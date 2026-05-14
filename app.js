@@ -72,7 +72,10 @@ async function loadSuppliers() {
     .order("alias", { ascending: true })
 
   if (error) {
-    showMessage(`Error al cargar proveedores: ${error.message}`, true)
+    const errorMessage = `Error al cargar proveedores: ${error.message}`
+
+    showMessage(errorMessage, true)
+    showToast(errorMessage, "error")
 
     tableBody.innerHTML = `
       <tr>
@@ -326,7 +329,11 @@ async function saveSupplier(event) {
   }
 
   if (!payload.alias || !payload.nombre_completo || !payload.metodo_pago) {
-    showMessage("Alias, nombre completo y método de pago son obligatorios.", true)
+    const validationMessage =
+      "Alias, nombre completo y método de pago son obligatorios."
+
+    showMessage(validationMessage, true)
+    showToast(validationMessage, "error")
     return
   }
 
@@ -346,10 +353,11 @@ async function saveSupplier(event) {
       !payload.banco ||
       (!payload.clabe && !payload.cuenta_bancaria))
   ) {
-    showMessage(
-      "Para transferencia bancaria captura tipo de cuenta, banco y CLABE o cuenta bancaria.",
-      true
-    )
+    const validationMessage =
+      "Para transferencia bancaria captura tipo de cuenta, banco y CLABE o cuenta bancaria."
+
+    showMessage(validationMessage, true)
+    showToast(validationMessage, "error")
     return
   }
 
@@ -365,13 +373,23 @@ async function saveSupplier(event) {
   }
 
   if (result.error) {
-    showMessage(`Error guardando proveedor: ${result.error.message}`, true)
+    const errorMessage = `Error guardando proveedor: ${result.error.message}`
+
+    showMessage(errorMessage, true)
+    showToast(errorMessage, "error")
     return
   }
 
-  closeModal()
-  showMessage("Proveedor guardado correctamente.")
+  form.reset()
+  currentEditingId = null
+
+  if (dialog.open) {
+    dialog.close()
+  }
+
   await loadSuppliers()
+
+  showToast("Proveedor guardado correctamente.")
 }
 
 window.toggleSupplier = async function (id, activo) {
@@ -390,13 +408,16 @@ window.toggleSupplier = async function (id, activo) {
     .eq("id", id)
 
   if (error) {
-    showMessage(`Error al actualizar proveedor: ${error.message}`, true)
+    const errorMessage = `Error al actualizar proveedor: ${error.message}`
+
+    showMessage(errorMessage, true)
+    showToast(errorMessage, "error")
     return
   }
 
-  showMessage(`Proveedor ${activo ? "reactivado" : "desactivado"} correctamente.`)
-
   await loadSuppliers()
+
+  showToast(`Proveedor ${activo ? "reactivado" : "desactivado"} correctamente.`)
 }
 
 async function logout() {
@@ -405,12 +426,19 @@ async function logout() {
 }
 
 function closeModal() {
-  dialog.close()
+  if (dialog.open) {
+    dialog.close()
+  }
+
   currentEditingId = null
 }
 
 function getValue(id) {
-  return document.getElementById(id).value.trim() || null
+  const element = document.getElementById(id)
+
+  if (!element) return null
+
+  return element.value.trim() || null
 }
 
 function setValue(id, value) {
@@ -445,4 +473,51 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;")
+}
+
+function showToast(message, type = "success") {
+  const existingToast = document.getElementById("toastMessage")
+
+  if (existingToast) {
+    existingToast.remove()
+  }
+
+  const toast = document.createElement("div")
+
+  toast.id = "toastMessage"
+  toast.textContent = message
+
+  toast.style.position = "fixed"
+  toast.style.top = "22px"
+  toast.style.right = "22px"
+  toast.style.zIndex = "99999"
+  toast.style.padding = "13px 16px"
+  toast.style.borderRadius = "10px"
+  toast.style.fontWeight = "700"
+  toast.style.fontSize = "13px"
+  toast.style.boxShadow = "0 16px 40px rgba(0,0,0,0.35)"
+  toast.style.border = "1px solid rgba(255,255,255,0.12)"
+  toast.style.backdropFilter = "blur(16px)"
+  toast.style.transition = "opacity 200ms ease, transform 200ms ease"
+
+  if (type === "success") {
+    toast.style.background = "rgba(15, 118, 110, 0.95)"
+    toast.style.color = "#ffffff"
+  } else {
+    toast.style.background = "rgba(224, 62, 82, 0.95)"
+    toast.style.color = "#ffffff"
+  }
+
+  document.body.appendChild(toast)
+
+  setTimeout(() => {
+    toast.style.opacity = "0"
+    toast.style.transform = "translateY(-8px)"
+  }, 2200)
+
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.remove()
+    }
+  }, 2600)
 }
