@@ -1,21 +1,31 @@
-<!doctype html>
-<html lang="es">
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Catálogo de Proveedores Flux</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso | Catálogo de Proveedores</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root { --bg:#07071a; --bg-card:#111128; --border:rgba(255,255,255,.09); --accent:#0f766e; --accent-hover:#0d9488; --text-1:#eeeef6; --text-2:#8888aa; --text-3:#50506a; --shadow-lg:0 16px 56px rgba(0,0,0,.65); }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{min-height:100vh;background:radial-gradient(circle at top left,rgba(15,118,110,.28),transparent 34%),var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans',sans-serif;display:grid;place-items:center;padding:28px}
+    .login-card{width:min(100%,460px);background:rgba(17,17,40,.92);border:1px solid var(--border);border-radius:22px;padding:34px;box-shadow:var(--shadow-lg);backdrop-filter:blur(18px)}
+    .logo{width:42px;height:42px;border-radius:10px;background:var(--accent);display:grid;place-items:center;color:white;font-weight:800;margin-bottom:22px}
+    h1{font-size:23px;letter-spacing:-.4px;margin-bottom:8px} p{color:var(--text-2);font-size:13px;line-height:1.6}
+    button{width:100%;height:42px;border:0;border-radius:9px;background:var(--accent);color:white;font-weight:700;margin-top:26px;cursor:pointer;font-family:inherit}
+    button:hover{background:var(--accent-hover)} .note{font-size:11px;color:var(--text-3);margin-top:18px;text-align:center}
+  </style>
 </head>
 <body>
-  <main class="login-page">
-    <section class="login-card">
-      <div class="brand-icon">◇</div>
-      <h1>Catálogo de Proveedores Flux</h1>
-      <p>Sistema de gestión de proveedores</p>
-      <button id="googleLoginBtn" class="google-btn"><span class="google-g">G</span>Continuar con Google</button>
-      <p class="help-text">Acceso conectado con Supabase Auth.</p>
-    </section>
+  <main class="login-card">
+    <div class="logo">QF</div>
+    <h1>Catálogo de Proveedores</h1>
+    <p>Accede con Google para administrar proveedores, métodos de pago, datos bancarios y estatus operativo.</p>
+    <button id="googleLoginBtn">Continuar con Google</button>
+    <p class="note">Acceso protegido con Supabase Auth.</p>
   </main>
   <script src="./config.js"></script>
   <script src="./auth.js"></script>

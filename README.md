@@ -1,10 +1,28 @@
-# Catálogo de Proveedores Flux — Sitio estático
+# Catálogo de Proveedores — template rediseñado
 
-Archivos: index.html, proveedores.html, styles.css, config.js, auth.js y app.js.
+Este paquete reemplaza el template anterior por el nuevo HTML rediseñado.
 
-1. Edita config.js y pega tu Supabase Publishable key en SUPABASE_ANON_KEY.
-2. No uses la Secret key.
-3. Sube la carpeta a GitHub.
-4. Importa el repositorio en Vercel.
-5. En Supabase > Authentication > URL Configuration agrega la URL de Vercel con /**.
-6. En Supabase > Authentication > Sign In / Providers asegúrate de tener Google habilitado.
+## Archivos
+- `index.html`: login con Google.
+- `proveedores.html`: nuevo template visual rediseñado.
+- `config.js`: configuración de Supabase.
+- `auth.js`: login OAuth Google.
+- `app.js`: CRUD dinámico contra `public.proveedores`.
+
+## Configuración
+En `config.js`, reemplaza:
+
+```js
+const SUPABASE_ANON_KEY = "PEGA_AQUI_TU_SUPABASE_PUBLISHABLE_KEY"
+```
+
+por la publishable key real de Supabase (`sb_publishable_...`). No uses la `sb_secret_`.
+
+## Cambios incluidos
+- Nuevo diseño visual dark/light.
+- Toggle de tema.
+- Tabla dinámica conectada a Supabase.
+- Alta, edición, desactivación y reactivación.
+- `tipo_cuenta` ahora es select con opciones válidas: `CLABE` y `Cuenta`.
+- Si método de pago es `Efectivo` o `Tarjeta en plataforma`, se deshabilitan campos bancarios.
+- Si método de pago es `Transferencia bancaria`, se precarga `CLABE` como tipo de cuenta.
