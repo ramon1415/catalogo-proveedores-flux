@@ -310,9 +310,24 @@
     }
     .table-toolbar select:focus { border-color: var(--accent); }
 
-    .table-wrapper { overflow-x: auto; }
-    .table-wrapper::-webkit-scrollbar { height: 3px; }
-    .table-wrapper::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+   .table-wrapper {
+  overflow: auto;
+  max-height: calc(100vh - 300px);
+}
+
+.table-wrapper::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+
+.table-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
 
     table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
