@@ -667,18 +667,6 @@
     </form>
   </dialog>
 
-  <script>
-    const html = document.documentElement;
-    const toggle = document.getElementById('themeToggle');
-    const saved = localStorage.getItem('flux-theme');
-    if (saved) html.setAttribute('data-theme', saved);
-    toggle.addEventListener('click', () => {
-      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
-      localStorage.setItem('flux-theme', next);
-    });
-  </script>
-
   <script src="./config.js"></script>
   <script src="./app.js"></script>
 </body>
