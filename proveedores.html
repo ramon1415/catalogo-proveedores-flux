@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proveedores | Flux</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand"><div class="brand-logo">PS</div><div><p class="brand-title">Payment System</p><p class="brand-subtitle">Catálogo de proveedores</p></div></div>
+        <nav class="nav">
+          <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
+          <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
+          <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
+          <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
+          <a href="./proveedores.html" class="nav-link active"><span>◇</span> Proveedores</a>
+          <a href="#" class="nav-link muted"><span>📊</span> Insights</a>
+        </nav>
+      </div>
+      <div class="user-card"><p id="userName">Usuario</p><span id="userEmail">Sesión activa</span><button id="logoutBtn" class="secondary-btn full">Cerrar sesión</button></div>
+    </aside>
+    <section class="content">
+      <header class="topbar"><div></div><div class="topbar-user"><span class="notification">🔔</span><div class="avatar">FL</div></div></header>
+      <div class="page">
+        <div class="page-header"><div><h1>Catálogo de proveedores</h1><p>Alta, consulta, edición y baja lógica de proveedores en Supabase.</p></div><button id="newSupplierBtn" class="primary-btn">+ Nuevo proveedor</button></div>
+        <div class="stats-grid">
+          <button class="stat-card total"><p>Total</p><strong id="totalCount">0</strong></button>
+          <button class="stat-card active"><p>Activos</p><strong id="activeCount">0</strong></button>
+          <button class="stat-card inactive"><p>Inactivos</p><strong id="inactiveCount">0</strong></button>
+          <button class="stat-card transfer"><p>Transferencia</p><strong id="transferCount">0</strong></button>
+        </div>
+        <section class="table-card">
+          <div class="table-toolbar"><input id="searchInput" type="search" placeholder="Buscar por alias, razón social, RFC, banco o correo..." /><select id="statusFilter"><option value="todos">Estatus: Todos</option><option value="activos">Activos</option><option value="inactivos">Inactivos</option></select></div>
+          <div id="messageBox" class="message hidden"></div>
+          <div class="table-wrapper"><table><thead><tr><th>Alias</th><th>Nombre completo</th><th>Método</th><th>Banco</th><th>CLABE / Cuenta</th><th>RFC</th><th>Contacto</th><th>Estatus</th><th>Acciones</th></tr></thead><tbody id="suppliersTableBody"><tr><td colspan="9" class="empty">Cargando proveedores...</td></tr></tbody></table></div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <dialog id="supplierDialog" class="modal"><form id="supplierForm" method="dialog" class="modal-content">
+    <div class="modal-header"><div><h2 id="modalTitle">Nuevo proveedor</h2><p>Completa los datos principales del proveedor.</p></div><button type="button" id="closeModalBtn" class="icon-btn">×</button></div>
+    <input type="hidden" id="supplierId" />
+    <div class="form-grid">
+      <label>Alias del proveedor *<input id="alias" required /></label>
+      <label>Nombre completo / razón social *<input id="nombre_completo" required /></label>
+      <label>Método de pago *<select id="metodo_pago" required><option value="">Seleccionar...</option><option value="Transferencia bancaria">Transferencia bancaria</option><option value="Efectivo">Efectivo</option><option value="Tarjeta en plataforma">Tarjeta en plataforma</option><option value="Cheque">Cheque</option><option value="Otro">Otro</option></select></label>
+      <label>Tipo de cuenta<input id="tipo_cuenta" placeholder="CLABE, cuenta, tarjeta..." /></label>
+      <label>Banco<input id="banco" /></label><label>CLABE<input id="clabe" maxlength="18" /></label><label>Cuenta bancaria<input id="cuenta_bancaria" /></label><label>RFC<input id="rfc" /></label><label>Correo<input id="email" type="email" /></label><label>Teléfono<input id="telefono" /></label><label>Tipo de proveedor<input id="tipo_proveedor" /></label>
+      <label class="check-label"><input id="es_personal_eventual" type="checkbox" />Es personal eventual</label><label class="check-label"><input id="activo" type="checkbox" checked />Proveedor activo</label>
+      <label class="full-row">Notas<textarea id="notas" rows="3"></textarea></label>
+    </div>
+    <div class="modal-actions"><button type="button" id="cancelBtn" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Guardar proveedor</button></div>
+  </form></dialog>
+  <script src="./config.js"></script><script src="./app.js"></script>
+</body>
+</html>
