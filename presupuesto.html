@@ -1,1 +1,554 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Motor de Presupuesto | Quantta Flow</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    :root {
+      --bg: #070719;
+      --bg-card: #111128;
+      --bg-soft: rgba(255, 255, 255, 0.04);
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.18);
+      --text-1: #f6f7fb;
+      --text-2: #a4a6c0;
+      --text-3: #6f728e;
+      --primary: #0f8f83;
+      --primary-2: #23c7b7;
+      --danger: #ff5c75;
+      --warning: #f4b84a;
+      --success: #27d17f;
+      --blue: #3c8cff;
+      --shadow: 0 18px 45px rgba(0,0,0,.35);
+    }
 
+    [data-theme="light"] {
+      --bg: #f6f8fc;
+      --bg-card: #ffffff;
+      --bg-soft: #f1f4fb;
+      --border: #e4e8f2;
+      --border-strong: #d4dae9;
+      --text-1: #101828;
+      --text-2: #526078;
+      --text-3: #7a869f;
+      --shadow: 0 16px 32px rgba(16,24,40,.10);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text-1);
+      background:
+        radial-gradient(circle at 84% 4%, rgba(15, 143, 131, 0.18), transparent 26%),
+        radial-gradient(circle at 60% 30%, rgba(60, 140, 255, 0.10), transparent 26%),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 270px 1fr;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: rgba(10, 10, 30, .68);
+      backdrop-filter: blur(16px);
+      padding: 20px 16px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    [data-theme="light"] .sidebar { background: #fff; }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 22px;
+    }
+
+    .brand-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .brand-title { font-weight: 800; font-size: 16px; }
+    .brand-subtitle { color: var(--text-3); font-size: 12px; margin-top: 2px; }
+
+    .nav {
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav a {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-2);
+      text-decoration: none;
+      padding: 12px 14px;
+      border-radius: 14px;
+      font-weight: 650;
+      font-size: 14px;
+    }
+
+    .nav a.active {
+      color: #64fff0;
+      background: rgba(15, 143, 131, .18);
+      border-left: 3px solid var(--primary-2);
+    }
+
+    .nav a:hover { background: var(--bg-soft); color: var(--text-1); }
+
+    .user-card {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 18px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(255,255,255,.04);
+    }
+
+    .user-card strong { display: block; font-size: 14px; }
+    .user-card span { color: var(--text-3); font-size: 12px; display: block; margin: 4px 0 12px; }
+
+    .ghost-btn {
+      width: 100%;
+      border: 1px solid var(--border-strong);
+      background: transparent;
+      color: var(--text-2);
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .main {
+      padding: 28px 32px 48px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      color: var(--primary-2);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 6px 0 8px;
+      font-size: 30px;
+      letter-spacing: -.04em;
+    }
+
+    .subtitle {
+      color: var(--text-2);
+      margin: 0;
+      max-width: 760px;
+      line-height: 1.55;
+    }
+
+    .theme-btn {
+      width: 48px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--bg-soft);
+      color: var(--text-2);
+      cursor: pointer;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 520px) 1fr;
+      gap: 22px;
+      align-items: start;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, .045);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    [data-theme="light"] .card { background: #fff; }
+
+    .card-header {
+      padding: 20px 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 850;
+      margin: 0 0 4px;
+    }
+
+    .card-desc {
+      margin: 0;
+      color: var(--text-3);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .card-body {
+      padding: 22px;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--text-2);
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+
+    input, select {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: rgba(8, 8, 28, .74);
+      color: var(--text-1);
+      padding: 0 12px;
+      outline: none;
+      font: inherit;
+    }
+
+    [data-theme="light"] input,
+    [data-theme="light"] select {
+      background: #fff;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--primary-2);
+      box-shadow: 0 0 0 3px rgba(35,199,183,.13);
+    }
+
+    .inline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-2);
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .inline input {
+      width: 18px;
+      height: 18px;
+      min-height: 18px;
+      accent-color: var(--primary);
+    }
+
+    .primary-btn {
+      border: 0;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: #fff;
+      min-height: 46px;
+      border-radius: 13px;
+      font-weight: 850;
+      cursor: pointer;
+      box-shadow: 0 12px 28px rgba(15, 143, 131, .28);
+    }
+
+    .primary-btn:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .result-box {
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      padding: 18px;
+      background: rgba(255,255,255,.035);
+    }
+
+    .result-box.success {
+      border-color: rgba(39,209,127,.45);
+      background: rgba(39,209,127,.08);
+    }
+
+    .result-box.blocked {
+      border-color: rgba(255,92,117,.45);
+      background: rgba(255,92,117,.08);
+    }
+
+    .result-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-weight: 850;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .result-status.success {
+      color: #ffffff;
+      background: rgba(39,209,127,.85);
+    }
+
+    .result-status.blocked {
+      color: #ffffff;
+      background: rgba(255,92,117,.85);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      background: rgba(255,255,255,.04);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--text-3);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .metric strong {
+      font-size: 22px;
+    }
+
+    .empty-state {
+      color: var(--text-3);
+      line-height: 1.6;
+    }
+
+    .table-card { margin-top: 22px; }
+
+    .table-wrapper {
+      overflow: auto;
+      max-height: 360px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+    }
+
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 13px;
+      color: var(--text-2);
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--bg-card);
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      font-size: 11px;
+    }
+
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 24px;
+      z-index: 9999;
+      padding: 13px 16px;
+      border-radius: 12px;
+      color: #fff;
+      background: rgba(15, 143, 131, .96);
+      box-shadow: var(--shadow);
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .toast.error { background: rgba(255, 92, 117, .96); }
+
+    @media (max-width: 980px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: relative;
+        height: auto;
+      }
+      .user-card { position: static; margin-top: 18px; }
+      .grid { grid-template-columns: 1fr; }
+      .main { padding: 22px 16px 40px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-badge">QF</div>
+        <div>
+          <div class="brand-title">Quantta Flow</div>
+          <div class="brand-subtitle">Sistema Operadora</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="./proveedores.html">◇ Proveedores</a>
+        <a class="active" href="./presupuesto.html">▣ Motor de Presupuesto</a>
+      </nav>
+
+      <div class="user-card">
+        <strong id="userName">Usuario</strong>
+        <span id="userEmail">Sesión activa</span>
+        <button class="ghost-btn" id="logoutBtn">Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="eyebrow">Validación presupuestal</div>
+          <h1>Motor de Presupuesto</h1>
+          <p class="subtitle">
+            Selecciona empresa, centro de costo, partida, mes y monto para validar si existe presupuesto disponible.
+            Esta pantalla solo consulta disponibilidad; todavía no crea solicitudes reales.
+          </p>
+        </div>
+        <button class="theme-btn" id="themeToggle" title="Cambiar tema">◐</button>
+      </div>
+
+      <section class="grid">
+        <article class="card">
+          <div class="card-header">
+            <h2 class="card-title">Validar disponibilidad</h2>
+            <p class="card-desc">Prueba el motor antes de conectarlo al flujo real de solicitudes.</p>
+          </div>
+          <div class="card-body">
+            <form id="budgetForm" class="form-grid">
+              <label>
+                Empresa
+                <select id="companySelect" required>
+                  <option value="">Cargando empresas...</option>
+                </select>
+              </label>
+
+              <label>
+                Centro de costo
+                <select id="costCenterSelect" required>
+                  <option value="">Cargando centros...</option>
+                </select>
+              </label>
+
+              <label>
+                Partida presupuestal
+                <select id="categorySelect" required>
+                  <option value="">Cargando partidas...</option>
+                </select>
+              </label>
+
+              <label>
+                Mes presupuestal
+                <input id="budgetMonth" type="month" required />
+              </label>
+
+              <label>
+                Monto a validar
+                <input id="amountInput" type="number" min="0.01" step="0.01" placeholder="1000.00" required />
+              </label>
+
+              <label class="inline">
+                <input id="extraordinaryCheck" type="checkbox" />
+                Es ajuste extraordinario
+              </label>
+
+              <button id="validateBtn" class="primary-btn" type="submit">Validar presupuesto</button>
+            </form>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2 class="card-title">Resultado de validación</h2>
+            <p class="card-desc">Aquí se muestra la respuesta de `verify_budget_availability`.</p>
+          </div>
+          <div class="card-body">
+            <div id="resultContainer" class="empty-state">
+              Ejecuta una validación para ver si la solicitud sería aprobable o si entra a excepción.
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="card table-card">
+        <div class="card-header">
+          <h2 class="card-title">Disponibilidad presupuestal actual</h2>
+          <p class="card-desc">Vista de referencia basada en `budget_availability`.</p>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Empresa</th>
+                <th>Centro</th>
+                <th>Partida</th>
+                <th>Mes</th>
+                <th>Presupuestado</th>
+                <th>Comprometido</th>
+                <th>Ejecutado</th>
+                <th>Disponible</th>
+              </tr>
+            </thead>
+            <tbody id="availabilityTableBody">
+              <tr><td colspan="8">Cargando disponibilidad...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./config.js"></script>
+  <script src="./presupuesto.js"></script>
+</body>
+</html>
