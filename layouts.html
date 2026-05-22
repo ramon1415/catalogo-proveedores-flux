@@ -134,6 +134,9 @@
     .badge-draft { background:var(--amber-dim); color:var(--amber); border:1px solid rgba(245,158,11,.22); }
     .badge-generated { background:var(--emerald-dim); color:var(--emerald); border:1px solid rgba(18,183,106,.2); }
     .badge-uploaded, .badge-confirmed { background:var(--sky-dim); color:var(--sky); border:1px solid rgba(46,144,250,.2); }
+    .badge-included { background:var(--amber-dim); color:var(--amber); border:1px solid rgba(245,158,11,.22); }
+    .badge-paid { background:var(--emerald-dim); color:var(--emerald); border:1px solid rgba(18,183,106,.2); }
+    .badge-bank_rejected { background:var(--ruby-dim); color:var(--ruby); border:1px solid rgba(224,62,82,.22); }
     .badge-cancelled { background:var(--ruby-dim); color:var(--ruby); border:1px solid rgba(224,62,82,.22); }
     .actions { display:flex; flex-wrap:wrap; gap:6px; }
     .primary-btn, .secondary-btn, .small-btn {
@@ -144,6 +147,9 @@
     .secondary-btn.full { width:100%; }
     .small-btn { min-height:30px; padding:5px 10px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); }
     .small-btn:hover, .secondary-btn:hover { background:var(--bg-hover); color:var(--text-1); }
+    .small-btn.success { background:var(--emerald-dim); color:var(--emerald); border-color:rgba(18,183,106,.24); }
+    .small-btn.warning { background:var(--amber-dim); color:var(--amber); border-color:rgba(245,158,11,.24); }
+    .small-btn.danger { background:var(--ruby-dim); color:var(--ruby); border-color:rgba(224,62,82,.26); }
     .message { padding:16px 18px; font-size:13px; color:var(--text-3); }
     .hidden { display:none !important; }
     .empty-state { padding:44px 20px; text-align:center; color:var(--text-3); }
@@ -157,6 +163,18 @@
     .modal-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
     .modal-header h2 { font-size:16px; font-weight:700; color:var(--text-1); }
     .modal-header p { font-size:12px; color:var(--text-3); margin-top:3px; }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-grid label {
+      display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3);
+      letter-spacing:.35px; text-transform:uppercase;
+    }
+    .form-grid label.full-row { grid-column:1 / -1; }
+    .form-control {
+      min-height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border);
+      border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none;
+    }
+    textarea.form-control { min-height:86px; padding:10px 11px; resize:vertical; line-height:1.45; }
+    .form-control:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim); }
     .icon-btn {
       width:30px; height:30px; border-radius:7px; border:1px solid var(--border); background:transparent;
       color:var(--text-3); font-size:18px; display:flex; align-items:center; justify-content:center; cursor:pointer;
@@ -298,14 +316,64 @@
               <th>REFERENCIA</th>
               <th>CONCEPTO</th>
               <th>SOLICITUD</th>
+              <th>ESTATUS</th>
+              <th>ACCIONES</th>
             </tr>
           </thead>
           <tbody id="linesTableBody">
-            <tr><td colspan="8" class="message">Selecciona un layout.</td></tr>
+            <tr><td colspan="10" class="message">Selecciona un layout.</td></tr>
           </tbody>
         </table>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <form id="confirmPaymentForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="confirmTitle">Confirmar pago</h2>
+          <p>Marca el layout como pagado y genera comprobantes internos por cada linea incluida.</p>
+        </div>
+        <button type="button" id="closeConfirmModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="form-grid">
+        <label>Fecha de pago *
+          <input id="paymentDate" class="form-control" type="date" required>
+        </label>
+        <label>Referencia bancaria
+          <input id="bankReference" class="form-control" type="text" placeholder="Referencia del banco">
+        </label>
+        <label class="full-row">Ruta de comprobante futura
+          <input id="receiptStoragePath" class="form-control" type="text" placeholder="Opcional, para Storage despues">
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" id="cancelConfirmBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitConfirmBtn" class="primary-btn">Confirmar pago</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rejectLineDialog">
+    <form id="rejectLineForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="rejectLineTitle">Rechazar linea bancaria</h2>
+          <p>La solicitud volvera a aprobada para reprogramarse en un layout futuro.</p>
+        </div>
+        <button type="button" id="closeRejectLineModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="form-grid">
+        <label class="full-row">Motivo del rechazo *
+          <textarea id="rejectionReason" class="form-control" placeholder="Captura el motivo reportado por el banco" required></textarea>
+        </label>
+      </div>
+      <div class="actions">
+        <button type="button" id="cancelRejectLineBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitRejectLineBtn" class="primary-btn">Rechazar linea</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>

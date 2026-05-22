@@ -3,6 +3,10 @@ const TEMPLATE_PATH = "./templates/FORMATO_pagos_semanales.xlsx";
 
 let layouts = [];
 let currentSession = null;
+let currentProfileId = null;
+let activeLinesLayoutId = null;
+let activeConfirmLayoutId = null;
+let activeRejectLineId = null;
 const dom = {};
 
 document.addEventListener("DOMContentLoaded", initLayoutsPage);
@@ -38,6 +42,22 @@ function cacheDom() {
   dom.linesSubtitle = document.getElementById("linesSubtitle");
   dom.linesTableBody = document.getElementById("linesTableBody");
   dom.closeLinesModalBtn = document.getElementById("closeLinesModalBtn");
+  dom.confirmDialog = document.getElementById("confirmDialog");
+  dom.confirmPaymentForm = document.getElementById("confirmPaymentForm");
+  dom.confirmTitle = document.getElementById("confirmTitle");
+  dom.paymentDate = document.getElementById("paymentDate");
+  dom.bankReference = document.getElementById("bankReference");
+  dom.receiptStoragePath = document.getElementById("receiptStoragePath");
+  dom.closeConfirmModalBtn = document.getElementById("closeConfirmModalBtn");
+  dom.cancelConfirmBtn = document.getElementById("cancelConfirmBtn");
+  dom.submitConfirmBtn = document.getElementById("submitConfirmBtn");
+  dom.rejectLineDialog = document.getElementById("rejectLineDialog");
+  dom.rejectLineForm = document.getElementById("rejectLineForm");
+  dom.rejectLineTitle = document.getElementById("rejectLineTitle");
+  dom.rejectionReason = document.getElementById("rejectionReason");
+  dom.closeRejectLineModalBtn = document.getElementById("closeRejectLineModalBtn");
+  dom.cancelRejectLineBtn = document.getElementById("cancelRejectLineBtn");
+  dom.submitRejectLineBtn = document.getElementById("submitRejectLineBtn");
   dom.toastStack = document.getElementById("toastStack");
 }
 
@@ -61,6 +81,12 @@ function bindEvents() {
     if (dom.templateMode.value === "file") dom.templateFile.click();
   });
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal);
+  dom.closeConfirmModalBtn?.addEventListener("click", closeConfirmModal);
+  dom.cancelConfirmBtn?.addEventListener("click", closeConfirmModal);
+  dom.confirmPaymentForm?.addEventListener("submit", submitConfirmPayment);
+  dom.closeRejectLineModalBtn?.addEventListener("click", closeRejectLineModal);
+  dom.cancelRejectLineBtn?.addEventListener("click", closeRejectLineModal);
+  dom.rejectLineForm?.addEventListener("submit", submitRejectLine);
 }
 
 async function loadSession() {
@@ -74,6 +100,35 @@ async function loadSession() {
   currentSession = session;
   dom.userEmail.textContent = session.user.email || "Sesion activa";
   dom.userName.textContent = session.user.user_metadata?.full_name || session.user.email || "Usuario";
+  await resolveCurrentProfile(session);
+}
+
+async function resolveCurrentProfile(session) {
+  currentProfileId = null;
+
+  const lookups = [
+    { column: "auth_user_id", value: session.user.id },
+    { column: "id", value: session.user.id },
+    { column: "email", value: session.user.email },
+  ].filter(item => item.value);
+
+  for (const lookup of lookups) {
+    try {
+      const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("id,email,full_name,auth_user_id,active")
+        .eq(lookup.column, lookup.value)
+        .maybeSingle();
+
+      if (!error && data?.id) {
+        currentProfileId = data.id;
+        dom.userName.textContent = data.full_name || dom.userName.textContent;
+        return;
+      }
+    } catch (_) {
+      currentProfileId = null;
+    }
+  }
 }
 
 async function loadLayouts() {
@@ -130,7 +185,7 @@ function renderLayoutsTable() {
         <td colspan="9">
           <div class="empty-state">
             <strong>No hay layouts para mostrar</strong>
-            Genera un layout desde solicitudes aprobadas para verlo aquí.
+            Genera un layout desde solicitudes aprobadas para verlo aqui.
           </div>
         </td>
       </tr>`;
@@ -147,27 +202,49 @@ function renderLayoutsTable() {
       <td><strong>${escapeHtml(formatCurrency(layout.total_amount))}</strong></td>
       <td>${escapeHtml(formatDate(layout.generated_at || layout.created_at))}</td>
       <td>${layout.file_name ? `<strong>${escapeHtml(layout.file_name)}</strong>` : `<span class="muted-line">Sin archivo</span>`}</td>
-      <td>
-        <div class="actions">
-          <button class="small-btn" type="button" onclick="openLayoutLines('${layout.id}')">Ver líneas</button>
-          <button class="small-btn" type="button" onclick="generateLayoutExcel('${layout.id}')">${layout.status === "generated" ? "Descargar Excel" : "Generar Excel"}</button>
-        </div>
-      </td>
+      <td><div class="actions">${renderLayoutActions(layout)}</div></td>
     </tr>`).join("");
+}
+
+function renderLayoutActions(layout) {
+  const actions = [
+    `<button class="small-btn" type="button" onclick="openLayoutLines('${layout.id}')">Ver lineas</button>`,
+  ];
+
+  if (layout.status === "draft") {
+    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${layout.id}')">Generar Excel</button>`);
+  }
+
+  if (layout.status === "generated") {
+    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${layout.id}')">${layout.file_name ? "Descargar Excel" : "Generar Excel"}</button>`);
+    actions.push(`<button class="small-btn warning" type="button" onclick="markLayoutUploaded('${layout.id}')">Marcar como subido</button>`);
+    actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${layout.id}')">Confirmar pago</button>`);
+  }
+
+  if (layout.status === "uploaded") {
+    actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${layout.id}')">Confirmar pago</button>`);
+  }
+
+  return actions.join("");
 }
 
 async function openLayoutLines(layoutId) {
   const layout = layouts.find(item => item.id === layoutId);
   if (!layout) return;
 
-  dom.linesTitle.textContent = layout.layout_number || "Líneas del layout";
-  dom.linesSubtitle.textContent = `${layout.name || ""} · columnas B:H del Excel`;
-  dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">Cargando líneas...</td></tr>`;
+  activeLinesLayoutId = layoutId;
+  dom.linesTitle.textContent = layout.layout_number || "Lineas del layout";
+  dom.linesSubtitle.textContent = `${layout.name || ""} - columnas B:H del Excel`;
+  dom.linesTableBody.innerHTML = `<tr><td colspan="10" class="message">Cargando lineas...</td></tr>`;
   dom.linesDialog.showModal();
 
+  await refreshLayoutLines(layoutId);
+}
+
+async function refreshLayoutLines(layoutId) {
   const { data, error } = await fetchLayoutLines(layoutId);
   if (error) {
-    dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">No fue posible cargar líneas. ${escapeHtml(rlsHint("payment_layout_lines", "select", error))}</td></tr>`;
+    dom.linesTableBody.innerHTML = `<tr><td colspan="10" class="message">No fue posible cargar lineas. ${escapeHtml(rlsHint("payment_layout_lines", "select", error))}</td></tr>`;
     return;
   }
 
@@ -175,12 +252,13 @@ async function openLayoutLines(layoutId) {
 }
 
 function closeLinesModal() {
+  activeLinesLayoutId = null;
   if (dom.linesDialog.open) dom.linesDialog.close();
 }
 
 function renderLinesTable(lines) {
   if (!lines.length) {
-    dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">Este layout no tiene líneas.</td></tr>`;
+    dom.linesTableBody.innerHTML = `<tr><td colspan="10" class="message">Este layout no tiene lineas.</td></tr>`;
     return;
   }
 
@@ -194,7 +272,14 @@ function renderLinesTable(lines) {
       <td>${escapeHtml(line.payment_reference || "")}</td>
       <td>${escapeHtml(line.payment_concept || "")}</td>
       <td>${escapeHtml(line.request_number || "")}</td>
+      <td>${renderLineStatusBadge(line.status)}</td>
+      <td><div class="actions">${renderLineActions(line)}</div></td>
     </tr>`).join("");
+}
+
+function renderLineActions(line) {
+  if (line.status !== "included") return `<span class="muted-line">Sin acciones</span>`;
+  return `<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')">Rechazar linea</button>`;
 }
 
 async function generateLayoutExcel(layoutId) {
@@ -213,7 +298,7 @@ async function generateLayoutExcel(layoutId) {
   }
 
   if (!lines?.length) {
-    showToast("Sin líneas", "Este layout no tiene líneas para generar Excel.", "warning");
+    showToast("Sin lineas", "Este layout no tiene lineas para generar Excel.", "warning");
     return;
   }
 
@@ -221,7 +306,7 @@ async function generateLayoutExcel(layoutId) {
   if (invalidLines.length) {
     const first = invalidLines[0];
     showToast(
-      "Líneas incompletas",
+      "Lineas incompletas",
       `No se puede generar el Excel. Solicitud ${first.request_number || first.payment_request_id}: falta ${first.missing_fields.join(", ")}.`,
       "error"
     );
@@ -256,15 +341,149 @@ async function generateLayoutExcel(layoutId) {
       return;
     }
 
-    showToast("Excel generado", `${fileName} se descargó correctamente.`, "success");
+    showToast("Excel generado", `${fileName} se descargo correctamente.`, "success");
     await loadLayouts();
   } catch (error) {
     showToast("No se pudo generar Excel", friendlyError(error), "error");
   }
 }
 
+async function markLayoutUploaded(layoutId) {
+  if (!ensureActorProfile()) return;
+
+  const layout = layouts.find(item => item.id === layoutId);
+  const label = layout?.layout_number || "este layout";
+  const confirmed = window.confirm(`Marcar ${label} como subido al banco?`);
+  if (!confirmed) return;
+
+  try {
+    const { data, error } = await supabaseClient.rpc("mark_payment_layout_uploaded", {
+      p_layout_id: layoutId,
+      p_actor_profile_id: currentProfileId,
+      p_comments: null,
+    });
+
+    if (error) throw error;
+
+    showToast("Layout actualizado", data?.message || "El layout fue marcado como subido.", "success");
+    await loadLayouts();
+  } catch (error) {
+    showToast("No se pudo marcar como subido", friendlyRpcError(error), "error");
+  }
+}
+
+function openConfirmPaymentModal(layoutId) {
+  if (!ensureActorProfile()) return;
+
+  const layout = layouts.find(item => item.id === layoutId);
+  activeConfirmLayoutId = layoutId;
+  dom.confirmTitle.textContent = `Confirmar pago ${layout?.layout_number || ""}`.trim();
+  dom.paymentDate.value = new Date().toISOString().slice(0, 10);
+  dom.bankReference.value = "";
+  dom.receiptStoragePath.value = "";
+  dom.confirmDialog.showModal();
+}
+
+function closeConfirmModal() {
+  activeConfirmLayoutId = null;
+  dom.confirmPaymentForm.reset();
+  if (dom.confirmDialog.open) dom.confirmDialog.close();
+}
+
+async function submitConfirmPayment(event) {
+  event.preventDefault();
+  if (!activeConfirmLayoutId || !ensureActorProfile()) return;
+
+  const paymentDate = dom.paymentDate.value;
+  if (!paymentDate) {
+    showToast("Fecha requerida", "Captura la fecha de pago.", "error");
+    return;
+  }
+
+  setButtonLoading(dom.submitConfirmBtn, true, "Confirmando...");
+
+  try {
+    const { data, error } = await supabaseClient.rpc("confirm_payment_layout", {
+      p_layout_id: activeConfirmLayoutId,
+      p_payment_date: paymentDate,
+      p_bank_reference: cleanText(dom.bankReference.value) || null,
+      p_storage_path: cleanText(dom.receiptStoragePath.value) || null,
+      p_registered_by: currentProfileId,
+    });
+
+    if (error) throw error;
+
+    showToast(
+      "Pago confirmado",
+      `${data?.paid_count || 0} pagos confirmados por ${formatCurrency(data?.total_paid || 0)}.`,
+      "success"
+    );
+    closeConfirmModal();
+    await loadLayouts();
+    if (activeLinesLayoutId) await refreshLayoutLines(activeLinesLayoutId);
+  } catch (error) {
+    showToast("No se pudo confirmar pago", friendlyRpcError(error), "error");
+  } finally {
+    setButtonLoading(dom.submitConfirmBtn, false, "Confirmar pago");
+  }
+}
+
+function openRejectLineModal(lineId) {
+  if (!ensureActorProfile()) return;
+
+  activeRejectLineId = lineId;
+  dom.rejectionReason.value = "";
+  dom.rejectLineTitle.textContent = "Rechazar linea bancaria";
+  dom.rejectLineDialog.showModal();
+}
+
+function closeRejectLineModal() {
+  activeRejectLineId = null;
+  dom.rejectLineForm.reset();
+  if (dom.rejectLineDialog.open) dom.rejectLineDialog.close();
+}
+
+async function submitRejectLine(event) {
+  event.preventDefault();
+  if (!activeRejectLineId || !ensureActorProfile()) return;
+
+  const reason = cleanText(dom.rejectionReason.value);
+  if (!reason) {
+    showToast("Motivo requerido", "Captura el motivo del rechazo bancario.", "error");
+    return;
+  }
+
+  setButtonLoading(dom.submitRejectLineBtn, true, "Rechazando...");
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reject_payment_layout_line", {
+      p_line_id: activeRejectLineId,
+      p_reason: reason,
+      p_actor_profile_id: currentProfileId,
+    });
+
+    if (error) throw error;
+
+    showToast(
+      "Linea rechazada",
+      data?.message || "La linea fue rechazada y la solicitud regreso a aprobada.",
+      "success"
+    );
+    closeRejectLineModal();
+    await loadLayouts();
+    if (activeLinesLayoutId) await refreshLayoutLines(activeLinesLayoutId);
+  } catch (error) {
+    showToast("No se pudo rechazar linea", friendlyRpcError(error), "error");
+  } finally {
+    setButtonLoading(dom.submitRejectLineBtn, false, "Rechazar linea");
+  }
+}
+
 window.openLayoutLines = openLayoutLines;
 window.generateLayoutExcel = generateLayoutExcel;
+window.markLayoutUploaded = markLayoutUploaded;
+window.openConfirmPaymentModal = openConfirmPaymentModal;
+window.openRejectLineModal = openRejectLineModal;
 
 async function fetchLayoutLines(layoutId) {
   return await supabaseClient
@@ -279,6 +498,7 @@ async function fetchLayoutLines(layoutId) {
 
 function validateLayoutLines(lines) {
   return lines
+    .filter(line => line.status !== "bank_rejected")
     .map(line => {
       const missing = [];
       if (!notBlank(line.source_account_number)) missing.push("source_account_number");
@@ -311,7 +531,7 @@ async function loadTemplateWorkbook() {
 
   const response = await fetch(TEMPLATE_PATH);
   if (!response.ok) {
-    throw new Error("No se encontró la plantilla en /templates/FORMATO_pagos_semanales.xlsx.");
+    throw new Error("No se encontro la plantilla en /templates/FORMATO_pagos_semanales.xlsx.");
   }
 
   const buffer = await response.arrayBuffer();
@@ -322,9 +542,10 @@ function writeLayoutToSheet(sheet, lines) {
   sheet["B3"] = sheet["B3"] || { t: "s", v: "CTA. CARGO" };
   sheet["C3"] = sheet["C3"] || { t: "s", v: "NOMBRE TITULAR" };
 
+  const exportLines = lines.filter(line => line.status !== "bank_rejected");
   clearDataRange(sheet, 4, 101, 2, 8);
 
-  lines.forEach((line, index) => {
+  exportLines.forEach((line, index) => {
     const row = 4 + index;
     setCell(sheet, `B${row}`, line.source_account_number, "s");
     setCell(sheet, `C${row}`, line.company_name, "s");
@@ -335,7 +556,7 @@ function writeLayoutToSheet(sheet, lines) {
     setCell(sheet, `H${row}`, line.payment_concept, "s");
   });
 
-  const lastRow = Math.max(4 + lines.length - 1, 101);
+  const lastRow = Math.max(4 + exportLines.length - 1, 101);
   sheet["!ref"] = `A1:H${lastRow}`;
 }
 
@@ -356,9 +577,38 @@ async function logout() {
   window.location.href = "./index.html";
 }
 
+function ensureActorProfile() {
+  if (currentProfileId) return true;
+  showToast(
+    "Perfil no identificado",
+    "No se pudo identificar el perfil del usuario para registrar la accion.",
+    "error"
+  );
+  return false;
+}
+
 function renderStatusBadge(status) {
   const normalized = status || "draft";
-  return `<span class="badge badge-${escapeHtml(normalized)}">${escapeHtml(normalized)}</span>`;
+  return `<span class="badge badge-${escapeHtml(normalized)}">${escapeHtml(statusLabel(normalized))}</span>`;
+}
+
+function renderLineStatusBadge(status) {
+  const normalized = status || "included";
+  return `<span class="badge badge-${escapeHtml(normalized)}">${escapeHtml(statusLabel(normalized))}</span>`;
+}
+
+function statusLabel(status) {
+  const labels = {
+    draft: "Draft",
+    generated: "Generated",
+    uploaded: "Uploaded",
+    confirmed: "Confirmed",
+    cancelled: "Cancelled",
+    included: "Included",
+    paid: "Paid",
+    bank_rejected: "Bank rejected",
+  };
+  return labels[status] || status;
 }
 
 function showMessage(message, isError = false) {
@@ -379,16 +629,37 @@ function showToast(title, message, type = "success") {
   window.setTimeout(() => toast.remove(), 6200);
 }
 
+function friendlyRpcError(error) {
+  const message = error?.message || String(error || "Error desconocido");
+  const known = {
+    layout_not_found: "No se encontro el layout.",
+    actor_profile_not_found: "No se pudo identificar el perfil del usuario.",
+    registered_by_profile_not_found: "No se pudo identificar el perfil del usuario.",
+    layout_must_be_generated_first: "Primero genera el Excel antes de marcar el layout como subido.",
+    invalid_layout_status_for_upload: "El layout no esta en un estado valido para marcarse como subido.",
+    invalid_layout_status_for_confirmation: "El layout no esta en un estado valido para confirmar pago.",
+    no_included_lines_to_confirm: "No hay lineas pendientes para confirmar pago.",
+    payment_date_required: "Captura la fecha de pago.",
+    line_not_found: "No se encontro la linea del layout.",
+    line_already_paid: "La linea ya fue pagada y no puede rechazarse.",
+    rejection_reason_required: "Captura el motivo del rechazo bancario.",
+  };
+
+  const key = Object.keys(known).find(item => message.includes(item));
+  if (key) return known[key];
+  return friendlyError(error);
+}
+
 function friendlyError(error) {
   const message = error?.message || String(error || "Error desconocido");
   if (message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("url scheme")) {
-    return "No se pudo cargar la plantilla. Si estás probando con file://, usa la opción Plantilla local o despliega en Vercel.";
+    return "No se pudo cargar la plantilla. Si estas probando con file://, usa la opcion Plantilla local o despliega en Vercel.";
   }
   if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
-    return "La operación fue bloqueada por RLS. Revisa policies para usuarios autenticados.";
+    return "La operacion fue bloqueada por RLS. Revisa policies para usuarios autenticados.";
   }
   if (message.toLowerCase().includes("permission denied")) {
-    return "Faltan permisos para ejecutar la operación.";
+    return "Faltan permisos para ejecutar la operacion.";
   }
   return message;
 }
@@ -399,6 +670,12 @@ function rlsHint(table, operation, error) {
     return `Operacion ${operation} bloqueada por RLS en ${table}; puede requerir una policy para usuarios autenticados.`;
   }
   return message;
+}
+
+function setButtonLoading(button, loading, text) {
+  if (!button) return;
+  button.disabled = loading;
+  button.textContent = text;
 }
 
 function formatCurrency(value) {
@@ -425,6 +702,10 @@ function numberValue(value) {
 
 function notBlank(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function cleanText(value) {
+  return String(value || "").trim();
 }
 
 function normalize(value) {
