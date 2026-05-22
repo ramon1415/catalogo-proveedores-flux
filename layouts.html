@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Layouts de pago | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#07071a; --bg-surface:#0d0d22; --bg-card:#111128; --bg-hover:rgba(255,255,255,.035);
+      --bg-input:#0d0d22; --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13);
+      --accent:#0f766e; --accent-dim:rgba(15,118,110,.14); --accent-hover:#0d9488; --accent-text:#5eead4;
+      --emerald:#12b76a; --emerald-dim:rgba(18,183,106,.12); --ruby:#e03e52; --ruby-dim:rgba(224,62,82,.11);
+      --sky:#2e90fa; --sky-dim:rgba(46,144,250,.11); --amber:#f59e0b; --amber-dim:rgba(245,158,11,.13);
+      --text-1:#eeeef6; --text-2:#aaaac3; --text-3:#666680; --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+    }
+    [data-theme="light"] {
+      --bg:#f4f4f9; --bg-surface:#fff; --bg-card:#fff; --bg-hover:rgba(0,0,0,.025); --bg-input:#f7f7fc;
+      --border:rgba(0,0,0,.08); --border-strong:rgba(0,0,0,.14); --accent:#0f766e; --accent-dim:rgba(15,118,110,.1);
+      --accent-hover:#0d6b63; --accent-text:#0f766e; --emerald:#0a9956; --emerald-dim:rgba(10,153,86,.09);
+      --ruby:#c8283c; --ruby-dim:rgba(200,40,60,.08); --sky:#1570ca; --sky-dim:rgba(21,112,202,.09);
+      --amber:#b76a00; --amber-dim:rgba(183,106,0,.09); --text-1:#0f0f1e; --text-2:#4a4a6a; --text-3:#9090b0;
+      --shadow-lg:0 12px 48px rgba(0,0,0,.14);
+    }
+    html, body { height:100%; }
+    body {
+      background:var(--bg); color:var(--text-1); font-family:'Plus Jakarta Sans',sans-serif;
+      font-size:13.5px; line-height:1.55; -webkit-font-smoothing:antialiased;
+    }
+    body::before {
+      content:''; position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:.02;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    body, .sidebar, .topbar, .table-card, .stat-card, .modal-content, .nav-link, input, select, button {
+      transition:background-color 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
+    }
+    .app-shell { display:flex; height:100vh; overflow:hidden; }
+    .sidebar {
+      width:232px; min-height:100vh; background:var(--bg-surface); border-right:1px solid var(--border);
+      display:flex; flex-direction:column; justify-content:space-between; padding:16px 10px; flex-shrink:0;
+    }
+    .brand { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; border-bottom:1px solid var(--border); margin-bottom:10px; }
+    .brand-logo {
+      width:33px; height:33px; border-radius:6px; background:var(--accent); display:flex; align-items:center;
+      justify-content:center; font-size:11.5px; font-weight:700; color:#fff; flex-shrink:0;
+    }
+    .brand-title { font-size:13px; font-weight:700; color:var(--text-1); letter-spacing:-.2px; }
+    .brand-subtitle { font-size:10.5px; color:var(--text-3); margin-top:1px; }
+    .nav { display:flex; flex-direction:column; gap:1px; }
+    .nav-link {
+      display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:6px; text-decoration:none;
+      font-size:13px; font-weight:500; color:var(--text-3); position:relative;
+    }
+    .nav-link:hover { color:var(--text-2); background:var(--bg-hover); }
+    .nav-link span { font-size:12px; width:16px; text-align:center; flex-shrink:0; }
+    .nav-link.active { color:var(--accent-text); background:var(--accent-dim); font-weight:600; }
+    .nav-link.active::before {
+      content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:2.5px; height:16px;
+      background:var(--accent); border-radius:0 2px 2px 0;
+    }
+    .user-card { padding:11px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg-hover); }
+    .user-card p { font-size:12.5px; font-weight:600; color:var(--text-1); overflow:hidden; text-overflow:ellipsis; }
+    .user-card span { display:block; font-size:11px; color:var(--text-3); margin:2px 0 9px; overflow:hidden; text-overflow:ellipsis; }
+    .content { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    .topbar {
+      height:52px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;
+      padding:0 24px; background:var(--bg-surface); flex-shrink:0;
+    }
+    .topbar-kicker { font-size:11px; font-weight:700; letter-spacing:.55px; text-transform:uppercase; color:var(--text-3); }
+    .topbar-user { display:flex; align-items:center; gap:12px; }
+    .theme-toggle {
+      width:48px; height:26px; border-radius:13px; background:var(--bg-card); border:1px solid var(--border-strong);
+      cursor:pointer; position:relative; flex-shrink:0;
+    }
+    .theme-toggle::after {
+      content:''; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:var(--accent);
+      transition:transform 220ms cubic-bezier(.4,0,.2,1);
+    }
+    [data-theme="light"] .theme-toggle::after { transform:translateX(22px); }
+    .avatar {
+      width:30px; height:30px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center;
+      font-size:11px; font-weight:700; color:#fff;
+    }
+    .page { flex:1; overflow-y:auto; padding:26px 26px 40px; display:flex; flex-direction:column; gap:18px; }
+    .page::-webkit-scrollbar, .table-wrapper::-webkit-scrollbar { width:4px; height:4px; }
+    .page::-webkit-scrollbar-thumb, .table-wrapper::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:4px; }
+    .page-header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .page-header h1 { font-size:17px; font-weight:700; color:var(--text-1); letter-spacing:-.3px; }
+    .page-header p { font-size:12px; color:var(--text-3); margin-top:2px; max-width:650px; }
+    .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    .stat-card {
+      background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:16px 18px 14px;
+      min-height:88px; position:relative; overflow:hidden;
+    }
+    .stat-card::after { content:''; position:absolute; top:0; left:0; right:0; height:1px; opacity:.75; }
+    .stat-card.total::after { background:linear-gradient(90deg,var(--accent),transparent 55%); }
+    .stat-card.generated::after { background:linear-gradient(90deg,var(--emerald),transparent 55%); }
+    .stat-card.draft::after { background:linear-gradient(90deg,var(--amber),transparent 55%); }
+    .stat-card.amount::after { background:linear-gradient(90deg,var(--sky),transparent 55%); }
+    .stat-card p { font-size:10.5px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.65px; margin-bottom:8px; }
+    .stat-card strong { font-size:25px; font-weight:700; line-height:1; letter-spacing:-.8px; font-variant-numeric:tabular-nums; }
+    .stat-card.total strong { color:var(--accent-text); }
+    .stat-card.generated strong { color:var(--emerald); }
+    .stat-card.draft strong { color:var(--amber); }
+    .stat-card.amount strong { color:var(--sky); font-size:21px; }
+    .table-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; overflow:hidden; }
+    .table-toolbar {
+      display:grid; grid-template-columns:minmax(240px,1fr) 180px 180px auto; gap:8px; padding:13px 16px; border-bottom:1px solid var(--border);
+    }
+    input, select, button { font-family:'Plus Jakarta Sans',sans-serif; }
+    .table-toolbar input, .table-toolbar select {
+      height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border);
+      border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none;
+    }
+    .table-toolbar input:focus, .table-toolbar select:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim); }
+    .table-wrapper { overflow:auto; max-height:calc(100vh - 370px); min-height:320px; }
+    table { width:100%; border-collapse:collapse; font-size:12.5px; min-width:1120px; }
+    thead th {
+      position:sticky; top:0; z-index:2; background:var(--bg-card); padding:9px 14px; text-align:left; font-size:10.5px;
+      font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:var(--text-3); white-space:nowrap; box-shadow:0 1px 0 var(--border);
+    }
+    tbody tr { border-bottom:1px solid var(--border); }
+    tbody tr:hover { background:var(--bg-hover); }
+    tbody td { padding:10px 14px; color:var(--text-2); vertical-align:middle; }
+    tbody td strong { color:var(--text-1); font-weight:600; display:block; font-size:12.5px; }
+    .muted-line { display:block; font-size:10px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.45px; margin-top:2px; }
+    .badge {
+      display:inline-flex; align-items:center; justify-content:center; padding:2.5px 8px; border-radius:20px;
+      font-size:10.5px; font-weight:700; letter-spacing:.1px; white-space:nowrap;
+    }
+    .badge-draft { background:var(--amber-dim); color:var(--amber); border:1px solid rgba(245,158,11,.22); }
+    .badge-generated { background:var(--emerald-dim); color:var(--emerald); border:1px solid rgba(18,183,106,.2); }
+    .badge-uploaded, .badge-confirmed { background:var(--sky-dim); color:var(--sky); border:1px solid rgba(46,144,250,.2); }
+    .badge-cancelled { background:var(--ruby-dim); color:var(--ruby); border:1px solid rgba(224,62,82,.22); }
+    .actions { display:flex; flex-wrap:wrap; gap:6px; }
+    .primary-btn, .secondary-btn, .small-btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:8px; font-size:12.5px; font-weight:700; cursor:pointer;
+    }
+    .primary-btn { min-height:36px; padding:8px 16px; border:none; background:linear-gradient(135deg,var(--accent),var(--accent-hover)); color:#fff; }
+    .secondary-btn { min-height:34px; padding:7px 13px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); }
+    .secondary-btn.full { width:100%; }
+    .small-btn { min-height:30px; padding:5px 10px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); }
+    .small-btn:hover, .secondary-btn:hover { background:var(--bg-hover); color:var(--text-1); }
+    .message { padding:16px 18px; font-size:13px; color:var(--text-3); }
+    .hidden { display:none !important; }
+    .empty-state { padding:44px 20px; text-align:center; color:var(--text-3); }
+    .empty-state strong { display:block; color:var(--text-1); margin-bottom:4px; font-size:14px; }
+    dialog { border:none; background:transparent; padding:0; width:calc(100vw - 40px); max-width:1080px; border-radius:20px; }
+    dialog::backdrop { background:rgba(0,0,0,.55); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+    .modal-content {
+      background:var(--bg-card); border:1px solid var(--border-strong); border-radius:20px; padding:24px 26px;
+      box-shadow:var(--shadow-lg); display:flex; flex-direction:column; gap:18px; overflow:hidden;
+    }
+    .modal-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+    .modal-header h2 { font-size:16px; font-weight:700; color:var(--text-1); }
+    .modal-header p { font-size:12px; color:var(--text-3); margin-top:3px; }
+    .icon-btn {
+      width:30px; height:30px; border-radius:7px; border:1px solid var(--border); background:transparent;
+      color:var(--text-3); font-size:18px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+    }
+    .toast-stack { position:fixed; right:22px; bottom:22px; z-index:10000; display:flex; flex-direction:column; gap:10px; width:min(420px,calc(100vw - 44px)); }
+    .toast { border:1px solid var(--border-strong); border-radius:14px; padding:13px 15px; background:var(--bg-card); box-shadow:var(--shadow-lg); color:var(--text-2); }
+    .toast strong { display:block; color:var(--text-1); margin-bottom:2px; }
+    .toast.success { border-color:rgba(18,183,106,.32); }
+    .toast.warning { border-color:rgba(245,158,11,.35); }
+    .toast.error { border-color:rgba(224,62,82,.38); }
+    @media (max-width:1100px) { .stats-grid { grid-template-columns:repeat(2,1fr); } .table-toolbar { grid-template-columns:1fr 1fr; } }
+    @media (max-width:760px) {
+      .app-shell { flex-direction:column; height:auto; min-height:100vh; overflow:visible; }
+      .sidebar { width:100%; min-height:auto; border-right:none; border-bottom:1px solid var(--border); }
+      .topbar { padding:0 16px; } .page { padding:20px 16px 30px; } .page-header { align-items:stretch; flex-direction:column; }
+      .stats-grid, .table-toolbar { grid-template-columns:1fr; } dialog { width:calc(100vw - 20px); }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div>
+            <p class="brand-title">Flux Operadora</p>
+            <p class="brand-subtitle">Layouts de pago</p>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
+          <a href="./proveedores.html" class="nav-link muted"><span>◇</span> Proveedores</a>
+          <a href="./presupuesto.html" class="nav-link muted"><span>▣</span> Motor de Presupuesto</a>
+          <a href="./solicitudes.html" class="nav-link muted"><span>S</span> Solicitudes de pago</a>
+          <a href="./layouts.html" class="nav-link active"><span>L</span> Layouts de pago</a>
+          <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
+          <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
+          <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
+        </nav>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button id="logoutBtn" class="secondary-btn full">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <section class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Generacion de archivos de pago semanales</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" title="Cambiar tema" aria-label="Cambiar tema"></button>
+          <div class="avatar">FL</div>
+        </div>
+      </header>
+
+      <div class="page">
+        <div class="page-header">
+          <div>
+            <h1>Layouts de pago</h1>
+            <p>Genera archivos semanales de pago a partir de solicitudes aprobadas.</p>
+          </div>
+          <button id="refreshBtn" class="primary-btn">Actualizar</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card total"><p>Total layouts</p><strong id="totalLayouts">0</strong></div>
+          <div class="stat-card draft"><p>Draft</p><strong id="draftLayouts">0</strong></div>
+          <div class="stat-card generated"><p>Generated</p><strong id="generatedLayouts">0</strong></div>
+          <div class="stat-card amount"><p>Monto total</p><strong id="totalAmount">$0</strong></div>
+        </div>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar por folio, nombre o periodo...">
+            <select id="statusFilter">
+              <option value="todos">Estatus: Todos</option>
+              <option value="draft">Draft</option>
+              <option value="generated">Generated</option>
+              <option value="uploaded">Uploaded</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <select id="templateMode">
+              <option value="repo">Plantilla del repo</option>
+              <option value="file">Plantilla local</option>
+            </select>
+            <input id="templateFile" type="file" accept=".xlsx,.xls" class="hidden">
+          </div>
+
+          <div id="messageBox" class="message hidden">Cargando layouts...</div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Layout</th>
+                  <th>Periodo</th>
+                  <th>Estatus</th>
+                  <th>Pagos</th>
+                  <th>Empresas</th>
+                  <th>Total</th>
+                  <th>Generado</th>
+                  <th>Archivo</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="layoutsTableBody">
+                <tr><td colspan="9" class="message">Cargando layouts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="linesDialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="linesTitle">Líneas del layout</h2>
+          <p id="linesSubtitle">Vista previa de columnas B:H del Excel.</p>
+        </div>
+        <button type="button" id="closeLinesModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>CTA. CARGO</th>
+              <th>NOMBRE TITULAR</th>
+              <th>DESTINO</th>
+              <th>BENEFICIARIO</th>
+              <th>MONTO</th>
+              <th>REFERENCIA</th>
+              <th>CONCEPTO</th>
+              <th>SOLICITUD</th>
+            </tr>
+          </thead>
+          <tbody id="linesTableBody">
+            <tr><td colspan="8" class="message">Selecciona un layout.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="./config.js"></script>
+  <script src="./layouts.js"></script>
+</body>
+</html>
