@@ -1,0 +1,445 @@
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const TEMPLATE_PATH = "./templates/FORMATO_pagos_semanales.xlsx";
+
+let layouts = [];
+let currentSession = null;
+const dom = {};
+
+document.addEventListener("DOMContentLoaded", initLayoutsPage);
+
+async function initLayoutsPage() {
+  cacheDom();
+  setupTheme();
+  bindEvents();
+
+  try {
+    await loadSession();
+    await loadLayouts();
+  } catch (error) {
+    showMessage(error.message || "No fue posible cargar layouts.", true);
+    showToast("No fue posible iniciar", friendlyError(error), "error");
+  }
+}
+
+function cacheDom() {
+  dom.themeToggle = document.getElementById("themeToggle");
+  dom.userName = document.getElementById("userName");
+  dom.userEmail = document.getElementById("userEmail");
+  dom.logoutBtn = document.getElementById("logoutBtn");
+  dom.refreshBtn = document.getElementById("refreshBtn");
+  dom.searchInput = document.getElementById("searchInput");
+  dom.statusFilter = document.getElementById("statusFilter");
+  dom.templateMode = document.getElementById("templateMode");
+  dom.templateFile = document.getElementById("templateFile");
+  dom.messageBox = document.getElementById("messageBox");
+  dom.layoutsTableBody = document.getElementById("layoutsTableBody");
+  dom.linesDialog = document.getElementById("linesDialog");
+  dom.linesTitle = document.getElementById("linesTitle");
+  dom.linesSubtitle = document.getElementById("linesSubtitle");
+  dom.linesTableBody = document.getElementById("linesTableBody");
+  dom.closeLinesModalBtn = document.getElementById("closeLinesModalBtn");
+  dom.toastStack = document.getElementById("toastStack");
+}
+
+function setupTheme() {
+  const saved = localStorage.getItem("flux-theme");
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+
+  dom.themeToggle?.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("flux-theme", next);
+  });
+}
+
+function bindEvents() {
+  dom.logoutBtn?.addEventListener("click", logout);
+  dom.refreshBtn?.addEventListener("click", loadLayouts);
+  dom.searchInput?.addEventListener("input", renderLayoutsTable);
+  dom.statusFilter?.addEventListener("change", renderLayoutsTable);
+  dom.templateMode?.addEventListener("change", () => {
+    if (dom.templateMode.value === "file") dom.templateFile.click();
+  });
+  dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal);
+}
+
+async function loadSession() {
+  const { data: { session }, error } = await supabaseClient.auth.getSession();
+  if (error) throw error;
+  if (!session) {
+    window.location.href = "./index.html";
+    return;
+  }
+
+  currentSession = session;
+  dom.userEmail.textContent = session.user.email || "Sesion activa";
+  dom.userName.textContent = session.user.user_metadata?.full_name || session.user.email || "Usuario";
+}
+
+async function loadLayouts() {
+  showMessage("Cargando layouts...");
+
+  const { data, error } = await supabaseClient
+    .from("payment_layouts")
+    .select("id,layout_number,name,period_start,period_end,status,generated_by,generated_at,storage_path,file_name,company_count,payment_count,total_amount,created_at,updated_at")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    showMessage(`Error al cargar layouts. ${rlsHint("payment_layouts", "select", error)}`, true);
+    dom.layoutsTableBody.innerHTML = `<tr><td colspan="9" class="message">No fue posible cargar layouts.</td></tr>`;
+    return;
+  }
+
+  layouts = data || [];
+  hideMessage();
+  renderStats();
+  renderLayoutsTable();
+}
+
+function renderStats() {
+  const total = layouts.length;
+  const draft = layouts.filter(layout => layout.status === "draft").length;
+  const generated = layouts.filter(layout => layout.status === "generated").length;
+  const amount = layouts.reduce((sum, layout) => sum + numberValue(layout.total_amount), 0);
+
+  document.getElementById("totalLayouts").textContent = total;
+  document.getElementById("draftLayouts").textContent = draft;
+  document.getElementById("generatedLayouts").textContent = generated;
+  document.getElementById("totalAmount").textContent = compactCurrency(amount);
+}
+
+function renderLayoutsTable() {
+  const query = normalize(dom.searchInput.value);
+  const status = dom.statusFilter.value;
+
+  const rows = layouts.filter(layout => {
+    const searchable = normalize([
+      layout.layout_number,
+      layout.name,
+      layout.period_start,
+      layout.period_end,
+      layout.file_name,
+    ].join(" "));
+
+    return searchable.includes(query) && (status === "todos" || layout.status === status);
+  });
+
+  if (!rows.length) {
+    dom.layoutsTableBody.innerHTML = `
+      <tr>
+        <td colspan="9">
+          <div class="empty-state">
+            <strong>No hay layouts para mostrar</strong>
+            Genera un layout desde solicitudes aprobadas para verlo aquí.
+          </div>
+        </td>
+      </tr>`;
+    return;
+  }
+
+  dom.layoutsTableBody.innerHTML = rows.map(layout => `
+    <tr>
+      <td><strong>${escapeHtml(layout.layout_number || "Sin folio")}</strong><span class="muted-line">${escapeHtml(layout.name || "")}</span></td>
+      <td>${escapeHtml(formatDate(layout.period_start))}<span class="muted-line">${escapeHtml(formatDate(layout.period_end))}</span></td>
+      <td>${renderStatusBadge(layout.status)}</td>
+      <td>${numberValue(layout.payment_count)}</td>
+      <td>${numberValue(layout.company_count)}</td>
+      <td><strong>${escapeHtml(formatCurrency(layout.total_amount))}</strong></td>
+      <td>${escapeHtml(formatDate(layout.generated_at || layout.created_at))}</td>
+      <td>${layout.file_name ? `<strong>${escapeHtml(layout.file_name)}</strong>` : `<span class="muted-line">Sin archivo</span>`}</td>
+      <td>
+        <div class="actions">
+          <button class="small-btn" type="button" onclick="openLayoutLines('${layout.id}')">Ver líneas</button>
+          <button class="small-btn" type="button" onclick="generateLayoutExcel('${layout.id}')">${layout.status === "generated" ? "Descargar Excel" : "Generar Excel"}</button>
+        </div>
+      </td>
+    </tr>`).join("");
+}
+
+async function openLayoutLines(layoutId) {
+  const layout = layouts.find(item => item.id === layoutId);
+  if (!layout) return;
+
+  dom.linesTitle.textContent = layout.layout_number || "Líneas del layout";
+  dom.linesSubtitle.textContent = `${layout.name || ""} · columnas B:H del Excel`;
+  dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">Cargando líneas...</td></tr>`;
+  dom.linesDialog.showModal();
+
+  const { data, error } = await fetchLayoutLines(layoutId);
+  if (error) {
+    dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">No fue posible cargar líneas. ${escapeHtml(rlsHint("payment_layout_lines", "select", error))}</td></tr>`;
+    return;
+  }
+
+  renderLinesTable(data || []);
+}
+
+function closeLinesModal() {
+  if (dom.linesDialog.open) dom.linesDialog.close();
+}
+
+function renderLinesTable(lines) {
+  if (!lines.length) {
+    dom.linesTableBody.innerHTML = `<tr><td colspan="8" class="message">Este layout no tiene líneas.</td></tr>`;
+    return;
+  }
+
+  dom.linesTableBody.innerHTML = lines.map(line => `
+    <tr>
+      <td>${escapeHtml(line.source_account_number || "")}</td>
+      <td>${escapeHtml(line.company_name || "")}</td>
+      <td>${escapeHtml(line.destination_value || "")}</td>
+      <td><strong>${escapeHtml(line.beneficiary_name || "")}</strong></td>
+      <td>${escapeHtml(formatCurrency(line.amount))}</td>
+      <td>${escapeHtml(line.payment_reference || "")}</td>
+      <td>${escapeHtml(line.payment_concept || "")}</td>
+      <td>${escapeHtml(line.request_number || "")}</td>
+    </tr>`).join("");
+}
+
+async function generateLayoutExcel(layoutId) {
+  const layout = layouts.find(item => item.id === layoutId);
+  if (!layout) return;
+
+  if (layout.status === "cancelled") {
+    showToast("Layout cancelado", "No se puede generar Excel de un layout cancelado.", "error");
+    return;
+  }
+
+  const { data: lines, error } = await fetchLayoutLines(layoutId);
+  if (error) {
+    showToast("No se pudo leer el layout", rlsHint("payment_layout_lines", "select", error), "error");
+    return;
+  }
+
+  if (!lines?.length) {
+    showToast("Sin líneas", "Este layout no tiene líneas para generar Excel.", "warning");
+    return;
+  }
+
+  const invalidLines = validateLayoutLines(lines);
+  if (invalidLines.length) {
+    const first = invalidLines[0];
+    showToast(
+      "Líneas incompletas",
+      `No se puede generar el Excel. Solicitud ${first.request_number || first.payment_request_id}: falta ${first.missing_fields.join(", ")}.`,
+      "error"
+    );
+    return;
+  }
+
+  try {
+    const workbook = await loadTemplateWorkbook();
+    const sheetName = workbook.SheetNames.includes("Hoja 1") ? "Hoja 1" : workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    writeLayoutToSheet(sheet, lines);
+
+    const fileName = `${sanitizeFileName(layout.layout_number || "layout-pagos")}.xlsx`;
+    XLSX.writeFile(workbook, fileName, { bookType: "xlsx", compression: true });
+
+    const update = await supabaseClient
+      .from("payment_layouts")
+      .update({
+        file_name: fileName,
+        status: "generated",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", layoutId);
+
+    if (update.error) {
+      showToast(
+        "Excel descargado",
+        "El Excel fue generado, pero no se pudo actualizar el estado del layout.",
+        "warning"
+      );
+      return;
+    }
+
+    showToast("Excel generado", `${fileName} se descargó correctamente.`, "success");
+    await loadLayouts();
+  } catch (error) {
+    showToast("No se pudo generar Excel", friendlyError(error), "error");
+  }
+}
+
+window.openLayoutLines = openLayoutLines;
+window.generateLayoutExcel = generateLayoutExcel;
+
+async function fetchLayoutLines(layoutId) {
+  return await supabaseClient
+    .from("payment_layout_lines")
+    .select("id,layout_id,payment_request_id,company_id,proveedor_id,company_bank_account_id,source_account_number,company_name,destination_type,destination_value,beneficiary_name,amount,payment_reference,payment_concept,request_number,status,bank_rejection_reason,created_at,updated_at")
+    .eq("layout_id", layoutId)
+    .order("source_account_number", { ascending: true })
+    .order("company_name", { ascending: true })
+    .order("beneficiary_name", { ascending: true })
+    .order("request_number", { ascending: true });
+}
+
+function validateLayoutLines(lines) {
+  return lines
+    .map(line => {
+      const missing = [];
+      if (!notBlank(line.source_account_number)) missing.push("source_account_number");
+      if (!notBlank(line.company_name)) missing.push("company_name");
+      if (!notBlank(line.destination_value)) missing.push("destination_value");
+      if (!notBlank(line.beneficiary_name)) missing.push("beneficiary_name");
+      if (!numberValue(line.amount)) missing.push("amount");
+      if (!notBlank(line.payment_reference)) missing.push("payment_reference");
+      if (!notBlank(line.payment_concept)) missing.push("payment_concept");
+
+      return {
+        payment_request_id: line.payment_request_id,
+        request_number: line.request_number,
+        missing_fields: missing,
+      };
+    })
+    .filter(item => item.missing_fields.length);
+}
+
+async function loadTemplateWorkbook() {
+  if (dom.templateMode.value === "file") {
+    const file = dom.templateFile.files?.[0];
+    if (!file) {
+      throw new Error("Selecciona la plantilla local FORMATO_pagos_semanales.xlsx antes de generar.");
+    }
+
+    const buffer = await file.arrayBuffer();
+    return XLSX.read(buffer, { type: "array", cellStyles: true });
+  }
+
+  const response = await fetch(TEMPLATE_PATH);
+  if (!response.ok) {
+    throw new Error("No se encontró la plantilla en /templates/FORMATO_pagos_semanales.xlsx.");
+  }
+
+  const buffer = await response.arrayBuffer();
+  return XLSX.read(buffer, { type: "array", cellStyles: true });
+}
+
+function writeLayoutToSheet(sheet, lines) {
+  sheet["B3"] = sheet["B3"] || { t: "s", v: "CTA. CARGO" };
+  sheet["C3"] = sheet["C3"] || { t: "s", v: "NOMBRE TITULAR" };
+
+  clearDataRange(sheet, 4, 101, 2, 8);
+
+  lines.forEach((line, index) => {
+    const row = 4 + index;
+    setCell(sheet, `B${row}`, line.source_account_number, "s");
+    setCell(sheet, `C${row}`, line.company_name, "s");
+    setCell(sheet, `D${row}`, line.destination_value, "s");
+    setCell(sheet, `E${row}`, line.beneficiary_name, "s");
+    setCell(sheet, `F${row}`, numberValue(line.amount), "n");
+    setCell(sheet, `G${row}`, line.payment_reference, "s");
+    setCell(sheet, `H${row}`, line.payment_concept, "s");
+  });
+
+  const lastRow = Math.max(4 + lines.length - 1, 101);
+  sheet["!ref"] = `A1:H${lastRow}`;
+}
+
+function clearDataRange(sheet, startRow, endRow, startCol, endCol) {
+  for (let row = startRow; row <= endRow; row += 1) {
+    for (let col = startCol; col <= endCol; col += 1) {
+      delete sheet[XLSX.utils.encode_cell({ r: row - 1, c: col - 1 })];
+    }
+  }
+}
+
+function setCell(sheet, address, value, type) {
+  sheet[address] = { t: type, v: value ?? "" };
+}
+
+async function logout() {
+  await supabaseClient.auth.signOut();
+  window.location.href = "./index.html";
+}
+
+function renderStatusBadge(status) {
+  const normalized = status || "draft";
+  return `<span class="badge badge-${escapeHtml(normalized)}">${escapeHtml(normalized)}</span>`;
+}
+
+function showMessage(message, isError = false) {
+  dom.messageBox.textContent = message;
+  dom.messageBox.classList.remove("hidden");
+  dom.messageBox.style.color = isError ? "var(--ruby)" : "var(--text-3)";
+}
+
+function hideMessage() {
+  dom.messageBox.classList.add("hidden");
+}
+
+function showToast(title, message, type = "success") {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+  dom.toastStack.appendChild(toast);
+  window.setTimeout(() => toast.remove(), 6200);
+}
+
+function friendlyError(error) {
+  const message = error?.message || String(error || "Error desconocido");
+  if (message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("url scheme")) {
+    return "No se pudo cargar la plantilla. Si estás probando con file://, usa la opción Plantilla local o despliega en Vercel.";
+  }
+  if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
+    return "La operación fue bloqueada por RLS. Revisa policies para usuarios autenticados.";
+  }
+  if (message.toLowerCase().includes("permission denied")) {
+    return "Faltan permisos para ejecutar la operación.";
+  }
+  return message;
+}
+
+function rlsHint(table, operation, error) {
+  const message = error?.message || "";
+  if (message.toLowerCase().includes("row-level security") || error?.code === "42501" || message.toLowerCase().includes("permission denied")) {
+    return `Operacion ${operation} bloqueada por RLS en ${table}; puede requerir una policy para usuarios autenticados.`;
+  }
+  return message;
+}
+
+function formatCurrency(value) {
+  const amount = numberValue(value);
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(amount);
+}
+
+function compactCurrency(value) {
+  const amount = numberValue(value);
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", notation: "compact", maximumFractionDigits: 1 }).format(amount);
+}
+
+function formatDate(value) {
+  if (!value) return "Sin fecha";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
+function numberValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function notBlank(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function normalize(value) {
+  return String(value || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+function sanitizeFileName(value) {
+  return String(value || "layout-pagos").replace(/[\\/:*?"<>|]+/g, "-").trim();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
