@@ -7,8 +7,7 @@ let companies = [];
 let costCenters = [];
 let budgetCategories = [];
 let proveedores = [];
-let categoryRelations = [];
-let relationsAvailable = false;
+let budgetAvailabilityRows = [];
 let highlightedRequestId = null;
 
 const html = document.documentElement;
@@ -28,7 +27,6 @@ async function initSolicitudesPage() {
       loadCostCenters(),
       loadBudgetCategories(),
       loadProveedores(),
-      loadCategoryRelations(),
     ]);
 
     populateFilters();
@@ -70,6 +68,7 @@ function cacheDom() {
   dom.companyId = document.getElementById("companyId");
   dom.costCenterId = document.getElementById("costCenterId");
   dom.budgetCategoryId = document.getElementById("budgetCategoryId");
+  dom.budgetCategoryHelp = document.getElementById("budgetCategoryHelp");
   dom.budgetMonth = document.getElementById("budgetMonth");
   dom.providerSearch = document.getElementById("providerSearch");
   dom.proveedorId = document.getElementById("proveedorId");
@@ -115,16 +114,10 @@ function bindEvents() {
   dom.budgetDecisionFilter?.addEventListener("change", renderPaymentRequestsTable);
   dom.companyFilter?.addEventListener("change", renderPaymentRequestsTable);
 
-  dom.companyId?.addEventListener("change", () => {
-    renderBudgetCategoryOptions();
-    updateSummaryPanel();
-  });
-  dom.costCenterId?.addEventListener("change", () => {
-    renderBudgetCategoryOptions();
-    updateSummaryPanel();
-  });
+  dom.companyId?.addEventListener("change", handleBudgetScopeChange);
+  dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
-  dom.budgetMonth?.addEventListener("change", updateSummaryPanel);
+  dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
   dom.providerSearch?.addEventListener("input", () => renderProveedorOptions(dom.providerSearch.value));
   dom.proveedorId?.addEventListener("change", updateSummaryPanel);
   dom.amountRequested?.addEventListener("input", updateSummaryPanel);
@@ -226,22 +219,6 @@ async function loadProveedores() {
   proveedores = data || [];
 }
 
-async function loadCategoryRelations() {
-  const { data, error } = await supabaseClient
-    .from("company_cost_center_budget_categories")
-    .select("*");
-
-  if (error) {
-    relationsAvailable = false;
-    categoryRelations = [];
-    console.warn("No se pudo cargar company_cost_center_budget_categories. Se mostraran todas las partidas.", error);
-    return;
-  }
-
-  relationsAvailable = true;
-  categoryRelations = activeRows(data || []);
-}
-
 async function loadPaymentRequests() {
   showMessage("Cargando solicitudes...");
 
@@ -270,7 +247,7 @@ function populateFilters() {
 function populateFormSelects() {
   renderCompanyOptions();
   renderCostCenterOptions();
-  renderBudgetCategoryOptions();
+  resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
   renderProveedorOptions("");
 }
 
@@ -284,26 +261,68 @@ function renderCostCenterOptions() {
     costCenters.map(center => `<option value="${escapeHtml(center.id)}">${escapeHtml(costCenterName(center))}</option>`).join("");
 }
 
-function renderBudgetCategoryOptions() {
+async function handleBudgetScopeChange() {
+  dom.budgetCategoryId.value = "";
+  await loadAvailableBudgetCategories();
+  updateSummaryPanel();
+}
+
+async function loadAvailableBudgetCategories() {
   const companyId = dom.companyId.value;
   const costCenterId = dom.costCenterId.value;
-  let categories = budgetCategories;
+  const budgetMonth = monthInputToDate(dom.budgetMonth.value);
 
-  if (relationsAvailable && companyId && costCenterId) {
-    const allowedIds = new Set(
-      categoryRelations
-        .filter(row => row.company_id === companyId && row.cost_center_id === costCenterId)
-        .map(row => row.budget_category_id)
-    );
+  budgetAvailabilityRows = [];
 
-    if (allowedIds.size) categories = budgetCategories.filter(category => allowedIds.has(category.id));
+  if (!companyId || !costCenterId || !budgetMonth) {
+    resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
+    setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
+    updateSummaryPanel();
+    return;
   }
 
-  const currentValue = dom.budgetCategoryId.value;
-  dom.budgetCategoryId.innerHTML = optionPlaceholder("Seleccionar partida presupuestal") +
-    categories.map(category => `<option value="${escapeHtml(category.id)}">${escapeHtml(budgetCategoryLabel(category))}</option>`).join("");
+  dom.budgetCategoryId.disabled = true;
+  dom.budgetCategoryId.innerHTML = optionPlaceholder("Cargando partidas disponibles...");
+  setBudgetCategoryHelp("Consultando presupuesto activo para la combinacion seleccionada.");
 
-  if (categories.some(category => category.id === currentValue)) dom.budgetCategoryId.value = currentValue;
+  const { data, error } = await supabaseClient
+    .from("budget_availability")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("cost_center_id", costCenterId)
+    .eq("budget_month", budgetMonth);
+
+  if (error) {
+    resetBudgetCategorySelect("No se pudieron cargar partidas");
+    setBudgetCategoryHelp(rlsHint("budget_availability", "select", error), "error");
+    showToast("Partidas no disponibles", friendlyError(error, "budget_availability"), "error");
+    updateSummaryPanel();
+    return;
+  }
+
+  budgetAvailabilityRows = dedupeAvailabilityRows(data || [])
+    .filter(row => row.budget_category_id)
+    .sort((a, b) => {
+      const categoryA = budgetCategoryById(a.budget_category_id);
+      const categoryB = budgetCategoryById(b.budget_category_id);
+      return budgetCategoryLabel(categoryA).localeCompare(budgetCategoryLabel(categoryB), "es");
+    });
+
+  if (!budgetAvailabilityRows.length) {
+    resetBudgetCategorySelect("Sin partidas disponibles");
+    setBudgetCategoryHelp("No hay partidas presupuestales disponibles para esta empresa, centro de costo y mes.", "warning");
+    updateSummaryPanel();
+    return;
+  }
+
+  dom.budgetCategoryId.disabled = false;
+  dom.budgetCategoryId.innerHTML = optionPlaceholder("Seleccionar partida presupuestal") +
+    budgetAvailabilityRows.map(row => {
+      const category = budgetCategoryById(row.budget_category_id);
+      return `<option value="${escapeHtml(row.budget_category_id)}">${escapeHtml(budgetCategoryAvailabilityLabel(category, row))}</option>`;
+    }).join("");
+
+  setBudgetCategoryHelp(`${budgetAvailabilityRows.length} partidas disponibles para la combinacion seleccionada.`, "success");
   updateSummaryPanel();
 }
 
@@ -415,7 +434,9 @@ function openNewRequestModal() {
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
   renderProveedorOptions("");
-  renderBudgetCategoryOptions();
+  budgetAvailabilityRows = [];
+  resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
+  setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
   handleCurrencyChange();
   dom.requestDialog.showModal();
 }
@@ -485,7 +506,6 @@ async function submitPaymentRequest(event) {
 }
 
 function collectRequestPayload() {
-  const monthValue = dom.budgetMonth.value;
   const currency = dom.currency.value || "MXN";
   const exchangeRate = currency === "MXN" ? 1 : numberValue(dom.exchangeRate.value);
 
@@ -494,7 +514,7 @@ function collectRequestPayload() {
     company_id: dom.companyId.value || null,
     cost_center_id: dom.costCenterId.value || null,
     budget_category_id: dom.budgetCategoryId.value || null,
-    budget_month: monthValue ? `${monthValue}-01` : null,
+    budget_month: monthInputToDate(dom.budgetMonth.value),
     amount_requested: numberValue(dom.amountRequested.value),
     currency,
     exchange_rate: exchangeRate,
@@ -508,6 +528,7 @@ function validateRequestPayload(payload) {
   if (!payload.company_id) return "Selecciona una empresa.";
   if (!payload.cost_center_id) return "Selecciona un centro de costo.";
   if (!payload.budget_category_id) return "Selecciona una partida presupuestal.";
+  if (!availabilityForCategory(payload.budget_category_id)) return "La partida seleccionada no esta disponible para la empresa, centro de costo y mes.";
   if (!payload.budget_month) return "Selecciona el mes presupuestal.";
   if (!payload.proveedor_id) return "Selecciona un proveedor.";
   if (!payload.amount_requested || payload.amount_requested <= 0) return "El monto solicitado debe ser mayor a 0.";
@@ -588,13 +609,16 @@ function updateSummaryPanel() {
   const company = companyById(dom.companyId.value);
   const center = costCenterById(dom.costCenterId.value);
   const category = budgetCategoryById(dom.budgetCategoryId.value);
+  const availability = availabilityForCategory(dom.budgetCategoryId.value);
   const proveedor = proveedorById(dom.proveedorId.value);
   const amount = numberValue(dom.amountRequested.value);
   const currency = dom.currency?.value || "MXN";
 
   dom.summaryCompany.textContent = company ? companyName(company) : "Sin seleccionar";
   dom.summaryCostCenter.textContent = center ? costCenterName(center) : "Sin seleccionar";
-  dom.summaryCategory.textContent = category ? budgetCategoryLabel(category) : "Sin seleccionar";
+  dom.summaryCategory.textContent = category
+    ? `${budgetCategoryLabel(category)} | Disp. ${formatCurrency(getAvailableAmount(availability), "MXN")}`
+    : "Sin seleccionar";
   dom.summaryProvider.textContent = proveedor ? proveedorLabel(proveedor) : "Sin seleccionar";
   dom.summaryMonth.textContent = dom.budgetMonth.value ? formatMonth(`${dom.budgetMonth.value}-01`) : "Sin seleccionar";
   dom.summaryAmount.textContent = formatCurrency(amount, currency);
@@ -631,6 +655,34 @@ function optionPlaceholder(label) {
   return `<option value="">${escapeHtml(label)}</option>`;
 }
 
+function resetBudgetCategorySelect(label) {
+  dom.budgetCategoryId.disabled = true;
+  dom.budgetCategoryId.innerHTML = optionPlaceholder(label);
+}
+
+function setBudgetCategoryHelp(message, state = "") {
+  if (!dom.budgetCategoryHelp) return;
+  dom.budgetCategoryHelp.textContent = message;
+  dom.budgetCategoryHelp.classList.remove("success", "warning", "error");
+  if (state) dom.budgetCategoryHelp.classList.add(state);
+}
+
+function dedupeAvailabilityRows(rows) {
+  const byCategory = new Map();
+
+  rows.forEach(row => {
+    const categoryId = row.budget_category_id;
+    if (!categoryId) return;
+
+    const current = byCategory.get(categoryId);
+    if (!current || getAvailableAmount(row) > getAvailableAmount(current)) {
+      byCategory.set(categoryId, row);
+    }
+  });
+
+  return Array.from(byCategory.values());
+}
+
 function companyById(id) {
   return companies.find(item => item.id === id) || null;
 }
@@ -663,6 +715,36 @@ function budgetCategoryLabel(category) {
   const code = category.code ? `${category.code} - ` : "";
   const section = category.category ? ` (${category.category})` : "";
   return `${code}${category.name || "Sin nombre"}${section}`;
+}
+
+function budgetCategoryAvailabilityLabel(category, availabilityRow) {
+  const categoryLabel = budgetCategoryLabel(category);
+  const available = formatCurrency(getAvailableAmount(availabilityRow), "MXN");
+  return `${categoryLabel} | Disponible ${available}`;
+}
+
+function availabilityForCategory(categoryId) {
+  return budgetAvailabilityRows.find(row => row.budget_category_id === categoryId) || null;
+}
+
+function getAvailableAmount(row) {
+  if (!row) return 0;
+  const candidates = [
+    row.available_amount,
+    row.amount_available,
+    row.disponible,
+    row.available,
+    row.budget_available,
+    row.current_available,
+    row.remaining_amount,
+    row.available_before,
+  ];
+  const firstNumber = candidates.find(value => value !== null && value !== undefined && value !== "");
+  return numberValue(firstNumber);
+}
+
+function monthInputToDate(value) {
+  return value ? `${value}-01` : null;
 }
 
 function proveedorAlias(proveedor) {

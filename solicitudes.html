@@ -583,6 +583,19 @@
       line-height: 1.45;
     }
 
+    .field-hint {
+      color: var(--text-3);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0;
+      line-height: 1.4;
+      margin-top: 1px;
+      text-transform: none;
+    }
+    .field-hint.success { color: var(--accent-text); }
+    .field-hint.warning { color: var(--amber); }
+    .field-hint.error { color: var(--ruby); }
+
     .checkbox-card {
       display: flex !important;
       align-items: center;
@@ -748,15 +761,15 @@
           </div>
         </div>
         <nav class="nav">
-  <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
-  <a href="./proveedores.html" class="nav-link muted"><span>◇</span> Proveedores</a>
-  <a href="./presupuesto.html" class="nav-link muted"><span>▣</span> Motor de Presupuesto</a>
-  <a href="./solicitudes.html" class="nav-link active"><span>S</span> Solicitudes de pago</a>
-  <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
-  <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
-  <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
-  <a href="#" class="nav-link muted"><span>📊</span> Insights</a>
-</nav>
+          <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
+          <a href="./proveedores.html" class="nav-link muted"><span>◇</span> Proveedores</a>
+          <a href="./presupuesto.html" class="nav-link muted"><span>▣</span> Motor de Presupuesto</a>
+          <a href="./solicitudes.html" class="nav-link active"><span>S</span> Solicitudes de pago</a>
+          <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
+          <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
+          <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
+          <a href="#" class="nav-link muted"><span>📊</span> Insights</a>
+        </nav>
       </div>
       <div class="user-card">
         <p id="userName">Usuario</p>
@@ -864,6 +877,7 @@
               </label>
               <label class="full-row">Partida presupuestal *
                 <select id="budgetCategoryId" class="form-control" required></select>
+                <div id="budgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
               </label>
               <label>Mes presupuestal *
                 <input id="budgetMonth" class="form-control" type="month" required>
