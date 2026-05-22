@@ -52,6 +52,12 @@ function cacheDom() {
   dom.statusFilter = document.getElementById("statusFilter");
   dom.budgetDecisionFilter = document.getElementById("budgetDecisionFilter");
   dom.companyFilter = document.getElementById("companyFilter");
+  dom.totalCard = document.getElementById("totalCard");
+  dom.approvableCard = document.getElementById("approvableCard");
+  dom.exceptionsCard = document.getElementById("exceptionsCard");
+  dom.filterSummary = document.getElementById("filterSummary");
+  dom.filterSummaryText = document.getElementById("filterSummaryText");
+  dom.clearFiltersBtn = document.getElementById("clearFiltersBtn");
   dom.requestDialog = document.getElementById("requestDialog");
   dom.requestForm = document.getElementById("requestForm");
   dom.closeRequestModalBtn = document.getElementById("closeRequestModalBtn");
@@ -113,6 +119,19 @@ function bindEvents() {
   dom.statusFilter?.addEventListener("change", renderPaymentRequestsTable);
   dom.budgetDecisionFilter?.addEventListener("change", renderPaymentRequestsTable);
   dom.companyFilter?.addEventListener("change", renderPaymentRequestsTable);
+  dom.totalCard?.addEventListener("click", showAllRequests);
+  dom.approvableCard?.addEventListener("click", showApprovableRequests);
+  dom.exceptionsCard?.addEventListener("click", showExceptionRequests);
+  dom.clearFiltersBtn?.addEventListener("click", showAllRequests);
+
+  [dom.totalCard, dom.approvableCard, dom.exceptionsCard].forEach(card => {
+    card?.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        card.click();
+      }
+    });
+  });
 
   dom.companyId?.addEventListener("change", handleBudgetScopeChange);
   dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
@@ -346,7 +365,7 @@ function renderProveedorOptions(query = "") {
 function renderStats() {
   const total = paymentRequests.length;
   const aprobables = paymentRequests.filter(request => request.budget_decision === "aprobable").length;
-  const blocked = paymentRequests.filter(request => request.budget_decision === "bloqueado").length;
+  const blocked = paymentRequests.filter(isExceptionRequest).length;
   const amount = paymentRequests.reduce((sum, request) => sum + numberValue(request.amount_requested), 0);
 
   document.getElementById("totalRequests").textContent = total;
@@ -355,11 +374,79 @@ function renderStats() {
   document.getElementById("requestedAmount").textContent = compactCurrency(amount);
 }
 
+function showAllRequests() {
+  dom.searchInput.value = "";
+  dom.statusFilter.value = "todos";
+  dom.budgetDecisionFilter.value = "todos";
+  dom.companyFilter.value = "todos";
+  renderPaymentRequestsTable();
+}
+
+function showApprovableRequests() {
+  dom.searchInput.value = "";
+  dom.statusFilter.value = "todos";
+  dom.budgetDecisionFilter.value = "aprobable";
+  dom.companyFilter.value = "todos";
+  renderPaymentRequestsTable();
+}
+
+function showExceptionRequests() {
+  dom.searchInput.value = "";
+  dom.statusFilter.value = "todos";
+  dom.budgetDecisionFilter.value = "excepciones";
+  dom.companyFilter.value = "todos";
+  renderPaymentRequestsTable();
+}
+
+function budgetDecisionMatches(request, filter) {
+  if (filter === "todos") return true;
+  if (filter === "excepciones") return isExceptionRequest(request);
+  return request.budget_decision === filter;
+}
+
+function isExceptionRequest(request) {
+  return request?.budget_decision === "bloqueado" || request?.is_extraordinary_adjustment === true;
+}
+
+function hasActiveFilters() {
+  return Boolean(dom.searchInput.value.trim()) ||
+    dom.statusFilter.value !== "todos" ||
+    dom.budgetDecisionFilter.value !== "todos" ||
+    dom.companyFilter.value !== "todos";
+}
+
+function renderFilterState() {
+  const activeParts = [];
+
+  if (dom.searchInput.value.trim()) activeParts.push("Busqueda");
+  if (dom.statusFilter.value !== "todos") activeParts.push(`Estatus: ${dom.statusFilter.value}`);
+  if (dom.budgetDecisionFilter.value === "aprobable") activeParts.push("Aprobables");
+  if (dom.budgetDecisionFilter.value === "excepciones") activeParts.push("Excepciones presupuestales");
+  if (dom.companyFilter.value !== "todos") {
+    const company = companyById(dom.companyFilter.value);
+    activeParts.push(company ? companyName(company) : "Empresa filtrada");
+  }
+
+  dom.totalCard?.classList.toggle("active-filter", !hasActiveFilters());
+  dom.approvableCard?.classList.toggle("active-filter", dom.budgetDecisionFilter.value === "aprobable");
+  dom.exceptionsCard?.classList.toggle("active-filter", dom.budgetDecisionFilter.value === "excepciones");
+
+  if (!activeParts.length) {
+    dom.filterSummary.classList.add("hidden");
+    dom.filterSummaryText.textContent = "Vista filtrada";
+    return;
+  }
+
+  dom.filterSummary.classList.remove("hidden");
+  dom.filterSummaryText.textContent = `Vista filtrada: ${activeParts.join(" · ")}`;
+}
+
 function renderPaymentRequestsTable() {
   const query = normalize(dom.searchInput.value);
   const statusFilter = dom.statusFilter.value;
   const decisionFilter = dom.budgetDecisionFilter.value;
   const companyFilter = dom.companyFilter.value;
+  renderFilterState();
 
   const rows = paymentRequests.filter(request => {
     const proveedor = proveedorById(request.proveedor_id);
@@ -378,17 +465,18 @@ function renderPaymentRequestsTable() {
 
     return searchable.includes(query) &&
       (statusFilter === "todos" || request.status === statusFilter) &&
-      (decisionFilter === "todos" || request.budget_decision === decisionFilter) &&
+      budgetDecisionMatches(request, decisionFilter) &&
       (companyFilter === "todos" || request.company_id === companyFilter);
   });
 
   if (!rows.length) {
+    const filtered = hasActiveFilters();
     dom.requestsTableBody.innerHTML = `
       <tr>
         <td colspan="11">
           <div class="empty-state">
-            <strong>No hay solicitudes para mostrar</strong>
-            Ajusta los filtros o crea una nueva solicitud de pago.
+            <strong>${filtered ? "No hay solicitudes para este filtro." : "No hay solicitudes para mostrar"}</strong>
+            ${filtered ? "Prueba ver todas las solicitudes o cambia los filtros activos." : "Crea una nueva solicitud de pago para iniciar la bandeja."}
           </div>
         </td>
       </tr>`;
@@ -404,7 +492,7 @@ function renderPaymentRequestsTable() {
 
     return `
       <tr class="${isHighlighted ? "highlight-row" : ""}">
-        <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? `<span class="badge badge-extra">Extraordinario</span>` : ""}</td>
+        <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? `<span class="badge badge-extra">Ajuste extraordinario</span>` : ""}</td>
         <td>${escapeHtml(formatDate(request.submitted_at || request.created_at))}</td>
         <td><strong>${escapeHtml(proveedorAlias(proveedor))}</strong><span class="muted-line">${escapeHtml(proveedorName(proveedor))}</span></td>
         <td>${escapeHtml(companyName(company))}</td>
@@ -546,13 +634,18 @@ function openRequestDetail(id) {
   const company = companyById(request.company_id);
   const center = costCenterById(request.cost_center_id);
   const category = budgetCategoryById(request.budget_category_id);
-  const decisionText = request.budget_decision === "aprobable"
+  const exception = isExceptionRequest(request);
+  const decisionText = request.budget_decision === "aprobable" && !exception
     ? "Validada automaticamente con presupuesto disponible."
     : "Requiere revision por excepcion presupuestal.";
+  const detailAlert = exception
+    ? `<div class="detail-alert warning">Esta solicitud requiere revisión por excepción presupuestal.</div>`
+    : `<div class="detail-alert success">Validada automáticamente con presupuesto disponible.</div>`;
 
   dom.detailTitle.textContent = request.request_number || "Detalle de solicitud";
   dom.detailSubtitle.textContent = decisionText;
   dom.detailContent.innerHTML = `
+    ${detailAlert}
     <div class="detail-grid">
       ${detailCard("Folio", request.request_number || "Sin folio")}
       ${detailCard("Proveedor", proveedorLabel(proveedor))}
@@ -593,7 +686,7 @@ function closeRequestDetail() {
 function renderBudgetDecisionBadge(decision, reason = "") {
   if (decision === "aprobable") return `<span class="badge badge-good">Aprobable</span>`;
   if (decision === "bloqueado") {
-    const label = reason ? `Bloqueado: ${reason}` : "Bloqueado";
+    const label = reason ? `Excepción: ${reason}` : "Excepción";
     return `<span class="badge badge-blocked">${escapeHtml(label)}</span>`;
   }
   return `<span class="badge badge-neutral">${escapeHtml(decision || "Sin validar")}</span>`;

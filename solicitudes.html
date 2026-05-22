@@ -275,6 +275,12 @@
       overflow: hidden;
       min-height: 88px;
     }
+    .stat-card.is-clickable { cursor: pointer; }
+    .stat-card.is-clickable:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+    .stat-card.active-filter {
+      border-color: rgba(15,118,110,0.48);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
     .stat-card::after {
       content: '';
       position: absolute;
@@ -473,6 +479,30 @@
 
     .message { padding: 16px 18px; font-size: 13px; color: var(--text-3); }
     .hidden { display: none !important; }
+
+    .filter-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-hover);
+      color: var(--text-2);
+      font-size: 12px;
+    }
+    .filter-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--accent-dim);
+      color: var(--accent-text);
+      border: 1px solid rgba(15,118,110,0.22);
+      font-weight: 700;
+    }
+    .filter-summary .small-btn { padding: 4px 10px; }
 
     .empty-state {
       padding: 44px 20px;
@@ -681,6 +711,24 @@
       font-size: 13px;
       overflow-wrap: anywhere;
     }
+    .detail-alert {
+      border-radius: 14px;
+      padding: 13px 14px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .detail-alert.success {
+      background: var(--emerald-dim);
+      border-color: rgba(18,183,106,0.24);
+      color: var(--emerald);
+    }
+    .detail-alert.warning {
+      background: var(--ruby-dim);
+      border-color: rgba(224,62,82,0.28);
+      color: var(--ruby);
+    }
     .budget-strip {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -800,9 +848,9 @@
         </div>
 
         <div class="stats-grid">
-          <div class="stat-card total"><p>Total solicitudes</p><strong id="totalRequests">0</strong></div>
-          <div class="stat-card good"><p>Aprobables</p><strong id="approvableRequests">0</strong></div>
-          <div class="stat-card blocked"><p>Bloqueadas presupuesto</p><strong id="blockedRequests">0</strong></div>
+          <div id="totalCard" class="stat-card total is-clickable" role="button" tabindex="0"><p>Total solicitudes</p><strong id="totalRequests">0</strong></div>
+          <div id="approvableCard" class="stat-card good is-clickable" role="button" tabindex="0"><p>Aprobables</p><strong id="approvableRequests">0</strong></div>
+          <div id="exceptionsCard" class="stat-card blocked is-clickable" role="button" tabindex="0"><p>Excepciones presupuestales</p><strong id="blockedRequests">0</strong></div>
           <div class="stat-card amount"><p>Monto solicitado</p><strong id="requestedAmount">$0</strong></div>
         </div>
 
@@ -818,11 +866,16 @@
             <select id="budgetDecisionFilter">
               <option value="todos">Presupuesto: Todos</option>
               <option value="aprobable">Aprobable</option>
-              <option value="bloqueado">Bloqueado</option>
+              <option value="excepciones">Excepciones</option>
             </select>
             <select id="companyFilter">
               <option value="todos">Empresa: Todas</option>
             </select>
+          </div>
+
+          <div id="filterSummary" class="filter-summary hidden">
+            <span id="filterSummaryText" class="filter-pill">Vista filtrada</span>
+            <button id="clearFiltersBtn" type="button" class="small-btn">Ver todas</button>
           </div>
 
           <div id="messageBox" class="message hidden">Cargando solicitudes...</div>
