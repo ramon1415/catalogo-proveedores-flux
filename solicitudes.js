@@ -9,6 +9,7 @@ let budgetCategories = [];
 let proveedores = [];
 let budgetAvailabilityRows = [];
 let highlightedRequestId = null;
+let currentDetailRequestId = null;
 
 const html = document.documentElement;
 const dom = {};
@@ -166,13 +167,29 @@ async function resolveCurrentProfile(session) {
   try {
     const byId = await supabaseClient
       .from("profiles")
-      .select("id,email,full_name,name")
-      .eq("id", session.user.id)
+      .select("id,email,full_name,auth_user_id")
+      .eq("auth_user_id", session.user.id)
       .maybeSingle();
 
     if (!byId.error && byId.data?.id) {
       currentProfileId = byId.data.id;
-      dom.userName.textContent = byId.data.full_name || byId.data.name || dom.userName.textContent;
+      dom.userName.textContent = byId.data.full_name || dom.userName.textContent;
+      return;
+    }
+  } catch (_) {
+    currentProfileId = null;
+  }
+
+  try {
+    const byProfileId = await supabaseClient
+      .from("profiles")
+      .select("id,email,full_name,auth_user_id")
+      .eq("id", session.user.id)
+      .maybeSingle();
+
+    if (!byProfileId.error && byProfileId.data?.id) {
+      currentProfileId = byProfileId.data.id;
+      dom.userName.textContent = byProfileId.data.full_name || dom.userName.textContent;
       return;
     }
   } catch (_) {
@@ -184,13 +201,13 @@ async function resolveCurrentProfile(session) {
   try {
     const byEmail = await supabaseClient
       .from("profiles")
-      .select("id,email,full_name,name")
+      .select("id,email,full_name,auth_user_id")
       .eq("email", session.user.email)
       .maybeSingle();
 
     if (!byEmail.error && byEmail.data?.id) {
       currentProfileId = byEmail.data.id;
-      dom.userName.textContent = byEmail.data.full_name || byEmail.data.name || dom.userName.textContent;
+      dom.userName.textContent = byEmail.data.full_name || dom.userName.textContent;
     }
   } catch (_) {
     currentProfileId = null;
@@ -243,7 +260,7 @@ async function loadPaymentRequests() {
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,created_at")
+    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -630,6 +647,7 @@ function openRequestDetail(id) {
   const request = paymentRequests.find(item => item.id === id);
   if (!request) return;
 
+  currentDetailRequestId = id;
   const proveedor = proveedorById(request.proveedor_id);
   const company = companyById(request.company_id);
   const center = costCenterById(request.cost_center_id);
@@ -667,6 +685,8 @@ function openRequestDetail(id) {
       ${detailCard("Faltante", formatCurrency(request.budget_shortfall, request.currency || "MXN"))}
     </div>
 
+    ${renderDecisionPanel(request)}
+
     <div class="detail-card full" style="margin-top: 10px;">
       <details>
         <summary>Ver resultado tecnico de presupuesto</summary>
@@ -674,13 +694,197 @@ function openRequestDetail(id) {
       </details>
     </div>`;
 
-  dom.detailDialog.showModal();
+  loadApprovalHistory(request.id);
+  if (!dom.detailDialog.open) dom.detailDialog.showModal();
 }
 
 window.openRequestDetail = openRequestDetail;
 
 function closeRequestDetail() {
   if (dom.detailDialog.open) dom.detailDialog.close();
+  currentDetailRequestId = null;
+}
+
+function renderDecisionPanel(request) {
+  const exception = isExceptionRequest(request);
+  const finalStatus = isFinalDecisionStatus(request.status);
+  const noteClass = finalStatus ? "neutral" : exception ? "warning" : "success";
+  const noteText = finalStatus
+    ? "Esta solicitud ya tiene una decisión registrada."
+    : exception
+      ? "Esta solicitud requiere decisión por excepción presupuestal."
+      : "Esta solicitud fue validada automáticamente con presupuesto disponible.";
+
+  const controls = finalStatus
+    ? `<div class="decision-note neutral">Esta solicitud ya tiene una decisión registrada.</div>`
+    : `
+      <textarea id="decisionComments" placeholder="${exception ? "Comentario obligatorio para resolver la excepción..." : "Comentario para la decisión..."}"></textarea>
+      <div id="decisionError" class="decision-error"></div>
+      <div class="decision-actions">${renderDecisionButtons(request)}</div>`;
+
+  return `
+    <section class="decision-card">
+      <h3>Decisión del aprobador</h3>
+      <p>Registra la acción que seguirá esta solicitud.</p>
+      <div class="decision-note ${noteClass}">${noteText}</div>
+      ${controls}
+      <div class="approval-history">
+        <h4>Historial de decisiones</h4>
+        <div id="approvalHistoryList" class="history-list">
+          <div class="history-item">Cargando historial...</div>
+        </div>
+      </div>
+    </section>`;
+}
+
+function renderDecisionButtons(request) {
+  if (isExceptionRequest(request)) {
+    return [
+      decisionActionButton("Autorizar excepción", "exception_approved", "approve"),
+      decisionActionButton("Rechazar excepción", "exception_rejected", "reject"),
+      decisionActionButton("Solicitar cambio de monto", "amount_change_requested", "change"),
+      decisionActionButton("Solicitar cambio de partida", "category_change_requested", "change"),
+      decisionActionButton("Solicitar ajuste presupuestal", "budget_adjustment_requested", "adjust"),
+    ].join("");
+  }
+
+  return [
+    decisionActionButton("Aprobar", "approved", "approve"),
+    decisionActionButton("Rechazar", "rejected", "reject"),
+    decisionActionButton("Solicitar cambios", "changes_requested", "change"),
+  ].join("");
+}
+
+function decisionActionButton(label, action, variant) {
+  return `<button type="button" class="decision-btn ${variant}" data-action="${escapeHtml(action)}" onclick="decidePaymentRequest('${escapeHtml(currentDetailRequestId)}', '${escapeHtml(action)}')">${escapeHtml(label)}</button>`;
+}
+
+function isFinalDecisionStatus(status) {
+  return [
+    "approved",
+    "rejected",
+    "changes_requested",
+    "scheduled",
+    "paid",
+    "cancelled",
+  ].includes(status);
+}
+
+async function loadApprovalHistory(paymentRequestId) {
+  const container = document.getElementById("approvalHistoryList");
+  if (!container) return;
+
+  const { data, error } = await supabaseClient
+    .from("payment_request_approvals")
+    .select("id,action,from_status,to_status,comments,approval_level,created_at,actor_profile_id,role_id")
+    .eq("payment_request_id", paymentRequestId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    container.innerHTML = `<div class="history-item">No fue posible cargar el historial. ${escapeHtml(rlsHint("payment_request_approvals", "select", error))}</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="history-item">Aún no hay decisiones registradas.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map(item => `
+    <div class="history-item">
+      <strong>${escapeHtml(decisionActionLabel(item.action))}</strong>
+      ${escapeHtml(item.comments || "Sin comentario")}
+      <span>${escapeHtml(formatDateTime(item.created_at))} · ${escapeHtml(item.from_status || "-")} → ${escapeHtml(item.to_status || "-")}</span>
+    </div>
+  `).join("");
+}
+
+async function decidePaymentRequest(paymentRequestId, action, comments) {
+  const request = paymentRequests.find(item => item.id === paymentRequestId);
+  if (!request) return;
+
+  const commentBox = document.getElementById("decisionComments");
+  const errorBox = document.getElementById("decisionError");
+  const cleanComments = String(comments ?? commentBox?.value ?? "").trim();
+  const commentRequired = isDecisionCommentRequired(request, action);
+
+  if (errorBox) errorBox.textContent = "";
+
+  if (!currentProfileId) {
+    const message = "No se pudo identificar el perfil del usuario para registrar la decisión.";
+    if (errorBox) errorBox.textContent = message;
+    showToast("Perfil no identificado", message, "error");
+    return;
+  }
+
+  if (commentRequired && !cleanComments) {
+    const message = "Captura un comentario para registrar esta decisión.";
+    if (errorBox) errorBox.textContent = message;
+    commentBox?.focus();
+    return;
+  }
+
+  setDecisionButtonsDisabled(true);
+
+  try {
+    const { data, error } = await supabaseClient.rpc("decide_payment_request", {
+      p_payment_request_id: paymentRequestId,
+      p_actor_profile_id: currentProfileId,
+      p_action: action,
+      p_comments: cleanComments || null,
+    });
+
+    if (error) throw error;
+
+    const result = normalizeRpcResult(data);
+    showToast(
+      "Decisión registrada",
+      `${decisionActionLabel(action)} registrada correctamente.`,
+      action.includes("reject") || action === "exception_rejected" ? "warning" : "success"
+    );
+
+    await loadPaymentRequests();
+    const updated = paymentRequests.find(item => item.id === (result.payment_request_id || paymentRequestId));
+    if (updated) openRequestDetail(updated.id);
+  } catch (error) {
+    const message = friendlyDecisionError(error);
+    if (errorBox) errorBox.textContent = message;
+    showToast("No se pudo registrar la decisión", message, "error");
+  } finally {
+    setDecisionButtonsDisabled(false);
+  }
+}
+
+window.decidePaymentRequest = decidePaymentRequest;
+
+function setDecisionButtonsDisabled(disabled) {
+  document.querySelectorAll(".decision-btn").forEach(button => {
+    button.disabled = disabled;
+  });
+}
+
+function isDecisionCommentRequired(request, action) {
+  if (action === "approved" && !isExceptionRequest(request)) return false;
+  return action === "rejected" ||
+    action === "changes_requested" ||
+    action.startsWith("exception_") ||
+    action === "amount_change_requested" ||
+    action === "category_change_requested" ||
+    action === "budget_adjustment_requested";
+}
+
+function decisionActionLabel(action) {
+  const labels = {
+    approved: "Aprobada",
+    rejected: "Rechazada",
+    changes_requested: "Cambios solicitados",
+    exception_approved: "Excepción autorizada",
+    exception_rejected: "Excepción rechazada",
+    amount_change_requested: "Cambio de monto solicitado",
+    category_change_requested: "Cambio de partida solicitado",
+    budget_adjustment_requested: "Ajuste presupuestal solicitado",
+  };
+  return labels[action] || action || "Decisión";
 }
 
 function renderBudgetDecisionBadge(decision, reason = "") {
@@ -906,6 +1110,19 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date);
 }
 
+function formatDateTime(value) {
+  if (!value) return "Sin fecha";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-MX", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function formatMonth(value) {
   if (!value) return "Sin mes";
   const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
@@ -945,6 +1162,31 @@ function friendlyError(error, operation = "") {
     return `${operation ? `${operation}: ` : ""}faltan permisos para ejecutar la operacion.`;
   }
   return message;
+}
+
+function friendlyDecisionError(error) {
+  const message = error?.message || String(error || "Error desconocido");
+  const known = {
+    payment_request_not_found: "No se encontró la solicitud.",
+    actor_profile_not_found: "No se pudo identificar el perfil del usuario para registrar la decisión.",
+    invalid_action: "La acción seleccionada no es válida.",
+    comments_required_for_exception_action: "El comentario es obligatorio para decisiones de excepción.",
+    comments_required_for_changes_requested: "El comentario es obligatorio para solicitar cambios.",
+    exception_action_not_allowed_for_approvable_request: "Esta solicitud es aprobable; no admite una acción de excepción.",
+    normal_approval_not_allowed_for_budget_exception: "Una excepción presupuestal no puede aprobarse como solicitud normal.",
+    invalid_exception_action: "La acción no es válida para una excepción presupuestal.",
+    actor_has_no_role: "Tu usuario no tiene un rol asignado para decidir solicitudes.",
+    approval_rule_not_found: "No existe una regla de aprobación activa para tu rol, monto y alcance.",
+    actor_cannot_approve: "Tu rol no tiene permiso para aprobar esta solicitud.",
+    actor_cannot_approve_exception: "Tu rol no tiene permiso para autorizar excepciones presupuestales.",
+    actor_cannot_reject: "Tu rol no tiene permiso para rechazar esta solicitud.",
+    actor_cannot_request_changes: "Tu rol no tiene permiso para solicitar cambios.",
+    actor_cannot_request_budget_adjustment: "Tu rol no tiene permiso para solicitar ajuste presupuestal.",
+  };
+
+  const key = Object.keys(known).find(item => message.includes(item));
+  if (key) return known[key];
+  return friendlyError(error, "decide_payment_request");
 }
 
 function rlsHint(table, operation, error) {

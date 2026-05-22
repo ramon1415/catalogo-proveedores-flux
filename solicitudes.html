@@ -729,6 +729,147 @@
       border-color: rgba(224,62,82,0.28);
       color: var(--ruby);
     }
+
+    .decision-card {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    }
+    .decision-card h3 {
+      font-size: 13px;
+      color: var(--text-1);
+      margin-bottom: 3px;
+      letter-spacing: -0.1px;
+    }
+    .decision-card p {
+      color: var(--text-3);
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    .decision-note {
+      border-radius: 12px;
+      padding: 11px 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.45;
+      border: 1px solid var(--border);
+    }
+    .decision-note.success {
+      background: var(--emerald-dim);
+      border-color: rgba(18,183,106,0.24);
+      color: var(--emerald);
+    }
+    .decision-note.warning {
+      background: var(--amber-dim);
+      border-color: rgba(245,158,11,0.25);
+      color: var(--amber);
+    }
+    .decision-note.neutral {
+      background: var(--accent-dim);
+      border-color: rgba(15,118,110,0.22);
+      color: var(--accent-text);
+    }
+    .decision-card textarea {
+      width: 100%;
+      min-height: 78px;
+      padding: 10px 11px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text-1);
+      font-size: 12.5px;
+      resize: vertical;
+      outline: none;
+    }
+    .decision-card textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .decision-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .decision-btn {
+      min-height: 34px;
+      padding: 7px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: transparent;
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .decision-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+    .decision-btn.approve {
+      background: var(--emerald-dim);
+      color: var(--emerald);
+      border-color: rgba(18,183,106,0.24);
+    }
+    .decision-btn.reject {
+      background: var(--ruby-dim);
+      color: var(--ruby);
+      border-color: rgba(224,62,82,0.26);
+    }
+    .decision-btn.change {
+      background: var(--amber-dim);
+      color: var(--amber);
+      border-color: rgba(245,158,11,0.24);
+    }
+    .decision-btn.adjust {
+      background: var(--violet-dim);
+      color: var(--violet);
+      border-color: rgba(168,85,247,0.24);
+    }
+    .decision-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .decision-error {
+      min-height: 18px;
+      margin-top: 8px;
+      color: var(--ruby);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .approval-history {
+      margin-top: 12px;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .approval-history h4 {
+      font-size: 11px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.55px;
+      margin-bottom: 8px;
+    }
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .history-item {
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 9px 10px;
+      background: rgba(255,255,255,0.015);
+      color: var(--text-2);
+      font-size: 12px;
+    }
+    .history-item strong {
+      display: block;
+      color: var(--text-1);
+      margin-bottom: 2px;
+    }
+    .history-item span {
+      display: block;
+      color: var(--text-3);
+      font-size: 10.5px;
+      margin-top: 3px;
+    }
     .budget-strip {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
