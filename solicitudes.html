@@ -263,7 +263,7 @@
     .page-header h1 { font-size: 17px; font-weight: 700; color: var(--text-1); letter-spacing: -0.3px; }
     .page-header p { font-size: 12px; color: var(--text-3); margin-top: 2px; font-weight: 400; max-width: 620px; }
 
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 
     .stat-card {
       background: var(--bg-card);
@@ -293,6 +293,7 @@
     .stat-card.total::after { background: linear-gradient(90deg, var(--accent), transparent 55%); }
     .stat-card.good::after { background: linear-gradient(90deg, var(--emerald), transparent 55%); }
     .stat-card.blocked::after { background: linear-gradient(90deg, var(--ruby), transparent 55%); }
+    .stat-card.paid::after { background: linear-gradient(90deg, var(--violet), transparent 55%); }
     .stat-card.amount::after { background: linear-gradient(90deg, var(--sky), transparent 55%); }
     .stat-card p {
       font-size: 10.5px;
@@ -313,6 +314,7 @@
     .stat-card.total strong { color: var(--accent-text); }
     .stat-card.good strong { color: var(--emerald); }
     .stat-card.blocked strong { color: var(--ruby); }
+    .stat-card.paid strong { color: var(--violet); }
     .stat-card.amount strong { color: var(--sky); font-size: 21px; }
 
     .table-card {
@@ -990,9 +992,10 @@
         </div>
 
         <div class="stats-grid">
-          <div id="totalCard" class="stat-card total is-clickable" role="button" tabindex="0"><p>Total solicitudes</p><strong id="totalRequests">0</strong></div>
+          <div id="totalCard" class="stat-card total is-clickable" role="button" tabindex="0"><p>Solicitudes activas</p><strong id="totalRequests">0</strong></div>
           <div id="approvableCard" class="stat-card good is-clickable" role="button" tabindex="0"><p>Aprobables</p><strong id="approvableRequests">0</strong></div>
           <div id="exceptionsCard" class="stat-card blocked is-clickable" role="button" tabindex="0"><p>Excepciones presupuestales</p><strong id="blockedRequests">0</strong></div>
+          <div id="paidCard" class="stat-card paid is-clickable" role="button" tabindex="0"><p>Pagadas</p><strong id="paidRequests">0</strong></div>
           <div class="stat-card amount"><p>Monto solicitado</p><strong id="requestedAmount">$0</strong></div>
         </div>
 
@@ -1003,7 +1006,15 @@
             </div>
             <select id="statusFilter">
               <option value="todos">Estatus: Todos</option>
+              <option value="activas" selected>Activas</option>
               <option value="submitted">Submitted</option>
+              <option value="approved">Approved</option>
+              <option value="changes_requested">Changes requested</option>
+              <option value="finance_validation">Finance validation</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="paid">Paid</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
             </select>
             <select id="budgetDecisionFilter">
               <option value="todos">Presupuesto: Todos</option>

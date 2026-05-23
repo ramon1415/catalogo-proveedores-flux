@@ -11,6 +11,27 @@ let budgetAvailabilityRows = [];
 let highlightedRequestId = null;
 let currentDetailRequestId = null;
 
+const ACTIVE_REQUEST_STATUSES = [
+  "submitted",
+  "approved",
+  "changes_requested",
+  "finance_validation",
+  "scheduled",
+];
+
+const STATUS_FILTER_LABELS = {
+  todos: "Todas",
+  activas: "Activas",
+  submitted: "Submitted",
+  approved: "Approved",
+  changes_requested: "Changes requested",
+  finance_validation: "Finance validation",
+  scheduled: "Scheduled",
+  paid: "Pagadas",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+};
+
 const html = document.documentElement;
 const dom = {};
 
@@ -56,6 +77,7 @@ function cacheDom() {
   dom.totalCard = document.getElementById("totalCard");
   dom.approvableCard = document.getElementById("approvableCard");
   dom.exceptionsCard = document.getElementById("exceptionsCard");
+  dom.paidCard = document.getElementById("paidCard");
   dom.filterSummary = document.getElementById("filterSummary");
   dom.filterSummaryText = document.getElementById("filterSummaryText");
   dom.clearFiltersBtn = document.getElementById("clearFiltersBtn");
@@ -120,12 +142,13 @@ function bindEvents() {
   dom.statusFilter?.addEventListener("change", renderPaymentRequestsTable);
   dom.budgetDecisionFilter?.addEventListener("change", renderPaymentRequestsTable);
   dom.companyFilter?.addEventListener("change", renderPaymentRequestsTable);
-  dom.totalCard?.addEventListener("click", showAllRequests);
+  dom.totalCard?.addEventListener("click", showActiveRequests);
   dom.approvableCard?.addEventListener("click", showApprovableRequests);
   dom.exceptionsCard?.addEventListener("click", showExceptionRequests);
+  dom.paidCard?.addEventListener("click", showPaidRequests);
   dom.clearFiltersBtn?.addEventListener("click", showAllRequests);
 
-  [dom.totalCard, dom.approvableCard, dom.exceptionsCard].forEach(card => {
+  [dom.totalCard, dom.approvableCard, dom.exceptionsCard, dom.paidCard].forEach(card => {
     card?.addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -380,15 +403,25 @@ function renderProveedorOptions(query = "") {
 }
 
 function renderStats() {
-  const total = paymentRequests.length;
-  const aprobables = paymentRequests.filter(request => request.budget_decision === "aprobable").length;
-  const blocked = paymentRequests.filter(isExceptionRequest).length;
-  const amount = paymentRequests.reduce((sum, request) => sum + numberValue(request.amount_requested), 0);
+  const activeRequests = paymentRequests.filter(isActiveRequest);
+  const paidRequests = paymentRequests.filter(request => request.status === "paid");
+  const aprobables = activeRequests.filter(request => request.budget_decision === "aprobable").length;
+  const blocked = activeRequests.filter(isExceptionRequest).length;
+  const amount = activeRequests.reduce((sum, request) => sum + numberValue(request.amount_requested), 0);
 
-  document.getElementById("totalRequests").textContent = total;
+  document.getElementById("totalRequests").textContent = activeRequests.length;
   document.getElementById("approvableRequests").textContent = aprobables;
   document.getElementById("blockedRequests").textContent = blocked;
+  document.getElementById("paidRequests").textContent = paidRequests.length;
   document.getElementById("requestedAmount").textContent = compactCurrency(amount);
+}
+
+function showActiveRequests() {
+  dom.searchInput.value = "";
+  dom.statusFilter.value = "activas";
+  dom.budgetDecisionFilter.value = "todos";
+  dom.companyFilter.value = "todos";
+  renderPaymentRequestsTable();
 }
 
 function showAllRequests() {
@@ -401,7 +434,7 @@ function showAllRequests() {
 
 function showApprovableRequests() {
   dom.searchInput.value = "";
-  dom.statusFilter.value = "todos";
+  dom.statusFilter.value = "activas";
   dom.budgetDecisionFilter.value = "aprobable";
   dom.companyFilter.value = "todos";
   renderPaymentRequestsTable();
@@ -409,8 +442,16 @@ function showApprovableRequests() {
 
 function showExceptionRequests() {
   dom.searchInput.value = "";
-  dom.statusFilter.value = "todos";
+  dom.statusFilter.value = "activas";
   dom.budgetDecisionFilter.value = "excepciones";
+  dom.companyFilter.value = "todos";
+  renderPaymentRequestsTable();
+}
+
+function showPaidRequests() {
+  dom.searchInput.value = "";
+  dom.statusFilter.value = "paid";
+  dom.budgetDecisionFilter.value = "todos";
   dom.companyFilter.value = "todos";
   renderPaymentRequestsTable();
 }
@@ -419,6 +460,16 @@ function budgetDecisionMatches(request, filter) {
   if (filter === "todos") return true;
   if (filter === "excepciones") return isExceptionRequest(request);
   return request.budget_decision === filter;
+}
+
+function isActiveRequest(request) {
+  return ACTIVE_REQUEST_STATUSES.includes(request?.status);
+}
+
+function statusMatches(request, filter) {
+  if (filter === "todos") return true;
+  if (filter === "activas") return isActiveRequest(request);
+  return request.status === filter;
 }
 
 function isExceptionRequest(request) {
@@ -436,7 +487,7 @@ function renderFilterState() {
   const activeParts = [];
 
   if (dom.searchInput.value.trim()) activeParts.push("Busqueda");
-  if (dom.statusFilter.value !== "todos") activeParts.push(`Estatus: ${dom.statusFilter.value}`);
+  if (dom.statusFilter.value !== "todos") activeParts.push(STATUS_FILTER_LABELS[dom.statusFilter.value] || `Estatus: ${dom.statusFilter.value}`);
   if (dom.budgetDecisionFilter.value === "aprobable") activeParts.push("Aprobables");
   if (dom.budgetDecisionFilter.value === "excepciones") activeParts.push("Excepciones presupuestales");
   if (dom.companyFilter.value !== "todos") {
@@ -444,9 +495,10 @@ function renderFilterState() {
     activeParts.push(company ? companyName(company) : "Empresa filtrada");
   }
 
-  dom.totalCard?.classList.toggle("active-filter", !hasActiveFilters());
-  dom.approvableCard?.classList.toggle("active-filter", dom.budgetDecisionFilter.value === "aprobable");
-  dom.exceptionsCard?.classList.toggle("active-filter", dom.budgetDecisionFilter.value === "excepciones");
+  dom.totalCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "todos");
+  dom.approvableCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "aprobable");
+  dom.exceptionsCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "excepciones");
+  dom.paidCard?.classList.toggle("active-filter", dom.statusFilter.value === "paid");
 
   if (!activeParts.length) {
     dom.filterSummary.classList.add("hidden");
@@ -481,7 +533,7 @@ function renderPaymentRequestsTable() {
     ].join(" "));
 
     return searchable.includes(query) &&
-      (statusFilter === "todos" || request.status === statusFilter) &&
+      statusMatches(request, statusFilter) &&
       budgetDecisionMatches(request, decisionFilter) &&
       (companyFilter === "todos" || request.company_id === companyFilter);
   });
@@ -653,10 +705,15 @@ function openRequestDetail(id) {
   const center = costCenterById(request.cost_center_id);
   const category = budgetCategoryById(request.budget_category_id);
   const exception = isExceptionRequest(request);
-  const decisionText = request.budget_decision === "aprobable" && !exception
+  const isPaid = request.status === "paid";
+  const decisionText = isPaid
+    ? "Esta solicitud ya fue pagada."
+    : request.budget_decision === "aprobable" && !exception
     ? "Validada automaticamente con presupuesto disponible."
     : "Requiere revision por excepcion presupuestal.";
-  const detailAlert = exception
+  const detailAlert = isPaid
+    ? `<div class="detail-alert success">Esta solicitud ya fue pagada.</div>`
+    : exception
     ? `<div class="detail-alert warning">Esta solicitud requiere revisión por excepción presupuestal.</div>`
     : `<div class="detail-alert success">Validada automáticamente con presupuesto disponible.</div>`;
 
@@ -687,6 +744,8 @@ function openRequestDetail(id) {
 
     ${renderDecisionPanel(request)}
 
+    ${renderPaymentInfoSection(request)}
+
     <div class="detail-card full" style="margin-top: 10px;">
       <details>
         <summary>Ver resultado tecnico de presupuesto</summary>
@@ -695,6 +754,7 @@ function openRequestDetail(id) {
     </div>`;
 
   loadApprovalHistory(request.id);
+  if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
 }
 
@@ -705,11 +765,56 @@ function closeRequestDetail() {
   currentDetailRequestId = null;
 }
 
+function renderPaymentInfoSection(request) {
+  if (request.status !== "paid") return "";
+
+  return `
+    <section class="decision-card">
+      <h3>Informacion de pago</h3>
+      <p>Datos registrados al confirmar el pago del layout.</p>
+      <div id="paymentInfoContent" class="history-list">
+        <div class="history-item">Cargando informacion de pago...</div>
+      </div>
+    </section>`;
+}
+
+async function loadPaymentInfo(paymentRequestId) {
+  const container = document.getElementById("paymentInfoContent");
+  if (!container) return;
+
+  const { data, error } = await supabaseClient
+    .from("payment_receipts")
+    .select("id,layout_id,payment_date,amount,bank_reference,storage_path,created_at")
+    .eq("payment_request_id", paymentRequestId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    container.innerHTML = `<div class="history-item">No fue posible cargar la informacion de pago. ${escapeHtml(rlsHint("payment_receipts", "select", error))}</div>`;
+    return;
+  }
+
+  if (!data?.length) {
+    container.innerHTML = `<div class="history-item">Pago registrado. La lectura de comprobantes queda como mejora pendiente si no hay recibos disponibles.</div>`;
+    return;
+  }
+
+  container.innerHTML = data.map(receipt => `
+    <div class="history-item">
+      <strong>${escapeHtml(formatCurrency(receipt.amount, "MXN"))}</strong>
+      Fecha de pago: ${escapeHtml(formatDate(receipt.payment_date))}
+      <span>Referencia: ${escapeHtml(receipt.bank_reference || "Sin referencia")} · Layout: ${escapeHtml(receipt.layout_id || "Sin layout")}</span>
+    </div>
+  `).join("");
+}
+
 function renderDecisionPanel(request) {
   const exception = isExceptionRequest(request);
   const finalStatus = isFinalDecisionStatus(request.status);
-  const noteClass = finalStatus ? "neutral" : exception ? "warning" : "success";
-  const noteText = finalStatus
+  const isPaid = request.status === "paid";
+  const noteClass = isPaid ? "success" : finalStatus ? "neutral" : exception ? "warning" : "success";
+  const noteText = isPaid
+    ? "Esta solicitud ya fue pagada."
+    : finalStatus
     ? "Esta solicitud ya tiene una decisión registrada."
     : exception
       ? "Esta solicitud requiere decisión por excepción presupuestal."
@@ -899,6 +1004,9 @@ function renderBudgetDecisionBadge(decision, reason = "") {
 function renderStatusBadge(status) {
   const normalized = status || "sin_estatus";
   if (normalized === "submitted") return `<span class="badge badge-submitted">Submitted</span>`;
+  if (normalized === "paid") return `<span class="badge badge-good">paid</span>`;
+  if (normalized === "rejected" || normalized === "cancelled") return `<span class="badge badge-blocked">${escapeHtml(normalized)}</span>`;
+  if (normalized === "approved" || normalized === "finance_validation" || normalized === "scheduled") return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
   return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
 }
 
