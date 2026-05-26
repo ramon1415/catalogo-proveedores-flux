@@ -2,6 +2,9 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 let proveedores = []
 let currentEditingId = null
+let originAccounts = []
+let originCompanies = []
+let editingOriginAccountId = null
 
 const rootElement = document.documentElement
 const toggle = document.getElementById("themeToggle")
@@ -42,6 +45,8 @@ async function init() {
   searchInput.addEventListener("input", renderTable)
   statusFilter.addEventListener("change", renderTable)
   form.addEventListener("submit", saveSupplier)
+
+  setupOriginAccountsAdmin()
 
   await loadSuppliers()
 }
@@ -224,6 +229,539 @@ function renderTable() {
     `
     )
     .join("")
+}
+
+function setupOriginAccountsAdmin() {
+  if (document.getElementById("originAccountsPanel")) return
+
+  const page = document.querySelector(".page")
+  const pageHeader = document.querySelector(".page-header")
+  const statsGrid = document.querySelector(".stats-grid")
+  const suppliersTable = document.querySelector(".table-card")
+  const newSupplierButton = document.getElementById("newSupplierBtn")
+
+  if (!page || !pageHeader || !statsGrid || !suppliersTable) return
+
+  installOriginAccountsStyles()
+
+  const tabs = document.createElement("div")
+  tabs.className = "provider-tabs"
+  tabs.innerHTML = `
+    <button type="button" class="provider-tab active" data-panel="suppliers">Proveedores</button>
+    <button type="button" class="provider-tab" data-panel="originAccounts">Cuentas origen</button>
+  `
+  pageHeader.insertAdjacentElement("afterend", tabs)
+
+  const suppliersPanel = document.createElement("section")
+  suppliersPanel.id = "suppliersPanel"
+  suppliersPanel.className = "provider-panel active"
+  page.insertBefore(suppliersPanel, statsGrid)
+  suppliersPanel.appendChild(statsGrid)
+  suppliersPanel.appendChild(suppliersTable)
+
+  const originPanel = document.createElement("section")
+  originPanel.id = "originAccountsPanel"
+  originPanel.className = "provider-panel hidden"
+  originPanel.innerHTML = `
+    <div class="origin-help-card">
+      <strong>Cuentas origen</strong>
+      <p>La cuenta origen es la cuenta de la empresa desde la que se realizara el pago. No es la cuenta del proveedor.</p>
+    </div>
+    <section class="table-card">
+      <div class="origin-toolbar">
+        <div>
+          <h2>Cuentas origen</h2>
+          <p>Estas cuentas alimentan solicitudes y layouts de pago.</p>
+        </div>
+        <button type="button" id="newOriginAccountBtn" class="primary-btn">+ Nueva cuenta origen</button>
+      </div>
+      <div id="originAccountsMessage" class="message hidden">Cargando cuentas origen...</div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Empresa</th>
+              <th>Nombre de cuenta</th>
+              <th>Banco</th>
+              <th>Numero de cuenta</th>
+              <th>CLABE</th>
+              <th>Moneda</th>
+              <th>Activa</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="originAccountsTableBody">
+            <tr><td colspan="8" class="message">Cargando cuentas origen...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+  suppliersPanel.insertAdjacentElement("afterend", originPanel)
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <dialog id="originAccountDialog" class="modal">
+      <form id="originAccountForm" method="dialog" class="modal-content">
+        <div class="modal-header">
+          <div>
+            <h2 id="originAccountModalTitle">Nueva cuenta origen</h2>
+            <p>Completa la cuenta de la empresa desde la que se realizaran pagos.</p>
+          </div>
+          <button type="button" id="closeOriginAccountModalBtn" class="icon-btn">x</button>
+        </div>
+        <input type="hidden" id="originAccountId">
+        <div class="form-grid">
+          <label class="full-row">Empresa *
+            <select id="originCompanyId" required></select>
+          </label>
+          <label>Nombre de cuenta *
+            <input id="originAccountName" required placeholder="Ej. BBVA Operadora">
+          </label>
+          <label>Banco *
+            <input id="originBankName" required placeholder="BBVA, Santander, Banorte...">
+          </label>
+          <label>Numero de cuenta *
+            <input id="originAccountNumber" required placeholder="Cuenta cargo">
+          </label>
+          <label>CLABE
+            <input id="originClabe" maxlength="18" placeholder="18 digitos">
+          </label>
+          <label>Moneda *
+            <select id="originCurrency" required>
+              <option value="MXN">MXN</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
+          <label>Tipo de cuenta
+            <input id="originAccountType" placeholder="Cheques, concentradora...">
+          </label>
+          <label class="check-label"><input id="originAccountActive" type="checkbox" checked> Cuenta activa</label>
+          <label class="full-row">Notas
+            <textarea id="originNotes" rows="3" placeholder="Uso operativo, propiedad, restricciones..."></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="cancelOriginAccountBtn" class="secondary-btn">Cancelar</button>
+          <button type="submit" class="primary-btn">Guardar cuenta origen</button>
+        </div>
+      </form>
+    </dialog>
+  `)
+
+  tabs.addEventListener("click", (event) => {
+    const button = event.target.closest(".provider-tab")
+    if (!button) return
+
+    const panel = button.dataset.panel
+    document.querySelectorAll(".provider-tab").forEach((item) => {
+      item.classList.toggle("active", item === button)
+    })
+
+    suppliersPanel.classList.toggle("hidden", panel !== "suppliers")
+    originPanel.classList.toggle("hidden", panel !== "originAccounts")
+
+    if (newSupplierButton) {
+      newSupplierButton.classList.toggle("hidden", panel !== "suppliers")
+    }
+
+    if (panel === "originAccounts") {
+      loadOriginAccountsAdmin()
+    }
+  })
+
+  document
+    .getElementById("newOriginAccountBtn")
+    ?.addEventListener("click", openOriginAccountCreate)
+  document
+    .getElementById("closeOriginAccountModalBtn")
+    ?.addEventListener("click", closeOriginAccountModal)
+  document
+    .getElementById("cancelOriginAccountBtn")
+    ?.addEventListener("click", closeOriginAccountModal)
+  document
+    .getElementById("originAccountForm")
+    ?.addEventListener("submit", saveOriginAccount)
+  document
+    .getElementById("originAccountsTableBody")
+    ?.addEventListener("click", handleOriginAccountAction)
+}
+
+async function loadOriginAccountsAdmin() {
+  const message = document.getElementById("originAccountsMessage")
+  const tbody = document.getElementById("originAccountsTableBody")
+
+  if (!tbody) return
+
+  showOriginMessage("Cargando cuentas origen...")
+
+  const [companiesResult, accountsResult] = await Promise.all([
+    supabaseClient
+      .from("companies")
+      .select("id,name,legal_name,active")
+      .order("name", { ascending: true }),
+    supabaseClient
+      .from("company_bank_accounts")
+      .select("id,company_id,name,bank_name,currency,account_type,last4,active,notes,account_number,clabe")
+      .order("name", { ascending: true }),
+  ])
+
+  if (companiesResult.error || accountsResult.error) {
+    const error = companiesResult.error || accountsResult.error
+    const text = originRlsMessage(error, "select")
+
+    if (message) {
+      message.textContent = text
+      message.classList.remove("hidden")
+      message.style.color = "var(--ruby)"
+    }
+
+    tbody.innerHTML = `<tr><td colspan="8" class="message">${escapeHtml(text)}</td></tr>`
+    return
+  }
+
+  originCompanies = (companiesResult.data || []).filter(
+    (company) => company.active !== false
+  )
+  originAccounts = accountsResult.data || []
+
+  populateOriginCompanyOptions()
+  hideOriginMessage()
+  renderOriginAccountsTable()
+}
+
+function renderOriginAccountsTable() {
+  const tbody = document.getElementById("originAccountsTableBody")
+
+  if (!tbody) return
+
+  if (!originAccounts.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" class="message">No hay cuentas origen capturadas.</td>
+      </tr>
+    `
+    return
+  }
+
+  tbody.innerHTML = originAccounts
+    .map((account) => {
+      const company = originCompanies.find((item) => item.id === account.company_id)
+
+      return `
+        <tr>
+          <td><strong>${escapeHtml(companyNameForOrigin(company))}</strong></td>
+          <td>${escapeHtml(account.name || "")}</td>
+          <td>${escapeHtml(account.bank_name || "")}</td>
+          <td><span class="clabe-num">${escapeHtml(account.account_number || "")}</span></td>
+          <td>${escapeHtml(account.clabe || "")}</td>
+          <td>${escapeHtml(account.currency || "MXN")}</td>
+          <td>
+            <span class="badge ${account.active === false ? "badge-inactive" : "badge-active"}">
+              ${account.active === false ? "Inactiva" : "Activa"}
+            </span>
+          </td>
+          <td>
+            <div class="actions">
+              <button type="button" class="small-btn" data-origin-action="edit" data-id="${escapeHtml(account.id)}">Editar</button>
+              ${
+                account.active === false
+                  ? `<button type="button" class="small-btn" data-origin-action="toggle" data-active="true" data-id="${escapeHtml(account.id)}">Reactivar</button>`
+                  : `<button type="button" class="small-btn danger" data-origin-action="toggle" data-active="false" data-id="${escapeHtml(account.id)}">Inactivar</button>`
+              }
+            </div>
+          </td>
+        </tr>
+      `
+    })
+    .join("")
+}
+
+function populateOriginCompanyOptions() {
+  const select = document.getElementById("originCompanyId")
+
+  if (!select) return
+
+  select.innerHTML =
+    '<option value="">Seleccionar empresa...</option>' +
+    originCompanies
+      .map(
+        (company) =>
+          `<option value="${escapeHtml(company.id)}">${escapeHtml(
+            companyNameForOrigin(company)
+          )}</option>`
+      )
+      .join("")
+}
+
+function openOriginAccountCreate() {
+  editingOriginAccountId = null
+
+  const form = document.getElementById("originAccountForm")
+  form?.reset()
+
+  populateOriginCompanyOptions()
+
+  document.getElementById("originAccountModalTitle").textContent =
+    "Nueva cuenta origen"
+  setOriginValue("originCurrency", "MXN")
+  document.getElementById("originAccountActive").checked = true
+  document.getElementById("originAccountDialog")?.showModal()
+}
+
+function openOriginAccountEdit(id) {
+  const account = originAccounts.find((item) => item.id === id)
+
+  if (!account) return
+
+  editingOriginAccountId = id
+  populateOriginCompanyOptions()
+
+  document.getElementById("originAccountModalTitle").textContent =
+    "Editar cuenta origen"
+  setOriginValue("originAccountId", account.id)
+  setOriginValue("originCompanyId", account.company_id)
+  setOriginValue("originAccountName", account.name)
+  setOriginValue("originBankName", account.bank_name)
+  setOriginValue("originAccountNumber", account.account_number)
+  setOriginValue("originClabe", account.clabe)
+  setOriginValue("originCurrency", account.currency || "MXN")
+  setOriginValue("originAccountType", account.account_type)
+  setOriginValue("originNotes", account.notes)
+  document.getElementById("originAccountActive").checked = account.active !== false
+  document.getElementById("originAccountDialog")?.showModal()
+}
+
+async function saveOriginAccount(event) {
+  event.preventDefault()
+
+  const payload = {
+    company_id: getOriginValue("originCompanyId"),
+    name: getOriginValue("originAccountName"),
+    bank_name: getOriginValue("originBankName"),
+    account_number: getOriginValue("originAccountNumber"),
+    clabe: getOriginValue("originClabe"),
+    currency: getOriginValue("originCurrency") || "MXN",
+    account_type: getOriginValue("originAccountType"),
+    notes: getOriginValue("originNotes"),
+    active: document.getElementById("originAccountActive")?.checked !== false,
+  }
+
+  const validation = validateOriginAccount(payload)
+
+  if (validation) {
+    showToast(validation, "error")
+    return
+  }
+
+  const result = editingOriginAccountId
+    ? await supabaseClient
+        .from("company_bank_accounts")
+        .update(payload)
+        .eq("id", editingOriginAccountId)
+    : await supabaseClient.from("company_bank_accounts").insert(payload)
+
+  if (result.error) {
+    showToast(
+      originRlsMessage(result.error, editingOriginAccountId ? "update" : "insert"),
+      "error"
+    )
+    return
+  }
+
+  closeOriginAccountModal()
+  showToast("Cuenta origen guardada correctamente.")
+  await loadOriginAccountsAdmin()
+}
+
+function validateOriginAccount(payload) {
+  if (!payload.company_id) return "Selecciona la empresa."
+  if (!payload.name) return "Captura el nombre de la cuenta."
+  if (!payload.bank_name) return "Captura el banco."
+  if (!payload.account_number) return "Captura el numero de cuenta."
+  if (!payload.currency) return "Selecciona la moneda."
+  return ""
+}
+
+async function handleOriginAccountAction(event) {
+  const button = event.target.closest("[data-origin-action]")
+
+  if (!button) return
+
+  const action = button.dataset.originAction
+  const id = button.dataset.id
+
+  if (action === "edit") {
+    openOriginAccountEdit(id)
+    return
+  }
+
+  if (action === "toggle") {
+    const active = button.dataset.active === "true"
+    await toggleOriginAccount(id, active)
+  }
+}
+
+async function toggleOriginAccount(id, active) {
+  const confirmed = confirm(
+    active
+      ? "Seguro que deseas reactivar esta cuenta origen?"
+      : "Seguro que deseas inactivar esta cuenta origen?"
+  )
+
+  if (!confirmed) return
+
+  const { error } = await supabaseClient
+    .from("company_bank_accounts")
+    .update({ active })
+    .eq("id", id)
+
+  if (error) {
+    showToast(originRlsMessage(error, "update"), "error")
+    return
+  }
+
+  showToast(active ? "Cuenta origen reactivada." : "Cuenta origen inactivada.")
+  await loadOriginAccountsAdmin()
+}
+
+function closeOriginAccountModal() {
+  document.getElementById("originAccountDialog")?.close()
+  editingOriginAccountId = null
+}
+
+function showOriginMessage(text) {
+  const message = document.getElementById("originAccountsMessage")
+
+  if (!message) return
+
+  message.textContent = text
+  message.classList.remove("hidden")
+  message.style.color = "var(--text-3)"
+}
+
+function hideOriginMessage() {
+  document.getElementById("originAccountsMessage")?.classList.add("hidden")
+}
+
+function originRlsMessage(error, operation) {
+  const message = error?.message || ""
+  const code = error?.code || ""
+  const isPermissionError =
+    code === "42501" ||
+    message.toLowerCase().includes("row-level security") ||
+    message.toLowerCase().includes("permission")
+
+  if (!isPermissionError) return `Error en cuentas origen: ${message}`
+
+  if (operation === "select") {
+    return "No se pudieron cargar las cuentas origen. Puede faltar policy select sobre company_bank_accounts."
+  }
+
+  if (operation === "insert") {
+    return "No se pudo crear la cuenta origen. Puede faltar policy insert sobre company_bank_accounts."
+  }
+
+  return "No se pudo actualizar la cuenta origen. Puede faltar policy update sobre company_bank_accounts."
+}
+
+function companyNameForOrigin(company) {
+  if (!company) return "Sin empresa"
+  return company.legal_name || company.name || "Empresa sin nombre"
+}
+
+function getOriginValue(id) {
+  const element = document.getElementById(id)
+  return element ? element.value.trim() || null : null
+}
+
+function setOriginValue(id, value) {
+  const element = document.getElementById(id)
+
+  if (element) {
+    element.value = value || ""
+  }
+}
+
+function installOriginAccountsStyles() {
+  if (document.getElementById("originAccountsStyle")) return
+
+  const style = document.createElement("style")
+  style.id = "originAccountsStyle"
+  style.textContent = `
+    .provider-tabs {
+      display: inline-flex;
+      gap: 4px;
+      width: fit-content;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.018);
+    }
+    .provider-tab {
+      min-height: 32px;
+      padding: 7px 13px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-3);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 12.5px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .provider-tab.active {
+      color: var(--accent-text);
+      background: var(--accent-dim);
+    }
+    .provider-panel.hidden,
+    .hidden {
+      display: none !important;
+    }
+    .origin-help-card {
+      margin-bottom: 12px;
+      padding: 14px 16px;
+      border: 1px solid rgba(15,118,110,0.22);
+      border-radius: 13px;
+      background: linear-gradient(180deg, rgba(15,118,110,0.12), rgba(255,255,255,0.014));
+    }
+    .origin-help-card strong {
+      display: block;
+      color: var(--accent-text);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .origin-help-card p {
+      margin: 0;
+      color: var(--text-2);
+      font-size: 12px;
+    }
+    .origin-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .origin-toolbar h2 {
+      color: var(--text-1);
+      font-size: 14px;
+      margin: 0 0 2px;
+    }
+    .origin-toolbar p {
+      color: var(--text-3);
+      font-size: 12px;
+      margin: 0;
+    }
+    @media (max-width: 760px) {
+      .origin-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
+  `
+
+  document.head.appendChild(style)
 }
 
 function openCreateModal() {
@@ -416,7 +954,9 @@ async function saveSupplier(event) {
   }
 
   if (result.error) {
-    const errorMessage = `Error guardando proveedor: ${result.error.message}`
+    const errorMessage = result.error.message?.toLowerCase().includes("row-level security") || result.error.code === "42501"
+      ? "No se pudo guardar el proveedor. Puede faltar permiso update sobre proveedores."
+      : `Error guardando proveedor: ${result.error.message}`
 
     showMessage(errorMessage, true)
     showToast(errorMessage, "error")
