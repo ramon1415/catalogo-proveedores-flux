@@ -20,17 +20,18 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   const layoutIncompleteMessage = 'Se encontraron solicitudes aprobadas en el periodo, pero algunas no pueden incluirse porque tienen datos bancarios incompletos.'
+  const layoutAllIncompleteMessage = 'No se pudo crear layout porque las solicitudes aprobadas tienen datos incompletos.'
   const layoutFieldLabels = {
-    company_bank_account_id: 'Falta seleccionar la cuenta bancaria de la empresa en la solicitud.',
-    source_account_number: 'Falta capturar el numero de cuenta origen en la cuenta bancaria de la empresa.',
+    company_bank_account_id: 'Falta seleccionar cuenta origen en la solicitud.',
+    source_account_number: 'La cuenta origen seleccionada no tiene numero de cuenta capturado.',
     destination_type: 'Falta definir el tipo de destino de pago del proveedor: CLABE, cuenta o convenio.',
     destination_value: 'Falta completar el destino de pago del proveedor segun su tipo de destino.',
-    beneficiary_name: 'Falta beneficiario para layout o nombre completo del proveedor.',
+    beneficiary_name: 'Falta beneficiario para layout en el proveedor.',
     company_name: 'Falta nombre de la empresa origen.',
     proveedor_id: 'Falta proveedor en la solicitud.',
-    clabe: 'Falta CLABE del proveedor.',
-    cuenta_bancaria: 'Falta cuenta bancaria del proveedor.',
-    convenio_number: 'Falta numero de convenio del proveedor.',
+    clabe: 'El proveedor esta configurado para CLABE, pero no tiene CLABE capturada.',
+    cuenta_bancaria: 'El proveedor esta configurado para cuenta bancaria, pero no tiene cuenta capturada.',
+    convenio_number: 'El proveedor esta configurado para convenio, pero no tiene numero de convenio.',
     payment_reference: 'Falta referencia de pago en la solicitud.',
     payment_concept: 'Falta concepto de pago en la solicitud.',
     amount: 'Monto',
@@ -119,6 +120,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
           </select>
         </label>
       `)
+    }
+
+    const destinationTypeLabel = document.getElementById('destination_type')?.closest('label')
+    if (destinationTypeLabel && !destinationTypeLabel.querySelector('.field-hint')) {
+      destinationTypeLabel.insertAdjacentHTML('beforeend', '<span class="field-hint">Este campo define que dato se enviara al archivo de pago: CLABE, cuenta bancaria o convenio.</span>')
     }
 
     const banco = document.getElementById('banco')
@@ -312,7 +318,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     const { request } = data
     const items = getSolicitudLayoutItems(data)
     const missingCount = items.filter(item => !item.complete).length
-    const canEdit = ['submitted', 'approved', 'changes_requested', 'finance_validation', 'scheduled'].includes(request.status)
+    const canEdit = ['submitted', 'approved', 'changes_requested', 'finance_validation'].includes(request.status)
 
     return `
       <section id="layoutReadinessSection" class="detail-card full layout-readiness-card">
@@ -334,10 +340,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function getSolicitudLayoutItems({ request, proveedor, currentAccount }) {
     return [
-      { label: 'Cuenta bancaria de la empresa', complete: Boolean(request.company_bank_account_id) },
+      { label: 'Cuenta origen seleccionada', complete: Boolean(request.company_bank_account_id) },
       { label: 'Numero de cuenta origen', complete: Boolean(currentAccount?.account_number) },
       { label: 'Tipo de destino del proveedor', complete: Boolean(proveedor?.destination_type) },
       { label: 'Destino de pago del proveedor', complete: Boolean(getProviderDestinationValue(proveedor)) },
+      { label: 'Beneficiario', complete: Boolean(isNotBlank(proveedor?.beneficiary_name || proveedor?.nombre_completo || proveedor?.alias)) },
       { label: 'Referencia de pago', complete: Boolean(isNotBlank(request.payment_reference)) },
       { label: 'Concepto de pago', complete: Boolean(isNotBlank(request.payment_concept)) }
     ]
@@ -366,7 +373,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   async function renderDemoBankAccountOptions(companyId, selectedId) {
-    client = getDemoSupabaseClient()
+    const client = getDemoSupabaseClient()
     const accountSelect = document.getElementById('layoutDataBankAccountId')
     if (!client || !accountSelect) return
 
@@ -396,7 +403,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
     accountSelect.innerHTML = [
       '<option value="">Seleccionar cuenta origen...</option>',
-      ...(accounts || []).map(account => `<option value="${escapeDemoHtml(account.id)}">${escapeDemoHtml(formatBankAccountLabel(account))}</option>`)
+      ...(accounts || []).map(account => {
+        const disabled = isNotBlank(account.account_number) ? '' : ' disabled'
+        const suffix = isNotBlank(account.account_number) ? '' : ' (incompleta: falta numero de cuenta)'
+        return `<option value="${escapeDemoHtml(account.id)}"${disabled}>${escapeDemoHtml(formatBankAccountLabel(account) + suffix)}</option>`
+      })
     ].join('')
     accountSelect.value = selectedId || ''
   }
@@ -426,7 +437,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     setDemoButtonLoading(submitBtn, false)
 
     if (error) {
-      showDemoToast(error.message || 'No se pudieron guardar los datos de layout.', 'error')
+      showDemoToast('No se pudieron guardar los datos de layout. Puede faltar permiso de actualizacion sobre payment_requests.', 'error')
       return
     }
 
@@ -495,7 +506,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       const help = document.createElement('span')
       help.id = 'layoutBankAccountHelp'
       help.className = 'field-hint'
-      help.textContent = 'Todas las cuentas no asigna una cuenta origen; cada solicitud debe tener cuenta bancaria de empresa y numero de cuenta capturados.'
+      help.textContent = 'Se incluiran solicitudes aprobadas de cualquier cuenta, siempre que cada solicitud ya tenga su cuenta origen completa.'
       bankAccountSelect.insertAdjacentElement('afterend', help)
     }
 
@@ -526,7 +537,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
       formattingInvalidBox = true
       invalidBox.innerHTML = `
-        <strong>${layoutIncompleteMessage}</strong>
+        <strong>${text.includes('No hay solicitudes validas') || text.includes('no_valid_payment_requests') ? layoutAllIncompleteMessage : layoutIncompleteMessage}</strong>
         <p class="field-hint">Completa esos datos en la solicitud, proveedor o cuenta bancaria de empresa segun corresponda.</p>
         <ul class="layout-invalid-list">
           ${items.map(item => `<li><strong>${escapeDemoHtml(item.request)}</strong><span class="layout-invalid-fields">${escapeDemoHtml(item.fields)}</span>${item.link ? `<a class="small-btn" href="${escapeDemoHtml(item.link)}">Ver solicitud</a>` : ''}</li>`).join('')}
