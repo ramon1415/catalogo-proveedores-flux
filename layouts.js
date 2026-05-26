@@ -378,14 +378,18 @@ async function submitNewLayout(event) {
     if (error) throw error;
 
     await loadLayouts();
-    renderInvalidRequests(data?.invalid_requests || []);
 
     if (data?.message === "no_valid_payment_requests") {
+      renderLayoutNotice(
+        "No hay solicitudes validas para generar layout en este periodo.",
+        data?.invalid_requests || []
+      );
       showToast("Sin solicitudes validas", "No hay solicitudes validas para este periodo.", "warning");
       return;
     }
 
     const invalidCount = numberValue(data?.invalid_count);
+    renderInvalidRequests(data?.invalid_requests || []);
     showToast(
       "Layout creado correctamente",
       invalidCount
@@ -396,10 +400,26 @@ async function submitNewLayout(event) {
 
     if (!invalidCount) closeNewLayoutModal();
   } catch (error) {
+    renderLayoutNotice(friendlyRpcError(error));
     showToast("No se pudo crear layout", friendlyRpcError(error), "error");
   } finally {
     setButtonLoading(dom.submitNewLayoutBtn, false, "Crear layout");
   }
+}
+
+function renderLayoutNotice(message, invalidRequests = []) {
+  const invalidList = invalidRequests.length
+    ? `<ul>${invalidRequests.slice(0, 8).map(item => {
+        const fields = Array.isArray(item.missing_fields) ? item.missing_fields.join(", ") : item.missing_fields || "datos incompletos";
+        return `<li><strong>${escapeHtml(item.request_number || item.payment_request_id || "Solicitud")}</strong>: ${escapeHtml(fields)}</li>`;
+      }).join("")}</ul>`
+    : "";
+
+  dom.layoutInvalidBox.innerHTML = `
+    <strong>${escapeHtml(message)}</strong>
+    ${invalidList}
+    ${invalidRequests.length > 8 ? `<p class="muted-line">Y ${invalidRequests.length - 8} mas.</p>` : ""}`;
+  dom.layoutInvalidBox.classList.remove("hidden");
 }
 
 function renderInvalidRequests(invalidRequests) {
