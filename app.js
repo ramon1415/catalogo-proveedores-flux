@@ -340,6 +340,7 @@ function setupOriginAccountsAdmin() {
             <textarea id="originNotes" rows="3" placeholder="Uso operativo, propiedad, restricciones..."></textarea>
           </label>
         </div>
+        <div id="originAccountFormMessage" class="origin-form-message hidden"></div>
         <div class="modal-actions">
           <button type="button" id="cancelOriginAccountBtn" class="secondary-btn">Cancelar</button>
           <button type="submit" class="primary-btn">Guardar cuenta origen</button>
@@ -505,6 +506,7 @@ function openOriginAccountCreate() {
     "Nueva cuenta origen"
   setOriginValue("originCurrency", "MXN")
   document.getElementById("originAccountActive").checked = true
+  hideOriginFormMessage()
   document.getElementById("originAccountDialog")?.showModal()
 }
 
@@ -528,6 +530,7 @@ function openOriginAccountEdit(id) {
   setOriginValue("originAccountType", account.account_type)
   setOriginValue("originNotes", account.notes)
   document.getElementById("originAccountActive").checked = account.active !== false
+  hideOriginFormMessage()
   document.getElementById("originAccountDialog")?.showModal()
 }
 
@@ -545,13 +548,15 @@ async function saveOriginAccount(event) {
     notes: getOriginValue("originNotes"),
     active: document.getElementById("originAccountActive")?.checked !== false,
   }
+  payload.last4 = payload.account_number ? payload.account_number.slice(-4) : null
 
   const validation = validateOriginAccount(payload)
 
   if (validation) {
-    showToast(validation, "error")
+    showOriginFormMessage(validation)
     return
   }
+  hideOriginFormMessage()
 
   const result = editingOriginAccountId
     ? await supabaseClient
@@ -561,9 +566,8 @@ async function saveOriginAccount(event) {
     : await supabaseClient.from("company_bank_accounts").insert(payload)
 
   if (result.error) {
-    showToast(
-      originRlsMessage(result.error, editingOriginAccountId ? "update" : "insert"),
-      "error"
+    showOriginFormMessage(
+      originRlsMessage(result.error, editingOriginAccountId ? "update" : "insert")
     )
     return
   }
@@ -626,7 +630,21 @@ async function toggleOriginAccount(id, active) {
 
 function closeOriginAccountModal() {
   document.getElementById("originAccountDialog")?.close()
+  hideOriginFormMessage()
   editingOriginAccountId = null
+}
+
+function showOriginFormMessage(text) {
+  const message = document.getElementById("originAccountFormMessage")
+
+  if (!message) return
+
+  message.textContent = text
+  message.classList.remove("hidden")
+}
+
+function hideOriginFormMessage() {
+  document.getElementById("originAccountFormMessage")?.classList.add("hidden")
 }
 
 function showOriginMessage(text) {
@@ -650,6 +668,14 @@ function originRlsMessage(error, operation) {
     code === "42501" ||
     message.toLowerCase().includes("row-level security") ||
     message.toLowerCase().includes("permission")
+
+  if (code === "23502") {
+    return `No se pudo guardar porque falta un dato obligatorio en la base: ${message}`
+  }
+
+  if (code === "23505") {
+    return "No se pudo guardar porque ya existe una cuenta origen con esos datos."
+  }
 
   if (!isPermissionError) return `Error en cuentas origen: ${message}`
 
@@ -752,6 +778,16 @@ function installOriginAccountsStyles() {
       color: var(--text-3);
       font-size: 12px;
       margin: 0;
+    }
+    .origin-form-message {
+      padding: 11px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(224,62,82,0.28);
+      background: rgba(224,62,82,0.10);
+      color: var(--ruby);
+      font-size: 12.5px;
+      line-height: 1.45;
+      font-weight: 700;
     }
     @media (max-width: 760px) {
       .origin-toolbar {
