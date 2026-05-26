@@ -1,0 +1,391 @@
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+const ACTIVE_FUND_STATUSES = ["active", "pending_receipt", "receipt_review", "blocked"]
+const PENDING_FUND_STATUSES = ["pending_receipt", "blocked"]
+const REVIEW_ROLES = ["admin", "finance", "finanzas", "approver_2", "aprobador_2"]
+
+const dom = {}
+let currentProfile = null
+let currentRoles = []
+let rolesWereLoaded = false
+let cashFunds = []
+let reconciliations = []
+let reconciliationItems = []
+let paymentRequests = []
+let profiles = []
+let companies = []
+let proveedores = []
+let budgetCategories = []
+let activeFundId = null
+let activeReconciliationId = null
+let activeReviewAction = null
+
+document.addEventListener("DOMContentLoaded", initCashPage)
+
+async function initCashPage() {
+  cacheDom()
+  setupTheme()
+  bindEvents()
+
+  try {
+    await loadSession()
+    await loadCashData()
+  } catch (error) {
+    showMessage(friendlyError(error), true)
+    showToast("No fue posible iniciar", friendlyError(error), "error")
+  }
+}
+
+function cacheDom() {
+  ;[
+    "themeToggle", "userName", "userEmail", "logoutBtn", "refreshBtn", "searchInput", "statusFilter", "methodFilter",
+    "responsibleFilter", "companyFilter", "messageBox", "fundsTableBody", "toastStack", "activeFunds", "pendingFunds",
+    "reviewFunds", "closedFunds", "pendingAmount", "fundDetailDialog", "detailTitle", "detailSubtitle", "detailContent",
+    "closeDetailModalBtn", "closeDetailFooterBtn", "ticketDialog", "ticketForm", "ticketConcept", "ticketAmount", "ticketDate",
+    "ticketProviderId", "ticketBudgetCategoryId", "closeTicketModalBtn", "cancelTicketBtn", "submitTicketBtn", "submitDialog",
+    "submitReconciliationForm", "submitTotalTickets", "submitAssignedAmount", "submitDifference", "returnedAmount", "closeSubmitModalBtn",
+    "cancelSubmitBtn", "submitReconciliationBtn", "reviewDialog", "reviewForm", "reviewTitle", "reviewSubtitle", "reviewComment",
+    "closeReviewModalBtn", "cancelReviewBtn", "submitReviewBtn",
+  ].forEach((id) => { dom[id] = document.getElementById(id) })
+}
+
+function setupTheme() {
+  const saved = localStorage.getItem("flux-theme")
+  if (saved) document.documentElement.setAttribute("data-theme", saved)
+  dom.themeToggle?.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"
+    document.documentElement.setAttribute("data-theme", next)
+    localStorage.setItem("flux-theme", next)
+  })
+}
+
+function bindEvents() {
+  dom.logoutBtn?.addEventListener("click", logout)
+  dom.refreshBtn?.addEventListener("click", loadCashData)
+  ;[dom.searchInput, dom.statusFilter, dom.methodFilter, dom.responsibleFilter, dom.companyFilter]
+    .forEach((el) => el?.addEventListener("input", renderFundsTable))
+  ;[dom.statusFilter, dom.methodFilter, dom.responsibleFilter, dom.companyFilter]
+    .forEach((el) => el?.addEventListener("change", renderFundsTable))
+  dom.closeDetailModalBtn?.addEventListener("click", closeFundDetail)
+  dom.closeDetailFooterBtn?.addEventListener("click", closeFundDetail)
+  dom.detailContent?.addEventListener("click", handleDetailAction)
+  dom.closeTicketModalBtn?.addEventListener("click", closeTicketModal)
+  dom.cancelTicketBtn?.addEventListener("click", closeTicketModal)
+  dom.ticketForm?.addEventListener("submit", saveTicket)
+  dom.closeSubmitModalBtn?.addEventListener("click", closeSubmitModal)
+  dom.cancelSubmitBtn?.addEventListener("click", closeSubmitModal)
+  dom.returnedAmount?.addEventListener("input", updateSubmitTotals)
+  dom.submitReconciliationForm?.addEventListener("submit", submitReconciliation)
+  dom.closeReviewModalBtn?.addEventListener("click", closeReviewModal)
+  dom.cancelReviewBtn?.addEventListener("click", closeReviewModal)
+  dom.reviewForm?.addEventListener("submit", reviewReconciliation)
+}
+
+async function loadSession() {
+  const { data: { session }, error } = await supabaseClient.auth.getSession()
+  if (error) throw error
+  if (!session) return window.location.href = "./index.html"
+
+  dom.userEmail.textContent = session.user.email || "Sesion activa"
+  dom.userName.textContent = session.user.user_metadata?.full_name || "Usuario"
+  await resolveCurrentProfile(session)
+}
+
+async function resolveCurrentProfile(session) {
+  currentProfile = null
+  currentRoles = []
+  rolesWereLoaded = false
+
+  const lookups = [
+    { column: "auth_user_id", value: session.user.id },
+    { column: "email", value: session.user.email },
+  ].filter((item) => item.value)
+
+  for (const lookup of lookups) {
+    const { data, error } = await supabaseClient.from("profiles").select("*").eq(lookup.column, lookup.value).maybeSingle()
+    if (!error && data) {
+      currentProfile = data
+      dom.userName.textContent = data.full_name || dom.userName.textContent
+      break
+    }
+  }
+
+  if (!currentProfile) return
+
+  const { data, error } = await supabaseClient.from("user_roles").select("role_id, roles(id,name,description)").eq("profile_id", currentProfile.id)
+  if (error) return
+  rolesWereLoaded = true
+  currentRoles = (data || []).map((row) => row.roles?.name || row.name || "").filter(Boolean)
+}
+
+async function loadCashData() {
+  showMessage("Cargando fondos...")
+
+  const [fundsResult, reconciliationsResult, itemsResult, requestsResult, profilesResult, companiesResult, providersResult, categoriesResult] = await Promise.all([
+    supabaseClient.from("cash_funds").select("*").order("created_at", { ascending: false }),
+    supabaseClient.from("cash_reconciliations").select("*").order("created_at", { ascending: false }),
+    supabaseClient.from("cash_reconciliation_items").select("*").order("created_at", { ascending: true }),
+    supabaseClient.from("payment_requests").select("*"),
+    supabaseClient.from("profiles").select("*"),
+    supabaseClient.from("companies").select("*").order("name", { ascending: true }),
+    supabaseClient.from("proveedores").select("*").order("alias", { ascending: true }),
+    supabaseClient.from("budget_categories").select("*").order("code", { ascending: true }),
+  ])
+
+  if (fundsResult.error) {
+    showMessage(rlsHint("cash_funds", "select", fundsResult.error), true)
+    dom.fundsTableBody.innerHTML = `<tr><td colspan="10" class="message">No fue posible cargar fondos.</td></tr>`
+    return
+  }
+
+  cashFunds = fundsResult.data || []
+  reconciliations = reconciliationsResult.error ? [] : (reconciliationsResult.data || [])
+  reconciliationItems = itemsResult.error ? [] : (itemsResult.data || [])
+  paymentRequests = requestsResult.error ? [] : (requestsResult.data || [])
+  profiles = profilesResult.error ? [] : (profilesResult.data || [])
+  companies = companiesResult.error ? [] : (companiesResult.data || [])
+  proveedores = providersResult.error ? [] : (providersResult.data || [])
+  budgetCategories = categoriesResult.error ? [] : (categoriesResult.data || [])
+
+  if (currentProfile && !profiles.some((p) => p.id === currentProfile.id)) profiles.push(currentProfile)
+
+  hideMessage()
+  populateFilters()
+  populateTicketCatalogs()
+  renderStats()
+  renderFundsTable()
+  if (activeFundId && dom.fundDetailDialog.open) renderFundDetail(activeFundId)
+}
+
+function populateFilters() {
+  const responsibleIds = unique(cashFunds.map((fund) => fund.responsible_profile_id).filter(Boolean))
+  dom.responsibleFilter.innerHTML = [`<option value="todos">Responsable: Todos</option>`, ...responsibleIds.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(profileName(id))}</option>`)].join("")
+  const companyIds = unique(cashFunds.map((fund) => fund.company_id).filter(Boolean))
+  dom.companyFilter.innerHTML = [`<option value="todos">Empresa: Todas</option>`, ...companyIds.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(companyName(id))}</option>`)].join("")
+}
+
+function populateTicketCatalogs() {
+  dom.ticketProviderId.innerHTML = [`<option value="">Sin proveedor</option>`, ...proveedores.filter((p) => p.activo !== false).map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(providerLabel(p))}</option>`)].join("")
+  dom.ticketBudgetCategoryId.innerHTML = [`<option value="">Sin partida</option>`, ...budgetCategories.filter((c) => c.active !== false && c.activo !== false).map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(budgetCategoryLabel(c))}</option>`)].join("")
+}
+
+function renderStats() {
+  const activeCount = cashFunds.filter((fund) => ACTIVE_FUND_STATUSES.includes(fund.status)).length
+  const pendingCount = cashFunds.filter((fund) => PENDING_FUND_STATUSES.includes(fund.status)).length
+  const reviewIds = new Set([...cashFunds.filter((fund) => fund.status === "receipt_review").map((fund) => fund.id), ...reconciliations.filter((item) => item.status === "submitted").map((item) => item.cash_fund_id)].filter(Boolean))
+  const closedCount = cashFunds.filter((fund) => fund.status === "closed").length
+  const pendingAmount = cashFunds.filter((fund) => !["closed", "cancelled"].includes(fund.status)).reduce((sum, fund) => sum + numberValue(fund.pending_amount), 0)
+
+  dom.activeFunds.textContent = activeCount
+  dom.pendingFunds.textContent = pendingCount
+  dom.reviewFunds.textContent = reviewIds.size
+  dom.closedFunds.textContent = closedCount
+  dom.pendingAmount.textContent = compactCurrency(pendingAmount)
+}
+
+function renderFundsTable() {
+  const query = normalize(dom.searchInput.value)
+  const status = dom.statusFilter.value
+  const method = dom.methodFilter.value
+  const responsibleId = dom.responsibleFilter.value
+  const companyId = dom.companyFilter.value
+
+  const rows = cashFunds.filter((fund) => {
+    const request = paymentRequestById(fund.payment_request_id)
+    const searchable = normalize([request?.request_number, request?.description, fund.notes, profileName(fund.responsible_profile_id), companyName(fund.company_id)].join(" "))
+    return searchable.includes(query) && (status === "todos" || fund.status === status) && (method === "todos" || fund.delivery_method === method) && (responsibleId === "todos" || fund.responsible_profile_id === responsibleId) && (companyId === "todos" || fund.company_id === companyId)
+  })
+
+  if (!rows.length) {
+    dom.fundsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state"><strong>No hay fondos para este filtro.</strong>Ajusta la busqueda o cambia los filtros.</td></tr>`
+    return
+  }
+
+  dom.fundsTableBody.innerHTML = rows.map((fund) => {
+    const request = paymentRequestById(fund.payment_request_id)
+    return `<tr><td><strong>${escapeHtml(request?.request_number || "Sin solicitud")}</strong><span class="muted-line">${escapeHtml(request?.description || fund.notes || "Sin descripcion")}</span></td><td>${escapeHtml(profileName(fund.responsible_profile_id))}</td><td>${escapeHtml(companyName(fund.company_id))}</td><td>${escapeHtml(methodLabel(fund.delivery_method))}</td><td><strong>${escapeHtml(formatCurrency(fund.assigned_amount))}</strong></td><td>${escapeHtml(formatCurrency(fund.verified_amount))}</td><td><strong>${escapeHtml(formatCurrency(fund.pending_amount))}</strong></td><td>${escapeHtml(formatDate(fund.due_date))}</td><td>${renderFundStatusBadge(fund.status)}</td><td><button class="small-btn" type="button" onclick="openFundDetail('${escapeHtml(fund.id)}')">Ver detalle</button></td></tr>`
+  }).join("")
+}
+
+function openFundDetail(fundId) {
+  activeFundId = fundId
+  renderFundDetail(fundId)
+  dom.fundDetailDialog.showModal()
+}
+window.openFundDetail = openFundDetail
+
+function renderFundDetail(fundId) {
+  const fund = fundById(fundId)
+  if (!fund) return
+  const request = paymentRequestById(fund.payment_request_id)
+  const reconciliation = reconciliationForFund(fund.id)
+  dom.detailTitle.textContent = request?.request_number || "Detalle de fondo"
+  dom.detailSubtitle.textContent = `${methodLabel(fund.delivery_method)} - ${fundStatusLabel(fund.status)}`
+  dom.detailContent.innerHTML = `<div class="detail-grid">${detailCard("Solicitud origen", request?.request_number || "Sin solicitud")}${detailCard("Responsable", profileName(fund.responsible_profile_id))}${detailCard("Empresa", companyName(fund.company_id))}${detailCard("Metodo", methodLabel(fund.delivery_method))}${detailCard("Monto asignado", formatCurrency(fund.assigned_amount))}${detailCard("Monto comprobado", formatCurrency(fund.verified_amount))}${detailCard("Monto pendiente", formatCurrency(fund.pending_amount))}${detailCard("Fecha de asignacion", formatDate(fund.assignment_date))}${detailCard("Fecha limite", formatDate(fund.due_date))}${detailCard("Estatus", renderFundStatusBadge(fund.status), true)}${detailCard("Notas", fund.notes || "Sin notas", false, "full")}</div>${renderReconciliationSection(fund, reconciliation)}${renderTicketsSection(reconciliation)}`
+}
+
+function renderReconciliationSection(fund, reconciliation) {
+  const canCreate = !reconciliation && !["closed", "cancelled"].includes(fund.status)
+  const canAddTicket = reconciliation && ["draft", "correction_requested"].includes(reconciliation.status)
+  const canSubmit = reconciliation && ["draft", "correction_requested"].includes(reconciliation.status)
+  const canReview = reconciliation && reconciliation.status === "submitted" && canReviewCurrentUser()
+  return `<section class="section-card"><div><h3>Comprobacion</h3><p>${reconciliation ? "Seguimiento de tickets y revision." : "Aun no hay comprobacion abierta para este fondo."}</p></div>${reconciliation ? `<div class="detail-grid">${detailCard("Estatus", renderReconciliationStatusBadge(reconciliation.status), true)}${detailCard("Total tickets", formatCurrency(reconciliation.total_tickets))}${detailCard("Monto devuelto", formatCurrency(reconciliation.returned_amount))}${detailCard("Diferencia", formatCurrency(reconciliation.difference_amount))}${detailCard("Comentario del revisor", reconciliation.reviewer_comment || "Sin comentario", false, "full")}${detailCard("Fecha de revision", formatDateTime(reconciliation.reviewed_at))}</div>` : `<div class="notice warning">Crea una comprobacion para empezar a registrar tickets.</div>`}<div id="blockCheckResult"></div><div class="actions">${canCreate ? `<button type="button" class="small-btn success" data-action="create-reconciliation" data-fund-id="${escapeHtml(fund.id)}">Crear comprobacion</button>` : ""}${canAddTicket ? `<button type="button" class="small-btn" data-action="add-ticket" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Agregar ticket</button>` : ""}${canSubmit ? `<button type="button" class="small-btn info" data-action="submit-reconciliation" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Enviar comprobacion</button>` : ""}${canReview ? `<button type="button" class="small-btn success" data-action="review" data-review-action="approved" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Aprobar</button><button type="button" class="small-btn danger" data-action="review" data-review-action="rejected" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Rechazar</button><button type="button" class="small-btn warning" data-action="review" data-review-action="correction_requested" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Solicitar correccion</button>` : ""}<button type="button" class="small-btn" data-action="verify-block" data-profile-id="${escapeHtml(fund.responsible_profile_id || "")}">Verificar bloqueo</button></div>${reconciliation && reconciliation.status === "submitted" && !canReview ? `<div class="notice warning">Esta comprobacion esta en revision. Las decisiones las registra un perfil autorizado.</div>` : ""}</section>`
+}
+
+function renderTicketsSection(reconciliation) {
+  if (!reconciliation) return `<section class="section-card"><h3>Tickets / comprobantes</h3><p>Primero crea una comprobacion para agregar tickets.</p></section>`
+  const rows = itemsForReconciliation(reconciliation.id)
+  const tableRows = rows.length ? rows.map((item) => `<tr><td><strong>${escapeHtml(item.concept || "Sin concepto")}</strong>${item.storage_path ? `<span class="muted-line">${escapeHtml(item.storage_path)}</span>` : `<span class="muted-line">Archivo pendiente</span>`}</td><td>${escapeHtml(providerName(item.proveedor_id))}</td><td>${escapeHtml(budgetCategoryName(item.budget_category_id))}</td><td><strong>${escapeHtml(formatCurrency(item.amount))}</strong></td><td>${escapeHtml(formatDate(item.ticket_date))}</td><td>${renderItemStatusBadge(item.status)}</td></tr>`).join("") : `<tr><td colspan="6" class="message">No hay tickets registrados.</td></tr>`
+  return `<section class="section-card"><div><h3>Tickets / comprobantes</h3><p>La carga de archivos se implementara en la siguiente fase.</p></div><div class="table-wrapper" style="max-height:260px;min-height:auto"><table><thead><tr><th>Concepto</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Fecha ticket</th><th>Estatus</th></tr></thead><tbody>${tableRows}</tbody></table></div></section>`
+}
+
+async function handleDetailAction(event) {
+  const button = event.target.closest("[data-action]")
+  if (!button) return
+  if (button.dataset.action === "create-reconciliation") await createReconciliation(button.dataset.fundId)
+  if (button.dataset.action === "add-ticket") openTicketModal(button.dataset.reconciliationId)
+  if (button.dataset.action === "submit-reconciliation") openSubmitModal(button.dataset.reconciliationId)
+  if (button.dataset.action === "review") openReviewModal(button.dataset.reconciliationId, button.dataset.reviewAction)
+  if (button.dataset.action === "verify-block") await verifyCashBlock(button.dataset.profileId)
+}
+
+async function createReconciliation(fundId) {
+  if (!ensureCurrentProfile()) return
+  try {
+    const { error } = await supabaseClient.rpc("create_cash_reconciliation", { p_cash_fund_id: fundId, p_submitted_by: currentProfile.id })
+    if (error) throw error
+    showToast("Comprobacion creada", "Comprobacion creada en borrador.", "success")
+    await loadCashData()
+    renderFundDetail(fundId)
+  } catch (error) { showToast("No se pudo crear comprobacion", friendlyRpcError(error), "error") }
+}
+
+function openTicketModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.ticketForm.reset(); dom.ticketDate.value = todayValue(); dom.ticketDialog.showModal() }
+function closeTicketModal() { activeReconciliationId = null; dom.ticketForm.reset(); if (dom.ticketDialog.open) dom.ticketDialog.close() }
+
+async function saveTicket(event) {
+  event.preventDefault()
+  if (!activeReconciliationId) return
+  const payload = { reconciliation_id: activeReconciliationId, concept: cleanText(dom.ticketConcept.value), amount: numberValue(dom.ticketAmount.value), ticket_date: dom.ticketDate.value || null, proveedor_id: dom.ticketProviderId.value || null, budget_category_id: dom.ticketBudgetCategoryId.value || null, status: "valid" }
+  if (!payload.concept) return showToast("Concepto requerido", "Captura el concepto del ticket.", "error")
+  if (payload.amount <= 0) return showToast("Monto requerido", "Captura un monto mayor a cero.", "error")
+  if (!payload.ticket_date) return showToast("Fecha requerida", "Captura la fecha del ticket.", "error")
+  setButtonLoading(dom.submitTicketBtn, true, "Guardando...")
+  const { error } = await supabaseClient.from("cash_reconciliation_items").insert(payload)
+  setButtonLoading(dom.submitTicketBtn, false, "Guardar ticket")
+  if (error) return showToast("No se pudo guardar ticket", rlsHint("cash_reconciliation_items", "insert", error), "error")
+  const fundId = activeFundId
+  closeTicketModal()
+  showToast("Ticket agregado", "Ticket agregado correctamente.", "success")
+  await loadCashData()
+  if (fundId) renderFundDetail(fundId)
+}
+
+function openSubmitModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.returnedAmount.value = "0"; updateSubmitTotals(); dom.submitDialog.showModal() }
+function closeSubmitModal() { activeReconciliationId = null; dom.submitReconciliationForm.reset(); if (dom.submitDialog.open) dom.submitDialog.close() }
+function updateSubmitTotals() { const reconciliation = reconciliationById(activeReconciliationId); const fund = reconciliation ? fundById(reconciliation.cash_fund_id) : null; const tickets = reconciliation ? totalValidTickets(reconciliation.id) : 0; const returned = numberValue(dom.returnedAmount.value); const assigned = numberValue(fund?.assigned_amount); dom.submitTotalTickets.textContent = formatCurrency(tickets); dom.submitAssignedAmount.textContent = formatCurrency(assigned); dom.submitDifference.textContent = formatCurrency(assigned - tickets - returned) }
+
+async function submitReconciliation(event) {
+  event.preventDefault()
+  if (!activeReconciliationId) return
+  setButtonLoading(dom.submitReconciliationBtn, true, "Enviando...")
+  try {
+    const { error } = await supabaseClient.rpc("submit_cash_reconciliation", { p_reconciliation_id: activeReconciliationId, p_returned_amount: numberValue(dom.returnedAmount.value) })
+    if (error) throw error
+    const fundId = activeFundId
+    closeSubmitModal()
+    showToast("Comprobacion enviada", "Comprobacion enviada para revision.", "success")
+    await loadCashData()
+    if (fundId) renderFundDetail(fundId)
+  } catch (error) { showToast("No se pudo enviar", friendlyRpcError(error), "error") }
+  finally { setButtonLoading(dom.submitReconciliationBtn, false, "Enviar comprobacion") }
+}
+
+function openReviewModal(reconciliationId, action) { activeReconciliationId = reconciliationId; activeReviewAction = action; dom.reviewForm.reset(); dom.reviewTitle.textContent = reviewActionTitle(action); dom.reviewSubtitle.textContent = action === "approved" ? "El comentario es opcional para aprobar." : "Captura un comentario para informar al responsable."; dom.submitReviewBtn.textContent = reviewActionButton(action); dom.reviewDialog.showModal() }
+function closeReviewModal() { activeReconciliationId = null; activeReviewAction = null; dom.reviewForm.reset(); if (dom.reviewDialog.open) dom.reviewDialog.close() }
+
+async function reviewReconciliation(event) {
+  event.preventDefault()
+  if (!activeReconciliationId || !activeReviewAction || !ensureCurrentProfile()) return
+  const comment = cleanText(dom.reviewComment.value)
+  if (["rejected", "correction_requested"].includes(activeReviewAction) && !comment) return showToast("Comentario requerido", "Captura un comentario para rechazar o solicitar correccion.", "error")
+  setButtonLoading(dom.submitReviewBtn, true, "Registrando...")
+  try {
+    const { error } = await supabaseClient.rpc("review_cash_reconciliation", { p_reconciliation_id: activeReconciliationId, p_reviewer_profile_id: currentProfile.id, p_action: activeReviewAction, p_comment: comment || null })
+    if (error) throw error
+    const fundId = activeFundId
+    closeReviewModal()
+    showToast("Decision registrada", activeReviewAction === "approved" ? "Comprobacion aprobada." : activeReviewAction === "rejected" ? "Comprobacion rechazada." : "Correccion solicitada.", "success")
+    await loadCashData()
+    if (fundId) renderFundDetail(fundId)
+  } catch (error) { showToast("No se pudo registrar decision", friendlyRpcError(error), "error") }
+  finally { setButtonLoading(dom.submitReviewBtn, false, reviewActionButton(activeReviewAction)) }
+}
+
+async function verifyCashBlock(profileId) {
+  if (!profileId) return showToast("Sin responsable", "Este fondo no tiene responsable asignado.", "error")
+  const target = document.getElementById("blockCheckResult")
+  if (target) target.innerHTML = `<div class="notice warning">Verificando fondos pendientes...</div>`
+  try {
+    const { data, error } = await supabaseClient.rpc("verify_cash_block", { p_profile_id: profileId })
+    if (error) throw error
+    renderCashBlockResult(data)
+  } catch (error) { if (target) target.innerHTML = `<div class="notice error">${escapeHtml(friendlyRpcError(error))}</div>` }
+}
+
+function renderCashBlockResult(result) {
+  const target = document.getElementById("blockCheckResult")
+  if (!target) return
+  if (!result?.blocked) return target.innerHTML = `<div class="notice">El responsable no tiene fondos vencidos pendientes.</div>`
+  const funds = Array.isArray(result?.funds) ? result.funds : []
+  target.innerHTML = `<div class="notice error"><strong>El responsable tiene fondos vencidos pendientes.</strong><br>Pendiente total: ${escapeHtml(formatCurrency(result?.total_pending || 0))}. Fondos vencidos: ${escapeHtml(result?.overdue_count || funds.length || 0)}.${funds.length ? `<ul>${funds.slice(0, 5).map((fund) => `<li>${escapeHtml(fund.request_number || fund.cash_fund_id || "Fondo")} - ${escapeHtml(formatCurrency(fund.pending_amount || 0))}</li>`).join("")}</ul>` : ""}</div>`
+}
+
+function canReviewCurrentUser() { if (!currentProfile) return false; if (!rolesWereLoaded) return true; return currentRoles.some((role) => REVIEW_ROLES.includes(normalizeRole(role))) }
+function ensureCurrentProfile() { if (currentProfile?.id) return true; showToast("Perfil no identificado", "No se pudo identificar tu perfil de usuario.", "error"); return false }
+async function logout() { await supabaseClient.auth.signOut(); window.location.href = "./index.html" }
+function closeFundDetail() { activeFundId = null; if (dom.fundDetailDialog.open) dom.fundDetailDialog.close() }
+function fundById(id) { return cashFunds.find((item) => item.id === id) || null }
+function reconciliationById(id) { return reconciliations.find((item) => item.id === id) || null }
+function reconciliationForFund(fundId) { return reconciliations.filter((item) => item.cash_fund_id === fundId).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0] || null }
+function itemsForReconciliation(id) { return reconciliationItems.filter((item) => item.reconciliation_id === id).sort((a, b) => new Date(a.ticket_date || a.created_at || 0) - new Date(b.ticket_date || b.created_at || 0)) }
+function totalValidTickets(id) { return itemsForReconciliation(id).filter((item) => item.status !== "rejected").reduce((sum, item) => sum + numberValue(item.amount), 0) }
+function paymentRequestById(id) { return paymentRequests.find((item) => item.id === id) || null }
+function profileById(id) { return profiles.find((item) => item.id === id) || (currentProfile?.id === id ? currentProfile : null) }
+function companyById(id) { return companies.find((item) => item.id === id) || null }
+function providerById(id) { return proveedores.find((item) => item.id === id) || null }
+function budgetCategoryById(id) { return budgetCategories.find((item) => item.id === id) || null }
+function profileName(id) { const p = profileById(id); return p ? (p.full_name || p.email || "Responsable") : "Sin responsable" }
+function companyName(id) { const c = companyById(id); return c ? (c.legal_name || c.name || "Empresa") : "Sin empresa" }
+function providerName(id) { return id ? providerLabel(providerById(id)) : "Sin proveedor" }
+function providerLabel(p) { return p ? (p.alias || p.nombre_completo || p.rfc || "Proveedor") : "Sin proveedor" }
+function budgetCategoryName(id) { return id ? budgetCategoryLabel(budgetCategoryById(id)) : "Sin partida" }
+function budgetCategoryLabel(c) { return c ? `${c.code ? `${c.code} - ` : ""}${c.name || c.nombre || "Sin nombre"}` : "Sin partida" }
+function methodLabel(method) { return ({ cash: "Efectivo", check: "Cheque" })[method] || "Sin metodo" }
+function fundStatusLabel(status) { return ({ active: "Activo", pending_receipt: "Pendiente de comprobar", blocked: "Bloqueado", receipt_review: "En revision", verified: "Verificado", closed: "Cerrado", cancelled: "Cancelado" })[status] || status || "Sin estatus" }
+function reconciliationStatusLabel(status) { return ({ draft: "Borrador", submitted: "En revision", approved: "Aprobada", rejected: "Rechazada", correction_requested: "Correccion solicitada" })[status] || status || "Sin estatus" }
+function itemStatusLabel(status) { return ({ valid: "Valido", rejected: "Rechazado" })[status] || status || "Sin estatus" }
+function renderFundStatusBadge(status) { const s = status || "neutral"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(fundStatusLabel(s))}</span>` }
+function renderReconciliationStatusBadge(status) { const s = status || "neutral"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(reconciliationStatusLabel(s))}</span>` }
+function renderItemStatusBadge(status) { const s = status || "valid"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(itemStatusLabel(s))}</span>` }
+function detailCard(label, value, html = false, extraClass = "") { return `<div class="detail-card ${extraClass}"><span>${escapeHtml(label)}</span><strong>${html ? value : escapeHtml(value)}</strong></div>` }
+function reviewActionTitle(action) { return ({ approved: "Aprobar comprobacion", rejected: "Rechazar comprobacion", correction_requested: "Solicitar correccion" })[action] || "Revisar comprobacion" }
+function reviewActionButton(action) { return ({ approved: "Aprobar", rejected: "Rechazar", correction_requested: "Solicitar correccion" })[action] || "Registrar decision" }
+function friendlyRpcError(error) { const message = error?.message || String(error || "Error desconocido"); const known = { cash_fund_not_found: "No se encontro el fondo.", cash_fund_not_open_for_reconciliation: "Este fondo ya no permite comprobacion.", open_reconciliation_already_exists: "Ya existe una comprobacion abierta para este fondo.", not_allowed_to_create_reconciliation: "No tienes permiso para crear esta comprobacion.", reconciliation_has_no_amounts: "Agrega al menos un ticket o registra monto devuelto.", reconciliation_exceeds_assigned_amount: "La suma de tickets y devuelto excede el fondo asignado.", only_draft_or_correction_can_be_submitted: "Solo se pueden enviar comprobaciones en borrador o correccion.", not_allowed_to_review_reconciliation: "No tienes permiso para revisar esta comprobacion.", only_submitted_reconciliations_can_be_reviewed: "Solo se pueden revisar comprobaciones enviadas.", review_comment_required: "Captura un comentario para rechazar o solicitar correccion.", profile_not_found: "No se pudo identificar el perfil del usuario." }; const key = Object.keys(known).find((item) => message.includes(item)); return key ? known[key] : friendlyError(error) }
+function friendlyError(error) { const message = error?.message || String(error || "Error desconocido"); if (message.toLowerCase().includes("row-level security") || error?.code === "42501") return "La operacion fue bloqueada por RLS. Revisa policies para usuarios autenticados."; if (message.toLowerCase().includes("permission denied")) return "Faltan permisos para ejecutar la operacion."; return message }
+function rlsHint(table, operation, error) { const message = error?.message || ""; if (message.toLowerCase().includes("row-level security") || error?.code === "42501" || message.toLowerCase().includes("permission denied")) return `Operacion ${operation} bloqueada por RLS en ${table}; puede requerir una policy para usuarios autenticados.`; return message || `No se pudo ejecutar ${operation} en ${table}.` }
+function showMessage(message, isError = false) { dom.messageBox.textContent = message; dom.messageBox.classList.remove("hidden"); dom.messageBox.style.color = isError ? "var(--ruby)" : "var(--text-3)" }
+function hideMessage() { dom.messageBox.classList.add("hidden") }
+function showToast(title, message, type = "success") { const toast = document.createElement("div"); toast.className = `toast ${type}`; toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`; dom.toastStack.appendChild(toast); window.setTimeout(() => toast.remove(), 6200) }
+function setButtonLoading(button, loading, text) { if (!button) return; button.disabled = loading; button.textContent = text }
+function formatCurrency(value) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(numberValue(value)) }
+function compactCurrency(value) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", notation: "compact", maximumFractionDigits: 1 }).format(numberValue(value)) }
+function formatDate(value) { if (!value) return "Sin fecha"; const date = new Date(`${String(value).slice(0, 10)}T00:00:00`); return Number.isNaN(date.getTime()) ? "Sin fecha" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date) }
+function formatDateTime(value) { if (!value) return "Sin fecha"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "Sin fecha" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date) }
+function numberValue(value) { const n = Number(value); return Number.isFinite(n) ? n : 0 }
+function cleanText(value) { return String(value || "").trim() }
+function normalize(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "") }
+function normalizeRole(value) { return normalize(value).replace(/\s+/g, "_") }
+function todayValue() { return new Date().toISOString().slice(0, 10) }
+function unique(values) { return Array.from(new Set(values)) }
+function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;") }
