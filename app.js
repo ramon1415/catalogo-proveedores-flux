@@ -37,6 +37,7 @@ async function init() {
   document.getElementById("closeModalBtn").addEventListener("click", closeModal)
   document.getElementById("cancelBtn").addEventListener("click", closeModal)
   document.getElementById("metodo_pago").addEventListener("change", handlePaymentMethodChange)
+  document.getElementById("destination_type")?.addEventListener("change", handleDestinationTypeChange)
 
   searchInput.addEventListener("input", renderTable)
   statusFilter.addEventListener("change", renderTable)
@@ -253,9 +254,12 @@ window.openEditModal = function (id) {
   setValue("nombre_completo", p.nombre_completo)
   setValue("metodo_pago", p.metodo_pago)
   setValue("tipo_cuenta", p.tipo_cuenta)
+  setValue("destination_type", p.destination_type)
+  setValue("beneficiary_name", p.beneficiary_name)
   setValue("banco", p.banco)
   setValue("clabe", p.clabe)
   setValue("cuenta_bancaria", p.cuenta_bancaria)
+  setValue("convenio_number", p.convenio_number)
   setValue("rfc", p.rfc)
   setValue("email", p.email)
   setValue("telefono", p.telefono)
@@ -269,6 +273,7 @@ window.openEditModal = function (id) {
   document.getElementById("activo").checked = Boolean(p.activo)
 
   handlePaymentMethodChange()
+  handleDestinationTypeChange()
 
   dialog.showModal()
 }
@@ -277,17 +282,21 @@ function handlePaymentMethodChange() {
   const metodoPago = document.getElementById("metodo_pago").value
 
   const tipoCuenta = document.getElementById("tipo_cuenta")
+  const destinationType = document.getElementById("destination_type")
   const banco = document.getElementById("banco")
   const clabe = document.getElementById("clabe")
   const cuentaBancaria = document.getElementById("cuenta_bancaria")
+  const convenioNumber = document.getElementById("convenio_number")
 
-  const camposBancarios = [tipoCuenta, banco, clabe, cuentaBancaria]
+  const camposBancarios = [tipoCuenta, destinationType, banco, clabe, cuentaBancaria, convenioNumber]
 
   if (metodoPago === "Efectivo" || metodoPago === "Tarjeta en plataforma") {
     tipoCuenta.value = ""
+    destinationType.value = ""
     banco.value = ""
     clabe.value = ""
     cuentaBancaria.value = ""
+    convenioNumber.value = ""
 
     camposBancarios.forEach((campo) => {
       campo.disabled = true
@@ -305,6 +314,37 @@ function handlePaymentMethodChange() {
   if (metodoPago === "Transferencia bancaria" && !tipoCuenta.value) {
     tipoCuenta.value = "CLABE"
   }
+
+  if (metodoPago === "Transferencia bancaria" && !destinationType.value) {
+    destinationType.value = inferDestinationType()
+  }
+
+  handleDestinationTypeChange()
+}
+
+function handleDestinationTypeChange() {
+  const destinationType = getValue("destination_type")
+  const tipoCuenta = document.getElementById("tipo_cuenta")
+
+  if (destinationType === "clabe") {
+    tipoCuenta.value = "CLABE"
+  }
+
+  if (destinationType === "cuenta") {
+    tipoCuenta.value = "Cuenta"
+  }
+
+  if (destinationType === "convenio") {
+    tipoCuenta.value = ""
+  }
+}
+
+function inferDestinationType() {
+  const tipoCuenta = getValue("tipo_cuenta")
+  if (tipoCuenta === "Cuenta") return "cuenta"
+  if (getValue("cuenta_bancaria") && !getValue("clabe")) return "cuenta"
+  if (getValue("convenio_number")) return "convenio"
+  return "clabe"
 }
 
 async function saveSupplier(event) {
@@ -315,9 +355,12 @@ async function saveSupplier(event) {
     nombre_completo: getValue("nombre_completo"),
     metodo_pago: getValue("metodo_pago"),
     tipo_cuenta: getValue("tipo_cuenta"),
+    destination_type: getValue("destination_type") || inferDestinationType(),
+    beneficiary_name: getValue("beneficiary_name"),
     banco: getValue("banco"),
     clabe: getValue("clabe"),
     cuenta_bancaria: getValue("cuenta_bancaria"),
+    convenio_number: getValue("convenio_number"),
     rfc: getValue("rfc"),
     email: getValue("email"),
     telefono: getValue("telefono"),
@@ -342,24 +385,24 @@ async function saveSupplier(event) {
     payload.metodo_pago === "Tarjeta en plataforma"
   ) {
     payload.tipo_cuenta = null
+    payload.destination_type = null
     payload.banco = null
     payload.clabe = null
     payload.cuenta_bancaria = null
+    payload.convenio_number = null
   }
 
-  if (
-    payload.metodo_pago === "Transferencia bancaria" &&
-    (!payload.tipo_cuenta ||
-      !payload.banco ||
-      (!payload.clabe && !payload.cuenta_bancaria))
-  ) {
-    const validationMessage =
-      "Para transferencia bancaria captura tipo de cuenta, banco y CLABE o cuenta bancaria."
+  const destinationValidation = validateDestination(payload)
 
-    showMessage(validationMessage, true)
-    showToast(validationMessage, "error")
+  if (destinationValidation) {
+    showMessage(destinationValidation, true)
+    showToast(destinationValidation, "error")
     return
   }
+
+  if (payload.destination_type === "clabe") payload.tipo_cuenta = "CLABE"
+  if (payload.destination_type === "cuenta") payload.tipo_cuenta = "Cuenta"
+  if (payload.destination_type === "convenio") payload.tipo_cuenta = null
 
   let result
 
@@ -390,6 +433,37 @@ async function saveSupplier(event) {
   await loadSuppliers()
 
   showToast("Proveedor guardado correctamente.")
+}
+
+function validateDestination(payload) {
+  if (
+    payload.metodo_pago === "Efectivo" ||
+    payload.metodo_pago === "Tarjeta en plataforma"
+  ) {
+    return ""
+  }
+
+  if (!payload.destination_type) {
+    return "Selecciona el tipo de destino de pago: CLABE, cuenta bancaria o convenio."
+  }
+
+  if (payload.metodo_pago === "Transferencia bancaria" && !payload.banco) {
+    return "Para transferencia bancaria captura el banco o institucion."
+  }
+
+  if (payload.destination_type === "clabe" && !payload.clabe) {
+    return "Para destino CLABE captura la CLABE del proveedor."
+  }
+
+  if (payload.destination_type === "cuenta" && !payload.cuenta_bancaria) {
+    return "Para destino cuenta bancaria captura la cuenta del proveedor."
+  }
+
+  if (payload.destination_type === "convenio" && !payload.convenio_number) {
+    return "Para destino convenio captura el numero de convenio."
+  }
+
+  return ""
 }
 
 window.toggleSupplier = async function (id, activo) {
