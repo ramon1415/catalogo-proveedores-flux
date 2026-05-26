@@ -64,6 +64,18 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     applyLoginCopy()
     applyDemoNavigation()
     applyBranding()
+    loadFluxExtensions()
+  }
+
+  function loadFluxExtensions() {
+    const enabledPages = ["solicitudes.html", "efectivo.html"]
+    if (!enabledPages.includes(pageName)) return
+    if (document.querySelector('script[data-flux-extension="cash-flow"]')) return
+
+    const script = document.createElement("script")
+    script.src = "./cash_flow_extension.js?v=20260526"
+    script.dataset.fluxExtension = "cash-flow"
+    document.body.appendChild(script)
   }
 
   if (document.readyState === "loading") {
