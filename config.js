@@ -322,17 +322,26 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
     return `
       <section id="layoutReadinessSection" class="detail-card full layout-readiness-card">
-        <span>Preparacion para layout</span>
-        <strong>${missingCount ? 'Faltan datos para generar el layout' : 'Lista para layout de pago'}</strong>
+        <div class="layout-readiness-head">
+          <div>
+            <span>Preparacion para layout</span>
+            <strong>${missingCount ? 'Faltan datos para generar el layout' : 'Lista para layout de pago'}</strong>
+          </div>
+          <em class="${missingCount ? 'warning' : 'success'}">${missingCount ? `${missingCount} pendiente${missingCount === 1 ? '' : 's'}` : 'Completa'}</em>
+        </div>
+        <p class="layout-readiness-copy">Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</p>
         <div class="layout-checklist">
           ${items.map(item => `
             <div class="layout-checkitem ${item.complete ? 'complete' : 'missing'}">
+              <div>
+                <strong>${escapeDemoHtml(item.label)}</strong>
+                ${item.message && !item.complete ? `<small>${escapeDemoHtml(item.message)}</small>` : ''}
+              </div>
               <b>${item.complete ? 'Completo' : 'Faltante'}</b>
-              <p>${escapeDemoHtml(item.label)}</p>
             </div>
           `).join('')}
         </div>
-        ${canEdit ? `<button type="button" class="secondary-btn" onclick="openDemoLayoutDataModal('${escapeDemoHtml(request.id)}')">Completar datos para layout</button>` : ''}
+        ${canEdit ? `<button type="button" class="secondary-btn layout-data-action" onclick="openDemoLayoutDataModal('${escapeDemoHtml(request.id)}')">Completar datos para layout</button>` : ''}
         ${request.status === 'paid' ? `<div class="decision-note neutral">Esta solicitud ya fue pagada y no se puede editar.</div>` : ''}
       </section>
     `
@@ -340,13 +349,13 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function getSolicitudLayoutItems({ request, proveedor, currentAccount }) {
     return [
-      { label: 'Cuenta origen seleccionada', complete: Boolean(request.company_bank_account_id) },
-      { label: 'Numero de cuenta origen', complete: Boolean(currentAccount?.account_number) },
-      { label: 'Tipo de destino del proveedor', complete: Boolean(proveedor?.destination_type) },
-      { label: 'Destino de pago del proveedor', complete: Boolean(getProviderDestinationValue(proveedor)) },
-      { label: 'Beneficiario', complete: Boolean(isNotBlank(proveedor?.beneficiary_name || proveedor?.nombre_completo || proveedor?.alias)) },
-      { label: 'Referencia de pago', complete: Boolean(isNotBlank(request.payment_reference)) },
-      { label: 'Concepto de pago', complete: Boolean(isNotBlank(request.payment_concept)) }
+      { label: 'Cuenta origen seleccionada', complete: Boolean(request.company_bank_account_id), message: 'Falta seleccionar cuenta origen en la solicitud.' },
+      { label: 'Numero de cuenta origen', complete: Boolean(currentAccount?.account_number), message: 'La cuenta origen seleccionada no tiene numero de cuenta capturado.' },
+      { label: 'Tipo de destino del proveedor', complete: Boolean(proveedor?.destination_type), message: 'Falta definir el tipo de destino del proveedor.' },
+      { label: 'Destino de pago del proveedor', complete: Boolean(getProviderDestinationValue(proveedor)), message: 'Falta CLABE, cuenta bancaria o numero de convenio del proveedor.' },
+      { label: 'Beneficiario', complete: Boolean(isNotBlank(proveedor?.beneficiary_name || proveedor?.nombre_completo || proveedor?.alias)), message: 'Falta beneficiario para layout en el proveedor.' },
+      { label: 'Referencia de pago', complete: Boolean(isNotBlank(request.payment_reference)), message: 'Falta referencia de pago en la solicitud.' },
+      { label: 'Concepto de pago', complete: Boolean(isNotBlank(request.payment_concept)), message: 'Falta concepto de pago en la solicitud.' }
     ]
   }
 
@@ -574,6 +583,121 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       .layout-invalid-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-left: 18px; }
       .layout-invalid-list strong { color: var(--text-1); }
       .layout-invalid-fields { display: block; margin-top: 2px; color: var(--text-2); font-size: 12px; line-height: 1.45; }
+      .layout-readiness-card {
+        display: block;
+        margin-top: 12px;
+        padding: 16px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.018);
+      }
+      .layout-readiness-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .layout-readiness-head span {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-3);
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .55px;
+        text-transform: uppercase;
+      }
+      .layout-readiness-head strong {
+        display: block;
+        color: var(--text-1);
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .layout-readiness-head em {
+        flex-shrink: 0;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-style: normal;
+        font-size: 10.5px;
+        font-weight: 800;
+      }
+      .layout-readiness-head em.success {
+        color: var(--emerald);
+        background: var(--emerald-dim);
+        border: 1px solid rgba(18,183,106,0.22);
+      }
+      .layout-readiness-head em.warning {
+        color: var(--amber);
+        background: var(--amber-dim);
+        border: 1px solid rgba(245,158,11,0.22);
+      }
+      .layout-readiness-copy {
+        margin: 0 0 12px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .layout-checklist {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .layout-checkitem {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 58px;
+        padding: 10px 11px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.018);
+      }
+      .layout-checkitem strong {
+        display: block;
+        color: var(--text-1);
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.3;
+      }
+      .layout-checkitem small {
+        display: block;
+        margin-top: 3px;
+        color: var(--ruby);
+        font-size: 10.5px;
+        line-height: 1.35;
+      }
+      .layout-checkitem b {
+        flex-shrink: 0;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+      }
+      .layout-checkitem.complete {
+        border-color: rgba(18,183,106,0.22);
+      }
+      .layout-checkitem.complete b {
+        color: var(--emerald);
+        background: var(--emerald-dim);
+        border: 1px solid rgba(18,183,106,0.22);
+      }
+      .layout-checkitem.missing {
+        border-color: rgba(224,62,82,0.26);
+      }
+      .layout-checkitem.missing b {
+        color: var(--ruby);
+        background: var(--ruby-dim);
+        border: 1px solid rgba(224,62,82,0.26);
+      }
+      .layout-data-action {
+        margin-top: 4px;
+      }
+      @media (max-width: 760px) {
+        .layout-checklist { grid-template-columns: 1fr; }
+        .layout-readiness-head { flex-direction: column; }
+      }
       .help-dot {
         width: 18px;
         height: 18px;
