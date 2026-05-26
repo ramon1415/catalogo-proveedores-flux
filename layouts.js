@@ -2,6 +2,8 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 const TEMPLATE_PATH = "./templates/FORMATO_pagos_semanales.xlsx";
 
 let layouts = [];
+let companies = [];
+let companyBankAccounts = [];
 let currentSession = null;
 let currentProfileId = null;
 let activeLinesLayoutId = null;
@@ -30,6 +32,7 @@ function cacheDom() {
   dom.userName = document.getElementById("userName");
   dom.userEmail = document.getElementById("userEmail");
   dom.logoutBtn = document.getElementById("logoutBtn");
+  dom.newLayoutBtn = document.getElementById("newLayoutBtn");
   dom.refreshBtn = document.getElementById("refreshBtn");
   dom.searchInput = document.getElementById("searchInput");
   dom.statusFilter = document.getElementById("statusFilter");
@@ -37,6 +40,17 @@ function cacheDom() {
   dom.templateFile = document.getElementById("templateFile");
   dom.messageBox = document.getElementById("messageBox");
   dom.layoutsTableBody = document.getElementById("layoutsTableBody");
+  dom.newLayoutDialog = document.getElementById("newLayoutDialog");
+  dom.newLayoutForm = document.getElementById("newLayoutForm");
+  dom.layoutPeriodStart = document.getElementById("layoutPeriodStart");
+  dom.layoutPeriodEnd = document.getElementById("layoutPeriodEnd");
+  dom.layoutName = document.getElementById("layoutName");
+  dom.layoutCompanyId = document.getElementById("layoutCompanyId");
+  dom.layoutBankAccountId = document.getElementById("layoutBankAccountId");
+  dom.layoutInvalidBox = document.getElementById("layoutInvalidBox");
+  dom.closeNewLayoutModalBtn = document.getElementById("closeNewLayoutModalBtn");
+  dom.cancelNewLayoutBtn = document.getElementById("cancelNewLayoutBtn");
+  dom.submitNewLayoutBtn = document.getElementById("submitNewLayoutBtn");
   dom.linesDialog = document.getElementById("linesDialog");
   dom.linesTitle = document.getElementById("linesTitle");
   dom.linesSubtitle = document.getElementById("linesSubtitle");
@@ -74,9 +88,14 @@ function setupTheme() {
 
 function bindEvents() {
   dom.logoutBtn?.addEventListener("click", logout);
+  dom.newLayoutBtn?.addEventListener("click", openNewLayoutModal);
   dom.refreshBtn?.addEventListener("click", loadLayouts);
   dom.searchInput?.addEventListener("input", renderLayoutsTable);
   dom.statusFilter?.addEventListener("change", renderLayoutsTable);
+  dom.layoutCompanyId?.addEventListener("change", renderLayoutBankAccountOptions);
+  dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal);
+  dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal);
+  dom.newLayoutForm?.addEventListener("submit", submitNewLayout);
   dom.templateMode?.addEventListener("change", () => {
     if (dom.templateMode.value === "file") dom.templateFile.click();
   });
@@ -226,6 +245,177 @@ function renderLayoutActions(layout) {
   }
 
   return actions.join("");
+}
+
+async function openNewLayoutModal() {
+  if (!ensureActorProfile()) return;
+
+  resetNewLayoutForm();
+  dom.newLayoutDialog.showModal();
+
+  try {
+    await loadLayoutCatalogs();
+  } catch (error) {
+    showToast("No se pudieron cargar catalogos", friendlyError(error), "error");
+  }
+}
+
+function closeNewLayoutModal() {
+  if (dom.newLayoutDialog.open) dom.newLayoutDialog.close();
+}
+
+function resetNewLayoutForm() {
+  dom.newLayoutForm?.reset();
+  dom.layoutInvalidBox.classList.add("hidden");
+  dom.layoutInvalidBox.innerHTML = "";
+
+  const today = new Date();
+  const endDate = new Date(today);
+  endDate.setDate(today.getDate() + 6);
+  dom.layoutPeriodStart.value = today.toISOString().slice(0, 10);
+  dom.layoutPeriodEnd.value = endDate.toISOString().slice(0, 10);
+}
+
+async function loadLayoutCatalogs() {
+  const [companiesResult, accountsResult] = await Promise.all([
+    supabaseClient
+      .from("companies")
+      .select("id,name,legal_name,active")
+      .eq("active", true)
+      .order("name", { ascending: true }),
+    supabaseClient
+      .from("company_bank_accounts")
+      .select("id,name,bank_name,account_number,last4,company_id,active")
+      .eq("active", true)
+      .order("name", { ascending: true }),
+  ]);
+
+  if (companiesResult.error) throw companiesResult.error;
+  if (accountsResult.error) throw accountsResult.error;
+
+  companies = companiesResult.data || [];
+  companyBankAccounts = accountsResult.data || [];
+  renderLayoutCompanyOptions();
+  renderLayoutBankAccountOptions();
+}
+
+function renderLayoutCompanyOptions() {
+  const selected = dom.layoutCompanyId.value;
+  dom.layoutCompanyId.innerHTML = [
+    `<option value="">Todas las empresas</option>`,
+    ...companies.map(company => {
+      const label = company.legal_name || company.name || "Empresa sin nombre";
+      return `<option value="${company.id}">${escapeHtml(label)}</option>`;
+    })
+  ].join("");
+
+  if (selected && companies.some(company => company.id === selected)) {
+    dom.layoutCompanyId.value = selected;
+  }
+}
+
+function renderLayoutBankAccountOptions() {
+  const selectedCompanyId = dom.layoutCompanyId.value;
+  const selected = dom.layoutBankAccountId.value;
+  let accounts = companyBankAccounts;
+
+  if (selectedCompanyId) {
+    const companyAccounts = companyBankAccounts.filter(account => account.company_id === selectedCompanyId);
+    accounts = companyAccounts.length ? companyAccounts : companyBankAccounts;
+  }
+
+  dom.layoutBankAccountId.innerHTML = [
+    `<option value="">Todas las cuentas</option>`,
+    ...accounts.map(account => {
+      const label = [
+        account.name || "Cuenta origen",
+        account.bank_name,
+        account.account_number ? `cta ${account.account_number}` : account.last4 ? `termina ${account.last4}` : null,
+      ].filter(Boolean).join(" · ");
+      return `<option value="${account.id}">${escapeHtml(label)}</option>`;
+    })
+  ].join("");
+
+  if (selected && accounts.some(account => account.id === selected)) {
+    dom.layoutBankAccountId.value = selected;
+  }
+}
+
+async function submitNewLayout(event) {
+  event.preventDefault();
+  if (!ensureActorProfile()) return;
+
+  const periodStart = dom.layoutPeriodStart.value;
+  const periodEnd = dom.layoutPeriodEnd.value;
+  const layoutName = cleanText(dom.layoutName.value);
+  const companyId = dom.layoutCompanyId.value || null;
+  const bankAccountId = dom.layoutBankAccountId.value || null;
+
+  dom.layoutInvalidBox.classList.add("hidden");
+  dom.layoutInvalidBox.innerHTML = "";
+
+  if (!periodStart || !periodEnd) {
+    showToast("Fechas requeridas", "Captura fecha inicio y fecha fin.", "error");
+    return;
+  }
+
+  if (periodStart > periodEnd) {
+    showToast("Rango invalido", "La fecha inicio no puede ser mayor a la fecha fin.", "error");
+    return;
+  }
+
+  setButtonLoading(dom.submitNewLayoutBtn, true, "Creando layout...");
+  try {
+    const { data, error } = await supabaseClient.rpc("create_payment_layout", {
+      p_period_start: periodStart,
+      p_period_end: periodEnd,
+      p_generated_by: currentProfileId,
+      p_name: layoutName || null,
+      p_company_id: companyId,
+      p_company_bank_account_id: bankAccountId,
+    });
+
+    if (error) throw error;
+
+    await loadLayouts();
+    renderInvalidRequests(data?.invalid_requests || []);
+
+    if (data?.message === "no_valid_payment_requests") {
+      showToast("Sin solicitudes validas", "No hay solicitudes validas para este periodo.", "warning");
+      return;
+    }
+
+    const invalidCount = numberValue(data?.invalid_count);
+    showToast(
+      "Layout creado correctamente",
+      invalidCount
+        ? "Algunas solicitudes no entraron al layout por datos incompletos."
+        : `${data?.layout_number || "El layout"} quedo en draft.`,
+      invalidCount ? "warning" : "success"
+    );
+
+    if (!invalidCount) closeNewLayoutModal();
+  } catch (error) {
+    showToast("No se pudo crear layout", friendlyRpcError(error), "error");
+  } finally {
+    setButtonLoading(dom.submitNewLayoutBtn, false, "Crear layout");
+  }
+}
+
+function renderInvalidRequests(invalidRequests) {
+  if (!invalidRequests.length) return;
+
+  const items = invalidRequests.slice(0, 8).map(item => {
+    const fields = Array.isArray(item.missing_fields) ? item.missing_fields.join(", ") : item.missing_fields || "datos incompletos";
+    return `<li><strong>${escapeHtml(item.request_number || item.payment_request_id || "Solicitud")}</strong>: ${escapeHtml(fields)}</li>`;
+  }).join("");
+
+  const remaining = invalidRequests.length > 8 ? `<p class="muted-line">Y ${invalidRequests.length - 8} mas.</p>` : "";
+  dom.layoutInvalidBox.innerHTML = `
+    <strong>Solicitudes fuera del layout por datos incompletos</strong>
+    <ul>${items}</ul>
+    ${remaining}`;
+  dom.layoutInvalidBox.classList.remove("hidden");
 }
 
 async function openLayoutLines(layoutId) {
@@ -643,6 +833,12 @@ function friendlyRpcError(error) {
     line_not_found: "No se encontro la linea del layout.",
     line_already_paid: "La linea ya fue pagada y no puede rechazarse.",
     rejection_reason_required: "Captura el motivo del rechazo bancario.",
+    generated_by_profile_not_found: "No se pudo identificar tu perfil de usuario.",
+    no_valid_payment_requests: "No hay solicitudes validas para este periodo.",
+    period_dates_required: "Captura fecha inicio y fecha fin.",
+    invalid_period_range: "La fecha inicio no puede ser mayor a la fecha fin.",
+    company_not_found: "La empresa seleccionada no existe.",
+    company_bank_account_not_found_or_inactive: "La cuenta origen no existe o esta inactiva.",
   };
 
   const key = Object.keys(known).find(item => message.includes(item));
