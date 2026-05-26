@@ -168,7 +168,7 @@
       display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3);
       letter-spacing:.35px; text-transform:uppercase;
     }
-    .form-grid label.full-row { grid-column:1 / -1; }
+    .form-grid label.full-row, .form-grid .full-row { grid-column:1 / -1; }
     .form-control {
       min-height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border);
       border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none;
@@ -208,14 +208,10 @@
           </div>
         </div>
         <nav class="nav">
-          <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
           <a href="./proveedores.html" class="nav-link muted"><span>◇</span> Proveedores</a>
           <a href="./presupuesto.html" class="nav-link muted"><span>▣</span> Motor de Presupuesto</a>
           <a href="./solicitudes.html" class="nav-link muted"><span>S</span> Solicitudes de pago</a>
           <a href="./layouts.html" class="nav-link active"><span>L</span> Layouts de pago</a>
-          <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
-          <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
-          <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
         </nav>
       </div>
       <div class="user-card">
@@ -240,7 +236,10 @@
             <h1>Layouts de pago</h1>
             <p>Genera archivos semanales de pago a partir de solicitudes aprobadas.</p>
           </div>
-          <button id="refreshBtn" class="primary-btn">Actualizar</button>
+          <div class="actions">
+            <button id="newLayoutBtn" class="primary-btn">+ Nuevo layout</button>
+            <button id="refreshBtn" class="secondary-btn">Actualizar</button>
+          </div>
         </div>
 
         <div class="stats-grid">
@@ -294,6 +293,44 @@
       </div>
     </section>
   </main>
+
+  <dialog id="newLayoutDialog">
+    <form id="newLayoutForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2>Nuevo layout de pago</h2>
+          <p>Selecciona el periodo y filtros opcionales para crear un layout desde solicitudes aprobadas.</p>
+        </div>
+        <button type="button" id="closeNewLayoutModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="form-grid">
+        <label>Fecha inicio *
+          <input id="layoutPeriodStart" class="form-control" type="date" required>
+        </label>
+        <label>Fecha fin *
+          <input id="layoutPeriodEnd" class="form-control" type="date" required>
+        </label>
+        <label class="full-row">Nombre del layout
+          <input id="layoutName" class="form-control" type="text" placeholder="Opcional">
+        </label>
+        <label>Empresa
+          <select id="layoutCompanyId" class="form-control">
+            <option value="">Todas las empresas</option>
+          </select>
+        </label>
+        <label>Cuenta origen
+          <select id="layoutBankAccountId" class="form-control">
+            <option value="">Todas las cuentas</option>
+          </select>
+        </label>
+        <div id="layoutInvalidBox" class="message hidden full-row"></div>
+      </div>
+      <div class="actions">
+        <button type="button" id="cancelNewLayoutBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitNewLayoutBtn" class="primary-btn">Crear layout</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="linesDialog">
     <div class="modal-content">
