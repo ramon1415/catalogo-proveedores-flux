@@ -335,12 +335,9 @@ function setupOriginAccountsAdmin() {
           <label>Tipo de cuenta
             <select id="originAccountType">
               <option value="">Sin clasificar</option>
-              <option value="checking">Cuenta de cheques</option>
-              <option value="savings">Cuenta de ahorro</option>
+              <option value="bank">Cuenta bancaria</option>
               <option value="cash">Caja / efectivo</option>
-              <option value="credit">Credito</option>
-              <option value="debit">Debito</option>
-              <option value="investment">Inversion</option>
+              <option value="card_processor">Procesador de tarjeta</option>
               <option value="other">Otra</option>
             </select>
           </label>
@@ -687,7 +684,7 @@ function originRlsMessage(error, operation) {
   }
 
   if (message.includes("company_account_type")) {
-    return "Tipo de cuenta no permitido. Selecciona una opcion del menu desplegable o deja el campo en Sin clasificar."
+    return "Tipo de cuenta no permitido. Usa: Cuenta bancaria, Caja / efectivo, Procesador de tarjeta u Otra."
   }
 
   if (!isPermissionError) return `Error en cuentas origen: ${message}`
