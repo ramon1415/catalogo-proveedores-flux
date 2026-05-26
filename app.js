@@ -333,7 +333,16 @@ function setupOriginAccountsAdmin() {
             </select>
           </label>
           <label>Tipo de cuenta
-            <input id="originAccountType" placeholder="Cheques, concentradora...">
+            <select id="originAccountType">
+              <option value="">Sin clasificar</option>
+              <option value="checking">Cuenta de cheques</option>
+              <option value="savings">Cuenta de ahorro</option>
+              <option value="cash">Caja / efectivo</option>
+              <option value="credit">Credito</option>
+              <option value="debit">Debito</option>
+              <option value="investment">Inversion</option>
+              <option value="other">Otra</option>
+            </select>
           </label>
           <label class="check-label"><input id="originAccountActive" type="checkbox" checked> Cuenta activa</label>
           <label class="full-row">Notas
@@ -675,6 +684,10 @@ function originRlsMessage(error, operation) {
 
   if (code === "23505") {
     return "No se pudo guardar porque ya existe una cuenta origen con esos datos."
+  }
+
+  if (message.includes("company_account_type")) {
+    return "Tipo de cuenta no permitido. Selecciona una opcion del menu desplegable o deja el campo en Sin clasificar."
   }
 
   if (!isPermissionError) return `Error en cuentas origen: ${message}`
