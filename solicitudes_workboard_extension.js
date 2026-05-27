@@ -289,6 +289,7 @@
       { source: "provider", label: "Tipo de destino del proveedor", complete: Boolean(provider?.destination_type), message: "Falta definir tipo de destino de pago en el proveedor." },
       { source: "provider", label: "Destino de pago del proveedor", complete: Boolean(destination), message: providerDestinationMissingMessage(provider) },
       { source: "provider", label: "Beneficiario", complete: Boolean(beneficiary), message: "Falta beneficiario para layout en el proveedor." },
+      { source: "request", label: "Fecha programada de pago", complete: Boolean(request.scheduled_payment_date), message: "Falta fecha programada de pago en la solicitud." },
       { source: "request", label: "Referencia de pago", complete: Boolean(request.payment_reference), message: "Falta referencia de pago en la solicitud." },
       { source: "request", label: "Concepto de pago", complete: Boolean(request.payment_concept), message: "Falta concepto de pago en la solicitud." },
     ];
