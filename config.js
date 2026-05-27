@@ -7,7 +7,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
 
   const modules = [
-    { file: "proveedores.html", href: "./proveedores.html", icon: "â—‡", label: "Proveedores" },
+    { file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores" },
     { file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago" },
     { file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago" },
     { file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones" },
@@ -62,10 +62,45 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     if (subtitle && subtitles[pageName]) subtitle.textContent = subtitles[pageName]
   }
 
+  function applyIncomeCompatibility() {
+    if (pageName !== "ingresos.html") return
+    if (!window.supabase?.createClient || window.supabase.__fluxIncomeCompatibility) return
+
+    const originalCreateClient = window.supabase.createClient.bind(window.supabase)
+    window.supabase.createClient = (...args) => {
+      const client = originalCreateClient(...args)
+      const originalFrom = client.from.bind(client)
+
+      client.from = (tableName) => {
+        const builder = originalFrom(tableName)
+        if (tableName === "cost_centers" && builder?.select) {
+          const originalSelect = builder.select.bind(builder)
+          builder.select = (columns, options) => {
+            const safeColumns = typeof columns === "string"
+              ? columns
+                  .split(",")
+                  .map((column) => column.trim())
+                  .filter((column) => column && column !== "company_id")
+                  .join(",")
+              : columns
+
+            return originalSelect(safeColumns, options)
+          }
+        }
+        return builder
+      }
+
+      return client
+    }
+
+    window.supabase.__fluxIncomeCompatibility = true
+  }
+
   function applyShell() {
     applyLoginCopy()
     applyDemoNavigation()
     applyBranding()
+    applyIncomeCompatibility()
     loadFluxExtensions()
   }
 
@@ -107,6 +142,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     }
   }
 
+  applyIncomeCompatibility()
   loadFluxExtensions()
 
   if (document.readyState === "loading") {
