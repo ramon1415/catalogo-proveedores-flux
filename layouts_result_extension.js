@@ -90,7 +90,14 @@
       if (error) throw error;
 
       await refreshLayouts();
-      renderResult(dom, data || {});
+      const diagnostics = await collectCandidateDiagnostics({
+        data: data || {},
+        periodStart,
+        periodEnd,
+        companyId: dom.companyId.value || null,
+        bankAccountId: dom.bankAccountId.value || null,
+      });
+      renderResult(dom, data || {}, diagnostics);
 
       const invalidCount = Number(data?.invalid_count || 0);
       if (data?.message === "no_valid_payment_requests") {
@@ -135,7 +142,101 @@
     dom.resultBox.innerHTML = "";
   }
 
-  function renderResult(dom, data) {
+  async function collectCandidateDiagnostics({ data, periodStart, periodEnd, companyId, bankAccountId }) {
+    try {
+      const [requestsResult, linesResult, layoutsResult] = await Promise.all([
+        client
+          .from("payment_requests")
+          .select("id,request_number,request_type,status,company_id,company_bank_account_id,scheduled_payment_date,updated_at,currency,amount_requested,payment_reference,payment_concept,proveedor_id")
+          .eq("status", "approved")
+          .limit(1000),
+        client
+          .from("payment_layout_lines")
+          .select("id,payment_request_id,layout_id,status")
+          .limit(2000),
+        client
+          .from("payment_layouts")
+          .select("id,layout_number,status")
+          .limit(1000),
+      ]);
+
+      if (requestsResult.error || linesResult.error || layoutsResult.error) return { notIncluded: [] };
+
+      const invalidIds = new Set((data.invalid_requests || []).map((item) => item.payment_request_id).filter(Boolean));
+      const includedIds = new Set((linesResult.data || [])
+        .filter((line) => line.layout_id === data.layout_id)
+        .map((line) => line.payment_request_id));
+      const layoutsById = new Map((layoutsResult.data || []).map((layout) => [layout.id, layout]));
+      const linesByRequest = new Map();
+      (linesResult.data || []).forEach((line) => {
+        const layout = layoutsById.get(line.layout_id);
+        if (!layout || layout.status === "cancelled") return;
+        if (!linesByRequest.has(line.payment_request_id)) linesByRequest.set(line.payment_request_id, []);
+        linesByRequest.get(line.payment_request_id).push({ ...line, layout });
+      });
+
+      const notIncluded = (requestsResult.data || [])
+        .filter((request) => !invalidIds.has(request.id) && !includedIds.has(request.id))
+        .map((request) => {
+          const reasons = exclusionReasons(request, {
+            periodStart,
+            periodEnd,
+            companyId,
+            bankAccountId,
+            lines: linesByRequest.get(request.id) || [],
+          });
+          return reasons.length ? { request, reasons } : null;
+        })
+        .filter(Boolean);
+
+      return { notIncluded };
+    } catch (_) {
+      return { notIncluded: [] };
+    }
+  }
+
+  function exclusionReasons(request, context) {
+    const reasons = [];
+    const type = request.request_type || "provider_payment";
+    const effectiveDate = (request.scheduled_payment_date || request.updated_at || "").slice(0, 10);
+
+    if (type === "cash" || type === "check") {
+      reasons.push(type === "cash" ? "Es solicitud de efectivo; se opera en Efectivo y comprobaciones." : "Es solicitud de cheque; se opera en Efectivo y comprobaciones.");
+    } else if (!["provider_payment", "transfer", "transferencia", "", null].includes(type)) {
+      reasons.push("El tipo de solicitud no corresponde a layout de pago por transferencia.");
+    }
+
+    if (context.companyId && request.company_id !== context.companyId) {
+      reasons.push("No coincide con la empresa seleccionada en el filtro.");
+    }
+
+    if (context.bankAccountId && request.company_bank_account_id !== context.bankAccountId) {
+      reasons.push("No coincide con la cuenta origen seleccionada en el filtro.");
+    }
+
+    if (!effectiveDate) {
+      reasons.push("No tiene fecha programada ni fecha de actualizacion para ubicarla en el periodo.");
+    } else if (effectiveDate < context.periodStart || effectiveDate > context.periodEnd) {
+      reasons.push(`Fuera del periodo seleccionado (${formatDate(effectiveDate)}).`);
+    }
+
+    if (request.currency && request.currency !== "MXN") {
+      reasons.push("La moneda no es MXN.");
+    }
+
+    if (Number(request.amount_requested || 0) <= 0) {
+      reasons.push("El monto solicitado no es mayor a cero.");
+    }
+
+    const previousLine = context.lines.find((line) => line.layout_id !== undefined);
+    if (previousLine?.layout) {
+      reasons.push(`Ya esta ligada al layout ${previousLine.layout.layout_number || "sin folio"} (${statusLabel(previousLine.layout.status)}).`);
+    }
+
+    return reasons;
+  }
+
+  function renderResult(dom, data, diagnostics = { notIncluded: [] }) {
     const invalidRequests = data.invalid_requests || [];
     const hasLayout = Boolean(data.layout_id || data.layout_number);
     const included = Number(data.payment_count || 0);
@@ -175,11 +276,45 @@
           </div>
         ` : ""}
         ${invalidRequests.length ? invalidPanel(invalidRequests) : ""}
+        ${diagnostics.notIncluded?.length ? notIncludedPanel(diagnostics.notIncluded) : ""}
       </div>`;
     dom.resultBox.classList.remove("hidden");
     dom.resultBox.querySelector("[data-open-created-lines]")?.addEventListener("click", (click) => {
       window.openLayoutLines?.(click.currentTarget.dataset.openCreatedLines);
     });
+  }
+
+  function notIncludedPanel(items) {
+    const visible = items.slice(0, PREVIEW_LIMIT);
+    const remaining = items.length - visible.length;
+    return `
+      <div class="layout-invalid-panel layout-not-included-panel">
+        <div class="layout-invalid-summary">
+          <div>
+            <strong>Aprobadas no consideradas</strong>
+            <p>Estas solicitudes estan aprobadas, pero la funcion no las tomo como candidatas para este layout.</p>
+          </div>
+          <span>${items.length}</span>
+        </div>
+        <div class="layout-invalid-scroll">
+          <ul class="layout-invalid-list">${visible.map(notIncludedItem).join("")}</ul>
+        </div>
+        ${remaining > 0 ? `<p class="muted-line">Mostrando ${visible.length} de ${items.length}. Hay ${remaining} adicionales.</p>` : ""}
+      </div>`;
+  }
+
+  function notIncludedItem(item) {
+    const request = item.request || {};
+    const requestUrl = request.id ? `./solicitudes.html?request_id=${encodeURIComponent(request.id)}` : "./solicitudes.html";
+    return `
+      <li>
+        <div>
+          <strong>${escapeHtml(request.request_number || request.id || "Solicitud")}</strong>
+          <span class="muted-line">No considerada</span>
+        </div>
+        <div class="layout-not-included-reasons">${item.reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}</div>
+        <a class="small-btn" href="${escapeHtml(requestUrl)}">Ver solicitud</a>
+      </li>`;
   }
 
   function renderError(dom, message) {
@@ -339,6 +474,24 @@
     return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(Number(value || 0));
   }
 
+  function formatDate(value) {
+    if (!value) return "sin fecha";
+    const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+  }
+
+  function statusLabel(status) {
+    const labels = {
+      draft: "borrador",
+      generated: "generado",
+      uploaded: "subido",
+      confirmed: "confirmado",
+      cancelled: "cancelado",
+    };
+    return labels[status] || status || "sin estatus";
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -382,6 +535,9 @@
       .layout-invalid-list li:last-child { border-bottom:none; }
       .layout-invalid-list strong { color:var(--text-1); }
       .layout-invalid-fields { display:flex; flex-wrap:wrap; gap:6px; }
+      .layout-not-included-panel { border-top-color:rgba(46,144,250,.18); }
+      .layout-not-included-reasons { display:flex; flex-direction:column; gap:4px; color:var(--text-2); font-size:12px; line-height:1.35; }
+      .layout-not-included-reasons span::before { content:"- "; color:var(--sky); }
       @media (max-width:760px) {
         .layout-result-header, .layout-invalid-summary { flex-direction:column; }
         .layout-result-metrics { grid-template-columns:1fr 1fr; }
