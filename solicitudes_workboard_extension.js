@@ -167,7 +167,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,amount_requested,currency,submitted_at,created_at,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -324,6 +324,7 @@
 
   function isAttention(request) {
     if (isHistorical(request)) return false;
+    if (isCorrectionRequired(request)) return true;
     if (isCashOrCheck(request) && cashFundFor(request)) return false;
     if (isProviderPayment(request) && hasLayoutLine(request)) return false;
     return isPendingApproval(request) ||
@@ -343,6 +344,7 @@
 
   function isInOperation(request) {
     if (isHistorical(request)) return false;
+    if (isCorrectionRequired(request)) return false;
     if (isCashOrCheck(request)) {
       const fund = cashFundFor(request);
       return Boolean(fund && ["active", "pending_receipt", "blocked", "receipt_review"].includes(fund.status));
@@ -361,6 +363,10 @@
   }
 
   function operationalState(request) {
+    if (isCorrectionRequired(request)) {
+      return { label: correctionLabel(request), className: "badge-warning" };
+    }
+
     if (isCashOrCheck(request)) {
       const fund = cashFundFor(request);
       if (fund?.status === "closed") return { label: "Fondo cerrado", className: "badge-success" };
@@ -434,6 +440,21 @@
 
   function isBudgetException(request) {
     return request.budget_decision === "bloqueado" || request.is_extraordinary_adjustment === true;
+  }
+
+  function isCorrectionRequired(request) {
+    return request.status === "changes_requested" ||
+      request.exception_status === "changes_requested" ||
+      ["amount_change_requested", "category_change_requested", "budget_adjustment_requested"].includes(request.exception_action);
+  }
+
+  function correctionLabel(request) {
+    const labels = {
+      amount_change_requested: "Cambio de monto solicitado",
+      category_change_requested: "Cambio de partida solicitado",
+      budget_adjustment_requested: "Ajuste presupuestal solicitado",
+    };
+    return labels[request.exception_action] || "Correccion requerida";
   }
 
   function cashFundFor(request) {
