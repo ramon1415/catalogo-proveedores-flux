@@ -11,6 +11,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     { file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago" },
     { file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago" },
     { file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones" },
+    { file: "ingresos.html", href: "./ingresos.html", icon: "I", label: "Ingresos e incidencias" },
   ]
 
   const subtitles = {
@@ -18,6 +19,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     "solicitudes.html": "Solicitudes de pago",
     "layouts.html": "Layouts de pago",
     "efectivo.html": "Efectivo y comprobaciones",
+    "ingresos.html": "Ingresos e incidencias",
   }
 
   function applyLoginCopy() {
