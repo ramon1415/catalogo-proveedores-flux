@@ -130,7 +130,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function loadFluxExtensions() {
-    const enabledPages = ["solicitudes.html", "efectivo.html", "layouts.html"]
+    const enabledPages = ["solicitudes.html", "efectivo.html", "layouts.html", "ingresos.html"]
     if (!enabledPages.includes(pageName)) return
 
     loadExtension("./cash_flow_extension.js?v=20260526-3", "cash-flow")
@@ -139,6 +139,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     }
     if (pageName === "layouts.html") {
       loadExtension("./layouts_result_extension.js?v=20260527-2", "layouts-result")
+    }
+    if (pageName === "ingresos.html") {
+      loadExtension("./ingresos_ux_extension.js?v=20260527-1", "ingresos-ux")
     }
   }
 
