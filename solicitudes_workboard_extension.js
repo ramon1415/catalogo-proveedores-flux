@@ -11,6 +11,7 @@
     companies: [],
     centers: [],
     categories: [],
+    accounts: [],
     layoutLines: [],
     layouts: [],
     cashFunds: [],
@@ -61,6 +62,7 @@
     ensureTypeHeader();
     bindEvents();
     await loadData();
+    observeDetailLayoutReadiness();
     render();
     window.setTimeout(render, 1200);
     window.setTimeout(render, 3200);
@@ -163,21 +165,23 @@
         companies,
         centers,
         categories,
+        accounts,
         lines,
         layouts,
         cashFunds,
       ] = await Promise.all([
         client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
-        client.from("proveedores").select("id,alias,nombre_completo"),
+        client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
         client.from("budget_categories").select("id,code,name"),
+        client.from("company_bank_accounts").select("id,company_id,name,bank_name,account_number,last4,active"),
         client.from("payment_layout_lines").select("id,payment_request_id,layout_id,status"),
         client.from("payment_layouts").select("id,status,layout_number"),
         client.from("cash_funds").select("id,payment_request_id,status,pending_amount"),
       ]);
 
-      [requests, providers, companies, centers, categories, lines, layouts, cashFunds].forEach((result) => {
+      [requests, providers, companies, centers, categories, accounts, lines, layouts, cashFunds].forEach((result) => {
         if (result.error) throw result.error;
       });
 
@@ -186,6 +190,7 @@
       state.companies = companies.data || [];
       state.centers = centers.data || [];
       state.categories = categories.data || [];
+      state.accounts = (accounts.data || []).filter((item) => item.active !== false);
       state.layoutLines = lines.data || [];
       state.layouts = layouts.data || [];
       state.cashFunds = cashFunds.data || [];
@@ -193,6 +198,216 @@
       console.warn("No se pudo cargar bandeja operativa", error);
     } finally {
       state.loading = false;
+    }
+  }
+
+  function observeDetailLayoutReadiness() {
+    const target = document.getElementById("detailContent");
+    if (!target) return;
+    const observer = new MutationObserver(() => window.setTimeout(appendLayoutReadinessSection, 140));
+    observer.observe(target, { childList: true, subtree: false });
+  }
+
+  async function appendLayoutReadinessSection() {
+    const target = document.getElementById("detailContent");
+    if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
+
+    const requestNumber = document.getElementById("detailTitle")?.textContent?.trim();
+    const request = state.requests.find((item) => item.request_number === requestNumber);
+    if (!request || isCashOrCheck(request)) return;
+    if (/Preparacion para layout/i.test(target.textContent)) return;
+
+    const freshRequest = await fetchRequestForLayout(request.id);
+    if (!freshRequest) return;
+    Object.assign(request, freshRequest);
+
+    const section = document.createElement("section");
+    section.className = "decision-card layout-readiness-card";
+    section.dataset.layoutReadinessExtension = "true";
+    section.innerHTML = renderLayoutReadinessSection(request);
+
+    const decisionPanel = Array.from(target.children).find((node) => /Decision del aprobador/i.test(node.textContent || ""));
+    if (decisionPanel) target.insertBefore(section, decisionPanel);
+    else target.appendChild(section);
+
+    section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(request.id));
+    section.querySelector("[data-edit-provider]")?.addEventListener("click", () => window.open("./proveedores.html", "_blank", "noopener"));
+  }
+
+  async function fetchRequestForLayout(requestId) {
+    const { data, error } = await client
+      .from("payment_requests")
+      .select("id,request_number,request_type,status,company_id,proveedor_id,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept")
+      .eq("id", requestId)
+      .maybeSingle();
+    if (error) {
+      console.warn("No se pudo cargar datos de layout de solicitud", error);
+      return null;
+    }
+    return data;
+  }
+
+  function renderLayoutReadinessSection(request) {
+    const items = layoutReadinessItems(request);
+    const missing = items.filter((item) => !item.complete);
+    const canEdit = !["paid", "cancelled"].includes(request.status);
+    return `
+      <div class="layout-card-header">
+        <div>
+          <span class="section-kicker">Preparacion para layout</span>
+          <h3>${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</h3>
+          <p>Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</p>
+        </div>
+        <span class="layout-count ${missing.length ? "warning" : "success"}">${missing.length ? `${missing.length} pendientes` : "Completo"}</span>
+      </div>
+      <div class="layout-checklist">
+        ${items.map((item) => `
+          <div class="layout-checkitem ${item.complete ? "complete" : "missing"}">
+            <div class="layout-checktext">
+              <strong>${escapeHtml(item.label)}</strong>
+              ${item.complete ? "" : `<small>${escapeHtml(item.message)}</small>`}
+            </div>
+            <span class="layout-state ${item.complete ? "complete" : "missing"}">${item.complete ? "Completo" : "Faltante"}</span>
+          </div>
+        `).join("")}
+      </div>
+      ${(canEdit || missing.some((item) => item.source === "provider")) ? `<div class="decision-actions">
+        ${canEdit ? '<button type="button" class="decision-btn approve" data-open-layout-data>Completar datos para layout</button>' : ""}
+        ${missing.some((item) => item.source === "provider") ? '<button type="button" class="decision-btn change" data-edit-provider>Editar proveedor</button>' : ""}
+      </div>` : ""}
+    `;
+  }
+
+  function layoutReadinessItems(request) {
+    const provider = findById(state.providers, request.proveedor_id);
+    const account = findById(state.accounts, request.company_bank_account_id);
+    const destination = providerDestinationValue(provider);
+    const beneficiary = provider?.beneficiary_name || provider?.nombre_completo || provider?.alias || "";
+    return [
+      { source: "request", label: "Cuenta origen seleccionada", complete: Boolean(request.company_bank_account_id), message: "Falta seleccionar cuenta origen en la solicitud." },
+      { source: "account", label: "Numero de cuenta origen", complete: Boolean(account?.account_number), message: "La cuenta origen seleccionada no tiene numero de cuenta capturado." },
+      { source: "provider", label: "Tipo de destino del proveedor", complete: Boolean(provider?.destination_type), message: "Falta definir tipo de destino de pago en el proveedor." },
+      { source: "provider", label: "Destino de pago del proveedor", complete: Boolean(destination), message: providerDestinationMissingMessage(provider) },
+      { source: "provider", label: "Beneficiario", complete: Boolean(beneficiary), message: "Falta beneficiario para layout en el proveedor." },
+      { source: "request", label: "Referencia de pago", complete: Boolean(request.payment_reference), message: "Falta referencia de pago en la solicitud." },
+      { source: "request", label: "Concepto de pago", complete: Boolean(request.payment_concept), message: "Falta concepto de pago en la solicitud." },
+    ];
+  }
+
+  function providerDestinationValue(provider) {
+    if (!provider) return "";
+    if (provider.destination_type === "clabe") return provider.clabe || "";
+    if (provider.destination_type === "cuenta") return provider.cuenta_bancaria || "";
+    if (provider.destination_type === "convenio") return provider.convenio_number || "";
+    return "";
+  }
+
+  function providerDestinationMissingMessage(provider) {
+    if (!provider?.destination_type) return "Falta definir tipo de destino de pago del proveedor: CLABE, cuenta o convenio.";
+    if (provider.destination_type === "clabe") return "El proveedor esta configurado para CLABE, pero no tiene CLABE capturada.";
+    if (provider.destination_type === "cuenta") return "El proveedor esta configurado para cuenta bancaria, pero no tiene cuenta capturada.";
+    if (provider.destination_type === "convenio") return "El proveedor esta configurado para convenio, pero no tiene numero de convenio.";
+    return "Falta destino de pago del proveedor.";
+  }
+
+  function ensureLayoutDataDialog() {
+    if (document.getElementById("layoutDataExtensionDialog")) return;
+    document.body.insertAdjacentHTML("beforeend", `
+      <dialog id="layoutDataExtensionDialog">
+        <form id="layoutDataExtensionForm" class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2>Datos para layout de pago</h2>
+              <p>Completa la informacion necesaria para incluir esta solicitud en un archivo de pago.</p>
+            </div>
+            <button type="button" id="closeLayoutDataExtensionBtn" class="icon-btn" aria-label="Cerrar">x</button>
+          </div>
+          <div class="form-grid">
+            <label class="full-row">Cuenta origen
+              <select id="layoutDataAccountId" class="form-control"></select>
+              <span class="field-hint">La cuenta origen es de la empresa que paga, no del proveedor.</span>
+            </label>
+            <label>Fecha programada de pago
+              <input id="layoutDataScheduledDate" class="form-control" type="date">
+            </label>
+            <label>Referencia de pago
+              <input id="layoutDataReference" class="form-control" type="text" placeholder="Ej. FACTURA 123, RECIBO MAYO...">
+            </label>
+            <label class="full-row">Concepto de pago
+              <input id="layoutDataConcept" class="form-control" type="text" placeholder="Ej. Mantenimiento mayo, servicio CFE...">
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="cancelLayoutDataExtensionBtn" class="secondary-btn">Cancelar</button>
+            <button type="submit" id="saveLayoutDataExtensionBtn" class="primary-btn">Guardar datos de layout</button>
+          </div>
+        </form>
+      </dialog>
+    `);
+    document.getElementById("closeLayoutDataExtensionBtn").addEventListener("click", closeLayoutDataEditor);
+    document.getElementById("cancelLayoutDataExtensionBtn").addEventListener("click", closeLayoutDataEditor);
+    document.getElementById("layoutDataExtensionForm").addEventListener("submit", saveLayoutDataEditor);
+  }
+
+  let activeLayoutRequestId = null;
+
+  async function openLayoutDataEditor(requestId) {
+    ensureLayoutDataDialog();
+    activeLayoutRequestId = requestId;
+    const request = await fetchRequestForLayout(requestId);
+    if (!request) return;
+    Object.assign(state.requests.find((item) => item.id === requestId) || {}, request);
+    renderAccountOptions(request);
+    document.getElementById("layoutDataScheduledDate").value = request.scheduled_payment_date || "";
+    document.getElementById("layoutDataReference").value = request.payment_reference || "";
+    document.getElementById("layoutDataConcept").value = request.payment_concept || "";
+    document.getElementById("layoutDataExtensionDialog").showModal();
+  }
+
+  function closeLayoutDataEditor() {
+    activeLayoutRequestId = null;
+    document.getElementById("layoutDataExtensionDialog")?.close();
+  }
+
+  function renderAccountOptions(request) {
+    const select = document.getElementById("layoutDataAccountId");
+    if (!select) return;
+    const companyAccounts = state.accounts.filter((account) => account.company_id === request.company_id);
+    const options = companyAccounts.length ? companyAccounts : state.accounts;
+    select.innerHTML = '<option value="">Seleccionar cuenta origen</option>' + options.map((account) => {
+      const label = [account.account_number || "Sin numero", account.name, account.bank_name].filter(Boolean).join(" - ");
+      return `<option value="${escapeHtml(account.id)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    select.value = request.company_bank_account_id || "";
+  }
+
+  async function saveLayoutDataEditor(event) {
+    event.preventDefault();
+    if (!activeLayoutRequestId) return;
+    const button = document.getElementById("saveLayoutDataExtensionBtn");
+    button.disabled = true;
+    button.textContent = "Guardando...";
+    try {
+      const payload = {
+        company_bank_account_id: document.getElementById("layoutDataAccountId").value || null,
+        scheduled_payment_date: document.getElementById("layoutDataScheduledDate").value || null,
+        payment_reference: document.getElementById("layoutDataReference").value.trim() || null,
+        payment_concept: document.getElementById("layoutDataConcept").value.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await client.from("payment_requests").update(payload).eq("id", activeLayoutRequestId);
+      if (error) throw error;
+      toast("Datos actualizados", "Datos de layout actualizados correctamente.", "success");
+      closeLayoutDataEditor();
+      await loadData();
+      document.querySelector("[data-layout-readiness-extension]")?.remove();
+      appendLayoutReadinessSection();
+      render();
+    } catch (error) {
+      toast("No se pudieron guardar los datos", friendlyError(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Guardar datos de layout";
     }
   }
 
@@ -412,6 +627,24 @@
     return '<span class="badge badge-neutral">Sin validacion</span>';
   }
 
+  function toast(title, message, type = "success") {
+    const stack = document.getElementById("toastStack");
+    if (!stack) return window.alert(`${title}\n${message}`);
+    const node = document.createElement("div");
+    node.className = `toast ${type}`;
+    node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+    stack.appendChild(node);
+    window.setTimeout(() => node.remove(), 5500);
+  }
+
+  function friendlyError(error) {
+    const message = error?.message || String(error || "Error desconocido");
+    if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
+      return "No se pudo guardar por permisos. Puede faltar permiso update sobre payment_requests.";
+    }
+    return message;
+  }
+
   function clearSelectFilters() {
     setSelect("statusFilter", "todos");
     setSelect("budgetDecisionFilter", "todos");
@@ -522,6 +755,24 @@
       .badge-warning { background: var(--amber-dim); color: var(--amber); }
       .badge-info { background: var(--sky-dim); color: var(--sky); }
       .badge-neutral { background: var(--bg-hover); color: var(--text-2); border: 1px solid var(--border); }
+      .layout-readiness-card { margin-top: 12px; }
+      .layout-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+      .layout-card-header h3 { margin: 4px 0 6px; color: var(--text-1); font-size: 15px; }
+      .layout-card-header p { color: var(--text-3); font-size: 12.5px; }
+      .section-kicker { display: block; color: var(--text-3); font-size: 10.5px; font-weight: 800; letter-spacing: .65px; text-transform: uppercase; }
+      .layout-count { flex-shrink: 0; border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 800; }
+      .layout-count.warning { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,.28); }
+      .layout-count.success { background: var(--emerald-dim); color: var(--emerald); border: 1px solid rgba(18,183,106,.28); }
+      .layout-checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .layout-checkitem { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 72px; border: 1px solid var(--border); border-radius: 12px; padding: 13px; background: rgba(255,255,255,.015); }
+      .layout-checkitem.complete { border-color: rgba(18,183,106,.22); }
+      .layout-checkitem.missing { border-color: rgba(224,62,82,.28); }
+      .layout-checktext strong { display: block; color: var(--text-1); font-size: 13px; }
+      .layout-checktext small { display: block; margin-top: 4px; color: var(--ruby); font-size: 12px; line-height: 1.35; }
+      .layout-state { flex-shrink: 0; border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800; }
+      .layout-state.complete { color: var(--emerald); background: var(--emerald-dim); border: 1px solid rgba(18,183,106,.24); }
+      .layout-state.missing { color: var(--ruby); background: var(--ruby-dim); border: 1px solid rgba(224,62,82,.28); }
+      @media (max-width: 760px) { .layout-card-header, .layout-checkitem { align-items: stretch; flex-direction: column; } .layout-checklist { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
   }
