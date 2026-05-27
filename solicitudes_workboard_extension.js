@@ -21,7 +21,7 @@
   const views = {
     attention: "Por atender",
     approval: "Pendientes de aprobacion",
-    ready: "Aprobadas listas",
+    ready: "Listas para operar",
     operation: "En operacion",
     history: "Historico / Cerradas",
     all: "Todas",
@@ -58,6 +58,7 @@
   async function init() {
     injectStyles();
     reframeCards();
+    ensureTypeHeader();
     bindEvents();
     await loadData();
     render();
@@ -68,7 +69,7 @@
   function reframeCards() {
     setCard("totalCard", "Por atender", "totalRequests", "attention");
     setCard("approvableCard", "Pendientes de aprobacion", "approvableRequests", "approval");
-    setCard("exceptionsCard", "Aprobadas listas", "blockedRequests", "ready");
+    setCard("exceptionsCard", "Listas para operar", "blockedRequests", "ready");
     setCard("paidCard", "En operacion", "paidRequests", "operation");
 
     const amountCard = document.getElementById("requestedAmount")?.closest(".stat-card");
@@ -95,10 +96,24 @@
     if (!card) return;
     card.dataset.workboardView = view;
     card.classList.add("workboard-card");
+    if (view === "ready") {
+      card.classList.remove("blocked");
+      card.classList.add("ready");
+    }
     const labelNode = card.querySelector("p");
     if (labelNode) labelNode.textContent = label;
     const valueNode = document.getElementById(valueId);
     if (valueNode) valueNode.textContent = "0";
+  }
+
+  function ensureTypeHeader() {
+    const headerRow = document.querySelector("thead tr");
+    if (!headerRow) return;
+    const headers = Array.from(headerRow.children).map((cell) => normalize(cell.textContent));
+    if (headers.includes("tipo")) return;
+    const folioHeader = headerRow.children[0];
+    if (!folioHeader) return;
+    folioHeader.insertAdjacentHTML("afterend", "<th>Tipo</th>");
   }
 
   function bindEvents() {
@@ -218,6 +233,7 @@
   function renderTable() {
     const tbody = document.getElementById("requestsTableBody");
     if (!tbody) return;
+    ensureTypeHeader();
 
     const rows = state.requests.filter((request) => matchesView(request) && matchesUiFilters(request));
 
@@ -478,6 +494,8 @@
       .workboard-card { cursor: pointer; }
       .workboard-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
       .workboard-card.active-filter { border-color: rgba(94,234,212,.38); box-shadow: 0 0 0 3px var(--accent-dim); }
+      .stat-card.ready::after { background: linear-gradient(90deg, var(--amber), transparent 55%); }
+      .stat-card.ready strong { color: var(--amber); }
       .badge-success { background: var(--emerald-dim); color: var(--emerald); }
       .badge-danger { background: var(--ruby-dim); color: var(--ruby); }
       .badge-warning { background: var(--amber-dim); color: var(--amber); }
