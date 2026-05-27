@@ -7,7 +7,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
 
   const modules = [
-    { file: "proveedores.html", href: "./proveedores.html", icon: "◇", label: "Proveedores" },
+    { file: "proveedores.html", href: "./proveedores.html", icon: "â—‡", label: "Proveedores" },
     { file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago" },
     { file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago" },
     { file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones" },
@@ -98,7 +98,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
     loadExtension("./cash_flow_extension.js?v=20260526-3", "cash-flow")
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_workboard_extension.js?v=20260527-2", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260527-3", "solicitudes-workboard")
     }
   }
 
