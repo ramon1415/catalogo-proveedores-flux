@@ -93,12 +93,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function loadFluxExtensions() {
-    const enabledPages = ["solicitudes.html", "efectivo.html"]
+    const enabledPages = ["solicitudes.html", "efectivo.html", "layouts.html"]
     if (!enabledPages.includes(pageName)) return
 
     loadExtension("./cash_flow_extension.js?v=20260526-3", "cash-flow")
     if (pageName === "solicitudes.html") {
       loadExtension("./solicitudes_workboard_extension.js?v=20260527-3", "solicitudes-workboard")
+    }
+    if (pageName === "layouts.html") {
+      loadExtension("./layouts_result_extension.js?v=20260527-1", "layouts-result")
     }
   }
 
