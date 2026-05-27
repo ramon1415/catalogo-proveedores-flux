@@ -98,7 +98,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
     loadExtension("./cash_flow_extension.js?v=20260526-3", "cash-flow")
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_workboard_extension.js?v=20260526-1", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260527-1", "solicitudes-workboard")
     }
   }
 
