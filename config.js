@@ -67,16 +67,34 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     loadFluxExtensions()
   }
 
+  let cashFlowExtensionLoaded = false
+
   function loadFluxExtensions() {
     const enabledPages = ["solicitudes.html", "efectivo.html"]
     if (!enabledPages.includes(pageName)) return
+    if (cashFlowExtensionLoaded) return
     if (document.querySelector('script[data-flux-extension="cash-flow"]')) return
+    cashFlowExtensionLoaded = true
+
+    try {
+      const request = new XMLHttpRequest()
+      request.open("GET", "./cash_flow_extension.js?v=20260526-3", false)
+      request.send(null)
+      if (request.status >= 200 && request.status < 300 && request.responseText) {
+        ;(0, eval)(request.responseText)
+        return
+      }
+    } catch (_) {
+      cashFlowExtensionLoaded = false
+    }
 
     const script = document.createElement("script")
-    script.src = "./cash_flow_extension.js?v=20260526-2"
+    script.src = "./cash_flow_extension.js?v=20260526-3"
     script.dataset.fluxExtension = "cash-flow"
     document.body.appendChild(script)
   }
+
+  loadFluxExtensions()
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", applyShell)
