@@ -148,6 +148,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./ingresos_ux_extension.js?v=20260527-1", "ingresos-ux")
     }
     if (pageName === "dashboard.html") {
+      loadExtension("./dashboard_report_downloads_extension.js?v=20260527-1", "dashboard-report-downloads")
       loadExtension("./dashboard_demo_extension.js?v=20260527-1", "dashboard-demo")
     }
   }
