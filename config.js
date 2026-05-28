@@ -7,6 +7,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
 
   const modules = [
+    { file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo" },
     { file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores" },
     { file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago" },
     { file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago" },
@@ -15,6 +16,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   ]
 
   const subtitles = {
+    "dashboard.html": "Dashboard operativo",
     "proveedores.html": "Proveedores",
     "solicitudes.html": "Solicitudes de pago",
     "layouts.html": "Layouts de pago",
