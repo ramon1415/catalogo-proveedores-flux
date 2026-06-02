@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Socios | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Socios</div></div>
+        </div>
+        <nav class="nav" aria-label="Menu principal"></nav>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Catalogo e historial</div>
+        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Socios</h1>
+            <p>Administra titulares y consulta su historial completo de cuotas, pagos, incidencias y facturas.</p>
+          </div>
+          <div class="actions">
+            <button class="secondary-btn" id="goIncomeBtn" type="button">Ir a Ingresos</button>
+            <button class="primary-btn" id="newMemberBtn" type="button">Nuevo socio</button>
+          </div>
+        </div>
+
+        <section class="stats-grid">
+          <button class="stat-card success" type="button" data-filter="active"><p>Socios activos</p><strong id="activeCount">0</strong></button>
+          <button class="stat-card warning" type="button" data-filter="pending"><p>Con saldo pendiente</p><strong id="pendingCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="incidents"><p>Con incidencias</p><strong id="incidentCount">0</strong></button>
+          <button class="stat-card" type="button" data-filter="invoices"><p>Facturas pendientes</p><strong id="invoiceCount">0</strong></button>
+          <button class="stat-card danger" type="button" data-filter="all"><p>Total historico</p><strong id="historicTotal">$0</strong></button>
+        </section>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar socio, RFC o correo">
+            <select id="statusFilter">
+              <option value="all">Estatus: Todos</option>
+              <option value="active">Activos</option>
+              <option value="inactive">Inactivos</option>
+            </select>
+            <select id="lineageFilter">
+              <option value="all">Estirpe: Todas</option>
+              <option value="SNR">SNR</option>
+              <option value="SNM">SNM</option>
+              <option value="PSN">PSN</option>
+              <option value="CSN">CSN</option>
+              <option value="FSN">FSN</option>
+            </select>
+            <button class="secondary-btn" id="clearFilterBtn" type="button">Ver todos</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Socio</th>
+                  <th>RFC</th>
+                  <th>Estirpe</th>
+                  <th>Factor</th>
+                  <th>Saldo pendiente</th>
+                  <th>Incidencias</th>
+                  <th>Facturas</th>
+                  <th>Estatus</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="membersTableBody">
+                <tr><td colspan="9" class="empty-state"><strong>Cargando socios...</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="memberDialog" class="narrow">
+    <form id="memberForm" class="modal-content">
+      <div class="modal-header">
+        <div><h2 id="memberDialogTitle">Nuevo socio</h2><p>El factor define la proporcion con la que participa en cuotas de mantenimiento.</p></div>
+        <button type="button" class="icon-btn" id="closeMemberBtn">x</button>
+      </div>
+      <div class="form-grid">
+        <label class="full-row">Nombre completo *<input id="memberFullName" class="form-control" required></label>
+        <label>RFC<input id="memberRfc" class="form-control"></label>
+        <label>Estirpe<select id="memberLineage" class="form-control"><option value="">Sin estirpe</option><option value="SNR">SNR</option><option value="SNM">SNM</option><option value="PSN">PSN</option><option value="CSN">CSN</option><option value="FSN">FSN</option></select></label>
+        <label>Factor de participacion *<input id="memberFeeFactor" class="form-control" type="number" min="0.0001" step="any" value="1" required><span class="muted-line">Usa 1 para cuota completa, 0.5 para media cuota, 0.333 para una tercera parte.</span></label>
+        <label>Correo<input id="memberEmail" class="form-control" type="email"></label>
+        <label>Telefono<input id="memberPhone" class="form-control"></label>
+        <label class="full-row">Notas<textarea id="memberNotes" class="form-control"></textarea></label>
+        <label><span><input id="memberActive" type="checkbox" checked> Activo</span></label>
+      </div>
+      <div id="memberError" class="notice warning hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="cancelMemberBtn">Cancelar</button>
+        <button type="submit" class="primary-btn" id="saveMemberBtn">Guardar socio</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="historyDialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div><h2 id="historyTitle">Historial del socio</h2><p>Cuotas, pagos, incidencias y facturas vinculadas al socio.</p></div>
+        <button type="button" class="icon-btn" id="closeHistoryBtn">x</button>
+      </div>
+      <div class="modal-scroll" id="historyContent"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeHistoryFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script src="./socios.js"></script>
+</body>
+</html>
