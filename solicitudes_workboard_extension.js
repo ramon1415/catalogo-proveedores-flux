@@ -61,6 +61,7 @@
     reframeCards();
     ensureTypeHeader();
     bindEvents();
+    document.addEventListener("flux:roles-ready", render);
     await loadData();
     observeDetailLayoutReadiness();
     render();
@@ -170,7 +171,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -419,6 +420,13 @@
     renderTable();
   }
 
+  function visibleRequests() {
+    const group = window.FluxAuth?.getGroup?.();
+    const profileId = window.FluxAuth?.getProfile?.()?.id;
+    if (group !== "requester" || !profileId) return state.requests;
+    return state.requests.filter((request) => request.requested_by === profileId);
+  }
+
   function renderStats() {
     setValue("totalRequests", countByView("attention"));
     setValue("approvableRequests", countByView("approval"));
@@ -451,7 +459,7 @@
     if (!tbody) return;
     ensureTypeHeader();
 
-    const rows = state.requests.filter((request) => matchesView(request) && matchesUiFilters(request));
+    const rows = visibleRequests().filter((request) => matchesView(request) && matchesUiFilters(request));
 
     if (!rows.length) {
       tbody.innerHTML = `
@@ -529,7 +537,7 @@
   }
 
   function countByView(view) {
-    return state.requests.filter((request) => {
+    return visibleRequests().filter((request) => {
       const previous = state.view;
       state.view = view;
       const result = matchesView(request);
