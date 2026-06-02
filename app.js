@@ -19,6 +19,7 @@ init()
 
 async function init() {
   setupTheme()
+  prepareSupplierFormUx()
 
   const {
     data: { session },
@@ -30,7 +31,7 @@ async function init() {
   }
 
   document.getElementById("userEmail").textContent =
-    session.user.email || "Sesión activa"
+    session.user.email || "SesiÃ³n activa"
 
   document.getElementById("userName").textContent =
     session.user.user_metadata?.full_name || "Usuario"
@@ -49,6 +50,58 @@ async function init() {
   setupOriginAccountsAdmin()
 
   await loadSuppliers()
+}
+
+function prepareSupplierFormUx() {
+  const grid = form?.querySelector(".form-grid")
+  if (!grid) return
+
+  const orderedControls = [
+    "alias",
+    "nombre_completo",
+    "tipo_proveedor",
+    "destination_type",
+    "metodo_pago",
+    "tipo_cuenta",
+    "beneficiary_name",
+    "banco",
+    "clabe",
+    "cuenta_bancaria",
+    "convenio_number",
+    "rfc",
+    "email",
+    "telefono",
+    "es_personal_eventual",
+    "activo",
+    "notas",
+  ]
+
+  orderedControls
+    .map(labelForControl)
+    .filter(Boolean)
+    .forEach((label) => grid.appendChild(label))
+
+  labelForControl("tipo_cuenta")?.classList.add("hidden")
+  labelForControl("banco")?.setAttribute("data-bank-field", "true")
+  labelForControl("clabe")?.setAttribute("data-destination-field", "clabe")
+  labelForControl("cuenta_bancaria")?.setAttribute("data-destination-field", "cuenta")
+  labelForControl("convenio_number")?.setAttribute("data-destination-field", "convenio")
+
+  const destinationLabel = labelForControl("destination_type")
+  const hint = destinationLabel?.querySelector(".field-hint")
+  if (hint) hint.textContent = "Captura solo el dato necesario segun el tipo de destino de pago."
+
+  updateDestinationFieldVisibility()
+}
+
+function labelForControl(controlId) {
+  return document.getElementById(controlId)?.closest("label") || null
+}
+
+function setControlLabelVisible(controlId, visible) {
+  const label = labelForControl(controlId)
+  if (!label) return
+  label.classList.toggle("hidden", !visible)
 }
 
 function setupTheme() {
@@ -355,13 +408,9 @@ function setupOriginAccountsAdmin() {
     </dialog>
   `)
 
-  tabs.addEventListener("click", (event) => {
-    const button = event.target.closest(".provider-tab")
-    if (!button) return
-
-    const panel = button.dataset.panel
+  const activateProviderPanel = (panel) => {
     document.querySelectorAll(".provider-tab").forEach((item) => {
-      item.classList.toggle("active", item === button)
+      item.classList.toggle("active", item.dataset.panel === panel)
     })
 
     suppliersPanel.classList.toggle("hidden", panel !== "suppliers")
@@ -374,6 +423,12 @@ function setupOriginAccountsAdmin() {
     if (panel === "originAccounts") {
       loadOriginAccountsAdmin()
     }
+  }
+
+  tabs.addEventListener("click", (event) => {
+    const button = event.target.closest(".provider-tab")
+    if (!button) return
+    activateProviderPanel(button.dataset.panel)
   })
 
   document
@@ -391,6 +446,11 @@ function setupOriginAccountsAdmin() {
   document
     .getElementById("originAccountsTableBody")
     ?.addEventListener("click", handleOriginAccountAction)
+
+  const requestedTab = new URLSearchParams(window.location.search).get("tab")
+  if (requestedTab === "cuentas-origen" || requestedTab === "originAccounts") {
+    activateProviderPanel("originAccounts")
+  }
 }
 
 async function loadOriginAccountsAdmin() {
@@ -887,6 +947,7 @@ function handlePaymentMethodChange() {
       campo.classList.add("field-disabled")
     })
 
+    updateDestinationFieldVisibility()
     return
   }
 
@@ -921,6 +982,21 @@ function handleDestinationTypeChange() {
   if (destinationType === "convenio") {
     tipoCuenta.value = ""
   }
+
+  updateDestinationFieldVisibility()
+}
+
+function updateDestinationFieldVisibility() {
+  const metodoPago = getValue("metodo_pago")
+  const destinationType = getValue("destination_type")
+  const hidesBankFields = metodoPago === "Efectivo" || metodoPago === "Tarjeta en plataforma"
+
+  setControlLabelVisible("tipo_cuenta", false)
+  setControlLabelVisible("destination_type", !hidesBankFields)
+  setControlLabelVisible("banco", !hidesBankFields && Boolean(destinationType))
+  setControlLabelVisible("clabe", !hidesBankFields && destinationType === "clabe")
+  setControlLabelVisible("cuenta_bancaria", !hidesBankFields && destinationType === "cuenta")
+  setControlLabelVisible("convenio_number", !hidesBankFields && destinationType === "convenio")
 }
 
 function inferDestinationType() {
@@ -957,7 +1033,7 @@ async function saveSupplier(event) {
 
   if (!payload.alias || !payload.nombre_completo || !payload.metodo_pago) {
     const validationMessage =
-      "Alias, nombre completo y método de pago son obligatorios."
+      "Alias, nombre completo y mÃ©todo de pago son obligatorios."
 
     showMessage(validationMessage, true)
     showToast(validationMessage, "error")
@@ -1055,7 +1131,7 @@ function validateDestination(payload) {
 window.toggleSupplier = async function (id, activo) {
   const action = activo ? "reactivar" : "desactivar"
 
-  const confirmed = confirm(`¿Seguro que deseas ${action} este proveedor?`)
+  const confirmed = confirm(`Â¿Seguro que deseas ${action} este proveedor?`)
 
   if (!confirmed) return
 
