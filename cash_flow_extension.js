@@ -26,7 +26,11 @@
   let currentProfile = null
   let activeCashRequest = null
 
-  document.addEventListener("DOMContentLoaded", initExtension)
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initExtension)
+  } else {
+    initExtension()
+  }
 
   async function initExtension() {
     injectStyles()
@@ -214,7 +218,7 @@
       exchange_rate: currency === "MXN" ? 1 : numberValue(value("exchangeRate")),
       description: value("description"),
       notes: value("notes") || null,
-      is_extraordinary_adjustment: Boolean(document.getElementById("isExtraordinaryAdjustment")?.checked),
+      is_extraordinary_adjustment: Boolean(window.FluxAuth?.canApprove?.() && document.getElementById("isExtraordinaryAdjustment")?.checked),
       responsible_profile_id: value("cashResponsibleProfileId"),
       due_date: value("cashDueDate"),
       delivery_method: value("cashDeliveryMethod") || type,
