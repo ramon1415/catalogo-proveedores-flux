@@ -3,7 +3,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 document.getElementById("googleLoginBtn").addEventListener("click", async () => {
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: `${window.location.origin}/proveedores.html` },
+    options: { redirectTo: `${window.location.origin}/solicitudes.html?post_login=1` },
   })
-  if (error) alert(`Error iniciando sesión: ${error.message}`)
+  if (error) alert(`Error iniciando sesiÃ³n: ${error.message}`)
 })
