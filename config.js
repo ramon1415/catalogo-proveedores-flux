@@ -22,8 +22,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     { key: "providers", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.ADMIN] },
     { key: "originAccounts", file: "proveedores.html", href: "./proveedores.html?tab=cuentas-origen", icon: "C", label: "Cuentas origen", groups: [ROLE_GROUPS.ADMIN] },
     { key: "requests", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER, ROLE_GROUPS.REQUESTER] },
+    { key: "approvals", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Aprobaciones de pago", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
     { key: "layouts", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "payments", file: "pagos_comprobaciones.html", href: "./pagos_comprobaciones.html", icon: "$", label: "Pagos y comprobaciones", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
     { key: "cash", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "members", file: "socios.html", href: "./socios.html", icon: "M", label: "Socios", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
     { key: "income", file: "ingresos.html", href: "./ingresos.html", icon: "I", label: "Ingresos e incidencias", groups: [ROLE_GROUPS.ADMIN] },
   ]
 
@@ -32,8 +35,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     providers: "Proveedores",
     originAccounts: "Cuentas origen",
     requests: "Solicitudes de pago",
+    approvals: "Aprobaciones de pago",
     layouts: "Layouts de pago",
+    payments: "Pagos y comprobaciones",
     cash: "Efectivo y comprobaciones",
+    members: "Socios",
     income: "Ingresos e incidencias",
   }
 
@@ -311,9 +317,14 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     }
     if (pageName === "layouts.html") {
       loadExtension("./layouts_result_extension.js?v=20260602-ux1", "layouts-result")
+      loadExtension("./layouts_ux2_extension.js?v=20260602-ux2", "layouts-ux2")
+    }
+    if (pageName === "efectivo.html") {
+      loadExtension("./efectivo_ux2_extension.js?v=20260602-ux2", "efectivo-ux2")
     }
     if (pageName === "ingresos.html") {
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
+      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2", "ingresos-ux2")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
