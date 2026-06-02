@@ -313,7 +313,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./cash_flow_extension.js?v=20260602-ux1", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1", "solicitudes-ux1")
+      loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-search", "solicitudes-ux1")
       loadExtension("./solicitudes_workboard_extension.js?v=20260602-ux1", "solicitudes-workboard")
     }
     if (pageName === "layouts.html") {
