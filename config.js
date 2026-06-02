@@ -89,6 +89,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   function applyDemoNavigation() {
     const nav = document.querySelector(".nav")
     if (!nav) return
+    if (!roleState.loaded) return
 
     const visibleModules = modulesForCurrentRole()
     const activeKey = currentModuleKey()
@@ -148,7 +149,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function applyShell() {
     applyLoginCopy()
-    applyDemoNavigation()
     applyBranding()
     applyIncomeCompatibility()
     loadFluxExtensions()
@@ -236,7 +236,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function modulesForCurrentRole() {
-    const group = roleState.loaded ? roleState.group : ROLE_GROUPS.REQUESTER
+    if (!roleState.loaded) return []
+    const group = roleState.group
     return modules.filter((item) => item.groups.includes(group))
   }
 
