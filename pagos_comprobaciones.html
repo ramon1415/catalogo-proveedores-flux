@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pagos y comprobaciones | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Pagos y comprobaciones</div></div>
+        </div>
+        <nav class="nav" aria-label="Menu principal"></nav>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Operacion de pagos</div>
+        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Pagos y comprobaciones</h1>
+            <p>Vista general de transferencias, efectivo, cheques y comprobantes usando solo informacion existente del sistema.</p>
+          </div>
+          <button class="primary-btn" id="refreshBtn" type="button">Actualizar</button>
+        </div>
+
+        <div class="notice">
+          Esta pantalla concentra pagos confirmados y comprobaciones. La carga real de comprobante de transferencia queda pendiente de integracion si no existe soporte de archivo en la tabla actual.
+        </div>
+
+        <section class="stats-grid">
+          <button class="stat-card success" type="button" data-filter="confirmed"><p>Pagos confirmados</p><strong id="confirmedCount">0</strong></button>
+          <button class="stat-card warning" type="button" data-filter="pending_receipt"><p>Pendientes comprobante</p><strong id="pendingReceiptCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="transfer"><p>Transferencias</p><strong id="transferCount">0</strong></button>
+          <button class="stat-card" type="button" data-filter="cash"><p>Efectivo / cheques</p><strong id="cashCount">0</strong></button>
+          <button class="stat-card danger" type="button" data-filter="review"><p>En revision</p><strong id="reviewCount">0</strong></button>
+        </section>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar proveedor, responsable, empresa o solicitud">
+            <select id="typeFilter">
+              <option value="all">Tipo: Todos</option>
+              <option value="transfer">Transferencia</option>
+              <option value="cash">Efectivo</option>
+              <option value="check">Cheque</option>
+            </select>
+            <select id="statusFilter">
+              <option value="all">Estatus: Todos</option>
+              <option value="confirmed">Confirmado</option>
+              <option value="pending_receipt">Pendiente comprobante</option>
+              <option value="review">En revision</option>
+              <option value="closed">Cerrado</option>
+            </select>
+            <button class="secondary-btn" id="clearFilterBtn" type="button">Ver todos</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Proveedor / responsable</th>
+                  <th>Empresa</th>
+                  <th>Monto</th>
+                  <th>Fecha pago</th>
+                  <th>Estatus</th>
+                  <th>Comprobante</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="paymentsTableBody">
+                <tr><td colspan="8" class="empty-state"><strong>Cargando pagos...</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="detailDialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div><h2 id="detailTitle">Pago</h2><p id="detailSubtitle">Detalle operativo.</p></div>
+        <button type="button" class="icon-btn" id="closeDetailBtn">x</button>
+      </div>
+      <div class="modal-scroll" id="detailContent"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeDetailFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script src="./pagos_comprobaciones.js"></script>
+</body>
+</html>
