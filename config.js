@@ -5,23 +5,61 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
 ;(function prepareFluxShell() {
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
+  const urlParams = new URLSearchParams(window.location.search)
+
+  const ROLE_GROUPS = {
+    ADMIN: "admin_finance",
+    APPROVER: "approver",
+    REQUESTER: "requester",
+  }
+
+  const ADMIN_ROLES = ["admin", "finance", "finanzas"]
+  const APPROVER_ROLES = ["approver_2", "aprobador_2"]
+  const REQUESTER_ROLES = ["solicitante", "operator", "default"]
 
   const modules = [
-    { file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo" },
-    { file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores" },
-    { file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago" },
-    { file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago" },
-    { file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones" },
-    { file: "ingresos.html", href: "./ingresos.html", icon: "I", label: "Ingresos e incidencias" },
+    { key: "dashboard", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
+    { key: "providers", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "originAccounts", file: "proveedores.html", href: "./proveedores.html?tab=cuentas-origen", icon: "C", label: "Cuentas origen", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "requests", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER, ROLE_GROUPS.REQUESTER] },
+    { key: "layouts", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "cash", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "income", file: "ingresos.html", href: "./ingresos.html", icon: "I", label: "Ingresos e incidencias", groups: [ROLE_GROUPS.ADMIN] },
   ]
 
   const subtitles = {
-    "dashboard.html": "Dashboard operativo",
-    "proveedores.html": "Proveedores",
-    "solicitudes.html": "Solicitudes de pago",
-    "layouts.html": "Layouts de pago",
-    "efectivo.html": "Efectivo y comprobaciones",
-    "ingresos.html": "Ingresos e incidencias",
+    dashboard: "Dashboard operativo",
+    providers: "Proveedores",
+    originAccounts: "Cuentas origen",
+    requests: "Solicitudes de pago",
+    layouts: "Layouts de pago",
+    cash: "Efectivo y comprobaciones",
+    income: "Ingresos e incidencias",
+  }
+
+  const roleState = {
+    loaded: false,
+    session: null,
+    profile: null,
+    roles: [],
+    group: ROLE_GROUPS.REQUESTER,
+  }
+
+  let rolePromise = null
+
+  window.FluxAuth = {
+    ready: () => resolveRoleAccess(),
+    state: roleState,
+    getRoles: () => roleState.roles.slice(),
+    getProfile: () => roleState.profile,
+    getGroup: () => roleState.group,
+    hasRole: (roles) => {
+      const list = Array.isArray(roles) ? roles : [roles]
+      return list.some((role) => roleState.roles.includes(normalizeRole(role)))
+    },
+    isAdminFinance: () => roleState.group === ROLE_GROUPS.ADMIN,
+    canApprove: () => roleState.group === ROLE_GROUPS.ADMIN || roleState.group === ROLE_GROUPS.APPROVER,
+    canManageProviders: () => roleState.group === ROLE_GROUPS.ADMIN,
   }
 
   function applyLoginCopy() {
@@ -46,9 +84,12 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     const nav = document.querySelector(".nav")
     if (!nav) return
 
-    nav.innerHTML = modules
+    const visibleModules = modulesForCurrentRole()
+    const activeKey = currentModuleKey()
+
+    nav.innerHTML = visibleModules
       .map((item) => {
-        const isActive = pageName === item.file
+        const isActive = activeKey === item.key
         return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
       })
       .join("")
@@ -58,10 +99,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     const logo = document.querySelector(".brand-logo, .brand-badge")
     const title = document.querySelector(".brand-title")
     const subtitle = document.querySelector(".brand-subtitle")
+    const activeKey = currentModuleKey()
 
     if (logo) logo.textContent = "FL"
     if (title) title.textContent = "Flux Operadora"
-    if (subtitle && subtitles[pageName]) subtitle.textContent = subtitles[pageName]
+    if (subtitle && subtitles[activeKey]) subtitle.textContent = subtitles[activeKey]
   }
 
   function applyIncomeCompatibility() {
@@ -104,6 +146,131 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     applyBranding()
     applyIncomeCompatibility()
     loadFluxExtensions()
+    resolveRoleAccess().then(() => {
+      applyDemoNavigation()
+      applyBranding()
+      applyPostLoginRedirect()
+      enforcePageVisibility()
+      document.dispatchEvent(new CustomEvent("flux:roles-ready", { detail: roleState }))
+    })
+  }
+
+  function resolveRoleAccess() {
+    if (rolePromise) return rolePromise
+    rolePromise = loadRoleState()
+    return rolePromise
+  }
+
+  async function loadRoleState() {
+    if (!window.supabase?.createClient) {
+      roleState.loaded = true
+      return roleState
+    }
+
+    try {
+      const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      const { data: { session } } = await client.auth.getSession()
+      roleState.session = session || null
+
+      if (!session?.user) {
+        roleState.loaded = true
+        return roleState
+      }
+
+      roleState.profile = await resolveProfile(client, session)
+      roleState.roles = await resolveRoles(client, roleState.profile)
+      roleState.group = groupFromRoles(roleState.roles)
+    } catch (_) {
+      roleState.roles = []
+      roleState.group = ROLE_GROUPS.REQUESTER
+    }
+
+    roleState.loaded = true
+    return roleState
+  }
+
+  async function resolveProfile(client, session) {
+    const lookups = [
+      ["auth_user_id", session.user.id],
+      ["email", session.user.email],
+    ].filter(([, value]) => value)
+
+    for (const [column, value] of lookups) {
+      const { data } = await client
+        .from("profiles")
+        .select("id,email,full_name,auth_user_id,active")
+        .eq(column, value)
+        .maybeSingle()
+      if (data?.id) return data
+    }
+
+    return null
+  }
+
+  async function resolveRoles(client, profile) {
+    if (!profile?.id) return []
+    const { data, error } = await client
+      .from("user_roles")
+      .select("role_id, roles(id,name,description)")
+      .eq("profile_id", profile.id)
+
+    if (error) return []
+
+    return (data || [])
+      .map((row) => normalizeRole(row.roles?.name || row.name || ""))
+      .filter(Boolean)
+  }
+
+  function groupFromRoles(roles) {
+    const cleanRoles = roles.map(normalizeRole)
+    if (cleanRoles.some((role) => ADMIN_ROLES.includes(role))) return ROLE_GROUPS.ADMIN
+    if (cleanRoles.some((role) => APPROVER_ROLES.includes(role))) return ROLE_GROUPS.APPROVER
+    if (cleanRoles.some((role) => REQUESTER_ROLES.includes(role))) return ROLE_GROUPS.REQUESTER
+    return ROLE_GROUPS.REQUESTER
+  }
+
+  function modulesForCurrentRole() {
+    const group = roleState.loaded ? roleState.group : ROLE_GROUPS.REQUESTER
+    return modules.filter((item) => item.groups.includes(group))
+  }
+
+  function currentModuleKey() {
+    if (pageName === "proveedores.html" && urlParams.get("tab") === "cuentas-origen") return "originAccounts"
+    const match = modules.find((item) => item.file === pageName && item.key !== "originAccounts")
+    return match?.key || "requests"
+  }
+
+  function applyPostLoginRedirect() {
+    if (urlParams.get("post_login") !== "1") return
+    const target = defaultLandingForRole()
+    if (pageName !== target) {
+      window.location.replace(`./${target}`)
+      return
+    }
+    urlParams.delete("post_login")
+    const cleanUrl = `${window.location.pathname}${urlParams.toString() ? `?${urlParams}` : ""}`
+    window.history.replaceState({}, "", cleanUrl)
+  }
+
+  function defaultLandingForRole() {
+    if (roleState.group === ROLE_GROUPS.ADMIN) return "dashboard.html"
+    return "solicitudes.html"
+  }
+
+  function enforcePageVisibility() {
+    if (pageName === "index.html" || pageName === "") return
+    if (!roleState.session) return
+    if (isCurrentPageAllowed()) return
+    if (pageName !== "solicitudes.html") window.location.replace("./solicitudes.html")
+  }
+
+  function isCurrentPageAllowed() {
+    const activeKey = currentModuleKey()
+    return modulesForCurrentRole().some((item) => item.key === activeKey)
+  }
+
+  function normalizeRole(value) {
+    return String(value || "").trim().toLowerCase()
   }
 
   const loadedExtensions = new Set()
@@ -136,20 +303,20 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     if (!enabledPages.includes(pageName)) return
 
     if (["solicitudes.html", "efectivo.html", "layouts.html"].includes(pageName)) {
-      loadExtension("./cash_flow_extension.js?v=20260526-3", "cash-flow")
+      loadExtension("./cash_flow_extension.js?v=20260602-ux1", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_workboard_extension.js?v=20260527-4", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260602-ux1", "solicitudes-workboard")
     }
     if (pageName === "layouts.html") {
-      loadExtension("./layouts_result_extension.js?v=20260527-2", "layouts-result")
+      loadExtension("./layouts_result_extension.js?v=20260602-ux1", "layouts-result")
     }
     if (pageName === "ingresos.html") {
-      loadExtension("./ingresos_ux_extension.js?v=20260527-1", "ingresos-ux")
+      loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
     }
     if (pageName === "dashboard.html") {
-      loadExtension("./dashboard_report_downloads_extension.js?v=20260527-1", "dashboard-report-downloads")
-      loadExtension("./dashboard_demo_extension.js?v=20260527-1", "dashboard-demo")
+      loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
+      loadExtension("./dashboard_demo_extension.js?v=20260602-ux1", "dashboard-demo")
     }
   }
 
