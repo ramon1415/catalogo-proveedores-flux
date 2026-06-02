@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aprobaciones de pago | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Aprobaciones de pago</div></div>
+        </div>
+        <nav class="nav" aria-label="Menu principal"></nav>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Bandeja de aprobacion</div>
+        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Aprobaciones de pago</h1>
+            <p>Revisa solicitudes pendientes, excepciones presupuestales y cambios solicitados sin mezclar la experiencia del solicitante.</p>
+          </div>
+          <button class="primary-btn" id="refreshBtn" type="button">Actualizar</button>
+        </div>
+
+        <div id="permissionNotice" class="notice warning hidden">No tienes permiso para aprobar solicitudes. Esta seccion esta disponible para admin, finanzas y aprobadores.</div>
+
+        <section class="stats-grid">
+          <button class="stat-card warning" type="button" data-filter="pending"><p>Pendientes</p><strong id="pendingCount">0</strong></button>
+          <button class="stat-card danger" type="button" data-filter="exceptions"><p>Excepciones</p><strong id="exceptionCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="changes"><p>Cambios solicitados</p><strong id="changesCount">0</strong></button>
+          <button class="stat-card success" type="button" data-filter="approved"><p>Aprobadas recientes</p><strong id="approvedCount">0</strong></button>
+          <button class="stat-card" type="button" data-filter="all"><p>Total bandeja</p><strong id="totalCount">0</strong></button>
+        </section>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar folio, proveedor, empresa o descripcion">
+            <select id="statusFilter">
+              <option value="all">Estatus: Todos</option>
+              <option value="submitted">Pendientes</option>
+              <option value="changes_requested">Cambios solicitados</option>
+              <option value="approved">Aprobadas</option>
+              <option value="rejected">Rechazadas</option>
+            </select>
+            <select id="budgetFilter">
+              <option value="all">Presupuesto: Todos</option>
+              <option value="aprobable">Aprobable</option>
+              <option value="bloqueado">Excepcion</option>
+            </select>
+            <button class="secondary-btn" id="clearFilterBtn" type="button">Ver todas</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Solicitud</th>
+                  <th>Tipo</th>
+                  <th>Proveedor</th>
+                  <th>Empresa</th>
+                  <th>Partida</th>
+                  <th>Monto</th>
+                  <th>Estatus</th>
+                  <th>Presupuesto</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="approvalsTableBody">
+                <tr><td colspan="9" class="empty-state"><strong>Cargando aprobaciones...</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="detailDialog">
+    <form class="modal-content" id="decisionForm">
+      <div class="modal-header">
+        <div><h2 id="detailTitle">Solicitud</h2><p id="detailSubtitle">Detalle para decision.</p></div>
+        <button type="button" class="icon-btn" id="closeDetailBtn">x</button>
+      </div>
+      <div class="modal-scroll">
+        <div id="detailContent"></div>
+        <div class="panel-card" style="padding:14px;">
+          <div class="section-title">Decision del aprobador</div>
+          <div id="decisionHelp" class="notice neutral" style="margin-top:10px;">Selecciona una accion y captura comentario cuando aplique.</div>
+          <div class="form-grid" style="margin-top:12px;">
+            <label class="full-row">Comentario
+              <textarea id="decisionComments" class="form-control" placeholder="Comentario para la decision"></textarea>
+            </label>
+          </div>
+          <div id="decisionError" class="notice warning hidden" style="margin-top:10px;"></div>
+          <div id="decisionActions" class="actions" style="margin-top:12px;"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeDetailFooterBtn">Cerrar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script src="./aprobaciones.js"></script>
+</body>
+</html>
