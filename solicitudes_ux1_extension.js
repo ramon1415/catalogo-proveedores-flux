@@ -43,6 +43,7 @@
       .provider-summary-card span{font-size:11px;color:var(--text-3)}
       .provider-actions-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
       .request-provider-select{min-height:88px}
+      .request-provider-select.provider-live-results{min-height:158px}
       .quick-provider-destination{display:none}
       .quick-provider-destination.visible{display:block}
     `
@@ -141,9 +142,65 @@
   function bindEvents() {
     document.getElementById("newProviderFromRequestBtn")?.addEventListener("click", openQuickProviderModal)
     dom.proveedorId?.addEventListener("change", renderProviderSummary)
+    dom.providerSearch?.addEventListener("input", scheduleProviderResultsOpen)
+    dom.providerSearch?.addEventListener("focus", scheduleProviderResultsOpen)
+    dom.proveedorId?.addEventListener("change", syncProviderSearchFromSelection)
+    dom.proveedorId?.addEventListener("change", collapseProviderResults)
+    document.getElementById("closeRequestModalBtn")?.addEventListener("click", collapseProviderResults)
+    document.getElementById("cancelRequestBtn")?.addEventListener("click", collapseProviderResults)
     dom.requestForm?.addEventListener("submit", () => {
       if (!canApprove() && dom.isExtraordinaryAdjustment) dom.isExtraordinaryAdjustment.checked = false
     }, true)
+  }
+
+  function scheduleProviderResultsOpen() {
+    window.setTimeout(openProviderResultsFromCurrentOptions, 0)
+  }
+
+  function openProviderResultsFromCurrentOptions() {
+    if (!dom.providerSearch || !dom.proveedorId) return
+    const query = dom.providerSearch.value.trim()
+    const help = document.getElementById("providerHelp")
+
+    if (!query) {
+      collapseProviderResults()
+      setProviderHelp(help, "Escribe para filtrar y luego selecciona el proveedor.", false)
+      return
+    }
+
+    const matches = Math.max(dom.proveedorId.options.length - 1, 0)
+    dom.proveedorId.size = Math.min(Math.max(matches + 1, 2), 8)
+    dom.proveedorId.classList.add("provider-live-results")
+
+    if (!matches) {
+      setProviderHelp(help, "No se encontraron proveedores con esa busqueda.", true)
+      return
+    }
+
+    setProviderHelp(help, `Mostrando ${matches} proveedor${matches === 1 ? "" : "es"}. Selecciona una opcion de la lista.`, false)
+  }
+
+  function collapseProviderResults() {
+    if (!dom.proveedorId) return
+    dom.proveedorId.removeAttribute("size")
+    dom.proveedorId.classList.remove("provider-live-results")
+  }
+
+  function syncProviderSearchFromSelection() {
+    if (!dom.providerSearch || !dom.proveedorId?.value) return
+    const selected = dom.proveedorId.options[dom.proveedorId.selectedIndex]
+    if (!selected) return
+    dom.providerSearch.value = cleanProviderOptionLabel(selected.textContent)
+  }
+
+  function cleanProviderOptionLabel(label) {
+    return String(label || "").split("|")[0].split(" - ")[0].trim()
+  }
+
+  function setProviderHelp(help, text, warning) {
+    if (!help) return
+    help.textContent = text
+    help.classList.toggle("warning", Boolean(warning))
   }
 
   function applyRoleUx() {
