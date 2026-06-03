@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
 </head>
 <body>
   <div class="app-shell">
@@ -68,25 +68,8 @@
             </select>
             <button class="secondary-btn" id="clearFilterBtn" type="button">Ver todas</button>
           </div>
-          <div class="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Solicitud</th>
-                  <th>Tipo</th>
-                  <th>Proveedor</th>
-                  <th>Empresa</th>
-                  <th>Partida</th>
-                  <th>Monto</th>
-                  <th>Estatus</th>
-                  <th>Presupuesto</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="approvalsTableBody">
-                <tr><td colspan="9" class="empty-state"><strong>Cargando aprobaciones...</strong></td></tr>
-              </tbody>
-            </table>
+          <div id="approvalsTableBody" class="approval-kanban">
+            <div class="empty-state"><strong>Cargando aprobaciones...</strong></div>
           </div>
         </section>
       </section>
