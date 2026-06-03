@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
 </head>
 <body>
   <div class="app-shell">
@@ -36,7 +36,7 @@
         <div class="page-header">
           <div>
             <h1>Socios</h1>
-            <p>Administra titulares y consulta su historial completo de cuotas, pagos, incidencias y facturas.</p>
+            <p>Administra titulares y consulta su historial completo de cuotas, pagos, visitas/incidencias y facturas.</p>
           </div>
           <div class="actions">
             <button class="secondary-btn" id="goIncomeBtn" type="button">Ir a Ingresos</button>
@@ -47,7 +47,7 @@
         <section class="stats-grid">
           <button class="stat-card success" type="button" data-filter="active"><p>Socios activos</p><strong id="activeCount">0</strong></button>
           <button class="stat-card warning" type="button" data-filter="pending"><p>Con saldo pendiente</p><strong id="pendingCount">0</strong></button>
-          <button class="stat-card info" type="button" data-filter="incidents"><p>Con incidencias</p><strong id="incidentCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="incidents"><p>Con visitas/incidencias</p><strong id="incidentCount">0</strong></button>
           <button class="stat-card" type="button" data-filter="invoices"><p>Facturas pendientes</p><strong id="invoiceCount">0</strong></button>
           <button class="stat-card danger" type="button" data-filter="all"><p>Total historico</p><strong id="historicTotal">$0</strong></button>
         </section>
@@ -119,10 +119,10 @@
     </form>
   </dialog>
 
-  <dialog id="historyDialog">
-    <div class="modal-content">
+  <dialog id="historyDialog" class="history-dialog">
+    <div class="modal-content history-modal-content">
       <div class="modal-header">
-        <div><h2 id="historyTitle">Historial del socio</h2><p>Cuotas, pagos, incidencias y facturas vinculadas al socio.</p></div>
+        <div><h2 id="historyTitle">Historial del socio</h2><p>Cuotas, pagos, visitas/incidencias y facturas vinculadas al socio.</p></div>
         <button type="button" class="icon-btn" id="closeHistoryBtn">x</button>
       </div>
       <div class="modal-scroll" id="historyContent"></div>
