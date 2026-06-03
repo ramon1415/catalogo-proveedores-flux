@@ -6,6 +6,10 @@
   if (!client) return
 
   const dom = {}
+  const state = {
+    visitIncidents: [],
+    visitMembersById: new Map(),
+  }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init)
@@ -42,6 +46,13 @@
       .provider-summary-card strong{color:var(--text-1);font-size:13px}
       .provider-summary-card span{font-size:11px;color:var(--text-3)}
       .provider-actions-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+      .provider-select-shell{display:grid;grid-template-columns:minmax(0,1fr) 56px;gap:10px;align-items:stretch}
+      .provider-select-shell.full-row{grid-column:1/-1}
+      .provider-select-shell label{margin:0}
+      .provider-select-label{display:grid;gap:8px}
+      .provider-plus-btn{width:56px;min-height:88px;border:1px solid rgba(255,255,255,.38);border-radius:14px;background:rgba(255,255,255,.055);color:#fff;font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .18s ease,background .18s ease,transform .18s ease}
+      .provider-plus-btn:hover{border-color:var(--accent);background:rgba(45,212,191,.14);transform:translateY(-1px)}
+      .provider-quick-hint{grid-column:1/-1;font-size:12px;color:var(--text-3);margin-top:-4px}
       .request-provider-select{min-height:88px}
       .request-provider-select.provider-live-results{min-height:158px}
       #quickProviderDialog{width:min(720px,calc(100vw - 28px));max-width:720px;margin:auto 20px auto auto}
@@ -51,6 +62,13 @@
       .visit-context-placeholder{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:rgba(255,255,255,.018);display:grid;gap:6px;color:var(--text-2)}
       .visit-context-placeholder strong{color:var(--text-1)}
       .visit-context-placeholder span{font-size:12px;color:var(--text-3)}
+      .visit-context-placeholder.success{border-style:solid;border-color:rgba(45,212,191,.32);background:rgba(45,212,191,.08)}
+      .visit-context-placeholder.warning{border-style:solid;border-color:rgba(245,158,11,.34);background:rgba(245,158,11,.08)}
+      .visit-context-placeholder.error{border-style:solid;border-color:rgba(244,63,94,.34);background:rgba(244,63,94,.08)}
+      @media (max-width:720px){
+        .provider-select-shell{grid-template-columns:1fr}
+        .provider-plus-btn{width:100%;min-height:46px}
+      }
     `
     document.head.appendChild(style)
   }
@@ -67,7 +85,7 @@
 
     const providerSection = createSection("requestProviderSection", "Proveedor / beneficiario", "Selecciona el proveedor de forma independiente al presupuesto.")
     const budgetSection = createSection("requestBudgetSection", "Clasificacion presupuestal", "Empresa, centro de costo, partida y mes para validar presupuesto.")
-    const visitContextSection = createSection("requestVisitContextSection", "Contexto operativo", "Campo opcional para relacionar el pago con una visita o incidencia cuando el modelo quede activo.")
+    const visitContextSection = createSection("requestVisitContextSection", "Contexto operativo", "Campo opcional para relacionar el pago con una visita o incidencia registrada.")
     const paymentGrid = paymentSection.querySelector(".form-grid")
     const providerGrid = providerSection.querySelector(".form-grid")
     const budgetGrid = budgetSection.querySelector(".form-grid")
@@ -128,23 +146,55 @@
     dom.providerSearch.placeholder = "Escribe alias, razon social o RFC"
     dom.proveedorId.classList.add("request-provider-select")
 
-    if (quickLink && !document.getElementById("newProviderFromRequestBtn")) {
-      quickLink.innerHTML = `
-        <span class="provider-actions-row">
-          <button type="button" id="newProviderFromRequestBtn" class="small-btn">Nuevo proveedor</button>
-          <span id="newProviderPermissionHint">Crea el proveedor sin salir de la solicitud.</span>
-        </span>
-      `
-    }
+    const providerShell = ensureProviderQuickCreateRow(selectLabel)
+    quickLink?.remove()
 
     if (!document.getElementById("selectedProviderSummary")) {
       const summary = document.createElement("div")
       summary.id = "selectedProviderSummary"
       summary.className = "provider-summary-card full-row"
       summary.innerHTML = "<strong>Sin proveedor seleccionado</strong><span>Busca y selecciona un proveedor para ver sus datos.</span>"
-      selectLabel.insertAdjacentElement("afterend", summary)
+      providerShell.insertAdjacentElement("afterend", summary)
     }
     renderProviderSummary()
+  }
+
+  function ensureProviderQuickCreateRow(selectLabel) {
+    let shell = document.getElementById("requestProviderSelectShell")
+    if (!shell) {
+      shell = document.createElement("div")
+      shell.id = "requestProviderSelectShell"
+      shell.className = "provider-select-shell full-row"
+      selectLabel.insertAdjacentElement("beforebegin", shell)
+      shell.appendChild(selectLabel)
+    } else if (!shell.contains(selectLabel)) {
+      shell.insertBefore(selectLabel, shell.firstChild)
+    }
+
+    selectLabel.classList.remove("full-row")
+    selectLabel.classList.add("provider-select-label")
+
+    let button = document.getElementById("newProviderFromRequestBtn")
+    if (!button) {
+      button = document.createElement("button")
+      button.id = "newProviderFromRequestBtn"
+      button.type = "button"
+    }
+    button.className = "provider-plus-btn"
+    button.textContent = "+"
+    button.title = "Crear proveedor sin salir de la solicitud"
+    button.setAttribute("aria-label", "Crear proveedor sin salir de la solicitud")
+    if (button.parentElement !== shell) shell.appendChild(button)
+
+    let hint = document.getElementById("newProviderPermissionHint")
+    if (!hint) {
+      hint = document.createElement("span")
+      hint.id = "newProviderPermissionHint"
+    }
+    hint.className = "provider-quick-hint"
+    if (hint.parentElement !== shell) shell.appendChild(hint)
+
+    return shell
   }
 
   function prepareVisitAssociationPlaceholder(section) {
@@ -154,19 +204,22 @@
     if (!grid) return
     grid.innerHTML = `
       <label class="full-row">Visita / Incidencia asociada
-        <select id="requestVisitIncidentPlaceholder" class="form-control" disabled>
-          <option>Modelo de visitas/incidencias pendiente de conexion</option>
+        <select id="requestVisitIncidentId" class="form-control">
+          <option value="">Sin visita/incidencia asociada</option>
+          <option value="" disabled>Cargando visitas/incidencias...</option>
         </select>
       </label>
-      <div class="visit-context-placeholder full-row">
+      <div id="requestVisitIncidentSummary" class="visit-context-placeholder full-row">
         <strong>Asociacion opcional, no requerida para guardar.</strong>
-        <span>La solicitud podra vincularse a una visita/evento cuando exista soporte backend. Por ahora el pago se registra normal y esta relacion queda como pendiente funcional.</span>
+        <span>Selecciona una visita/incidencia si este pago corresponde a un cargo registrado en Ingresos e incidencias. La referencia se guardara en notas de la solicitud.</span>
       </div>
     `
+    loadVisitIncidentOptions()
   }
 
   function bindEvents() {
     document.getElementById("newProviderFromRequestBtn")?.addEventListener("click", openQuickProviderModal)
+    document.getElementById("requestVisitIncidentId")?.addEventListener("change", renderVisitIncidentSummaryFromSelection)
     dom.proveedorId?.addEventListener("change", renderProviderSummary)
     dom.providerSearch?.addEventListener("input", scheduleProviderResultsOpen)
     dom.providerSearch?.addEventListener("focus", scheduleProviderResultsOpen)
@@ -177,6 +230,7 @@
     dom.requestForm?.addEventListener("submit", () => {
       if (!canApprove() && dom.isExtraordinaryAdjustment) dom.isExtraordinaryAdjustment.checked = false
     }, true)
+    dom.requestForm?.addEventListener("submit", attachVisitIncidentToNotes, true)
   }
 
   function scheduleProviderResultsOpen() {
@@ -262,6 +316,121 @@
         section.insertAdjacentHTML("beforeend", `<div class="decision-note neutral" data-requester-decision-note>Las acciones de aprobacion solo estan disponibles para usuarios autorizados. Esta vista queda como consulta de la solicitud.</div>`)
       }
     })
+  }
+
+  async function loadVisitIncidentOptions() {
+    const select = document.getElementById("requestVisitIncidentId")
+    if (!select) return
+
+    try {
+      const [incidentsResult, membersResult] = await Promise.all([
+        client
+          .from("incident_charges")
+          .select("id,member_id,external_name,description,amount,incident_date,status")
+          .order("incident_date", { ascending: false })
+          .limit(100),
+        client
+          .from("members")
+          .select("id,full_name")
+          .eq("active", true),
+      ])
+
+      if (incidentsResult.error) throw incidentsResult.error
+
+      state.visitMembersById = new Map((membersResult.data || []).map((member) => [member.id, member.full_name]))
+      state.visitIncidents = incidentsResult.data || []
+
+      select.innerHTML = `<option value="">Sin visita/incidencia asociada</option>`
+      state.visitIncidents.forEach((incident) => {
+        const option = document.createElement("option")
+        option.value = incident.id
+        option.textContent = visitIncidentOptionLabel(incident)
+        select.appendChild(option)
+      })
+
+      if (!state.visitIncidents.length) {
+        renderVisitIncidentSummary("warning", "No hay visitas/incidencias disponibles.", "Crea primero una visita/incidencia en Ingresos e incidencias o guarda la solicitud sin asociarla.")
+        return
+      }
+
+      renderVisitIncidentSummary("neutral", "Asociacion opcional, no requerida para guardar.", "Selecciona una visita/incidencia si este pago corresponde a un cargo registrado. La referencia se guardara en notas de la solicitud.")
+    } catch (error) {
+      state.visitIncidents = []
+      select.innerHTML = `<option value="">Sin visita/incidencia asociada</option>`
+      renderVisitIncidentSummary("error", "No se pudieron cargar visitas/incidencias.", visitIncidentFriendlyError(error))
+    }
+  }
+
+  function renderVisitIncidentSummaryFromSelection() {
+    const incident = selectedVisitIncident()
+    if (!incident) {
+      renderVisitIncidentSummary("neutral", "Asociacion opcional, no requerida para guardar.", "Selecciona una visita/incidencia si este pago corresponde a un cargo registrado. La referencia se guardara en notas de la solicitud.")
+      return
+    }
+
+    renderVisitIncidentSummary(
+      "success",
+      "Visita/incidencia vinculada a esta solicitud.",
+      `${visitIncidentReceiverName(incident)} | ${formatDate(incident.incident_date)} | ${formatCurrency(incident.amount)} | ${incidentStatusLabel(incident.status)}`
+    )
+  }
+
+  function renderVisitIncidentSummary(type, title, text) {
+    const summary = document.getElementById("requestVisitIncidentSummary")
+    if (!summary) return
+    summary.classList.remove("success", "warning", "error")
+    if (type && type !== "neutral") summary.classList.add(type)
+    summary.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`
+  }
+
+  function selectedVisitIncident() {
+    const id = document.getElementById("requestVisitIncidentId")?.value || ""
+    if (!id) return null
+    return state.visitIncidents.find((incident) => incident.id === id) || null
+  }
+
+  function attachVisitIncidentToNotes() {
+    const notes = document.getElementById("notes")
+    if (!notes) return
+
+    const cleanNotes = String(notes.value || "").replace(/\n?\[Visita\/incidencia asociada:[^\]]+\]/g, "").trim()
+    const incident = selectedVisitIncident()
+    if (!incident) {
+      notes.value = cleanNotes
+      return
+    }
+
+    const marker = `[Visita/incidencia asociada: ${incident.id} - ${visitIncidentOptionLabel(incident)}]`
+    notes.value = [cleanNotes, marker].filter(Boolean).join("\n")
+  }
+
+  function visitIncidentOptionLabel(incident) {
+    return [
+      formatDate(incident.incident_date),
+      visitIncidentReceiverName(incident),
+      incident.description || "Sin descripcion",
+      formatCurrency(incident.amount),
+      incidentStatusLabel(incident.status),
+    ].filter(Boolean).join(" | ")
+  }
+
+  function visitIncidentReceiverName(incident) {
+    if (!incident) return "Sin receptor"
+    if (incident.member_id) return state.visitMembersById.get(incident.member_id) || "Socio"
+    return incident.external_name || "Externo"
+  }
+
+  function incidentStatusLabel(status) {
+    const labels = { open: "Abierta", invoiced: "Facturada", paid: "Pagada", cancelled: "Cancelada" }
+    return labels[status] || status || "Sin estatus"
+  }
+
+  function visitIncidentFriendlyError(error) {
+    const message = error?.message || String(error || "Error desconocido")
+    if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
+      return "No tienes permiso para consultar visitas/incidencias. Puedes guardar la solicitud sin asociarla."
+    }
+    return "Puedes guardar la solicitud sin asociarla y revisar el modulo de Ingresos e incidencias despues."
   }
 
   async function renderProviderSummary() {
@@ -483,6 +652,18 @@
 
   function value(id) {
     return String(document.getElementById(id)?.value || "").trim()
+  }
+
+  function formatCurrency(value) {
+    const amount = Number(value || 0)
+    return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number.isFinite(amount) ? amount : 0)
+  }
+
+  function formatDate(value) {
+    if (!value) return "Sin fecha"
+    const date = new Date(`${String(value).slice(0, 10)}T00:00:00`)
+    if (Number.isNaN(date.getTime())) return String(value)
+    return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date)
   }
 
   function destinationTypeLabel(type) {
