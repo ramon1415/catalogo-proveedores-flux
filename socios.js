@@ -275,41 +275,41 @@ function showMemberHistory(memberId) {
 
   dom.historyTitle.textContent = `Historial - ${member.full_name}`
   dom.historyContent.innerHTML = `
-    <div class="detail-grid">
+    <div class="detail-grid history-summary-grid">
       ${detailCard("Cuotas esperadas", formatCurrency(balance.expected))}
       ${detailCard("Cuotas pagadas", formatCurrency(balance.paid))}
       ${detailCard("Saldo pendiente", formatCurrency(balance.pending))}
-      ${detailCard("Incidencias abiertas", `${balance.openIncidents}`)}
-      ${detailCard("Incidencias pagadas", `${balance.paidIncidents}`)}
+      ${detailCard("Visitas/incidencias abiertas", `${balance.openIncidents}`)}
+      ${detailCard("Visitas/incidencias pagadas", `${balance.paidIncidents}`)}
       ${detailCard("Facturas pendientes", `${balance.pendingInvoices}`)}
     </div>
-    ${historyTable("Cuotas", ["Periodo", "Esperado", "Pagado", "Pendiente", "Estatus"], charges.map((charge) => [
+    ${historyTable("Cuotas", "Cuotas de mantenimiento esperadas y avance de cobro.", "Sin cuotas registradas.", ["Periodo", "Esperado", "Pagado", "Pendiente", "Estatus"], charges.map((charge) => [
       periodLabel(charge.billing_period_id),
       formatCurrency(charge.expected_amount),
       formatCurrency(charge.paid_amount),
       formatCurrency(charge.pending_amount),
-      chargeStatusLabel(charge.status),
+      statusPill(charge.status, chargeStatusLabel(charge.status)),
     ]))}
-    ${historyTable("Pagos", ["Fecha", "Monto", "Metodo", "Referencia", "Notas"], payments.map((payment) => [
+    ${historyTable("Pagos", "Pagos registrados contra cuotas de mantenimiento.", "Sin pagos registrados.", ["Fecha", "Monto", "Metodo", "Referencia", "Notas"], payments.map((payment) => [
       formatDate(payment.payment_date || payment.created_at),
       formatCurrency(payment.amount_paid),
       payment.payment_method || "Sin metodo",
       payment.bank_reference || "Sin referencia",
       payment.notes || "Sin notas",
     ]))}
-    ${historyTable("Incidencias", ["Fecha", "Descripcion", "Monto", "Estatus", "Factura"], incidents.map((incident) => [
+    ${historyTable("Visitas / Incidencias", "Registro actual de visitas/incidencias. En la siguiente fase estas agruparan pagos asociados.", "Sin visitas/incidencias registradas.", ["Fecha", "Descripcion", "Monto actual", "Estatus", "Factura"], incidents.map((incident) => [
       formatDate(incident.incident_date),
       incident.description || "Sin descripcion",
       formatCurrency(incident.amount),
-      incidentStatusLabel(incident.status),
+      statusPill(incident.status, incidentStatusLabel(incident.status)),
       invoiceLabel(incident.invoice_id),
     ]))}
-    ${historyTable("Facturas", ["Folio", "Tipo", "Monto", "Emision", "Estatus", "Pago"], invoices.map((invoice) => [
+    ${historyTable("Facturas", "Facturas emitidas o vinculadas al socio.", "Sin facturas registradas.", ["Folio", "Tipo", "Monto", "Emision", "Estatus", "Pago"], invoices.map((invoice) => [
       invoice.series_folio || invoice.fiscal_uuid || "Sin folio",
-      invoice.invoice_type === "incident" ? "Incidencia" : "Cuota",
+      invoice.invoice_type === "incident" ? "Visita/incidencia" : "Cuota",
       formatCurrency(invoice.amount),
       formatDate(invoice.issue_date),
-      invoiceStatusLabel(invoice.status),
+      statusPill(invoice.status, invoiceStatusLabel(invoice.status)),
       formatDate(invoice.payment_date),
     ]))}
   `
@@ -353,23 +353,48 @@ function memberInvoices(memberId) {
   return state.invoices.filter((invoice) => invoice.member_id === memberId || chargeIds.has(invoice.charge_id) || incidentIds.has(invoice.incident_charge_id))
 }
 
-function historyTable(title, columns, rows) {
-  if (!rows.length) return `<div class="panel-card" style="padding:14px;"><div class="section-title">${escapeHtml(title)}</div><div class="empty-state"><strong>Sin registros.</strong></div></div>`
+function historyTable(title, description, emptyMessage, columns, rows) {
+  if (!rows.length) {
+    return `
+      <section class="panel-card history-section">
+        <div class="history-section-header">
+          <div class="section-title">${escapeHtml(title)}</div>
+          <p>${escapeHtml(description || "")}</p>
+        </div>
+        <div class="empty-state compact"><strong>${escapeHtml(emptyMessage || "Sin registros.")}</strong></div>
+      </section>
+    `
+  }
   return `
-    <div class="panel-card">
-      <div style="padding:14px 14px 0;"><div class="section-title">${escapeHtml(title)}</div></div>
-      <div class="table-wrapper" style="max-height:260px;min-height:auto;">
-        <table style="min-width:760px;">
+    <section class="panel-card history-section">
+      <div class="history-section-header">
+        <div class="section-title">${escapeHtml(title)}</div>
+        <p>${escapeHtml(description || "")}</p>
+      </div>
+      <div class="table-wrapper history-table-wrapper">
+        <table class="history-table">
           <thead><tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+          <tbody>${rows.map((row) => `<tr>${row.map(historyCell).join("")}</tr>`).join("")}</tbody>
         </table>
       </div>
-    </div>
+    </section>
   `
 }
 
+function historyCell(cell) {
+  if (cell && typeof cell === "object" && "html" in cell) return `<td>${cell.html}</td>`
+  return `<td>${escapeHtml(displayValue(cell))}</td>`
+}
+
+function statusPill(status, label) {
+  const good = ["paid", "closed", "approved"].includes(status)
+  const bad = ["cancelled", "rejected"].includes(status)
+  const klass = good ? "good" : bad ? "bad" : "warn"
+  return { html: `<span class="badge ${klass}">${escapeHtml(label || status || "Sin estatus")}</span>` }
+}
+
 function detailCard(label, value) {
-  return `<div class="detail-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+  return `<div class="detail-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(displayValue(value))}</strong></div>`
 }
 
 function periodLabel(id) {
@@ -380,6 +405,11 @@ function periodLabel(id) {
 function invoiceLabel(id) {
   const invoice = byId(state.invoices, id)
   return invoice ? (invoice.series_folio || invoice.fiscal_uuid || invoice.status || "Factura") : "Sin factura"
+}
+
+function displayValue(value) {
+  if (value === null || value === undefined || value === "" || Number.isNaN(value)) return "-"
+  return String(value)
 }
 
 function chargeStatusLabel(status) {
