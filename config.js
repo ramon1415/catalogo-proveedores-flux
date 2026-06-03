@@ -100,6 +100,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
         return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
       })
       .join("")
+    markShellReady()
   }
 
   function applyBranding() {
@@ -157,6 +158,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       applyBranding()
       applyPostLoginRedirect()
       enforcePageVisibility()
+      markShellReady()
       document.dispatchEvent(new CustomEvent("flux:roles-ready", { detail: roleState }))
     })
   }
@@ -280,6 +282,10 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     return String(value || "").trim().toLowerCase()
   }
 
+  function markShellReady() {
+    document.body?.classList.add("flux-shell-ready")
+  }
+
   const loadedExtensions = new Set()
 
   function loadExtension(src, key) {
@@ -313,7 +319,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./cash_flow_extension.js?v=20260602-ux1", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-search", "solicitudes-ux1")
+      loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-live-visits", "solicitudes-ux1")
       loadExtension("./solicitudes_workboard_extension.js?v=20260602-ux1", "solicitudes-workboard")
     }
     if (pageName === "layouts.html") {
