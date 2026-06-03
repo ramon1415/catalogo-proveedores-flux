@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
 </head>
 <body>
   <div class="app-shell">
@@ -42,14 +42,14 @@
         </div>
 
         <div class="notice">
-          Esta pantalla concentra pagos confirmados y comprobaciones. La carga real de comprobante de transferencia queda pendiente de integracion si no existe soporte de archivo en la tabla actual.
+          Esta pantalla separa transferencias, entregas de efectivo/cheque y comprobaciones. Una solicitud de efectivo aprobada sin fondo aparece como pendiente por entregar, no como transferencia.
         </div>
 
         <section class="stats-grid">
           <button class="stat-card success" type="button" data-filter="confirmed"><p>Pagos confirmados</p><strong id="confirmedCount">0</strong></button>
-          <button class="stat-card warning" type="button" data-filter="pending_receipt"><p>Pendientes comprobante</p><strong id="pendingReceiptCount">0</strong></button>
-          <button class="stat-card info" type="button" data-filter="transfer"><p>Transferencias</p><strong id="transferCount">0</strong></button>
-          <button class="stat-card" type="button" data-filter="cash"><p>Efectivo / cheques</p><strong id="cashCount">0</strong></button>
+          <button class="stat-card warning" type="button" data-filter="pending_confirmation"><p>Pendientes por confirmar</p><strong id="pendingConfirmationCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="pending_delivery"><p>Pendientes por entregar</p><strong id="pendingDeliveryCount">0</strong></button>
+          <button class="stat-card" type="button" data-filter="pending_receipt"><p>Pendientes de comprobacion</p><strong id="pendingReceiptCount">0</strong></button>
           <button class="stat-card danger" type="button" data-filter="review"><p>En revision</p><strong id="reviewCount">0</strong></button>
         </section>
 
@@ -65,7 +65,9 @@
             <select id="statusFilter">
               <option value="all">Estatus: Todos</option>
               <option value="confirmed">Confirmado</option>
-              <option value="pending_receipt">Pendiente comprobante</option>
+              <option value="pending_confirmation">Pendiente por confirmar</option>
+              <option value="pending_delivery">Pendiente por entregar</option>
+              <option value="pending_reconciliation">Pendiente de comprobacion</option>
               <option value="review">En revision</option>
               <option value="closed">Cerrado</option>
             </select>
@@ -76,17 +78,19 @@
               <thead>
                 <tr>
                   <th>Tipo</th>
-                  <th>Proveedor / responsable</th>
+                  <th>Solicitud / Folio</th>
+                  <th>Proveedor</th>
+                  <th>Responsable gasto</th>
                   <th>Empresa</th>
                   <th>Monto</th>
-                  <th>Fecha pago</th>
-                  <th>Estatus</th>
+                  <th>Fecha</th>
+                  <th>Etapa</th>
                   <th>Comprobante</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="paymentsTableBody">
-                <tr><td colspan="8" class="empty-state"><strong>Cargando pagos...</strong></td></tr>
+                <tr><td colspan="10" class="empty-state"><strong>Cargando pagos...</strong></td></tr>
               </tbody>
             </table>
           </div>
@@ -112,6 +116,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
-  <script src="./pagos_comprobaciones.js"></script>
+  <script src="./pagos_comprobaciones.js?v=20260603-cash-payments-ux"></script>
+  <script src="./pagos_comprobaciones_cash_ux.js?v=20260603-cash-payments-ux"></script>
 </body>
 </html>
