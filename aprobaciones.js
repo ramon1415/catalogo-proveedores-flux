@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", init)
 
 async function init() {
   cacheDom()
+  installApprovalKanbanStyles()
   bindEvents()
   applyTheme()
   await resolveUser()
@@ -87,6 +88,7 @@ function bindEvents() {
     if (!button) return
     const requestId = button.dataset.id
     if (button.dataset.action === "detail") openDetail(requestId)
+    if (button.dataset.action === "quick-decision") handleQuickDecision(requestId, button.dataset.decision)
   })
   dom.decisionActions?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-decision]")
@@ -95,6 +97,32 @@ function bindEvents() {
   })
   document.getElementById("closeDetailBtn")?.addEventListener("click", closeDetail)
   document.getElementById("closeDetailFooterBtn")?.addEventListener("click", closeDetail)
+}
+
+function installApprovalKanbanStyles() {
+  if (document.getElementById("approvalKanbanStyles")) return
+  const style = document.createElement("style")
+  style.id = "approvalKanbanStyles"
+  style.textContent = `
+    .approval-kanban{display:grid;grid-template-columns:repeat(5,minmax(260px,1fr));gap:12px;overflow:auto;padding:14px;min-height:420px;max-height:calc(100vh - 330px)}
+    .approval-column{border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.018);display:flex;flex-direction:column;min-height:360px;max-height:calc(100vh - 360px);overflow:hidden}
+    .approval-column header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:13px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.018)}
+    .approval-column header strong{display:block;color:var(--text-1);font-size:13px}
+    .approval-column header span{display:block;color:var(--text-3);font-size:11.5px;margin-top:2px}
+    .approval-column header em{min-width:26px;height:26px;border-radius:999px;display:grid;place-items:center;background:var(--bg-hover);color:var(--text-2);font-style:normal;font-weight:800}
+    .approval-column-body{display:flex;flex-direction:column;gap:10px;overflow:auto;padding:10px}
+    .approval-card{border:1px solid var(--border);border-radius:13px;background:var(--bg-card);padding:12px;display:grid;gap:10px}
+    .approval-card-top,.approval-card-actions,.approval-card-badges{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .approval-card-top strong,.approval-card-main strong{display:block;color:var(--text-1);font-size:13px}
+    .approval-card-top span,.approval-card-main span{display:block;color:var(--text-3);font-size:11px;margin-top:2px}
+    .approval-card-grid{display:grid;grid-template-columns:72px 1fr;gap:4px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:9px 0}
+    .approval-card-grid span{color:var(--text-3);font-size:10px;text-transform:uppercase;font-weight:800;letter-spacing:.45px}
+    .approval-card-grid strong{color:var(--text-2);font-size:11.5px;font-weight:700}
+    .approval-card-actions{justify-content:flex-start}
+    .kanban-empty{border:1px dashed var(--border-strong);border-radius:12px;padding:18px 12px;text-align:center;color:var(--text-3);font-size:12px}
+    @media(max-width:1280px){.approval-kanban{grid-template-columns:repeat(5,280px)}}
+  `
+  document.head.appendChild(style)
 }
 
 function applyTheme() {
@@ -114,7 +142,7 @@ async function resolveUser() {
 }
 
 async function loadData() {
-  dom.tableBody.innerHTML = `<tr><td colspan="9" class="empty-state"><strong>Cargando aprobaciones...</strong></td></tr>`
+  dom.tableBody.innerHTML = `<div class="empty-state"><strong>Cargando aprobaciones...</strong></div>`
   try {
     const [
       requestsResult,
@@ -148,7 +176,7 @@ async function loadData() {
     renderStats()
     renderTable()
   } catch (error) {
-    dom.tableBody.innerHTML = `<tr><td colspan="9" class="empty-state"><strong>No se pudieron cargar aprobaciones</strong>${escapeHtml(friendlyError(error))}</td></tr>`
+    dom.tableBody.innerHTML = `<div class="empty-state"><strong>No se pudieron cargar aprobaciones</strong>${escapeHtml(friendlyError(error))}</div>`
     showToast("No se pudo cargar", friendlyError(error), "error")
   }
 }
@@ -158,7 +186,7 @@ function approvalRows() {
   return state.requests.filter((request) => {
     if (["paid", "cancelled"].includes(request.status)) return false
     if (isPending(request) || isException(request) || isChanges(request)) return true
-    if (request.status === "approved") {
+    if (request.status === "approved" || request.status === "rejected") {
       const dateValue = new Date(request.updated_at || request.created_at).getTime()
       return Number.isNaN(dateValue) || dateValue >= cutoff
     }
@@ -203,29 +231,105 @@ function renderTable() {
       matchesQuickFilter(request)
   })
 
+  renderKanban(rows)
+}
+
+function renderKanban(rows) {
+  const columns = approvalColumns().map((column) => ({
+    ...column,
+    rows: rows.filter((request) => columnForRequest(request) === column.key),
+  }))
+
   if (!rows.length) {
-    dom.tableBody.innerHTML = `<tr><td colspan="9" class="empty-state"><strong>No hay solicitudes para esta vista.</strong>Cambia filtros o presiona Ver todas.</td></tr>`
+    dom.tableBody.innerHTML = `<div class="empty-state"><strong>No hay solicitudes para esta vista.</strong>Cambia filtros o presiona Ver todas.</div>`
     return
   }
 
-  dom.tableBody.innerHTML = rows.map((request) => {
-    const provider = byId(state.providers, request.proveedor_id)
-    const company = byId(state.companies, request.company_id)
-    const category = byId(state.categories, request.budget_category_id)
-    return `
-      <tr>
-        <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong><span class="muted-line">${escapeHtml(formatDate(request.created_at))}</span></td>
-        <td>${typeBadge(request.request_type)}</td>
-        <td><strong>${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</strong><span class="muted-line">${escapeHtml(provider?.rfc || "")}</span></td>
-        <td>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</td>
-        <td><strong>${escapeHtml(category?.code || "")}</strong><span class="muted-line">${escapeHtml(category?.name || category?.category || "Sin partida")}</span></td>
-        <td><strong>${formatCurrency(request.amount_requested, request.currency)}</strong></td>
-        <td>${statusBadge(request.status)}</td>
-        <td>${budgetBadge(request)}</td>
-        <td><div class="actions"><button class="small-btn" type="button" data-action="detail" data-id="${escapeHtml(request.id)}">Ver detalle</button></div></td>
-      </tr>
-    `
-  }).join("")
+  dom.tableBody.innerHTML = columns.map((column) => `
+    <section class="approval-column ${escapeHtml(column.key)}">
+      <header>
+        <div>
+          <strong>${escapeHtml(column.title)}</strong>
+          <span>${escapeHtml(column.description)}</span>
+        </div>
+        <em>${column.rows.length}</em>
+      </header>
+      <div class="approval-column-body">
+        ${column.rows.length ? column.rows.map(renderApprovalCard).join("") : `<div class="kanban-empty">Sin solicitudes en esta etapa.</div>`}
+      </div>
+    </section>
+  `).join("")
+}
+
+function approvalColumns() {
+  return [
+    { key: "pending", title: "Por aprobar", description: "Solicitudes listas para decision." },
+    { key: "changes", title: "Cambios solicitados", description: "Requieren ajuste del solicitante." },
+    { key: "exceptions", title: "Excepcion presupuestal", description: "Requieren criterio del aprobador." },
+    { key: "approved", title: "Aprobadas recientemente", description: "Ya tienen decision aprobada." },
+    { key: "closed", title: "Rechazadas / cerradas", description: "Decisiones no aprobadas recientes." },
+  ]
+}
+
+function columnForRequest(request) {
+  if (request.status === "approved") return "approved"
+  if (request.status === "rejected" || request.status === "cancelled") return "closed"
+  if (isChanges(request)) return "changes"
+  if (isException(request)) return "exceptions"
+  return "pending"
+}
+
+function renderApprovalCard(request) {
+  const provider = byId(state.providers, request.proveedor_id)
+  const company = byId(state.companies, request.company_id)
+  const center = byId(state.centers, request.cost_center_id)
+  const category = byId(state.categories, request.budget_category_id)
+  const canAct = state.canApprove && !["approved", "rejected", "paid", "cancelled"].includes(request.status)
+  return `
+    <article class="approval-card" data-id="${escapeHtml(request.id)}">
+      <div class="approval-card-top">
+        <div>
+          <strong>${escapeHtml(request.request_number || "Sin folio")}</strong>
+          <span>${escapeHtml(formatDate(request.created_at))}</span>
+        </div>
+        ${typeBadge(request.request_type)}
+      </div>
+      <div class="approval-card-main">
+        <strong>${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</strong>
+        <span>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</span>
+      </div>
+      <div class="approval-card-grid">
+        <span>Centro</span><strong>${escapeHtml(center?.name || center?.code || "Sin centro")}</strong>
+        <span>Partida</span><strong>${escapeHtml([category?.code, category?.name || category?.category].filter(Boolean).join(" - ") || "Sin partida")}</strong>
+        <span>Monto</span><strong>${formatCurrency(request.amount_requested, request.currency)}</strong>
+      </div>
+      <div class="approval-card-badges">
+        ${statusBadge(request.status)}
+        ${budgetBadge(request)}
+        ${request.incident_charge_id ? `<span class="badge info">Visita asociada</span>` : ""}
+      </div>
+      <div class="approval-card-actions">
+        <button class="small-btn" type="button" data-action="detail" data-id="${escapeHtml(request.id)}">Ver detalle</button>
+        ${canAct ? `
+          <button class="small-btn success" type="button" data-action="quick-decision" data-decision="approved" data-id="${escapeHtml(request.id)}">Aprobar</button>
+          <button class="small-btn danger" type="button" data-action="quick-decision" data-decision="rejected" data-id="${escapeHtml(request.id)}">Rechazar</button>
+          <button class="small-btn warning" type="button" data-action="quick-decision" data-decision="changes_requested" data-id="${escapeHtml(request.id)}">Solicitar cambios</button>
+        ` : ""}
+      </div>
+    </article>
+  `
+}
+
+function handleQuickDecision(requestId, action) {
+  state.currentRequestId = requestId
+  if (requiresComment(action)) {
+    openDetail(requestId)
+    dom.decisionComments.focus()
+    dom.decisionError.textContent = "Captura un comentario para registrar esta decision."
+    dom.decisionError.classList.remove("hidden")
+    return
+  }
+  decideRequest(action)
 }
 
 function matchesQuickFilter(request) {
