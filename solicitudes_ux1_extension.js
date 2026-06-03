@@ -44,8 +44,13 @@
       .provider-actions-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
       .request-provider-select{min-height:88px}
       .request-provider-select.provider-live-results{min-height:158px}
+      #quickProviderDialog{width:min(720px,calc(100vw - 28px));max-width:720px;margin:auto 20px auto auto}
+      #quickProviderDialog .modal-content{max-height:90vh;overflow:auto}
       .quick-provider-destination{display:none}
       .quick-provider-destination.visible{display:block}
+      .visit-context-placeholder{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:rgba(255,255,255,.018);display:grid;gap:6px;color:var(--text-2)}
+      .visit-context-placeholder strong{color:var(--text-1)}
+      .visit-context-placeholder span{font-size:12px;color:var(--text-3)}
     `
     document.head.appendChild(style)
   }
@@ -62,6 +67,7 @@
 
     const providerSection = createSection("requestProviderSection", "Proveedor / beneficiario", "Selecciona el proveedor de forma independiente al presupuesto.")
     const budgetSection = createSection("requestBudgetSection", "Clasificacion presupuestal", "Empresa, centro de costo, partida y mes para validar presupuesto.")
+    const visitContextSection = createSection("requestVisitContextSection", "Contexto operativo", "Campo opcional para relacionar el pago con una visita o incidencia cuando el modelo quede activo.")
     const paymentGrid = paymentSection.querySelector(".form-grid")
     const providerGrid = providerSection.querySelector(".form-grid")
     const budgetGrid = budgetSection.querySelector(".form-grid")
@@ -75,11 +81,13 @@
 
     paymentSection.insertAdjacentElement("afterend", providerSection)
     providerSection.insertAdjacentElement("afterend", budgetSection)
+    budgetSection.insertAdjacentElement("afterend", visitContextSection)
+    prepareVisitAssociationPlaceholder(visitContextSection)
 
     const layoutDetails = document.getElementById("requestLayoutDetails")
     const cashSection = document.getElementById("cashCheckSection")
-    if (layoutDetails) budgetSection.insertAdjacentElement("afterend", layoutDetails)
-    if (cashSection) (layoutDetails || budgetSection).insertAdjacentElement("afterend", cashSection)
+    if (layoutDetails) visitContextSection.insertAdjacentElement("afterend", layoutDetails)
+    if (cashSection) (layoutDetails || visitContextSection).insertAdjacentElement("afterend", cashSection)
 
     financialSection?.classList.add("hidden")
     descriptionSection?.classList.add("hidden")
@@ -139,6 +147,24 @@
     renderProviderSummary()
   }
 
+  function prepareVisitAssociationPlaceholder(section) {
+    if (!section || section.dataset.visitReady === "true") return
+    section.dataset.visitReady = "true"
+    const grid = section.querySelector(".form-grid")
+    if (!grid) return
+    grid.innerHTML = `
+      <label class="full-row">Visita / Incidencia asociada
+        <select id="requestVisitIncidentPlaceholder" class="form-control" disabled>
+          <option>Modelo de visitas/incidencias pendiente de conexion</option>
+        </select>
+      </label>
+      <div class="visit-context-placeholder full-row">
+        <strong>Asociacion opcional, no requerida para guardar.</strong>
+        <span>La solicitud podra vincularse a una visita/evento cuando exista soporte backend. Por ahora el pago se registra normal y esta relacion queda como pendiente funcional.</span>
+      </div>
+    `
+  }
+
   function bindEvents() {
     document.getElementById("newProviderFromRequestBtn")?.addEventListener("click", openQuickProviderModal)
     dom.proveedorId?.addEventListener("change", renderProviderSummary)
@@ -154,6 +180,9 @@
   }
 
   function scheduleProviderResultsOpen() {
+    if (typeof window.renderProveedorOptions === "function") {
+      window.renderProveedorOptions(dom.providerSearch?.value || "")
+    }
     window.setTimeout(openProviderResultsFromCurrentOptions, 0)
   }
 
@@ -258,14 +287,17 @@
   }
 
   function ensureQuickProviderDialog() {
-    if (document.getElementById("quickProviderDialog")) return
+    if (document.getElementById("quickProviderDialog")) {
+      upgradeQuickProviderDialog()
+      return
+    }
     document.body.insertAdjacentHTML("beforeend", `
       <dialog id="quickProviderDialog">
         <form id="quickProviderForm" class="modal-content">
           <div class="modal-header">
             <div>
               <h2>Nuevo proveedor</h2>
-              <p>Captura los datos minimos para usarlo en esta solicitud.</p>
+              <p>Alta rapida sin salir de la solicitud.</p>
             </div>
             <button type="button" class="icon-btn" data-close-quick-provider>x</button>
           </div>
@@ -289,11 +321,14 @@
               </select>
             </label>
             <label>Beneficiario para layout<input id="quickProviderBeneficiary" class="form-control"></label>
+            <label>RFC<input id="quickProviderRfc" class="form-control"></label>
+            <label>Telefono<input id="quickProviderPhone" class="form-control"></label>
+            <label class="full-row">Email<input id="quickProviderEmail" class="form-control" type="email"></label>
             <label class="quick-provider-destination" data-quick-bank>Banco<input id="quickProviderBank" class="form-control"></label>
             <label class="quick-provider-destination" data-quick-destination="clabe">CLABE<input id="quickProviderClabe" class="form-control" maxlength="18"></label>
             <label class="quick-provider-destination" data-quick-destination="cuenta">Cuenta bancaria<input id="quickProviderAccount" class="form-control"></label>
             <label class="quick-provider-destination" data-quick-destination="convenio">Numero de convenio<input id="quickProviderConvenio" class="form-control"></label>
-            <label class="full-row">RFC<input id="quickProviderRfc" class="form-control"></label>
+            <label class="full-row">Notas<textarea id="quickProviderNotes" class="form-control"></textarea></label>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary-btn" data-close-quick-provider>Cancelar</button>
@@ -306,7 +341,50 @@
     document.getElementById("quickProviderDestinationType")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderPaymentMethod")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderForm")?.addEventListener("submit", saveQuickProvider)
+    document.getElementById("quickProviderForm").dataset.ux1Bound = "true"
+    upgradeQuickProviderDialog()
     updateQuickProviderDestinationFields()
+  }
+
+  function upgradeQuickProviderDialog() {
+    const dialog = document.getElementById("quickProviderDialog")
+    const form = document.getElementById("quickProviderForm")
+    const grid = form?.querySelector(".form-grid")
+    if (!dialog || !form || !grid) return
+    dialog.style.width = "min(720px, calc(100vw - 28px))"
+    dialog.style.maxWidth = "720px"
+    dialog.style.margin = "auto 20px auto auto"
+    form.style.maxHeight = "90vh"
+    form.style.overflow = "auto"
+    const subtitle = form.querySelector(".modal-header p")
+    if (subtitle) subtitle.textContent = "Alta rapida sin salir de la solicitud."
+    insertQuickField("quickProviderRfc", "RFC", "input", { beforeId: "quickProviderBank" })
+    insertQuickField("quickProviderPhone", "Telefono", "input", { beforeId: "quickProviderBank" })
+    insertQuickField("quickProviderEmail", "Email", "input", { beforeId: "quickProviderBank", fullRow: true, type: "email" })
+    insertQuickField("quickProviderNotes", "Notas", "textarea", { fullRow: true })
+    if (form.dataset.ux1Bound !== "true") {
+      form.dataset.ux1Bound = "true"
+      document.querySelectorAll("[data-close-quick-provider]").forEach((button) => button.addEventListener("click", closeQuickProviderModal))
+      document.getElementById("quickProviderDestinationType")?.addEventListener("change", updateQuickProviderDestinationFields)
+      document.getElementById("quickProviderPaymentMethod")?.addEventListener("change", updateQuickProviderDestinationFields)
+      form.addEventListener("submit", saveQuickProvider)
+    }
+  }
+
+  function insertQuickField(id, label, tag, options = {}) {
+    if (document.getElementById(id)) return
+    const grid = document.getElementById("quickProviderForm")?.querySelector(".form-grid")
+    if (!grid) return
+    const wrapper = document.createElement("label")
+    if (options.fullRow) wrapper.className = "full-row"
+    wrapper.append(document.createTextNode(label))
+    const control = document.createElement(tag)
+    control.id = id
+    control.className = "form-control"
+    if (tag === "input" && options.type) control.type = options.type
+    wrapper.append(control)
+    const before = options.beforeId ? document.getElementById(options.beforeId)?.closest("label") : null
+    grid.insertBefore(wrapper, before || null)
   }
 
   function openQuickProviderModal() {
@@ -351,6 +429,9 @@
       cuenta_bancaria: !isCash && destination === "cuenta" ? value("quickProviderAccount") : null,
       convenio_number: !isCash && destination === "convenio" ? value("quickProviderConvenio") : null,
       rfc: value("quickProviderRfc"),
+      telefono: value("quickProviderPhone") || null,
+      email: value("quickProviderEmail") || null,
+      notas: value("quickProviderNotes") || null,
       tipo_proveedor: "Servicios",
       activo: true,
       updated_at: new Date().toISOString(),
