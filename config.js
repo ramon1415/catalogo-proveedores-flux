@@ -343,7 +343,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     }
     if (pageName === "ingresos.html") {
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
-      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2", "ingresos-ux2")
+      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2-visitas", "ingresos-ux2")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
