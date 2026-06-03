@@ -52,6 +52,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   let rolePromise = null
+  installShellReadyStyles()
 
   window.FluxAuth = {
     ready: () => resolveRoleAccess(),
@@ -284,6 +285,17 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function markShellReady() {
     document.body?.classList.add("flux-shell-ready")
+  }
+
+  function installShellReadyStyles() {
+    if (document.getElementById("fluxShellReadyStyles")) return
+    const style = document.createElement("style")
+    style.id = "fluxShellReadyStyles"
+    style.textContent = `
+      body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden;opacity:0}
+      body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;transition:opacity 120ms ease}
+    `
+    document.head.appendChild(style)
   }
 
   const loadedExtensions = new Set()
