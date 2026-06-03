@@ -327,10 +327,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     const enabledPages = ["solicitudes.html", "efectivo.html", "layouts.html", "ingresos.html", "dashboard.html"]
     if (!enabledPages.includes(pageName)) return
 
-    if (["solicitudes.html", "efectivo.html", "layouts.html"].includes(pageName)) {
-      loadExtension("./cash_flow_extension.js?v=20260602-ux1", "cash-flow")
+    if (["efectivo.html", "layouts.html"].includes(pageName)) {
+      loadExtension("./cash_flow_extension.js?v=20260603-cash-ux", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
+      loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
       loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-live-visits", "solicitudes-ux1")
       loadExtension("./solicitudes_workboard_extension.js?v=20260602-ux1", "solicitudes-workboard")
     }
@@ -343,7 +344,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     }
     if (pageName === "ingresos.html") {
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
-      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2-visitas", "ingresos-ux2")
+      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2-visitas-fix", "ingresos-ux2")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
