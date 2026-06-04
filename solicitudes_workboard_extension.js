@@ -63,7 +63,7 @@
     bindEvents();
     document.addEventListener("flux:roles-ready", render);
     await loadData();
-    observeDetailLayoutReadiness();
+    patchOpenRequestDetail();
     render();
     window.setTimeout(render, 1200);
     window.setTimeout(render, 3200);
@@ -110,13 +110,7 @@
   }
 
   function ensureTypeHeader() {
-    const headerRow = document.querySelector("thead tr");
-    if (!headerRow) return;
-    const headers = Array.from(headerRow.children).map((cell) => normalize(cell.textContent));
-    if (headers.includes("tipo")) return;
-    const folioHeader = headerRow.children[0];
-    if (!folioHeader) return;
-    folioHeader.insertAdjacentHTML("afterend", "<th>Tipo</th>");
+    // no-op: el header de 6 columnas ya está definido en el HTML
   }
 
   function bindEvents() {
@@ -171,7 +165,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -202,25 +196,30 @@
     }
   }
 
-  function observeDetailLayoutReadiness() {
-    const target = document.getElementById("detailContent");
-    if (!target) return;
-    const observer = new MutationObserver(() => window.setTimeout(appendLayoutReadinessSection, 140));
-    observer.observe(target, { childList: true, subtree: false });
+  function patchOpenRequestDetail() {
+    const original = window.openRequestDetail;
+    if (!original || window._workboardDetailPatched) return;
+    window._workboardDetailPatched = true;
+    console.log("[workboard v5] patch activo");
+    window.openRequestDetail = async function(requestId) {
+      await original(requestId);
+      window.setTimeout(() => injectLayoutReadiness(requestId), 350);
+    };
   }
 
-  async function appendLayoutReadinessSection() {
+  function injectLayoutReadiness(requestId) {
+    console.log("[workboard v5] injectLayoutReadiness", requestId);
     const target = document.getElementById("detailContent");
-    if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
+    if (!target || target.querySelector("[data-layout-readiness-extension]")) {
+      console.log("[workboard v5] guard activado — ya existe la sección o no hay target");
+      return;
+    }
 
-    const requestNumber = document.getElementById("detailTitle")?.textContent?.trim();
-    const request = state.requests.find((item) => item.request_number === requestNumber);
-    if (!request || isCashOrCheck(request)) return;
-    if (/Preparacion para layout/i.test(target.textContent)) return;
-
-    const freshRequest = await fetchRequestForLayout(request.id);
-    if (!freshRequest) return;
-    Object.assign(request, freshRequest);
+    const request = state.requests.find((item) => item.id === requestId);
+    if (!request || isCashOrCheck(request)) {
+      console.log("[workboard v5] request no aplica:", request?.request_type);
+      return;
+    }
 
     const section = document.createElement("section");
     section.className = "decision-card layout-readiness-card";
@@ -231,8 +230,27 @@
     if (decisionPanel) target.insertBefore(section, decisionPanel);
     else target.appendChild(section);
 
-    section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(request.id));
-    section.querySelector("[data-edit-provider]")?.addEventListener("click", () => window.open("./proveedores.html", "_blank", "noopener"));
+    console.log("[workboard v5] sección inyectada OK, hijos de detailContent:", target.children.length);
+
+    const removalWatcher = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.removedNodes) {
+          if (node === section || node.querySelector?.("[data-layout-readiness-extension]")) {
+            console.error("[workboard v5] SECCIÓN ELIMINADA por:", new Error().stack);
+            removalWatcher.disconnect();
+          }
+        }
+        if (m.type === "childList" && m.target === target) {
+          console.log("[workboard v5] detailContent cambió — innerHTML completo reemplazado");
+        }
+      }
+    });
+    removalWatcher.observe(target, { childList: true, subtree: false });
+
+    section.addEventListener("click", (e) => {
+      if (e.target.closest("[data-open-layout-data]")) openLayoutDataEditor(requestId);
+      if (e.target.closest("[data-edit-provider]")) window.open("./proveedores.html", "_blank", "noopener");
+    });
   }
 
   async function fetchRequestForLayout(requestId) {
@@ -252,30 +270,30 @@
     const items = layoutReadinessItems(request);
     const missing = items.filter((item) => !item.complete);
     const canEdit = !["paid", "cancelled"].includes(request.status);
-    return `
-      <div class="layout-card-header">
-        <div>
-          <span class="section-kicker">Preparacion para layout</span>
-          <h3>${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</h3>
-          <p>Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</p>
-        </div>
-        <span class="layout-count ${missing.length ? "warning" : "success"}">${missing.length ? `${missing.length} pendientes` : "Completo"}</span>
-      </div>
-      <div class="layout-checklist">
-        ${items.map((item) => `
-          <div class="layout-checkitem ${item.complete ? "complete" : "missing"}">
-            <div class="layout-checktext">
-              <strong>${escapeHtml(item.label)}</strong>
-              ${item.complete ? "" : `<small>${escapeHtml(item.message)}</small>`}
-            </div>
-            <span class="layout-state ${item.complete ? "complete" : "missing"}">${item.complete ? "Completo" : "Faltante"}</span>
-          </div>
-        `).join("")}
-      </div>
-      ${(canEdit || missing.some((item) => item.source === "provider")) ? `<div class="decision-actions">
+    const progress = { done: items.length - missing.length, total: items.length };
+
+    const checkItems = items.map((item) => ({
+      ok: item.complete,
+      label: escapeHtml(item.label),
+      reason: item.complete ? null : escapeHtml(item.message),
+      actionLabel: (!item.complete && item.source === "request" && canEdit) ? "Completar" : null,
+      actionAttr: (!item.complete && item.source === "request" && canEdit) ? "data-open-layout-data" : null,
+    }));
+
+    const footer = (canEdit || missing.some((item) => item.source === "provider")) ? `
+      <div class="decision-actions" style="margin-top:12px">
         ${canEdit ? '<button type="button" class="decision-btn approve" data-open-layout-data>Completar datos para layout</button>' : ""}
         ${missing.some((item) => item.source === "provider") ? '<button type="button" class="decision-btn change" data-edit-provider>Editar proveedor</button>' : ""}
-      </div>` : ""}
+      </div>` : "";
+
+    return `
+      <div style="margin-bottom:10px">
+        <span style="display:block;font-size:10.5px;font-weight:800;letter-spacing:.65px;text-transform:uppercase;color:var(--text-3);margin-bottom:4px">Preparacion para layout</span>
+        <div style="font-size:15px;font-weight:700;color:var(--text-1);margin-bottom:4px">${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</div>
+        <div style="font-size:12.5px;color:var(--text-3)">Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</div>
+      </div>
+      ${Components.checkList({ items: checkItems, progress })}
+      ${footer}
     `;
   }
 
@@ -403,7 +421,9 @@
       closeLayoutDataEditor();
       await loadData();
       document.querySelector("[data-layout-readiness-extension]")?.remove();
-      appendLayoutReadinessSection();
+      const _reloadId = activeLayoutRequestId;
+      await loadData();
+      injectLayoutReadiness(_reloadId);
       render();
     } catch (error) {
       toast("No se pudieron guardar los datos", friendlyError(error), "error");
@@ -464,7 +484,7 @@
     if (!rows.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="12">
+          <td colspan="6">
             <div class="empty-state">
               <strong>No hay solicitudes para esta vista.</strong>
               Cambia el filtro o usa Ver todas para consultar el historico completo.
@@ -479,20 +499,43 @@
       const company = findById(state.companies, request.company_id);
       const center = findById(state.centers, request.cost_center_id);
       const category = findById(state.categories, request.budget_category_id);
+
+      const folio = escapeHtml(request.request_number || "Sin folio");
+      const extraBadge = request.is_extraordinary_adjustment ? Components.badge("Extraordinario", "violet") : "";
+      const date = escapeHtml(formatDate(request.submitted_at || request.created_at));
+      const providerAlias = escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor");
+      const empresaCentro = [company?.legal_name || company?.name, center?.name || center?.code].filter(Boolean).map(escapeHtml).join(" · ");
+      const catCode = escapeHtml(category?.code || "—");
+      const catName = escapeHtml(category?.name || "Sin partida");
+      const mes = escapeHtml(formatMonth(request.budget_month));
+      const monto = escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"));
+
       return `
         <tr>
-          <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? '<span class="badge badge-extra">Ajuste extraordinario</span>' : ""}</td>
-          <td>${renderTypeBadge(request)}</td>
-          <td>${escapeHtml(formatDate(request.submitted_at || request.created_at))}</td>
-          <td><strong>${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</strong><span class="muted-line">${escapeHtml(provider?.nombre_completo || "")}</span></td>
-          <td>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</td>
-          <td>${escapeHtml(center?.name || center?.code || "Sin centro")}</td>
-          <td><strong>${escapeHtml(category?.code || "")}</strong><span class="muted-line">${escapeHtml(category?.name || "Sin partida")}</span></td>
-          <td>${escapeHtml(formatMonth(request.budget_month))}</td>
-          <td><strong>${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</strong></td>
-          <td>${renderOperationalBadge(request)}</td>
-          <td>${renderBudgetBadge(request)}</td>
-          <td><div class="actions"><button class="small-btn" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button></div></td>
+          <td>
+            <span class="cell-main">${folio}${extraBadge}</span>
+            <span class="cell-sub">${date}</span>
+          </td>
+          <td>
+            <span class="cell-main">${providerAlias}</span>
+            <span class="cell-sub">${empresaCentro}</span>
+          </td>
+          <td>
+            <span class="cell-main">${catCode}</span>
+            <span class="cell-sub">${catName} · ${mes}</span>
+          </td>
+          <td>
+            <span class="cell-main">${monto}</span>
+          </td>
+          <td>
+            ${renderOperationalBadge(request)}
+            ${renderBudgetBadge(request)}
+          </td>
+          <td>
+            <div class="actions row-actions">
+              <button class="small-btn" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button>
+            </div>
+          </td>
         </tr>`;
     }).join("");
   }
