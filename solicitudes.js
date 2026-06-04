@@ -1,6 +1,5 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let currentSession = null;
 let currentProfileId = null;
 let paymentRequests = [];
 let companies = [];
@@ -39,11 +38,26 @@ document.addEventListener("DOMContentLoaded", initSolicitudesPage);
 
 async function initSolicitudesPage() {
   cacheDom();
-  setupTheme();
   bindEvents();
 
+  const stored = localStorage.getItem("flux-theme");
+  if (stored) html.setAttribute("data-theme", stored);
+  document.getElementById("themeToggle")?.addEventListener("click", () => {
+    const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    html.setAttribute("data-theme", next);
+    localStorage.setItem("flux-theme", next);
+  });
+
+  if (window.FluxAuth?.ready) await window.FluxAuth.ready();
+  const profile = window.FluxAuth?.getProfile?.();
+  const session  = window.FluxAuth?.state?.session;
+  if (!session) { window.location.href = "./index.html"; return; }
+
+  currentProfileId = profile?.id || null;
+  if (dom.userName)  dom.userName.textContent  = profile?.full_name || session.user?.email || "Usuario";
+  if (dom.userEmail) dom.userEmail.textContent = profile?.email || session.user?.email || "Sesion activa";
+
   try {
-    await loadSession();
     await Promise.all([
       loadCompanies(),
       loadCostCenters(),
@@ -63,7 +77,6 @@ async function initSolicitudesPage() {
 }
 
 function cacheDom() {
-  dom.themeToggle = document.getElementById("themeToggle");
   dom.userName = document.getElementById("userName");
   dom.userEmail = document.getElementById("userEmail");
   dom.logoutBtn = document.getElementById("logoutBtn");
@@ -116,19 +129,6 @@ function cacheDom() {
   dom.summaryAmount = document.getElementById("summaryAmount");
 }
 
-function setupTheme() {
-  const saved = localStorage.getItem("flux-theme");
-  if (saved) html.setAttribute("data-theme", saved);
-
-  if (dom.themeToggle) {
-    dom.themeToggle.addEventListener("click", () => {
-      const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
-      html.setAttribute("data-theme", next);
-      localStorage.setItem("flux-theme", next);
-    });
-  }
-}
-
 function bindEvents() {
   dom.logoutBtn?.addEventListener("click", logout);
   dom.newRequestBtn?.addEventListener("click", openNewRequestModal);
@@ -167,74 +167,6 @@ function bindEvents() {
   dom.currency?.addEventListener("change", handleCurrencyChange);
   dom.exchangeRate?.addEventListener("input", updateSummaryPanel);
   dom.isExtraordinaryAdjustment?.addEventListener("change", updateSummaryPanel);
-}
-
-async function loadSession() {
-  const { data: { session }, error } = await supabaseClient.auth.getSession();
-  if (error) throw error;
-  if (!session) {
-    window.location.href = "./index.html";
-    return;
-  }
-
-  currentSession = session;
-  dom.userEmail.textContent = session.user.email || "Sesion activa";
-  dom.userName.textContent = session.user.user_metadata?.full_name || session.user.email || "Usuario";
-
-  await resolveCurrentProfile(session);
-}
-
-async function resolveCurrentProfile(session) {
-  currentProfileId = null;
-
-  try {
-    const byId = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("auth_user_id", session.user.id)
-      .maybeSingle();
-
-    if (!byId.error && byId.data?.id) {
-      currentProfileId = byId.data.id;
-      dom.userName.textContent = byId.data.full_name || dom.userName.textContent;
-      return;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
-
-  try {
-    const byProfileId = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("id", session.user.id)
-      .maybeSingle();
-
-    if (!byProfileId.error && byProfileId.data?.id) {
-      currentProfileId = byProfileId.data.id;
-      dom.userName.textContent = byProfileId.data.full_name || dom.userName.textContent;
-      return;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
-
-  if (!session.user.email) return;
-
-  try {
-    const byEmail = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("email", session.user.email)
-      .maybeSingle();
-
-    if (!byEmail.error && byEmail.data?.id) {
-      currentProfileId = byEmail.data.id;
-      dom.userName.textContent = byEmail.data.full_name || dom.userName.textContent;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
 }
 
 async function loadCompanies() {

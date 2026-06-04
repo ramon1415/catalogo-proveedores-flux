@@ -7,1019 +7,148 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260604-ux2">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #07071a;
-      --bg-surface: #0d0d22;
-      --bg-card: #111128;
-      --bg-hover: rgba(255,255,255,0.035);
-      --bg-input: #0d0d22;
-      --border: rgba(255,255,255,0.07);
-      --border-strong: rgba(255,255,255,0.13);
-      --accent: #0f766e;
-      --accent-dim: rgba(15,118,110,0.14);
-      --accent-glow: rgba(15,118,110,0.24);
-      --accent-hover: #0d9488;
-      --accent-text: #5eead4;
-      --emerald: #12b76a;
-      --emerald-dim: rgba(18,183,106,0.12);
-      --ruby: #e03e52;
-      --ruby-dim: rgba(224,62,82,0.11);
-      --sky: #2e90fa;
-      --sky-dim: rgba(46,144,250,0.11);
-      --amber: #f59e0b;
-      --amber-dim: rgba(245,158,11,0.13);
-      --violet: #a855f7;
-      --violet-dim: rgba(168,85,247,0.13);
-      --text-1: #eeeef6;
-      --text-2: #aaaac3;
-      --text-3: #666680;
-      --shadow: 0 4px 20px rgba(0,0,0,0.45);
-      --shadow-lg: 0 18px 60px rgba(0,0,0,0.68);
-    }
-
-    [data-theme="light"] {
-      --bg: #f4f4f9;
-      --bg-surface: #ffffff;
-      --bg-card: #ffffff;
-      --bg-hover: rgba(0,0,0,0.025);
-      --bg-input: #f7f7fc;
-      --border: rgba(0,0,0,0.08);
-      --border-strong: rgba(0,0,0,0.14);
-      --accent: #0f766e;
-      --accent-dim: rgba(15,118,110,0.1);
-      --accent-glow: rgba(15,118,110,0.18);
-      --accent-hover: #0d6b63;
-      --accent-text: #0f766e;
-      --emerald: #0a9956;
-      --emerald-dim: rgba(10,153,86,0.09);
-      --ruby: #c8283c;
-      --ruby-dim: rgba(200,40,60,0.08);
-      --sky: #1570ca;
-      --sky-dim: rgba(21,112,202,0.09);
-      --amber: #b76a00;
-      --amber-dim: rgba(183,106,0,0.09);
-      --violet: #7e22ce;
-      --violet-dim: rgba(126,34,206,0.09);
-      --text-1: #0f0f1e;
-      --text-2: #4a4a6a;
-      --text-3: #9090b0;
-      --shadow: 0 2px 12px rgba(0,0,0,0.07);
-      --shadow-lg: 0 12px 48px rgba(0,0,0,0.14);
-    }
-
-    html { transition: background-color 180ms ease; }
-    body, .sidebar, .topbar, .table-card, .stat-card, .modal-content,
-    .user-card, .nav-link, .small-btn, .secondary-btn, .primary-btn,
-    input, select, textarea, .detail-card {
-      transition: background-color 180ms ease, border-color 180ms ease,
-                  color 180ms ease, box-shadow 180ms ease;
-    }
-
-    html, body { height: 100%; }
-    body {
-      background: var(--bg);
-      color: var(--text-1);
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      font-size: 13.5px;
-      line-height: 1.55;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      opacity: 0.02;
-      pointer-events: none;
-      z-index: 9999;
-    }
-
-    .app-shell { display: flex; height: 100vh; overflow: hidden; }
-
-    .sidebar {
-      width: 232px;
-      min-height: 100vh;
-      background: var(--bg-surface);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 16px 10px;
-      flex-shrink: 0;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 8px 16px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 10px;
-    }
-
-    .brand-logo {
-      width: 33px;
-      height: 33px;
-      border-radius: 6px;
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11.5px;
-      font-weight: 700;
-      color: #fff;
-      letter-spacing: 0.2px;
-      flex-shrink: 0;
-    }
-
-    .brand-title { font-size: 13px; font-weight: 700; color: var(--text-1); letter-spacing: -0.2px; }
-    .brand-subtitle { font-size: 10.5px; color: var(--text-3); font-weight: 400; margin-top: 1px; }
-    .nav { display: flex; flex-direction: column; gap: 1px; }
-
-    .nav-link {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 10px;
-      border-radius: 6px;
-      text-decoration: none;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-3);
-      position: relative;
-    }
-
-    .nav-link:hover { color: var(--text-2); background: var(--bg-hover); }
-    .nav-link span { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
-    .nav-link.active { color: var(--accent-text); background: var(--accent-dim); font-weight: 600; }
-    [data-theme="dark"] .nav-link.active { color: #5eead4; }
-
-    .nav-link.active::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 2.5px;
-      height: 16px;
-      background: var(--accent);
-      border-radius: 0 2px 2px 0;
-    }
-
-    .user-card {
-      padding: 11px 12px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--bg-hover);
-    }
-    .user-card p { font-size: 12.5px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
-    .user-card span { font-size: 11px; color: var(--text-3); display: block; margin: 2px 0 9px; overflow: hidden; text-overflow: ellipsis; }
-
-    .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-
-    .topbar {
-      height: 52px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 24px;
-      flex-shrink: 0;
-      background: var(--bg-surface);
-    }
-
-    .topbar-kicker {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.55px;
-      text-transform: uppercase;
-      color: var(--text-3);
-    }
-
-    .topbar-user { display: flex; align-items: center; gap: 12px; }
-
-    .theme-toggle {
-      width: 48px;
-      height: 26px;
-      border-radius: 13px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      cursor: pointer;
-      position: relative;
-      flex-shrink: 0;
-    }
-
-    .theme-toggle::after {
-      content: '';
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: var(--accent);
-      transition: transform 220ms cubic-bezier(.4,0,.2,1);
-    }
-
-    [data-theme="light"] .theme-toggle::after { transform: translateX(22px); }
-    .toggle-icon { position: absolute; top: 50%; transform: translateY(-50%); font-size: 10px; pointer-events: none; color: var(--text-3); }
-    .toggle-moon { left: 7px; }
-    .toggle-sun { right: 7px; }
-    [data-theme="dark"] .toggle-moon { opacity: 1; }
-    [data-theme="dark"] .toggle-sun { opacity: 0.35; }
-    [data-theme="light"] .toggle-moon { opacity: 0.35; }
-    [data-theme="light"] .toggle-sun { opacity: 1; }
-
-    .avatar {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      color: #fff;
-      flex-shrink: 0;
-    }
-
-    .page {
-      flex: 1;
-      overflow-y: auto;
-      padding: 26px 26px 40px;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-    }
-    .page::-webkit-scrollbar { width: 4px; }
-    .page::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
-
-    .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .page-header h1 { font-size: 17px; font-weight: 700; color: var(--text-1); letter-spacing: -0.3px; }
-    .page-header p { font-size: 12px; color: var(--text-3); margin-top: 2px; font-weight: 400; max-width: 620px; }
-
-    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
-
-    .stat-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      padding: 16px 18px 14px;
-      text-align: left;
-      position: relative;
-      overflow: hidden;
-      min-height: 88px;
-    }
-    .stat-card.is-clickable { cursor: pointer; }
-    .stat-card.is-clickable:hover { border-color: var(--border-strong); background: var(--bg-hover); }
-    .stat-card.active-filter, .kpi.active {
-      border-color: rgba(15,118,110,0.48);
-      box-shadow: 0 0 0 3px var(--accent-dim);
-    }
-    .stat-card::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      opacity: 0.75;
-    }
-    .stat-card.total::after { background: linear-gradient(90deg, var(--accent), transparent 55%); }
-    .stat-card.good::after { background: linear-gradient(90deg, var(--emerald), transparent 55%); }
-    .stat-card.blocked::after { background: linear-gradient(90deg, var(--ruby), transparent 55%); }
-    .stat-card.paid::after { background: linear-gradient(90deg, var(--violet), transparent 55%); }
-    .stat-card.amount::after { background: linear-gradient(90deg, var(--sky), transparent 55%); }
-    .stat-card p {
-      font-size: 10.5px;
-      font-weight: 600;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.65px;
-      margin-bottom: 8px;
-    }
-    .stat-card strong {
-      font-size: 25px;
-      font-weight: 700;
-      letter-spacing: -0.8px;
-      line-height: 1;
-      font-variant-numeric: tabular-nums;
-      overflow-wrap: anywhere;
-    }
-    .stat-card.total strong { color: var(--accent-text); }
-    .stat-card.good strong { color: var(--emerald); }
-    .stat-card.blocked strong { color: var(--ruby); }
-    .stat-card.paid strong { color: var(--violet); }
-    .stat-card.amount strong { color: var(--sky); font-size: 21px; }
-
-    .table-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      overflow: hidden;
-    }
-
-    .table-toolbar {
-      display: grid;
-      grid-template-columns: minmax(240px, 1fr) 150px 190px minmax(180px, 260px);
-      gap: 8px;
-      padding: 13px 16px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    input, select, textarea, button { font-family: 'Plus Jakarta Sans', sans-serif; }
-
-    .table-toolbar input[type="search"],
-    .table-toolbar select,
-    .form-control {
-      height: 36px;
-      padding: 0 11px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      color: var(--text-1);
-      font-size: 12.5px;
-      outline: none;
-    }
-
-    .table-toolbar input[type="search"] { padding-left: 34px; }
-    .search-field { position: relative; }
+    /* Solicitudes-specific — layout del formulario y panel de decision */
+    .search-field { position:relative }
     .search-field::before {
-      content: '';
-      position: absolute;
-      left: 12px;
-      top: 50%;
-      width: 13px;
-      height: 13px;
-      transform: translateY(-50%);
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%2370708a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") center/contain no-repeat;
+      content:''; position:absolute; left:12px; top:50%; width:13px; height:13px;
+      transform:translateY(-50%);
+      background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%2370708a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") center/contain no-repeat;
     }
+    .search-field input { padding-left:34px }
 
-    .table-toolbar input::placeholder, textarea::placeholder { color: var(--text-3); }
-    .table-toolbar input:focus, .table-toolbar select:focus, .form-control:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-dim);
-    }
+    .request-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; align-items:start }
+    .form-sections { display:flex; flex-direction:column; gap:14px; min-width:0 }
+    .form-section { border:1px solid var(--border); border-radius:13px; padding:15px; background:rgba(255,255,255,.015) }
+    .form-section h3 { font-size:12px; font-weight:700; color:var(--text-1); margin-bottom:12px }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px }
+    .form-grid label { display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3); letter-spacing:.35px; text-transform:uppercase }
+    .form-grid label.full-row { grid-column:1/-1 }
+    .form-control { height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none; font-family:inherit }
+    .form-control:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim) }
+    .form-control.textarea { height:auto; min-height:74px; padding:10px 11px; resize:vertical; line-height:1.45 }
+    .field-hint { color:var(--text-3); font-size:11px; font-weight:500; line-height:1.4; margin-top:1px; text-transform:none; letter-spacing:0 }
+    .field-hint.success { color:var(--accent-text) }
+    .field-hint.warning { color:var(--amber) }
+    .field-hint.error { color:var(--ruby) }
+    .checkbox-card { display:flex!important; align-items:center; flex-direction:row!important; gap:9px!important; min-height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-2)!important; text-transform:none!important; letter-spacing:0!important; font-size:12.5px!important; font-weight:600!important; cursor:pointer }
+    .checkbox-card input { width:15px; height:15px; accent-color:var(--accent); flex-shrink:0 }
 
-    .table-wrapper {
-      overflow: auto;
-      max-height: calc(100vh - 370px);
-      min-height: 320px;
-    }
-    .table-wrapper::-webkit-scrollbar { width: 4px; height: 4px; }
-    .table-wrapper::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+    .summary-panel { position:sticky; top:0; border:1px solid var(--border); border-radius:15px; padding:16px; background:linear-gradient(180deg,rgba(15,118,110,.12),rgba(255,255,255,.015)); box-shadow:var(--shadow) }
+    .summary-panel h3 { font-size:13px; color:var(--text-1); margin-bottom:4px }
+    .summary-panel > p { color:var(--text-3); font-size:12px; margin-bottom:14px }
+    .sol-summary-list { display:flex; flex-direction:column; gap:10px }
+    .sol-summary-list label { display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3); letter-spacing:.35px; text-transform:uppercase }
+    .summary-value { min-height:20px; color:var(--text-1); font-size:12.5px; font-weight:600; text-transform:none; letter-spacing:0; overflow-wrap:anywhere }
+    .summary-note { margin-top:14px; padding:12px; border-radius:12px; background:var(--accent-dim); border:1px solid rgba(15,118,110,.22); color:var(--accent-text); font-size:12px; line-height:1.45 }
 
-    table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 700px; }
-    thead tr { border-bottom: 1px solid var(--border); }
-    thead th {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      background: var(--bg-card);
-      padding: 9px 14px;
-      text-align: left;
-      font-size: 10.5px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: var(--text-3);
-      white-space: nowrap;
-      box-shadow: 0 1px 0 var(--border);
-    }
-    tbody tr { border-bottom: 1px solid var(--border); }
-    tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover, tbody tr.highlight-row { background: var(--bg-hover); }
-    tbody tr.highlight-row td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-    tbody td { padding: 10px 14px; color: var(--text-2); vertical-align: middle; }
-    tbody td strong { color: var(--text-1); font-weight: 600; display: block; font-size: 12.5px; }
+    .filter-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--bg-hover); color:var(--text-2); font-size:12px }
+    .filter-pill { display:inline-flex; align-items:center; gap:7px; padding:5px 9px; border-radius:999px; background:var(--accent-dim); color:var(--accent-text); border:1px solid rgba(15,118,110,.22); font-weight:700 }
 
-    .muted-line {
-      display: block;
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.45px;
-      margin-top: 2px;
-    }
+    tbody tr.highlight-row { background:var(--bg-hover) }
+    tbody tr.highlight-row td:first-child { box-shadow:inset 3px 0 0 var(--accent) }
 
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2.5px 8px;
-      border-radius: 20px;
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.1px;
-      white-space: nowrap;
-    }
-    .badge-submitted { background: var(--sky-dim); color: var(--sky); border: 1px solid rgba(46,144,250,0.2); }
-    .badge-good { background: var(--emerald-dim); color: var(--emerald); border: 1px solid rgba(18,183,106,0.2); }
-    .badge-blocked { background: var(--ruby-dim); color: var(--ruby); border: 1px solid rgba(224,62,82,0.22); }
-    .badge-warning { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.22); }
-    .badge-extra { background: var(--violet-dim); color: var(--violet); border: 1px solid rgba(168,85,247,0.22); }
-    .badge-neutral { background: var(--accent-dim); color: var(--accent-text); border: 1px solid rgba(15,118,110,0.22); }
+    .decision-card { margin-top:12px; border:1px solid var(--border); border-radius:15px; padding:16px; background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01)) }
+    .decision-card h3 { font-size:13px; color:var(--text-1); margin-bottom:3px; letter-spacing:-.1px }
+    .decision-card > p { color:var(--text-3); font-size:12px; margin-bottom:12px }
+    .decision-note { border-radius:12px; padding:11px 12px; margin-bottom:12px; font-size:12px; font-weight:700; line-height:1.45; border:1px solid var(--border) }
+    .decision-note.success { background:var(--emerald-dim); border-color:rgba(18,183,106,.24); color:var(--emerald) }
+    .decision-note.warning { background:var(--amber-dim); border-color:rgba(245,158,11,.25); color:var(--amber) }
+    .decision-note.neutral { background:var(--accent-dim); border-color:rgba(15,118,110,.22); color:var(--accent-text) }
+    .decision-card textarea { width:100%; min-height:78px; padding:10px 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:9px; color:var(--text-1); font-size:12.5px; resize:vertical; outline:none; font-family:inherit }
+    .decision-card textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim) }
+    .decision-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px }
+    .decision-btn { min-height:34px; padding:7px 12px; border-radius:8px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); font-size:12px; font-weight:700; cursor:pointer; font-family:inherit }
+    .decision-btn:hover { background:var(--bg-hover); color:var(--text-1) }
+    .decision-btn.approve { background:var(--emerald-dim); color:var(--emerald); border-color:rgba(18,183,106,.24) }
+    .decision-btn.reject  { background:var(--ruby-dim);   color:var(--ruby);   border-color:rgba(224,62,82,.26) }
+    .decision-btn.change  { background:var(--amber-dim);  color:var(--amber);  border-color:rgba(245,158,11,.24) }
+    .decision-btn.adjust  { background:var(--violet-dim); color:var(--violet); border-color:rgba(168,85,247,.24) }
+    .decision-btn:disabled { opacity:.55; cursor:not-allowed }
+    .decision-error { min-height:18px; margin-top:8px; color:var(--ruby); font-size:12px; font-weight:700 }
 
-    .actions { display: flex; gap: 5px; flex-wrap: wrap; }
-    .row-actions { opacity: 0; transition: opacity 120ms; }
-    tbody tr:hover .row-actions { opacity: 1; }
-    .cell-main { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-1); }
-    .cell-sub  { display: block; font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
+    .approval-history { margin-top:12px; border-top:1px solid var(--border); padding-top:12px }
+    .approval-history h4 { font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.55px; margin-bottom:8px }
+    .history-list { display:flex; flex-direction:column; gap:7px }
+    .history-item { border:1px solid var(--border); border-radius:11px; padding:9px 10px; background:rgba(255,255,255,.015); color:var(--text-2); font-size:12px }
+    .history-item strong { display:block; color:var(--text-1); margin-bottom:2px }
+    .history-item span { display:block; color:var(--text-3); font-size:10.5px; margin-top:3px }
 
-    .small-btn {
-      padding: 4px 9px;
-      border-radius: 5px;
-      font-size: 11.5px;
-      font-weight: 600;
-      cursor: pointer;
-      border: 1px solid var(--border-strong);
-      background: transparent;
-      color: var(--text-2);
-      white-space: nowrap;
-    }
-    .small-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+    .budget-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:4px }
+    pre { max-height:220px; overflow:auto; padding:12px; border-radius:10px; background:var(--bg-input); border:1px solid var(--border); color:var(--text-2); font-size:11px; line-height:1.45; white-space:pre-wrap }
+    details { color:var(--text-2) }
+    details summary { cursor:pointer; color:var(--accent-text); font-weight:700; margin-bottom:8px }
 
-    .primary-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      min-height: 36px;
-      padding: 8px 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 700;
-      cursor: pointer;
-      border: none;
-      background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-      color: #fff;
-      letter-spacing: -0.1px;
-      box-shadow: 0 0 0 transparent;
-    }
-    .primary-btn:hover { box-shadow: 0 0 18px var(--accent-glow); }
-    .primary-btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+    #requestDialog { max-width:1060px }
+    #detailDialog  { max-width:860px }
 
-    .secondary-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-      min-height: 34px;
-      padding: 7px 13px;
-      border-radius: 7px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      border: 1px solid var(--border-strong);
-      background: transparent;
-      color: var(--text-2);
-    }
-    .secondary-btn:hover { background: var(--bg-hover); color: var(--text-1); }
-    .secondary-btn.full { width: 100%; }
-
-    .message { padding: 16px 18px; font-size: 13px; color: var(--text-3); }
-    .hidden { display: none !important; }
-
-    .filter-summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-hover);
-      color: var(--text-2);
-      font-size: 12px;
-    }
-    .filter-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 5px 9px;
-      border-radius: 999px;
-      background: var(--accent-dim);
-      color: var(--accent-text);
-      border: 1px solid rgba(15,118,110,0.22);
-      font-weight: 700;
-    }
-    .filter-summary .small-btn { padding: 4px 10px; }
-
-    .empty-state {
-      padding: 44px 20px;
-      text-align: center;
-      color: var(--text-3);
-    }
-    .empty-state strong { display: block; color: var(--text-1); margin-bottom: 4px; font-size: 14px; }
-
-    dialog {
-      border: none;
-      background: transparent;
-      padding: 0;
-      width: calc(100vw - 40px);
-      border-radius: 20px;
-    }
-    #requestDialog { max-width: 1060px; }
-    #detailDialog { max-width: 860px; }
-    dialog::backdrop {
-      background: rgba(0,0,0,0.55);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-    }
-
-    .modal-content {
-      background: var(--bg-card);
-      border: 1px solid var(--border-strong);
-      border-radius: 20px;
-      padding: 24px 26px;
-      box-shadow: var(--shadow-lg);
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-      position: relative;
-      overflow: hidden;
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-    }
-
-    .modal-content::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.16) 35%, rgba(255,255,255,0.16) 65%, transparent);
-    }
-
-    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-    .modal-header h2 { font-size: 16px; font-weight: 700; color: var(--text-1); letter-spacing: -0.2px; }
-    .modal-header p { font-size: 12px; color: var(--text-3); margin-top: 3px; font-weight: 400; }
-
-    .icon-btn {
-      width: 30px;
-      height: 30px;
-      border-radius: 7px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--text-3);
-      font-size: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    .icon-btn:hover { border-color: var(--border-strong); color: var(--text-1); background: var(--bg-hover); }
-
-    .request-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 310px;
-      gap: 18px;
-      align-items: start;
-    }
-
-    .form-sections { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-    .form-section {
-      border: 1px solid var(--border);
-      border-radius: 13px;
-      padding: 15px;
-      background: rgba(255,255,255,0.015);
-    }
-    .form-section h3 {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-1);
-      letter-spacing: 0.1px;
-      margin-bottom: 12px;
-    }
-
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .form-grid label, .summary-panel label {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      font-size: 10.5px;
-      font-weight: 700;
-      color: var(--text-3);
-      letter-spacing: 0.35px;
-      text-transform: uppercase;
-    }
-    .form-grid label.full-row { grid-column: 1 / -1; }
-    .form-control.textarea {
-      height: auto;
-      min-height: 74px;
-      padding: 10px 11px;
-      resize: vertical;
-      line-height: 1.45;
-    }
-
-    .field-hint {
-      color: var(--text-3);
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0;
-      line-height: 1.4;
-      margin-top: 1px;
-      text-transform: none;
-    }
-    .field-hint.success { color: var(--accent-text); }
-    .field-hint.warning { color: var(--amber); }
-    .field-hint.error { color: var(--ruby); }
-
-    .checkbox-card {
-      display: flex !important;
-      align-items: center;
-      flex-direction: row !important;
-      gap: 9px !important;
-      min-height: 36px;
-      padding: 0 11px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      color: var(--text-2) !important;
-      text-transform: none !important;
-      letter-spacing: 0 !important;
-      font-size: 12.5px !important;
-      font-weight: 600 !important;
-      cursor: pointer;
-    }
-    .checkbox-card input { width: 15px; height: 15px; accent-color: var(--accent); }
-
-    .summary-panel {
-      position: sticky;
-      top: 0;
-      border: 1px solid var(--border);
-      border-radius: 15px;
-      padding: 16px;
-      background: linear-gradient(180deg, rgba(15,118,110,0.12), rgba(255,255,255,0.015));
-      box-shadow: var(--shadow);
-    }
-    .summary-panel h3 { font-size: 13px; color: var(--text-1); margin-bottom: 4px; }
-    .summary-panel p { color: var(--text-3); font-size: 12px; margin-bottom: 14px; }
-    .summary-list { display: flex; flex-direction: column; gap: 10px; }
-    .summary-value {
-      min-height: 20px;
-      color: var(--text-1);
-      font-size: 12.5px;
-      font-weight: 600;
-      text-transform: none;
-      letter-spacing: 0;
-      overflow-wrap: anywhere;
-    }
-    .summary-note {
-      margin-top: 14px;
-      padding: 12px;
-      border-radius: 12px;
-      background: var(--accent-dim);
-      border: 1px solid rgba(15,118,110,0.22);
-      color: var(--accent-text);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .modal-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      padding-top: 4px;
-      border-top: 1px solid var(--border);
-    }
-
-    .detail-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-    .detail-card {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      background: rgba(255,255,255,0.015);
-    }
-    .detail-card.full { grid-column: 1 / -1; }
-    .detail-card span {
-      display: block;
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-    .detail-card strong {
-      color: var(--text-1);
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-    .detail-alert {
-      border-radius: 14px;
-      padding: 13px 14px;
-      border: 1px solid var(--border);
-      font-size: 13px;
-      font-weight: 700;
-      margin-bottom: 12px;
-    }
-    .detail-alert.success {
-      background: var(--emerald-dim);
-      border-color: rgba(18,183,106,0.24);
-      color: var(--emerald);
-    }
-    .detail-alert.warning {
-      background: var(--ruby-dim);
-      border-color: rgba(224,62,82,0.28);
-      color: var(--ruby);
-    }
-
-    .decision-card {
-      margin-top: 12px;
-      border: 1px solid var(--border);
-      border-radius: 15px;
-      padding: 16px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-    }
-    .decision-card h3 {
-      font-size: 13px;
-      color: var(--text-1);
-      margin-bottom: 3px;
-      letter-spacing: -0.1px;
-    }
-    .decision-card p {
-      color: var(--text-3);
-      font-size: 12px;
-      margin-bottom: 12px;
-    }
-    .decision-note {
-      border-radius: 12px;
-      padding: 11px 12px;
-      margin-bottom: 12px;
-      font-size: 12px;
-      font-weight: 700;
-      line-height: 1.45;
-      border: 1px solid var(--border);
-    }
-    .decision-note.success {
-      background: var(--emerald-dim);
-      border-color: rgba(18,183,106,0.24);
-      color: var(--emerald);
-    }
-    .decision-note.warning {
-      background: var(--amber-dim);
-      border-color: rgba(245,158,11,0.25);
-      color: var(--amber);
-    }
-    .decision-note.neutral {
-      background: var(--accent-dim);
-      border-color: rgba(15,118,110,0.22);
-      color: var(--accent-text);
-    }
-    .decision-card textarea {
-      width: 100%;
-      min-height: 78px;
-      padding: 10px 11px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      border-radius: 9px;
-      color: var(--text-1);
-      font-size: 12.5px;
-      resize: vertical;
-      outline: none;
-    }
-    .decision-card textarea:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-dim);
-    }
-    .decision-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .decision-btn {
-      min-height: 34px;
-      padding: 7px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border-strong);
-      background: transparent;
-      color: var(--text-2);
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .decision-btn:hover { background: var(--bg-hover); color: var(--text-1); }
-    .decision-btn.approve {
-      background: var(--emerald-dim);
-      color: var(--emerald);
-      border-color: rgba(18,183,106,0.24);
-    }
-    .decision-btn.reject {
-      background: var(--ruby-dim);
-      color: var(--ruby);
-      border-color: rgba(224,62,82,0.26);
-    }
-    .decision-btn.change {
-      background: var(--amber-dim);
-      color: var(--amber);
-      border-color: rgba(245,158,11,0.24);
-    }
-    .decision-btn.adjust {
-      background: var(--violet-dim);
-      color: var(--violet);
-      border-color: rgba(168,85,247,0.24);
-    }
-    .decision-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-    .decision-error {
-      min-height: 18px;
-      margin-top: 8px;
-      color: var(--ruby);
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .approval-history {
-      margin-top: 12px;
-      border-top: 1px solid var(--border);
-      padding-top: 12px;
-    }
-    .approval-history h4 {
-      font-size: 11px;
-      color: var(--text-3);
-      text-transform: uppercase;
-      letter-spacing: 0.55px;
-      margin-bottom: 8px;
-    }
-    .history-list {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-    }
-    .history-item {
-      border: 1px solid var(--border);
-      border-radius: 11px;
-      padding: 9px 10px;
-      background: rgba(255,255,255,0.015);
-      color: var(--text-2);
-      font-size: 12px;
-    }
-    .history-item strong {
-      display: block;
-      color: var(--text-1);
-      margin-bottom: 2px;
-    }
-    .history-item span {
-      display: block;
-      color: var(--text-3);
-      font-size: 10.5px;
-      margin-top: 3px;
-    }
-    .budget-strip {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-top: 4px;
-    }
-    pre {
-      max-height: 220px;
-      overflow: auto;
-      padding: 12px;
-      border-radius: 10px;
-      background: var(--bg-input);
-      border: 1px solid var(--border);
-      color: var(--text-2);
-      font-size: 11px;
-      line-height: 1.45;
-      white-space: pre-wrap;
-    }
-    details { color: var(--text-2); }
-    summary { cursor: pointer; color: var(--accent-text); font-weight: 700; margin-bottom: 8px; }
-
-    .toast-stack {
-      position: fixed;
-      right: 22px;
-      bottom: 22px;
-      z-index: 10000;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      width: min(420px, calc(100vw - 44px));
-    }
-    .toast {
-      border: 1px solid var(--border-strong);
-      border-radius: 14px;
-      padding: 13px 15px;
-      background: var(--bg-card);
-      box-shadow: var(--shadow-lg);
-      color: var(--text-2);
-      animation: toastIn 180ms ease-out;
-    }
-    .toast strong { display: block; color: var(--text-1); margin-bottom: 2px; }
-    .toast.success { border-color: rgba(18,183,106,0.32); }
-    .toast.warning { border-color: rgba(245,158,11,0.35); }
-    .toast.error { border-color: rgba(224,62,82,0.38); }
-    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-    @media (max-width: 1100px) {
-      .stats-grid { grid-template-columns: repeat(2, 1fr); }
-      .table-toolbar { grid-template-columns: 1fr 1fr; }
-      .request-layout { grid-template-columns: 1fr; }
-      .summary-panel { position: static; }
-    }
-
-    @media (max-width: 760px) {
-      .app-shell { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
-      .sidebar { width: 100%; min-height: auto; border-right: none; border-bottom: 1px solid var(--border); }
-      .content { min-height: 0; }
-      .topbar { padding: 0 16px; }
-      .page { padding: 20px 16px 30px; }
-      .page-header { align-items: stretch; flex-direction: column; }
-      .stats-grid, .table-toolbar, .form-grid, .detail-grid, .budget-strip { grid-template-columns: 1fr; }
-      .table-wrapper { max-height: 460px; }
-      dialog { width: calc(100vw - 20px); }
-      .modal-content { padding: 20px; }
-    }
+    @media (max-width:1100px) { .request-layout { grid-template-columns:1fr } .summary-panel { position:static } }
+    @media (max-width:760px)  { .form-grid { grid-template-columns:1fr } .budget-strip { grid-template-columns:1fr } }
   </style>
-  <link rel="stylesheet" href="./ux2_shared.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <main class="app-shell">
+  <div class="app-shell">
     <aside class="sidebar">
       <div>
         <div class="brand">
           <div class="brand-logo">FL</div>
           <div>
-            <p class="brand-title">Flux Operadora</p>
-            <p class="brand-subtitle">Solicitudes de pago</p>
+            <div class="brand-title">Flux Operadora</div>
+            <div class="brand-subtitle">Solicitudes</div>
           </div>
         </div>
-        <nav class="nav">
-          <a href="#" class="nav-link muted"><span>▦</span> Dashboard</a>
-          <a href="./proveedores.html" class="nav-link muted"><span>◇</span> Proveedores</a>
-          <a href="./presupuesto.html" class="nav-link muted"><span>▣</span> Motor de Presupuesto</a>
-          <a href="./solicitudes.html" class="nav-link active"><span>S</span> Solicitudes de pago</a>
-          <a href="./layouts.html" class="nav-link muted"><span>L</span> Layouts de pago</a>
-          <a href="#" class="nav-link muted"><span>✓</span> Aprobaciones</a>
-          <a href="#" class="nav-link muted"><span>$</span> Validación financiera</a>
-          <a href="#" class="nav-link muted"><span>→</span> Pagos</a>
-          <a href="#" class="nav-link muted"><span>📊</span> Insights</a>
-        </nav>
+        <nav class="nav" aria-label="Menu principal"></nav>
       </div>
       <div class="user-card">
         <p id="userName">Usuario</p>
         <span id="userEmail">Sesion activa</span>
-        <button id="logoutBtn" class="secondary-btn full">Cerrar sesion</button>
+        <button id="logoutBtn" class="secondary-btn" style="width:100%" type="button">Cerrar sesion</button>
       </div>
     </aside>
 
-    <section class="content">
+    <main class="content">
       <header class="topbar">
         <div class="topbar-kicker">Validacion automatica contra presupuesto</div>
         <div class="topbar-user">
-          <button class="theme-toggle" id="themeToggle" title="Cambiar tema" aria-label="Cambiar tema">
-            <span class="toggle-icon toggle-moon">N</span>
-            <span class="toggle-icon toggle-sun">L</span>
-          </button>
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
           <div class="avatar">FL</div>
         </div>
       </header>
 
-      <div class="page">
+      <section class="page">
         <div class="page-header">
           <div>
             <h1>Solicitudes de pago</h1>
             <p>Crea solicitudes y deja que el sistema valide automaticamente la disponibilidad presupuestal.</p>
           </div>
-          <button id="newRequestBtn" class="primary-btn">+ Nueva solicitud</button>
+          <button id="newRequestBtn" class="primary-btn" type="button">+ Nueva solicitud</button>
         </div>
 
-        <div class="stats-grid">
-          <div id="totalCard" class="kpi info clickable" role="button" tabindex="0"><span class="kpi-label">Solicitudes activas</span><span class="kpi-value" id="totalRequests">0</span></div>
+        <div class="stats-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+          <div id="totalCard"      class="kpi info clickable"    role="button" tabindex="0"><span class="kpi-label">Solicitudes activas</span><span class="kpi-value" id="totalRequests">0</span></div>
           <div id="approvableCard" class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Aprobables</span><span class="kpi-value" id="approvableRequests">0</span></div>
           <div id="exceptionsCard" class="kpi warning clickable" role="button" tabindex="0"><span class="kpi-label">Excepciones presupuestales</span><span class="kpi-value" id="blockedRequests">0</span></div>
-          <div id="paidCard" class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Pagadas</span><span class="kpi-value" id="paidRequests">0</span></div>
+          <div id="paidCard"       class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Pagadas</span><span class="kpi-value" id="paidRequests">0</span></div>
           <div class="kpi muted"><span class="kpi-label">Monto solicitado</span><span class="kpi-value" id="requestedAmount">$0</span></div>
         </div>
 
         <section class="table-card">
-          <div class="table-toolbar">
+          <div class="table-toolbar" style="grid-template-columns:minmax(240px,1fr) 150px 190px minmax(180px,260px)">
             <div class="search-field">
               <input id="searchInput" type="search" placeholder="Buscar por folio, proveedor o descripcion...">
             </div>
             <select id="statusFilter">
               <option value="todos">Estatus: Todos</option>
               <option value="activas" selected>Activas</option>
-              <option value="submitted">Submitted</option>
-              <option value="approved">Approved</option>
-              <option value="changes_requested">Changes requested</option>
-              <option value="finance_validation">Finance validation</option>
-              <option value="scheduled">Scheduled</option>
-              <option value="paid">Paid</option>
-              <option value="rejected">Rejected</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="submitted">Enviada</option>
+              <option value="approved">Aprobada</option>
+              <option value="changes_requested">Con correccion</option>
+              <option value="finance_validation">En revision</option>
+              <option value="scheduled">Programada</option>
+              <option value="paid">Pagada</option>
+              <option value="rejected">Rechazada</option>
+              <option value="cancelled">Cancelada</option>
             </select>
             <select id="budgetDecisionFilter">
               <option value="todos">Presupuesto: Todos</option>
@@ -1036,7 +165,7 @@
             <button id="clearFiltersBtn" type="button" class="small-btn">Ver todas</button>
           </div>
 
-          <div id="messageBox" class="message hidden">Cargando solicitudes...</div>
+          <div id="messageBox" class="hidden" style="padding:16px 18px;font-size:13px;color:var(--text-3)">Cargando solicitudes...</div>
 
           <div class="table-wrapper">
             <table>
@@ -1051,102 +180,105 @@
                 </tr>
               </thead>
               <tbody id="requestsTableBody">
-                <tr><td colspan="6" class="message">Cargando solicitudes...</td></tr>
+                <tr><td colspan="6" style="padding:44px;text-align:center;color:var(--text-3)">Cargando solicitudes...</td></tr>
               </tbody>
             </table>
           </div>
         </section>
-      </div>
-    </section>
-  </main>
+      </section>
+    </main>
+  </div>
 
+  <!-- Dialog: nueva solicitud -->
   <dialog id="requestDialog">
     <form id="requestForm" class="modal-content">
       <div class="modal-header">
         <div>
-          <h2>Nueva solicitud de pago</h2>
+          <h2 style="color:var(--text-1)">Nueva solicitud de pago</h2>
           <p>Completa los datos operativos y financieros para validar presupuesto al guardar.</p>
         </div>
-        <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+        <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
       </div>
 
-      <div class="request-layout">
-        <div class="form-sections">
-          <section class="form-section">
-            <h3>Datos generales</h3>
-            <div class="form-grid">
-              <label>Empresa *
-                <select id="companyId" class="form-control" required></select>
-              </label>
-              <label>Centro de costo *
-                <select id="costCenterId" class="form-control" required></select>
-              </label>
-              <label class="full-row">Partida presupuestal *
-                <select id="budgetCategoryId" class="form-control" required></select>
-                <div id="budgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
-              </label>
-              <label>Mes presupuestal *
-                <input id="budgetMonth" class="form-control" type="month" required>
-              </label>
-              <label>Buscar proveedor
-                <input id="providerSearch" class="form-control" type="search" placeholder="Alias, razon social o RFC">
-              </label>
-              <label class="full-row">Proveedor *
-                <select id="proveedorId" class="form-control" required></select>
-              </label>
-            </div>
-          </section>
+      <div class="modal-scroll" style="padding:0">
+        <div class="request-layout" style="padding:0 2px 2px">
+          <div class="form-sections">
+            <section class="form-section">
+              <h3>Datos generales</h3>
+              <div class="form-grid">
+                <label>Empresa *
+                  <select id="companyId" class="form-control" required></select>
+                </label>
+                <label>Centro de costo *
+                  <select id="costCenterId" class="form-control" required></select>
+                </label>
+                <label class="full-row">Partida presupuestal *
+                  <select id="budgetCategoryId" class="form-control" required></select>
+                  <div id="budgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
+                </label>
+                <label>Mes presupuestal *
+                  <input id="budgetMonth" class="form-control" type="month" required>
+                </label>
+                <label>Buscar proveedor
+                  <input id="providerSearch" class="form-control" type="search" placeholder="Alias, razon social o RFC">
+                </label>
+                <label class="full-row">Proveedor *
+                  <select id="proveedorId" class="form-control" required></select>
+                </label>
+              </div>
+            </section>
 
-          <section class="form-section">
-            <h3>Datos financieros</h3>
-            <div class="form-grid">
-              <label>Monto solicitado *
-                <input id="amountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
-              </label>
-              <label>Moneda *
-                <select id="currency" class="form-control" required>
-                  <option value="MXN">MXN</option>
-                  <option value="USD">USD</option>
-                </select>
-              </label>
-              <label>Tipo de cambio *
-                <input id="exchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1" required>
-              </label>
-              <label class="checkbox-card">
-                <input id="isExtraordinaryAdjustment" type="checkbox">
-                Ajuste extraordinario
-              </label>
-            </div>
-          </section>
+            <section class="form-section">
+              <h3>Datos financieros</h3>
+              <div class="form-grid">
+                <label>Monto solicitado *
+                  <input id="amountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+                </label>
+                <label>Moneda *
+                  <select id="currency" class="form-control" required>
+                    <option value="MXN">MXN</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+                <label>Tipo de cambio *
+                  <input id="exchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1" required>
+                </label>
+                <label class="checkbox-card">
+                  <input id="isExtraordinaryAdjustment" type="checkbox">
+                  Ajuste extraordinario
+                </label>
+              </div>
+            </section>
 
-          <section class="form-section">
-            <h3>Descripcion</h3>
-            <div class="form-grid">
-              <label class="full-row">Descripcion *
-                <textarea id="description" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
-              </label>
-              <label class="full-row">Notas
-                <textarea id="notes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
-              </label>
+            <section class="form-section">
+              <h3>Descripcion</h3>
+              <div class="form-grid">
+                <label class="full-row">Descripcion *
+                  <textarea id="description" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
+                </label>
+                <label class="full-row">Notas
+                  <textarea id="notes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
+                </label>
+              </div>
+            </section>
+          </div>
+
+          <aside class="summary-panel">
+            <h3>Resumen</h3>
+            <p>Vista previa de la solicitud antes de validar.</p>
+            <div class="sol-summary-list">
+              <label>Empresa <span id="summaryCompany" class="summary-value">Sin seleccionar</span></label>
+              <label>Centro de costo <span id="summaryCostCenter" class="summary-value">Sin seleccionar</span></label>
+              <label>Partida <span id="summaryCategory" class="summary-value">Sin seleccionar</span></label>
+              <label>Proveedor <span id="summaryProvider" class="summary-value">Sin seleccionar</span></label>
+              <label>Mes <span id="summaryMonth" class="summary-value">Sin seleccionar</span></label>
+              <label>Monto <span id="summaryAmount" class="summary-value">$0.00 MXN</span></label>
             </div>
-          </section>
+            <div class="summary-note">
+              Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.
+            </div>
+          </aside>
         </div>
-
-        <aside class="summary-panel">
-          <h3>Resumen</h3>
-          <p>Vista previa de la solicitud antes de validar.</p>
-          <div class="summary-list">
-            <label>Empresa <span id="summaryCompany" class="summary-value">Sin seleccionar</span></label>
-            <label>Centro de costo <span id="summaryCostCenter" class="summary-value">Sin seleccionar</span></label>
-            <label>Partida <span id="summaryCategory" class="summary-value">Sin seleccionar</span></label>
-            <label>Proveedor <span id="summaryProvider" class="summary-value">Sin seleccionar</span></label>
-            <label>Mes <span id="summaryMonth" class="summary-value">Sin seleccionar</span></label>
-            <label>Monto <span id="summaryAmount" class="summary-value">$0.00 MXN</span></label>
-          </div>
-          <div class="summary-note">
-            Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.
-          </div>
-        </aside>
       </div>
 
       <div class="modal-actions">
@@ -1156,27 +288,29 @@
     </form>
   </dialog>
 
+  <!-- Dialog: detalle de solicitud -->
   <dialog id="detailDialog">
     <div class="modal-content">
       <div class="modal-header">
         <div>
-          <h2 id="detailTitle">Detalle de solicitud</h2>
+          <h2 id="detailTitle" style="color:var(--text-1)">Detalle de solicitud</h2>
           <p id="detailSubtitle">Validacion presupuestal automatica</p>
         </div>
-        <button type="button" id="closeDetailModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
+        <button type="button" id="closeDetailModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
       </div>
-      <div id="detailContent"></div>
+      <div class="modal-scroll" id="detailContent"></div>
       <div class="modal-actions">
         <button type="button" id="closeDetailFooterBtn" class="secondary-btn">Cerrar</button>
       </div>
     </div>
   </dialog>
 
-  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script src="./components.js"></script>
-  <script src="./solicitudes.js"></script>
+  <script src="./solicitudes.js?v=20260604-ux2"></script>
   <script src="./cash_flow_extension.js"></script>
 </body>
 </html>
