@@ -467,10 +467,10 @@ function showMemberHistory(id) {
       <div class="ref-cell"><span class="ref-label">Total historico</span><span class="ref-value">${formatCurrency(balance.historic)}</span></div>
       <div class="ref-cell"><span class="ref-label">Factor</span><span class="ref-value">${formatNumber(member.fee_factor || 1)}</span></div>
     </div>
-    ${renderHistorySection("Cuotas", charges.map((c) => `<tr><td>${escHtml(c.description || c.period_label || "Cuota")}</td><td>${formatCurrency(c.amount)}</td><td>${escHtml(c.status || "")}</td><td>${formatDate(c.due_date)}</td></tr>`), ["Descripcion", "Monto", "Estatus", "Vencimiento"])}
-    ${renderHistorySection("Pagos", payments.map((p) => `<tr><td>${formatDate(p.payment_date)}</td><td>${formatCurrency(p.amount)}</td><td>${escHtml(p.payment_method || "")}</td><td>${escHtml(p.notes || "")}</td></tr>`), ["Fecha", "Monto", "Metodo", "Notas"])}
-    ${renderHistorySection("Visitas / Incidencias", incidents.map((i) => `<tr><td>${formatDate(i.incident_date)}</td><td>${escHtml(i.description || "")}</td><td>${formatCurrency(i.amount)}</td><td>${escHtml(i.status || "")}</td></tr>`), ["Fecha", "Descripcion", "Cargo", "Estatus"])}
-    ${renderHistorySection("Facturas", invoices.map((inv) => `<tr><td>${escHtml(inv.folio || "")}</td><td>${formatCurrency(inv.total)}</td><td>${escHtml(inv.status || "")}</td><td>${formatDate(inv.issue_date)}</td></tr>`), ["Folio", "Total", "Estatus", "Emision"])}
+    ${renderHistorySection("Cuotas", charges.map((c) => `<tr><td>${escHtml(c.description || c.period_label || "Cuota")}</td><td>${formatCurrency(c.amount)}</td><td>${chargeStatusBadge(c.status)}</td><td>${formatDate(c.due_date)}</td></tr>`), ["Descripcion", "Monto", "Estatus", "Vencimiento"])}
+    ${renderHistorySection("Pagos", payments.map((p) => `<tr><td>${formatDate(p.payment_date)}</td><td>${formatCurrency(p.amount)}</td><td>${paymentMethodLabel(p.payment_method)}</td>${p.notes ? `<td>${escHtml(p.notes)}</td>` : ""}</tr>`), payments.some((p) => p.notes) ? ["Fecha", "Monto", "Metodo", "Notas"] : ["Fecha", "Monto", "Metodo"])}
+    ${renderHistorySection("Visitas / Incidencias", incidents.map((i) => `<tr><td>${formatDate(i.incident_date)}</td><td>${escHtml(i.description || "")}</td><td>${formatCurrency(i.amount)}</td><td>${incidentStatusBadge(i.status)}</td></tr>`), ["Fecha", "Descripcion", "Cargo", "Estatus"])}
+    ${renderHistorySection("Facturas", invoices.map((inv) => `<tr><td>${escHtml(inv.folio || "—")}</td><td>${formatCurrency(inv.total)}</td><td>${invoiceStatusBadge(inv.status)}</td><td>${formatDate(inv.issue_date)}</td></tr>`), ["Folio", "Total", "Estatus", "Emision"])}
   `
   document.getElementById("historyDialog")?.showModal()
 }
@@ -479,8 +479,8 @@ function renderHistorySection(title, rows, headers) {
   return `
     <div class="section-heading">${title}</div>
     ${rows.length ? `
-      <div class="table-wrapper" style="max-height:200px;min-height:auto;border:1px solid var(--border);border-radius:10px;overflow:auto;margin-bottom:4px">
-        <table style="min-width:400px">
+      <div class="history-table-wrapper">
+        <table class="history-table">
           <thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
           <tbody>${rows.join("")}</tbody>
         </table>
@@ -504,6 +504,30 @@ function memberBalance(memberId) {
   const openIncidents = incidents.filter((i) => i.status && !["resolved", "paid", "closed"].includes(i.status)).length
   const pendingInvoices = invoices.filter((inv) => inv.status === "issued").length
   return { pending: Math.max(0, pending), historic, openIncidents, pendingInvoices }
+}
+
+// ── Badge helpers ────────────────────────────────────────────────
+function chargeStatusBadge(status) {
+  const map = { pending: ["Pendiente", "warning"], partial: ["Parcial", "warning"], paid: ["Pagado", "success"], cancelled: ["Cancelado", "neutral"], voided: ["Anulado", "neutral"] }
+  const [label, variant] = map[status] || [status || "—", "neutral"]
+  return Components.badge(label, variant)
+}
+
+function incidentStatusBadge(status) {
+  const map = { open: ["Abierta", "danger"], pending: ["Pendiente", "warning"], paid: ["Pagada", "success"], resolved: ["Resuelta", "success"], closed: ["Cerrada", "neutral"], cancelled: ["Cancelada", "neutral"] }
+  const [label, variant] = map[status] || [status || "—", "neutral"]
+  return Components.badge(label, variant)
+}
+
+function invoiceStatusBadge(status) {
+  const map = { issued: ["Emitida", "warning"], paid: ["Pagada", "success"], cancelled: ["Cancelada", "neutral"], draft: ["Borrador", "neutral"] }
+  const [label, variant] = map[status] || [status || "—", "neutral"]
+  return Components.badge(label, variant)
+}
+
+function paymentMethodLabel(method) {
+  const map = { transfer: "Transferencia", cash: "Efectivo", check: "Cheque", card: "Tarjeta", spei: "SPEI" }
+  return escHtml(map[method] || method || "—")
 }
 
 // ── Utilidades ───────────────────────────────────────────────────
