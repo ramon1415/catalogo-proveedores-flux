@@ -7,34 +7,25 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css?v=20260603-config-menu">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
+  <link rel="stylesheet" href="./socios_history_patch.css?v=20260602-ux2">
   <style>
-    .config-tabs { display:flex; gap:8px; flex-wrap:wrap; }
-    .config-tab {
-      min-height:36px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card);
-      color:var(--text-3); padding:7px 12px; font:inherit; font-size:12.5px; font-weight:800; cursor:pointer;
-      display:inline-flex; align-items:center; gap:8px;
-    }
+    .config-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .config-tab { min-height:34px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card); color:var(--text-3); padding:6px 13px; font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:7px; }
     .config-tab:hover { color:var(--text-2); background:var(--bg-hover); }
     .config-tab.active { color:var(--accent-text); border-color:rgba(94,234,212,.28); background:var(--accent-dim); }
     .config-tab[disabled] { opacity:.38; cursor:not-allowed; }
-    .tab-badge {
-      font-size:9.5px; line-height:1; padding:4px 6px; border-radius:999px; border:1px solid var(--border-strong);
-      color:var(--text-2); background:rgba(255,255,255,.035);
-    }
-    .config-grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:14px; }
-    .config-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; overflow:hidden; }
-    .config-card-body { padding:16px; display:grid; gap:12px; }
-    .config-card h2 { font-size:16px; margin-bottom:2px; }
-    .config-card p { color:var(--text-3); font-size:12.5px; line-height:1.55; }
-    .config-list { display:grid; gap:8px; }
-    .config-list li {
-      list-style:none; border:1px solid var(--border); border-radius:10px; padding:11px 12px;
-      color:var(--text-2); background:rgba(255,255,255,.015);
-    }
-    .config-panel.hidden { display:none; }
-    .permission-note { border:1px solid rgba(245,158,11,.26); background:rgba(245,158,11,.10); color:#f59e0b; }
-    @media (max-width:980px) { .config-grid { grid-template-columns:1fr; } }
+    .tab-badge { font-size:9.5px; line-height:1; padding:3px 6px; border-radius:999px; border:1px solid var(--border-strong); color:var(--text-3); background:var(--bg-hover); }
+    .config-panel { display:none; flex-direction:column; gap:14px; }
+    .config-panel.active { display:flex; }
+    .panel-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; border-bottom:1px solid var(--border); }
+    .panel-toolbar h2 { font-size:14px; color:var(--text-1); margin:0 0 2px; }
+    .panel-toolbar p { color:var(--text-3); font-size:12px; margin:0; }
+    .form-grid input, .form-grid select, .form-grid textarea { min-height:34px; padding:0 10px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none; }
+    .form-grid textarea { min-height:72px; padding:8px 10px; resize:vertical; }
+    .pending-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:24px; display:flex; flex-direction:column; gap:10px; }
+    .pending-card h2 { font-size:15px; color:var(--text-1); }
+    .pending-card p { font-size:12.5px; color:var(--text-3); }
   </style>
 </head>
 <body>
@@ -57,105 +48,265 @@
     <main class="content">
       <header class="topbar">
         <div class="topbar-kicker">Administracion del sistema</div>
-        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+          <div class="avatar">FL</div>
+        </div>
       </header>
 
       <section class="page">
         <div class="page-header">
           <div>
             <h1>Configuracion</h1>
-            <p>Administra catalogos y parametros operativos sin mezclar estas opciones con la operacion diaria.</p>
+            <p>Administra catalogos y parametros operativos.</p>
           </div>
         </div>
 
-        <div id="permissionMessage" class="notice permission-note hidden"></div>
+        <div id="permissionMessage" class="notice-v2 warning hidden">
+          <span class="notice-icon">⚠</span>
+          <span class="notice-text" id="permissionMessageText"></span>
+        </div>
 
-        <div class="config-tabs" role="tablist" aria-label="Configuracion">
+        <div class="config-tabs" role="tablist">
           <button type="button" class="config-tab" data-config-tab="members">Socios <span class="tab-badge">Dir</span></button>
           <button type="button" class="config-tab" data-config-tab="originAccounts">Cuentas origen <span class="tab-badge">Adm/Dir</span></button>
           <button type="button" class="config-tab" data-config-tab="budgets">Presupuestos <span class="tab-badge">Trim.</span></button>
           <button type="button" class="config-tab" data-config-tab="system">Sistema <span class="tab-badge">SysAdmin</span></button>
         </div>
 
-        <section id="membersPanel" class="config-panel config-card hidden">
-          <div class="panel-header">
-            <div>
-              <h2>Socios</h2>
-              <p>Alta y administracion de socios. Visible para Direccion y SysAdmin.</p>
+        <!-- Socios -->
+        <div id="membersPanel" class="config-panel">
+          <section class="table-card">
+            <div class="panel-toolbar">
+              <div>
+                <h2>Socios</h2>
+                <p>Administra titulares y consulta su historial de cuotas, pagos e incidencias.</p>
+              </div>
+              <button class="primary-btn" id="newMemberBtn" type="button">+ Nuevo socio</button>
             </div>
-            <a class="primary-btn" href="./socios.html">Abrir Socios</a>
-          </div>
-          <div class="config-card-body">
-            <ul class="config-list">
-              <li>Ver socios, saldo pendiente, incidencias, facturas e historial.</li>
-              <li>Crear o editar socios con factor de participacion.</li>
-              <li>Las cuotas periodicas se configuran aqui y se reflejan en Ingresos > Cuotas.</li>
-              <li>Periodicidad, monto de cuota y datos bancarios quedan preparados visualmente; su persistencia depende del modelo final.</li>
-              <li>Consultar historial por socio sin mover datos de ingresos.</li>
-            </ul>
-          </div>
-        </section>
+            <div class="table-toolbar" style="grid-template-columns:minmax(200px,1fr) 160px 160px auto">
+              <input id="memberSearch" type="search" placeholder="Buscar socio, RFC o correo">
+              <select id="memberStatusFilter">
+                <option value="all">Estatus: Todos</option>
+                <option value="active">Activos</option>
+                <option value="inactive">Inactivos</option>
+              </select>
+              <select id="memberLineageFilter">
+                <option value="all">Estirpe: Todas</option>
+                <option value="SNR">SNR</option>
+                <option value="SNM">SNM</option>
+                <option value="PSN">PSN</option>
+                <option value="CSN">CSN</option>
+                <option value="FSN">FSN</option>
+              </select>
+              <button class="secondary-btn" id="clearMemberFilterBtn" type="button">Ver todos</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Socio</th>
+                    <th>RFC</th>
+                    <th>Estirpe</th>
+                    <th>Factor</th>
+                    <th>Saldo pendiente</th>
+                    <th>Incidencias</th>
+                    <th>Facturas</th>
+                    <th>Estatus</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="membersTableBody">
+                  <tr><td colspan="9" style="padding:44px;text-align:center;color:var(--text-3)">Selecciona la pestaña Socios para cargar.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
 
-        <section id="originAccountsPanel" class="config-panel config-card hidden">
-          <div class="panel-header">
-            <div>
-              <h2>Cuentas origen</h2>
-              <p>Cuentas bancarias de la empresa desde las que se realizaran pagos.</p>
+        <!-- Cuentas origen -->
+        <div id="originAccountsPanel" class="config-panel">
+          <div class="notice-v2 info">
+            <span class="notice-icon">·</span>
+            <span class="notice-text">
+              <span class="notice-title">Cuentas origen</span>
+              <span class="notice-sep">—</span>
+              <span class="notice-desc">Son las cuentas bancarias de la empresa desde las que se realizan pagos. No son cuentas del proveedor.</span>
+            </span>
+          </div>
+          <section class="table-card">
+            <div class="panel-toolbar">
+              <div>
+                <h2>Cuentas origen</h2>
+                <p>Estas cuentas alimentan solicitudes y layouts de pago.</p>
+              </div>
+              <button class="primary-btn" id="newOriginAccountBtn" type="button">+ Nueva cuenta origen</button>
             </div>
-            <a class="primary-btn" href="./proveedores.html?tab=cuentas-origen">Abrir Cuentas origen</a>
-          </div>
-          <div class="config-card-body">
-            <ul class="config-list">
-              <li>Ver empresa, banco, numero de cuenta, CLABE, moneda, tipo y estatus.</li>
-              <li>Crear, editar e inactivar cuentas origen con la pantalla actual de Proveedores.</li>
-              <li>Estas cuentas alimentan solicitudes y layouts de pago.</li>
-            </ul>
-          </div>
-        </section>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Empresa</th>
+                    <th>Nombre de cuenta</th>
+                    <th>Banco</th>
+                    <th>Numero de cuenta</th>
+                    <th>CLABE</th>
+                    <th>Moneda</th>
+                    <th>Estatus</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="originAccountsTableBody">
+                  <tr><td colspan="8" style="padding:44px;text-align:center;color:var(--text-3)">Selecciona la pestaña Cuentas origen para cargar.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
 
-        <section id="budgetsPanel" class="config-panel config-card hidden">
-          <div class="panel-header">
-            <div>
-              <h2>Presupuestos</h2>
-              <p>Carga trimestral de presupuestos por empresa, centro de costo, partida y periodo.</p>
+        <!-- Presupuestos -->
+        <div id="budgetsPanel" class="config-panel">
+          <div class="pending-card">
+            <h2>Presupuestos</h2>
+            <p>Carga trimestral de presupuestos por empresa, centro de costo, partida y periodo. Pendiente de conexion con modelo presupuestal final.</p>
+            <div class="notice-v2 warning">
+              <span class="notice-icon">·</span>
+              <span class="notice-text">
+                <span class="notice-title">Pendiente</span>
+                <span class="notice-sep">—</span>
+                <span class="notice-desc">Permitira cargar presupuesto base trimestral para alimentar Dashboard, comparativos y cierre mensual.</span>
+              </span>
             </div>
-            <button type="button" class="secondary-btn" disabled>Pendiente</button>
           </div>
-          <div class="config-card-body">
-            <div class="notice permission-note">Pendiente de conexion con modelo presupuestal final.</div>
-            <ul class="config-list">
-              <li>Permitira cargar presupuesto base trimestral.</li>
-              <li>Servira para alimentar Dashboard, comparativos y cierre mensual.</li>
-              <li>No modifica el flujo presupuestal actual en esta tanda.</li>
-            </ul>
-          </div>
-        </section>
+        </div>
 
-        <section id="systemPanel" class="config-panel config-card hidden">
-          <div class="panel-header">
-            <div>
-              <h2>Sistema</h2>
-              <p>Configuracion avanzada reservada para SysAdmin.</p>
+        <!-- Sistema -->
+        <div id="systemPanel" class="config-panel">
+          <div class="pending-card">
+            <h2>Sistema</h2>
+            <p>Configuracion avanzada reservada para SysAdmin. Administracion de usuarios, roles, parametros e integraciones futuras.</p>
+            <div class="notice-v2 warning">
+              <span class="notice-icon">·</span>
+              <span class="notice-text">
+                <span class="notice-title">Pendiente</span>
+                <span class="notice-sep">—</span>
+                <span class="notice-desc">Pendiente de habilitar administracion de usuarios, roles y parametros generales.</span>
+              </span>
             </div>
-            <button type="button" class="secondary-btn" disabled>Pendiente</button>
           </div>
-          <div class="config-card-body">
-            <div class="notice permission-note">Pendiente de habilitar administracion de usuarios, roles y parametros.</div>
-            <ul class="config-list">
-              <li>Usuarios y roles.</li>
-              <li>Parametros generales del sistema.</li>
-              <li>Integraciones futuras, como n8n y Google Drive.</li>
-            </ul>
-          </div>
-        </section>
+        </div>
+
       </section>
     </main>
   </div>
 
-  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <!-- Dialog: cuentas origen -->
+  <dialog id="originAccountDialog" class="narrow">
+    <form id="originAccountForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="originAccountModalTitle" style="color:var(--text-1)">Nueva cuenta origen</h2>
+          <p>Cuenta de la empresa desde la que se realizaran pagos.</p>
+        </div>
+        <button type="button" id="closeOriginAccountModalBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-scroll">
+        <input type="hidden" id="originAccountId">
+        <div class="form-grid">
+          <label class="full-row">Empresa *<select id="originCompanyId" required></select></label>
+          <label>Nombre de cuenta *<input id="originAccountName" required placeholder="Ej. BBVA Operadora"></label>
+          <label>Banco *<input id="originBankName" required placeholder="BBVA, Santander, Banorte..."></label>
+          <label>Numero de cuenta *<input id="originAccountNumber" required placeholder="Cuenta cargo"></label>
+          <label>CLABE<input id="originClabe" maxlength="18" placeholder="18 digitos"></label>
+          <label>Moneda *<select id="originCurrency" required><option value="MXN">MXN</option><option value="USD">USD</option></select></label>
+          <label>Tipo de cuenta
+            <select id="originAccountType">
+              <option value="">Sin clasificar</option>
+              <option value="bank">Cuenta bancaria</option>
+              <option value="cash">Caja / efectivo</option>
+              <option value="card_processor">Procesador de tarjeta</option>
+              <option value="other">Otra</option>
+            </select>
+          </label>
+          <label class="check-label"><input id="originAccountActive" type="checkbox" checked> Cuenta activa</label>
+          <label class="full-row">Notas<textarea id="originNotes" rows="3" placeholder="Uso operativo, propiedad, restricciones..."></textarea></label>
+        </div>
+        <div id="originAccountFormMessage" class="notice-v2 danger hidden" style="margin-top:10px">
+          <span class="notice-icon">✕</span>
+          <span class="notice-text" id="originAccountFormMessageText"></span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelOriginAccountBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" class="primary-btn">Guardar cuenta origen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: socio -->
+  <dialog id="memberDialog" class="narrow">
+    <form id="memberForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="memberDialogTitle" style="color:var(--text-1)">Nuevo socio</h2>
+          <p>El factor define la proporcion con la que participa en cuotas de mantenimiento.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeMemberBtn">✕</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <label class="full-row">Nombre completo *<input id="memberFullName" required></label>
+          <label>RFC<input id="memberRfc"></label>
+          <label>Estirpe
+            <select id="memberLineage">
+              <option value="">Sin estirpe</option>
+              <option value="SNR">SNR</option>
+              <option value="SNM">SNM</option>
+              <option value="PSN">PSN</option>
+              <option value="CSN">CSN</option>
+              <option value="FSN">FSN</option>
+            </select>
+          </label>
+          <label>Factor de participacion *<input id="memberFeeFactor" type="number" min="0.0001" step="any" value="1" required></label>
+          <label>Correo<input id="memberEmail" type="email"></label>
+          <label>Telefono<input id="memberPhone"></label>
+          <label class="full-row">Notas<textarea id="memberNotes" rows="3"></textarea></label>
+          <label class="check-label"><input id="memberActive" type="checkbox" checked> Activo</label>
+        </div>
+        <div id="memberError" class="notice-v2 danger hidden" style="margin-top:10px">
+          <span class="notice-icon">✕</span>
+          <span class="notice-text" id="memberErrorText"></span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="cancelMemberBtn">Cancelar</button>
+        <button type="submit" class="primary-btn" id="saveMemberBtn">Guardar socio</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: historial socio -->
+  <dialog id="historyDialog" class="history-dialog">
+    <div class="modal-content history-modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="historyTitle" style="color:var(--text-1)">Historial del socio</h2>
+          <p>Cuotas, pagos, incidencias y facturas vinculadas al socio.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeHistoryBtn">✕</button>
+      </div>
+      <div class="modal-scroll" id="historyContent"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeHistoryFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
-  <script src="./configuracion.js?v=20260603-config-menu"></script>
+  <script src="./components.js"></script>
+  <script src="./configuracion.js?v=20260604-embedded-panels"></script>
 </body>
 </html>
