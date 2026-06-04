@@ -63,7 +63,7 @@
     bindEvents();
     document.addEventListener("flux:roles-ready", render);
     await loadData();
-    observeDetailLayoutReadiness();
+    patchOpenRequestDetail();
     render();
     window.setTimeout(render, 1200);
     window.setTimeout(render, 3200);
@@ -202,36 +202,39 @@
     }
   }
 
-  function observeDetailLayoutReadiness() {
-    const target = document.getElementById("detailContent");
-    if (!target) return;
-    const observer = new MutationObserver(() => window.setTimeout(appendLayoutReadinessSection, 140));
-    observer.observe(target, { childList: true, subtree: false });
+  function patchOpenRequestDetail() {
+    const original = window.openRequestDetail;
+    if (!original || window._workboardDetailPatched) return;
+    window._workboardDetailPatched = true;
+    window.openRequestDetail = async function(requestId) {
+      await original(requestId);
+      window.setTimeout(() => injectLayoutReadiness(requestId), 350);
+    };
   }
 
-  async function appendLayoutReadinessSection() {
+  async function injectLayoutReadiness(requestId) {
     const target = document.getElementById("detailContent");
     if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
 
-    const requestNumber = document.getElementById("detailTitle")?.textContent?.trim();
-    const request = state.requests.find((item) => item.request_number === requestNumber);
+    const request = state.requests.find((item) => item.id === requestId);
     if (!request || isCashOrCheck(request)) return;
-    if (/Preparacion para layout/i.test(target.textContent)) return;
 
-    const freshRequest = await fetchRequestForLayout(request.id);
+    const freshRequest = await fetchRequestForLayout(requestId);
     if (!freshRequest) return;
     Object.assign(request, freshRequest);
+
+    if (target.querySelector("[data-layout-readiness-extension]")) return;
 
     const section = document.createElement("section");
     section.className = "decision-card layout-readiness-card";
     section.dataset.layoutReadinessExtension = "true";
-    section.innerHTML = renderLayoutReadinessSection(request);
+    section.innerHTML = renderLayoutReadinessSection(freshRequest);
 
     const decisionPanel = Array.from(target.children).find((node) => /Decision del aprobador/i.test(node.textContent || ""));
     if (decisionPanel) target.insertBefore(section, decisionPanel);
     else target.appendChild(section);
 
-    section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(request.id));
+    section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(requestId));
     section.querySelector("[data-edit-provider]")?.addEventListener("click", () => window.open("./proveedores.html", "_blank", "noopener"));
   }
 
@@ -252,30 +255,30 @@
     const items = layoutReadinessItems(request);
     const missing = items.filter((item) => !item.complete);
     const canEdit = !["paid", "cancelled"].includes(request.status);
-    return `
-      <div class="layout-card-header">
-        <div>
-          <span class="section-kicker">Preparacion para layout</span>
-          <h3>${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</h3>
-          <p>Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</p>
-        </div>
-        <span class="layout-count ${missing.length ? "warning" : "success"}">${missing.length ? `${missing.length} pendientes` : "Completo"}</span>
-      </div>
-      <div class="layout-checklist">
-        ${items.map((item) => `
-          <div class="layout-checkitem ${item.complete ? "complete" : "missing"}">
-            <div class="layout-checktext">
-              <strong>${escapeHtml(item.label)}</strong>
-              ${item.complete ? "" : `<small>${escapeHtml(item.message)}</small>`}
-            </div>
-            <span class="layout-state ${item.complete ? "complete" : "missing"}">${item.complete ? "Completo" : "Faltante"}</span>
-          </div>
-        `).join("")}
-      </div>
-      ${(canEdit || missing.some((item) => item.source === "provider")) ? `<div class="decision-actions">
+    const progress = { done: items.length - missing.length, total: items.length };
+
+    const checkItems = items.map((item) => ({
+      ok: item.complete,
+      label: escapeHtml(item.label),
+      reason: item.complete ? null : escapeHtml(item.message),
+      actionLabel: (!item.complete && item.source === "request" && canEdit) ? "Completar" : null,
+      actionAttr: (!item.complete && item.source === "request" && canEdit) ? "data-open-layout-data" : null,
+    }));
+
+    const footer = (canEdit || missing.some((item) => item.source === "provider")) ? `
+      <div class="decision-actions" style="margin-top:12px">
         ${canEdit ? '<button type="button" class="decision-btn approve" data-open-layout-data>Completar datos para layout</button>' : ""}
         ${missing.some((item) => item.source === "provider") ? '<button type="button" class="decision-btn change" data-edit-provider>Editar proveedor</button>' : ""}
-      </div>` : ""}
+      </div>` : "";
+
+    return `
+      <div style="margin-bottom:10px">
+        <span style="display:block;font-size:10.5px;font-weight:800;letter-spacing:.65px;text-transform:uppercase;color:var(--text-3);margin-bottom:4px">Preparacion para layout</span>
+        <div style="font-size:15px;font-weight:700;color:var(--text-1);margin-bottom:4px">${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</div>
+        <div style="font-size:12.5px;color:var(--text-3)">Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</div>
+      </div>
+      ${Components.checkList({ items: checkItems, progress })}
+      ${footer}
     `;
   }
 

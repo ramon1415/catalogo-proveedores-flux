@@ -730,7 +730,7 @@ function openRequestDetail(id) {
     : Components.notice("Presupuesto disponible", "Validada automáticamente con presupuesto disponible.", "info");
 
   dom.detailTitle.textContent = request.request_number || "Detalle de solicitud";
-  dom.detailSubtitle.textContent = `${proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)} · ${renderStatusBadge(request.status)}`;
+  dom.detailSubtitle.textContent = `${proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`;
   dom.detailContent.innerHTML = `
     ${detailNotice}
 
