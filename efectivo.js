@@ -188,18 +188,17 @@ function renderFundDetail(fundId) {
   dom.detailTitle.textContent = request?.request_number || "Detalle de fondo"
   dom.detailSubtitle.textContent = `${methodLabel(fund.delivery_method)} — ${fundStatusLabel(fund.status)}`
   dom.detailContent.innerHTML = `
-    <div class="ref-grid">
+    <div class="ref-grid" style="grid-template-columns:repeat(3,1fr)">
       ${refCell("Solicitud origen", request?.request_number || "Sin solicitud")}
       ${refCell("Responsable", profileName(fund.responsible_profile_id))}
       ${refCell("Empresa", companyName(fund.company_id))}
       ${refCell("Metodo", methodLabel(fund.delivery_method))}
       ${refCell("Monto asignado", formatCurrency(fund.assigned_amount))}
       ${refCell("Monto comprobado", formatCurrency(fund.verified_amount))}
-      ${refCell("Monto pendiente", formatCurrency(fund.pending_amount))}
-      ${refCell("Fecha de asignacion", formatDate(fund.assignment_date))}
+      ${refCell("Pendiente", formatCurrency(fund.pending_amount))}
       ${refCell("Fecha limite", formatDate(fund.due_date))}
       <div class="ref-cell"><span class="ref-label">Estatus</span><span class="ref-value">${fundStatusBadge(fund.status)}</span></div>
-      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Notas</span><span class="ref-value">${escapeHtml(fund.notes || "Sin notas")}</span></div>
+      ${fund.notes ? `<div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Notas</span><span class="ref-value">${escapeHtml(fund.notes)}</span></div>` : ""}
     </div>
     ${renderReconciliationSection(fund, reconciliation)}
     ${renderTicketsSection(reconciliation)}
@@ -213,13 +212,13 @@ function renderReconciliationSection(fund, reconciliation) {
   const canReview = reconciliation && reconciliation.status === "submitted" && canReviewCurrentUser()
 
   const reconciliationDetails = reconciliation ? `
-    <div class="ref-grid">
+    <div class="ref-grid" style="grid-template-columns:repeat(3,1fr)">
       <div class="ref-cell"><span class="ref-label">Estatus</span><span class="ref-value">${reconciliationStatusBadge(reconciliation.status)}</span></div>
       ${refCell("Total tickets", formatCurrency(reconciliation.total_tickets))}
       ${refCell("Monto devuelto", formatCurrency(reconciliation.returned_amount))}
       ${refCell("Diferencia", formatCurrency(reconciliation.difference_amount))}
       ${refCell("Fecha de revision", formatDateTime(reconciliation.reviewed_at))}
-      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Comentario del revisor</span><span class="ref-value">${escapeHtml(reconciliation.reviewer_comment || "Sin comentario")}</span></div>
+      ${reconciliation.reviewer_comment ? `<div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Comentario del revisor</span><span class="ref-value">${escapeHtml(reconciliation.reviewer_comment)}</span></div>` : ""}
     </div>` : `
     <div class="notice-v2 warning" style="margin-bottom:10px">
       <span class="notice-icon">·</span>
@@ -277,7 +276,7 @@ function renderTicketsSection(reconciliation) {
 
   return `
     <div class="section-heading">Tickets / comprobantes</div>
-    <div class="table-wrapper" style="max-height:260px;min-height:auto;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+    <div class="table-wrapper" style="max-height:240px;min-height:auto;border:1px solid var(--border);border-radius:10px;overflow:auto">
       <table style="min-width:600px">
         <thead><tr><th>Concepto</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Fecha ticket</th><th>Estatus</th></tr></thead>
         <tbody>${tableRows}</tbody>
