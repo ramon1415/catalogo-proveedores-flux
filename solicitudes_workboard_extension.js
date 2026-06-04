@@ -110,13 +110,7 @@
   }
 
   function ensureTypeHeader() {
-    const headerRow = document.querySelector("thead tr");
-    if (!headerRow) return;
-    const headers = Array.from(headerRow.children).map((cell) => normalize(cell.textContent));
-    if (headers.includes("tipo")) return;
-    const folioHeader = headerRow.children[0];
-    if (!folioHeader) return;
-    folioHeader.insertAdjacentHTML("afterend", "<th>Tipo</th>");
+    // no-op: el header de 6 columnas ya está definido en el HTML
   }
 
   function bindEvents() {
@@ -488,7 +482,7 @@
     if (!rows.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="12">
+          <td colspan="6">
             <div class="empty-state">
               <strong>No hay solicitudes para esta vista.</strong>
               Cambia el filtro o usa Ver todas para consultar el historico completo.
@@ -503,20 +497,43 @@
       const company = findById(state.companies, request.company_id);
       const center = findById(state.centers, request.cost_center_id);
       const category = findById(state.categories, request.budget_category_id);
+
+      const folio = escapeHtml(request.request_number || "Sin folio");
+      const extraBadge = request.is_extraordinary_adjustment ? Components.badge("Extraordinario", "violet") : "";
+      const date = escapeHtml(formatDate(request.submitted_at || request.created_at));
+      const providerAlias = escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor");
+      const empresaCentro = [company?.legal_name || company?.name, center?.name || center?.code].filter(Boolean).map(escapeHtml).join(" · ");
+      const catCode = escapeHtml(category?.code || "—");
+      const catName = escapeHtml(category?.name || "Sin partida");
+      const mes = escapeHtml(formatMonth(request.budget_month));
+      const monto = escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"));
+
       return `
         <tr>
-          <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? '<span class="badge badge-extra">Ajuste extraordinario</span>' : ""}</td>
-          <td>${renderTypeBadge(request)}</td>
-          <td>${escapeHtml(formatDate(request.submitted_at || request.created_at))}</td>
-          <td><strong>${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</strong><span class="muted-line">${escapeHtml(provider?.nombre_completo || "")}</span></td>
-          <td>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</td>
-          <td>${escapeHtml(center?.name || center?.code || "Sin centro")}</td>
-          <td><strong>${escapeHtml(category?.code || "")}</strong><span class="muted-line">${escapeHtml(category?.name || "Sin partida")}</span></td>
-          <td>${escapeHtml(formatMonth(request.budget_month))}</td>
-          <td><strong>${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</strong></td>
-          <td>${renderOperationalBadge(request)}</td>
-          <td>${renderBudgetBadge(request)}</td>
-          <td><div class="actions"><button class="small-btn" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button></div></td>
+          <td>
+            <span class="cell-main">${folio}${extraBadge}</span>
+            <span class="cell-sub">${date}</span>
+          </td>
+          <td>
+            <span class="cell-main">${providerAlias}</span>
+            <span class="cell-sub">${empresaCentro}</span>
+          </td>
+          <td>
+            <span class="cell-main">${catCode}</span>
+            <span class="cell-sub">${catName} · ${mes}</span>
+          </td>
+          <td>
+            <span class="cell-main">${monto}</span>
+          </td>
+          <td>
+            ${renderOperationalBadge(request)}
+            ${renderBudgetBadge(request)}
+          </td>
+          <td>
+            <div class="row-actions">
+              <button class="btn-row-action" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button>
+            </div>
+          </td>
         </tr>`;
     }).join("");
   }
