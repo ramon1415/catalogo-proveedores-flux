@@ -6,7 +6,7 @@
     ingresos: "dashboard",
     income: "dashboard",
     balance: "dashboard",
-    cuotas: "periods",
+    cuotas: "payments",
     cobros: "payments",
     payments: "payments",
     incidencias: "incidents",
