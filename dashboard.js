@@ -495,6 +495,7 @@ function drawChart(labels, presupuesto, ejecutado, esperado, cobrado) {
   if (state.chart) state.chart.destroy()
 
   state.chart = new Chart(canvas, {
+    type: "bar",
     data: {
       labels,
       datasets: [
