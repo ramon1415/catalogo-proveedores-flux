@@ -236,6 +236,23 @@
     if (decisionPanel) target.insertBefore(section, decisionPanel);
     else target.appendChild(section);
 
+    console.log("[workboard v5] sección inyectada OK, hijos de detailContent:", target.children.length);
+
+    const removalWatcher = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.removedNodes) {
+          if (node === section || node.querySelector?.("[data-layout-readiness-extension]")) {
+            console.error("[workboard v5] SECCIÓN ELIMINADA por:", new Error().stack);
+            removalWatcher.disconnect();
+          }
+        }
+        if (m.type === "childList" && m.target === target) {
+          console.log("[workboard v5] detailContent cambió — innerHTML completo reemplazado");
+        }
+      }
+    });
+    removalWatcher.observe(target, { childList: true, subtree: false });
+
     section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(requestId));
     section.querySelector("[data-edit-provider]")?.addEventListener("click", () => window.open("./proveedores.html", "_blank", "noopener"));
   }
