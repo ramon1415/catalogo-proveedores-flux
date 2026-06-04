@@ -82,5 +82,11 @@
     script.src = "./ingresos_carlos_ux_patch_v2.js?v=20260603-carlos-ux2"
     script.dataset.fluxExtension = "ingresos-carlos-ux"
     document.body.appendChild(script)
+    if (!document.querySelector("script[data-flux-extension='ingresos-default-balance']")) {
+      const defaultScript = document.createElement("script")
+      defaultScript.src = "./ingresos_default_balance_patch.js?v=20260603-default-balance"
+      defaultScript.dataset.fluxExtension = "ingresos-default-balance"
+      document.body.appendChild(defaultScript)
+    }
   }
 })()
