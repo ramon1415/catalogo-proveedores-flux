@@ -206,6 +206,7 @@
     const original = window.openRequestDetail;
     if (!original || window._workboardDetailPatched) return;
     window._workboardDetailPatched = true;
+    console.log("[workboard v5] patch activo");
     window.openRequestDetail = async function(requestId) {
       await original(requestId);
       window.setTimeout(() => injectLayoutReadiness(requestId), 350);
@@ -213,11 +214,18 @@
   }
 
   function injectLayoutReadiness(requestId) {
+    console.log("[workboard v5] injectLayoutReadiness", requestId);
     const target = document.getElementById("detailContent");
-    if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
+    if (!target || target.querySelector("[data-layout-readiness-extension]")) {
+      console.log("[workboard v5] guard activado — ya existe la sección o no hay target");
+      return;
+    }
 
     const request = state.requests.find((item) => item.id === requestId);
-    if (!request || isCashOrCheck(request)) return;
+    if (!request || isCashOrCheck(request)) {
+      console.log("[workboard v5] request no aplica:", request?.request_type);
+      return;
+    }
 
     const section = document.createElement("section");
     section.className = "decision-card layout-readiness-card";

@@ -367,7 +367,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     if (pageName === "solicitudes.html") {
       loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
       loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-live-visits", "solicitudes-ux1")
-      loadExtension("./solicitudes_workboard_extension.js?v=20260604-checklist4", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260604-checklist5", "solicitudes-workboard")
     }
     if (pageName === "layouts.html") {
       loadExtension("./layouts_result_extension.js?v=20260602-ux1", "layouts-result")
