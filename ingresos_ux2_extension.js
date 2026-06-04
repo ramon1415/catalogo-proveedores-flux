@@ -79,7 +79,7 @@
   function loadCarlosUxPatch() {
     if (document.querySelector("script[data-flux-extension='ingresos-carlos-ux']")) return
     const script = document.createElement("script")
-    script.src = "./ingresos_carlos_ux_patch.js?v=20260603-carlos-ux"
+    script.src = "./ingresos_carlos_ux_patch_v2.js?v=20260603-carlos-ux2"
     script.dataset.fluxExtension = "ingresos-carlos-ux"
     document.body.appendChild(script)
   }
