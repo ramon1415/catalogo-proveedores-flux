@@ -14,6 +14,8 @@
     .clabe-label { display: block; font-size: 9.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; margin-top: 1px; }
     .check-label { flex-direction: row !important; align-items: center !important; gap: 7px !important; text-transform: none !important; font-size: 12.5px !important; letter-spacing: 0 !important; color: var(--text-2) !important; }
     .check-label input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+    .form-grid input, .form-grid select, .form-grid textarea { min-height: 34px; padding: 0 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 7px; color: var(--text-1); font-size: 12.5px; outline: none; }
+    .form-grid textarea { min-height: 72px; padding: 8px 10px; resize: vertical; }
     .field-disabled { opacity: .55; cursor: not-allowed !important; }
     .form-grid input:disabled, .form-grid select:disabled { background: var(--bg-hover); color: var(--text-3); cursor: not-allowed; }
   </style>
@@ -53,11 +55,11 @@
           <button id="newSupplierBtn" class="primary-btn" type="button">+ Nuevo proveedor</button>
         </div>
 
-        <div class="stats-grid">
-          <div class="stat-card total"><p>Total</p><strong id="totalCount">0</strong></div>
-          <div class="stat-card active"><p>Activos</p><strong id="activeCount">0</strong></div>
-          <div class="stat-card inactive"><p>Inactivos</p><strong id="inactiveCount">0</strong></div>
-          <div class="stat-card transfer"><p>Transferencia</p><strong id="transferCount">0</strong></div>
+        <div class="stats-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+          <div class="stat-card"><p>Total</p><strong id="totalCount">0</strong></div>
+          <div class="stat-card success"><p>Activos</p><strong id="activeCount">0</strong></div>
+          <div class="stat-card danger"><p>Inactivos</p><strong id="inactiveCount">0</strong></div>
+          <div class="stat-card info"><p>Transferencia</p><strong id="transferCount">0</strong></div>
         </div>
 
         <section class="table-card">
