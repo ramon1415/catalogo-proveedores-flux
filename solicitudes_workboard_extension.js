@@ -171,7 +171,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -212,23 +212,17 @@
     };
   }
 
-  async function injectLayoutReadiness(requestId) {
+  function injectLayoutReadiness(requestId) {
     const target = document.getElementById("detailContent");
     if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
 
     const request = state.requests.find((item) => item.id === requestId);
     if (!request || isCashOrCheck(request)) return;
 
-    const freshRequest = await fetchRequestForLayout(requestId);
-    if (!freshRequest) return;
-    Object.assign(request, freshRequest);
-
-    if (target.querySelector("[data-layout-readiness-extension]")) return;
-
     const section = document.createElement("section");
     section.className = "decision-card layout-readiness-card";
     section.dataset.layoutReadinessExtension = "true";
-    section.innerHTML = renderLayoutReadinessSection(freshRequest);
+    section.innerHTML = renderLayoutReadinessSection(request);
 
     const decisionPanel = Array.from(target.children).find((node) => /Decision del aprobador/i.test(node.textContent || ""));
     if (decisionPanel) target.insertBefore(section, decisionPanel);
@@ -406,7 +400,9 @@
       closeLayoutDataEditor();
       await loadData();
       document.querySelector("[data-layout-readiness-extension]")?.remove();
-      appendLayoutReadinessSection();
+      const _reloadId = activeLayoutRequestId;
+      await loadData();
+      injectLayoutReadiness(_reloadId);
       render();
     } catch (error) {
       toast("No se pudieron guardar los datos", friendlyError(error), "error");
