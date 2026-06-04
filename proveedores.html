@@ -7,96 +7,158 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg:#07071a; --bg-surface:#0d0d22; --bg-card:#111128; --bg-hover:rgba(255,255,255,0.03); --bg-input:#0d0d22;
-      --border:rgba(255,255,255,0.07); --border-strong:rgba(255,255,255,0.12); --accent:#0f766e; --accent-dim:rgba(15,118,110,0.14);
-      --accent-glow:rgba(15,118,110,0.22); --accent-hover:#0d9488; --accent-text:#5eead4; --emerald:#12b76a; --emerald-dim:rgba(18,183,106,0.11);
-      --ruby:#e03e52; --ruby-dim:rgba(224,62,82,0.1); --sky:#2e90fa; --sky-dim:rgba(46,144,250,0.11); --text-1:#eeeef6; --text-2:#8888aa; --text-3:#50506a;
-      --shadow:0 4px 20px rgba(0,0,0,0.45); --shadow-lg:0 16px 56px rgba(0,0,0,0.65);
-    }
-    [data-theme="light"] {
-      --bg:#f4f4f9; --bg-surface:#ffffff; --bg-card:#ffffff; --bg-hover:rgba(0,0,0,0.025); --bg-input:#f7f7fc;
-      --border:rgba(0,0,0,0.08); --border-strong:rgba(0,0,0,0.14); --accent:#0f766e; --accent-dim:rgba(15,118,110,0.1);
-      --accent-glow:rgba(15,118,110,0.18); --accent-hover:#0d6b63; --accent-text:#0f766e; --emerald:#0a9956; --emerald-dim:rgba(10,153,86,0.09);
-      --ruby:#c8283c; --ruby-dim:rgba(200,40,60,0.07); --sky:#1570ca; --sky-dim:rgba(21,112,202,0.09); --text-1:#0f0f1e; --text-2:#4a4a6a; --text-3:#9090b0;
-      --shadow:0 2px 12px rgba(0,0,0,0.07); --shadow-lg:0 12px 48px rgba(0,0,0,0.14);
-    }
-    html { transition: background-color 180ms ease; }
-    body, .sidebar, .topbar, .table-card, .stat-card, .modal-content, .user-card, .nav-link, .small-btn, .secondary-btn, .primary-btn, input, select, textarea { transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease; }
-    html, body { height: 100%; }
-    body { background: var(--bg); color: var(--text-1); font-family:'Plus Jakarta Sans',sans-serif; font-size:13.5px; line-height:1.55; -webkit-font-smoothing:antialiased; }
-    body::before { content:''; position:fixed; inset:0; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity:0.02; pointer-events:none; z-index:9999; }
-    .app-shell { display:flex; height:100vh; overflow:hidden; }
-    .sidebar { width:232px; min-height:100vh; background:var(--bg-surface); border-right:1px solid var(--border); display:flex; flex-direction:column; justify-content:space-between; padding:16px 10px; flex-shrink:0; }
-    .brand { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; border-bottom:1px solid var(--border); margin-bottom:10px; }
-    .brand-logo { width:33px; height:33px; border-radius:6px; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700; color:#fff; letter-spacing:0.2px; flex-shrink:0; }
-    .brand-title{font-size:13px;font-weight:700;color:var(--text-1);letter-spacing:-0.2px}.brand-subtitle{font-size:10.5px;color:var(--text-3);font-weight:400;margin-top:1px}
-    .nav{display:flex;flex-direction:column;gap:1px}.nav-link{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:500;color:var(--text-3);position:relative}.nav-link:hover{color:var(--text-2);background:var(--bg-hover)}.nav-link span{font-size:13px;width:16px;text-align:center;flex-shrink:0}.nav-link.active{color:var(--accent-text);background:var(--accent-dim);font-weight:600}[data-theme="dark"] .nav-link.active{color:#5eead4}.nav-link.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:2.5px;height:16px;background:var(--accent);border-radius:0 2px 2px 0}
-    .user-card{padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover)}.user-card p{font-size:12.5px;font-weight:600;color:var(--text-1)}.user-card span{font-size:11px;color:var(--text-3);display:block;margin:2px 0 9px}
-    .content{flex:1;display:flex;flex-direction:column;overflow:hidden}.topbar{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;flex-shrink:0;background:var(--bg-surface)}.topbar-user{display:flex;align-items:center;gap:12px}
-    .theme-toggle{width:48px;height:26px;border-radius:13px;background:var(--bg-card);border:1px solid var(--border-strong);cursor:pointer;position:relative;flex-shrink:0}.theme-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--accent);transition:transform 220ms cubic-bezier(.4,0,.2,1)}[data-theme="light"] .theme-toggle::after{transform:translateX(22px)}.toggle-icon{position:absolute;top:50%;transform:translateY(-50%);font-size:10px;pointer-events:none;transition:opacity 180ms ease}.toggle-moon{left:6px}.toggle-sun{right:6px}[data-theme="dark"] .toggle-moon{opacity:1}[data-theme="dark"] .toggle-sun{opacity:.4}[data-theme="light"] .toggle-moon{opacity:.35}[data-theme="light"] .toggle-sun{opacity:1}.notification{font-size:15px;cursor:pointer;opacity:.4}.notification:hover{opacity:.75}.avatar{width:30px;height:30px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;cursor:pointer;flex-shrink:0}
-    .page{flex:1;overflow-y:auto;padding:26px 26px 40px;display:flex;flex-direction:column;gap:18px}.page::-webkit-scrollbar{width:4px}.page::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:4px}.page-header{display:flex;align-items:center;justify-content:space-between;gap:16px}.page-header h1{font-size:17px;font-weight:700;color:var(--text-1);letter-spacing:-0.3px}.page-header p{font-size:12px;color:var(--text-3);margin-top:2px;font-weight:400}
-    .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;padding:16px 18px 14px;text-align:left;cursor:pointer;position:relative;overflow:hidden}.stat-card:hover{border-color:var(--border-strong);background:var(--bg-hover)}.stat-card::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;opacity:.7}.stat-card.total::after{background:linear-gradient(90deg,var(--accent),transparent 55%)}.stat-card.active::after{background:linear-gradient(90deg,var(--emerald),transparent 55%)}.stat-card.inactive::after{background:linear-gradient(90deg,var(--ruby),transparent 55%)}.stat-card.transfer::after{background:linear-gradient(90deg,var(--sky),transparent 55%)}.stat-card p{font-size:10.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.65px;margin-bottom:8px}.stat-card strong{font-size:26px;font-weight:700;letter-spacing:-.8px;line-height:1;font-variant-numeric:tabular-nums}.stat-card.total strong{color:var(--accent-text)}.stat-card.active strong{color:var(--emerald)}.stat-card.inactive strong{color:var(--ruby)}.stat-card.transfer strong{color:var(--sky)}[data-theme="dark"] .stat-card.total strong{color:#5eead4}
-    .table-card{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;overflow:hidden}.table-toolbar{display:flex;gap:8px;padding:13px 16px;border-bottom:1px solid var(--border)}.table-toolbar input[type="search"]{flex:1;height:34px;padding:0 12px 0 34px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:400;outline:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%2370708a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:11px center}.table-toolbar input[type="search"]::placeholder{color:var(--text-3)}.table-toolbar input[type="search"]:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim);outline:none}.table-toolbar select{height:34px;padding:0 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-2);font-family:'Plus Jakarta Sans',sans-serif;font-size:12.5px;font-weight:500;outline:none;cursor:pointer}.table-toolbar select:focus{border-color:var(--accent)}
-    .table-wrapper{overflow:auto;max-height:calc(100vh - 300px)}.table-wrapper::-webkit-scrollbar{width:6px;height:6px}.table-wrapper::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px}.table-wrapper::-webkit-scrollbar-track{background:transparent}table{width:100%;border-collapse:collapse;font-size:12.5px}thead tr{border-bottom:1px solid var(--border)}thead th{padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);white-space:nowrap;position:sticky;top:0;z-index:2;background:var(--bg-card)}tbody tr{border-bottom:1px solid var(--border)}tbody tr:last-child{border-bottom:none}tbody tr:hover{background:var(--bg-hover)}tbody td{padding:10px 14px;color:var(--text-2);vertical-align:middle}tbody td strong{color:var(--text-1);font-weight:600;display:block;font-size:12.5px}.clabe-num{display:block;font-size:12px;font-weight:400;color:var(--text-2);font-variant-numeric:tabular-nums;letter-spacing:.1px}.clabe-label{display:block;font-size:9.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-top:1px}
-    .badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10.5px;font-weight:600;letter-spacing:.1px}.badge-active{background:var(--emerald-dim);color:var(--emerald);border:1px solid rgba(18,183,106,.18)}.badge-inactive{background:var(--accent-dim);color:var(--accent-text);border:1px solid rgba(15,118,110,.22)}[data-theme="dark"] .badge-inactive{color:#5eead4}.actions{display:flex;gap:5px}.small-btn{padding:3.5px 9px;border-radius:5px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border-strong);background:transparent;color:var(--text-2);white-space:nowrap}.small-btn:hover{background:var(--bg-hover);color:var(--text-1)}.small-btn.danger{background:var(--ruby-dim);border-color:rgba(224,62,82,.18);color:var(--ruby)}.small-btn.danger:hover{background:rgba(224,62,82,.16);border-color:rgba(224,62,82,.35)}
-    .primary-btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none;background:var(--accent);color:#fff;letter-spacing:-.1px}.primary-btn:hover{background:var(--accent-hover);box-shadow:0 0 16px var(--accent-glow)}.secondary-btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border-strong);background:transparent;color:var(--text-2)}.secondary-btn:hover{background:var(--bg-hover);color:var(--text-1)}.secondary-btn.full{width:100%;justify-content:center}.message{padding:16px 18px;font-size:13px;color:var(--text-3)}.hidden{display:none}
-    dialog{border:none;background:transparent;padding:0;max-width:640px;width:calc(100vw - 40px);border-radius:20px}dialog::backdrop{background:rgba(0,0,0,.5);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.modal-content{background:var(--bg-card);border:1px solid var(--border-strong);border-radius:20px;padding:24px 26px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:20px;position:relative;overflow:hidden;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}.modal-content::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15) 35%,rgba(255,255,255,.15) 65%,transparent)}[data-theme="light"] .modal-content::before{background:linear-gradient(90deg,transparent,rgba(255,255,255,.8) 35%,rgba(255,255,255,.8) 65%,transparent)}.modal-header{display:flex;justify-content:space-between;align-items:flex-start}.modal-header h2{font-size:15.5px;font-weight:700;color:var(--text-1);letter-spacing:-.2px}.modal-header p{font-size:12px;color:var(--text-3);margin-top:3px;font-weight:400}.icon-btn{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-3);font-size:17px;display:flex;align-items:center;justify-content:center;cursor:pointer}.icon-btn:hover{border-color:var(--border-strong);color:var(--text-1);background:var(--bg-hover)}
-    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-grid label{display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.35px;text-transform:uppercase}.form-grid label.full-row{grid-column:1 / -1}.form-grid input,.form-grid select,.form-grid textarea{background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 11px;color:var(--text-1);font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:400;outline:none;resize:vertical}.form-grid input::placeholder,.form-grid textarea::placeholder{color:var(--text-3)}.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}.form-grid select option{background:var(--bg-card);color:var(--text-1)}.check-label{flex-direction:row!important;align-items:center!important;gap:7px!important;text-transform:none!important;font-size:12.5px!important;letter-spacing:0!important;color:var(--text-2)!important}.check-label input[type="checkbox"]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}.modal-actions{display:flex;justify-content:flex-end;gap:8px;padding-top:4px;border-top:1px solid var(--border)}.field-disabled{opacity:.55;cursor:not-allowed!important}.form-grid input:disabled,.form-grid select:disabled{background:var(--bg-hover);color:var(--text-3);cursor:not-allowed}
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 820px; }
+    .clabe-num { display: block; font-size: 12px; font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; letter-spacing: .1px; }
+    .clabe-label { display: block; font-size: 9.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; margin-top: 1px; }
+    .check-label { flex-direction: row !important; align-items: center !important; gap: 7px !important; text-transform: none !important; font-size: 12.5px !important; letter-spacing: 0 !important; color: var(--text-2) !important; }
+    .check-label input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+    .field-disabled { opacity: .55; cursor: not-allowed !important; }
+    .form-grid input:disabled, .form-grid select:disabled { background: var(--bg-hover); color: var(--text-3); cursor: not-allowed; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <main class="app-shell">
+  <div class="app-shell">
     <aside class="sidebar">
       <div>
-        <div class="brand"><div class="brand-logo">FL</div><div><p class="brand-title">Flux Operadora</p><p class="brand-subtitle">Proveedores</p></div></div>
-        <nav class="nav"><a href="./proveedores.html" class="nav-link active"><span>◇</span> Proveedores</a><a href="./solicitudes.html" class="nav-link muted"><span>S</span> Solicitudes de pago</a><a href="./layouts.html" class="nav-link muted"><span>L</span> Layouts de pago</a></nav>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Proveedores</div></div>
+        </div>
+        <nav class="nav" aria-label="Menu principal"></nav>
       </div>
-      <div class="user-card"><p id="userName">Usuario</p><span id="userEmail">Sesión activa</span><button id="logoutBtn" class="secondary-btn full">Cerrar sesión</button></div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
     </aside>
-    <section class="content">
-      <header class="topbar"><div></div><div class="topbar-user"><span class="notification">🔔</span><button class="theme-toggle" id="themeToggle" title="Cambiar tema" aria-label="Cambiar tema"><span class="toggle-icon toggle-moon">🌙</span><span class="toggle-icon toggle-sun">☀️</span></button><div class="avatar">FL</div></div></header>
-      <div class="page">
-        <div class="page-header"><div><h1>Proveedores</h1><p>Administra proveedores, métodos de pago, datos bancarios y estatus operativo.</p></div><button id="newSupplierBtn" class="primary-btn">+ Nuevo proveedor</button></div>
-        <div class="stats-grid"><button class="stat-card total"><p>Total</p><strong id="totalCount">0</strong></button><button class="stat-card active"><p>Activos</p><strong id="activeCount">0</strong></button><button class="stat-card inactive"><p>Inactivos</p><strong id="inactiveCount">0</strong></button><button class="stat-card transfer"><p>Transferencia</p><strong id="transferCount">0</strong></button></div>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Proveedores</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+          <div class="avatar">FL</div>
+        </div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Proveedores</h1>
+            <p>Administra proveedores, metodos de pago, datos bancarios y estatus operativo.</p>
+          </div>
+          <button id="newSupplierBtn" class="primary-btn" type="button">+ Nuevo proveedor</button>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card total"><p>Total</p><strong id="totalCount">0</strong></div>
+          <div class="stat-card active"><p>Activos</p><strong id="activeCount">0</strong></div>
+          <div class="stat-card inactive"><p>Inactivos</p><strong id="inactiveCount">0</strong></div>
+          <div class="stat-card transfer"><p>Transferencia</p><strong id="transferCount">0</strong></div>
+        </div>
+
         <section class="table-card">
-          <div class="table-toolbar"><input id="searchInput" type="search" placeholder="Buscar por alias, razón social, RFC, banco o correo..."><select id="statusFilter"><option value="todos">Estatus: Todos</option><option value="activos">Activos</option><option value="inactivos">Inactivos</option></select></div>
-          <div id="messageBox" class="message hidden">Cargando proveedores...</div>
-          <div class="table-wrapper"><table><thead><tr><th>Alias</th><th>Nombre completo</th><th>Método</th><th>Banco</th><th>CLABE / Cuenta</th><th>RFC</th><th>Contacto</th><th>Estatus</th><th>Acciones</th></tr></thead><tbody id="suppliersTableBody"><tr><td colspan="9" class="message">Cargando proveedores...</td></tr></tbody></table></div>
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar alias, razon social, RFC, banco...">
+            <select id="statusFilter">
+              <option value="todos">Estatus: Todos</option>
+              <option value="activos">Activos</option>
+              <option value="inactivos">Inactivos</option>
+            </select>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Alias</th>
+                  <th>Nombre completo</th>
+                  <th>Metodo</th>
+                  <th>Banco</th>
+                  <th>CLABE / Cuenta</th>
+                  <th>RFC</th>
+                  <th>Estatus</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="suppliersTableBody">
+                <tr><td colspan="8" style="padding:44px;text-align:center;color:var(--text-3)">Cargando proveedores...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </section>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal proveedor -->
+  <dialog id="supplierDialog">
+    <form id="supplierForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="modalTitle">Nuevo proveedor</h2>
+          <p>Completa los datos principales del proveedor.</p>
+        </div>
+        <button type="button" id="closeModalBtn" class="icon-btn">✕</button>
       </div>
-    </section>
-  </main>
-  <dialog id="supplierDialog" class="modal">
-    <form id="supplierForm" method="dialog" class="modal-content">
-      <div class="modal-header"><div><h2 id="modalTitle">Nuevo proveedor</h2><p>Completa los datos principales del proveedor.</p></div><button type="button" id="closeModalBtn" class="icon-btn">×</button></div>
-      <input type="hidden" id="supplierId">
-      <div class="form-grid">
-        <label>Alias del proveedor *<input id="alias" required placeholder="ej. ACROCARPUS"></label>
-        <label>Nombre completo / razón social *<input id="nombre_completo" required placeholder="Razón social completa"></label>
-        <label>Método de pago *<select id="metodo_pago" required><option value="">Seleccionar...</option><option value="Transferencia bancaria">Transferencia bancaria</option><option value="Efectivo">Efectivo</option><option value="Tarjeta en plataforma">Tarjeta en plataforma</option><option value="Cheque">Cheque</option><option value="Otro">Otro</option></select></label>
-        <label>Tipo de cuenta<select id="tipo_cuenta"><option value="">No aplica</option><option value="CLABE">CLABE</option><option value="Cuenta">Cuenta</option></select></label>
-        <label>Tipo de destino de pago<select id="destination_type"><option value="">Seleccionar...</option><option value="clabe">CLABE</option><option value="cuenta">Cuenta bancaria</option><option value="convenio">Convenio</option></select></label>
-        <label>Beneficiario para layout<input id="beneficiary_name" placeholder="Nombre que aparece en el layout"></label>
-        <label>Banco<input id="banco" placeholder="BBVA, Banorte, HSBC..."></label>
-        <label>CLABE<input id="clabe" maxlength="18" placeholder="18 dígitos"></label>
-        <label>Cuenta bancaria<input id="cuenta_bancaria" placeholder="Número de cuenta"></label>
-        <label>Número de convenio<input id="convenio_number" placeholder="Convenio de pago"></label>
-        <label>RFC<input id="rfc" placeholder="RFC del proveedor"></label>
-        <label>Correo<input id="email" type="email" placeholder="correo@dominio.com"></label>
-        <label>Teléfono<input id="telefono" placeholder="+52 ..."></label>
-        <label>Tipo de proveedor<input id="tipo_proveedor" placeholder="Servicios, materiales..."></label>
-        <label class="check-label"><input id="es_personal_eventual" type="checkbox"> Es personal eventual</label>
-        <label class="check-label"><input id="activo" type="checkbox" checked> Proveedor activo</label>
-        <label class="full-row">Notas<textarea id="notas" rows="3" placeholder="Información adicional..."></textarea></label>
+      <div class="modal-scroll">
+        <input type="hidden" id="supplierId">
+        <div class="form-grid">
+          <label>Alias del proveedor *<input id="alias" required placeholder="ej. ACROCARPUS"></label>
+          <label>Nombre completo / razon social *<input id="nombre_completo" required placeholder="Razon social completa"></label>
+          <label>Metodo de pago *
+            <select id="metodo_pago" required>
+              <option value="">Seleccionar...</option>
+              <option value="Transferencia bancaria">Transferencia bancaria</option>
+              <option value="Efectivo">Efectivo</option>
+              <option value="Tarjeta en plataforma">Tarjeta en plataforma</option>
+              <option value="Cheque">Cheque</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </label>
+          <label>Tipo de cuenta
+            <select id="tipo_cuenta">
+              <option value="">No aplica</option>
+              <option value="CLABE">CLABE</option>
+              <option value="Cuenta">Cuenta</option>
+            </select>
+          </label>
+          <label>Tipo de destino de pago
+            <select id="destination_type">
+              <option value="">Seleccionar...</option>
+              <option value="clabe">CLABE</option>
+              <option value="cuenta">Cuenta bancaria</option>
+              <option value="convenio">Convenio</option>
+            </select>
+          </label>
+          <label>Beneficiario para layout<input id="beneficiary_name" placeholder="Nombre que aparece en el layout"></label>
+          <label>Banco<input id="banco" placeholder="BBVA, Banorte, HSBC..."></label>
+          <label>CLABE<input id="clabe" maxlength="18" placeholder="18 digitos"></label>
+          <label>Cuenta bancaria<input id="cuenta_bancaria" placeholder="Numero de cuenta"></label>
+          <label>Numero de convenio<input id="convenio_number" placeholder="Convenio de pago"></label>
+          <label>RFC<input id="rfc" placeholder="RFC del proveedor"></label>
+          <label>Correo<input id="email" type="email" placeholder="correo@dominio.com"></label>
+          <label>Telefono<input id="telefono" placeholder="+52 ..."></label>
+          <label>Tipo de proveedor<input id="tipo_proveedor" placeholder="Servicios, materiales..."></label>
+          <label class="check-label"><input id="es_personal_eventual" type="checkbox"> Es personal eventual</label>
+          <label class="check-label"><input id="activo" type="checkbox" checked> Proveedor activo</label>
+          <label class="full-row">Notas<textarea id="notas" rows="3" placeholder="Informacion adicional..."></textarea></label>
+        </div>
       </div>
-      <div class="modal-actions"><button type="button" id="cancelBtn" class="secondary-btn">Cancelar</button><button type="submit" class="primary-btn">Guardar proveedor</button></div>
+      <div class="modal-actions">
+        <button type="button" id="cancelBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" class="primary-btn">Guardar proveedor</button>
+      </div>
     </form>
   </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
+  <script src="./components.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
