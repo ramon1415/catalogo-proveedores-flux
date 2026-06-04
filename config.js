@@ -8,39 +8,43 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   const urlParams = new URLSearchParams(window.location.search)
 
   const ROLE_GROUPS = {
+    SYSADMIN: "sysadmin",
     ADMIN: "admin_finance",
-    APPROVER: "approver",
-    REQUESTER: "requester",
+    DIRECTION: "direction",
+    OPERATION: "operation",
   }
 
-  const ADMIN_ROLES = ["admin", "finance", "finanzas"]
-  const APPROVER_ROLES = ["approver_2", "aprobador_2"]
-  const REQUESTER_ROLES = ["solicitante", "operator", "default"]
+  const SYSADMIN_ROLES = ["sysadmin", "system_admin", "admin"]
+  const ADMIN_ROLES = ["finance", "finanzas", "treasury", "tesoreria"]
+  const DIRECTION_ROLES = ["approver_2", "aprobador_2", "direccion", "director"]
+  const OPERATION_ROLES = ["solicitante", "operator", "default"]
 
   const modules = [
-    { key: "dashboard", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
-    { key: "providers", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.ADMIN] },
-    { key: "originAccounts", file: "proveedores.html", href: "./proveedores.html?tab=cuentas-origen", icon: "C", label: "Cuentas origen", groups: [ROLE_GROUPS.ADMIN] },
-    { key: "requests", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER, ROLE_GROUPS.REQUESTER] },
-    { key: "approvals", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Aprobaciones de pago", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
-    { key: "layouts", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.ADMIN] },
-    { key: "payments", file: "pagos_comprobaciones.html", href: "./pagos_comprobaciones.html", icon: "$", label: "Pagos y comprobaciones", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
-    { key: "cash", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.ADMIN] },
-    { key: "members", file: "socios.html", href: "./socios.html", icon: "M", label: "Socios", groups: [ROLE_GROUPS.ADMIN, ROLE_GROUPS.APPROVER] },
-    { key: "income", file: "ingresos.html", href: "./ingresos.html", icon: "I", label: "Ingresos e incidencias", groups: [ROLE_GROUPS.ADMIN] },
+    { key: "requests", section: "Operacion", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION] },
+    { key: "layouts", section: "Operacion", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "cash", section: "Operacion", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "payments", section: "Operacion", file: "pagos_comprobaciones.html", href: "./pagos_comprobaciones.html", icon: "$", label: "Pagos y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION], hidden: true },
+    { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=payments", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "config", section: "Configuracion", file: "configuracion.html", href: "./configuracion.html", icon: "C", label: "Configuracion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
   ]
+
+  const navSections = ["Operacion", "General", "Configuracion"]
 
   const subtitles = {
     dashboard: "Dashboard operativo",
     providers: "Proveedores",
-    originAccounts: "Cuentas origen",
     requests: "Solicitudes de pago",
-    approvals: "Aprobaciones de pago",
+    approvals: "Cola de aprobacion",
     layouts: "Layouts de pago",
     payments: "Pagos y comprobaciones",
     cash: "Efectivo y comprobaciones",
-    members: "Socios",
-    income: "Ingresos e incidencias",
+    income: "Ingresos",
+    incidents: "Incidencias",
+    config: "Configuracion",
   }
 
   const roleState = {
@@ -48,7 +52,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     session: null,
     profile: null,
     roles: [],
-    group: ROLE_GROUPS.REQUESTER,
+    group: ROLE_GROUPS.OPERATION,
   }
 
   let rolePromise = null
@@ -64,9 +68,10 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       const list = Array.isArray(roles) ? roles : [roles]
       return list.some((role) => roleState.roles.includes(normalizeRole(role)))
     },
-    isAdminFinance: () => roleState.group === ROLE_GROUPS.ADMIN,
-    canApprove: () => roleState.group === ROLE_GROUPS.ADMIN || roleState.group === ROLE_GROUPS.APPROVER,
-    canManageProviders: () => roleState.group === ROLE_GROUPS.ADMIN,
+    isAdminFinance: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN].includes(roleState.group),
+    canApprove: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
+    canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
+    canAccessConfigTab: (tab) => canAccessConfigTab(tab),
   }
 
   function applyLoginCopy() {
@@ -92,13 +97,22 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     if (!nav) return
     if (!roleState.loaded) return
 
-    const visibleModules = modulesForCurrentRole()
+    const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
     const activeKey = currentModuleKey()
 
-    nav.innerHTML = visibleModules
-      .map((item) => {
-        const isActive = activeKey === item.key
-        return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
+    nav.innerHTML = navSections
+      .map((section) => {
+        const items = visibleModules.filter((item) => item.section === section)
+        if (!items.length) return ""
+        return `
+          <div class="nav-section">
+            <div class="nav-section-title">${section}</div>
+            ${items.map((item) => {
+              const isActive = activeKey === item.key
+              return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
+            }).join("")}
+          </div>
+        `
       })
       .join("")
     markShellReady()
@@ -191,7 +205,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       roleState.group = groupFromRoles(roleState.roles)
     } catch (_) {
       roleState.roles = []
-      roleState.group = ROLE_GROUPS.REQUESTER
+      roleState.group = ROLE_GROUPS.OPERATION
     }
 
     roleState.loaded = true
@@ -232,10 +246,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function groupFromRoles(roles) {
     const cleanRoles = roles.map(normalizeRole)
+    if (cleanRoles.some((role) => SYSADMIN_ROLES.includes(role))) return ROLE_GROUPS.SYSADMIN
     if (cleanRoles.some((role) => ADMIN_ROLES.includes(role))) return ROLE_GROUPS.ADMIN
-    if (cleanRoles.some((role) => APPROVER_ROLES.includes(role))) return ROLE_GROUPS.APPROVER
-    if (cleanRoles.some((role) => REQUESTER_ROLES.includes(role))) return ROLE_GROUPS.REQUESTER
-    return ROLE_GROUPS.REQUESTER
+    if (cleanRoles.some((role) => DIRECTION_ROLES.includes(role))) return ROLE_GROUPS.DIRECTION
+    if (cleanRoles.some((role) => OPERATION_ROLES.includes(role))) return ROLE_GROUPS.OPERATION
+    return ROLE_GROUPS.OPERATION
   }
 
   function modulesForCurrentRole() {
@@ -245,8 +260,12 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function currentModuleKey() {
-    if (pageName === "proveedores.html" && urlParams.get("tab") === "cuentas-origen") return "originAccounts"
-    const match = modules.find((item) => item.file === pageName && item.key !== "originAccounts")
+    if (pageName === "configuracion.html") return "config"
+    if (pageName === "socios.html") return "config"
+    if (pageName === "proveedores.html" && urlParams.get("tab") === "cuentas-origen") return "config"
+    if (pageName === "ingresos.html" && urlParams.get("tab") === "incidents") return "incidents"
+    if (pageName === "ingresos.html") return "income"
+    const match = modules.find((item) => item.file === pageName)
     return match?.key || "requests"
   }
 
@@ -263,7 +282,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function defaultLandingForRole() {
-    if (roleState.group === ROLE_GROUPS.ADMIN) return "dashboard.html"
+    if ([ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group)) return "dashboard.html"
     return "solicitudes.html"
   }
 
@@ -275,8 +294,21 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function isCurrentPageAllowed() {
+    if (pageName === "socios.html") return canAccessConfigTab("members")
+    if (pageName === "proveedores.html" && urlParams.get("tab") === "cuentas-origen") return canAccessConfigTab("originAccounts")
     const activeKey = currentModuleKey()
     return modulesForCurrentRole().some((item) => item.key === activeKey)
+  }
+
+  function canAccessConfigTab(tab) {
+    const group = roleState.group
+    const tabGroups = {
+      members: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.DIRECTION],
+      originAccounts: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+      budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+      system: [ROLE_GROUPS.SYSADMIN],
+    }
+    return (tabGroups[tab] || []).includes(group)
   }
 
   function normalizeRole(value) {
@@ -294,6 +326,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     style.textContent = `
       body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden;opacity:0}
       body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;transition:opacity 120ms ease}
+      .sidebar .nav-section{display:flex;flex-direction:column;gap:1px;margin-bottom:14px}
+      .sidebar .nav-section-title{padding:9px 10px 4px;font-size:10px;font-weight:800;letter-spacing:.75px;text-transform:uppercase;color:var(--text-3, #666680)}
     `
     document.head.appendChild(style)
   }
@@ -343,8 +377,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./efectivo_ux2_extension.js?v=20260602-ux2", "efectivo-ux2")
     }
     if (pageName === "ingresos.html") {
+      loadExtension("./ingresos_nav_patch.js?v=20260603-config-menu", "ingresos-nav")
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
-      loadExtension("./ingresos_ux2_extension.js?v=20260602-ux2-visitas-fix", "ingresos-ux2")
+      loadExtension("./ingresos_ux2_extension.js?v=20260603-config-menu", "ingresos-ux2")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
