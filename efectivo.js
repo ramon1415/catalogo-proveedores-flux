@@ -2,12 +2,11 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 const ACTIVE_FUND_STATUSES = ["active", "pending_receipt", "receipt_review", "blocked"]
 const PENDING_FUND_STATUSES = ["pending_receipt", "blocked"]
-const REVIEW_ROLES = ["admin", "finance", "finanzas", "approver_2", "aprobador_2"]
+const REVIEW_ROLES = ["admin", "finance", "finanzas", "approver_2", "aprobador_2", "sysadmin", "system_admin", "treasury", "tesoreria"]
 
 const dom = {}
 let currentProfile = null
 let currentRoles = []
-let rolesWereLoaded = false
 let cashFunds = []
 let reconciliations = []
 let reconciliationItems = []
@@ -24,22 +23,27 @@ document.addEventListener("DOMContentLoaded", initCashPage)
 
 async function initCashPage() {
   cacheDom()
-  setupTheme()
   bindEvents()
 
   try {
-    await loadSession()
+    await FluxAuth.ready()
+    const profile = FluxAuth.getProfile()
+    currentProfile = profile
+    currentRoles = FluxAuth.state.roles || []
+    if (profile) {
+      dom.userName.textContent = profile.full_name || "Usuario"
+      dom.userEmail.textContent = FluxAuth.state.session?.user?.email || "Sesion activa"
+    }
     await loadCashData()
   } catch (error) {
-    showMessage(friendlyError(error), true)
-    showToast("No fue posible iniciar", friendlyError(error), "error")
+    showToast("No fue posible iniciar", friendlyError(error), "danger")
   }
 }
 
 function cacheDom() {
   ;[
     "themeToggle", "userName", "userEmail", "logoutBtn", "refreshBtn", "searchInput", "statusFilter", "methodFilter",
-    "responsibleFilter", "companyFilter", "messageBox", "fundsTableBody", "toastStack", "activeFunds", "pendingFunds",
+    "responsibleFilter", "companyFilter", "fundsTableBody", "toastStack", "activeFunds", "pendingFunds",
     "reviewFunds", "closedFunds", "pendingAmount", "fundDetailDialog", "detailTitle", "detailSubtitle", "detailContent",
     "closeDetailModalBtn", "closeDetailFooterBtn", "ticketDialog", "ticketForm", "ticketConcept", "ticketAmount", "ticketDate",
     "ticketProviderId", "ticketBudgetCategoryId", "closeTicketModalBtn", "cancelTicketBtn", "submitTicketBtn", "submitDialog",
@@ -47,16 +51,6 @@ function cacheDom() {
     "cancelSubmitBtn", "submitReconciliationBtn", "reviewDialog", "reviewForm", "reviewTitle", "reviewSubtitle", "reviewComment",
     "closeReviewModalBtn", "cancelReviewBtn", "submitReviewBtn",
   ].forEach((id) => { dom[id] = document.getElementById(id) })
-}
-
-function setupTheme() {
-  const saved = localStorage.getItem("flux-theme")
-  if (saved) document.documentElement.setAttribute("data-theme", saved)
-  dom.themeToggle?.addEventListener("click", () => {
-    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"
-    document.documentElement.setAttribute("data-theme", next)
-    localStorage.setItem("flux-theme", next)
-  })
 }
 
 function bindEvents() {
@@ -81,45 +75,8 @@ function bindEvents() {
   dom.reviewForm?.addEventListener("submit", reviewReconciliation)
 }
 
-async function loadSession() {
-  const { data: { session }, error } = await supabaseClient.auth.getSession()
-  if (error) throw error
-  if (!session) return window.location.href = "./index.html"
-
-  dom.userEmail.textContent = session.user.email || "Sesion activa"
-  dom.userName.textContent = session.user.user_metadata?.full_name || "Usuario"
-  await resolveCurrentProfile(session)
-}
-
-async function resolveCurrentProfile(session) {
-  currentProfile = null
-  currentRoles = []
-  rolesWereLoaded = false
-
-  const lookups = [
-    { column: "auth_user_id", value: session.user.id },
-    { column: "email", value: session.user.email },
-  ].filter((item) => item.value)
-
-  for (const lookup of lookups) {
-    const { data, error } = await supabaseClient.from("profiles").select("*").eq(lookup.column, lookup.value).maybeSingle()
-    if (!error && data) {
-      currentProfile = data
-      dom.userName.textContent = data.full_name || dom.userName.textContent
-      break
-    }
-  }
-
-  if (!currentProfile) return
-
-  const { data, error } = await supabaseClient.from("user_roles").select("role_id, roles(id,name,description)").eq("profile_id", currentProfile.id)
-  if (error) return
-  rolesWereLoaded = true
-  currentRoles = (data || []).map((row) => row.roles?.name || row.name || "").filter(Boolean)
-}
-
 async function loadCashData() {
-  showMessage("Cargando fondos...")
+  dom.fundsTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Cargando fondos...</td></tr>`
 
   const [fundsResult, reconciliationsResult, itemsResult, requestsResult, profilesResult, companiesResult, providersResult, categoriesResult] = await Promise.all([
     supabaseClient.from("cash_funds").select("*").order("created_at", { ascending: false }),
@@ -133,8 +90,7 @@ async function loadCashData() {
   ])
 
   if (fundsResult.error) {
-    showMessage(rlsHint("cash_funds", "select", fundsResult.error), true)
-    dom.fundsTableBody.innerHTML = `<tr><td colspan="10" class="message">No fue posible cargar fondos.</td></tr>`
+    dom.fundsTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">${escapeHtml(rlsHint("cash_funds", "select", fundsResult.error))}</td></tr>`
     return
   }
 
@@ -149,7 +105,6 @@ async function loadCashData() {
 
   if (currentProfile && !profiles.some((p) => p.id === currentProfile.id)) profiles.push(currentProfile)
 
-  hideMessage()
   populateFilters()
   populateTicketCatalogs()
   renderStats()
@@ -203,7 +158,18 @@ function renderFundsTable() {
 
   dom.fundsTableBody.innerHTML = rows.map((fund) => {
     const request = paymentRequestById(fund.payment_request_id)
-    return `<tr><td><strong>${escapeHtml(request?.request_number || "Sin solicitud")}</strong><span class="muted-line">${escapeHtml(request?.description || fund.notes || "Sin descripcion")}</span></td><td>${escapeHtml(profileName(fund.responsible_profile_id))}</td><td>${escapeHtml(companyName(fund.company_id))}</td><td>${escapeHtml(methodLabel(fund.delivery_method))}</td><td><strong>${escapeHtml(formatCurrency(fund.assigned_amount))}</strong></td><td>${escapeHtml(formatCurrency(fund.verified_amount))}</td><td><strong>${escapeHtml(formatCurrency(fund.pending_amount))}</strong></td><td>${escapeHtml(formatDate(fund.due_date))}</td><td>${renderFundStatusBadge(fund.status)}</td><td><button class="small-btn" type="button" onclick="openFundDetail('${escapeHtml(fund.id)}')">Ver detalle</button></td></tr>`
+    return `<tr>
+      <td><span class="cell-main">${escapeHtml(request?.request_number || "Sin solicitud")}</span><span class="cell-sub">${escapeHtml(request?.description || fund.notes || "")}</span></td>
+      <td>${escapeHtml(profileName(fund.responsible_profile_id))}</td>
+      <td>${escapeHtml(companyName(fund.company_id))}</td>
+      <td>${escapeHtml(methodLabel(fund.delivery_method))}</td>
+      <td><span class="cell-main">${escapeHtml(formatCurrency(fund.assigned_amount))}</span></td>
+      <td>${escapeHtml(formatCurrency(fund.verified_amount))}</td>
+      <td><span class="cell-main">${escapeHtml(formatCurrency(fund.pending_amount))}</span></td>
+      <td>${escapeHtml(formatDate(fund.due_date))}</td>
+      <td>${fundStatusBadge(fund.status)}</td>
+      <td><div class="actions row-actions"><button class="small-btn" type="button" onclick="openFundDetail('${escapeHtml(fund.id)}')">Ver detalle</button></div></td>
+    </tr>`
   }).join("")
 }
 
@@ -220,8 +186,24 @@ function renderFundDetail(fundId) {
   const request = paymentRequestById(fund.payment_request_id)
   const reconciliation = reconciliationForFund(fund.id)
   dom.detailTitle.textContent = request?.request_number || "Detalle de fondo"
-  dom.detailSubtitle.textContent = `${methodLabel(fund.delivery_method)} - ${fundStatusLabel(fund.status)}`
-  dom.detailContent.innerHTML = `<div class="detail-grid">${detailCard("Solicitud origen", request?.request_number || "Sin solicitud")}${detailCard("Responsable", profileName(fund.responsible_profile_id))}${detailCard("Empresa", companyName(fund.company_id))}${detailCard("Metodo", methodLabel(fund.delivery_method))}${detailCard("Monto asignado", formatCurrency(fund.assigned_amount))}${detailCard("Monto comprobado", formatCurrency(fund.verified_amount))}${detailCard("Monto pendiente", formatCurrency(fund.pending_amount))}${detailCard("Fecha de asignacion", formatDate(fund.assignment_date))}${detailCard("Fecha limite", formatDate(fund.due_date))}${detailCard("Estatus", renderFundStatusBadge(fund.status), true)}${detailCard("Notas", fund.notes || "Sin notas", false, "full")}</div>${renderReconciliationSection(fund, reconciliation)}${renderTicketsSection(reconciliation)}`
+  dom.detailSubtitle.textContent = `${methodLabel(fund.delivery_method)} — ${fundStatusLabel(fund.status)}`
+  dom.detailContent.innerHTML = `
+    <div class="ref-grid">
+      ${refCell("Solicitud origen", request?.request_number || "Sin solicitud")}
+      ${refCell("Responsable", profileName(fund.responsible_profile_id))}
+      ${refCell("Empresa", companyName(fund.company_id))}
+      ${refCell("Metodo", methodLabel(fund.delivery_method))}
+      ${refCell("Monto asignado", formatCurrency(fund.assigned_amount))}
+      ${refCell("Monto comprobado", formatCurrency(fund.verified_amount))}
+      ${refCell("Monto pendiente", formatCurrency(fund.pending_amount))}
+      ${refCell("Fecha de asignacion", formatDate(fund.assignment_date))}
+      ${refCell("Fecha limite", formatDate(fund.due_date))}
+      <div class="ref-cell"><span class="ref-label">Estatus</span><span class="ref-value">${fundStatusBadge(fund.status)}</span></div>
+      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Notas</span><span class="ref-value">${escapeHtml(fund.notes || "Sin notas")}</span></div>
+    </div>
+    ${renderReconciliationSection(fund, reconciliation)}
+    ${renderTicketsSection(reconciliation)}
+  `
 }
 
 function renderReconciliationSection(fund, reconciliation) {
@@ -229,14 +211,78 @@ function renderReconciliationSection(fund, reconciliation) {
   const canAddTicket = reconciliation && ["draft", "correction_requested"].includes(reconciliation.status)
   const canSubmit = reconciliation && ["draft", "correction_requested"].includes(reconciliation.status)
   const canReview = reconciliation && reconciliation.status === "submitted" && canReviewCurrentUser()
-  return `<section class="section-card"><div><h3>Comprobacion</h3><p>${reconciliation ? "Seguimiento de tickets y revision." : "Aun no hay comprobacion abierta para este fondo."}</p></div>${reconciliation ? `<div class="detail-grid">${detailCard("Estatus", renderReconciliationStatusBadge(reconciliation.status), true)}${detailCard("Total tickets", formatCurrency(reconciliation.total_tickets))}${detailCard("Monto devuelto", formatCurrency(reconciliation.returned_amount))}${detailCard("Diferencia", formatCurrency(reconciliation.difference_amount))}${detailCard("Comentario del revisor", reconciliation.reviewer_comment || "Sin comentario", false, "full")}${detailCard("Fecha de revision", formatDateTime(reconciliation.reviewed_at))}</div>` : `<div class="notice warning">Crea una comprobacion para empezar a registrar tickets.</div>`}<div id="blockCheckResult"></div><div class="actions">${canCreate ? `<button type="button" class="small-btn success" data-action="create-reconciliation" data-fund-id="${escapeHtml(fund.id)}">Crear comprobacion</button>` : ""}${canAddTicket ? `<button type="button" class="small-btn" data-action="add-ticket" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Agregar ticket</button>` : ""}${canSubmit ? `<button type="button" class="small-btn info" data-action="submit-reconciliation" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Enviar comprobacion</button>` : ""}${canReview ? `<button type="button" class="small-btn success" data-action="review" data-review-action="approved" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Aprobar</button><button type="button" class="small-btn danger" data-action="review" data-review-action="rejected" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Rechazar</button><button type="button" class="small-btn warning" data-action="review" data-review-action="correction_requested" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Solicitar correccion</button>` : ""}<button type="button" class="small-btn" data-action="verify-block" data-profile-id="${escapeHtml(fund.responsible_profile_id || "")}">Verificar bloqueo</button></div>${reconciliation && reconciliation.status === "submitted" && !canReview ? `<div class="notice warning">Esta comprobacion esta en revision. Las decisiones las registra un perfil autorizado.</div>` : ""}</section>`
+
+  const reconciliationDetails = reconciliation ? `
+    <div class="ref-grid">
+      <div class="ref-cell"><span class="ref-label">Estatus</span><span class="ref-value">${reconciliationStatusBadge(reconciliation.status)}</span></div>
+      ${refCell("Total tickets", formatCurrency(reconciliation.total_tickets))}
+      ${refCell("Monto devuelto", formatCurrency(reconciliation.returned_amount))}
+      ${refCell("Diferencia", formatCurrency(reconciliation.difference_amount))}
+      ${refCell("Fecha de revision", formatDateTime(reconciliation.reviewed_at))}
+      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Comentario del revisor</span><span class="ref-value">${escapeHtml(reconciliation.reviewer_comment || "Sin comentario")}</span></div>
+    </div>` : `
+    <div class="notice-v2 warning" style="margin-bottom:10px">
+      <span class="notice-icon">·</span>
+      <span class="notice-text">
+        <span class="notice-title">Sin comprobacion</span>
+        <span class="notice-sep">—</span>
+        <span class="notice-desc">Crea una comprobacion para empezar a registrar tickets.</span>
+      </span>
+    </div>`
+
+  const submittedNotice = reconciliation?.status === "submitted" && !canReview ? `
+    <div class="notice-v2 warning">
+      <span class="notice-icon">·</span>
+      <span class="notice-text">
+        <span class="notice-title">En revision</span>
+        <span class="notice-sep">—</span>
+        <span class="notice-desc">Las decisiones las registra un perfil autorizado.</span>
+      </span>
+    </div>` : ""
+
+  return `
+    <div class="section-heading">Comprobacion</div>
+    ${reconciliationDetails}
+    <div id="blockCheckResult"></div>
+    <div class="actions">
+      ${canCreate ? `<button type="button" class="small-btn success" data-action="create-reconciliation" data-fund-id="${escapeHtml(fund.id)}">Crear comprobacion</button>` : ""}
+      ${canAddTicket ? `<button type="button" class="small-btn" data-action="add-ticket" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Agregar ticket</button>` : ""}
+      ${canSubmit ? `<button type="button" class="small-btn info" data-action="submit-reconciliation" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Enviar comprobacion</button>` : ""}
+      ${canReview ? `
+        <button type="button" class="small-btn success" data-action="review" data-review-action="approved" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Aprobar</button>
+        <button type="button" class="small-btn danger" data-action="review" data-review-action="rejected" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Rechazar</button>
+        <button type="button" class="small-btn warning" data-action="review" data-review-action="correction_requested" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Solicitar correccion</button>
+      ` : ""}
+      <button type="button" class="small-btn" data-action="verify-block" data-profile-id="${escapeHtml(fund.responsible_profile_id || "")}">Verificar bloqueo</button>
+    </div>
+    ${submittedNotice}`
 }
 
 function renderTicketsSection(reconciliation) {
-  if (!reconciliation) return `<section class="section-card"><h3>Tickets / comprobantes</h3><p>Primero crea una comprobacion para agregar tickets.</p></section>`
+  if (!reconciliation) return `
+    <div class="section-heading">Tickets / comprobantes</div>
+    <div style="border:1px dashed var(--border-strong);border-radius:10px;padding:18px;text-align:center;color:var(--text-3);font-size:12px">Primero crea una comprobacion para agregar tickets.</div>`
+
   const rows = itemsForReconciliation(reconciliation.id)
-  const tableRows = rows.length ? rows.map((item) => `<tr><td><strong>${escapeHtml(item.concept || "Sin concepto")}</strong>${item.storage_path ? `<span class="muted-line">${escapeHtml(item.storage_path)}</span>` : `<span class="muted-line">Archivo pendiente</span>`}</td><td>${escapeHtml(providerName(item.proveedor_id))}</td><td>${escapeHtml(budgetCategoryName(item.budget_category_id))}</td><td><strong>${escapeHtml(formatCurrency(item.amount))}</strong></td><td>${escapeHtml(formatDate(item.ticket_date))}</td><td>${renderItemStatusBadge(item.status)}</td></tr>`).join("") : `<tr><td colspan="6" class="message">No hay tickets registrados.</td></tr>`
-  return `<section class="section-card"><div><h3>Tickets / comprobantes</h3><p>La carga de archivos se implementara en la siguiente fase.</p></div><div class="table-wrapper" style="max-height:260px;min-height:auto"><table><thead><tr><th>Concepto</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Fecha ticket</th><th>Estatus</th></tr></thead><tbody>${tableRows}</tbody></table></div></section>`
+  const tableRows = rows.length
+    ? rows.map((item) => `<tr>
+        <td><span class="cell-main">${escapeHtml(item.concept || "Sin concepto")}</span><span class="cell-sub">${item.storage_path ? escapeHtml(item.storage_path) : "Archivo pendiente"}</span></td>
+        <td>${escapeHtml(providerName(item.proveedor_id))}</td>
+        <td>${escapeHtml(budgetCategoryName(item.budget_category_id))}</td>
+        <td><span class="cell-main">${escapeHtml(formatCurrency(item.amount))}</span></td>
+        <td>${escapeHtml(formatDate(item.ticket_date))}</td>
+        <td>${itemStatusBadge(item.status)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-3)">No hay tickets registrados.</td></tr>`
+
+  return `
+    <div class="section-heading">Tickets / comprobantes</div>
+    <div class="table-wrapper" style="max-height:260px;min-height:auto;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <table style="min-width:600px">
+        <thead><tr><th>Concepto</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Fecha ticket</th><th>Estatus</th></tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`
 }
 
 async function handleDetailAction(event) {
@@ -257,7 +303,7 @@ async function createReconciliation(fundId) {
     showToast("Comprobacion creada", "Comprobacion creada en borrador.", "success")
     await loadCashData()
     renderFundDetail(fundId)
-  } catch (error) { showToast("No se pudo crear comprobacion", friendlyRpcError(error), "error") }
+  } catch (error) { showToast("No se pudo crear comprobacion", friendlyRpcError(error), "danger") }
 }
 
 function openTicketModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.ticketForm.reset(); dom.ticketDate.value = todayValue(); dom.ticketDialog.showModal() }
@@ -267,13 +313,13 @@ async function saveTicket(event) {
   event.preventDefault()
   if (!activeReconciliationId) return
   const payload = { reconciliation_id: activeReconciliationId, concept: cleanText(dom.ticketConcept.value), amount: numberValue(dom.ticketAmount.value), ticket_date: dom.ticketDate.value || null, proveedor_id: dom.ticketProviderId.value || null, budget_category_id: dom.ticketBudgetCategoryId.value || null, status: "valid" }
-  if (!payload.concept) return showToast("Concepto requerido", "Captura el concepto del ticket.", "error")
-  if (payload.amount <= 0) return showToast("Monto requerido", "Captura un monto mayor a cero.", "error")
-  if (!payload.ticket_date) return showToast("Fecha requerida", "Captura la fecha del ticket.", "error")
+  if (!payload.concept) return showToast("Concepto requerido", "Captura el concepto del ticket.", "danger")
+  if (payload.amount <= 0) return showToast("Monto requerido", "Captura un monto mayor a cero.", "danger")
+  if (!payload.ticket_date) return showToast("Fecha requerida", "Captura la fecha del ticket.", "danger")
   setButtonLoading(dom.submitTicketBtn, true, "Guardando...")
   const { error } = await supabaseClient.from("cash_reconciliation_items").insert(payload)
   setButtonLoading(dom.submitTicketBtn, false, "Guardar ticket")
-  if (error) return showToast("No se pudo guardar ticket", rlsHint("cash_reconciliation_items", "insert", error), "error")
+  if (error) return showToast("No se pudo guardar ticket", rlsHint("cash_reconciliation_items", "insert", error), "danger")
   const fundId = activeFundId
   closeTicketModal()
   showToast("Ticket agregado", "Ticket agregado correctamente.", "success")
@@ -283,7 +329,16 @@ async function saveTicket(event) {
 
 function openSubmitModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.returnedAmount.value = "0"; updateSubmitTotals(); dom.submitDialog.showModal() }
 function closeSubmitModal() { activeReconciliationId = null; dom.submitReconciliationForm.reset(); if (dom.submitDialog.open) dom.submitDialog.close() }
-function updateSubmitTotals() { const reconciliation = reconciliationById(activeReconciliationId); const fund = reconciliation ? fundById(reconciliation.cash_fund_id) : null; const tickets = reconciliation ? totalValidTickets(reconciliation.id) : 0; const returned = numberValue(dom.returnedAmount.value); const assigned = numberValue(fund?.assigned_amount); dom.submitTotalTickets.textContent = formatCurrency(tickets); dom.submitAssignedAmount.textContent = formatCurrency(assigned); dom.submitDifference.textContent = formatCurrency(assigned - tickets - returned) }
+function updateSubmitTotals() {
+  const reconciliation = reconciliationById(activeReconciliationId)
+  const fund = reconciliation ? fundById(reconciliation.cash_fund_id) : null
+  const tickets = reconciliation ? totalValidTickets(reconciliation.id) : 0
+  const returned = numberValue(dom.returnedAmount.value)
+  const assigned = numberValue(fund?.assigned_amount)
+  dom.submitTotalTickets.textContent = formatCurrency(tickets)
+  dom.submitAssignedAmount.textContent = formatCurrency(assigned)
+  dom.submitDifference.textContent = formatCurrency(assigned - tickets - returned)
+}
 
 async function submitReconciliation(event) {
   event.preventDefault()
@@ -297,54 +352,87 @@ async function submitReconciliation(event) {
     showToast("Comprobacion enviada", "Comprobacion enviada para revision.", "success")
     await loadCashData()
     if (fundId) renderFundDetail(fundId)
-  } catch (error) { showToast("No se pudo enviar", friendlyRpcError(error), "error") }
+  } catch (error) { showToast("No se pudo enviar", friendlyRpcError(error), "danger") }
   finally { setButtonLoading(dom.submitReconciliationBtn, false, "Enviar comprobacion") }
 }
 
-function openReviewModal(reconciliationId, action) { activeReconciliationId = reconciliationId; activeReviewAction = action; dom.reviewForm.reset(); dom.reviewTitle.textContent = reviewActionTitle(action); dom.reviewSubtitle.textContent = action === "approved" ? "El comentario es opcional para aprobar." : "Captura un comentario para informar al responsable."; dom.submitReviewBtn.textContent = reviewActionButton(action); dom.reviewDialog.showModal() }
+function openReviewModal(reconciliationId, action) {
+  activeReconciliationId = reconciliationId
+  activeReviewAction = action
+  dom.reviewForm.reset()
+  dom.reviewTitle.textContent = reviewActionTitle(action)
+  dom.reviewSubtitle.textContent = action === "approved" ? "El comentario es opcional para aprobar." : "Captura un comentario para informar al responsable."
+  dom.submitReviewBtn.textContent = reviewActionButton(action)
+  dom.reviewDialog.showModal()
+}
 function closeReviewModal() { activeReconciliationId = null; activeReviewAction = null; dom.reviewForm.reset(); if (dom.reviewDialog.open) dom.reviewDialog.close() }
 
 async function reviewReconciliation(event) {
   event.preventDefault()
   if (!activeReconciliationId || !activeReviewAction || !ensureCurrentProfile()) return
   const comment = cleanText(dom.reviewComment.value)
-  if (["rejected", "correction_requested"].includes(activeReviewAction) && !comment) return showToast("Comentario requerido", "Captura un comentario para rechazar o solicitar correccion.", "error")
+  if (["rejected", "correction_requested"].includes(activeReviewAction) && !comment) return showToast("Comentario requerido", "Captura un comentario para rechazar o solicitar correccion.", "danger")
   setButtonLoading(dom.submitReviewBtn, true, "Registrando...")
   try {
     const { error } = await supabaseClient.rpc("review_cash_reconciliation", { p_reconciliation_id: activeReconciliationId, p_reviewer_profile_id: currentProfile.id, p_action: activeReviewAction, p_comment: comment || null })
     if (error) throw error
     const fundId = activeFundId
     closeReviewModal()
-    showToast("Decision registrada", activeReviewAction === "approved" ? "Comprobacion aprobada." : activeReviewAction === "rejected" ? "Comprobacion rechazada." : "Correccion solicitada.", "success")
+    const desc = activeReviewAction === "approved" ? "Comprobacion aprobada." : activeReviewAction === "rejected" ? "Comprobacion rechazada." : "Correccion solicitada."
+    showToast("Decision registrada", desc, "success")
     await loadCashData()
     if (fundId) renderFundDetail(fundId)
-  } catch (error) { showToast("No se pudo registrar decision", friendlyRpcError(error), "error") }
+  } catch (error) { showToast("No se pudo registrar decision", friendlyRpcError(error), "danger") }
   finally { setButtonLoading(dom.submitReviewBtn, false, reviewActionButton(activeReviewAction)) }
 }
 
 async function verifyCashBlock(profileId) {
-  if (!profileId) return showToast("Sin responsable", "Este fondo no tiene responsable asignado.", "error")
+  if (!profileId) return showToast("Sin responsable", "Este fondo no tiene responsable asignado.", "warning")
   const target = document.getElementById("blockCheckResult")
-  if (target) target.innerHTML = `<div class="notice warning">Verificando fondos pendientes...</div>`
+  if (target) target.innerHTML = `<div class="notice-v2 warning"><span class="notice-icon">·</span><span class="notice-text"><span class="notice-title">Verificando</span><span class="notice-sep">—</span><span class="notice-desc">Consultando fondos pendientes...</span></span></div>`
   try {
     const { data, error } = await supabaseClient.rpc("verify_cash_block", { p_profile_id: profileId })
     if (error) throw error
     renderCashBlockResult(data)
-  } catch (error) { if (target) target.innerHTML = `<div class="notice error">${escapeHtml(friendlyRpcError(error))}</div>` }
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="notice-v2 danger"><span class="notice-icon">✕</span><span class="notice-text">${escapeHtml(friendlyRpcError(error))}</span></div>`
+  }
 }
 
 function renderCashBlockResult(result) {
   const target = document.getElementById("blockCheckResult")
   if (!target) return
-  if (!result?.blocked) return target.innerHTML = `<div class="notice">El responsable no tiene fondos vencidos pendientes.</div>`
+  if (!result?.blocked) {
+    target.innerHTML = `<div class="notice-v2 neutral"><span class="notice-icon">·</span><span class="notice-text"><span class="notice-title">Sin bloqueo</span><span class="notice-sep">—</span><span class="notice-desc">El responsable no tiene fondos vencidos pendientes.</span></span></div>`
+    return
+  }
   const funds = Array.isArray(result?.funds) ? result.funds : []
-  target.innerHTML = `<div class="notice error"><strong>El responsable tiene fondos vencidos pendientes.</strong><br>Pendiente total: ${escapeHtml(formatCurrency(result?.total_pending || 0))}. Fondos vencidos: ${escapeHtml(result?.overdue_count || funds.length || 0)}.${funds.length ? `<ul>${funds.slice(0, 5).map((fund) => `<li>${escapeHtml(fund.request_number || fund.cash_fund_id || "Fondo")} - ${escapeHtml(formatCurrency(fund.pending_amount || 0))}</li>`).join("")}</ul>` : ""}</div>`
+  target.innerHTML = `<div class="notice-v2 danger"><span class="notice-icon">✕</span><span class="notice-text"><span class="notice-title">Fondos vencidos</span><span class="notice-sep">—</span><span class="notice-desc">Pendiente total: ${escapeHtml(formatCurrency(result?.total_pending || 0))}. Fondos vencidos: ${escapeHtml(String(result?.overdue_count || funds.length || 0))}.</span></span></div>`
 }
 
-function canReviewCurrentUser() { if (!currentProfile) return false; if (!rolesWereLoaded) return true; return currentRoles.some((role) => REVIEW_ROLES.includes(normalizeRole(role))) }
-function ensureCurrentProfile() { if (currentProfile?.id) return true; showToast("Perfil no identificado", "No se pudo identificar tu perfil de usuario.", "error"); return false }
+function canReviewCurrentUser() { if (!currentProfile) return false; return currentRoles.some((role) => REVIEW_ROLES.includes(normalizeRole(role))) }
+function ensureCurrentProfile() { if (currentProfile?.id) return true; showToast("Perfil no identificado", "No se pudo identificar tu perfil de usuario.", "danger"); return false }
 async function logout() { await supabaseClient.auth.signOut(); window.location.href = "./index.html" }
 function closeFundDetail() { activeFundId = null; if (dom.fundDetailDialog.open) dom.fundDetailDialog.close() }
+
+// Badge helpers using Components.badge()
+function fundStatusBadge(status) {
+  const labels = { active: "Activo", pending_receipt: "Por comprobar", blocked: "Bloqueado", receipt_review: "En revision", verified: "Verificado", closed: "Cerrado", cancelled: "Cancelado" }
+  const variants = { active: "accent", pending_receipt: "warning", blocked: "danger", receipt_review: "info", verified: "success", closed: "neutral", cancelled: "neutral" }
+  const s = status || "neutral"
+  return Components.badge(labels[s] || s, variants[s] || "neutral")
+}
+function reconciliationStatusBadge(status) {
+  const labels = { draft: "Borrador", submitted: "En revision", approved: "Aprobada", rejected: "Rechazada", correction_requested: "Correccion" }
+  const variants = { draft: "neutral", submitted: "info", approved: "success", rejected: "danger", correction_requested: "warning" }
+  const s = status || "neutral"
+  return Components.badge(labels[s] || s, variants[s] || "neutral")
+}
+function itemStatusBadge(status) {
+  return Components.badge(status === "rejected" ? "Rechazado" : "Valido", status === "rejected" ? "danger" : "success")
+}
+
+// Lookup helpers
 function fundById(id) { return cashFunds.find((item) => item.id === id) || null }
 function reconciliationById(id) { return reconciliations.find((item) => item.id === id) || null }
 function reconciliationForFund(fundId) { return reconciliations.filter((item) => item.cash_fund_id === fundId).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0] || null }
@@ -363,20 +451,26 @@ function budgetCategoryName(id) { return id ? budgetCategoryLabel(budgetCategory
 function budgetCategoryLabel(c) { return c ? `${c.code ? `${c.code} - ` : ""}${c.name || c.nombre || "Sin nombre"}` : "Sin partida" }
 function methodLabel(method) { return ({ cash: "Efectivo", check: "Cheque" })[method] || "Sin metodo" }
 function fundStatusLabel(status) { return ({ active: "Activo", pending_receipt: "Pendiente de comprobar", blocked: "Bloqueado", receipt_review: "En revision", verified: "Verificado", closed: "Cerrado", cancelled: "Cancelado" })[status] || status || "Sin estatus" }
-function reconciliationStatusLabel(status) { return ({ draft: "Borrador", submitted: "En revision", approved: "Aprobada", rejected: "Rechazada", correction_requested: "Correccion solicitada" })[status] || status || "Sin estatus" }
-function itemStatusLabel(status) { return ({ valid: "Valido", rejected: "Rechazado" })[status] || status || "Sin estatus" }
-function renderFundStatusBadge(status) { const s = status || "neutral"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(fundStatusLabel(s))}</span>` }
-function renderReconciliationStatusBadge(status) { const s = status || "neutral"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(reconciliationStatusLabel(s))}</span>` }
-function renderItemStatusBadge(status) { const s = status || "valid"; return `<span class="badge badge-${escapeHtml(s)}">${escapeHtml(itemStatusLabel(s))}</span>` }
-function detailCard(label, value, html = false, extraClass = "") { return `<div class="detail-card ${extraClass}"><span>${escapeHtml(label)}</span><strong>${html ? value : escapeHtml(value)}</strong></div>` }
 function reviewActionTitle(action) { return ({ approved: "Aprobar comprobacion", rejected: "Rechazar comprobacion", correction_requested: "Solicitar correccion" })[action] || "Revisar comprobacion" }
 function reviewActionButton(action) { return ({ approved: "Aprobar", rejected: "Rechazar", correction_requested: "Solicitar correccion" })[action] || "Registrar decision" }
-function friendlyRpcError(error) { const message = error?.message || String(error || "Error desconocido"); const known = { cash_fund_not_found: "No se encontro el fondo.", cash_fund_not_open_for_reconciliation: "Este fondo ya no permite comprobacion.", open_reconciliation_already_exists: "Ya existe una comprobacion abierta para este fondo.", not_allowed_to_create_reconciliation: "No tienes permiso para crear esta comprobacion.", reconciliation_has_no_amounts: "Agrega al menos un ticket o registra monto devuelto.", reconciliation_exceeds_assigned_amount: "La suma de tickets y devuelto excede el fondo asignado.", only_draft_or_correction_can_be_submitted: "Solo se pueden enviar comprobaciones en borrador o correccion.", not_allowed_to_review_reconciliation: "No tienes permiso para revisar esta comprobacion.", only_submitted_reconciliations_can_be_reviewed: "Solo se pueden revisar comprobaciones enviadas.", review_comment_required: "Captura un comentario para rechazar o solicitar correccion.", profile_not_found: "No se pudo identificar el perfil del usuario." }; const key = Object.keys(known).find((item) => message.includes(item)); return key ? known[key] : friendlyError(error) }
+
+// ref-grid helper
+function refCell(label, value) { return `<div class="ref-cell"><span class="ref-label">${escapeHtml(label)}</span><span class="ref-value">${escapeHtml(value)}</span></div>` }
+
+// Error helpers
+function friendlyRpcError(error) {
+  const message = error?.message || String(error || "Error desconocido")
+  const known = { cash_fund_not_found: "No se encontro el fondo.", cash_fund_not_open_for_reconciliation: "Este fondo ya no permite comprobacion.", open_reconciliation_already_exists: "Ya existe una comprobacion abierta para este fondo.", not_allowed_to_create_reconciliation: "No tienes permiso para crear esta comprobacion.", reconciliation_has_no_amounts: "Agrega al menos un ticket o registra monto devuelto.", reconciliation_exceeds_assigned_amount: "La suma de tickets y devuelto excede el fondo asignado.", only_draft_or_correction_can_be_submitted: "Solo se pueden enviar comprobaciones en borrador o correccion.", not_allowed_to_review_reconciliation: "No tienes permiso para revisar esta comprobacion.", only_submitted_reconciliations_can_be_reviewed: "Solo se pueden revisar comprobaciones enviadas.", review_comment_required: "Captura un comentario para rechazar o solicitar correccion.", profile_not_found: "No se pudo identificar el perfil del usuario." }
+  const key = Object.keys(known).find((item) => message.includes(item))
+  return key ? known[key] : friendlyError(error)
+}
 function friendlyError(error) { const message = error?.message || String(error || "Error desconocido"); if (message.toLowerCase().includes("row-level security") || error?.code === "42501") return "La operacion fue bloqueada por RLS. Revisa policies para usuarios autenticados."; if (message.toLowerCase().includes("permission denied")) return "Faltan permisos para ejecutar la operacion."; return message }
-function rlsHint(table, operation, error) { const message = error?.message || ""; if (message.toLowerCase().includes("row-level security") || error?.code === "42501" || message.toLowerCase().includes("permission denied")) return `Operacion ${operation} bloqueada por RLS en ${table}; puede requerir una policy para usuarios autenticados.`; return message || `No se pudo ejecutar ${operation} en ${table}.` }
-function showMessage(message, isError = false) { dom.messageBox.textContent = message; dom.messageBox.classList.remove("hidden"); dom.messageBox.style.color = isError ? "var(--ruby)" : "var(--text-3)" }
-function hideMessage() { dom.messageBox.classList.add("hidden") }
-function showToast(title, message, type = "success") { const toast = document.createElement("div"); toast.className = `toast ${type}`; toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`; dom.toastStack.appendChild(toast); window.setTimeout(() => toast.remove(), 6200) }
+function rlsHint(table, operation, error) { const message = error?.message || ""; if (message.toLowerCase().includes("row-level security") || error?.code === "42501" || message.toLowerCase().includes("permission denied")) return `Operacion ${operation} bloqueada por RLS en ${table}.`; return message || `No se pudo ejecutar ${operation} en ${table}.` }
+
+// Toast via components
+function showToast(title, desc, variant = "success") { Components.showToast({ title, desc, variant, duration: 6 }) }
+
+// Utils
 function setButtonLoading(button, loading, text) { if (!button) return; button.disabled = loading; button.textContent = text }
 function formatCurrency(value) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(numberValue(value)) }
 function compactCurrency(value) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", notation: "compact", maximumFractionDigits: 1 }).format(numberValue(value)) }
