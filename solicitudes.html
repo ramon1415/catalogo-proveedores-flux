@@ -277,7 +277,7 @@
     }
     .stat-card.is-clickable { cursor: pointer; }
     .stat-card.is-clickable:hover { border-color: var(--border-strong); background: var(--bg-hover); }
-    .stat-card.active-filter {
+    .stat-card.active-filter, .kpi.active {
       border-color: rgba(15,118,110,0.48);
       box-shadow: 0 0 0 3px var(--accent-dim);
     }
@@ -427,6 +427,10 @@
     .badge-neutral { background: var(--accent-dim); color: var(--accent-text); border: 1px solid rgba(15,118,110,0.22); }
 
     .actions { display: flex; gap: 5px; flex-wrap: wrap; }
+    .row-actions { opacity: 0; transition: opacity 120ms; }
+    tbody tr:hover .row-actions { opacity: 1; }
+    .cell-main { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-1); }
+    .cell-sub  { display: block; font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
 
     .small-btn {
       padding: 4px 9px;
@@ -938,6 +942,7 @@
       .modal-content { padding: 20px; }
     }
   </style>
+  <link rel="stylesheet" href="./ux2_shared.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -992,11 +997,11 @@
         </div>
 
         <div class="stats-grid">
-          <div id="totalCard" class="stat-card total is-clickable" role="button" tabindex="0"><p>Solicitudes activas</p><strong id="totalRequests">0</strong></div>
-          <div id="approvableCard" class="stat-card good is-clickable" role="button" tabindex="0"><p>Aprobables</p><strong id="approvableRequests">0</strong></div>
-          <div id="exceptionsCard" class="stat-card blocked is-clickable" role="button" tabindex="0"><p>Excepciones presupuestales</p><strong id="blockedRequests">0</strong></div>
-          <div id="paidCard" class="stat-card paid is-clickable" role="button" tabindex="0"><p>Pagadas</p><strong id="paidRequests">0</strong></div>
-          <div class="stat-card amount"><p>Monto solicitado</p><strong id="requestedAmount">$0</strong></div>
+          <div id="totalCard" class="kpi info clickable" role="button" tabindex="0"><span class="kpi-label">Solicitudes activas</span><span class="kpi-value" id="totalRequests">0</span></div>
+          <div id="approvableCard" class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Aprobables</span><span class="kpi-value" id="approvableRequests">0</span></div>
+          <div id="exceptionsCard" class="kpi warning clickable" role="button" tabindex="0"><span class="kpi-label">Excepciones presupuestales</span><span class="kpi-value" id="blockedRequests">0</span></div>
+          <div id="paidCard" class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Pagadas</span><span class="kpi-value" id="paidRequests">0</span></div>
+          <div class="kpi muted"><span class="kpi-label">Monto solicitado</span><span class="kpi-value" id="requestedAmount">$0</span></div>
         </div>
 
         <section class="table-card">
@@ -1038,20 +1043,15 @@
               <thead>
                 <tr>
                   <th>Folio</th>
-                  <th>Fecha</th>
                   <th>Proveedor</th>
-                  <th>Empresa</th>
-                  <th>Centro de costo</th>
                   <th>Partida</th>
-                  <th>Mes</th>
                   <th>Monto</th>
                   <th>Estatus</th>
-                  <th>Validacion presupuestal</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody id="requestsTableBody">
-                <tr><td colspan="11" class="message">Cargando solicitudes...</td></tr>
+                <tr><td colspan="6" class="message">Cargando solicitudes...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1175,6 +1175,7 @@
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
   <script src="./config.js"></script>
+  <script src="./components.js"></script>
   <script src="./solicitudes.js"></script>
   <script src="./cash_flow_extension.js"></script>
 </body>

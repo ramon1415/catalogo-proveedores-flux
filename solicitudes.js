@@ -495,10 +495,10 @@ function renderFilterState() {
     activeParts.push(company ? companyName(company) : "Empresa filtrada");
   }
 
-  dom.totalCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "todos");
-  dom.approvableCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "aprobable");
-  dom.exceptionsCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "excepciones");
-  dom.paidCard?.classList.toggle("active-filter", dom.statusFilter.value === "paid");
+  dom.totalCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "todos");
+  dom.approvableCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "aprobable");
+  dom.exceptionsCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "excepciones");
+  dom.paidCard?.classList.toggle("active", dom.statusFilter.value === "paid");
 
   if (!activeParts.length) {
     dom.filterSummary.classList.add("hidden");
@@ -541,14 +541,13 @@ function renderPaymentRequestsTable() {
   if (!rows.length) {
     const filtered = hasActiveFilters();
     dom.requestsTableBody.innerHTML = `
-      <tr>
-        <td colspan="11">
-          <div class="empty-state">
-            <strong>${filtered ? "No hay solicitudes para este filtro." : "No hay solicitudes para mostrar"}</strong>
-            ${filtered ? "Prueba ver todas las solicitudes o cambia los filtros activos." : "Crea una nueva solicitud de pago para iniciar la bandeja."}
-          </div>
-        </td>
-      </tr>`;
+      <tr><td colspan="6">${Components.emptyState({
+        icon: filtered ? "🔍" : "📋",
+        title: filtered ? "Sin resultados" : "Sin solicitudes",
+        desc: filtered ? "Ninguna solicitud coincide con los filtros aplicados." : "Crea una nueva solicitud de pago para iniciar la bandeja.",
+        actionHtml: filtered ? `<button class="secondary-btn" onclick="document.getElementById('clearFiltersBtn').click()">Limpiar filtros</button>` : "",
+        variant: filtered ? "compact" : "full",
+      })}</td></tr>`;
     return;
   }
 
@@ -559,19 +558,32 @@ function renderPaymentRequestsTable() {
     const category = budgetCategoryById(request.budget_category_id);
     const isHighlighted = highlightedRequestId && request.id === highlightedRequestId;
 
+    const folioExtra = request.is_extraordinary_adjustment ? Components.badge("Extraordinario", "violet") : "";
+    const statusCell = `${renderStatusBadge(request.status)} ${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}`;
+
     return `
       <tr class="${isHighlighted ? "highlight-row" : ""}">
-        <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? `<span class="badge badge-extra">Ajuste extraordinario</span>` : ""}</td>
-        <td>${escapeHtml(formatDate(request.submitted_at || request.created_at))}</td>
-        <td><strong>${escapeHtml(proveedorAlias(proveedor))}</strong><span class="muted-line">${escapeHtml(proveedorName(proveedor))}</span></td>
-        <td>${escapeHtml(companyName(company))}</td>
-        <td>${escapeHtml(costCenterName(center))}</td>
-        <td><strong>${escapeHtml(category?.code || "")}</strong><span class="muted-line">${escapeHtml(category?.name || "Sin partida")}</span></td>
-        <td>${escapeHtml(formatMonth(request.budget_month))}</td>
-        <td><strong>${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</strong></td>
-        <td>${renderStatusBadge(request.status)}</td>
-        <td>${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}</td>
-        <td><div class="actions"><button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')">Ver detalle</button></div></td>
+        <td>
+          <span class="cell-main">${escapeHtml(request.request_number || "Sin folio")}</span>${folioExtra}
+          <span class="cell-sub">${escapeHtml(formatDate(request.submitted_at || request.created_at))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(proveedorAlias(proveedor))}</span>
+          <span class="cell-sub">${escapeHtml(companyName(company))} · ${escapeHtml(costCenterName(center))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(category?.code || "Sin partida")}</span>
+          <span class="cell-sub">${escapeHtml(category?.name || "")} · ${escapeHtml(formatMonth(request.budget_month))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</span>
+        </td>
+        <td>${statusCell}</td>
+        <td>
+          <div class="actions row-actions">
+            <button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')">Ver detalle</button>
+          </div>
+        </td>
       </tr>`;
   }).join("");
 
@@ -711,47 +723,50 @@ function openRequestDetail(id) {
     : request.budget_decision === "aprobable" && !exception
     ? "Validada automaticamente con presupuesto disponible."
     : "Requiere revision por excepcion presupuestal.";
-  const detailAlert = isPaid
-    ? `<div class="detail-alert success">Esta solicitud ya fue pagada.</div>`
+  const detailNotice = isPaid
+    ? Components.notice("Pagada", "Esta solicitud ya fue pagada.", "success")
     : exception
-    ? `<div class="detail-alert warning">Esta solicitud requiere revisión por excepción presupuestal.</div>`
-    : `<div class="detail-alert success">Validada automáticamente con presupuesto disponible.</div>`;
+    ? Components.notice("Excepción presupuestal", "Requiere revisión por excepción presupuestal.", "warning")
+    : Components.notice("Presupuesto disponible", "Validada automáticamente con presupuesto disponible.", "info");
 
   dom.detailTitle.textContent = request.request_number || "Detalle de solicitud";
-  dom.detailSubtitle.textContent = decisionText;
+  dom.detailSubtitle.textContent = `${proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)} · ${renderStatusBadge(request.status)}`;
   dom.detailContent.innerHTML = `
-    ${detailAlert}
-    <div class="detail-grid">
-      ${detailCard("Folio", request.request_number || "Sin folio")}
-      ${detailCard("Proveedor", proveedorLabel(proveedor))}
-      ${detailCard("Empresa", companyName(company))}
-      ${detailCard("Centro de costo", costCenterName(center))}
-      ${detailCard("Partida", budgetCategoryLabel(category))}
-      ${detailCard("Mes", formatMonth(request.budget_month))}
-      ${detailCard("Monto", formatCurrency(request.amount_requested, request.currency || "MXN"))}
-      ${detailCard("Estatus", renderStatusBadge(request.status), true)}
-      ${detailCard("Decision presupuestal", renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason), true)}
-      ${detailCard("Motivo bloqueo", request.budget_block_reason || "No aplica")}
-      ${detailCard("Descripcion", request.description || "Sin descripcion", false, "full")}
-      ${detailCard("Notas", request.notes || "Sin notas", false, "full")}
+    ${detailNotice}
+
+    <div style="font-size:28px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;padding:4px 0">
+      ${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}
     </div>
 
-    <div class="budget-strip">
-      ${detailCard("Disponible antes", formatCurrency(request.budget_available_before, request.currency || "MXN"))}
-      ${detailCard("Disponible despues", formatCurrency(request.budget_available_after, request.currency || "MXN"))}
-      ${detailCard("Faltante", formatCurrency(request.budget_shortfall, request.currency || "MXN"))}
-    </div>
+    ${Components.refGrid([
+      { label: "Proveedor",      value: escapeHtml(proveedorAlias(proveedor)) },
+      { label: "Empresa",        value: escapeHtml(companyName(company)) },
+      { label: "Centro de costo",value: escapeHtml(costCenterName(center)), muted: true },
+      { label: "Mes presupuestal",value: escapeHtml(formatMonth(request.budget_month)), muted: true },
+      { label: "Partida",        value: escapeHtml(budgetCategoryLabel(category)), muted: true, full: true },
+    ])}
+
+    ${Components.dataSection([
+      { label: "Estatus",              value: renderStatusBadge(request.status) },
+      { label: "Validación presupuestal", value: renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason) },
+      { label: "Descripción",          value: escapeHtml(request.description || "Sin descripción"), muted: true },
+      ...(request.notes ? [{ label: "Notas", value: escapeHtml(request.notes), muted: true }] : []),
+    ])}
+
+    ${Components.dataSection([
+      { label: "Disponible antes",  value: escapeHtml(formatCurrency(request.budget_available_before, request.currency || "MXN")), muted: true },
+      { label: "Disponible después", value: escapeHtml(formatCurrency(request.budget_available_after, request.currency || "MXN")), muted: true },
+      { label: "Faltante",          value: escapeHtml(formatCurrency(request.budget_shortfall, request.currency || "MXN")), muted: true },
+    ], "Impacto presupuestal")}
 
     ${renderDecisionPanel(request)}
 
     ${renderPaymentInfoSection(request)}
 
-    <div class="detail-card full" style="margin-top: 10px;">
-      <details>
-        <summary>Ver resultado tecnico de presupuesto</summary>
-        <pre>${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
-      </details>
-    </div>`;
+    <details style="font-size:11px;color:var(--text-3);margin-top:8px">
+      <summary style="cursor:pointer;padding:4px 0">Ver resultado técnico de presupuesto</summary>
+      <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
+    </details>`;
 
   loadApprovalHistory(request.id);
   if (isPaid) loadPaymentInfo(request.id);
@@ -993,21 +1008,24 @@ function decisionActionLabel(action) {
 }
 
 function renderBudgetDecisionBadge(decision, reason = "") {
-  if (decision === "aprobable") return `<span class="badge badge-good">Aprobable</span>`;
-  if (decision === "bloqueado") {
-    const label = reason ? `Excepción: ${reason}` : "Excepción";
-    return `<span class="badge badge-blocked">${escapeHtml(label)}</span>`;
-  }
-  return `<span class="badge badge-neutral">${escapeHtml(decision || "Sin validar")}</span>`;
+  if (decision === "aprobable") return Components.badge("Aprobable", "success");
+  if (decision === "bloqueado") return Components.badge(reason ? `Excepción: ${escapeHtml(reason)}` : "Excepción", "violet");
+  return Components.badge(decision ? escapeHtml(decision) : "Sin validar", "neutral");
 }
 
 function renderStatusBadge(status) {
-  const normalized = status || "sin_estatus";
-  if (normalized === "submitted") return `<span class="badge badge-submitted">Submitted</span>`;
-  if (normalized === "paid") return `<span class="badge badge-good">paid</span>`;
-  if (normalized === "rejected" || normalized === "cancelled") return `<span class="badge badge-blocked">${escapeHtml(normalized)}</span>`;
-  if (normalized === "approved" || normalized === "finance_validation" || normalized === "scheduled") return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
-  return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
+  const map = {
+    submitted:          ["Enviada",      "info"],
+    approved:           ["Aprobada",     "success"],
+    paid:               ["Pagado",       "success"],
+    rejected:           ["Rechazada",    "danger"],
+    cancelled:          ["Cancelada",    "warning"],
+    changes_requested:  ["Con corrección","warning"],
+    finance_validation: ["En revisión",  "info"],
+    scheduled:          ["Programado",   "info"],
+  };
+  const [label, variant] = map[status] ?? [escapeHtml(status || "Sin estatus"), "neutral"];
+  return Components.badge(label, variant);
 }
 
 function updateSummaryPanel() {
@@ -1254,11 +1272,8 @@ function hideMessage() {
 }
 
 function showToast(title, message, type = "success") {
-  const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
-  dom.toastStack.appendChild(toast);
-  window.setTimeout(() => toast.remove(), 6200);
+  const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" };
+  Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 });
 }
 
 function friendlyError(error, operation = "") {
