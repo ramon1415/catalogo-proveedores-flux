@@ -347,7 +347,7 @@ function renderDetail(request) {
   return `
     <div style="padding:16px 20px 8px">
       <div style="font-size:26px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;margin-bottom:12px">${escapeHtml(formatCurrency(request.amount_requested, request.currency))}</div>
-      <div class="ref-grid" style="margin-bottom:12px">
+      <div class="ref-grid" style="margin-bottom:12px;grid-template-columns:1fr 1fr 1fr">
         <div class="ref-cell">
           <span class="ref-label">Proveedor</span>
           <span class="ref-value">${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</span>
