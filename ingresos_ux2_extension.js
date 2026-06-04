@@ -15,12 +15,16 @@
   }
 
   function applyStableCopy() {
-    document.title = "Ingresos e incidencias | Flux"
-    setText(".brand-subtitle", "Ingresos e incidencias")
-    setText(".topbar-kicker", "Socios, cuotas de mantenimiento, cobros e incidencias")
-    setText(".page-header h1", "Ingresos e incidencias")
-    setText(".page-header p", "Controla socios, cuotas de mantenimiento, cobros, visitas/incidencias y facturas.")
-    setText("[data-tab='incidents']", "Visitas / Incidencias")
+    const requestedTab = new URLSearchParams(window.location.search).get("tab")
+    const isIncidents = requestedTab === "incidents" || requestedTab === "incidencias"
+    document.title = `${isIncidents ? "Incidencias" : "Ingresos"} | Flux`
+    setText(".brand-subtitle", isIncidents ? "Incidencias" : "Ingresos")
+    setText(".topbar-kicker", "Cuotas, cobros, incidencias y facturas")
+    setText(".page-header h1", isIncidents ? "Incidencias" : "Ingresos")
+    setText(".page-header p", isIncidents
+      ? "Consulta y registra incidencias, visitas, cargos recuperables y facturas."
+      : "Controla cuotas de mantenimiento, periodos de cobro, pagos y facturas.")
+    setText("[data-tab='incidents']", "Incidencias")
   }
 
   function addOperationalNotice() {
@@ -40,8 +44,8 @@
   }
 
   function noticeCopy() {
-    return `Este modulo concentra periodos, cuotas, cobros, visitas/incidencias y facturas. El historial completo por socio esta en
-      <a href="./socios.html" style="color:var(--accent-text);font-weight:800;">Socios</a>.`
+    return `Ingresos e Incidencias comparten datos operativos, pero el menu los separa para navegar mas claro. La administracion de socios queda en
+      <a href="./configuracion.html?tab=members" style="color:var(--accent-text);font-weight:800;">Configuracion > Socios</a>.`
   }
 
   function addMembersNotice() {
@@ -62,8 +66,8 @@
   }
 
   function membersNoticeCopy() {
-    return `Esta vista se mantiene por compatibilidad. Para balance completo, pagos, incidencias y facturas por socio, usa el modulo
-      <a href="./socios.html" style="color:var(--accent-text);font-weight:800;">Socios</a>.`
+    return `Esta vista se mantiene por compatibilidad. La administracion principal de socios queda en
+      <a href="./configuracion.html?tab=members" style="color:var(--accent-text);font-weight:800;">Configuracion > Socios</a>.`
   }
 
   function setText(selector, text) {
