@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modal Aprobación Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --sky:#2e90fa;--sky-dim:rgba(46,144,250,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --violet:#8b5cf6;--violet-dim:rgba(139,92,246,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;gap:48px;align-items:flex-start}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  /* badges */
+  .b{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+  .b-success{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.2)}
+  .b-danger {background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.22)}
+  .b-warning{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.22)}
+  .b-info   {background:var(--sky-dim);color:var(--sky);border-color:rgba(46,144,250,.2)}
+  .b-neutral{background:var(--bg-hover);color:var(--text-2);border-color:var(--border)}
+  .b-violet {background:var(--violet-dim);color:var(--violet);border-color:rgba(139,92,246,.22)}
+
+  /* shared shell */
+  .modal-wrap{width:500px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:20px;box-shadow:var(--shadow-lg);overflow:hidden}
+  .modal-top{padding:18px 24px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .modal-top h1{font-size:15px;font-weight:700}
+  .modal-top p{font-size:11.5px;color:var(--text-3);margin-top:2px}
+  .close-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-3);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .modal-scroll{padding:18px 24px;display:flex;flex-direction:column;gap:16px}
+  .modal-footer{padding:12px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;align-items:center}
+
+  /* buttons */
+  .btn-approve{min-height:32px;padding:6px 16px;border:none;border-radius:7px;background:linear-gradient(135deg,var(--accent),#0d9488);color:#fff;font-size:12px;font-weight:700;cursor:pointer}
+  .btn-reject{min-height:32px;padding:6px 14px;border:1px solid rgba(224,62,82,.3);border-radius:7px;background:var(--ruby-dim);color:var(--ruby);font-size:12px;font-weight:700;cursor:pointer}
+  .btn-exception{min-height:32px;padding:6px 14px;border:1px solid rgba(139,92,246,.3);border-radius:7px;background:var(--violet-dim);color:var(--violet);font-size:12px;font-weight:700;cursor:pointer}
+  .secondary-btn{min-height:32px;padding:6px 12px;border:1px solid var(--border-strong);border-radius:7px;background:transparent;color:var(--text-2);font-size:12px;font-weight:700;cursor:pointer}
+
+  /* data rows */
+  .data-section{display:flex;flex-direction:column}
+  .section-heading{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.65px;color:var(--text-3);padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .data-row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:8px 0}
+  .data-label{font-size:11.5px;color:var(--text-3);font-weight:600;white-space:nowrap;flex-shrink:0}
+  .data-value{font-size:13px;color:var(--text-1);font-weight:600;text-align:right}
+  .data-value.muted{color:var(--text-2);font-weight:500}
+  .data-value.amount{font-size:18px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums}
+
+  /* ref grid */
+  .ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;opacity:.85}
+  .ref-cell{background:var(--bg-card);padding:8px 12px;display:flex;flex-direction:column;gap:3px}
+  .ref-cell.full{grid-column:1/-1}
+  .ref-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)}
+  .ref-value{font-size:12.5px;font-weight:600;color:var(--text-1)}
+  .ref-value.muted{color:var(--text-2);font-weight:400}
+
+  /* decision area */
+  .decision-area{background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .decision-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.65px;color:var(--text-3)}
+  .f-ctrl{width:100%;min-height:72px;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-size:12.5px;outline:none;resize:vertical}
+  .f-ctrl:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-dim)}
+  .f-ctrl::placeholder{color:var(--text-3)}
+  .decision-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* notice */
+  .notice{display:flex;gap:8px;align-items:baseline;border-radius:10px;padding:9px 13px;font-size:12px;line-height:1.5;border:1px solid transparent}
+  .notice.info{background:var(--accent-dim);border-color:rgba(15,118,110,.2);color:var(--accent-text)}
+  .notice.warning{background:var(--amber-dim);border-color:rgba(245,158,11,.22);color:var(--amber)}
+  .notice-title{font-weight:700}
+  .notice-sep{margin:0 4px;opacity:.4}
+
+  /* ══ ANTES ══ */
+  .old-scroll{padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+  .old-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .old-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+  .old-card span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)}
+  .old-card strong{display:block;margin-top:4px;font-size:12.5px;color:var(--text-1)}
+  .old-card.full{grid-column:1/-1}
+  .old-panel{border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .old-panel-title{font-size:12px;font-weight:800;color:var(--text-1)}
+  .old-notice-neutral{background:var(--bg-hover);border:1px solid var(--border);border-radius:10px;padding:9px 13px;font-size:12px;color:var(--text-2)}
+  .old-textarea{width:100%;min-height:72px;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-2);font-size:12.5px;outline:none;resize:vertical}
+  .old-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .small-btn{min-height:28px;padding:4px 10px;border:1px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--text-2);font-size:11.5px;font-weight:700;cursor:pointer}
+  .small-btn.success{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.2)}
+  .small-btn.danger{background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.22)}
+  .small-btn.warning{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.22)}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — bloques + panel suelto, botones sin jerarquía</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div>
+        <h1>SOL-2026-0017</h1>
+        <p>Detalle para decision.</p>
+      </div>
+      <button class="close-btn">✕</button>
+    </div>
+    <div class="old-scroll">
+      <div class="old-grid">
+        <div class="old-card"><span>Folio</span><strong>SOL-2026-0017</strong></div>
+        <div class="old-card"><span>Proveedor</span><strong>Carlos Arceo</strong></div>
+        <div class="old-card"><span>Empresa</span><strong>Operadora Tlacatecpan</strong></div>
+        <div class="old-card"><span>Centro de costo</span><strong>Rancho San Juan</strong></div>
+        <div class="old-card full"><span>Partida</span><strong>602-08-011-000 – Arrendamiento Pick Up JAC</strong></div>
+        <div class="old-card"><span>Mes</span><strong>Jun 2026</strong></div>
+        <div class="old-card"><span>Monto</span><strong>$2,000.00</strong></div>
+        <div class="old-card"><span>Validacion</span><strong><span class="b b-success">Aprobable</span></strong></div>
+        <div class="old-card"><span>Estatus</span><strong><span class="b b-info">Enviada</span></strong></div>
+      </div>
+      <div class="old-panel">
+        <div class="old-panel-title">Decision del aprobador</div>
+        <div class="old-notice-neutral">Selecciona una accion y captura comentario cuando aplique.</div>
+        <textarea class="old-textarea" placeholder="Comentario para la decision"></textarea>
+        <div class="old-actions">
+          <button class="small-btn success">Aprobar</button>
+          <button class="small-btn danger">Rechazar</button>
+          <button class="small-btn warning">Aprobar como excepcion</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — contexto compacto + decisión destacada</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div>
+        <h1>SOL-2026-0017</h1>
+        <p>Carlos Arceo · Jun 2026 · <span class="b b-success" style="vertical-align:middle">Aprobable</span></p>
+      </div>
+      <button class="close-btn">✕</button>
+    </div>
+    <div class="modal-scroll">
+
+      <!-- Monto destacado -->
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">
+        <span style="font-size:11.5px;color:var(--text-3)">Monto solicitado</span>
+        <span style="font-size:24px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums">$2,000.00</span>
+      </div>
+
+      <!-- Referencia compacta -->
+      <div class="ref-grid">
+        <div class="ref-cell">
+          <span class="ref-label">Proveedor</span>
+          <span class="ref-value">Carlos Arceo</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Empresa</span>
+          <span class="ref-value">Operadora Tlacatecpan</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Centro de costo</span>
+          <span class="ref-value muted">Rancho San Juan</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Mes presupuestal</span>
+          <span class="ref-value muted">Jun 2026</span>
+        </div>
+        <div class="ref-cell full">
+          <span class="ref-label">Partida</span>
+          <span class="ref-value muted">602-08-011-000 · Arrendamiento Pick Up JAC</span>
+        </div>
+      </div>
+
+      <div class="notice info">
+        <span><span class="notice-title">Presupuesto disponible</span><span class="notice-sep">—</span><span style="font-weight:400;opacity:.85">La partida tiene saldo suficiente para este mes.</span></span>
+      </div>
+
+      <!-- Área de decisión -->
+      <div class="decision-area">
+        <span class="decision-label">Tu decisión</span>
+        <textarea class="f-ctrl" placeholder="Comentario (requerido para rechazar o aprobar como excepción)..."></textarea>
+        <div class="decision-actions">
+          <button class="btn-approve">Aprobar</button>
+          <button class="btn-reject">Rechazar</button>
+          <button class="btn-exception">Aprobar como excepción</button>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

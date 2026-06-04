@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toasts Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --sky:#2e90fa;--sky-dim:rgba(46,144,250,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --violet:#8b5cf6;--violet-dim:rgba(139,92,246,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;gap:64px;align-items:flex-start}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  .stack{display:flex;flex-direction:column;gap:10px;width:340px}
+
+  /* ══ ANTES — alert-box estilo banner ══ */
+  .old-alert{padding:10px 14px;border-radius:8px;font-size:12.5px;border:1px solid transparent}
+  .old-alert.success{background:rgba(18,183,106,.1);border-color:rgba(18,183,106,.2);color:var(--emerald)}
+  .old-alert.error  {background:rgba(224,62,82,.1);border-color:rgba(224,62,82,.2);color:var(--ruby)}
+  .old-alert.warning{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.2);color:var(--amber)}
+  .old-alert.info   {background:rgba(46,144,250,.1);border-color:rgba(46,144,250,.2);color:var(--sky)}
+
+  /* ══ NUEVO — toast ══ */
+  .toast{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-radius:11px;border:1px solid transparent;box-shadow:0 8px 28px rgba(0,0,0,.55);background:var(--bg-card);position:relative;overflow:hidden}
+
+  /* accent bar izquierda */
+  .toast::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px}
+  .toast.success::before{background:var(--emerald)}
+  .toast.danger::before {background:var(--ruby)}
+  .toast.warning::before{background:var(--amber)}
+  .toast.info::before   {background:var(--sky)}
+  .toast.neutral::before{background:var(--text-3)}
+
+  /* border por variante */
+  .toast.success{border-color:rgba(18,183,106,.18)}
+  .toast.danger {border-color:rgba(224,62,82,.2)}
+  .toast.warning{border-color:rgba(245,158,11,.2)}
+  .toast.info   {border-color:rgba(46,144,250,.18)}
+  .toast.neutral{border-color:var(--border-strong)}
+
+  .toast-icon{font-size:14px;flex-shrink:0;margin-top:1px;margin-left:4px}
+  .toast-body{flex:1;display:flex;flex-direction:column;gap:2px}
+  .toast-title{font-size:12.5px;font-weight:700;color:var(--text-1)}
+  .toast-desc{font-size:11.5px;color:var(--text-2);line-height:1.5}
+  .toast-close{width:20px;height:20px;border-radius:5px;border:none;background:transparent;color:var(--text-3);cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+  .toast-close:hover{background:var(--bg-hover);color:var(--text-2)}
+
+  /* progress bar de duración */
+  .toast-progress{position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--border)}
+  .toast-progress-fill{height:100%;border-radius:2px;animation:shrink 4s linear forwards}
+  .toast.success .toast-progress-fill{background:var(--emerald)}
+  .toast.danger  .toast-progress-fill{background:var(--ruby)}
+  .toast.warning .toast-progress-fill{background:var(--amber)}
+  .toast.info    .toast-progress-fill{background:var(--sky)}
+  @keyframes shrink{from{width:100%}to{width:0%}}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — alert banners inline</h2>
+  <div class="stack">
+    <div class="old-alert success">Solicitud guardada correctamente.</div>
+    <div class="old-alert error">Error al guardar. Intenta de nuevo.</div>
+    <div class="old-alert warning">El monto supera el presupuesto disponible.</div>
+    <div class="old-alert info">La solicitud fue enviada para aprobación.</div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — toasts flotantes con barra de duración</h2>
+  <div class="stack">
+
+    <!-- success -->
+    <div class="toast success">
+      <span class="toast-icon">✓</span>
+      <div class="toast-body">
+        <span class="toast-title">Solicitud guardada</span>
+        <span class="toast-desc">SOL-2026-0017 fue enviada para aprobación.</span>
+      </div>
+      <button class="toast-close">✕</button>
+      <div class="toast-progress"><div class="toast-progress-fill"></div></div>
+    </div>
+
+    <!-- danger -->
+    <div class="toast danger">
+      <span class="toast-icon">✕</span>
+      <div class="toast-body">
+        <span class="toast-title">Error al guardar</span>
+        <span class="toast-desc">No se pudo conectar con el servidor. Intenta de nuevo.</span>
+      </div>
+      <button class="toast-close">✕</button>
+      <div class="toast-progress"><div class="toast-progress-fill" style="animation-duration:6s"></div></div>
+    </div>
+
+    <!-- warning -->
+    <div class="toast warning">
+      <span class="toast-icon">!</span>
+      <div class="toast-body">
+        <span class="toast-title">Presupuesto insuficiente</span>
+        <span class="toast-desc">El monto supera el saldo disponible en la partida.</span>
+      </div>
+      <button class="toast-close">✕</button>
+      <div class="toast-progress"><div class="toast-progress-fill" style="animation-duration:5s"></div></div>
+    </div>
+
+    <!-- info -->
+    <div class="toast info">
+      <span class="toast-icon">i</span>
+      <div class="toast-body">
+        <span class="toast-title">Pago programado</span>
+        <span class="toast-desc">LAY-2026-0004 queda en espera de confirmación bancaria.</span>
+      </div>
+      <button class="toast-close">✕</button>
+      <div class="toast-progress"><div class="toast-progress-fill"></div></div>
+    </div>
+
+    <!-- compacto -->
+    <div class="toast success">
+      <span class="toast-icon">✓</span>
+      <div class="toast-body">
+        <span class="toast-title">Aprobado</span>
+        <span class="toast-desc">SOL-2026-0017</span>
+      </div>
+      <button class="toast-close">✕</button>
+      <div class="toast-progress"><div class="toast-progress-fill"></div></div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

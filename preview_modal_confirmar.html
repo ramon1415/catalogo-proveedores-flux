@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirmar Pago Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;gap:48px;align-items:flex-start}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  .modal-wrap{width:460px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:20px;box-shadow:var(--shadow-lg);overflow:hidden}
+  .modal-top{padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .modal-top h1{font-size:15px;font-weight:700}
+  .modal-top p{font-size:11.5px;color:var(--text-3);margin-top:3px}
+  .close-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-3);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .modal-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .modal-footer{padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+  .primary-btn{min-height:32px;padding:6px 16px;border:none;border-radius:7px;background:linear-gradient(135deg,var(--accent),#0d9488);color:#fff;font-size:12px;font-weight:700;cursor:pointer}
+  .danger-btn{min-height:32px;padding:6px 16px;border:none;border-radius:7px;background:var(--ruby-dim);border:1px solid rgba(224,62,82,.3);color:var(--ruby);font-size:12px;font-weight:700;cursor:pointer}
+  .secondary-btn{min-height:32px;padding:6px 12px;border:1px solid var(--border-strong);border-radius:7px;background:transparent;color:var(--text-2);font-size:12px;font-weight:700;cursor:pointer}
+
+  /* form */
+  .fg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fg label{display:flex;flex-direction:column;gap:5px}
+  .fg label.full{grid-column:1/-1}
+  .f-label{font-size:10.5px;font-weight:700;color:var(--text-3);letter-spacing:.3px;display:flex;gap:4px}
+  .f-req{color:var(--accent-text)}
+  .f-ctrl{min-height:34px;padding:0 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-size:12.5px;outline:none;width:100%}
+  .f-ctrl:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-dim)}
+  .f-hint{font-size:10.5px;color:var(--text-3);margin-top:2px}
+
+  /* notice */
+  .notice{display:flex;gap:8px;align-items:baseline;border-radius:10px;padding:9px 13px;font-size:12px;line-height:1.5;border:1px solid transparent}
+  .notice.warning{background:var(--amber-dim);border-color:rgba(245,158,11,.22);color:var(--amber)}
+  .notice-title{font-weight:700}
+  .notice-sep{margin:0 4px;opacity:.4}
+  .notice-desc{font-weight:400;opacity:.85}
+
+  /* resumen del layout */
+  .layout-summary{background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+  .summary-row{display:flex;justify-content:space-between;align-items:baseline}
+  .summary-label{font-size:11px;color:var(--text-3);font-weight:600}
+  .summary-value{font-size:12.5px;color:var(--text-1);font-weight:600}
+  .summary-value.big{font-size:18px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums}
+  .summary-divider{height:1px;background:var(--border)}
+
+  /* old form */
+  .old-body{padding:20px 24px;display:flex;flex-direction:column;gap:14px}
+  .old-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .old-grid label{display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.35px}
+  .old-grid label.full{grid-column:1/-1}
+  .old-ctrl{min-height:36px;padding:0 11px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-2);font-size:12.5px;outline:none;width:100%}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — formulario suelto, sin contexto del layout</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div>
+        <h1>Confirmar pago LAY-2026-0004</h1>
+        <p>Marca el layout como pagado y genera comprobantes internos por cada linea incluida.</p>
+      </div>
+      <button class="close-btn">✕</button>
+    </div>
+    <div class="old-body">
+      <div class="old-grid">
+        <label>Fecha de pago *<input class="old-ctrl" type="date" value="2026-06-04"></label>
+        <label>Referencia bancaria<input class="old-ctrl" type="text" placeholder="Referencia del banco"></label>
+        <label class="full">Ruta de comprobante futura<input class="old-ctrl" type="text" placeholder="Opcional, para Storage despues"></label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn">Cancelar</button>
+      <button class="primary-btn">Confirmar pago</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — contexto del layout + advertencia de irreversibilidad</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div>
+        <h1>Confirmar pago</h1>
+        <p>Esta acción es irreversible.</p>
+      </div>
+      <button class="close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Resumen del layout -->
+      <div class="layout-summary">
+        <div class="summary-row">
+          <span class="summary-label">Layout</span>
+          <span class="summary-value">LAY-2026-0004</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Empresa · Cuenta origen</span>
+          <span class="summary-value">Operadora Tlacatecpan · BBVA ****4821</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div class="summary-row">
+          <span class="summary-label">Líneas incluidas</span>
+          <span class="summary-value">8 transferencias</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Monto total</span>
+          <span class="summary-value big">$48,313.00</span>
+        </div>
+      </div>
+
+      <!-- Advertencia -->
+      <div class="notice warning">
+        <span style="flex-shrink:0">!</span>
+        <span><span class="notice-title">Acción irreversible</span><span class="notice-sep">—</span><span class="notice-desc">Al confirmar se marcarán 8 solicitudes como pagadas y se generarán los registros de comprobación.</span></span>
+      </div>
+
+      <!-- Campos -->
+      <div class="fg">
+        <label>
+          <span class="f-label">Fecha de pago <span class="f-req">*</span></span>
+          <input class="f-ctrl" type="date" value="2026-06-04">
+        </label>
+        <label>
+          <span class="f-label">Referencia bancaria</span>
+          <input class="f-ctrl" type="text" placeholder="Ej. 00123456">
+          <span class="f-hint">Opcional — del estado de cuenta</span>
+        </label>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn">Cancelar</button>
+      <button class="danger-btn">Confirmar pago · $48,313.00</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

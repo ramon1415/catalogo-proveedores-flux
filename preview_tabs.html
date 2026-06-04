@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tabs Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --sky:#2e90fa;--sky-dim:rgba(46,144,250,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;flex-direction:column;gap:56px}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  /* badges */
+  .b{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+  .b-neutral{background:var(--bg-hover);color:var(--text-2);border-color:var(--border)}
+  .b-info{background:var(--sky-dim);color:var(--sky);border-color:rgba(46,144,250,.2)}
+
+  /* ══ ANTES — underline con borde inferior ══ */
+  .old-tab-bar{display:flex;border-bottom:1px solid var(--border);gap:0;padding:0 24px}
+  .old-tab{padding:10px 14px;font-size:13px;font-weight:600;color:var(--text-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .old-tab.active{color:var(--text-1);border-bottom-color:var(--accent-text)}
+  .old-content{padding:20px 24px;background:var(--bg-card);font-size:12px;color:var(--text-3)}
+
+  /* ══ NUEVO — pill tabs ══ */
+  .tab-bar{display:flex;align-items:center;gap:4px;padding:4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;width:fit-content}
+  .tab{padding:6px 13px;border-radius:7px;font-size:12px;font-weight:700;color:var(--text-3);cursor:pointer;border:none;background:transparent;display:flex;align-items:center;gap:6px;transition:color 120ms,background 120ms}
+  .tab:hover{color:var(--text-2);background:var(--bg-hover)}
+  .tab.active{background:var(--bg-card);color:var(--accent-text);box-shadow:0 1px 6px rgba(0,0,0,.5);border:1px solid var(--border-strong)}
+  .tab-count{font-size:10px;font-weight:800;padding:1px 5px;border-radius:10px;background:var(--border);color:var(--text-3)}
+  .tab.active .tab-count{background:var(--accent-dim);color:var(--accent-text)}
+
+  /* variante con separador de sección */
+  .section-header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px 0;border-top:1px solid var(--border)}
+  .section-title{font-size:13px;font-weight:700}
+
+  /* módulo shell */
+  .module{background:var(--bg-card);border:1px solid var(--border-strong);border-radius:16px;overflow:hidden;width:640px}
+  .module-top{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .module-top h1{font-size:15px;font-weight:700}
+  .module-body{padding:20px 24px;font-size:12px;color:var(--text-3);min-height:80px;display:flex;align-items:center}
+  .primary-btn{min-height:30px;padding:5px 14px;border:none;border-radius:7px;background:linear-gradient(135deg,var(--accent),#0d9488);color:#fff;font-size:12px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — underline tabs pegados al borde de la tarjeta</h2>
+  <div class="module">
+    <div class="module-top">
+      <h1>Efectivo</h1>
+      <button class="primary-btn">+ Nuevo fondo</button>
+    </div>
+    <div class="old-tab-bar">
+      <div class="old-tab active">Fondos</div>
+      <div class="old-tab">Comprobaciones</div>
+      <div class="old-tab">Historial</div>
+    </div>
+    <div class="old-content">Contenido del tab activo…</div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — pill tabs en contenedor propio</h2>
+  <div class="module">
+    <div class="module-top">
+      <h1>Efectivo</h1>
+      <button class="primary-btn">+ Nuevo fondo</button>
+    </div>
+    <!-- tabs dentro del cuerpo, no pegados al borde -->
+    <div style="padding:14px 24px;border-bottom:1px solid var(--border)">
+      <div class="tab-bar">
+        <button class="tab active">Fondos <span class="tab-count">3</span></button>
+        <button class="tab">Comprobaciones <span class="tab-count">12</span></button>
+        <button class="tab">Historial</button>
+      </div>
+    </div>
+    <div class="module-body">Contenido del tab activo…</div>
+  </div>
+</div>
+
+<!-- variante: tabs sin conteos, más minimalista -->
+<div>
+  <h2 class="col-label">Variante — sin conteos (tabs simples)</h2>
+  <div class="module">
+    <div class="module-top">
+      <h1>Solicitudes</h1>
+      <button class="primary-btn">+ Nueva solicitud</button>
+    </div>
+    <div style="padding:14px 24px;border-bottom:1px solid var(--border)">
+      <div class="tab-bar">
+        <button class="tab active">Pendientes</button>
+        <button class="tab">Aprobadas</button>
+        <button class="tab">Rechazadas</button>
+        <button class="tab">Todas</button>
+      </div>
+    </div>
+    <div class="module-body">Contenido del tab activo…</div>
+  </div>
+</div>
+
+</body>
+</html>

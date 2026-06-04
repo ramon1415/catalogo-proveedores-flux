@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modal Efectivo Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --sky:#2e90fa;--sky-dim:rgba(46,144,250,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --violet:#8b5cf6;--violet-dim:rgba(139,92,246,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;gap:48px;align-items:flex-start}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  /* badges */
+  .b{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+  .b-success{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.2)}
+  .b-danger {background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.22)}
+  .b-warning{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.22)}
+  .b-info   {background:var(--sky-dim);color:var(--sky);border-color:rgba(46,144,250,.2)}
+  .b-neutral{background:var(--bg-hover);color:var(--text-2);border-color:var(--border)}
+  .b-accent {background:var(--accent-dim);color:var(--accent-text);border-color:rgba(15,118,110,.2)}
+
+  /* notice */
+  .notice{display:flex;gap:8px;align-items:baseline;border-radius:10px;padding:9px 13px;font-size:12px;line-height:1.5;border:1px solid transparent}
+  .notice.warning{background:var(--amber-dim);border-color:rgba(245,158,11,.22);color:var(--amber)}
+  .notice.info{background:var(--accent-dim);border-color:rgba(15,118,110,.2);color:var(--accent-text)}
+  .notice-title{font-weight:700}
+  .notice-sep{margin:0 4px;opacity:.4}
+  .notice-desc{font-weight:400;opacity:.85}
+
+  /* shared modal shell */
+  .modal-wrap{width:560px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:20px;box-shadow:var(--shadow-lg);overflow:hidden}
+  .modal-top{padding:18px 24px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .modal-top h1{font-size:15px;font-weight:700}
+  .modal-top p{font-size:11.5px;color:var(--text-3);margin-top:2px}
+  .close-btn{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-3);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .modal-scroll{max-height:540px;overflow-y:auto;padding:18px 24px;display:flex;flex-direction:column;gap:16px}
+  .modal-footer{padding:12px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .primary-btn{min-height:32px;padding:6px 16px;border:none;border-radius:7px;background:linear-gradient(135deg,var(--accent),#0d9488);color:#fff;font-size:12px;font-weight:700;cursor:pointer}
+  .secondary-btn{min-height:32px;padding:6px 12px;border:1px solid var(--border-strong);border-radius:7px;background:transparent;color:var(--text-2);font-size:12px;font-weight:700;cursor:pointer}
+  .small-btn{min-height:28px;padding:4px 10px;border:1px solid var(--border-strong);border-radius:6px;background:transparent;color:var(--text-2);font-size:11.5px;font-weight:700;cursor:pointer}
+  .small-btn.success{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.2)}
+  .small-btn.info{background:var(--sky-dim);color:var(--sky);border-color:rgba(46,144,250,.2)}
+
+  /* data rows */
+  .data-section{display:flex;flex-direction:column}
+  .section-heading{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.65px;color:var(--text-3);padding-bottom:8px;border-bottom:1px solid var(--border)}
+  .data-row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:8px 0}
+  .data-label{font-size:11.5px;color:var(--text-3);font-weight:600;white-space:nowrap;flex-shrink:0}
+  .data-value{font-size:13px;color:var(--text-1);font-weight:600;text-align:right}
+  .data-value.muted{color:var(--text-2);font-weight:500}
+
+  /* kpi strip */
+  .kpi-strip{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  .kpi{background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:10px 13px;position:relative;overflow:hidden}
+  .kpi::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,var(--accent),transparent 60%)}
+  .kpi.success::after{background:linear-gradient(90deg,var(--emerald),transparent 60%)}
+  .kpi.warning::after{background:linear-gradient(90deg,var(--amber),transparent 60%)}
+  .kpi-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.55px;color:var(--text-3);margin-bottom:5px}
+  .kpi-value{font-size:18px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums}
+  .kpi.success .kpi-value{color:var(--emerald)}
+  .kpi.warning .kpi-value{color:var(--amber)}
+
+  /* ticket list */
+  .ticket-list{display:flex;flex-direction:column;gap:0}
+  .ticket-item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+  .ticket-item:last-child{border-bottom:none}
+  .ticket-concept{flex:1}
+  .ticket-main{font-size:12.5px;font-weight:600;color:var(--text-1);display:block}
+  .ticket-sub{font-size:10.5px;color:var(--text-3);display:block;margin-top:1px}
+  .ticket-amount{font-size:13px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* workflow state indicator */
+  .workflow{display:flex;align-items:center;gap:0;margin-bottom:4px}
+  .wf-step{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;color:var(--text-3)}
+  .wf-step.done{color:var(--emerald)}
+  .wf-step.active{color:var(--text-1)}
+  .wf-dot{width:7px;height:7px;border-radius:50%;background:var(--border-strong);flex-shrink:0}
+  .wf-step.done .wf-dot{background:var(--emerald)}
+  .wf-step.active .wf-dot{background:var(--accent-text);box-shadow:0 0 0 2px var(--accent-dim)}
+  .wf-line{width:24px;height:1px;background:var(--border);margin:0 4px;flex-shrink:0}
+  .wf-step.done + .wf-line{background:var(--emerald)}
+
+  /* ══ ANTES ══ */
+  .old-section-card{border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+  .old-section-card h3{font-size:13px;font-weight:700}
+  .old-section-card p{font-size:11.5px;color:var(--text-3)}
+  .old-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .old-detail-card{border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+  .old-detail-card span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)}
+  .old-detail-card strong{display:block;margin-top:4px;font-size:12.5px;color:var(--text-1)}
+  .old-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .old-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+  .old-table th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--border)}
+  .old-table td{padding:8px 10px;color:var(--text-2);border-bottom:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — bloques + tabla, flujo sin contexto de estado</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div>
+        <h1>SOL-2026-0014</h1>
+        <p>Efectivo — Abierto</p>
+      </div>
+      <button class="close-btn">✕</button>
+    </div>
+    <div class="modal-scroll">
+      <div class="old-detail-grid">
+        <div class="old-detail-card"><span>Solicitud origen</span><strong>SOL-2026-0014</strong></div>
+        <div class="old-detail-card"><span>Responsable</span><strong>Ramon</strong></div>
+        <div class="old-detail-card"><span>Empresa</span><strong>Operadora Tlacatecpan</strong></div>
+        <div class="old-detail-card"><span>Metodo</span><strong>Efectivo</strong></div>
+        <div class="old-detail-card"><span>Monto asignado</span><strong>$500.00</strong></div>
+        <div class="old-detail-card"><span>Monto comprobado</span><strong>$320.00</strong></div>
+        <div class="old-detail-card"><span>Monto pendiente</span><strong>$180.00</strong></div>
+        <div class="old-detail-card"><span>Fecha limite</span><strong>15 jun 2026</strong></div>
+        <div class="old-detail-card"><span>Estatus</span><strong><span class="b b-accent">Abierto</span></strong></div>
+        <div class="old-detail-card"><span>Notas</span><strong>Mantenimiento lavadoras</strong></div>
+      </div>
+      <div class="old-section-card">
+        <div>
+          <h3>Comprobacion</h3>
+          <p>Seguimiento de tickets y revision.</p>
+        </div>
+        <div class="old-detail-grid">
+          <div class="old-detail-card"><span>Estatus</span><strong><span class="b b-neutral">Borrador</span></strong></div>
+          <div class="old-detail-card"><span>Total tickets</span><strong>$320.00</strong></div>
+          <div class="old-detail-card"><span>Monto devuelto</span><strong>$0.00</strong></div>
+          <div class="old-detail-card"><span>Diferencia</span><strong>$180.00</strong></div>
+        </div>
+        <div class="old-actions">
+          <button class="small-btn">Agregar ticket</button>
+          <button class="small-btn info">Enviar comprobacion</button>
+          <button class="small-btn">Verificar bloqueo</button>
+        </div>
+      </div>
+      <div class="old-section-card">
+        <h3>Tickets registrados</h3>
+        <table class="old-table">
+          <thead><tr><th>Concepto</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Fecha</th><th>Estatus</th></tr></thead>
+          <tbody>
+            <tr><td>Refacciones lavadora</td><td>Ferretería Local</td><td>Mantenimiento</td><td>$220.00</td><td>01 jun</td><td><span class="b b-success">Válido</span></td></tr>
+            <tr><td>Mano de obra</td><td>—</td><td>Mantenimiento</td><td>$100.00</td><td>02 jun</td><td><span class="b b-success">Válido</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span></span>
+      <button class="secondary-btn">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — estado del flujo visible, datos en secciones</h2>
+  <div class="modal-wrap">
+    <div class="modal-top">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <h1>SOL-2026-0014</h1>
+          <span class="b b-accent">Abierto</span>
+        </div>
+        <!-- workflow indicator -->
+        <div class="workflow">
+          <div class="wf-step done"><div class="wf-dot"></div>Asignado</div>
+          <div class="wf-line"></div>
+          <div class="wf-step active"><div class="wf-dot"></div>Comprobando</div>
+          <div class="wf-line"></div>
+          <div class="wf-step"><div class="wf-dot"></div>En revisión</div>
+          <div class="wf-line"></div>
+          <div class="wf-step"><div class="wf-dot"></div>Cerrado</div>
+        </div>
+      </div>
+      <button class="close-btn" style="margin-top:2px">✕</button>
+    </div>
+    <div class="modal-scroll">
+
+      <!-- KPIs de monto -->
+      <div class="kpi-strip">
+        <div class="kpi">
+          <div class="kpi-label">Asignado</div>
+          <div class="kpi-value">$500</div>
+        </div>
+        <div class="kpi success">
+          <div class="kpi-label">Comprobado</div>
+          <div class="kpi-value">$320</div>
+        </div>
+        <div class="kpi warning">
+          <div class="kpi-label">Pendiente</div>
+          <div class="kpi-value">$180</div>
+        </div>
+      </div>
+
+      <!-- Referencia -->
+      <div class="data-section">
+        <div class="section-heading">Referencia</div>
+        <div class="data-row">
+          <span class="data-label">Responsable</span>
+          <span class="data-value">Ramon</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Empresa · Método</span>
+          <span class="data-value muted">Operadora Tlacatecpan · Efectivo</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Concepto</span>
+          <span class="data-value muted">Mantenimiento lavadoras</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Fecha límite</span>
+          <span class="data-value muted">15 jun 2026</span>
+        </div>
+      </div>
+
+      <!-- Comprobación: tickets -->
+      <div class="data-section">
+        <div class="section-heading" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Tickets <span style="color:var(--text-3);font-weight:500">(2 registrados)</span></span>
+          <button class="small-btn">+ Agregar ticket</button>
+        </div>
+        <div class="ticket-list">
+          <div class="ticket-item">
+            <div class="ticket-concept">
+              <span class="ticket-main">Refacciones lavadora</span>
+              <span class="ticket-sub">Ferretería Local · Mantenimiento · 01 jun</span>
+            </div>
+            <span class="b b-success">Válido</span>
+            <span class="ticket-amount">$220.00</span>
+          </div>
+          <div class="ticket-item">
+            <div class="ticket-concept">
+              <span class="ticket-main">Mano de obra</span>
+              <span class="ticket-sub">Sin proveedor · Mantenimiento · 02 jun</span>
+            </div>
+            <span class="b b-success">Válido</span>
+            <span class="ticket-amount">$100.00</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="notice warning">
+        <span>!</span>
+        <span><span class="notice-title">$180 pendientes</span><span class="notice-sep">—</span><span class="notice-desc">Agrega tickets o registra monto devuelto para completar la comprobación.</span></span>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn">Cerrar</button>
+      <button class="small-btn info" style="margin-left:auto;margin-right:8px">Enviar a revisión</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
