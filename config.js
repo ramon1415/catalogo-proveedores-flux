@@ -24,7 +24,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     { key: "layouts", section: "Operacion", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "cash", section: "Operacion", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "payments", section: "Operacion", file: "pagos_comprobaciones.html", href: "./pagos_comprobaciones.html", icon: "$", label: "Pagos y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION], hidden: true },
-    { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=payments", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=income", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
@@ -380,6 +380,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./ingresos_nav_patch.js?v=20260603-config-menu", "ingresos-nav")
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
       loadExtension("./ingresos_ux2_extension.js?v=20260603-config-menu", "ingresos-ux2")
+      loadExtension("./ingresos_carlos_ux_patch_v2.js?v=20260603-carlos-ux2", "ingresos-carlos-ux")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
