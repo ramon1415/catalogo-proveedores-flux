@@ -105,16 +105,10 @@ async function loadSuppliers() {
   }
 
   proveedores = data || []
-  renderStats()
+
   renderTable()
 }
 
-function renderStats() {
-  document.getElementById("totalCount").textContent = proveedores.length
-  document.getElementById("activeCount").textContent = proveedores.filter((p) => p.activo).length
-  document.getElementById("inactiveCount").textContent = proveedores.filter((p) => !p.activo).length
-  document.getElementById("transferCount").textContent = proveedores.filter((p) => normalize(p.metodo_pago).includes("transferencia")).length
-}
 
 function renderTable() {
   const query = normalize(searchInput.value)
@@ -165,11 +159,10 @@ function setupOriginAccountsAdmin() {
 
   const page = document.querySelector(".page")
   const pageHeader = document.querySelector(".page-header")
-  const statsGrid = document.querySelector(".stats-grid")
   const suppliersTable = document.querySelector(".table-card")
   const newSupplierButton = document.getElementById("newSupplierBtn")
 
-  if (!page || !pageHeader || !statsGrid || !suppliersTable) return
+  if (!page || !pageHeader || !suppliersTable) return
 
   installOriginAccountsStyles()
 
@@ -184,8 +177,7 @@ function setupOriginAccountsAdmin() {
   const suppliersPanel = document.createElement("section")
   suppliersPanel.id = "suppliersPanel"
   suppliersPanel.className = "provider-panel active"
-  page.insertBefore(suppliersPanel, statsGrid)
-  suppliersPanel.appendChild(statsGrid)
+  page.insertBefore(suppliersPanel, suppliersTable)
   suppliersPanel.appendChild(suppliersTable)
 
   const originPanel = document.createElement("section")
