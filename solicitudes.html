@@ -18,7 +18,10 @@
     }
     .search-field input { padding-left:34px }
 
-    .provider-combo { position:relative }
+    .provider-combo { display:flex; gap:6px; align-items:flex-start }
+    .provider-combo-input { position:relative; flex:1; min-width:0 }
+    .provider-plus-btn { height:36px; width:36px; border-radius:7px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0 }
+    .provider-plus-btn:hover { background:var(--bg-hover); color:var(--text-1) }
     .combo-list { position:absolute; top:calc(100% + 3px); left:0; right:0; z-index:300; background:var(--bg-card); border:1px solid var(--border-strong); border-radius:9px; box-shadow:var(--shadow); max-height:220px; overflow-y:auto; padding:4px 0; list-style:none; margin:0 }
     .combo-list li { padding:8px 12px; cursor:pointer; }
     .combo-list li:hover, .combo-list li.combo-active { background:var(--bg-hover) }
@@ -229,8 +232,11 @@
                 </label>
                 <label class="full-row">Proveedor *
                   <div class="provider-combo" id="providerCombo">
-                    <input id="providerSearch" type="text" class="form-control" placeholder="Escribe alias, razón social o RFC…" autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown">
-                    <ul id="providerDropdown" class="combo-list hidden" role="listbox"></ul>
+                    <div class="provider-combo-input">
+                      <input id="providerSearch" type="text" class="form-control" placeholder="Escribe alias, razón social o RFC…" autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown" style="width:100%">
+                      <ul id="providerDropdown" class="combo-list hidden" role="listbox"></ul>
+                    </div>
+                    <button id="newProviderFromRequestBtn" type="button" class="provider-plus-btn" title="Crear proveedor sin salir de la solicitud" aria-label="Crear proveedor sin salir de la solicitud">+</button>
                     <input type="hidden" id="proveedorId">
                   </div>
                 </label>
