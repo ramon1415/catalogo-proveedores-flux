@@ -20,11 +20,11 @@
     const isIncidents = requestedTab === "incidents" || requestedTab === "incidencias"
     document.title = `${isIncidents ? "Incidencias" : "Ingresos"} | Flux`
     setText(".brand-subtitle", isIncidents ? "Incidencias" : "Ingresos")
-    setText(".topbar-kicker", "Cuotas, cobros, incidencias y facturas")
+    setText(".topbar-kicker", isIncidents ? "Visitas, incidencias y cargos" : "Cuotas, cobros y balance")
     setText(".page-header h1", isIncidents ? "Incidencias" : "Ingresos")
     setText(".page-header p", isIncidents
       ? "Consulta y registra incidencias, visitas, cargos recuperables y facturas."
-      : "Controla cuotas de mantenimiento, periodos de cobro, pagos y facturas.")
+      : "Controla balance de ingresos, cuotas de mantenimiento, cobros y facturas.")
     setText("[data-tab='incidents']", "Incidencias")
   }
 
@@ -45,7 +45,7 @@
   }
 
   function noticeCopy() {
-    return `Ingresos e Incidencias comparten datos operativos, pero el menu los separa para navegar mas claro. La administracion de socios queda en
+    return `Ingresos queda separado de Incidencias: aqui se revisan balance, cuotas y cobros. Incidencias tiene su propia entrada en el menu. La administracion de socios queda en
       <a href="./configuracion.html?tab=members" style="color:var(--accent-text);font-weight:800;">Configuracion > Socios</a>.`
   }
 
