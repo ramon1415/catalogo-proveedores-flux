@@ -8,6 +8,32 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./ux2_shared.css?v=20260602-ux2-menu-history">
+  <style>
+    .approval-kanban{display:grid;grid-template-columns:repeat(5,minmax(260px,1fr));gap:12px;overflow:auto;padding:14px;min-height:420px;max-height:calc(100vh - 330px)}
+    .approval-column{border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.018);display:flex;flex-direction:column;min-height:360px;max-height:calc(100vh - 360px);overflow:hidden}
+    .approval-column header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:13px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.018)}
+    .approval-column header strong{display:block;color:var(--text-1);font-size:13px}
+    .approval-column header span{display:block;color:var(--text-3);font-size:11.5px;margin-top:2px}
+    .approval-column header em{min-width:26px;height:26px;border-radius:999px;display:grid;place-items:center;background:var(--bg-hover);color:var(--text-2);font-style:normal;font-weight:800}
+    .approval-column-body{display:flex;flex-direction:column;gap:10px;overflow:auto;padding:10px}
+    .approval-card{border:1px solid var(--border);border-radius:13px;background:var(--bg-card);padding:12px;display:grid;gap:10px}
+    .approval-card-top,.approval-card-actions,.approval-card-badges{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .approval-card-top strong,.approval-card-main strong{display:block;color:var(--text-1);font-size:13px}
+    .approval-card-top span,.approval-card-main span{display:block;color:var(--text-3);font-size:11px;margin-top:2px}
+    .approval-card-badges{justify-content:flex-start;gap:4px}
+    .approval-card-actions{justify-content:flex-start;gap:6px}
+    .kanban-empty{border:1px dashed var(--border-strong);border-radius:12px;padding:18px 12px;text-align:center;color:var(--text-3);font-size:12px}
+    @media(max-width:1280px){.approval-kanban{grid-template-columns:repeat(5,280px)}}
+
+    .decision-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+    .decision-btn{min-height:34px;padding:7px 12px;border-radius:8px;border:1px solid var(--border-strong);background:transparent;color:var(--text-2);font-size:12px;font-weight:700;cursor:pointer}
+    .decision-btn:hover{background:var(--bg-hover);color:var(--text-1)}
+    .decision-btn.approve{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.24)}
+    .decision-btn.reject{background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.26)}
+    .decision-btn.change{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.24)}
+    .decision-btn.exception{background:var(--violet-dim);color:var(--violet);border-color:rgba(168,85,247,.24)}
+    .decision-btn:disabled{opacity:.55;cursor:not-allowed}
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -41,17 +67,24 @@
           <button class="primary-btn" id="refreshBtn" type="button">Actualizar</button>
         </div>
 
-        <div id="permissionNotice" class="notice warning hidden">No tienes permiso para aprobar solicitudes. Esta seccion esta disponible para admin, finanzas y aprobadores.</div>
+        <div id="permissionNotice" class="notice-v2 warning hidden">
+          <span class="notice-icon">⚠</span>
+          <span class="notice-text">
+            <span class="notice-title">Sin permisos de aprobacion</span>
+            <span class="notice-sep">—</span>
+            <span class="notice-desc">Esta seccion esta disponible para admin, finanzas y aprobadores.</span>
+          </span>
+        </div>
 
-        <section class="stats-grid">
-          <button class="stat-card warning" type="button" data-filter="pending"><p>Pendientes</p><strong id="pendingCount">0</strong></button>
-          <button class="stat-card danger" type="button" data-filter="exceptions"><p>Excepciones</p><strong id="exceptionCount">0</strong></button>
-          <button class="stat-card info" type="button" data-filter="changes"><p>Cambios solicitados</p><strong id="changesCount">0</strong></button>
-          <button class="stat-card success" type="button" data-filter="approved"><p>Aprobadas recientes</p><strong id="approvedCount">0</strong></button>
-          <button class="stat-card" type="button" data-filter="all"><p>Total bandeja</p><strong id="totalCount">0</strong></button>
+        <section class="stats-grid" style="margin-top:16px">
+          <button class="kpi" type="button" data-filter="pending"><p class="kpi-label">Pendientes</p><strong class="kpi-value warning" id="pendingCount">0</strong></button>
+          <button class="kpi" type="button" data-filter="exceptions"><p class="kpi-label">Excepciones</p><strong class="kpi-value danger" id="exceptionCount">0</strong></button>
+          <button class="kpi" type="button" data-filter="changes"><p class="kpi-label">Cambios solicitados</p><strong class="kpi-value" id="changesCount">0</strong></button>
+          <button class="kpi" type="button" data-filter="approved"><p class="kpi-label">Aprobadas recientes</p><strong class="kpi-value success" id="approvedCount">0</strong></button>
+          <button class="kpi" type="button" data-filter="all"><p class="kpi-label">Total bandeja</p><strong class="kpi-value" id="totalCount">0</strong></button>
         </section>
 
-        <section class="table-card">
+        <section class="table-card" style="margin-top:16px">
           <div class="table-toolbar">
             <input id="searchInput" type="search" placeholder="Buscar folio, proveedor, empresa o descripcion">
             <select id="statusFilter">
@@ -79,22 +112,35 @@
   <dialog id="detailDialog">
     <form class="modal-content" id="decisionForm">
       <div class="modal-header">
-        <div><h2 id="detailTitle">Solicitud</h2><p id="detailSubtitle">Detalle para decision.</p></div>
-        <button type="button" class="icon-btn" id="closeDetailBtn">x</button>
+        <div>
+          <h2 id="detailTitle">Solicitud</h2>
+          <p id="detailSubtitle" class="modal-subtitle"></p>
+        </div>
+        <button type="button" class="icon-btn" id="closeDetailBtn">✕</button>
       </div>
       <div class="modal-scroll">
         <div id="detailContent"></div>
-        <div class="panel-card" style="padding:14px;">
-          <div class="section-title">Decision del aprobador</div>
-          <div id="decisionHelp" class="notice neutral" style="margin-top:10px;">Selecciona una accion y captura comentario cuando aplique.</div>
-          <div class="form-grid" style="margin-top:12px;">
-            <label class="full-row">Comentario
-              <textarea id="decisionComments" class="form-control" placeholder="Comentario para la decision"></textarea>
+        <section class="decision-card" style="margin-top:0">
+          <div class="section-heading">Decision del aprobador</div>
+          <div id="decisionHelp" class="notice-v2 neutral" style="margin-top:10px">
+            <span class="notice-icon">·</span>
+            <span class="notice-text">
+              <span class="notice-title">Accion requerida</span>
+              <span class="notice-sep">—</span>
+              <span class="notice-desc">Selecciona una accion y captura comentario cuando aplique.</span>
+            </span>
+          </div>
+          <div class="fg" style="margin-top:12px">
+            <label class="full-row f-label">Comentario
+              <textarea id="decisionComments" class="f-input" placeholder="Comentario para la decision"></textarea>
             </label>
           </div>
-          <div id="decisionError" class="notice warning hidden" style="margin-top:10px;"></div>
-          <div id="decisionActions" class="actions" style="margin-top:12px;"></div>
-        </div>
+          <div id="decisionError" class="notice-v2 danger hidden" style="margin-top:10px">
+            <span class="notice-icon">✕</span>
+            <span class="notice-text" id="decisionErrorText"></span>
+          </div>
+          <div id="decisionActions" class="decision-actions"></div>
+        </section>
       </div>
       <div class="modal-actions">
         <button type="button" class="secondary-btn" id="closeDetailFooterBtn">Cerrar</button>
@@ -102,10 +148,11 @@
     </form>
   </dialog>
 
-  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
+  <script src="./components.js"></script>
   <script src="./aprobaciones.js"></script>
 </body>
 </html>

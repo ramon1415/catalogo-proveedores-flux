@@ -20,7 +20,6 @@ document.addEventListener("DOMContentLoaded", init)
 
 async function init() {
   cacheDom()
-  installApprovalKanbanStyles()
   bindEvents()
   applyTheme()
   await resolveUser()
@@ -46,6 +45,7 @@ function cacheDom() {
   dom.decisionComments = document.getElementById("decisionComments")
   dom.decisionActions = document.getElementById("decisionActions")
   dom.decisionError = document.getElementById("decisionError")
+  dom.decisionErrorText = document.getElementById("decisionErrorText")
 }
 
 function bindEvents() {
@@ -97,32 +97,6 @@ function bindEvents() {
   })
   document.getElementById("closeDetailBtn")?.addEventListener("click", closeDetail)
   document.getElementById("closeDetailFooterBtn")?.addEventListener("click", closeDetail)
-}
-
-function installApprovalKanbanStyles() {
-  if (document.getElementById("approvalKanbanStyles")) return
-  const style = document.createElement("style")
-  style.id = "approvalKanbanStyles"
-  style.textContent = `
-    .approval-kanban{display:grid;grid-template-columns:repeat(5,minmax(260px,1fr));gap:12px;overflow:auto;padding:14px;min-height:420px;max-height:calc(100vh - 330px)}
-    .approval-column{border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.018);display:flex;flex-direction:column;min-height:360px;max-height:calc(100vh - 360px);overflow:hidden}
-    .approval-column header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:13px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.018)}
-    .approval-column header strong{display:block;color:var(--text-1);font-size:13px}
-    .approval-column header span{display:block;color:var(--text-3);font-size:11.5px;margin-top:2px}
-    .approval-column header em{min-width:26px;height:26px;border-radius:999px;display:grid;place-items:center;background:var(--bg-hover);color:var(--text-2);font-style:normal;font-weight:800}
-    .approval-column-body{display:flex;flex-direction:column;gap:10px;overflow:auto;padding:10px}
-    .approval-card{border:1px solid var(--border);border-radius:13px;background:var(--bg-card);padding:12px;display:grid;gap:10px}
-    .approval-card-top,.approval-card-actions,.approval-card-badges{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}
-    .approval-card-top strong,.approval-card-main strong{display:block;color:var(--text-1);font-size:13px}
-    .approval-card-top span,.approval-card-main span{display:block;color:var(--text-3);font-size:11px;margin-top:2px}
-    .approval-card-grid{display:grid;grid-template-columns:72px 1fr;gap:4px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:9px 0}
-    .approval-card-grid span{color:var(--text-3);font-size:10px;text-transform:uppercase;font-weight:800;letter-spacing:.45px}
-    .approval-card-grid strong{color:var(--text-2);font-size:11.5px;font-weight:700}
-    .approval-card-actions{justify-content:flex-start}
-    .kanban-empty{border:1px dashed var(--border-strong);border-radius:12px;padding:18px 12px;text-align:center;color:var(--text-3);font-size:12px}
-    @media(max-width:1280px){.approval-kanban{grid-template-columns:repeat(5,280px)}}
-  `
-  document.head.appendChild(style)
 }
 
 function applyTheme() {
@@ -296,24 +270,28 @@ function renderApprovalCard(request) {
       </div>
       <div class="approval-card-main">
         <strong>${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</strong>
-        <span>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</span>
+        <span>${escapeHtml(company?.legal_name || company?.name || "Sin empresa")} · ${escapeHtml(center?.name || center?.code || "")}</span>
       </div>
-      <div class="approval-card-grid">
-        <span>Centro</span><strong>${escapeHtml(center?.name || center?.code || "Sin centro")}</strong>
-        <span>Partida</span><strong>${escapeHtml([category?.code, category?.name || category?.category].filter(Boolean).join(" - ") || "Sin partida")}</strong>
-        <span>Monto</span><strong>${formatCurrency(request.amount_requested, request.currency)}</strong>
+      <div class="ref-grid" style="margin:4px 0">
+        <div class="ref-cell">
+          <span class="ref-label">Partida</span>
+          <span class="ref-value">${escapeHtml([category?.code, category?.name || category?.category].filter(Boolean).join(" · ") || "Sin partida")}</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Monto</span>
+          <span class="ref-value">${escapeHtml(formatCurrency(request.amount_requested, request.currency))}</span>
+        </div>
       </div>
       <div class="approval-card-badges">
         ${statusBadge(request.status)}
         ${budgetBadge(request)}
-        ${request.incident_charge_id ? `<span class="badge info">Visita asociada</span>` : ""}
+        ${request.incident_charge_id ? Components.badge("Visita asociada", "info") : ""}
       </div>
       <div class="approval-card-actions">
         <button class="small-btn" type="button" data-action="detail" data-id="${escapeHtml(request.id)}">Ver detalle</button>
         ${canAct ? `
           <button class="small-btn success" type="button" data-action="quick-decision" data-decision="approved" data-id="${escapeHtml(request.id)}">Aprobar</button>
           <button class="small-btn danger" type="button" data-action="quick-decision" data-decision="rejected" data-id="${escapeHtml(request.id)}">Rechazar</button>
-          <button class="small-btn warning" type="button" data-action="quick-decision" data-decision="changes_requested" data-id="${escapeHtml(request.id)}">Solicitar cambios</button>
         ` : ""}
       </div>
     </article>
@@ -325,8 +303,7 @@ function handleQuickDecision(requestId, action) {
   if (requiresComment(action)) {
     openDetail(requestId)
     dom.decisionComments.focus()
-    dom.decisionError.textContent = "Captura un comentario para registrar esta decision."
-    dom.decisionError.classList.remove("hidden")
+    showDecisionError("Captura un comentario para registrar esta decision.")
     return
   }
   decideRequest(action)
@@ -346,10 +323,9 @@ function openDetail(requestId) {
   if (!request) return
   state.currentRequestId = requestId
   dom.detailTitle.textContent = request.request_number || "Solicitud"
-  dom.detailSubtitle.textContent = `${statusLabel(request.status)} / ${budgetLabel(request.budget_decision)}`
+  dom.detailSubtitle.innerHTML = `${statusBadge(request.status)} ${budgetBadge(request)}`
   dom.decisionComments.value = ""
-  dom.decisionError.classList.add("hidden")
-  dom.decisionError.textContent = ""
+  hideDecisionError()
   dom.detailContent.innerHTML = renderDetail(request)
   dom.decisionActions.innerHTML = renderDecisionActions(request)
   dom.detailDialog.showModal()
@@ -369,53 +345,80 @@ function renderDetail(request) {
   const fund = state.cashFunds.find((item) => item.payment_request_id === request.id)
 
   return `
-    <div class="detail-grid">
-      ${detailCard("Proveedor", provider?.alias || provider?.nombre_completo || "Sin proveedor", provider?.rfc || "")}
-      ${detailCard("Empresa", company?.legal_name || company?.name || "Sin empresa", "")}
-      ${detailCard("Centro de costo", center?.name || center?.code || "Sin centro", center?.code || "")}
-      ${detailCard("Partida", `${category?.code || ""} ${category?.name || category?.category || ""}`.trim() || "Sin partida", "")}
-      ${detailCard("Monto", formatCurrency(request.amount_requested, request.currency), request.currency || "MXN")}
-      ${detailCard("Tipo", typeLabel(request.request_type), request.request_type || "provider_payment")}
-      ${detailCard("Estatus", statusLabel(request.status), request.status || "")}
-      ${detailCard("Presupuesto", budgetLabel(request.budget_decision), request.budget_block_reason || "Sin motivo")}
-    </div>
-    <div class="panel-card" style="padding:14px;">
-      <div class="section-title">Datos del pago</div>
-      <p style="color:var(--text-2);margin-top:8px;">${escapeHtml(request.description || "Sin descripcion")}</p>
-      <p style="color:var(--text-3);margin-top:4px;">${escapeHtml(request.notes || "Sin notas")}</p>
-    </div>
-    <div class="detail-grid">
-      ${detailCard("Operacion posterior", layoutLine ? "En layout" : fund ? "Fondo creado" : "Sin operacion creada", layoutLine?.status || fund?.status || "Pendiente")}
-      ${detailCard("Ajuste extraordinario", request.is_extraordinary_adjustment ? "Si" : "No", request.exception_action || request.exception_status || "")}
+    <div style="padding:16px 20px 8px">
+      <div style="font-size:26px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;margin-bottom:12px">${escapeHtml(formatCurrency(request.amount_requested, request.currency))}</div>
+      <div class="ref-grid" style="margin-bottom:12px">
+        <div class="ref-cell">
+          <span class="ref-label">Proveedor</span>
+          <span class="ref-value">${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</span>
+          ${provider?.rfc ? `<span class="ref-value muted">${escapeHtml(provider.rfc)}</span>` : ""}
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Empresa</span>
+          <span class="ref-value">${escapeHtml(company?.legal_name || company?.name || "Sin empresa")}</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Centro de costo</span>
+          <span class="ref-value">${escapeHtml(center?.name || center?.code || "Sin centro")}</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Partida</span>
+          <span class="ref-value">${escapeHtml([category?.code, category?.name || category?.category].filter(Boolean).join(" · ") || "Sin partida")}</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Tipo</span>
+          <span class="ref-value">${escapeHtml(typeLabel(request.request_type))}</span>
+        </div>
+        <div class="ref-cell">
+          <span class="ref-label">Mes presupuestal</span>
+          <span class="ref-value">${escapeHtml(formatMonth(request.budget_month))}</span>
+        </div>
+      </div>
+      <div class="data-section" style="margin-bottom:12px">
+        <div class="section-heading">Descripcion y notas</div>
+        <div class="data-row">
+          <span class="data-label">Descripcion</span>
+          <span class="data-value muted">${escapeHtml(request.description || "Sin descripcion")}</span>
+        </div>
+        ${request.notes ? `<div class="data-row"><span class="data-label">Notas</span><span class="data-value muted">${escapeHtml(request.notes)}</span></div>` : ""}
+      </div>
+      <div class="data-section" style="margin-bottom:16px">
+        <div class="section-heading">Operacion posterior</div>
+        <div class="data-row">
+          <span class="data-label">Estado</span>
+          <span class="data-value">${escapeHtml(layoutLine ? "En layout" : fund ? "Fondo creado" : "Sin operacion creada")}</span>
+        </div>
+        ${request.is_extraordinary_adjustment ? `<div class="data-row"><span class="data-label">Ajuste extraordinario</span><span class="data-value">${escapeHtml(request.exception_action || request.exception_status || "Activo")}</span></div>` : ""}
+      </div>
     </div>
   `
 }
 
 function renderDecisionActions(request) {
   if (!state.canApprove) {
-    return `<span class="muted-line">Sin permisos de aprobacion</span>`
+    return `<span style="color:var(--text-3);font-size:12px">Sin permisos de aprobacion</span>`
   }
   if (["approved", "rejected", "paid", "cancelled"].includes(request.status) && !isException(request)) {
-    return `<span class="muted-line">Esta solicitud ya tiene una decision registrada</span>`
+    return `<span style="color:var(--text-3);font-size:12px">Esta solicitud ya tiene una decision registrada</span>`
   }
   if (isException(request)) {
     return [
-      decisionButton("Autorizar excepcion", "exception_approved", "success"),
-      decisionButton("Rechazar excepcion", "exception_rejected", "danger"),
-      decisionButton("Solicitar cambio de monto", "amount_change_requested", "warning"),
-      decisionButton("Solicitar cambio de partida", "category_change_requested", "warning"),
-      decisionButton("Solicitar ajuste presupuestal", "budget_adjustment_requested", "warning"),
+      decisionButton("Autorizar excepcion", "exception_approved", "approve"),
+      decisionButton("Rechazar excepcion", "exception_rejected", "reject"),
+      decisionButton("Cambio de monto", "amount_change_requested", "change"),
+      decisionButton("Cambio de partida", "category_change_requested", "change"),
+      decisionButton("Ajuste presupuestal", "budget_adjustment_requested", "exception"),
     ].join("")
   }
   return [
-    decisionButton("Aprobar", "approved", "success"),
-    decisionButton("Rechazar", "rejected", "danger"),
-    decisionButton("Solicitar cambios", "changes_requested", "warning"),
+    decisionButton("Aprobar", "approved", "approve"),
+    decisionButton("Rechazar", "rejected", "reject"),
+    decisionButton("Solicitar cambios", "changes_requested", "change"),
   ].join("")
 }
 
 function decisionButton(label, action, variant) {
-  return `<button class="small-btn ${variant}" type="button" data-decision="${escapeHtml(action)}">${escapeHtml(label)}</button>`
+  return `<button class="decision-btn ${escapeHtml(variant)}" type="button" data-decision="${escapeHtml(action)}">${escapeHtml(label)}</button>`
 }
 
 async function decideRequest(action) {
@@ -424,8 +427,7 @@ async function decideRequest(action) {
   const comments = dom.decisionComments.value.trim()
   if (!state.profile?.id) return showToast("Perfil no identificado", "No se pudo identificar el perfil del usuario.", "error")
   if (requiresComment(action) && !comments) {
-    dom.decisionError.textContent = "Captura un comentario para registrar esta decision."
-    dom.decisionError.classList.remove("hidden")
+    showDecisionError("Captura un comentario para registrar esta decision.")
     dom.decisionComments.focus()
     return
   }
@@ -443,8 +445,7 @@ async function decideRequest(action) {
     closeDetail()
     await loadData()
   } catch (error) {
-    dom.decisionError.textContent = friendlyDecisionError(error)
-    dom.decisionError.classList.remove("hidden")
+    showDecisionError(friendlyDecisionError(error))
     showToast("No se pudo registrar", friendlyDecisionError(error), "error")
   } finally {
     setDecisionButtons(false)
@@ -453,6 +454,16 @@ async function decideRequest(action) {
 
 function setDecisionButtons(disabled) {
   dom.decisionActions.querySelectorAll("button").forEach((button) => { button.disabled = disabled })
+}
+
+function showDecisionError(message) {
+  dom.decisionErrorText.textContent = message
+  dom.decisionError.classList.remove("hidden")
+}
+
+function hideDecisionError() {
+  dom.decisionError.classList.add("hidden")
+  dom.decisionErrorText.textContent = ""
 }
 
 function isPending(request) {
@@ -473,25 +484,21 @@ function requiresComment(action) {
   return action !== "approved"
 }
 
-function detailCard(label, value, hint) {
-  return `<div class="detail-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong>${hint ? `<small class="muted-line">${escapeHtml(hint)}</small>` : ""}</div>`
-}
-
 function typeBadge(type) {
   const label = typeLabel(type)
-  const klass = type === "cash" || type === "check" ? "warn" : "info"
-  return `<span class="badge ${klass}">${escapeHtml(label)}</span>`
+  const variant = type === "cash" || type === "check" ? "warning" : "info"
+  return Components.badge(label, variant)
 }
 
 function statusBadge(status) {
-  const klass = status === "approved" ? "good" : status === "rejected" ? "bad" : status === "changes_requested" ? "warn" : "info"
-  return `<span class="badge ${klass}">${escapeHtml(statusLabel(status))}</span>`
+  const variant = status === "approved" ? "success" : status === "rejected" ? "danger" : status === "changes_requested" ? "warning" : "neutral"
+  return Components.badge(statusLabel(status), variant)
 }
 
 function budgetBadge(request) {
-  if (request.budget_decision === "aprobable") return `<span class="badge good">Aprobable</span>`
-  if (request.budget_decision === "bloqueado") return `<span class="badge bad">Excepcion</span>`
-  return `<span class="badge">${escapeHtml(request.budget_decision || "Sin validar")}</span>`
+  if (request.budget_decision === "aprobable") return Components.badge("Aprobable", "success")
+  if (request.budget_decision === "bloqueado") return Components.badge("Excepcion", "violet")
+  return Components.badge(request.budget_decision || "Sin validar", "neutral")
 }
 
 function typeLabel(type) {
@@ -502,11 +509,6 @@ function typeLabel(type) {
 function statusLabel(status) {
   const labels = { submitted: "Pendiente", pending_approval: "Pendiente", finance_validation: "Validacion financiera", changes_requested: "Cambios solicitados", approved: "Aprobada", rejected: "Rechazada", paid: "Pagada", cancelled: "Cancelada" }
   return labels[status] || status || "Sin estatus"
-}
-
-function budgetLabel(value) {
-  const labels = { aprobable: "Aprobable", bloqueado: "Excepcion presupuestal" }
-  return labels[value] || value || "Sin validar"
 }
 
 function decisionLabel(action) {
@@ -521,6 +523,14 @@ function decisionLabel(action) {
     budget_adjustment_requested: "Ajuste presupuestal solicitado",
   }
   return labels[action] || action
+}
+
+function formatMonth(value) {
+  if (!value) return "Sin mes"
+  const [year, month] = String(value).split("-")
+  const date = new Date(Number(year), Number(month) - 1, 1)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("es-MX", { month: "long", year: "numeric" }).format(date)
 }
 
 function friendlyDecisionError(error) {
@@ -541,11 +551,8 @@ function friendlyError(error) {
 }
 
 function showToast(title, message, type = "success") {
-  const node = document.createElement("div")
-  node.className = `toast ${type}`
-  node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`
-  document.getElementById("toastStack").appendChild(node)
-  window.setTimeout(() => node.remove(), 5200)
+  const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" }
+  Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 })
 }
 
 function byId(list, id) {
@@ -558,7 +565,7 @@ function setText(id, value) {
 }
 
 function normalize(value) {
-  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  return String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
 }
 
 function formatCurrency(value, currency = "MXN") {
