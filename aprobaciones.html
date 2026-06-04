@@ -112,11 +112,14 @@
   <dialog id="detailDialog">
     <form class="modal-content" id="decisionForm">
       <div class="modal-header">
-        <div>
-          <h2 id="detailTitle" style="color:var(--text-1)">Solicitud</h2>
-          <p id="detailSubtitle" class="modal-subtitle"></p>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px">
+            <h2 id="detailTitle" style="color:var(--text-1);font-size:16px;font-weight:700">Solicitud</h2>
+            <span id="detailAmount" style="font-size:22px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+          </div>
+          <div id="detailSubtitle" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px"></div>
         </div>
-        <button type="button" class="icon-btn" id="closeDetailBtn">✕</button>
+        <button type="button" class="icon-btn" id="closeDetailBtn" style="margin-left:12px;flex-shrink:0">✕</button>
       </div>
       <div class="modal-scroll">
         <div id="detailContent"></div>

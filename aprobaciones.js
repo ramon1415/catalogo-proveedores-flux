@@ -41,6 +41,7 @@ function cacheDom() {
   dom.detailDialog = document.getElementById("detailDialog")
   dom.detailTitle = document.getElementById("detailTitle")
   dom.detailSubtitle = document.getElementById("detailSubtitle")
+  dom.detailAmount = document.getElementById("detailAmount")
   dom.detailContent = document.getElementById("detailContent")
   dom.decisionComments = document.getElementById("decisionComments")
   dom.decisionActions = document.getElementById("decisionActions")
@@ -323,6 +324,7 @@ function openDetail(requestId) {
   if (!request) return
   state.currentRequestId = requestId
   dom.detailTitle.textContent = request.request_number || "Solicitud"
+  dom.detailAmount.textContent = formatCurrency(request.amount_requested, request.currency)
   dom.detailSubtitle.innerHTML = `${statusBadge(request.status)} ${budgetBadge(request)}`
   dom.decisionComments.value = ""
   hideDecisionError()
@@ -345,9 +347,13 @@ function renderDetail(request) {
   const fund = state.cashFunds.find((item) => item.payment_request_id === request.id)
 
   return `
-    <div style="padding:16px 20px 8px">
-      <div style="font-size:26px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;margin-bottom:12px">${escapeHtml(formatCurrency(request.amount_requested, request.currency))}</div>
-      <div class="ref-grid" style="margin-bottom:12px;grid-template-columns:1fr 1fr 1fr">
+    <div style="padding:0 20px 8px;display:flex;flex-direction:column;gap:12px">
+      ${(request.description || request.notes) ? `
+      <div class="data-section">
+        ${request.description ? `<div class="data-row"><span class="data-label">Descripcion</span><span class="data-value muted">${escapeHtml(request.description)}</span></div>` : ""}
+        ${request.notes ? `<div class="data-row"><span class="data-label">Notas</span><span class="data-value muted">${escapeHtml(request.notes)}</span></div>` : ""}
+      </div>` : ""}
+      <div class="ref-grid" style="grid-template-columns:1fr 1fr 1fr">
         <div class="ref-cell">
           <span class="ref-label">Proveedor</span>
           <span class="ref-value">${escapeHtml(provider?.alias || provider?.nombre_completo || "Sin proveedor")}</span>
@@ -374,22 +380,15 @@ function renderDetail(request) {
           <span class="ref-value">${escapeHtml(formatMonth(request.budget_month))}</span>
         </div>
       </div>
-      <div class="data-section" style="margin-bottom:12px">
-        <div class="section-heading">Descripcion y notas</div>
+      ${(layoutLine || fund || request.is_extraordinary_adjustment) ? `
+      <div class="data-section">
         <div class="data-row">
-          <span class="data-label">Descripcion</span>
-          <span class="data-value muted">${escapeHtml(request.description || "Sin descripcion")}</span>
-        </div>
-        ${request.notes ? `<div class="data-row"><span class="data-label">Notas</span><span class="data-value muted">${escapeHtml(request.notes)}</span></div>` : ""}
-      </div>
-      <div class="data-section" style="margin-bottom:16px">
-        <div class="section-heading">Operacion posterior</div>
-        <div class="data-row">
-          <span class="data-label">Estado</span>
+          <span class="data-label">Operacion posterior</span>
           <span class="data-value">${escapeHtml(layoutLine ? "En layout" : fund ? "Fondo creado" : "Sin operacion creada")}</span>
         </div>
         ${request.is_extraordinary_adjustment ? `<div class="data-row"><span class="data-label">Ajuste extraordinario</span><span class="data-value">${escapeHtml(request.exception_action || request.exception_status || "Activo")}</span></div>` : ""}
-      </div>
+      </div>` : ""}
+
     </div>
   `
 }
