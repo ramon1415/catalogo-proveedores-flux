@@ -1,3 +1,5 @@
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
 const ACTIVE_FUND_STATUSES = ["active", "pending_receipt", "receipt_review", "blocked"]
 const PENDING_FUND_STATUSES = ["pending_receipt", "blocked"]
 const REVIEW_ROLES = ["admin", "finance", "finanzas", "approver_2", "aprobador_2", "sysadmin", "system_admin", "treasury", "tesoreria"]
