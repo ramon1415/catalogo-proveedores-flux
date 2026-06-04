@@ -120,7 +120,7 @@
       </div>
       <div class="modal-scroll">
         <div id="detailContent"></div>
-        <section class="decision-card" style="margin-top:0">
+        <div class="panel-card" style="padding:16px 20px">
           <div class="section-heading">Decision del aprobador</div>
           <div id="decisionHelp" class="notice-v2 neutral" style="margin-top:10px">
             <span class="notice-icon">·</span>
@@ -130,9 +130,9 @@
               <span class="notice-desc">Selecciona una accion y captura comentario cuando aplique.</span>
             </span>
           </div>
-          <div class="fg" style="margin-top:12px">
-            <label class="full-row f-label">Comentario
-              <textarea id="decisionComments" class="f-input" placeholder="Comentario para la decision"></textarea>
+          <div class="form-grid" style="margin-top:12px">
+            <label class="full-row">Comentario
+              <textarea id="decisionComments" class="form-control" placeholder="Comentario para la decision"></textarea>
             </label>
           </div>
           <div id="decisionError" class="notice-v2 danger hidden" style="margin-top:10px">
@@ -140,7 +140,7 @@
             <span class="notice-text" id="decisionErrorText"></span>
           </div>
           <div id="decisionActions" class="decision-actions"></div>
-        </section>
+        </div>
       </div>
       <div class="modal-actions">
         <button type="button" class="secondary-btn" id="closeDetailFooterBtn">Cerrar</button>
