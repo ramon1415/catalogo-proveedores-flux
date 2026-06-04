@@ -247,8 +247,10 @@
     });
     removalWatcher.observe(target, { childList: true, subtree: false });
 
-    section.querySelector("[data-open-layout-data]")?.addEventListener("click", () => openLayoutDataEditor(requestId));
-    section.querySelector("[data-edit-provider]")?.addEventListener("click", () => window.open("./proveedores.html", "_blank", "noopener"));
+    section.addEventListener("click", (e) => {
+      if (e.target.closest("[data-open-layout-data]")) openLayoutDataEditor(requestId);
+      if (e.target.closest("[data-edit-provider]")) window.open("./proveedores.html", "_blank", "noopener");
+    });
   }
 
   async function fetchRequestForLayout(requestId) {
@@ -530,8 +532,8 @@
             ${renderBudgetBadge(request)}
           </td>
           <td>
-            <div class="row-actions">
-              <button class="btn-row-action" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button>
+            <div class="actions row-actions">
+              <button class="small-btn" type="button" onclick="openRequestDetail('${escapeHtml(request.id)}')">Ver detalle</button>
             </div>
           </td>
         </tr>`;
