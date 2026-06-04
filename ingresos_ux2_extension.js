@@ -45,6 +45,11 @@
   }
 
   function noticeCopy() {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab")
+    const isIncidents = requestedTab === "incidents" || requestedTab === "incidencias"
+    if (isIncidents) {
+      return `Incidencias queda enfocada en visitas, eventos, cargos recuperables, facturacion y cobro. La vinculacion formal con solicitudes de pago se conectara en la siguiente fase backend.`
+    }
     return `Ingresos queda separado de Incidencias: aqui se revisan balance, cuotas y cobros. Incidencias tiene su propia entrada en el menu. La administracion de socios queda en
       <a href="./configuracion.html?tab=members" style="color:var(--accent-text);font-weight:800;">Configuracion > Socios</a>.`
   }
