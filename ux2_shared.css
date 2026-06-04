@@ -219,3 +219,4 @@ textarea.f-ctrl{padding:8px 10px;resize:vertical;min-height:68px}
 .check-card input{width:14px;height:14px;accent-color:var(--accent);flex-shrink:0}
 .check-card-label{font-size:12px;font-weight:700;color:var(--text-1)}
 .check-card-desc{font-size:10.5px;color:var(--text-3)}
+.cell-main{display:block;font-size:12.5px;font-weight:600;color:var(--text-1)}.cell-sub{display:block;font-size:10.5px;color:var(--text-3);margin-top:2px}.row-actions{opacity:0;transition:opacity 120ms}tbody tr:hover .row-actions{opacity:1}
