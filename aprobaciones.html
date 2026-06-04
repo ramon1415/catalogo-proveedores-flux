@@ -120,9 +120,9 @@
       </div>
       <div class="modal-scroll">
         <div id="detailContent"></div>
-        <div class="panel-card" style="padding:16px 20px">
+        <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
           <div class="section-heading">Decision del aprobador</div>
-          <div id="decisionHelp" class="notice-v2 neutral" style="margin-top:10px">
+          <div id="decisionHelp" class="notice-v2 neutral">
             <span class="notice-icon">·</span>
             <span class="notice-text">
               <span class="notice-title">Accion requerida</span>
@@ -130,12 +130,10 @@
               <span class="notice-desc">Selecciona una accion y captura comentario cuando aplique.</span>
             </span>
           </div>
-          <div class="form-grid" style="margin-top:12px">
-            <label class="full-row">Comentario
-              <textarea id="decisionComments" class="form-control" placeholder="Comentario para la decision"></textarea>
-            </label>
-          </div>
-          <div id="decisionError" class="notice-v2 danger hidden" style="margin-top:10px">
+          <label style="display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:700;color:var(--text-3);letter-spacing:.35px;text-transform:uppercase">Comentario
+            <textarea id="decisionComments" class="form-control" placeholder="Comentario para la decision"></textarea>
+          </label>
+          <div id="decisionError" class="notice-v2 danger hidden">
             <span class="notice-icon">✕</span>
             <span class="notice-text" id="decisionErrorText"></span>
           </div>
