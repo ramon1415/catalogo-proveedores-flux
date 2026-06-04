@@ -12,6 +12,7 @@
     applyStableCopy()
     addOperationalNotice()
     addMembersNotice()
+    loadCarlosUxPatch()
   }
 
   function applyStableCopy() {
@@ -73,5 +74,13 @@
   function setText(selector, text) {
     const node = document.querySelector(selector)
     if (node) node.textContent = text
+  }
+
+  function loadCarlosUxPatch() {
+    if (document.querySelector("script[data-flux-extension='ingresos-carlos-ux']")) return
+    const script = document.createElement("script")
+    script.src = "./ingresos_carlos_ux_patch.js?v=20260603-carlos-ux"
+    script.dataset.fluxExtension = "ingresos-carlos-ux"
+    document.body.appendChild(script)
   }
 })()
