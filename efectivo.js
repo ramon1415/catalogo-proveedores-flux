@@ -213,13 +213,13 @@ function renderReconciliationSection(fund, reconciliation) {
   const canReview = reconciliation && reconciliation.status === "submitted" && canReviewCurrentUser()
 
   const reconciliationDetails = reconciliation ? `
-    <div class="ref-grid" style="margin-bottom:10px">
+    <div class="ref-grid">
       <div class="ref-cell"><span class="ref-label">Estatus</span><span class="ref-value">${reconciliationStatusBadge(reconciliation.status)}</span></div>
       ${refCell("Total tickets", formatCurrency(reconciliation.total_tickets))}
       ${refCell("Monto devuelto", formatCurrency(reconciliation.returned_amount))}
       ${refCell("Diferencia", formatCurrency(reconciliation.difference_amount))}
-      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Comentario del revisor</span><span class="ref-value">${escapeHtml(reconciliation.reviewer_comment || "Sin comentario")}</span></div>
       ${refCell("Fecha de revision", formatDateTime(reconciliation.reviewed_at))}
+      <div class="ref-cell" style="grid-column:1/-1"><span class="ref-label">Comentario del revisor</span><span class="ref-value">${escapeHtml(reconciliation.reviewer_comment || "Sin comentario")}</span></div>
     </div>` : `
     <div class="notice-v2 warning" style="margin-bottom:10px">
       <span class="notice-icon">·</span>
@@ -242,22 +242,20 @@ function renderReconciliationSection(fund, reconciliation) {
 
   return `
     <div class="section-heading">Comprobacion</div>
-    <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
-      ${reconciliationDetails}
-      <div id="blockCheckResult"></div>
-      <div class="actions">
-        ${canCreate ? `<button type="button" class="small-btn success" data-action="create-reconciliation" data-fund-id="${escapeHtml(fund.id)}">Crear comprobacion</button>` : ""}
-        ${canAddTicket ? `<button type="button" class="small-btn" data-action="add-ticket" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Agregar ticket</button>` : ""}
-        ${canSubmit ? `<button type="button" class="small-btn info" data-action="submit-reconciliation" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Enviar comprobacion</button>` : ""}
-        ${canReview ? `
-          <button type="button" class="small-btn success" data-action="review" data-review-action="approved" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Aprobar</button>
-          <button type="button" class="small-btn danger" data-action="review" data-review-action="rejected" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Rechazar</button>
-          <button type="button" class="small-btn warning" data-action="review" data-review-action="correction_requested" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Solicitar correccion</button>
-        ` : ""}
-        <button type="button" class="small-btn" data-action="verify-block" data-profile-id="${escapeHtml(fund.responsible_profile_id || "")}">Verificar bloqueo</button>
-      </div>
-      ${submittedNotice}
-    </div>`
+    ${reconciliationDetails}
+    <div id="blockCheckResult"></div>
+    <div class="actions">
+      ${canCreate ? `<button type="button" class="small-btn success" data-action="create-reconciliation" data-fund-id="${escapeHtml(fund.id)}">Crear comprobacion</button>` : ""}
+      ${canAddTicket ? `<button type="button" class="small-btn" data-action="add-ticket" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Agregar ticket</button>` : ""}
+      ${canSubmit ? `<button type="button" class="small-btn info" data-action="submit-reconciliation" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Enviar comprobacion</button>` : ""}
+      ${canReview ? `
+        <button type="button" class="small-btn success" data-action="review" data-review-action="approved" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Aprobar</button>
+        <button type="button" class="small-btn danger" data-action="review" data-review-action="rejected" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Rechazar</button>
+        <button type="button" class="small-btn warning" data-action="review" data-review-action="correction_requested" data-reconciliation-id="${escapeHtml(reconciliation.id)}">Solicitar correccion</button>
+      ` : ""}
+      <button type="button" class="small-btn" data-action="verify-block" data-profile-id="${escapeHtml(fund.responsible_profile_id || "")}">Verificar bloqueo</button>
+    </div>
+    ${submittedNotice}`
 }
 
 function renderTicketsSection(reconciliation) {
