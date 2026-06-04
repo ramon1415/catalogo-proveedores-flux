@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuracion | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260603-config-menu">
+  <style>
+    .config-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .config-tab {
+      min-height:36px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card);
+      color:var(--text-3); padding:7px 12px; font:inherit; font-size:12.5px; font-weight:800; cursor:pointer;
+      display:inline-flex; align-items:center; gap:8px;
+    }
+    .config-tab:hover { color:var(--text-2); background:var(--bg-hover); }
+    .config-tab.active { color:var(--accent-text); border-color:rgba(94,234,212,.28); background:var(--accent-dim); }
+    .config-tab[disabled] { opacity:.38; cursor:not-allowed; }
+    .tab-badge {
+      font-size:9.5px; line-height:1; padding:4px 6px; border-radius:999px; border:1px solid var(--border-strong);
+      color:var(--text-2); background:rgba(255,255,255,.035);
+    }
+    .config-grid { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:14px; }
+    .config-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; overflow:hidden; }
+    .config-card-body { padding:16px; display:grid; gap:12px; }
+    .config-card h2 { font-size:16px; margin-bottom:2px; }
+    .config-card p { color:var(--text-3); font-size:12.5px; line-height:1.55; }
+    .config-list { display:grid; gap:8px; }
+    .config-list li {
+      list-style:none; border:1px solid var(--border); border-radius:10px; padding:11px 12px;
+      color:var(--text-2); background:rgba(255,255,255,.015);
+    }
+    .config-panel.hidden { display:none; }
+    .permission-note { border:1px solid rgba(245,158,11,.26); background:rgba(245,158,11,.10); color:#f59e0b; }
+    @media (max-width:980px) { .config-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo">FL</div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Configuracion</div></div>
+        </div>
+        <nav class="nav" aria-label="Menu principal"></nav>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Administracion del sistema</div>
+        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Configuracion</h1>
+            <p>Administra catalogos y parametros operativos sin mezclar estas opciones con la operacion diaria.</p>
+          </div>
+        </div>
+
+        <div id="permissionMessage" class="notice permission-note hidden"></div>
+
+        <div class="config-tabs" role="tablist" aria-label="Configuracion">
+          <button type="button" class="config-tab" data-config-tab="members">Socios <span class="tab-badge">Dir</span></button>
+          <button type="button" class="config-tab" data-config-tab="originAccounts">Cuentas origen <span class="tab-badge">Adm/Dir</span></button>
+          <button type="button" class="config-tab" data-config-tab="budgets">Presupuestos <span class="tab-badge">Trim.</span></button>
+          <button type="button" class="config-tab" data-config-tab="system">Sistema <span class="tab-badge">SysAdmin</span></button>
+        </div>
+
+        <section id="membersPanel" class="config-panel config-card hidden">
+          <div class="panel-header">
+            <div>
+              <h2>Socios</h2>
+              <p>Alta y administracion de socios. Visible para Direccion y SysAdmin.</p>
+            </div>
+            <a class="primary-btn" href="./socios.html">Abrir Socios</a>
+          </div>
+          <div class="config-card-body">
+            <ul class="config-list">
+              <li>Ver socios, saldo pendiente, incidencias, facturas e historial.</li>
+              <li>Crear o editar socios con factor de participacion.</li>
+              <li>Consultar historial por socio sin mover datos de ingresos.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="originAccountsPanel" class="config-panel config-card hidden">
+          <div class="panel-header">
+            <div>
+              <h2>Cuentas origen</h2>
+              <p>Cuentas bancarias de la empresa desde las que se realizaran pagos.</p>
+            </div>
+            <a class="primary-btn" href="./proveedores.html?tab=cuentas-origen">Abrir Cuentas origen</a>
+          </div>
+          <div class="config-card-body">
+            <ul class="config-list">
+              <li>Ver empresa, banco, numero de cuenta, CLABE, moneda, tipo y estatus.</li>
+              <li>Crear, editar e inactivar cuentas origen con la pantalla actual de Proveedores.</li>
+              <li>Estas cuentas alimentan solicitudes y layouts de pago.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="budgetsPanel" class="config-panel config-card hidden">
+          <div class="panel-header">
+            <div>
+              <h2>Presupuestos</h2>
+              <p>Carga trimestral de presupuestos por empresa, centro de costo, partida y periodo.</p>
+            </div>
+            <button type="button" class="secondary-btn" disabled>Pendiente</button>
+          </div>
+          <div class="config-card-body">
+            <div class="notice permission-note">Pendiente de conexion con modelo presupuestal final.</div>
+            <ul class="config-list">
+              <li>Permitira cargar presupuesto base trimestral.</li>
+              <li>Servira para alimentar Dashboard, comparativos y cierre mensual.</li>
+              <li>No modifica el flujo presupuestal actual en esta tanda.</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="systemPanel" class="config-panel config-card hidden">
+          <div class="panel-header">
+            <div>
+              <h2>Sistema</h2>
+              <p>Configuracion avanzada reservada para SysAdmin.</p>
+            </div>
+            <button type="button" class="secondary-btn" disabled>Pendiente</button>
+          </div>
+          <div class="config-card-body">
+            <div class="notice permission-note">Pendiente de habilitar administracion de usuarios, roles y parametros.</div>
+            <ul class="config-list">
+              <li>Usuarios y roles.</li>
+              <li>Parametros generales del sistema.</li>
+              <li>Integraciones futuras, como n8n y Google Drive.</li>
+            </ul>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <script src="./configuracion.js?v=20260603-config-menu"></script>
+</body>
+</html>
