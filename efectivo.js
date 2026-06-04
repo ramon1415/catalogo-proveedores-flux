@@ -168,7 +168,7 @@ function renderFundsTable() {
       <td><span class="cell-main">${escapeHtml(formatCurrency(fund.pending_amount))}</span></td>
       <td>${escapeHtml(formatDate(fund.due_date))}</td>
       <td>${fundStatusBadge(fund.status)}</td>
-      <td><div class="actions row-actions"><button class="small-btn" type="button" onclick="openFundDetail('${escapeHtml(fund.id)}')">Ver detalle</button></div></td>
+      <td><button class="small-btn" type="button" style="white-space:nowrap" onclick="openFundDetail('${escapeHtml(fund.id)}')">Ver detalle</button></td>
     </tr>`
   }).join("")
 }
