@@ -95,7 +95,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   function applyDemoNavigation() {
     const nav = document.querySelector(".nav")
     if (!nav) return
-    if (!roleState.loaded) return
+    if (!roleState.loaded) {
+      nav.innerHTML = ""
+      nav.setAttribute("aria-busy", "true")
+      return
+    }
 
     const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
     const activeKey = currentModuleKey()
@@ -115,6 +119,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
         `
       })
       .join("")
+    nav.setAttribute("aria-busy", "false")
     markShellReady()
   }
 
@@ -167,6 +172,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     applyLoginCopy()
     applyBranding()
     applyIncomeCompatibility()
+    hideLegacyNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
@@ -316,7 +322,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function markShellReady() {
+    document.documentElement?.classList.add("flux-shell-ready")
     document.body?.classList.add("flux-shell-ready")
+  }
+
+  function hideLegacyNavigation() {
+    const nav = document.querySelector(".nav")
+    if (!nav || roleState.loaded) return
+    nav.innerHTML = ""
+    nav.setAttribute("aria-busy", "true")
   }
 
   function installShellReadyStyles() {
@@ -324,8 +338,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     const style = document.createElement("style")
     style.id = "fluxShellReadyStyles"
     style.textContent = `
-      body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden;opacity:0}
-      body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;transition:opacity 120ms ease}
+      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
+      body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+      body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
       .sidebar .nav-section{display:flex;flex-direction:column;gap:1px;margin-bottom:14px}
       .sidebar .nav-section-title{padding:9px 10px 4px;font-size:10px;font-weight:800;letter-spacing:.75px;text-transform:uppercase;color:var(--text-3, #666680)}
     `
@@ -368,6 +383,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
       loadExtension("./solicitudes_ux1_extension.js?v=20260602-ux1-provider-live-visits", "solicitudes-ux1")
       loadExtension("./solicitudes_workboard_extension.js?v=20260602-ux1", "solicitudes-workboard")
+      loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }
     if (pageName === "layouts.html") {
       loadExtension("./layouts_result_extension.js?v=20260602-ux1", "layouts-result")
@@ -377,10 +393,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./efectivo_ux2_extension.js?v=20260602-ux2", "efectivo-ux2")
     }
     if (pageName === "ingresos.html") {
-      loadExtension("./ingresos_nav_patch.js?v=20260603-config-menu", "ingresos-nav")
+      loadExtension("./ingresos_nav_patch.js?v=20260604-menu-incidents", "ingresos-nav")
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
-      loadExtension("./ingresos_ux2_extension.js?v=20260603-config-menu", "ingresos-ux2")
-      loadExtension("./ingresos_carlos_ux_patch_v2.js?v=20260603-carlos-ux2", "ingresos-carlos-ux")
+      loadExtension("./ingresos_ux2_extension.js?v=20260604-menu-incidents", "ingresos-ux2")
+      loadExtension("./ingresos_carlos_ux_patch_v2.js?v=20260604-menu-incidents", "ingresos-carlos-ux")
+      loadExtension("./ingresos_incidents_guard_patch.js?v=20260604-menu-incidents", "ingresos-incidents-guard")
     }
     if (pageName === "dashboard.html") {
       loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
