@@ -161,7 +161,7 @@ function bindEvents() {
   dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
   dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
-  dom.providerSearch?.addEventListener("input", () => renderProveedorOptions(dom.providerSearch.value));
+  initProviderCombo();
   dom.proveedorId?.addEventListener("change", updateSummaryPanel);
   dom.amountRequested?.addEventListener("input", updateSummaryPanel);
   dom.currency?.addEventListener("change", handleCurrencyChange);
@@ -317,21 +317,99 @@ async function loadAvailableBudgetCategories() {
   updateSummaryPanel();
 }
 
-function renderProveedorOptions(query = "") {
+function initProviderCombo() {
+  const input = dom.providerSearch;
+  const dropdown = document.getElementById("providerDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderComboList(input.value);
+    openCombo();
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, -1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click();
+    } else if (e.key === "Escape") {
+      closeCombo();
+    }
+  });
+
+  input.addEventListener("focus", () => {
+    if (!dom.proveedorId.value) renderComboList(input.value);
+    openCombo();
+  });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("providerCombo")?.contains(e.target)) closeCombo();
+  });
+}
+
+function renderComboList(query = "") {
+  const dropdown = document.getElementById("providerDropdown");
+  if (!dropdown) return;
   const normalizedQuery = normalize(query);
-  const currentValue = dom.proveedorId.value;
   const filtered = proveedores
-    .filter(provider => {
-      const text = normalize([provider.alias, provider.nombre_completo, provider.rfc, provider.banco, provider.clabe].join(" "));
+    .filter(p => {
+      const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
       return !normalizedQuery || text.includes(normalizedQuery);
     })
-    .slice(0, 180);
+    .slice(0, 60);
 
-  dom.proveedorId.innerHTML = optionPlaceholder("Seleccionar proveedor") +
-    filtered.map(provider => `<option value="${escapeHtml(provider.id)}">${escapeHtml(proveedorLabel(provider))}</option>`).join("");
+  if (!filtered.length) {
+    dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`;
+    return;
+  }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
 
-  if (filtered.some(provider => provider.id === currentValue)) dom.proveedorId.value = currentValue;
-  updateSummaryPanel();
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); selectProvider(li.dataset.id, li.dataset.label); });
+  });
+}
+
+function highlightCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+function openCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.remove("hidden");
+}
+
+function closeCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+}
+
+function selectProvider(id, label) {
+  if (dom.providerSearch) dom.providerSearch.value = label;
+  if (dom.proveedorId) {
+    dom.proveedorId.value = id;
+    dom.proveedorId.dispatchEvent(new Event("change"));
+  }
+  closeCombo();
+}
+
+function renderProveedorOptions(query = "") {
+  renderComboList(query);
 }
 
 function renderStats() {
@@ -534,6 +612,8 @@ function openNewRequestModal() {
   dom.submitRequestBtn.disabled = false;
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
+  if (dom.providerSearch) dom.providerSearch.value = "";
+  if (dom.proveedorId) { dom.proveedorId.value = ""; dom.proveedorId.dispatchEvent(new Event("change")); }
   renderProveedorOptions("");
   budgetAvailabilityRows = [];
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
