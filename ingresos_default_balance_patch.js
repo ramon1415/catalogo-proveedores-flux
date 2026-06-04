@@ -10,6 +10,5 @@
     if (balanceButton) balanceButton.click()
   }
 
-  window.setTimeout(clickBalance, 1000)
-  window.setTimeout(clickBalance, 1500)
+  ;[20, 80, 160, 320, 700, 1100, 1500].forEach((delay) => window.setTimeout(clickBalance, delay))
 })()
