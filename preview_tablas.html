@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tablas Preview</title>
+<style>
+  :root {
+    --bg:#07071a;--bg-surface:#0d0d22;--bg-card:#111128;--bg-hover:rgba(255,255,255,.035);
+    --border:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.13);
+    --accent:#0f766e;--accent-dim:rgba(15,118,110,.14);--accent-text:#5eead4;
+    --emerald:#12b76a;--emerald-dim:rgba(18,183,106,.12);
+    --ruby:#e03e52;--ruby-dim:rgba(224,62,82,.11);
+    --sky:#2e90fa;--sky-dim:rgba(46,144,250,.11);
+    --amber:#f59e0b;--amber-dim:rgba(245,158,11,.13);
+    --violet:#8b5cf6;--violet-dim:rgba(139,92,246,.13);
+    --text-1:#eeeef6;--text-2:#aaaac3;--text-3:#666680;
+    --shadow-lg:0 18px 60px rgba(0,0,0,.68);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text-1);font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13.5px;padding:40px 48px;display:flex;flex-direction:column;gap:56px}
+  h2.col-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);margin-bottom:16px}
+
+  /* badges */
+  .b{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+  .b-success{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.2)}
+  .b-danger {background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.22)}
+  .b-warning{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.22)}
+  .b-info   {background:var(--sky-dim);color:var(--sky);border-color:rgba(46,144,250,.2)}
+  .b-neutral{background:var(--bg-hover);color:var(--text-2);border-color:var(--border)}
+  .b-violet {background:var(--violet-dim);color:var(--violet);border-color:rgba(139,92,246,.22)}
+
+  /* ══ ANTES ══ */
+  .old-table-card{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;overflow:hidden}
+  .old-toolbar{display:grid;grid-template-columns:1fr 160px 160px auto;gap:8px;padding:13px 16px;border-bottom:1px solid var(--border)}
+  .old-toolbar input,.old-toolbar select{min-height:36px;padding:0 11px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-2);font-size:12.5px;outline:none}
+  .old-wrapper{overflow-x:auto}
+  .old-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1100px}
+  .old-table thead th{padding:9px 14px;text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border);background:var(--bg-card)}
+  .old-table tbody tr{border-bottom:1px solid var(--border)}
+  .old-table tbody tr:hover{background:var(--bg-hover)}
+  .old-table tbody td{padding:10px 14px;color:var(--text-2);vertical-align:top}
+  .old-table tbody td strong{color:var(--text-1);font-weight:600;display:block}
+  .old-table .muted{display:block;font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.45px;margin-top:2px}
+
+  /* ══ NUEVO ══ */
+  .table-card{background:var(--bg-card);border:1px solid var(--border);border-radius:13px;overflow:hidden}
+
+  /* toolbar simplificado */
+  .toolbar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .toolbar-search{flex:1;max-width:280px;position:relative}
+  .toolbar-search input{width:100%;min-height:32px;padding:0 10px 0 30px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-size:12px;outline:none}
+  .toolbar-search::before{content:'⌕';position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-3);font-size:14px;pointer-events:none}
+  .toolbar select{min-height:32px;padding:0 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;color:var(--text-2);font-size:12px;outline:none}
+  .toolbar-sep{flex:1}
+  .primary-btn{min-height:32px;padding:6px 14px;border:none;border-radius:7px;background:linear-gradient(135deg,var(--accent),#0d9488);color:#fff;font-size:12px;font-weight:700;cursor:pointer}
+  .secondary-btn{min-height:32px;padding:6px 12px;border:1px solid var(--border-strong);border-radius:7px;background:transparent;color:var(--text-2);font-size:12px;font-weight:700;cursor:pointer}
+
+  /* tabla */
+  .table-wrap{overflow-x:auto}
+  .data-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .data-table thead th{padding:8px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.65px;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border);background:var(--bg-card);position:sticky;top:0;z-index:2}
+  .data-table tbody tr{border-bottom:1px solid var(--border);cursor:pointer}
+  .data-table tbody tr:hover{background:var(--bg-hover)}
+  .data-table tbody td{padding:11px 16px;color:var(--text-2);vertical-align:middle}
+  /* jerarquía dentro de celda */
+  .cell-main{color:var(--text-1);font-weight:600;font-size:12.5px;display:block}
+  .cell-sub{color:var(--text-3);font-size:10.5px;display:block;margin-top:2px}
+  /* col widths */
+  .col-folio{width:120px}
+  .col-proveedor{width:180px}
+  .col-partida{width:220px}
+  .col-monto{width:100px;text-align:right}
+  .col-monto td{text-align:right}
+  .col-estado{width:120px}
+  .col-pago{width:110px}
+  .col-acciones{width:80px}
+  /* monto destacado */
+  .amount{font-size:13px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums}
+  /* acciones inline */
+  .row-actions{display:flex;gap:6px;opacity:0}
+  tr:hover .row-actions{opacity:1}
+  .icon-action{width:28px;height:28px;border-radius:6px;border:1px solid var(--border-strong);background:transparent;color:var(--text-3);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}
+  .icon-action:hover{background:var(--bg-hover);color:var(--text-1)}
+</style>
+</head>
+<body>
+
+<!-- ══ ANTES ══ -->
+<div>
+  <h2 class="col-label">Antes — 11 columnas, todo igual de pesado</h2>
+  <div class="old-table-card">
+    <div class="old-toolbar">
+      <input placeholder="Buscar solicitud...">
+      <select><option>Todos los estatus</option></select>
+      <select><option>Todas las empresas</option></select>
+      <button style="min-height:36px;padding:0 14px;border:none;border-radius:7px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer">+ Nueva</button>
+    </div>
+    <div class="old-wrapper">
+      <table class="old-table">
+        <thead>
+          <tr>
+            <th>Folio</th><th>Tipo</th><th>Fecha</th><th>Proveedor</th><th>Empresa</th>
+            <th>Centro de costo</th><th>Partida</th><th>Mes</th><th>Monto</th>
+            <th>Estatus</th><th>Validacion presupuestal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>SOL-2026-0017</strong></td>
+            <td><span class="b b-neutral">Transferencia</span></td>
+            <td>03 jun 2026</td>
+            <td><strong>Carlos Arceo</strong><span class="muted">CARLOS ARCEO</span></td>
+            <td>Operadora Tlacatecpan</td>
+            <td>Rancho San Juan Tlacatecpan</td>
+            <td><strong>602-08-011-000</strong><span class="muted">ARRENDAMIENTO PICK UP JAC</span></td>
+            <td>jun 2026</td>
+            <td><strong>$2,000.00</strong></td>
+            <td><span class="b b-warning">Aprobada sin layout</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+          </tr>
+          <tr>
+            <td><strong>SOL-2026-0015</strong></td>
+            <td><span class="b b-neutral">Transferencia</span></td>
+            <td>03 jun 2026</td>
+            <td><strong>Ramon</strong><span class="muted">HOLA</span></td>
+            <td>Operadora Tlacatecpan</td>
+            <td>Rancho San Juan Tlacatecpan</td>
+            <td><strong>602-08-003-000</strong><span class="muted">COMBUSTIBLE CAMPO</span></td>
+            <td>jun 2026</td>
+            <td><strong>$12,313.00</strong></td>
+            <td><span class="b b-info">Pendiente de aprobacion</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+          </tr>
+          <tr>
+            <td><strong>SOL-2026-0014</strong></td>
+            <td><span class="b b-warning">Efectivo</span></td>
+            <td>02 jun 2026</td>
+            <td><strong>Ramon</strong><span class="muted">HOLA</span></td>
+            <td>Operadora Tlacatecpan</td>
+            <td>Rancho San Juan Tlacatecpan</td>
+            <td><strong>602-03-004-000</strong><span class="muted">MANTENIMIENTO LAVADORAS</span></td>
+            <td>jun 2026</td>
+            <td><strong>$500.00</strong></td>
+            <td><span class="b b-warning">Fondo pendiente</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NUEVO ══ -->
+<div>
+  <h2 class="col-label">Propuesta — 6 columnas, jerarquía clara, acciones al hover</h2>
+  <div class="table-card">
+    <div class="toolbar">
+      <div class="toolbar-search"><input placeholder="Buscar por folio, proveedor..."></div>
+      <select><option>Todos los estatus</option><option>Aprobadas</option><option>Pendientes</option></select>
+      <select><option>Todas las empresas</option></select>
+      <div class="toolbar-sep"></div>
+      <button class="secondary-btn">Exportar</button>
+      <button class="primary-btn">+ Nueva solicitud</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-folio">Folio</th>
+            <th class="col-proveedor">Proveedor</th>
+            <th class="col-partida">Partida</th>
+            <th class="col-monto">Monto</th>
+            <th class="col-estado">Aprobación</th>
+            <th class="col-pago">Pago</th>
+            <th class="col-acciones"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <span class="cell-main">SOL-2026-0017</span>
+              <span class="cell-sub">03 jun · Transferencia</span>
+            </td>
+            <td>
+              <span class="cell-main">Carlos Arceo</span>
+              <span class="cell-sub">Rancho San Juan Tlacatecpan</span>
+            </td>
+            <td>
+              <span class="cell-main">Arrendamiento Pick Up JAC</span>
+              <span class="cell-sub">602-08-011-000 · Jun 2026</span>
+            </td>
+            <td><span class="amount">$2,000</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+            <td><span class="b b-warning">Pendiente</span></td>
+            <td><div class="row-actions"><button class="icon-action">↗</button><button class="icon-action">✎</button></div></td>
+          </tr>
+          <tr>
+            <td>
+              <span class="cell-main">SOL-2026-0015</span>
+              <span class="cell-sub">03 jun · Transferencia</span>
+            </td>
+            <td>
+              <span class="cell-main">Ramon</span>
+              <span class="cell-sub">Rancho San Juan Tlacatecpan</span>
+            </td>
+            <td>
+              <span class="cell-main">Combustible Campo</span>
+              <span class="cell-sub">602-08-003-000 · Jun 2026</span>
+            </td>
+            <td><span class="amount">$12,313</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+            <td><span class="b b-info">Programado</span></td>
+            <td><div class="row-actions"><button class="icon-action">↗</button><button class="icon-action">✎</button></div></td>
+          </tr>
+          <tr>
+            <td>
+              <span class="cell-main">SOL-2026-0014</span>
+              <span class="cell-sub">02 jun · Efectivo</span>
+            </td>
+            <td>
+              <span class="cell-main">Ramon</span>
+              <span class="cell-sub">Rancho San Juan Tlacatecpan</span>
+            </td>
+            <td>
+              <span class="cell-main">Mantenimiento Lavadoras</span>
+              <span class="cell-sub">602-03-004-000 · Jun 2026</span>
+            </td>
+            <td><span class="amount">$500</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+            <td><span class="b b-warning">Pendiente</span></td>
+            <td><div class="row-actions"><button class="icon-action">↗</button><button class="icon-action">✎</button></div></td>
+          </tr>
+          <tr>
+            <td>
+              <span class="cell-main">SOL-2026-0009</span>
+              <span class="cell-sub">26 may · Transferencia</span>
+            </td>
+            <td>
+              <span class="cell-main">Carlos Arceo</span>
+              <span class="cell-sub">Rancho San Juan Tlacatecpan</span>
+            </td>
+            <td>
+              <span class="cell-main">Mantenimiento Vehículos</span>
+              <span class="cell-sub">602-03-001-000 · May 2026</span>
+            </td>
+            <td><span class="amount">$1,000</span></td>
+            <td><span class="b b-success">Aprobable</span></td>
+            <td><span class="b b-success">Pagado</span></td>
+            <td><div class="row-actions"><button class="icon-action">↗</button><button class="icon-action">✎</button></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
