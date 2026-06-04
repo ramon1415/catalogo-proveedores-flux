@@ -3,8 +3,9 @@
   if (pageName !== "ingresos.html") return
 
   const tabMap = {
-    ingresos: "payments",
-    income: "payments",
+    ingresos: "dashboard",
+    income: "dashboard",
+    balance: "dashboard",
     cuotas: "periods",
     cobros: "payments",
     payments: "payments",
