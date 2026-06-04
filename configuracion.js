@@ -479,8 +479,8 @@ function renderHistorySection(title, rows, headers) {
   return `
     <div class="section-heading">${title}</div>
     ${rows.length ? `
-      <div class="table-wrapper" style="max-height:200px;min-height:auto;border:1px solid var(--border);border-radius:10px;overflow:auto;margin-bottom:4px">
-        <table style="min-width:400px">
+      <div class="history-table-wrapper">
+        <table class="history-table">
           <thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
           <tbody>${rows.join("")}</tbody>
         </table>
