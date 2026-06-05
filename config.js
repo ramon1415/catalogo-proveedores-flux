@@ -12,6 +12,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     ADMIN: "admin_finance",
     DIRECTION: "direction",
     OPERATION: "operation",
+    PENDING: "pending",
   }
 
   const SYSADMIN_ROLES = ["sysadmin", "system_admin", "admin"]
@@ -72,6 +73,9 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     canApprove: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canAccessConfigTab: (tab) => canAccessConfigTab(tab),
+    isPending: () => roleState.group === ROLE_GROUPS.PENDING,
+    isSysadmin: () => roleState.group === ROLE_GROUPS.SYSADMIN,
+    defaultRedirect: () => defaultLandingForRole(),
   }
 
   function applyLoginCopy() {
@@ -233,7 +237,15 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       if (data?.id) return data
     }
 
-    return null
+    // Usuario nuevo de Google OAuth — crear perfil pendiente de aprobación
+    const email = session.user.email || ""
+    const full_name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split("@")[0]
+    const { data: newProfile } = await client
+      .from("profiles")
+      .insert({ email, full_name, auth_user_id: session.user.id, active: true })
+      .select("id,email,full_name,auth_user_id,active")
+      .single()
+    return newProfile || null
   }
 
   async function resolveRoles(client, profile) {
@@ -256,7 +268,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     if (cleanRoles.some((role) => ADMIN_ROLES.includes(role))) return ROLE_GROUPS.ADMIN
     if (cleanRoles.some((role) => DIRECTION_ROLES.includes(role))) return ROLE_GROUPS.DIRECTION
     if (cleanRoles.some((role) => OPERATION_ROLES.includes(role))) return ROLE_GROUPS.OPERATION
-    return ROLE_GROUPS.OPERATION
+    return ROLE_GROUPS.PENDING
   }
 
   function modulesForCurrentRole() {
@@ -288,13 +300,18 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
   }
 
   function defaultLandingForRole() {
+    if (roleState.group === ROLE_GROUPS.PENDING) return "pending.html"
     if ([ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group)) return "dashboard.html"
     return "solicitudes.html"
   }
 
   function enforcePageVisibility() {
-    if (pageName === "index.html" || pageName === "") return
+    if (pageName === "index.html" || pageName === "" || pageName === "pending.html") return
     if (!roleState.session) return
+    if (roleState.group === ROLE_GROUPS.PENDING) {
+      window.location.replace("./pending.html")
+      return
+    }
     if (isCurrentPageAllowed()) return
     if (pageName !== "solicitudes.html") window.location.replace("./solicitudes.html")
   }

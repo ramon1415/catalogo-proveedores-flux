@@ -28,6 +28,14 @@
     .pending-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:24px; display:flex; flex-direction:column; gap:10px; }
     .pending-card h2 { font-size:15px; color:var(--text-1); }
     .pending-card p { font-size:12.5px; color:var(--text-3); }
+    .role-option { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:11px; cursor:pointer; background:var(--bg-card); transition:border-color 120ms }
+    .role-option:hover { border-color:var(--border-strong) }
+    .role-option input[type=radio] { margin-top:2px; accent-color:var(--accent); flex-shrink:0; width:15px; height:15px }
+    .role-option-body { display:flex; flex-direction:column; gap:3px }
+    .role-option-title { font-size:13px; font-weight:700; color:var(--text-1) }
+    .role-option-desc { font-size:11.5px; color:var(--text-3); line-height:1.4 }
+    .role-option:has(input:checked) { border-color:var(--accent); background:var(--accent-dim) }
+    .role-option:has(input:checked) .role-option-title { color:var(--accent-text) }
   </style>
 </head>
 <body>
@@ -184,18 +192,36 @@
 
         <!-- Sistema -->
         <div id="systemPanel" class="config-panel">
-          <div class="pending-card">
-            <h2>Sistema</h2>
-            <p>Configuracion avanzada reservada para SysAdmin. Administracion de usuarios, roles, parametros e integraciones futuras.</p>
-            <div class="notice-v2 warning">
-              <span class="notice-icon">·</span>
-              <span class="notice-text">
-                <span class="notice-title">Pendiente</span>
-                <span class="notice-sep">—</span>
-                <span class="notice-desc">Pendiente de habilitar administracion de usuarios, roles y parametros generales.</span>
-              </span>
+          <section class="table-card">
+            <div class="table-toolbar" style="grid-template-columns:minmax(200px,1fr) 160px auto">
+              <input type="search" id="usersSearch" placeholder="Buscar por nombre o email…">
+              <select id="usersRoleFilter">
+                <option value="todos">Todos los roles</option>
+                <option value="pending">Pendiente</option>
+                <option value="operation">Operativo</option>
+                <option value="admin_finance">Financiero</option>
+                <option value="direction">Director</option>
+                <option value="sysadmin">SysAdmin</option>
+              </select>
+              <button type="button" id="refreshUsersBtn" class="secondary-btn">Actualizar</button>
             </div>
-          </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Rol actual</th>
+                    <th>Nivel de acceso</th>
+                    <th>Registrado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                  <tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando usuarios…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
       </section>
@@ -300,6 +326,62 @@
       <div class="modal-scroll" id="historyContent"></div>
       <div class="modal-actions">
         <button type="button" class="secondary-btn" id="closeHistoryFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Dialog: asignar rol -->
+  <dialog id="assignRoleDialog" class="narrow">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Asignar rol</h2>
+          <p id="assignRoleSubtitle">Selecciona el nivel de acceso para este usuario.</p>
+        </div>
+        <button type="button" id="closeAssignRoleBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-scroll" style="gap:10px">
+        <div style="display:flex;flex-direction:column;gap:8px" id="roleOptions">
+          <label class="role-option" data-group="pending">
+            <input type="radio" name="assignRole" value="pending">
+            <div class="role-option-body">
+              <span class="role-option-title">Pendiente</span>
+              <span class="role-option-desc">Sin acceso al sistema. Puede iniciar sesión pero no ver nada.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="operation">
+            <input type="radio" name="assignRole" value="solicitante">
+            <div class="role-option-body">
+              <span class="role-option-title">Operativo</span>
+              <span class="role-option-desc">Solo puede crear y ver sus propias solicitudes de pago.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="admin_finance">
+            <input type="radio" name="assignRole" value="finance">
+            <div class="role-option-body">
+              <span class="role-option-title">Financiero</span>
+              <span class="role-option-desc">Acceso completo a solicitudes, layouts, efectivo, ingresos, proveedores y dashboard.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="direction">
+            <input type="radio" name="assignRole" value="director">
+            <div class="role-option-body">
+              <span class="role-option-title">Director</span>
+              <span class="role-option-desc">Mismo acceso que financiero más aprobaciones y cola de decisión.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="sysadmin">
+            <input type="radio" name="assignRole" value="sysadmin">
+            <div class="role-option-body">
+              <span class="role-option-title">SysAdmin</span>
+              <span class="role-option-desc">Acceso total incluyendo gestión de usuarios, roles y configuración del sistema.</span>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelAssignRoleBtn" class="secondary-btn">Cancelar</button>
+        <button type="button" id="saveAssignRoleBtn" class="primary-btn">Guardar rol</button>
       </div>
     </div>
   </dialog>

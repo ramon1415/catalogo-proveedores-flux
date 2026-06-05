@@ -76,6 +76,14 @@ function bindEvents() {
   document.getElementById("clearMemberFilterBtn")?.addEventListener("click", clearMemberFilters)
   document.getElementById("closeHistoryBtn")?.addEventListener("click", closeHistory)
   document.getElementById("closeHistoryFooterBtn")?.addEventListener("click", closeHistory)
+
+  // Usuarios
+  document.getElementById("usersSearch")?.addEventListener("input", renderUsersTable)
+  document.getElementById("usersRoleFilter")?.addEventListener("change", renderUsersTable)
+  document.getElementById("refreshUsersBtn")?.addEventListener("click", loadUsers)
+  document.getElementById("closeAssignRoleBtn")?.addEventListener("click", closeAssignRole)
+  document.getElementById("cancelAssignRoleBtn")?.addEventListener("click", closeAssignRole)
+  document.getElementById("saveAssignRoleBtn")?.addEventListener("click", saveAssignRole)
 }
 
 // ── Tab logic ────────────────────────────────────────────────────
@@ -116,6 +124,8 @@ function openTab(tab) {
   const params = new URLSearchParams(window.location.search)
   params.set("tab", tab)
   window.history.replaceState({}, "", `${window.location.pathname}?${params}`)
+
+  if (tab === "system" && window.FluxAuth?.isSysadmin?.()) loadUsers()
 
   if (tab === "originAccounts" && !originLoaded) loadOriginAccounts()
   if (tab === "members" && !sociosLoaded) loadSocios()
@@ -540,3 +550,173 @@ function formatNumber(value) { return new Intl.NumberFormat("es-MX", { maximumFr
 function formatDate(value) { if (!value) return "—"; const d = new Date(`${String(value).slice(0, 10)}T00:00:00`); return isNaN(d) ? "—" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(d) }
 function friendlyError(error) { const msg = error?.message || String(error || "Error desconocido"); if (msg.toLowerCase().includes("row-level security") || error?.code === "42501") return "Operacion bloqueada por RLS. Revisa policies."; return msg }
 function showToast(title, desc, variant = "success") { Components.showToast({ title, desc, variant, duration: 6 }) }
+
+// ── Gestión de usuarios ──────────────────────────────────────────
+
+let allUsers = []
+let assigningProfileId = null
+
+const GROUP_LABELS = {
+  sysadmin:     "SysAdmin",
+  admin_finance: "Financiero",
+  direction:    "Director",
+  operation:    "Operativo",
+  pending:      "Pendiente",
+}
+const GROUP_BADGE = {
+  sysadmin:     "accent",
+  admin_finance: "info",
+  direction:    "violet",
+  operation:    "success",
+  pending:      "warning",
+}
+
+function groupFromRoleNames(roleNames) {
+  const SYSADMIN   = ["sysadmin","system_admin","admin"]
+  const ADMIN      = ["finance","finanzas","treasury","tesoreria"]
+  const DIRECTION  = ["approver_2","aprobador_2","direccion","director"]
+  const OPERATION  = ["solicitante","operator","default"]
+  const n = roleNames.map(r => r.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu,""))
+  if (n.some(r => SYSADMIN.includes(r)))   return "sysadmin"
+  if (n.some(r => ADMIN.includes(r)))      return "admin_finance"
+  if (n.some(r => DIRECTION.includes(r)))  return "direction"
+  if (n.some(r => OPERATION.includes(r)))  return "operation"
+  return "pending"
+}
+
+async function loadUsers() {
+  const tbody = document.getElementById("usersTableBody")
+  if (!tbody) return
+  tbody.innerHTML = `<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando…</td></tr>`
+
+  try {
+    // Traer todos los profiles con sus roles
+    const { data: profiles, error: pe } = await supabaseClient
+      .from("profiles")
+      .select("id,email,full_name,created_at,active")
+      .order("created_at", { ascending: false })
+    if (pe) throw pe
+
+    const { data: userRoles, error: re } = await supabaseClient
+      .from("user_roles")
+      .select("profile_id, roles(id,name)")
+    if (re) throw re
+
+    // Agrupar roles por profile
+    const rolesByProfile = {}
+    for (const ur of userRoles || []) {
+      if (!rolesByProfile[ur.profile_id]) rolesByProfile[ur.profile_id] = []
+      rolesByProfile[ur.profile_id].push(ur.roles?.name || "")
+    }
+
+    allUsers = (profiles || []).map(p => ({
+      ...p,
+      roleNames: rolesByProfile[p.id] || [],
+      group: groupFromRoleNames(rolesByProfile[p.id] || []),
+    }))
+
+    renderUsersTable()
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(err.message)}</td></tr>`
+  }
+}
+
+function renderUsersTable() {
+  const tbody = document.getElementById("usersTableBody")
+  if (!tbody) return
+  const query = normalize(document.getElementById("usersSearch")?.value || "")
+  const groupFilter = document.getElementById("usersRoleFilter")?.value || "todos"
+
+  const filtered = allUsers.filter(u => {
+    const text = normalize(`${u.full_name || ""} ${u.email || ""}`)
+    const matchText = !query || text.includes(query)
+    const matchGroup = groupFilter === "todos" || u.group === groupFilter
+    return matchText && matchGroup
+  })
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin resultados.</td></tr>`
+    return
+  }
+
+  tbody.innerHTML = filtered.map(u => `
+    <tr>
+      <td>
+        <span class="cell-main">${escHtml(u.full_name || "Sin nombre")}</span>
+        <span class="cell-sub">${escHtml(u.email || "")}</span>
+      </td>
+      <td>${u.roleNames.length ? escHtml(u.roleNames.join(", ")) : Components.badge("Sin rol", "neutral")}</td>
+      <td>${Components.badge(GROUP_LABELS[u.group] || u.group, GROUP_BADGE[u.group] || "neutral")}</td>
+      <td><span class="cell-sub">${formatDate(u.created_at)}</span></td>
+      <td>
+        <button class="small-btn row-actions" data-action="assign-role" data-profile-id="${escHtml(u.id)}" data-group="${escHtml(u.group)}">
+          Cambiar rol
+        </button>
+      </td>
+    </tr>`).join("")
+
+  tbody.addEventListener("click", handleUserAction, { once: true })
+}
+
+function handleUserAction(e) {
+  // Re-bind after each render
+  document.getElementById("usersTableBody")?.addEventListener("click", handleUserAction, { once: true })
+  const btn = e.target.closest("[data-action='assign-role']")
+  if (!btn) return
+  openAssignRole(btn.dataset.profileId, btn.dataset.group)
+}
+
+function openAssignRole(profileId, currentGroup) {
+  const user = allUsers.find(u => u.id === profileId)
+  if (!user) return
+  assigningProfileId = profileId
+  document.getElementById("assignRoleSubtitle").textContent =
+    `${user.full_name || user.email} — rol actual: ${GROUP_LABELS[currentGroup] || currentGroup}`
+  // Preselect current group radio
+  const roleMap = { sysadmin: "sysadmin", admin_finance: "finance", direction: "director", operation: "solicitante", pending: "pending" }
+  const currentValue = roleMap[currentGroup] || "pending"
+  document.querySelectorAll("[name='assignRole']").forEach(r => { r.checked = r.value === currentValue })
+  document.getElementById("assignRoleDialog")?.showModal()
+}
+
+function closeAssignRole() {
+  assigningProfileId = null
+  document.getElementById("assignRoleDialog")?.close()
+}
+
+async function saveAssignRole() {
+  if (!assigningProfileId) return
+  const selected = document.querySelector("[name='assignRole']:checked")?.value
+  if (!selected) { showToast("Selecciona un rol", "Elige un nivel de acceso.", "warning"); return }
+
+  const btn = document.getElementById("saveAssignRoleBtn")
+  btn.disabled = true
+  btn.textContent = "Guardando…"
+
+  try {
+    // 1. Obtener todos los roles de la tabla roles
+    const { data: rolesData, error: re } = await supabaseClient.from("roles").select("id,name")
+    if (re) throw re
+
+    // 2. Borrar roles actuales del usuario
+    const { error: de } = await supabaseClient.from("user_roles").delete().eq("profile_id", assigningProfileId)
+    if (de) throw de
+
+    // 3. Si no es pending, asignar el nuevo rol
+    if (selected !== "pending") {
+      const roleRow = rolesData.find(r => r.name.toLowerCase() === selected.toLowerCase())
+      if (!roleRow) throw new Error(`Rol "${selected}" no encontrado en la tabla roles.`)
+      const { error: ie } = await supabaseClient.from("user_roles").insert({ profile_id: assigningProfileId, role_id: roleRow.id })
+      if (ie) throw ie
+    }
+
+    showToast("Rol actualizado", "El acceso del usuario fue actualizado correctamente.", "success")
+    closeAssignRole()
+    await loadUsers()
+  } catch (err) {
+    showToast("Error al guardar", err.message, "error")
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Guardar rol"
+  }
+}
