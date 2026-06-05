@@ -127,6 +127,27 @@ function cacheDom() {
   dom.summaryProvider = document.getElementById("summaryProvider");
   dom.summaryMonth = document.getElementById("summaryMonth");
   dom.summaryAmount = document.getElementById("summaryAmount");
+
+  dom.editRequestBtn = document.getElementById("editRequestBtn");
+  dom.editDialog = document.getElementById("editDialog");
+  dom.editForm = document.getElementById("editForm");
+  dom.closeEditModalBtn = document.getElementById("closeEditModalBtn");
+  dom.cancelEditBtn = document.getElementById("cancelEditBtn");
+  dom.submitEditBtn = document.getElementById("submitEditBtn");
+  dom.editSubtitle = document.getElementById("editSubtitle");
+  dom.editCompanyId = document.getElementById("editCompanyId");
+  dom.editCostCenterId = document.getElementById("editCostCenterId");
+  dom.editBudgetCategoryId = document.getElementById("editBudgetCategoryId");
+  dom.editBudgetCategoryHelp = document.getElementById("editBudgetCategoryHelp");
+  dom.editBudgetMonth = document.getElementById("editBudgetMonth");
+  dom.editProviderSearch = document.getElementById("editProviderSearch");
+  dom.editProveedorId = document.getElementById("editProveedorId");
+  dom.editAmountRequested = document.getElementById("editAmountRequested");
+  dom.editCurrency = document.getElementById("editCurrency");
+  dom.editExchangeRate = document.getElementById("editExchangeRate");
+  dom.editIsExtraordinaryAdjustment = document.getElementById("editIsExtraordinaryAdjustment");
+  dom.editDescription = document.getElementById("editDescription");
+  dom.editNotes = document.getElementById("editNotes");
 }
 
 function bindEvents() {
@@ -137,6 +158,14 @@ function bindEvents() {
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
+  dom.editRequestBtn?.addEventListener("click", () => openEditRequest(currentDetailRequestId));
+  dom.closeEditModalBtn?.addEventListener("click", closeEditModal);
+  dom.cancelEditBtn?.addEventListener("click", closeEditModal);
+  dom.editForm?.addEventListener("submit", submitEditRequest);
+  dom.editCompanyId?.addEventListener("change", handleEditScopeChange);
+  dom.editCostCenterId?.addEventListener("change", handleEditScopeChange);
+  dom.editBudgetMonth?.addEventListener("change", handleEditScopeChange);
+  initEditProviderCombo();
 
   dom.searchInput?.addEventListener("input", renderPaymentRequestsTable);
   dom.statusFilter?.addEventListener("change", renderPaymentRequestsTable);
@@ -161,7 +190,7 @@ function bindEvents() {
   dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
   dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
-  dom.providerSearch?.addEventListener("input", () => renderProveedorOptions(dom.providerSearch.value));
+  initProviderCombo();
   dom.proveedorId?.addEventListener("change", updateSummaryPanel);
   dom.amountRequested?.addEventListener("input", updateSummaryPanel);
   dom.currency?.addEventListener("change", handleCurrencyChange);
@@ -317,21 +346,99 @@ async function loadAvailableBudgetCategories() {
   updateSummaryPanel();
 }
 
-function renderProveedorOptions(query = "") {
+function initProviderCombo() {
+  const input = dom.providerSearch;
+  const dropdown = document.getElementById("providerDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderComboList(input.value);
+    openCombo();
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, -1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click();
+    } else if (e.key === "Escape") {
+      closeCombo();
+    }
+  });
+
+  input.addEventListener("focus", () => {
+    if (!dom.proveedorId.value) renderComboList(input.value);
+    openCombo();
+  });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("providerCombo")?.contains(e.target)) closeCombo();
+  });
+}
+
+function renderComboList(query = "") {
+  const dropdown = document.getElementById("providerDropdown");
+  if (!dropdown) return;
   const normalizedQuery = normalize(query);
-  const currentValue = dom.proveedorId.value;
   const filtered = proveedores
-    .filter(provider => {
-      const text = normalize([provider.alias, provider.nombre_completo, provider.rfc, provider.banco, provider.clabe].join(" "));
+    .filter(p => {
+      const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
       return !normalizedQuery || text.includes(normalizedQuery);
     })
-    .slice(0, 180);
+    .slice(0, 60);
 
-  dom.proveedorId.innerHTML = optionPlaceholder("Seleccionar proveedor") +
-    filtered.map(provider => `<option value="${escapeHtml(provider.id)}">${escapeHtml(proveedorLabel(provider))}</option>`).join("");
+  if (!filtered.length) {
+    dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`;
+    return;
+  }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
 
-  if (filtered.some(provider => provider.id === currentValue)) dom.proveedorId.value = currentValue;
-  updateSummaryPanel();
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); selectProvider(li.dataset.id, li.dataset.label); });
+  });
+}
+
+function highlightCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+function openCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.remove("hidden");
+}
+
+function closeCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+}
+
+function selectProvider(id, label) {
+  if (dom.providerSearch) dom.providerSearch.value = label;
+  if (dom.proveedorId) {
+    dom.proveedorId.value = id;
+    dom.proveedorId.dispatchEvent(new Event("change"));
+  }
+  closeCombo();
+}
+
+function renderProveedorOptions(query = "") {
+  renderComboList(query);
 }
 
 function renderStats() {
@@ -534,6 +641,8 @@ function openNewRequestModal() {
   dom.submitRequestBtn.disabled = false;
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
+  if (dom.providerSearch) dom.providerSearch.value = "";
+  if (dom.proveedorId) { dom.proveedorId.value = ""; dom.proveedorId.dispatchEvent(new Event("change")); }
   renderProveedorOptions("");
   budgetAvailabilityRows = [];
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
@@ -698,18 +807,276 @@ function openRequestDetail(id) {
     <details style="font-size:11px;color:var(--text-3);margin-top:8px">
       <summary style="cursor:pointer;padding:4px 0">Ver resultado técnico de presupuesto</summary>
       <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
-    </details>`;
+    </details>
+
+    ${window.FluxAuth?.canApprove?.() ? `
+    <div id="detailIncidenciaSection" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">Incidencia asociada</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center">
+        <select id="detailIncidenciaSelect" class="form-control" style="height:36px">
+          <option value="">Cargando incidencias…</option>
+        </select>
+        <button type="button" id="detailIncidenciaBtn" class="primary-btn" style="height:36px;white-space:nowrap">Asociar</button>
+      </div>
+      <div id="detailIncidenciaHint" style="font-size:11px;color:var(--text-3)">Cargando…</div>
+    </div>` : ""}`;
+
+  const canEdit = window.FluxAuth?.canApprove?.() && !isPaid;
+  if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
 
   loadApprovalHistory(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
+  if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
 }
 
 window.openRequestDetail = openRequestDetail;
 
+async function loadDetailIncidencias(request) {
+  const select = document.getElementById("detailIncidenciaSelect");
+  const hint = document.getElementById("detailIncidenciaHint");
+  const btn = document.getElementById("detailIncidenciaBtn");
+  if (!select || !hint || !btn) return;
+
+  // Detect current linked incidencia from notes
+  const currentMarker = (request.notes || "").match(/\[Visita\/incidencia asociada: ([^\s\]]+)/);
+  const currentIncidenciaId = currentMarker ? currentMarker[1] : null;
+
+  try {
+    const [{ data: incidents, error: ie }, { data: members, error: me }] = await Promise.all([
+      supabaseClient.from("incident_charges").select("id,member_id,external_name,description,amount,incident_date,status").order("incident_date", { ascending: false }).limit(100),
+      supabaseClient.from("members").select("id,full_name").eq("active", true),
+    ]);
+    if (ie) throw ie;
+
+    const membersById = new Map((members || []).map(m => [m.id, m.full_name]));
+
+    const label = inc => {
+      const receiver = inc.member_id ? (membersById.get(inc.member_id) || "Socio") : (inc.external_name || "Externo");
+      const statusMap = { open: "Abierta", invoiced: "Facturada", paid: "Pagada", cancelled: "Cancelada" };
+      return [formatDate(inc.incident_date), receiver, inc.description || "Sin descripcion", formatCurrency(inc.amount, "MXN"), statusMap[inc.status] || inc.status].filter(Boolean).join(" | ");
+    };
+
+    select.innerHTML = `<option value="">Sin incidencia asociada</option>` +
+      (incidents || []).map(inc => `<option value="${escapeHtml(inc.id)}">${escapeHtml(label(inc))}</option>`).join("");
+
+    if (currentIncidenciaId) {
+      select.value = currentIncidenciaId;
+      hint.textContent = "Incidencia actualmente vinculada. Puedes cambiarla o quitarla.";
+    } else {
+      hint.textContent = "Asocia una incidencia de Ingresos a esta solicitud. Se guardará en notas.";
+    }
+
+    btn.onclick = async () => {
+      const incId = select.value;
+      const inc = (incidents || []).find(i => i.id === incId) || null;
+      const cleanNotes = (request.notes || "").replace(/\n?\[Visita\/incidencia asociada:[^\]]+\]/g, "").trim();
+      const marker = inc ? `[Visita/incidencia asociada: ${inc.id} - ${label(inc)}]` : "";
+      const newNotes = [cleanNotes, marker].filter(Boolean).join("\n") || null;
+
+      btn.disabled = true;
+      btn.textContent = "Guardando…";
+      const { error } = await supabaseClient.from("payment_requests").update({ notes: newNotes, updated_at: new Date().toISOString() }).eq("id", request.id);
+      btn.disabled = false;
+      btn.textContent = "Asociar";
+      if (error) { showToast("Error", error.message, "error"); return; }
+      showToast("Incidencia actualizada", inc ? "Incidencia vinculada correctamente." : "Incidencia desvinculada.", "success");
+      await loadPaymentRequests();
+      openRequestDetail(request.id);
+    };
+  } catch (err) {
+    select.innerHTML = `<option value="">No se pudieron cargar incidencias</option>`;
+    hint.textContent = err.message || "Error al cargar incidencias.";
+  }
+}
+
 function closeRequestDetail() {
   if (dom.detailDialog.open) dom.detailDialog.close();
   currentDetailRequestId = null;
+}
+
+// ── Edit modal ──────────────────────────────────────────────────────────────
+
+async function openEditRequest(id) {
+  const request = paymentRequests.find(r => r.id === id);
+  if (!request) return;
+
+  dom.editSubtitle.textContent = `${request.request_number || "Sin folio"} · editando todos los campos`;
+
+  dom.editCompanyId.innerHTML = companies.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(companyName(c))}</option>`).join("");
+  dom.editCostCenterId.innerHTML = costCenters.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(costCenterName(c))}</option>`).join("");
+
+  dom.editCompanyId.value = request.company_id || "";
+  dom.editCostCenterId.value = request.cost_center_id || "";
+  dom.editBudgetMonth.value = request.budget_month ? request.budget_month.slice(0, 7) : "";
+
+  await loadEditBudgetCategories();
+  dom.editBudgetCategoryId.value = request.budget_category_id || "";
+
+  const proveedor = proveedorById(request.proveedor_id);
+  dom.editProviderSearch.value = proveedor ? proveedorLabel(proveedor) : "";
+  dom.editProveedorId.value = request.proveedor_id || "";
+
+  dom.editAmountRequested.value = request.amount_requested || "";
+  dom.editCurrency.value = request.currency || "MXN";
+  dom.editExchangeRate.value = request.exchange_rate || "1";
+  dom.editIsExtraordinaryAdjustment.checked = !!request.is_extraordinary_adjustment;
+  dom.editDescription.value = request.description || "";
+  dom.editNotes.value = request.notes || "";
+
+  dom.submitEditBtn.disabled = false;
+  dom.submitEditBtn.textContent = "Guardar cambios";
+
+  if (!dom.editDialog.open) dom.editDialog.showModal();
+}
+
+function closeEditModal() {
+  if (dom.editDialog.open) dom.editDialog.close();
+}
+
+async function handleEditScopeChange() {
+  dom.editBudgetCategoryId.value = "";
+  await loadEditBudgetCategories();
+}
+
+async function loadEditBudgetCategories() {
+  const companyId = dom.editCompanyId.value;
+  const costCenterId = dom.editCostCenterId.value;
+  const budgetMonth = monthInputToDate(dom.editBudgetMonth.value);
+
+  if (!companyId || !costCenterId || !budgetMonth) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Selecciona empresa, centro de costo y mes</option>`;
+    dom.editBudgetCategoryHelp.textContent = "Selecciona empresa, centro de costo y mes para cargar partidas disponibles.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.disabled = true;
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Cargando partidas...</option>`;
+
+  const { data, error } = await supabaseClient
+    .from("budget_availability")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("cost_center_id", costCenterId)
+    .eq("budget_month", budgetMonth);
+
+  dom.editBudgetCategoryId.disabled = false;
+
+  if (error) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">No se pudieron cargar partidas</option>`;
+    dom.editBudgetCategoryHelp.textContent = friendlyError(error, "budget_availability");
+    return;
+  }
+
+  const rows = dedupeAvailabilityRows(data || []).filter(r => r.budget_category_id).sort((a, b) => {
+    return budgetCategoryLabel(budgetCategoryById(a.budget_category_id)).localeCompare(budgetCategoryLabel(budgetCategoryById(b.budget_category_id)), "es");
+  });
+
+  if (!rows.length) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Sin partidas disponibles para esta combinación</option>`;
+    dom.editBudgetCategoryHelp.textContent = "No hay partidas activas para empresa, centro de costo y mes seleccionados.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Seleccionar partida presupuestal</option>` +
+    rows.map(row => {
+      const cat = budgetCategoryById(row.budget_category_id);
+      return `<option value="${escapeHtml(row.budget_category_id)}">${escapeHtml(budgetCategoryAvailabilityLabel(cat, row))}</option>`;
+    }).join("");
+  dom.editBudgetCategoryHelp.textContent = `${rows.length} partidas disponibles para esta combinación.`;
+}
+
+function initEditProviderCombo() {
+  const input = dom.editProviderSearch;
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderEditComboList(input.value);
+    dropdown.classList.remove("hidden");
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, -1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "Enter") { e.preventDefault(); if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click(); }
+    else if (e.key === "Escape") dropdown.classList.add("hidden");
+  });
+
+  input.addEventListener("focus", () => { renderEditComboList(input.value); dropdown.classList.remove("hidden"); });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("editProviderCombo")?.contains(e.target)) dropdown.classList.add("hidden");
+  });
+}
+
+function renderEditComboList(query = "") {
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!dropdown) return;
+  const nq = normalize(query);
+  const filtered = proveedores.filter(p => {
+    const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
+    return !nq || text.includes(nq);
+  }).slice(0, 60);
+
+  if (!filtered.length) { dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`; return; }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); dom.editProviderSearch.value = li.dataset.label; dom.editProveedorId.value = li.dataset.id; dropdown.classList.add("hidden"); });
+  });
+}
+
+function highlightEditCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+async function submitEditRequest(event) {
+  event.preventDefault();
+  const id = currentDetailRequestId;
+  if (!id) return;
+
+  if (!dom.editProveedorId.value) { showToast("Revisa la solicitud", "Selecciona un proveedor.", "warning"); return; }
+  if (!dom.editBudgetCategoryId.value) { showToast("Revisa la solicitud", "Selecciona una partida presupuestal.", "warning"); return; }
+
+  dom.submitEditBtn.disabled = true;
+  dom.submitEditBtn.textContent = "Guardando...";
+
+  const payload = {
+    proveedor_id: dom.editProveedorId.value,
+    company_id: dom.editCompanyId.value,
+    cost_center_id: dom.editCostCenterId.value,
+    budget_category_id: dom.editBudgetCategoryId.value,
+    budget_month: monthInputToDate(dom.editBudgetMonth.value),
+    amount_requested: numberValue(dom.editAmountRequested.value),
+    currency: dom.editCurrency.value,
+    exchange_rate: numberValue(dom.editExchangeRate.value) || 1,
+    is_extraordinary_adjustment: dom.editIsExtraordinaryAdjustment.checked,
+    description: dom.editDescription.value.trim(),
+    notes: dom.editNotes.value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    const { error } = await supabaseClient.from("payment_requests").update(payload).eq("id", id);
+    if (error) throw error;
+    showToast("Solicitud actualizada", "Los cambios se guardaron correctamente.", "success");
+    closeEditModal();
+    await loadPaymentRequests();
+    openRequestDetail(id);
+  } catch (err) {
+    showToast("Error al guardar", err.message || "No se pudo actualizar la solicitud.", "error");
+    dom.submitEditBtn.disabled = false;
+    dom.submitEditBtn.textContent = "Guardar cambios";
+  }
 }
 
 function renderPaymentInfoSection(request) {

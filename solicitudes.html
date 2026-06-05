@@ -18,6 +18,17 @@
     }
     .search-field input { padding-left:34px }
 
+    .provider-combo { display:flex; gap:6px; align-items:flex-start }
+    .provider-combo-input { position:relative; flex:1; min-width:0 }
+    .provider-plus-btn { height:36px; width:36px; border-radius:7px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0 }
+    .provider-plus-btn:hover { background:var(--bg-hover); color:var(--text-1) }
+    .combo-list { position:absolute; top:calc(100% + 3px); left:0; right:0; z-index:300; background:var(--bg-card); border:1px solid var(--border-strong); border-radius:9px; box-shadow:var(--shadow); max-height:220px; overflow-y:auto; padding:4px 0; list-style:none; margin:0 }
+    .combo-list li { padding:8px 12px; cursor:pointer; }
+    .combo-list li:hover, .combo-list li.combo-active { background:var(--bg-hover) }
+    .combo-list li .combo-main { display:block; font-size:12.5px; font-weight:600; color:var(--text-1) }
+    .combo-list li .combo-sub  { display:block; font-size:10.5px; color:var(--text-3); margin-top:1px }
+    .combo-list li.combo-empty { color:var(--text-3); cursor:default; font-size:12px; font-style:italic }
+
     .request-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; align-items:start }
     .form-sections { display:flex; flex-direction:column; gap:14px; min-width:0 }
     .form-section { border:1px solid var(--border); border-radius:13px; padding:15px; background:rgba(255,255,255,.015) }
@@ -219,11 +230,15 @@
                 <label>Mes presupuestal *
                   <input id="budgetMonth" class="form-control" type="month" required>
                 </label>
-                <label>Buscar proveedor
-                  <input id="providerSearch" class="form-control" type="search" placeholder="Alias, razon social o RFC">
-                </label>
                 <label class="full-row">Proveedor *
-                  <select id="proveedorId" class="form-control" required></select>
+                  <div class="provider-combo" id="providerCombo">
+                    <div class="provider-combo-input">
+                      <input id="providerSearch" type="text" class="form-control" placeholder="Escribe alias, razón social o RFC…" autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown" style="width:100%">
+                      <ul id="providerDropdown" class="combo-list hidden" role="listbox"></ul>
+                    </div>
+                    <button id="newProviderFromRequestBtn" type="button" class="provider-plus-btn" title="Crear proveedor sin salir de la solicitud" aria-label="Crear proveedor sin salir de la solicitud">+</button>
+                    <input type="hidden" id="proveedorId">
+                  </div>
                 </label>
               </div>
             </section>
@@ -300,9 +315,94 @@
       </div>
       <div class="modal-scroll" id="detailContent"></div>
       <div class="modal-actions">
+        <button type="button" id="editRequestBtn" class="secondary-btn" style="margin-right:auto;display:none">Editar solicitud</button>
         <button type="button" id="closeDetailFooterBtn" class="secondary-btn">Cerrar</button>
       </div>
     </div>
+  </dialog>
+
+  <!-- Dialog: editar solicitud -->
+  <dialog id="editDialog">
+    <form id="editForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Editar solicitud</h2>
+          <p id="editSubtitle">Modifica los datos de la solicitud.</p>
+        </div>
+        <button type="button" id="closeEditModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-scroll" style="padding:0">
+        <div style="padding:0 2px 2px">
+          <section class="form-section">
+            <h3>Datos generales</h3>
+            <div class="form-grid">
+              <label>Empresa *
+                <select id="editCompanyId" class="form-control" required></select>
+              </label>
+              <label>Centro de costo *
+                <select id="editCostCenterId" class="form-control" required></select>
+              </label>
+              <label class="full-row">Partida presupuestal *
+                <select id="editBudgetCategoryId" class="form-control" required></select>
+                <div id="editBudgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
+              </label>
+              <label>Mes presupuestal *
+                <input id="editBudgetMonth" class="form-control" type="month" required>
+              </label>
+              <label class="full-row">Proveedor *
+                <div class="provider-combo" id="editProviderCombo">
+                  <div class="provider-combo-input">
+                    <input id="editProviderSearch" type="text" class="form-control" placeholder="Escribe alias, razón social o RFC…" autocomplete="off" style="width:100%">
+                    <ul id="editProviderDropdown" class="combo-list hidden" role="listbox"></ul>
+                  </div>
+                  <input type="hidden" id="editProveedorId">
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Datos financieros</h3>
+            <div class="form-grid">
+              <label>Monto solicitado *
+                <input id="editAmountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+              </label>
+              <label>Moneda *
+                <select id="editCurrency" class="form-control" required>
+                  <option value="MXN">MXN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <label>Tipo de cambio *
+                <input id="editExchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1" required>
+              </label>
+              <label class="checkbox-card">
+                <input id="editIsExtraordinaryAdjustment" type="checkbox">
+                Ajuste extraordinario
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Descripcion</h3>
+            <div class="form-grid">
+              <label class="full-row">Descripcion *
+                <textarea id="editDescription" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
+              </label>
+              <label class="full-row">Notas
+                <textarea id="editNotes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelEditBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitEditBtn" class="primary-btn">Guardar cambios</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
