@@ -724,7 +724,10 @@ function unique(arr)  { return [...new Set(arr.filter(Boolean).map(String))].sor
 function norm(v)      { return String(v || "").trim().toLowerCase().replace(/\s+/g, "-") }
 function safe(v, fb = "—") { return esc(v === null || v === undefined || v === "" ? fb : String(v)) }
 function esc(v)       { return String(v ?? "").replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])) }
-function linkOrDash(url) { return url ? `<a href="${esc(url)}" target="_blank" rel="noopener">Abrir</a>` : "—" }
+function linkOrDash(url) {
+  const valid = url && /^https?:\/\//i.test(url.trim());
+  return valid ? `<a href="${esc(url)}" target="_blank" rel="noopener">Abrir</a>` : "—";
+}
 
 function fmtDateTime(v) {
   if (!v) return "—"

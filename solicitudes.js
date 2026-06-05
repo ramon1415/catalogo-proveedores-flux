@@ -821,7 +821,7 @@ function openRequestDetail(id) {
       <div id="detailIncidenciaHint" style="font-size:11px;color:var(--text-3)">Cargando…</div>
     </div>` : ""}`;
 
-  const isTerminal = ["paid", "cancelled", "rejected"].includes(request.status);
+  const isTerminal = ["paid", "cancelled", "rejected", "approved", "scheduled"].includes(request.status);
   const canEdit = window.FluxAuth?.canApprove?.() && !isTerminal;
   if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
 
