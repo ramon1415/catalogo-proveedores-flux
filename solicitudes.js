@@ -127,6 +127,27 @@ function cacheDom() {
   dom.summaryProvider = document.getElementById("summaryProvider");
   dom.summaryMonth = document.getElementById("summaryMonth");
   dom.summaryAmount = document.getElementById("summaryAmount");
+
+  dom.editRequestBtn = document.getElementById("editRequestBtn");
+  dom.editDialog = document.getElementById("editDialog");
+  dom.editForm = document.getElementById("editForm");
+  dom.closeEditModalBtn = document.getElementById("closeEditModalBtn");
+  dom.cancelEditBtn = document.getElementById("cancelEditBtn");
+  dom.submitEditBtn = document.getElementById("submitEditBtn");
+  dom.editSubtitle = document.getElementById("editSubtitle");
+  dom.editCompanyId = document.getElementById("editCompanyId");
+  dom.editCostCenterId = document.getElementById("editCostCenterId");
+  dom.editBudgetCategoryId = document.getElementById("editBudgetCategoryId");
+  dom.editBudgetCategoryHelp = document.getElementById("editBudgetCategoryHelp");
+  dom.editBudgetMonth = document.getElementById("editBudgetMonth");
+  dom.editProviderSearch = document.getElementById("editProviderSearch");
+  dom.editProveedorId = document.getElementById("editProveedorId");
+  dom.editAmountRequested = document.getElementById("editAmountRequested");
+  dom.editCurrency = document.getElementById("editCurrency");
+  dom.editExchangeRate = document.getElementById("editExchangeRate");
+  dom.editIsExtraordinaryAdjustment = document.getElementById("editIsExtraordinaryAdjustment");
+  dom.editDescription = document.getElementById("editDescription");
+  dom.editNotes = document.getElementById("editNotes");
 }
 
 function bindEvents() {
@@ -137,6 +158,14 @@ function bindEvents() {
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
+  dom.editRequestBtn?.addEventListener("click", () => openEditRequest(currentDetailRequestId));
+  dom.closeEditModalBtn?.addEventListener("click", closeEditModal);
+  dom.cancelEditBtn?.addEventListener("click", closeEditModal);
+  dom.editForm?.addEventListener("submit", submitEditRequest);
+  dom.editCompanyId?.addEventListener("change", handleEditScopeChange);
+  dom.editCostCenterId?.addEventListener("change", handleEditScopeChange);
+  dom.editBudgetMonth?.addEventListener("change", handleEditScopeChange);
+  initEditProviderCombo();
 
   dom.searchInput?.addEventListener("input", renderPaymentRequestsTable);
   dom.statusFilter?.addEventListener("change", renderPaymentRequestsTable);
@@ -780,6 +809,9 @@ function openRequestDetail(id) {
       <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
     </details>`;
 
+  const canEdit = window.FluxAuth?.canApprove?.() && !isPaid;
+  if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
+
   loadApprovalHistory(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
@@ -790,6 +822,190 @@ window.openRequestDetail = openRequestDetail;
 function closeRequestDetail() {
   if (dom.detailDialog.open) dom.detailDialog.close();
   currentDetailRequestId = null;
+}
+
+// ── Edit modal ──────────────────────────────────────────────────────────────
+
+async function openEditRequest(id) {
+  const request = paymentRequests.find(r => r.id === id);
+  if (!request) return;
+
+  dom.editSubtitle.textContent = `${request.request_number || "Sin folio"} · editando todos los campos`;
+
+  dom.editCompanyId.innerHTML = companies.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(companyName(c))}</option>`).join("");
+  dom.editCostCenterId.innerHTML = costCenters.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(costCenterName(c))}</option>`).join("");
+
+  dom.editCompanyId.value = request.company_id || "";
+  dom.editCostCenterId.value = request.cost_center_id || "";
+  dom.editBudgetMonth.value = request.budget_month ? request.budget_month.slice(0, 7) : "";
+
+  await loadEditBudgetCategories();
+  dom.editBudgetCategoryId.value = request.budget_category_id || "";
+
+  const proveedor = proveedorById(request.proveedor_id);
+  dom.editProviderSearch.value = proveedor ? proveedorLabel(proveedor) : "";
+  dom.editProveedorId.value = request.proveedor_id || "";
+
+  dom.editAmountRequested.value = request.amount_requested || "";
+  dom.editCurrency.value = request.currency || "MXN";
+  dom.editExchangeRate.value = request.exchange_rate || "1";
+  dom.editIsExtraordinaryAdjustment.checked = !!request.is_extraordinary_adjustment;
+  dom.editDescription.value = request.description || "";
+  dom.editNotes.value = request.notes || "";
+
+  dom.submitEditBtn.disabled = false;
+  dom.submitEditBtn.textContent = "Guardar cambios";
+
+  if (!dom.editDialog.open) dom.editDialog.showModal();
+}
+
+function closeEditModal() {
+  if (dom.editDialog.open) dom.editDialog.close();
+}
+
+async function handleEditScopeChange() {
+  dom.editBudgetCategoryId.value = "";
+  await loadEditBudgetCategories();
+}
+
+async function loadEditBudgetCategories() {
+  const companyId = dom.editCompanyId.value;
+  const costCenterId = dom.editCostCenterId.value;
+  const budgetMonth = monthInputToDate(dom.editBudgetMonth.value);
+
+  if (!companyId || !costCenterId || !budgetMonth) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Selecciona empresa, centro de costo y mes</option>`;
+    dom.editBudgetCategoryHelp.textContent = "Selecciona empresa, centro de costo y mes para cargar partidas disponibles.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.disabled = true;
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Cargando partidas...</option>`;
+
+  const { data, error } = await supabaseClient
+    .from("budget_availability")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("cost_center_id", costCenterId)
+    .eq("budget_month", budgetMonth);
+
+  dom.editBudgetCategoryId.disabled = false;
+
+  if (error) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">No se pudieron cargar partidas</option>`;
+    dom.editBudgetCategoryHelp.textContent = friendlyError(error, "budget_availability");
+    return;
+  }
+
+  const rows = dedupeAvailabilityRows(data || []).filter(r => r.budget_category_id).sort((a, b) => {
+    return budgetCategoryLabel(budgetCategoryById(a.budget_category_id)).localeCompare(budgetCategoryLabel(budgetCategoryById(b.budget_category_id)), "es");
+  });
+
+  if (!rows.length) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Sin partidas disponibles para esta combinación</option>`;
+    dom.editBudgetCategoryHelp.textContent = "No hay partidas activas para empresa, centro de costo y mes seleccionados.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Seleccionar partida presupuestal</option>` +
+    rows.map(row => {
+      const cat = budgetCategoryById(row.budget_category_id);
+      return `<option value="${escapeHtml(row.budget_category_id)}">${escapeHtml(budgetCategoryAvailabilityLabel(cat, row))}</option>`;
+    }).join("");
+  dom.editBudgetCategoryHelp.textContent = `${rows.length} partidas disponibles para esta combinación.`;
+}
+
+function initEditProviderCombo() {
+  const input = dom.editProviderSearch;
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderEditComboList(input.value);
+    dropdown.classList.remove("hidden");
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, -1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "Enter") { e.preventDefault(); if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click(); }
+    else if (e.key === "Escape") dropdown.classList.add("hidden");
+  });
+
+  input.addEventListener("focus", () => { renderEditComboList(input.value); dropdown.classList.remove("hidden"); });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("editProviderCombo")?.contains(e.target)) dropdown.classList.add("hidden");
+  });
+}
+
+function renderEditComboList(query = "") {
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!dropdown) return;
+  const nq = normalize(query);
+  const filtered = proveedores.filter(p => {
+    const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
+    return !nq || text.includes(nq);
+  }).slice(0, 60);
+
+  if (!filtered.length) { dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`; return; }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); dom.editProviderSearch.value = li.dataset.label; dom.editProveedorId.value = li.dataset.id; dropdown.classList.add("hidden"); });
+  });
+}
+
+function highlightEditCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+async function submitEditRequest(event) {
+  event.preventDefault();
+  const id = currentDetailRequestId;
+  if (!id) return;
+
+  if (!dom.editProveedorId.value) { showToast("Revisa la solicitud", "Selecciona un proveedor.", "warning"); return; }
+  if (!dom.editBudgetCategoryId.value) { showToast("Revisa la solicitud", "Selecciona una partida presupuestal.", "warning"); return; }
+
+  dom.submitEditBtn.disabled = true;
+  dom.submitEditBtn.textContent = "Guardando...";
+
+  const payload = {
+    proveedor_id: dom.editProveedorId.value,
+    company_id: dom.editCompanyId.value,
+    cost_center_id: dom.editCostCenterId.value,
+    budget_category_id: dom.editBudgetCategoryId.value,
+    budget_month: monthInputToDate(dom.editBudgetMonth.value),
+    amount_requested: numberValue(dom.editAmountRequested.value),
+    currency: dom.editCurrency.value,
+    exchange_rate: numberValue(dom.editExchangeRate.value) || 1,
+    is_extraordinary_adjustment: dom.editIsExtraordinaryAdjustment.checked,
+    description: dom.editDescription.value.trim(),
+    notes: dom.editNotes.value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    const { error } = await supabaseClient.from("payment_requests").update(payload).eq("id", id);
+    if (error) throw error;
+    showToast("Solicitud actualizada", "Los cambios se guardaron correctamente.", "success");
+    closeEditModal();
+    await loadPaymentRequests();
+    openRequestDetail(id);
+  } catch (err) {
+    showToast("Error al guardar", err.message || "No se pudo actualizar la solicitud.", "error");
+    dom.submitEditBtn.disabled = false;
+    dom.submitEditBtn.textContent = "Guardar cambios";
+  }
 }
 
 function renderPaymentInfoSection(request) {

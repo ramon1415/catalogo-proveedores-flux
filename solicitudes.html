@@ -315,9 +315,94 @@
       </div>
       <div class="modal-scroll" id="detailContent"></div>
       <div class="modal-actions">
+        <button type="button" id="editRequestBtn" class="secondary-btn" style="margin-right:auto;display:none">Editar solicitud</button>
         <button type="button" id="closeDetailFooterBtn" class="secondary-btn">Cerrar</button>
       </div>
     </div>
+  </dialog>
+
+  <!-- Dialog: editar solicitud -->
+  <dialog id="editDialog">
+    <form id="editForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Editar solicitud</h2>
+          <p id="editSubtitle">Modifica los datos de la solicitud.</p>
+        </div>
+        <button type="button" id="closeEditModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-scroll" style="padding:0">
+        <div style="padding:0 2px 2px">
+          <section class="form-section">
+            <h3>Datos generales</h3>
+            <div class="form-grid">
+              <label>Empresa *
+                <select id="editCompanyId" class="form-control" required></select>
+              </label>
+              <label>Centro de costo *
+                <select id="editCostCenterId" class="form-control" required></select>
+              </label>
+              <label class="full-row">Partida presupuestal *
+                <select id="editBudgetCategoryId" class="form-control" required></select>
+                <div id="editBudgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
+              </label>
+              <label>Mes presupuestal *
+                <input id="editBudgetMonth" class="form-control" type="month" required>
+              </label>
+              <label class="full-row">Proveedor *
+                <div class="provider-combo" id="editProviderCombo">
+                  <div class="provider-combo-input">
+                    <input id="editProviderSearch" type="text" class="form-control" placeholder="Escribe alias, razón social o RFC…" autocomplete="off" style="width:100%">
+                    <ul id="editProviderDropdown" class="combo-list hidden" role="listbox"></ul>
+                  </div>
+                  <input type="hidden" id="editProveedorId">
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Datos financieros</h3>
+            <div class="form-grid">
+              <label>Monto solicitado *
+                <input id="editAmountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+              </label>
+              <label>Moneda *
+                <select id="editCurrency" class="form-control" required>
+                  <option value="MXN">MXN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <label>Tipo de cambio *
+                <input id="editExchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1" required>
+              </label>
+              <label class="checkbox-card">
+                <input id="editIsExtraordinaryAdjustment" type="checkbox">
+                Ajuste extraordinario
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Descripcion</h3>
+            <div class="form-grid">
+              <label class="full-row">Descripcion *
+                <textarea id="editDescription" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
+              </label>
+              <label class="full-row">Notas
+                <textarea id="editNotes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelEditBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitEditBtn" class="primary-btn">Guardar cambios</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
