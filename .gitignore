@@ -1,0 +1,4 @@
+# Archivos internos de desarrollo — no publicar en Vercel
+CLAUDE.md
+preview_*.html
+.DS_Store

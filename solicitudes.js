@@ -1,6 +1,5 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let currentSession = null;
 let currentProfileId = null;
 let paymentRequests = [];
 let companies = [];
@@ -39,11 +38,26 @@ document.addEventListener("DOMContentLoaded", initSolicitudesPage);
 
 async function initSolicitudesPage() {
   cacheDom();
-  setupTheme();
   bindEvents();
 
+  const stored = localStorage.getItem("flux-theme");
+  if (stored) html.setAttribute("data-theme", stored);
+  document.getElementById("themeToggle")?.addEventListener("click", () => {
+    const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    html.setAttribute("data-theme", next);
+    localStorage.setItem("flux-theme", next);
+  });
+
+  if (window.FluxAuth?.ready) await window.FluxAuth.ready();
+  const profile = window.FluxAuth?.getProfile?.();
+  const session  = window.FluxAuth?.state?.session;
+  if (!session) { window.location.href = "./index.html"; return; }
+
+  currentProfileId = profile?.id || null;
+  if (dom.userName)  dom.userName.textContent  = profile?.full_name || session.user?.email || "Usuario";
+  if (dom.userEmail) dom.userEmail.textContent = profile?.email || session.user?.email || "Sesion activa";
+
   try {
-    await loadSession();
     await Promise.all([
       loadCompanies(),
       loadCostCenters(),
@@ -63,7 +77,6 @@ async function initSolicitudesPage() {
 }
 
 function cacheDom() {
-  dom.themeToggle = document.getElementById("themeToggle");
   dom.userName = document.getElementById("userName");
   dom.userEmail = document.getElementById("userEmail");
   dom.logoutBtn = document.getElementById("logoutBtn");
@@ -114,19 +127,27 @@ function cacheDom() {
   dom.summaryProvider = document.getElementById("summaryProvider");
   dom.summaryMonth = document.getElementById("summaryMonth");
   dom.summaryAmount = document.getElementById("summaryAmount");
-}
 
-function setupTheme() {
-  const saved = localStorage.getItem("flux-theme");
-  if (saved) html.setAttribute("data-theme", saved);
-
-  if (dom.themeToggle) {
-    dom.themeToggle.addEventListener("click", () => {
-      const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
-      html.setAttribute("data-theme", next);
-      localStorage.setItem("flux-theme", next);
-    });
-  }
+  dom.editRequestBtn = document.getElementById("editRequestBtn");
+  dom.editDialog = document.getElementById("editDialog");
+  dom.editForm = document.getElementById("editForm");
+  dom.closeEditModalBtn = document.getElementById("closeEditModalBtn");
+  dom.cancelEditBtn = document.getElementById("cancelEditBtn");
+  dom.submitEditBtn = document.getElementById("submitEditBtn");
+  dom.editSubtitle = document.getElementById("editSubtitle");
+  dom.editCompanyId = document.getElementById("editCompanyId");
+  dom.editCostCenterId = document.getElementById("editCostCenterId");
+  dom.editBudgetCategoryId = document.getElementById("editBudgetCategoryId");
+  dom.editBudgetCategoryHelp = document.getElementById("editBudgetCategoryHelp");
+  dom.editBudgetMonth = document.getElementById("editBudgetMonth");
+  dom.editProviderSearch = document.getElementById("editProviderSearch");
+  dom.editProveedorId = document.getElementById("editProveedorId");
+  dom.editAmountRequested = document.getElementById("editAmountRequested");
+  dom.editCurrency = document.getElementById("editCurrency");
+  dom.editExchangeRate = document.getElementById("editExchangeRate");
+  dom.editIsExtraordinaryAdjustment = document.getElementById("editIsExtraordinaryAdjustment");
+  dom.editDescription = document.getElementById("editDescription");
+  dom.editNotes = document.getElementById("editNotes");
 }
 
 function bindEvents() {
@@ -137,6 +158,14 @@ function bindEvents() {
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
+  dom.editRequestBtn?.addEventListener("click", () => openEditRequest(currentDetailRequestId));
+  dom.closeEditModalBtn?.addEventListener("click", closeEditModal);
+  dom.cancelEditBtn?.addEventListener("click", closeEditModal);
+  dom.editForm?.addEventListener("submit", submitEditRequest);
+  dom.editCompanyId?.addEventListener("change", handleEditScopeChange);
+  dom.editCostCenterId?.addEventListener("change", handleEditScopeChange);
+  dom.editBudgetMonth?.addEventListener("change", handleEditScopeChange);
+  initEditProviderCombo();
 
   dom.searchInput?.addEventListener("input", renderPaymentRequestsTable);
   dom.statusFilter?.addEventListener("change", renderPaymentRequestsTable);
@@ -161,80 +190,12 @@ function bindEvents() {
   dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
   dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
-  dom.providerSearch?.addEventListener("input", () => renderProveedorOptions(dom.providerSearch.value));
+  initProviderCombo();
   dom.proveedorId?.addEventListener("change", updateSummaryPanel);
   dom.amountRequested?.addEventListener("input", updateSummaryPanel);
   dom.currency?.addEventListener("change", handleCurrencyChange);
   dom.exchangeRate?.addEventListener("input", updateSummaryPanel);
   dom.isExtraordinaryAdjustment?.addEventListener("change", updateSummaryPanel);
-}
-
-async function loadSession() {
-  const { data: { session }, error } = await supabaseClient.auth.getSession();
-  if (error) throw error;
-  if (!session) {
-    window.location.href = "./index.html";
-    return;
-  }
-
-  currentSession = session;
-  dom.userEmail.textContent = session.user.email || "Sesion activa";
-  dom.userName.textContent = session.user.user_metadata?.full_name || session.user.email || "Usuario";
-
-  await resolveCurrentProfile(session);
-}
-
-async function resolveCurrentProfile(session) {
-  currentProfileId = null;
-
-  try {
-    const byId = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("auth_user_id", session.user.id)
-      .maybeSingle();
-
-    if (!byId.error && byId.data?.id) {
-      currentProfileId = byId.data.id;
-      dom.userName.textContent = byId.data.full_name || dom.userName.textContent;
-      return;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
-
-  try {
-    const byProfileId = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("id", session.user.id)
-      .maybeSingle();
-
-    if (!byProfileId.error && byProfileId.data?.id) {
-      currentProfileId = byProfileId.data.id;
-      dom.userName.textContent = byProfileId.data.full_name || dom.userName.textContent;
-      return;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
-
-  if (!session.user.email) return;
-
-  try {
-    const byEmail = await supabaseClient
-      .from("profiles")
-      .select("id,email,full_name,auth_user_id")
-      .eq("email", session.user.email)
-      .maybeSingle();
-
-    if (!byEmail.error && byEmail.data?.id) {
-      currentProfileId = byEmail.data.id;
-      dom.userName.textContent = byEmail.data.full_name || dom.userName.textContent;
-    }
-  } catch (_) {
-    currentProfileId = null;
-  }
 }
 
 async function loadCompanies() {
@@ -385,21 +346,99 @@ async function loadAvailableBudgetCategories() {
   updateSummaryPanel();
 }
 
-function renderProveedorOptions(query = "") {
+function initProviderCombo() {
+  const input = dom.providerSearch;
+  const dropdown = document.getElementById("providerDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderComboList(input.value);
+    openCombo();
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, -1);
+      highlightCombo(items, activeIndex);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click();
+    } else if (e.key === "Escape") {
+      closeCombo();
+    }
+  });
+
+  input.addEventListener("focus", () => {
+    if (!dom.proveedorId.value) renderComboList(input.value);
+    openCombo();
+  });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("providerCombo")?.contains(e.target)) closeCombo();
+  });
+}
+
+function renderComboList(query = "") {
+  const dropdown = document.getElementById("providerDropdown");
+  if (!dropdown) return;
   const normalizedQuery = normalize(query);
-  const currentValue = dom.proveedorId.value;
   const filtered = proveedores
-    .filter(provider => {
-      const text = normalize([provider.alias, provider.nombre_completo, provider.rfc, provider.banco, provider.clabe].join(" "));
+    .filter(p => {
+      const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
       return !normalizedQuery || text.includes(normalizedQuery);
     })
-    .slice(0, 180);
+    .slice(0, 60);
 
-  dom.proveedorId.innerHTML = optionPlaceholder("Seleccionar proveedor") +
-    filtered.map(provider => `<option value="${escapeHtml(provider.id)}">${escapeHtml(proveedorLabel(provider))}</option>`).join("");
+  if (!filtered.length) {
+    dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`;
+    return;
+  }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
 
-  if (filtered.some(provider => provider.id === currentValue)) dom.proveedorId.value = currentValue;
-  updateSummaryPanel();
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); selectProvider(li.dataset.id, li.dataset.label); });
+  });
+}
+
+function highlightCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+function openCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.remove("hidden");
+}
+
+function closeCombo() {
+  const dropdown = document.getElementById("providerDropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+}
+
+function selectProvider(id, label) {
+  if (dom.providerSearch) dom.providerSearch.value = label;
+  if (dom.proveedorId) {
+    dom.proveedorId.value = id;
+    dom.proveedorId.dispatchEvent(new Event("change"));
+  }
+  closeCombo();
+}
+
+function renderProveedorOptions(query = "") {
+  renderComboList(query);
 }
 
 function renderStats() {
@@ -495,10 +534,10 @@ function renderFilterState() {
     activeParts.push(company ? companyName(company) : "Empresa filtrada");
   }
 
-  dom.totalCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "todos");
-  dom.approvableCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "aprobable");
-  dom.exceptionsCard?.classList.toggle("active-filter", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "excepciones");
-  dom.paidCard?.classList.toggle("active-filter", dom.statusFilter.value === "paid");
+  dom.totalCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "todos");
+  dom.approvableCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "aprobable");
+  dom.exceptionsCard?.classList.toggle("active", dom.statusFilter.value === "activas" && dom.budgetDecisionFilter.value === "excepciones");
+  dom.paidCard?.classList.toggle("active", dom.statusFilter.value === "paid");
 
   if (!activeParts.length) {
     dom.filterSummary.classList.add("hidden");
@@ -541,14 +580,13 @@ function renderPaymentRequestsTable() {
   if (!rows.length) {
     const filtered = hasActiveFilters();
     dom.requestsTableBody.innerHTML = `
-      <tr>
-        <td colspan="11">
-          <div class="empty-state">
-            <strong>${filtered ? "No hay solicitudes para este filtro." : "No hay solicitudes para mostrar"}</strong>
-            ${filtered ? "Prueba ver todas las solicitudes o cambia los filtros activos." : "Crea una nueva solicitud de pago para iniciar la bandeja."}
-          </div>
-        </td>
-      </tr>`;
+      <tr><td colspan="6">${Components.emptyState({
+        icon: filtered ? "🔍" : "📋",
+        title: filtered ? "Sin resultados" : "Sin solicitudes",
+        desc: filtered ? "Ninguna solicitud coincide con los filtros aplicados." : "Crea una nueva solicitud de pago para iniciar la bandeja.",
+        actionHtml: filtered ? `<button class="secondary-btn" onclick="document.getElementById('clearFiltersBtn').click()">Limpiar filtros</button>` : "",
+        variant: filtered ? "compact" : "full",
+      })}</td></tr>`;
     return;
   }
 
@@ -559,19 +597,32 @@ function renderPaymentRequestsTable() {
     const category = budgetCategoryById(request.budget_category_id);
     const isHighlighted = highlightedRequestId && request.id === highlightedRequestId;
 
+    const folioExtra = request.is_extraordinary_adjustment ? Components.badge("Extraordinario", "violet") : "";
+    const statusCell = `${renderStatusBadge(request.status)} ${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}`;
+
     return `
       <tr class="${isHighlighted ? "highlight-row" : ""}">
-        <td><strong>${escapeHtml(request.request_number || "Sin folio")}</strong>${request.is_extraordinary_adjustment ? `<span class="badge badge-extra">Ajuste extraordinario</span>` : ""}</td>
-        <td>${escapeHtml(formatDate(request.submitted_at || request.created_at))}</td>
-        <td><strong>${escapeHtml(proveedorAlias(proveedor))}</strong><span class="muted-line">${escapeHtml(proveedorName(proveedor))}</span></td>
-        <td>${escapeHtml(companyName(company))}</td>
-        <td>${escapeHtml(costCenterName(center))}</td>
-        <td><strong>${escapeHtml(category?.code || "")}</strong><span class="muted-line">${escapeHtml(category?.name || "Sin partida")}</span></td>
-        <td>${escapeHtml(formatMonth(request.budget_month))}</td>
-        <td><strong>${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</strong></td>
-        <td>${renderStatusBadge(request.status)}</td>
-        <td>${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}</td>
-        <td><div class="actions"><button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')">Ver detalle</button></div></td>
+        <td>
+          <span class="cell-main">${escapeHtml(request.request_number || "Sin folio")}</span>${folioExtra}
+          <span class="cell-sub">${escapeHtml(formatDate(request.submitted_at || request.created_at))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(proveedorAlias(proveedor))}</span>
+          <span class="cell-sub">${escapeHtml(companyName(company))} · ${escapeHtml(costCenterName(center))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(category?.code || "Sin partida")}</span>
+          <span class="cell-sub">${escapeHtml(category?.name || "")} · ${escapeHtml(formatMonth(request.budget_month))}</span>
+        </td>
+        <td>
+          <span class="cell-main">${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}</span>
+        </td>
+        <td>${statusCell}</td>
+        <td>
+          <div class="actions row-actions">
+            <button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')">Ver detalle</button>
+          </div>
+        </td>
       </tr>`;
   }).join("");
 
@@ -590,6 +641,8 @@ function openNewRequestModal() {
   dom.submitRequestBtn.disabled = false;
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
+  if (dom.providerSearch) dom.providerSearch.value = "";
+  if (dom.proveedorId) { dom.proveedorId.value = ""; dom.proveedorId.dispatchEvent(new Event("change")); }
   renderProveedorOptions("");
   budgetAvailabilityRows = [];
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
@@ -711,58 +764,320 @@ function openRequestDetail(id) {
     : request.budget_decision === "aprobable" && !exception
     ? "Validada automaticamente con presupuesto disponible."
     : "Requiere revision por excepcion presupuestal.";
-  const detailAlert = isPaid
-    ? `<div class="detail-alert success">Esta solicitud ya fue pagada.</div>`
+  const detailNotice = isPaid
+    ? Components.notice("Pagada", "Esta solicitud ya fue pagada.", "success")
     : exception
-    ? `<div class="detail-alert warning">Esta solicitud requiere revisión por excepción presupuestal.</div>`
-    : `<div class="detail-alert success">Validada automáticamente con presupuesto disponible.</div>`;
+    ? Components.notice("Excepción presupuestal", "Requiere revisión por excepción presupuestal.", "warning")
+    : Components.notice("Presupuesto disponible", "Validada automáticamente con presupuesto disponible.", "info");
 
   dom.detailTitle.textContent = request.request_number || "Detalle de solicitud";
-  dom.detailSubtitle.textContent = decisionText;
+  dom.detailSubtitle.textContent = `${proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`;
   dom.detailContent.innerHTML = `
-    ${detailAlert}
-    <div class="detail-grid">
-      ${detailCard("Folio", request.request_number || "Sin folio")}
-      ${detailCard("Proveedor", proveedorLabel(proveedor))}
-      ${detailCard("Empresa", companyName(company))}
-      ${detailCard("Centro de costo", costCenterName(center))}
-      ${detailCard("Partida", budgetCategoryLabel(category))}
-      ${detailCard("Mes", formatMonth(request.budget_month))}
-      ${detailCard("Monto", formatCurrency(request.amount_requested, request.currency || "MXN"))}
-      ${detailCard("Estatus", renderStatusBadge(request.status), true)}
-      ${detailCard("Decision presupuestal", renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason), true)}
-      ${detailCard("Motivo bloqueo", request.budget_block_reason || "No aplica")}
-      ${detailCard("Descripcion", request.description || "Sin descripcion", false, "full")}
-      ${detailCard("Notas", request.notes || "Sin notas", false, "full")}
+    ${detailNotice}
+
+    <div style="font-size:28px;font-weight:700;color:var(--accent-text);font-variant-numeric:tabular-nums;padding:4px 0">
+      ${escapeHtml(formatCurrency(request.amount_requested, request.currency || "MXN"))}
     </div>
 
-    <div class="budget-strip">
-      ${detailCard("Disponible antes", formatCurrency(request.budget_available_before, request.currency || "MXN"))}
-      ${detailCard("Disponible despues", formatCurrency(request.budget_available_after, request.currency || "MXN"))}
-      ${detailCard("Faltante", formatCurrency(request.budget_shortfall, request.currency || "MXN"))}
-    </div>
+    ${Components.refGrid([
+      { label: "Proveedor",      value: escapeHtml(proveedorAlias(proveedor)) },
+      { label: "Empresa",        value: escapeHtml(companyName(company)) },
+      { label: "Centro de costo",value: escapeHtml(costCenterName(center)), muted: true },
+      { label: "Mes presupuestal",value: escapeHtml(formatMonth(request.budget_month)), muted: true },
+      { label: "Partida",        value: escapeHtml(budgetCategoryLabel(category)), muted: true, full: true },
+    ])}
+
+    ${Components.dataSection([
+      { label: "Estatus",              value: renderStatusBadge(request.status) },
+      { label: "Validación presupuestal", value: renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason) },
+      { label: "Descripción",          value: escapeHtml(request.description || "Sin descripción"), muted: true },
+      ...(request.notes ? [{ label: "Notas", value: escapeHtml(request.notes), muted: true }] : []),
+    ])}
+
+    ${Components.dataSection([
+      { label: "Disponible antes",  value: escapeHtml(formatCurrency(request.budget_available_before, request.currency || "MXN")), muted: true },
+      { label: "Disponible después", value: escapeHtml(formatCurrency(request.budget_available_after, request.currency || "MXN")), muted: true },
+      { label: "Faltante",          value: escapeHtml(formatCurrency(request.budget_shortfall, request.currency || "MXN")), muted: true },
+    ], "Impacto presupuestal")}
 
     ${renderDecisionPanel(request)}
 
     ${renderPaymentInfoSection(request)}
 
-    <div class="detail-card full" style="margin-top: 10px;">
-      <details>
-        <summary>Ver resultado tecnico de presupuesto</summary>
-        <pre>${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
-      </details>
-    </div>`;
+    <details style="font-size:11px;color:var(--text-3);margin-top:8px">
+      <summary style="cursor:pointer;padding:4px 0">Ver resultado técnico de presupuesto</summary>
+      <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
+    </details>
+
+    ${window.FluxAuth?.canApprove?.() ? `
+    <div id="detailIncidenciaSection" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">Incidencia asociada</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center">
+        <select id="detailIncidenciaSelect" class="form-control" style="height:36px">
+          <option value="">Cargando incidencias…</option>
+        </select>
+        <button type="button" id="detailIncidenciaBtn" class="primary-btn" style="height:36px;white-space:nowrap">Asociar</button>
+      </div>
+      <div id="detailIncidenciaHint" style="font-size:11px;color:var(--text-3)">Cargando…</div>
+    </div>` : ""}`;
+
+  const isTerminal = ["paid", "cancelled", "rejected", "approved", "scheduled"].includes(request.status);
+  const canEdit = window.FluxAuth?.canApprove?.() && !isTerminal;
+  if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
 
   loadApprovalHistory(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
+  if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
 }
 
 window.openRequestDetail = openRequestDetail;
 
+async function loadDetailIncidencias(request) {
+  const select = document.getElementById("detailIncidenciaSelect");
+  const hint = document.getElementById("detailIncidenciaHint");
+  const btn = document.getElementById("detailIncidenciaBtn");
+  if (!select || !hint || !btn) return;
+
+  // Detect current linked incidencia from notes
+  const currentMarker = (request.notes || "").match(/\[Visita\/incidencia asociada: ([^\s\]]+)/);
+  const currentIncidenciaId = currentMarker ? currentMarker[1] : null;
+
+  try {
+    const [{ data: incidents, error: ie }, { data: members, error: me }] = await Promise.all([
+      supabaseClient.from("incident_charges").select("id,member_id,external_name,description,amount,incident_date,status").order("incident_date", { ascending: false }).limit(100),
+      supabaseClient.from("members").select("id,full_name").eq("active", true),
+    ]);
+    if (ie) throw ie;
+
+    const membersById = new Map((members || []).map(m => [m.id, m.full_name]));
+
+    const label = inc => {
+      const receiver = inc.member_id ? (membersById.get(inc.member_id) || "Socio") : (inc.external_name || "Externo");
+      const statusMap = { open: "Abierta", invoiced: "Facturada", paid: "Pagada", cancelled: "Cancelada" };
+      return [formatDate(inc.incident_date), receiver, inc.description || "Sin descripcion", formatCurrency(inc.amount, "MXN"), statusMap[inc.status] || inc.status].filter(Boolean).join(" | ");
+    };
+
+    select.innerHTML = `<option value="">Sin incidencia asociada</option>` +
+      (incidents || []).map(inc => `<option value="${escapeHtml(inc.id)}">${escapeHtml(label(inc))}</option>`).join("");
+
+    if (currentIncidenciaId) {
+      select.value = currentIncidenciaId;
+      hint.textContent = "Incidencia actualmente vinculada. Puedes cambiarla o quitarla.";
+    } else {
+      hint.textContent = "Asocia una incidencia de Ingresos a esta solicitud. Se guardará en notas.";
+    }
+
+    btn.onclick = async () => {
+      const incId = select.value;
+      const inc = (incidents || []).find(i => i.id === incId) || null;
+      const cleanNotes = (request.notes || "").replace(/\n?\[Visita\/incidencia asociada:[^\]]+\]/g, "").trim();
+      const marker = inc ? `[Visita/incidencia asociada: ${inc.id} - ${label(inc)}]` : "";
+      const newNotes = [cleanNotes, marker].filter(Boolean).join("\n") || null;
+
+      btn.disabled = true;
+      btn.textContent = "Guardando…";
+      const { error } = await supabaseClient.from("payment_requests").update({ notes: newNotes, updated_at: new Date().toISOString() }).eq("id", request.id);
+      btn.disabled = false;
+      btn.textContent = "Asociar";
+      if (error) { showToast("Error", error.message, "error"); return; }
+      showToast("Incidencia actualizada", inc ? "Incidencia vinculada correctamente." : "Incidencia desvinculada.", "success");
+      await loadPaymentRequests();
+      openRequestDetail(request.id);
+    };
+  } catch (err) {
+    select.innerHTML = `<option value="">No se pudieron cargar incidencias</option>`;
+    hint.textContent = err.message || "Error al cargar incidencias.";
+  }
+}
+
 function closeRequestDetail() {
   if (dom.detailDialog.open) dom.detailDialog.close();
   currentDetailRequestId = null;
+}
+
+// ── Edit modal ──────────────────────────────────────────────────────────────
+
+async function openEditRequest(id) {
+  const request = paymentRequests.find(r => r.id === id);
+  if (!request) return;
+
+  dom.editSubtitle.textContent = `${request.request_number || "Sin folio"} · editando todos los campos`;
+
+  dom.editCompanyId.innerHTML = companies.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(companyName(c))}</option>`).join("");
+  dom.editCostCenterId.innerHTML = costCenters.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(costCenterName(c))}</option>`).join("");
+
+  dom.editCompanyId.value = request.company_id || "";
+  dom.editCostCenterId.value = request.cost_center_id || "";
+  dom.editBudgetMonth.value = request.budget_month ? request.budget_month.slice(0, 7) : "";
+
+  await loadEditBudgetCategories();
+  dom.editBudgetCategoryId.value = request.budget_category_id || "";
+
+  const proveedor = proveedorById(request.proveedor_id);
+  dom.editProviderSearch.value = proveedor ? proveedorLabel(proveedor) : "";
+  dom.editProveedorId.value = request.proveedor_id || "";
+
+  dom.editAmountRequested.value = request.amount_requested || "";
+  dom.editCurrency.value = request.currency || "MXN";
+  dom.editExchangeRate.value = request.exchange_rate || "1";
+  dom.editIsExtraordinaryAdjustment.checked = !!request.is_extraordinary_adjustment;
+  dom.editDescription.value = request.description || "";
+  dom.editNotes.value = request.notes || "";
+
+  dom.submitEditBtn.disabled = false;
+  dom.submitEditBtn.textContent = "Guardar cambios";
+
+  if (!dom.editDialog.open) dom.editDialog.showModal();
+}
+
+function closeEditModal() {
+  if (dom.editDialog.open) dom.editDialog.close();
+}
+
+async function handleEditScopeChange() {
+  dom.editBudgetCategoryId.value = "";
+  await loadEditBudgetCategories();
+}
+
+async function loadEditBudgetCategories() {
+  const companyId = dom.editCompanyId.value;
+  const costCenterId = dom.editCostCenterId.value;
+  const budgetMonth = monthInputToDate(dom.editBudgetMonth.value);
+
+  if (!companyId || !costCenterId || !budgetMonth) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Selecciona empresa, centro de costo y mes</option>`;
+    dom.editBudgetCategoryHelp.textContent = "Selecciona empresa, centro de costo y mes para cargar partidas disponibles.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.disabled = true;
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Cargando partidas...</option>`;
+
+  const { data, error } = await supabaseClient
+    .from("budget_availability")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("cost_center_id", costCenterId)
+    .eq("budget_month", budgetMonth);
+
+  dom.editBudgetCategoryId.disabled = false;
+
+  if (error) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">No se pudieron cargar partidas</option>`;
+    dom.editBudgetCategoryHelp.textContent = friendlyError(error, "budget_availability");
+    return;
+  }
+
+  const rows = dedupeAvailabilityRows(data || []).filter(r => r.budget_category_id).sort((a, b) => {
+    return budgetCategoryLabel(budgetCategoryById(a.budget_category_id)).localeCompare(budgetCategoryLabel(budgetCategoryById(b.budget_category_id)), "es");
+  });
+
+  if (!rows.length) {
+    dom.editBudgetCategoryId.innerHTML = `<option value="">Sin partidas disponibles para esta combinación</option>`;
+    dom.editBudgetCategoryHelp.textContent = "No hay partidas activas para empresa, centro de costo y mes seleccionados.";
+    return;
+  }
+
+  dom.editBudgetCategoryId.innerHTML = `<option value="">Seleccionar partida presupuestal</option>` +
+    rows.map(row => {
+      const cat = budgetCategoryById(row.budget_category_id);
+      return `<option value="${escapeHtml(row.budget_category_id)}">${escapeHtml(budgetCategoryAvailabilityLabel(cat, row))}</option>`;
+    }).join("");
+  dom.editBudgetCategoryHelp.textContent = `${rows.length} partidas disponibles para esta combinación.`;
+}
+
+function initEditProviderCombo() {
+  const input = dom.editProviderSearch;
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!input || !dropdown) return;
+
+  let activeIndex = -1;
+
+  input.addEventListener("input", () => {
+    activeIndex = -1;
+    renderEditComboList(input.value);
+    dropdown.classList.remove("hidden");
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = dropdown.querySelectorAll("li:not(.combo-empty)");
+    if (e.key === "ArrowDown") { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, -1); highlightEditCombo(items, activeIndex); }
+    else if (e.key === "Enter") { e.preventDefault(); if (activeIndex >= 0 && items[activeIndex]) items[activeIndex].click(); }
+    else if (e.key === "Escape") dropdown.classList.add("hidden");
+  });
+
+  input.addEventListener("focus", () => { renderEditComboList(input.value); dropdown.classList.remove("hidden"); });
+
+  document.addEventListener("click", e => {
+    if (!document.getElementById("editProviderCombo")?.contains(e.target)) dropdown.classList.add("hidden");
+  });
+}
+
+function renderEditComboList(query = "") {
+  const dropdown = document.getElementById("editProviderDropdown");
+  if (!dropdown) return;
+  const nq = normalize(query);
+  const filtered = proveedores.filter(p => {
+    const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
+    return !nq || text.includes(nq);
+  }).slice(0, 60);
+
+  if (!filtered.length) { dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`; return; }
+  dropdown.innerHTML = filtered.map(p => `
+    <li role="option" data-id="${escapeHtml(p.id)}" data-label="${escapeHtml(proveedorLabel(p))}">
+      <span class="combo-main">${escapeHtml(p.alias || p.nombre_completo || "")}</span>
+      <span class="combo-sub">${escapeHtml(p.rfc || "")}${p.banco ? " · " + escapeHtml(p.banco) : ""}</span>
+    </li>`).join("");
+  dropdown.querySelectorAll("li[data-id]").forEach(li => {
+    li.addEventListener("mousedown", e => { e.preventDefault(); dom.editProviderSearch.value = li.dataset.label; dom.editProveedorId.value = li.dataset.id; dropdown.classList.add("hidden"); });
+  });
+}
+
+function highlightEditCombo(items, index) {
+  items.forEach((li, i) => li.classList.toggle("combo-active", i === index));
+  if (index >= 0) items[index]?.scrollIntoView({ block: "nearest" });
+}
+
+async function submitEditRequest(event) {
+  event.preventDefault();
+  const id = currentDetailRequestId;
+  if (!id) return;
+
+  if (!dom.editProveedorId.value) { showToast("Revisa la solicitud", "Selecciona un proveedor.", "warning"); return; }
+  if (!dom.editBudgetCategoryId.value) { showToast("Revisa la solicitud", "Selecciona una partida presupuestal.", "warning"); return; }
+
+  dom.submitEditBtn.disabled = true;
+  dom.submitEditBtn.textContent = "Guardando...";
+
+  const payload = {
+    proveedor_id: dom.editProveedorId.value,
+    company_id: dom.editCompanyId.value,
+    cost_center_id: dom.editCostCenterId.value,
+    budget_category_id: dom.editBudgetCategoryId.value,
+    budget_month: monthInputToDate(dom.editBudgetMonth.value),
+    amount_requested: numberValue(dom.editAmountRequested.value),
+    currency: dom.editCurrency.value,
+    exchange_rate: numberValue(dom.editExchangeRate.value) || 1,
+    is_extraordinary_adjustment: dom.editIsExtraordinaryAdjustment.checked,
+    description: dom.editDescription.value.trim(),
+    notes: dom.editNotes.value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    const { error } = await supabaseClient.from("payment_requests").update(payload).eq("id", id);
+    if (error) throw error;
+    showToast("Solicitud actualizada", "Los cambios se guardaron correctamente.", "success");
+    closeEditModal();
+    await loadPaymentRequests();
+    openRequestDetail(id);
+  } catch (err) {
+    showToast("Error al guardar", err.message || "No se pudo actualizar la solicitud.", "error");
+    dom.submitEditBtn.disabled = false;
+    dom.submitEditBtn.textContent = "Guardar cambios";
+  }
 }
 
 function renderPaymentInfoSection(request) {
@@ -993,21 +1308,24 @@ function decisionActionLabel(action) {
 }
 
 function renderBudgetDecisionBadge(decision, reason = "") {
-  if (decision === "aprobable") return `<span class="badge badge-good">Aprobable</span>`;
-  if (decision === "bloqueado") {
-    const label = reason ? `Excepción: ${reason}` : "Excepción";
-    return `<span class="badge badge-blocked">${escapeHtml(label)}</span>`;
-  }
-  return `<span class="badge badge-neutral">${escapeHtml(decision || "Sin validar")}</span>`;
+  if (decision === "aprobable") return Components.badge("Aprobable", "success");
+  if (decision === "bloqueado") return Components.badge(reason ? `Excepción: ${escapeHtml(reason)}` : "Excepción", "violet");
+  return Components.badge(decision ? escapeHtml(decision) : "Sin validar", "neutral");
 }
 
 function renderStatusBadge(status) {
-  const normalized = status || "sin_estatus";
-  if (normalized === "submitted") return `<span class="badge badge-submitted">Submitted</span>`;
-  if (normalized === "paid") return `<span class="badge badge-good">paid</span>`;
-  if (normalized === "rejected" || normalized === "cancelled") return `<span class="badge badge-blocked">${escapeHtml(normalized)}</span>`;
-  if (normalized === "approved" || normalized === "finance_validation" || normalized === "scheduled") return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
-  return `<span class="badge badge-neutral">${escapeHtml(normalized)}</span>`;
+  const map = {
+    submitted:          ["Enviada",      "info"],
+    approved:           ["Aprobada",     "success"],
+    paid:               ["Pagado",       "success"],
+    rejected:           ["Rechazada",    "danger"],
+    cancelled:          ["Cancelada",    "warning"],
+    changes_requested:  ["Con corrección","warning"],
+    finance_validation: ["En revisión",  "info"],
+    scheduled:          ["Programado",   "info"],
+  };
+  const [label, variant] = map[status] ?? [escapeHtml(status || "Sin estatus"), "neutral"];
+  return Components.badge(label, variant);
 }
 
 function updateSummaryPanel() {
@@ -1254,11 +1572,8 @@ function hideMessage() {
 }
 
 function showToast(title, message, type = "success") {
-  const toast = document.createElement("div");
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
-  dom.toastStack.appendChild(toast);
-  window.setTimeout(() => toast.remove(), 6200);
+  const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" };
+  Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 });
 }
 
 function friendlyError(error, operation = "") {

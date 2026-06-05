@@ -136,6 +136,7 @@
   }
 
   function prepareProviderSelector() {
+    if (document.getElementById("providerDropdown")) return
     const searchLabel = labelForControl("providerSearch")
     const selectLabel = labelForControl("proveedorId")
     const quickLink = document.getElementById("addProviderQuickLink")
@@ -220,11 +221,13 @@
   function bindEvents() {
     document.getElementById("newProviderFromRequestBtn")?.addEventListener("click", openQuickProviderModal)
     document.getElementById("requestVisitIncidentId")?.addEventListener("change", renderVisitIncidentSummaryFromSelection)
-    dom.proveedorId?.addEventListener("change", renderProviderSummary)
-    dom.providerSearch?.addEventListener("input", scheduleProviderResultsOpen)
-    dom.providerSearch?.addEventListener("focus", scheduleProviderResultsOpen)
-    dom.proveedorId?.addEventListener("change", syncProviderSearchFromSelection)
-    dom.proveedorId?.addEventListener("change", collapseProviderResults)
+    if (!document.getElementById("providerDropdown")) {
+      dom.proveedorId?.addEventListener("change", renderProviderSummary)
+      dom.providerSearch?.addEventListener("input", scheduleProviderResultsOpen)
+      dom.providerSearch?.addEventListener("focus", scheduleProviderResultsOpen)
+      dom.proveedorId?.addEventListener("change", syncProviderSearchFromSelection)
+      dom.proveedorId?.addEventListener("change", collapseProviderResults)
+    }
     document.getElementById("closeRequestModalBtn")?.addEventListener("click", collapseProviderResults)
     document.getElementById("cancelRequestBtn")?.addEventListener("click", collapseProviderResults)
     dom.requestForm?.addEventListener("submit", () => {
