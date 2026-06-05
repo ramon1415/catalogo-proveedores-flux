@@ -17,6 +17,9 @@ const state = {
   companies: [], costCenters: [], categories: [],
 }
 const d = {}
+let paymentFileUpload = null
+let invoiceXmlUpload = null
+let invoicePdfUpload = null
 const $ = (id) => document.getElementById(id)
 
 window.addEventListener("DOMContentLoaded", init)
@@ -55,7 +58,7 @@ function cacheDom() {
     "periodDialog", "periodForm", "periodYear", "periodName", "periodCutoffDate", "periodTotalBudget", "periodStatus", "savePeriodBtn",
     "paymentDialog", "paymentForm", "paymentDialogSubtitle", "paymentAmount", "paymentDate", "paymentBankReference", "paymentMethod", "paymentNotes", "savePaymentBtn",
     "incidentDialog", "incidentForm", "incidentReceiverType", "incidentMemberLabel", "incidentMemberId", "incidentExternalNameLabel", "incidentExternalName", "incidentExternalRfcLabel", "incidentExternalRfc", "incidentReferredByMemberId", "incidentCompanyId", "incidentCostCenterId", "incidentBudgetCategoryId", "incidentAmount", "incidentDate", "incidentDescription", "incidentNotes", "saveIncidentBtn",
-    "invoiceDialog", "invoiceForm", "invoiceDialogTitle", "invoiceDialogSubtitle", "invoiceFiscalUuid", "invoiceSeriesFolio", "invoiceAmount", "invoiceIssueDate", "invoiceXmlPath", "invoicePdfPath", "saveInvoiceBtn",
+    "invoiceDialog", "invoiceForm", "invoiceDialogTitle", "invoiceDialogSubtitle", "invoiceFiscalUuid", "invoiceSeriesFolio", "invoiceAmount", "invoiceIssueDate", "saveInvoiceBtn",
     "invoicePayDialog", "invoicePayForm", "invoicePayDate", "invoicePayMethod", "invoicePayReference", "invoicePayNotes", "saveInvoicePayBtn",
     "statementDialog", "statementTitle", "statementContent",
   ].forEach((id) => (d[id] = $(id)))
@@ -103,6 +106,10 @@ function bindEvents() {
   d.incidentForm?.addEventListener("submit", saveIncident)
   d.invoiceForm?.addEventListener("submit", saveInvoice)
   d.invoicePayForm?.addEventListener("submit", saveInvoicePay)
+
+  paymentFileUpload = window.FluxUpload?.initFileUpload("payment")
+  invoiceXmlUpload  = window.FluxUpload?.initFileUpload("invoiceXml")
+  invoicePdfUpload  = window.FluxUpload?.initFileUpload("invoicePdf")
 
   d.membersTableBody?.addEventListener("click", onMembersAction)
   d.periodsTableBody?.addEventListener("click", onPeriodsAction)
@@ -386,6 +393,7 @@ function openPayment(chargeId) {
   if (!c) return toast("Cuota no encontrada", "No se encontro la cuota.", "danger")
   state.paymentChargeId = chargeId
   d.paymentForm.reset()
+  paymentFileUpload?.reset()
   d.paymentAmount.value = num(c.pending_amount).toFixed(2)
   d.paymentDate.value = today()
   d.paymentMethod.value = "transfer"
@@ -396,6 +404,8 @@ function openPayment(chargeId) {
 function openInvoice(type, id) {
   state.invoiceContext = { type, id }
   d.invoiceForm.reset()
+  invoiceXmlUpload?.reset()
+  invoicePdfUpload?.reset()
   d.invoiceIssueDate.value = today()
   if (type === "maintenance_fee") {
     const c = state.charges.find((x) => x.id === id)
@@ -512,6 +522,12 @@ async function savePayment(e) {
   await runButton(d.savePaymentBtn, "Registrando...", "Registrar cobro", async () => {
     const { data, error } = await supabaseClient.rpc("register_maintenance_fee_payment", { p_charge_id: state.paymentChargeId, p_amount: amount, p_payment_date: payDate, p_bank_reference: clean(d.paymentBankReference.value) || null, p_payment_method: d.paymentMethod.value || "transfer", p_registered_by: state.profile.id, p_notes: clean(d.paymentNotes.value) || null })
     if (error) throw error
+    const paymentId = data?.payment_id || data?.id || null
+    const file = paymentFileUpload?.getFile()
+    if (file && paymentId) {
+      const storagePath = await window.FluxUpload.uploadReceipt(file, `cobros/${state.paymentChargeId}`)
+      await supabaseClient.from("maintenance_fee_payments").update({ receipt_storage_path: storagePath }).eq("id", paymentId)
+    }
     closeDialog("paymentDialog"); toast("Cobro registrado", data?.message || "Cobro registrado correctamente."); await loadData()
   })
 }
@@ -539,7 +555,12 @@ async function saveInvoice(e) {
   if (amount < 0) return toast("Monto invalido", "El monto no puede ser negativo.", "warning")
   if (!issue) return toast("Fecha requerida", "Captura fecha de emision.", "warning")
   await runButton(d.saveInvoiceBtn, "Registrando...", "Registrar factura", async () => {
-    const { data, error } = await supabaseClient.rpc("create_invoice_record", { p_invoice_type: state.invoiceContext.type, p_reference_id: state.invoiceContext.id, p_fiscal_uuid: clean(d.invoiceFiscalUuid.value) || null, p_series_folio: clean(d.invoiceSeriesFolio.value) || null, p_amount: amount, p_issue_date: issue, p_storage_path_xml: clean(d.invoiceXmlPath.value) || null, p_storage_path_pdf: clean(d.invoicePdfPath.value) || null })
+    const folder = `facturas/${state.invoiceContext.type}/${state.invoiceContext.id}`
+    const [xmlPath, pdfPath] = await Promise.all([
+      window.FluxUpload?.uploadReceipt(invoiceXmlUpload?.getFile(), folder),
+      window.FluxUpload?.uploadReceipt(invoicePdfUpload?.getFile(), folder),
+    ])
+    const { data, error } = await supabaseClient.rpc("create_invoice_record", { p_invoice_type: state.invoiceContext.type, p_reference_id: state.invoiceContext.id, p_fiscal_uuid: clean(d.invoiceFiscalUuid.value) || null, p_series_folio: clean(d.invoiceSeriesFolio.value) || null, p_amount: amount, p_issue_date: issue, p_storage_path_xml: xmlPath || null, p_storage_path_pdf: pdfPath || null })
     if (error) throw error
     closeDialog("invoiceDialog"); toast("Factura registrada", data?.message || "Factura registrada."); await loadData()
   })

@@ -138,14 +138,15 @@
           <label>Fecha ticket *<input id="ticketDate" type="date" required></label>
           <label>Proveedor<select id="ticketProviderId"><option value="">Sin proveedor</option></select></label>
           <label>Partida presupuestal<select id="ticketBudgetCategoryId"><option value="">Sin partida</option></select></label>
-        </div>
-        <div class="notice-v2 warning">
-          <span class="notice-icon">·</span>
-          <span class="notice-text">
-            <span class="notice-title">Archivo pendiente</span>
-            <span class="notice-sep">—</span>
-            <span class="notice-desc">La carga documental se implementara en la siguiente fase.</span>
-          </span>
+          <label class="full-row">Comprobante (foto o PDF)
+            <div class="file-upload-area" id="ticketFileArea">
+              <input type="file" id="ticketFile" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none">
+              <button type="button" class="file-upload-btn" id="ticketFileBtn">Seleccionar archivo</button>
+              <span class="file-upload-name" id="ticketFileName">Sin archivo</span>
+              <button type="button" class="file-upload-clear hidden" id="ticketFileClear" aria-label="Quitar archivo">✕</button>
+            </div>
+            <span class="file-hint" id="ticketFileHint">JPG, PNG, WEBP o PDF · máx. 10 MB</span>
+          </label>
         </div>
       </div>
       <div class="modal-actions">
@@ -211,6 +212,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script src="./components.js"></script>
+  <script src="./upload_helper.js"></script>
   <script src="./efectivo.js"></script>
 </body>
 </html>

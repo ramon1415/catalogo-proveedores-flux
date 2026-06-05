@@ -288,6 +288,15 @@
           <label>Referencia bancaria<input id="paymentBankReference"></label>
           <label>Metodo de pago<select id="paymentMethod"><option value="transfer">Transferencia</option><option value="cash">Efectivo</option><option value="check">Cheque</option><option value="card">Tarjeta</option><option value="other">Otro</option></select></label>
           <label class="full-row">Notas<textarea id="paymentNotes"></textarea></label>
+          <label class="full-row">Comprobante (foto o PDF)
+            <div class="file-upload-area" id="paymentFileArea">
+              <input type="file" id="paymentFile" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none">
+              <button type="button" class="file-upload-btn" id="paymentFileBtn">Seleccionar archivo</button>
+              <span class="file-upload-name" id="paymentFileName">Sin archivo</span>
+              <button type="button" class="file-upload-clear hidden" id="paymentFileClear" aria-label="Quitar archivo">✕</button>
+            </div>
+            <span class="file-hint" id="paymentFileHint">JPG, PNG, WEBP o PDF · máx. 10 MB</span>
+          </label>
         </div>
       </div>
       <div class="modal-actions">
@@ -340,8 +349,22 @@
           <label>Serie/Folio<input id="invoiceSeriesFolio"></label>
           <label>Monto *<input id="invoiceAmount" type="number" min="0" step="0.01" required></label>
           <label>Fecha emision *<input id="invoiceIssueDate" type="date" required></label>
-          <label>Ruta XML<input id="invoiceXmlPath" placeholder="Pendiente Storage"></label>
-          <label>Ruta PDF<input id="invoicePdfPath" placeholder="Pendiente Storage"></label>
+          <label>XML (CFDI)
+            <div class="file-upload-area" id="invoiceXmlArea">
+              <input type="file" id="invoiceXmlFile" accept="text/xml,application/xml,.xml" style="display:none">
+              <button type="button" class="file-upload-btn" id="invoiceXmlBtn">Seleccionar XML</button>
+              <span class="file-upload-name" id="invoiceXmlName">Sin archivo</span>
+              <button type="button" class="file-upload-clear hidden" id="invoiceXmlClear" aria-label="Quitar">✕</button>
+            </div>
+          </label>
+          <label>PDF
+            <div class="file-upload-area" id="invoicePdfArea">
+              <input type="file" id="invoicePdfFile" accept="application/pdf,.pdf" style="display:none">
+              <button type="button" class="file-upload-btn" id="invoicePdfBtn">Seleccionar PDF</button>
+              <span class="file-upload-name" id="invoicePdfName">Sin archivo</span>
+              <button type="button" class="file-upload-clear hidden" id="invoicePdfClear" aria-label="Quitar">✕</button>
+            </div>
+          </label>
         </div>
         <div class="notice-v2 info" style="margin-top:12px">
           <span class="notice-icon">·</span>
@@ -400,6 +423,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script src="./components.js"></script>
+  <script src="./upload_helper.js"></script>
   <script src="./ingresos.js?v=20260604-ux2"></script>
 </body>
 </html>

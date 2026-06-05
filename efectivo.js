@@ -18,6 +18,7 @@ let budgetCategories = []
 let activeFundId = null
 let activeReconciliationId = null
 let activeReviewAction = null
+let ticketFileUpload = null
 
 document.addEventListener("DOMContentLoaded", initCashPage)
 
@@ -63,6 +64,14 @@ function bindEvents() {
   dom.closeDetailModalBtn?.addEventListener("click", closeFundDetail)
   dom.closeDetailFooterBtn?.addEventListener("click", closeFundDetail)
   dom.detailContent?.addEventListener("click", handleDetailAction)
+  dom.detailContent?.addEventListener("click", async (e) => {
+    const link = e.target.closest(".receipt-link")
+    if (!link) return
+    e.preventDefault()
+    const url = await window.FluxUpload?.getReceiptUrl(link.dataset.path)
+    if (url) window.open(url, "_blank")
+    else showToast("No disponible", "No se pudo generar el enlace al comprobante.", "danger")
+  })
   dom.closeTicketModalBtn?.addEventListener("click", closeTicketModal)
   dom.cancelTicketBtn?.addEventListener("click", closeTicketModal)
   dom.ticketForm?.addEventListener("submit", saveTicket)
@@ -72,6 +81,7 @@ function bindEvents() {
   dom.submitReconciliationForm?.addEventListener("submit", submitReconciliation)
   dom.closeReviewModalBtn?.addEventListener("click", closeReviewModal)
   dom.cancelReviewBtn?.addEventListener("click", closeReviewModal)
+  ticketFileUpload = window.FluxUpload?.initFileUpload("ticket")
   dom.reviewForm?.addEventListener("submit", reviewReconciliation)
 }
 
@@ -265,7 +275,7 @@ function renderTicketsSection(reconciliation) {
   const rows = itemsForReconciliation(reconciliation.id)
   const tableRows = rows.length
     ? rows.map((item) => `<tr>
-        <td><span class="cell-main">${escapeHtml(item.concept || "Sin concepto")}</span><span class="cell-sub">${item.storage_path ? escapeHtml(item.storage_path) : "Archivo pendiente"}</span></td>
+        <td><span class="cell-main">${escapeHtml(item.concept || "Sin concepto")}</span><span class="cell-sub">${item.storage_path ? `<a href="#" class="receipt-link" data-path="${escapeHtml(item.storage_path)}" style="color:var(--accent-text)">Ver comprobante</a>` : "Sin comprobante"}</span></td>
         <td>${escapeHtml(providerName(item.proveedor_id))}</td>
         <td>${escapeHtml(budgetCategoryName(item.budget_category_id))}</td>
         <td><span class="cell-main">${escapeHtml(formatCurrency(item.amount))}</span></td>
@@ -305,8 +315,8 @@ async function createReconciliation(fundId) {
   } catch (error) { showToast("No se pudo crear comprobacion", friendlyRpcError(error), "danger") }
 }
 
-function openTicketModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.ticketForm.reset(); dom.ticketDate.value = todayValue(); dom.ticketDialog.showModal() }
-function closeTicketModal() { activeReconciliationId = null; dom.ticketForm.reset(); if (dom.ticketDialog.open) dom.ticketDialog.close() }
+function openTicketModal(reconciliationId) { activeReconciliationId = reconciliationId; dom.ticketForm.reset(); ticketFileUpload?.reset(); dom.ticketDate.value = todayValue(); dom.ticketDialog.showModal() }
+function closeTicketModal() { activeReconciliationId = null; dom.ticketForm.reset(); ticketFileUpload?.reset(); if (dom.ticketDialog.open) dom.ticketDialog.close() }
 
 async function saveTicket(event) {
   event.preventDefault()
@@ -316,9 +326,19 @@ async function saveTicket(event) {
   if (payload.amount <= 0) return showToast("Monto requerido", "Captura un monto mayor a cero.", "danger")
   if (!payload.ticket_date) return showToast("Fecha requerida", "Captura la fecha del ticket.", "danger")
   setButtonLoading(dom.submitTicketBtn, true, "Guardando...")
-  const { error } = await supabaseClient.from("cash_reconciliation_items").insert(payload)
+  try {
+    const file = ticketFileUpload?.getFile()
+    if (file) {
+      const folder = `tickets/${activeReconciliationId}`
+      payload.storage_path = await window.FluxUpload.uploadReceipt(file, folder)
+    }
+    const { error } = await supabaseClient.from("cash_reconciliation_items").insert(payload)
+    if (error) throw error
+  } catch (err) {
+    setButtonLoading(dom.submitTicketBtn, false, "Guardar ticket")
+    return showToast("No se pudo guardar ticket", err.message || rlsHint("cash_reconciliation_items", "insert", err), "danger")
+  }
   setButtonLoading(dom.submitTicketBtn, false, "Guardar ticket")
-  if (error) return showToast("No se pudo guardar ticket", rlsHint("cash_reconciliation_items", "insert", error), "danger")
   const fundId = activeFundId
   closeTicketModal()
   showToast("Ticket agregado", "Ticket agregado correctamente.", "success")
