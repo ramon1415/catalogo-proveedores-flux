@@ -638,7 +638,7 @@ function openExport() {
     ["Sheet existente", close.sheet_url],
     ["Reporte Slides",  close.slides_url],
     ["PDF existente",   close.pdf_url],
-  ].filter(([, url]) => Boolean(url))
+  ].filter(([, url]) => isRealUrl(url))
   const linksEl = document.getElementById("exportLinks")
   if (linksEl) {
     linksEl.innerHTML = links.length
@@ -724,9 +724,14 @@ function unique(arr)  { return [...new Set(arr.filter(Boolean).map(String))].sor
 function norm(v)      { return String(v || "").trim().toLowerCase().replace(/\s+/g, "-") }
 function safe(v, fb = "—") { return esc(v === null || v === undefined || v === "" ? fb : String(v)) }
 function esc(v)       { return String(v ?? "").replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])) }
+function isRealUrl(url) {
+  if (!url || !/^https?:\/\//i.test(url.trim())) return false;
+  // Filtrar URLs de ejemplo/placeholder que solo generarían 404
+  if (/example[-_]/i.test(url) || /\/example$/i.test(url)) return false;
+  return true;
+}
 function linkOrDash(url) {
-  const valid = url && /^https?:\/\//i.test(url.trim());
-  return valid ? `<a href="${esc(url)}" target="_blank" rel="noopener">Abrir</a>` : "—";
+  return isRealUrl(url) ? `<a href="${esc(url)}" target="_blank" rel="noopener">Abrir</a>` : "—";
 }
 
 function fmtDateTime(v) {
