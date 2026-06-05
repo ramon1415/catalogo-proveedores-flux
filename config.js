@@ -15,10 +15,10 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     PENDING: "pending",
   }
 
-  const SYSADMIN_ROLES = ["sysadmin", "system_admin", "admin"]
-  const ADMIN_ROLES = ["finance", "finanzas", "treasury", "tesoreria"]
+  const SYSADMIN_ROLES = ["sysadmin", "system_admin", "admin", "superadmin"]
+  const ADMIN_ROLES = ["finance", "finanzas", "treasury", "tesoreria", "administracion"]
   const DIRECTION_ROLES = ["approver_2", "aprobador_2", "direccion", "director"]
-  const OPERATION_ROLES = ["solicitante", "operator", "default"]
+  const OPERATION_ROLES = ["solicitante", "operator", "default", "seller", "celebraciones", "producciones", "planner"]
 
   const modules = [
     { key: "requests", section: "Operacion", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION] },

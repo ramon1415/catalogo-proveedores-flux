@@ -29,6 +29,11 @@ function initFileUpload(id) {
   fileInput.addEventListener("change", () => {
     const file = fileInput.files[0] || null;
     if (!file) return;
+    if (!UPLOAD_ACCEPTED.includes(file.type)) {
+      if (hint) { hint.textContent = "Tipo de archivo no permitido. Usa JPG, PNG, WEBP, PDF o XML."; hint.style.color = "var(--ruby)"; }
+      fileInput.value = "";
+      return;
+    }
     if (file.size > UPLOAD_MAX_BYTES) {
       if (hint) { hint.textContent = "El archivo supera 10 MB. Elige uno más pequeño."; hint.style.color = "var(--ruby)"; }
       fileInput.value = "";
