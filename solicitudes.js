@@ -807,7 +807,19 @@ function openRequestDetail(id) {
     <details style="font-size:11px;color:var(--text-3);margin-top:8px">
       <summary style="cursor:pointer;padding:4px 0">Ver resultado técnico de presupuesto</summary>
       <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
-    </details>`;
+    </details>
+
+    ${window.FluxAuth?.canApprove?.() ? `
+    <div id="detailIncidenciaSection" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">Incidencia asociada</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center">
+        <select id="detailIncidenciaSelect" class="form-control" style="height:36px">
+          <option value="">Cargando incidencias…</option>
+        </select>
+        <button type="button" id="detailIncidenciaBtn" class="primary-btn" style="height:36px;white-space:nowrap">Asociar</button>
+      </div>
+      <div id="detailIncidenciaHint" style="font-size:11px;color:var(--text-3)">Cargando…</div>
+    </div>` : ""}`;
 
   const canEdit = window.FluxAuth?.canApprove?.() && !isPaid;
   if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
@@ -815,9 +827,68 @@ function openRequestDetail(id) {
   loadApprovalHistory(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
+  if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
 }
 
 window.openRequestDetail = openRequestDetail;
+
+async function loadDetailIncidencias(request) {
+  const select = document.getElementById("detailIncidenciaSelect");
+  const hint = document.getElementById("detailIncidenciaHint");
+  const btn = document.getElementById("detailIncidenciaBtn");
+  if (!select || !hint || !btn) return;
+
+  // Detect current linked incidencia from notes
+  const currentMarker = (request.notes || "").match(/\[Visita\/incidencia asociada: ([^\s\]]+)/);
+  const currentIncidenciaId = currentMarker ? currentMarker[1] : null;
+
+  try {
+    const [{ data: incidents, error: ie }, { data: members, error: me }] = await Promise.all([
+      supabaseClient.from("incident_charges").select("id,member_id,external_name,description,amount,incident_date,status").order("incident_date", { ascending: false }).limit(100),
+      supabaseClient.from("members").select("id,full_name").eq("active", true),
+    ]);
+    if (ie) throw ie;
+
+    const membersById = new Map((members || []).map(m => [m.id, m.full_name]));
+
+    const label = inc => {
+      const receiver = inc.member_id ? (membersById.get(inc.member_id) || "Socio") : (inc.external_name || "Externo");
+      const statusMap = { open: "Abierta", invoiced: "Facturada", paid: "Pagada", cancelled: "Cancelada" };
+      return [formatDate(inc.incident_date), receiver, inc.description || "Sin descripcion", formatCurrency(inc.amount, "MXN"), statusMap[inc.status] || inc.status].filter(Boolean).join(" | ");
+    };
+
+    select.innerHTML = `<option value="">Sin incidencia asociada</option>` +
+      (incidents || []).map(inc => `<option value="${escapeHtml(inc.id)}">${escapeHtml(label(inc))}</option>`).join("");
+
+    if (currentIncidenciaId) {
+      select.value = currentIncidenciaId;
+      hint.textContent = "Incidencia actualmente vinculada. Puedes cambiarla o quitarla.";
+    } else {
+      hint.textContent = "Asocia una incidencia de Ingresos a esta solicitud. Se guardará en notas.";
+    }
+
+    btn.onclick = async () => {
+      const incId = select.value;
+      const inc = (incidents || []).find(i => i.id === incId) || null;
+      const cleanNotes = (request.notes || "").replace(/\n?\[Visita\/incidencia asociada:[^\]]+\]/g, "").trim();
+      const marker = inc ? `[Visita/incidencia asociada: ${inc.id} - ${label(inc)}]` : "";
+      const newNotes = [cleanNotes, marker].filter(Boolean).join("\n") || null;
+
+      btn.disabled = true;
+      btn.textContent = "Guardando…";
+      const { error } = await supabaseClient.from("payment_requests").update({ notes: newNotes, updated_at: new Date().toISOString() }).eq("id", request.id);
+      btn.disabled = false;
+      btn.textContent = "Asociar";
+      if (error) { showToast("Error", error.message, "error"); return; }
+      showToast("Incidencia actualizada", inc ? "Incidencia vinculada correctamente." : "Incidencia desvinculada.", "success");
+      await loadPaymentRequests();
+      openRequestDetail(request.id);
+    };
+  } catch (err) {
+    select.innerHTML = `<option value="">No se pudieron cargar incidencias</option>`;
+    hint.textContent = err.message || "Error al cargar incidencias.";
+  }
+}
 
 function closeRequestDetail() {
   if (dom.detailDialog.open) dom.detailDialog.close();
