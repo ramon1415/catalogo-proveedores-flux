@@ -526,7 +526,8 @@ async function savePayment(e) {
     const file = paymentFileUpload?.getFile()
     if (file && paymentId) {
       const storagePath = await window.FluxUpload.uploadReceipt(file, `cobros/${state.paymentChargeId}`)
-      await supabaseClient.from("maintenance_fee_payments").update({ receipt_storage_path: storagePath }).eq("id", paymentId)
+      const { error: receiptErr } = await supabaseClient.from("maintenance_fee_payments").update({ receipt_storage_path: storagePath }).eq("id", paymentId)
+      if (receiptErr) toast("Comprobante no vinculado", "El cobro se registró pero el comprobante no pudo vincularse. Contacta a soporte.", "warning")
     }
     closeDialog("paymentDialog"); toast("Cobro registrado", data?.message || "Cobro registrado correctamente."); await loadData()
   })
