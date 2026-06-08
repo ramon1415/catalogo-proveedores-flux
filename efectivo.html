@@ -139,13 +139,8 @@
           <label>Proveedor<select id="ticketProviderId"><option value="">Sin proveedor</option></select></label>
           <label>Partida presupuestal<select id="ticketBudgetCategoryId"><option value="">Sin partida</option></select></label>
           <label class="full-row">Comprobante (foto o PDF)
-            <div class="file-upload-area" id="ticketFileArea">
-              <input type="file" id="ticketFile" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none">
-              <button type="button" class="file-upload-btn" id="ticketFileBtn">Seleccionar archivo</button>
-              <span class="file-upload-name" id="ticketFileName">Sin archivo</span>
-              <button type="button" class="file-upload-clear hidden" id="ticketFileClear" aria-label="Quitar archivo">✕</button>
-            </div>
-            <span class="file-hint" id="ticketFileHint">JPG, PNG, WEBP o PDF · máx. 10 MB</span>
+            <input type="file" id="ticketFile" class="form-file" accept="image/jpeg,image/png,image/webp,application/pdf">
+            <span class="file-hint">JPG, PNG, WEBP o PDF · máx. 10 MB</span>
           </label>
         </div>
       </div>
