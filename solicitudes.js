@@ -9,6 +9,8 @@ let proveedores = [];
 let budgetAvailabilityRows = [];
 let highlightedRequestId = null;
 let currentDetailRequestId = null;
+let requestFileUpload = null;
+let editRequestFileUpload = null;
 
 const ACTIVE_REQUEST_STATUSES = [
   "submitted",
@@ -160,6 +162,14 @@ function bindEvents() {
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
+  dom.detailContent?.addEventListener("click", async e => {
+    const link = e.target.closest(".invoice-link");
+    if (!link) return;
+    e.preventDefault();
+    const url = await window.FluxUpload?.getReceiptUrl(link.dataset.path);
+    if (url) window.open(url, "_blank");
+    else showToast("No disponible", "No se pudo generar el link del comprobante.", "error");
+  });
   dom.editRequestBtn?.addEventListener("click", () => openEditRequest(currentDetailRequestId));
   dom.closeEditModalBtn?.addEventListener("click", closeEditModal);
   dom.cancelEditBtn?.addEventListener("click", closeEditModal);
@@ -199,6 +209,8 @@ function bindEvents() {
   dom.exchangeRate?.addEventListener("input", updateSummaryPanel);
   dom.isExtraordinaryAdjustment?.addEventListener("change", updateSummaryPanel);
   dom.editCurrency?.addEventListener("change", handleEditCurrencyChange);
+  requestFileUpload = window.FluxUpload?.initFileUpload("request");
+  editRequestFileUpload = window.FluxUpload?.initFileUpload("editRequest");
 }
 
 async function loadCompanies() {
@@ -247,7 +259,7 @@ async function loadPaymentRequests() {
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,created_at,updated_at")
+    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -642,6 +654,7 @@ function openNewRequestModal() {
   dom.currency.value = "MXN";
   dom.exchangeRate.value = "1";
   handleCurrencyChange();
+  requestFileUpload?.reset();
   dom.submitRequestBtn.disabled = false;
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
@@ -709,8 +722,19 @@ async function submitPaymentRequest(event) {
       );
     }
 
+    const newRequestId = result.payment_request_id || result.id || null;
+    const requestFile = requestFileUpload?.getFile();
+    if (requestFile && newRequestId) {
+      try {
+        const storagePath = await window.FluxUpload.uploadReceipt(requestFile, `solicitudes/${newRequestId}`);
+        const { error: uploadErr } = await supabaseClient.from("payment_requests").update({ invoice_storage_path: storagePath }).eq("id", newRequestId);
+        if (uploadErr) showToast("Comprobante no vinculado", "La solicitud se creó pero el comprobante no pudo vincularse.", "warning");
+      } catch (uploadErr) {
+        showToast("Comprobante no vinculado", "La solicitud se creó pero el comprobante no pudo subirse.", "warning");
+      }
+    }
     closeNewRequestModal();
-    highlightedRequestId = result.payment_request_id || result.id || null;
+    highlightedRequestId = newRequestId;
     await loadPaymentRequests();
   } catch (error) {
     showToast("No se pudo crear la solicitud", friendlyError(error, "create_payment_request"), "error");
@@ -796,6 +820,7 @@ function openRequestDetail(id) {
       { label: "Validación presupuestal", value: renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason) },
       { label: "Descripción",          value: escapeHtml(request.description || "Sin descripción"), muted: true },
       ...(request.notes ? [{ label: "Notas", value: escapeHtml(request.notes), muted: true }] : []),
+      ...(request.invoice_storage_path ? [{ label: "Comprobante", value: `<a href="#" class="invoice-link" data-path="${escapeHtml(request.invoice_storage_path)}">Ver comprobante</a>` }] : []),
     ])}
 
     ${Components.dataSection([
@@ -929,6 +954,7 @@ async function openEditRequest(id) {
   dom.editIsExtraordinaryAdjustment.checked = !!request.is_extraordinary_adjustment;
   dom.editDescription.value = request.description || "";
   dom.editNotes.value = request.notes || "";
+  editRequestFileUpload?.reset();
 
   dom.submitEditBtn.disabled = false;
   dom.submitEditBtn.textContent = "Guardar cambios";
@@ -1072,6 +1098,11 @@ async function submitEditRequest(event) {
   };
 
   try {
+    const editFile = editRequestFileUpload?.getFile();
+    if (editFile) {
+      const storagePath = await window.FluxUpload.uploadReceipt(editFile, `solicitudes/${id}`);
+      payload.invoice_storage_path = storagePath;
+    }
     const { error } = await supabaseClient.from("payment_requests").update(payload).eq("id", id);
     if (error) throw error;
     showToast("Solicitud actualizada", "Los cambios se guardaron correctamente.", "success");
