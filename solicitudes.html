@@ -274,7 +274,8 @@
                 <label class="full-row">Notas
                   <textarea id="notes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
                 </label>
-                <label class="full-row">Factura / comprobante
+                <div class="full-row" style="display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:700;color:var(--text-3);letter-spacing:.35px;text-transform:uppercase">
+                  Factura / comprobante
                   <div class="file-upload-area" id="requestFileArea">
                     <input type="file" id="requestFile" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" style="display:none">
                     <button type="button" class="file-upload-btn" id="requestFileBtn">Seleccionar archivo</button>
@@ -282,7 +283,7 @@
                     <button type="button" class="file-upload-clear hidden" id="requestFileClear">✕</button>
                   </div>
                   <span class="file-hint" id="requestFileHint">JPG, PNG, WEBP, PDF o XML · máx. 10 MB</span>
-                </label>
+                </div>
               </div>
             </section>
           </div>
@@ -402,7 +403,8 @@
               <label class="full-row">Notas
                 <textarea id="editNotes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
               </label>
-              <label class="full-row">Factura / comprobante
+              <div class="full-row" style="display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:700;color:var(--text-3);letter-spacing:.35px;text-transform:uppercase">
+                Factura / comprobante
                 <div class="file-upload-area" id="editRequestFileArea">
                   <input type="file" id="editRequestFile" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" style="display:none">
                   <button type="button" class="file-upload-btn" id="editRequestFileBtn">Seleccionar archivo</button>
@@ -410,7 +412,7 @@
                   <button type="button" class="file-upload-clear hidden" id="editRequestFileClear">✕</button>
                 </div>
                 <span class="file-hint" id="editRequestFileHint">JPG, PNG, WEBP, PDF o XML · máx. 10 MB</span>
-              </label>
+              </div>
             </div>
           </section>
         </div>
