@@ -67,7 +67,7 @@ function initFileUpload(id) {
  */
 async function uploadReceipt(file, folder) {
   if (!file) return null;
-  const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const client = window.supabaseClient || window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   if (!client) throw new Error("Cliente Supabase no disponible.");
 
   const ext = file.name.split(".").pop().toLowerCase();
@@ -86,7 +86,7 @@ async function uploadReceipt(file, folder) {
  */
 async function getReceiptUrl(storagePath) {
   if (!storagePath) return null;
-  const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const client = window.supabaseClient || window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   if (!client) return null;
   const { data, error } = await client.storage.from(UPLOAD_BUCKET).createSignedUrl(storagePath, 3600);
   if (error) return null;
