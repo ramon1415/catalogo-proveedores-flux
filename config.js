@@ -301,8 +301,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function defaultLandingForRole() {
     if (roleState.group === ROLE_GROUPS.PENDING) return "pending.html"
-    if ([ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group)) return "dashboard.html"
-    return "solicitudes.html"
+    const first = modules.find((m) => !m.hidden && m.groups.includes(roleState.group))
+    return first ? first.file : "solicitudes.html"
   }
 
   function enforcePageVisibility() {
