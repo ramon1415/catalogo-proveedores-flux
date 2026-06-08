@@ -5,32 +5,21 @@ const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 const UPLOAD_ACCEPTED = ["image/jpeg", "image/png", "image/webp", "application/pdf", "text/xml", "application/xml"];
 
 /**
- * Inicializa un control de file-upload compuesto por:
- *   - input[type=file]  → #${id}File
- *   - button trigger    → #${id}Btn
- *   - span nombre       → #${id}Name
- *   - button clear      → #${id}Clear
- *   - contenedor área   → #${id}Area  (recibe clase has-file)
- *
- * Devuelve { getFile, reset } para usarlo desde el form.
+ * Inicializa validación sobre un input[type=file] nativo.
+ * id corresponde al id del <input> directamente.
+ * Devuelve { getFile, reset }.
  */
 function initFileUpload(id) {
-  const fileInput = document.getElementById(`${id}File`);
-  const btn       = document.getElementById(`${id}Btn`);
-  const nameSpan  = document.getElementById(`${id}Name`);
-  const clearBtn  = document.getElementById(`${id}Clear`);
-  const area      = document.getElementById(`${id}Area`);
-  const hint      = document.getElementById(`${id}Hint`);
+  const fileInput = document.getElementById(`${id}File`) || document.getElementById(id);
+  const hint = document.getElementById(`${id}Hint`);
 
-  if (!fileInput || !btn || !nameSpan) return { getFile: () => null, reset: () => {} };
-
-  btn.addEventListener("click", () => fileInput.click());
+  if (!fileInput) return { getFile: () => null, reset: () => {} };
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files[0] || null;
     if (!file) return;
     if (!UPLOAD_ACCEPTED.includes(file.type)) {
-      if (hint) { hint.textContent = "Tipo de archivo no permitido. Usa JPG, PNG, WEBP, PDF o XML."; hint.style.color = "var(--ruby)"; }
+      if (hint) { hint.textContent = "Tipo no permitido. Usa JPG, PNG, WEBP, PDF o XML."; hint.style.color = "var(--ruby)"; }
       fileInput.value = "";
       return;
     }
@@ -39,30 +28,19 @@ function initFileUpload(id) {
       fileInput.value = "";
       return;
     }
-    nameSpan.textContent = file.name;
-    area?.classList.add("has-file");
-    if (clearBtn) clearBtn.classList.remove("hidden");
     if (hint) { hint.textContent = `${(file.size / 1024).toFixed(0)} KB · listo para subir`; hint.style.color = "var(--accent-text)"; }
   });
 
-  clearBtn?.addEventListener("click", () => reset());
-
   function reset() {
     fileInput.value = "";
-    nameSpan.textContent = "Sin archivo";
-    area?.classList.remove("has-file");
-    if (clearBtn) clearBtn.classList.add("hidden");
-    if (hint) { hint.textContent = hint.dataset.default || "JPG, PNG, WEBP o PDF · máx. 10 MB"; hint.style.color = ""; }
+    if (hint) { hint.textContent = hint.dataset.default || ""; hint.style.color = ""; }
   }
 
-  return {
-    getFile: () => fileInput.files[0] || null,
-    reset,
-  };
+  return { getFile: () => fileInput.files[0] || null, reset };
 }
 
 /**
- * Sube un archivo a Supabase Storage en payment-receipts/{folder}/{timestamp}_{name}
+ * Sube un archivo a Supabase Storage en payment-receipts/{folder}/{timestamp}_{random}.{ext}
  * Devuelve el storage path (string) o lanza error.
  */
 async function uploadReceipt(file, folder) {
