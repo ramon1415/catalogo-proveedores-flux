@@ -93,7 +93,7 @@
     const heading = paymentSection.querySelector("h3")
     if (heading) heading.textContent = "Datos del pago"
 
-    moveControls(paymentGrid, ["requestType", "amountRequested", "currency", "exchangeRate", "isExtraordinaryAdjustment", "description", "notes"])
+    moveControls(paymentGrid, ["requestType", "amountRequested", "currency", "exchangeRate", "isExtraordinaryAdjustment", "description", "notes", "requestFile"])
     moveControls(providerGrid, ["providerSearch", "proveedorId"])
     moveControls(budgetGrid, ["companyId", "costCenterId", "budgetCategoryId", "budgetMonth"])
 
