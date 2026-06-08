@@ -117,6 +117,7 @@ function cacheDom() {
   dom.amountRequested = document.getElementById("amountRequested");
   dom.currency = document.getElementById("currency");
   dom.exchangeRate = document.getElementById("exchangeRate");
+  dom.exchangeRateRow = document.getElementById("exchangeRateRow");
   dom.isExtraordinaryAdjustment = document.getElementById("isExtraordinaryAdjustment");
   dom.description = document.getElementById("description");
   dom.notes = document.getElementById("notes");
@@ -145,6 +146,7 @@ function cacheDom() {
   dom.editAmountRequested = document.getElementById("editAmountRequested");
   dom.editCurrency = document.getElementById("editCurrency");
   dom.editExchangeRate = document.getElementById("editExchangeRate");
+  dom.editExchangeRateRow = document.getElementById("editExchangeRateRow");
   dom.editIsExtraordinaryAdjustment = document.getElementById("editIsExtraordinaryAdjustment");
   dom.editDescription = document.getElementById("editDescription");
   dom.editNotes = document.getElementById("editNotes");
@@ -196,6 +198,7 @@ function bindEvents() {
   dom.currency?.addEventListener("change", handleCurrencyChange);
   dom.exchangeRate?.addEventListener("input", updateSummaryPanel);
   dom.isExtraordinaryAdjustment?.addEventListener("change", updateSummaryPanel);
+  dom.editCurrency?.addEventListener("change", handleEditCurrencyChange);
 }
 
 async function loadCompanies() {
@@ -638,6 +641,7 @@ function openNewRequestModal() {
   dom.requestForm.reset();
   dom.currency.value = "MXN";
   dom.exchangeRate.value = "1";
+  handleCurrencyChange();
   dom.submitRequestBtn.disabled = false;
   dom.submitRequestBtn.textContent = "Crear solicitud";
   setDefaultMonth();
@@ -921,6 +925,7 @@ async function openEditRequest(id) {
   dom.editAmountRequested.value = request.amount_requested || "";
   dom.editCurrency.value = request.currency || "MXN";
   dom.editExchangeRate.value = request.exchange_rate || "1";
+  handleEditCurrencyChange();
   dom.editIsExtraordinaryAdjustment.checked = !!request.is_extraordinary_adjustment;
   dom.editDescription.value = request.description || "";
   dom.editNotes.value = request.notes || "";
@@ -1348,14 +1353,24 @@ function updateSummaryPanel() {
 }
 
 function handleCurrencyChange() {
-  if (dom.currency.value === "MXN") {
+  const isUsd = dom.currency.value === "USD";
+  dom.exchangeRateRow?.classList.toggle("hidden", !isUsd);
+  if (!isUsd) {
     dom.exchangeRate.value = "1";
-    dom.exchangeRate.disabled = true;
-  } else {
-    dom.exchangeRate.disabled = false;
-    if (!dom.exchangeRate.value || Number(dom.exchangeRate.value) <= 0) dom.exchangeRate.value = "1";
+  } else if (!dom.exchangeRate.value || Number(dom.exchangeRate.value) <= 0) {
+    dom.exchangeRate.value = "1";
   }
   updateSummaryPanel();
+}
+
+function handleEditCurrencyChange() {
+  const isUsd = dom.editCurrency.value === "USD";
+  dom.editExchangeRateRow?.classList.toggle("hidden", !isUsd);
+  if (!isUsd) {
+    dom.editExchangeRate.value = "1";
+  } else if (!dom.editExchangeRate.value || Number(dom.editExchangeRate.value) <= 0) {
+    dom.editExchangeRate.value = "1";
+  }
 }
 
 async function logout() {
