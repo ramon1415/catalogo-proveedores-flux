@@ -646,7 +646,7 @@ function renderPaymentRequestsTable() {
         <td>${statusCell}</td>
         <td>
           <div class="actions row-actions">
-            <button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')">Ver detalle</button>
+            <button class="small-btn" type="button" onclick="openRequestDetail('${request.id}')" style="white-space:nowrap">Ver detalle</button>
           </div>
         </td>
       </tr>`;
