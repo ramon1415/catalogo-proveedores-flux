@@ -30,6 +30,8 @@
     .kpi-card.warning .kpi-progress-bar { background:var(--amber); }
     .kpi-sub { font-size:11px; color:var(--text-3); line-height:1.5; }
     .chart-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; overflow:hidden; }
+    /* .page es flex-column y overflow:hidden permite encoger a 0 — sin esto las cards se colapsan */
+    .page > .chart-card, .page > .table-card { flex-shrink:0; }
     .chart-body { padding:16px 20px 20px; height:280px; position:relative; }
     .panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; border-bottom:1px solid var(--border); }
     .panel-header h2 { font-size:13px; font-weight:700; color:var(--text-1); margin:0; }
