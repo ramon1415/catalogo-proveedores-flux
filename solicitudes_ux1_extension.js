@@ -471,7 +471,10 @@
               <h2 style="color:var(--text-1)">Nuevo proveedor</h2>
               <p>Alta rapida sin salir de la solicitud.</p>
             </div>
-            <button type="button" class="icon-btn" data-close-quick-provider>✕</button>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button type="button" class="demo-fill-btn" data-demo-quick-provider>⚡ Demo</button>
+              <button type="button" class="icon-btn" data-close-quick-provider>✕</button>
+            </div>
           </div>
           <div class="modal-scroll">
           <div class="form-grid">
@@ -515,6 +518,7 @@
     document.getElementById("quickProviderDestinationType")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderPaymentMethod")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderForm")?.addEventListener("submit", saveQuickProvider)
+    document.querySelector("[data-demo-quick-provider]")?.addEventListener("click", fillDemoQuickProvider)
     document.getElementById("quickProviderForm").dataset.ux1Bound = "true"
     upgradeQuickProviderDialog()
     updateQuickProviderDestinationFields()
@@ -582,6 +586,24 @@
     const hidden = method === "Efectivo" || method === "Tarjeta en plataforma"
     document.querySelectorAll("[data-quick-bank]").forEach((field) => field.classList.toggle("visible", !hidden && Boolean(destination)))
     document.querySelectorAll("[data-quick-destination]").forEach((field) => field.classList.toggle("visible", !hidden && field.dataset.quickDestination === destination))
+  }
+
+  // Botón Demo: rellena el form de proveedor con datos de prueba.
+  function fillDemoQuickProvider() {
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val }
+    const stamp = String(Date.now()).slice(-4)
+    set("quickProviderAlias", `Test - Proveedor Demo ${stamp}`)
+    set("quickProviderName", `Test - Proveedor Demo ${stamp} SA de CV`)
+    set("quickProviderPaymentMethod", "Transferencia bancaria")
+    set("quickProviderDestinationType", "clabe")
+    updateQuickProviderDestinationFields()
+    set("quickProviderBeneficiary", `Test - Proveedor Demo ${stamp} SA de CV`)
+    set("quickProviderRfc", "XAXX010101000")
+    set("quickProviderPhone", "5512345678")
+    set("quickProviderEmail", "demo@example.com")
+    set("quickProviderBank", "BBVA")
+    set("quickProviderClabe", "012180001234567895")
+    set("quickProviderNotes", "Proveedor generado con el botón Demo")
   }
 
   async function saveQuickProvider(event) {
