@@ -153,7 +153,14 @@ const Components = (() => {
     if (!stack) {
       stack = document.createElement('div')
       stack.className = 'toast-stack-v2'
+      // popover=manual coloca el stack en el top layer del browser, por
+      // encima de cualquier <dialog> abierto con showModal()
+      stack.setAttribute('popover', 'manual')
       document.body.appendChild(stack)
+    }
+    // Asegurar que esté en el top layer (idempotente)
+    if (stack.hasAttribute('popover') && !stack.matches(':popover-open')) {
+      try { stack.showPopover() } catch (_) {}
     }
     const id = `toast-${Date.now()}`
     const el = document.createElement('div')

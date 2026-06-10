@@ -109,6 +109,8 @@
    TOASTS v2 — aprobado
    ══════════════════════════════════════════ */
 .toast-stack-v2{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:8px;z-index:10000}
+.toast-stack-v2[popover]{inset:auto;right:20px;bottom:20px;left:auto;top:auto;margin:0;padding:0;border:none;background:transparent;max-width:none;max-height:none;overflow:visible}
+.toast-stack-v2[popover]::backdrop{background:transparent}
 .toast-v2{display:flex;align-items:flex-start;gap:10px;padding:14px 16px;border-radius:11px;border:1px solid transparent;box-shadow:var(--shadow-toast);background:var(--bg-card);position:relative;overflow:hidden;min-width:280px;max-width:400px}
 .toast-v2::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px}
 .toast-v2.success::before{background:var(--emerald)}
