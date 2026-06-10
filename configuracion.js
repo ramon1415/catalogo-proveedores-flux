@@ -570,6 +570,15 @@ const GROUP_BADGE = {
   operation:    "success",
   pending:      "warning",
 }
+// El valor del radio del dialog mapea a varios nombres reales posibles en la
+// tabla roles (alineado con los grupos de config.js). Así "sysadmin" encuentra
+// superadmin/admin, "finance" encuentra administracion, etc.
+const ROLE_ALIASES = {
+  sysadmin:    ["sysadmin", "superadmin", "system_admin", "admin"],
+  finance:     ["finance", "finanzas", "administracion", "treasury", "tesoreria"],
+  director:    ["director", "direccion", "approver_2", "aprobador_2"],
+  solicitante: ["solicitante", "operator", "default"],
+}
 
 function groupFromRoleNames(roleNames) {
   const SYSADMIN   = ["sysadmin","system_admin","admin"]
@@ -698,14 +707,21 @@ async function saveAssignRole() {
     const { data: rolesData, error: re } = await configClient.from("roles").select("id,name")
     if (re) throw re
 
-    // 2. Borrar roles actuales del usuario
+    // 2. Resolver el rol destino ANTES de borrar nada (alias-tolerante: el
+    //    valor del UI puede mapear a varios nombres reales en la tabla).
+    let roleRow = null
+    if (selected !== "pending") {
+      const aliases = (ROLE_ALIASES[selected] || [selected]).map(a => a.toLowerCase())
+      roleRow = rolesData.find(r => aliases.includes(r.name.toLowerCase()))
+      if (!roleRow) throw new Error(`No hay un rol equivalente a "${selected}" en la tabla roles.`)
+    }
+
+    // 3. Borrar roles actuales del usuario (ya verificamos que el nuevo existe)
     const { error: de } = await configClient.from("user_roles").delete().eq("profile_id", assigningProfileId)
     if (de) throw de
 
-    // 3. Si no es pending, asignar el nuevo rol
-    if (selected !== "pending") {
-      const roleRow = rolesData.find(r => r.name.toLowerCase() === selected.toLowerCase())
-      if (!roleRow) throw new Error(`Rol "${selected}" no encontrado en la tabla roles.`)
+    // 4. Asignar el nuevo rol (si no es pending)
+    if (roleRow) {
       const { error: ie } = await configClient.from("user_roles").insert({ profile_id: assigningProfileId, role_id: roleRow.id })
       if (ie) throw ie
     }
