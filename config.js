@@ -413,7 +413,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       loadExtension("./ingresos_nav_patch.js?v=20260604-menu-incidents", "ingresos-nav")
       loadExtension("./ingresos_ux_extension.js?v=20260602-ux1", "ingresos-ux")
       loadExtension("./ingresos_ux2_extension.js?v=20260604-menu-incidents", "ingresos-ux2")
-      loadExtension("./ingresos_carlos_ux_patch_v2.js?v=20260604-menu-incidents", "ingresos-carlos-ux")
+      loadExtension("./ingresos_carlos_ux_patch_v2.js?v=20260610-unified-tabs", "ingresos-carlos-ux")
       loadExtension("./ingresos_incidents_guard_patch.js?v=20260604-menu-incidents", "ingresos-incidents-guard")
     }
     if (pageName === "dashboard.html") {
