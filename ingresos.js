@@ -72,6 +72,14 @@ function cacheDom() {
 }
 
 function bindEvents() {
+  // Puente para ingresos_carlos_ux_patch_v2.js, que reescribe los tabs y
+  // dispara estas funciones vía window.* con nombres "*Modal".
+  window.openIncidentModal = openIncident
+  window.openPaymentModal = openPayment
+  window.openInvoiceModal = openInvoice
+  window.openInvoicePayModal = openInvoicePay
+  window.showPaymentHistory = showStatement
+
   d.logoutBtn?.addEventListener("click", logout)
   document.getElementById("themeToggle")?.addEventListener("click", () => {
     const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark"
