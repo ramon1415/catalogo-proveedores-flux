@@ -35,19 +35,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   const navSections = ["Operacion", "General", "Configuracion"]
 
-  const subtitles = {
-    dashboard: "Dashboard operativo",
-    providers: "Proveedores",
-    requests: "Solicitudes de pago",
-    approvals: "Cola de aprobacion",
-    layouts: "Layouts de pago",
-    payments: "Pagos y comprobaciones",
-    cash: "Efectivo y comprobaciones",
-    income: "Ingresos e incidencias",
-    incidents: "Ingresos e incidencias",
-    config: "Configuracion",
-  }
-
   const roleState = {
     loaded: false,
     session: null,
@@ -127,17 +114,6 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
     markShellReady()
   }
 
-  function applyBranding() {
-    const logo = document.querySelector(".brand-logo, .brand-badge")
-    const title = document.querySelector(".brand-title")
-    const subtitle = document.querySelector(".brand-subtitle")
-    const activeKey = currentModuleKey()
-
-    if (logo) logo.textContent = "FL"
-    if (title) title.textContent = "Flux Operadora"
-    if (subtitle && subtitles[activeKey]) subtitle.textContent = subtitles[activeKey]
-  }
-
   function applyIncomeCompatibility() {
     if (pageName !== "ingresos.html") return
     if (!window.supabase?.createClient || window.supabase.__fluxIncomeCompatibility) return
@@ -174,13 +150,11 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
 
   function applyShell() {
     applyLoginCopy()
-    applyBranding()
     applyIncomeCompatibility()
     hideLegacyNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
-      applyBranding()
       applyPostLoginRedirect()
       enforcePageVisibility()
       markShellReady()
