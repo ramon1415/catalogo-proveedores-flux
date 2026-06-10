@@ -476,7 +476,7 @@
           <div class="form-grid">
             <label>Alias / nombre visible *<input id="quickProviderAlias" class="form-control" required></label>
             <label>Razon social / nombre completo *<input id="quickProviderName" class="form-control" required></label>
-            <label>Tipo de destino de pago
+            <label>Tipo de destino de pago * <span style="font-weight:400;text-transform:none">(no aplica para efectivo)</span>
               <select id="quickProviderDestinationType" class="form-control">
                 <option value="">Seleccionar...</option>
                 <option value="clabe">CLABE</option>
