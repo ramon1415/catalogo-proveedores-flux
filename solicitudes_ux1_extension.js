@@ -50,15 +50,15 @@
       .provider-select-shell.full-row{grid-column:1/-1}
       .provider-select-shell label{margin:0}
       .provider-select-label{display:grid;gap:8px}
-      .provider-plus-btn{width:56px;min-height:88px;border:1px solid rgba(255,255,255,.38);border-radius:14px;background:rgba(255,255,255,.055);color:#fff;font-size:28px;font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .18s ease,background .18s ease,transform .18s ease}
-      .provider-plus-btn:hover{border-color:var(--accent);background:rgba(45,212,191,.14);transform:translateY(-1px)}
+      .provider-plus-btn{width:36px;height:36px;min-height:36px;flex-shrink:0;align-self:flex-start;border:1px solid var(--border-strong);border-radius:7px;background:var(--bg-input);color:var(--text-2);font-size:18px;font-weight:600;line-height:1;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit;padding:0;transition:border-color .18s ease,background .18s ease}
+      .provider-plus-btn:hover{border-color:var(--accent);background:var(--bg-hover);color:var(--text-1)}
       .provider-quick-hint{grid-column:1/-1;font-size:12px;color:var(--text-3);margin-top:-4px}
       .request-provider-select{min-height:88px}
       .request-provider-select.provider-live-results{min-height:158px}
-      #quickProviderDialog{width:min(720px,calc(100vw - 28px));max-width:720px;margin:auto 20px auto auto}
+      #quickProviderDialog{width:min(720px,calc(100vw - 28px));max-width:720px;margin:auto}
       #quickProviderDialog .modal-content{max-height:90vh;overflow:auto}
       .quick-provider-destination{display:none}
-      .quick-provider-destination.visible{display:block}
+      .quick-provider-destination.visible{display:flex;flex-direction:column;gap:5px}
       .visit-context-placeholder{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:rgba(255,255,255,.018);display:grid;gap:6px;color:var(--text-2)}
       .visit-context-placeholder strong{color:var(--text-1)}
       .visit-context-placeholder span{font-size:12px;color:var(--text-3)}
