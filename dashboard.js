@@ -178,11 +178,36 @@ async function loadYearlyChart() {
       cobrado.push(   num(p.kpis?.ingresos?.maintenance_collected))
     })
 
+    const hasData = [presupuesto, ejecutado, esperado, cobrado].some((serie) => serie.some((v) => v > 0))
+    if (!hasData) {
+      const demo = demoChartSeries(labels.length)
+      if (sub) sub.textContent = `Enero – ${labels[labels.length - 1]} ${year} · datos de ejemplo`
+      drawChart(labels, demo.presupuesto, demo.ejecutado, demo.esperado, demo.cobrado)
+      return
+    }
+
     if (sub) sub.textContent = `Enero – ${labels[labels.length - 1]} ${year}`
     drawChart(labels, presupuesto, ejecutado, esperado, cobrado)
   } catch (_) {
     if (sub) sub.textContent = "No se pudo cargar la serie anual"
   }
+}
+
+function demoChartSeries(count) {
+  // Serie determinística y plausible para demo cuando no hay movimientos reales
+  const basePresupuesto = [920000, 880000, 940000, 905000, 960000, 930000, 915000, 950000, 925000, 945000, 910000, 970000]
+  const ejecPct         = [0.82, 0.91, 0.76, 0.88, 0.79, 0.85, 0.93, 0.81, 0.87, 0.78, 0.9, 0.84]
+  const baseEsperado    = 480000
+  const cobroPct        = [0.95, 0.88, 0.92, 1, 0.85, 0.97, 0.9, 0.94, 0.89, 0.98, 0.91, 0.96]
+  const presupuesto = [], ejecutado = [], esperado = [], cobrado = []
+  for (let i = 0; i < count; i++) {
+    const p = basePresupuesto[i % 12]
+    presupuesto.push(p)
+    ejecutado.push(Math.round(p * ejecPct[i % 12]))
+    esperado.push(baseEsperado)
+    cobrado.push(Math.round(baseEsperado * cobroPct[i % 12]))
+  }
+  return { presupuesto, ejecutado, esperado, cobrado }
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
