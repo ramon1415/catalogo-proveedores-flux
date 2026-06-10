@@ -468,7 +468,7 @@
         <form id="quickProviderForm" class="modal-content">
           <div class="modal-header">
             <div>
-              <h2>Nuevo proveedor</h2>
+              <h2 style="color:var(--text-1)">Nuevo proveedor</h2>
               <p>Alta rapida sin salir de la solicitud.</p>
             </div>
             <button type="button" class="icon-btn" data-close-quick-provider>✕</button>
@@ -617,20 +617,20 @@
     if (payload.destination_type === "cuenta" && !payload.cuenta_bancaria) return showToast("Cuenta requerida", "Captura la cuenta bancaria.", "warning")
     if (payload.destination_type === "convenio" && !payload.convenio_number) return showToast("Convenio requerido", "Captura el numero de convenio.", "warning")
 
-    const { data, error } = await client.from("proveedores").insert(payload).select("id,alias,nombre_completo").single()
+    const { data, error } = await client.from("proveedores").insert(payload).select("id,alias,nombre_completo,rfc,banco,clabe,cuenta_bancaria,activo").single()
     if (error) {
       showToast("No se pudo crear proveedor", providerCreateFriendlyError(error), "error")
       return
     }
 
     closeQuickProviderModal()
-    const option = document.createElement("option")
-    option.value = data.id
-    option.textContent = [data.alias, data.nombre_completo].filter(Boolean).join(" | ")
-    option.selected = true
-    dom.proveedorId.appendChild(option)
-    dom.proveedorId.value = data.id
-    dom.providerSearch.value = data.alias || data.nombre_completo || ""
+    // Inyectar al combobox de solicitudes.js y seleccionarlo
+    if (typeof window.fluxRegisterProvider === "function") {
+      window.fluxRegisterProvider(data)
+    } else {
+      if (dom.proveedorId) dom.proveedorId.value = data.id
+      if (dom.providerSearch) dom.providerSearch.value = data.alias || data.nombre_completo || ""
+    }
     await renderProviderSummary()
     showToast("Proveedor creado", "Proveedor agregado y seleccionado en la solicitud.", "success")
   }

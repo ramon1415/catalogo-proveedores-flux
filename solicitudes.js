@@ -452,6 +452,17 @@ function selectProvider(id, label) {
   closeCombo();
 }
 
+// Hook para que la extensión (alta rápida de proveedor) inyecte el nuevo
+// proveedor al combobox y lo seleccione sin recargar la página.
+window.fluxRegisterProvider = function (prov) {
+  if (!prov?.id) return;
+  if (!proveedores.some((p) => p.id === prov.id)) {
+    proveedores.push(prov);
+    proveedores.sort((a, b) => (a.alias || "").localeCompare(b.alias || "", "es"));
+  }
+  selectProvider(prov.id, proveedorLabel(prov));
+};
+
 function renderProveedorOptions(query = "") {
   renderComboList(query);
 }
