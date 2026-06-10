@@ -2,10 +2,6 @@
   const pageName = (window.location.pathname.split("/").pop() || "").toLowerCase()
   if (pageName !== "ingresos.html") return
 
-  const params = new URLSearchParams(window.location.search)
-  const requestedTab = (params.get("tab") || "income").toLowerCase()
-  const isIncidentMode = ["incidents", "incidencias", "visitas"].includes(requestedTab)
-
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init)
   } else {
@@ -13,25 +9,11 @@
   }
 
   function init() {
-    normalizeCopySoon()
-    document.addEventListener("flux:income-data-ready", normalizeCopySoon)
-    document.addEventListener("flux:roles-ready", normalizeCopySoon)
+    // Solo guarda defensiva: explica con un toast cuando una acción del tab
+    // (cobro, factura, etc.) aún no tiene su función cargada. La copia del
+    // header ya la maneja el HTML base + ingresos_ux2 + carlos_ux unificados;
+    // este patch ya NO reescribe títulos (causaba parpadeo).
     document.addEventListener("click", explainUnavailableIncidentAction)
-  }
-
-  function normalizeCopySoon() {
-    ;[0, 120, 450, 900, 1400].forEach((delay) => window.setTimeout(normalizeCopy, delay))
-  }
-
-  function normalizeCopy() {
-    replaceText(document.body, /(?:visitas\s*\/\s*)+incidencias/gi, "incidencias")
-    replaceText(document.body, /ingresos\s+(?:e|y)\s+incidencias/gi, isIncidentMode ? "Incidencias" : "Ingresos")
-    setText("[data-tab='incidents']", "Incidencias")
-    if (isIncidentMode) {
-      setText(".brand-subtitle", "Incidencias")
-      setText(".page-header h1", "Incidencias")
-      setText(".topbar-kicker", "VISITAS, INCIDENCIAS Y CARGOS RECUPERABLES")
-    }
   }
 
   function explainUnavailableIncidentAction(event) {
@@ -58,21 +40,6 @@
 
     event.preventDefault()
     toast("Accion no disponible", check[1])
-  }
-
-  function replaceText(root, pattern, replacement) {
-    if (!root) return
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    const nodes = []
-    while (walker.nextNode()) nodes.push(walker.currentNode)
-    nodes.forEach((node) => {
-      node.nodeValue = node.nodeValue.replace(pattern, replacement)
-    })
-  }
-
-  function setText(selector, text) {
-    const node = document.querySelector(selector)
-    if (node && node.textContent !== text) node.textContent = text
   }
 
   function toast(title, message) {
