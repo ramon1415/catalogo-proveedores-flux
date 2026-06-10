@@ -155,16 +155,13 @@ const Components = (() => {
       stack.className = 'toast-stack-v2'
       document.body.appendChild(stack)
     }
-    // popover=manual coloca el stack en el top layer, por encima de cualquier
-    // <dialog open>. El div suele venir hardcodeado en el HTML (#toastStack),
-    // así que el atributo se asegura aquí aunque no lo hayamos creado nosotros.
-    if (!stack.hasAttribute('popover')) stack.setAttribute('popover', 'manual')
-    // Re-mostrar en cada toast: lo sube al tope del top layer, encima de un
-    // modal que se haya abierto DESPUÉS de mostrar el primer toast.
-    try {
-      if (stack.matches(':popover-open')) stack.hidePopover()
-      stack.showPopover()
-    } catch (_) {}
+    // Un <dialog open> (showModal) vive en el top layer y SIEMPRE pinta sobre
+    // cualquier elemento del body, incluso popovers. La única forma fiable de
+    // que el toast se vea sobre el modal es que sea hijo del propio dialog
+    // (mismo contexto de top layer). Reparentamos al dialog abierto, o al body.
+    const openDialog = document.querySelector('dialog[open]')
+    const desiredParent = openDialog || document.body
+    if (stack.parentElement !== desiredParent) desiredParent.appendChild(stack)
     const id = `toast-${Date.now()}`
     const el = document.createElement('div')
     el.innerHTML = toast({ title, desc, variant, duration, onClose: `this.closest('.toast-v2').remove()` })
