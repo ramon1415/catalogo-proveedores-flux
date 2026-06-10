@@ -29,13 +29,26 @@
 
   function applyMode() {
     normalizeCopy()
-    if (isIncidentMode) {
-      applyIncidentMode()
-    } else {
-      applyIncomeMode()
-    }
+    applyUnifiedMode()
     renderCustomViews()
     adjustIncidentFormCopy()
+  }
+
+  // Vista unificada: ambas entradas del menú (Ingresos / Incidencias) muestran
+  // el mismo set completo de tabs y etiquetas. El ?tab= solo decide el inicial.
+  function applyUnifiedMode() {
+    document.title = "Ingresos e incidencias | Flux"
+    setText(".brand-subtitle", "Ingresos e incidencias")
+    setText(".topbar-kicker", "CUOTAS, COBROS, BALANCE E INCIDENCIAS")
+    setText(".page-header h1", "Ingresos e incidencias")
+    setText(".page-header p", "Controla cuotas de mantenimiento, periodos de cobro, pagos, balance e incidencias.")
+    setText("[data-tab='dashboard']", "Balance")
+    setText("[data-tab='payments']", "Cuotas")
+    ;["dashboard", "members", "periods", "payments", "incidents", "invoices"].forEach(showTabButton)
+    const initial = isIncidentMode
+      ? "incidents"
+      : (["cuotas", "payments"].includes(requestedTab) ? "payments" : "dashboard")
+    clickTab(initial)
   }
 
   function normalizeCopy() {
@@ -44,49 +57,11 @@
     replaceRepeatedText(document.body, /(Visitas\/)+Incidencias/g, "Incidencias")
   }
 
-  function applyIncomeMode() {
-    document.title = "Ingresos | Flux"
-    setText(".brand-subtitle", "Ingresos")
-    setText(".topbar-kicker", "CUOTAS, COBROS Y BALANCE")
-    setText(".page-header h1", "Ingresos")
-    setText(".page-header p", "Controla cuotas de mantenimiento, periodos de cobro, pagos e historico de ingresos.")
-    setText("[data-tab='dashboard']", "Balance")
-    setText("[data-tab='payments']", "Cuotas")
-    showTabButton("dashboard")
-    showTabButton("payments")
-    hideTabButton("members")
-    hideTabButton("periods")
-    hideTabButton("incidents")
-    hideTabButton("invoices")
-    ensureNotice("incomeModeNotice", "Ingresos queda enfocado en balance y cuotas. Socios y cuentas origen viven en Configuracion; Incidencias tiene su propia entrada en el menu.")
-    const targetTab = ["cuotas", "payments"].includes(requestedTab) ? "payments" : "dashboard"
-    clickTab(targetTab)
-  }
-
-  function applyIncidentMode() {
-    document.title = "Incidencias | Flux"
-    setText(".brand-subtitle", "Incidencias")
-    setText(".topbar-kicker", "VISITAS, INCIDENCIAS Y CARGOS RECUPERABLES")
-    setText(".page-header h1", "Incidencias")
-    setText(".page-header p", "Registra visitas, incidencias y cargos recuperables. La relacion formal con solicitudes de pago queda preparada para la siguiente tanda backend.")
-    hideTabButton("dashboard")
-    hideTabButton("members")
-    hideTabButton("periods")
-    hideTabButton("payments")
-    showTabButton("incidents")
-    hideTabButton("invoices")
-    ensureNotice("incidentModeNotice", "Una incidencia representa una visita o evento que agrupa solicitudes de pago. Hoy se captura el cargo recuperable; la vinculacion multiple queda pendiente de backend/SQL.")
-    clickTab("incidents")
-  }
-
   function renderCustomViews() {
     const data = getData()
-    if (isIncidentMode) {
-      renderIncidentsExperience(data)
-    } else {
-      renderBalanceExperience(data)
-      renderQuotasExperience(data)
-    }
+    renderBalanceExperience(data)
+    renderQuotasExperience(data)
+    renderIncidentsExperience(data)
   }
 
   function renderBalanceExperience(data) {
@@ -324,8 +299,6 @@
   function matchesPeriod(dateValue, periodValue, scope) { if (!periodValue) return true; const date = new Date(dateValue); if (Number.isNaN(date.getTime())) return false; const [yearText, monthText] = String(periodValue).split("-"); const year = Number(yearText); const month = Number(monthText); if (scope === "year") return date.getFullYear() === year; if (scope === "quarter") { const selectedQuarter = Math.floor((month - 1) / 3); const rowQuarter = Math.floor(date.getMonth() / 3); return date.getFullYear() === year && rowQuarter === selectedQuarter } return date.getFullYear() === year && date.getMonth() + 1 === month }
   function clickTab(tab) { const button = document.querySelector(`[data-tab="${tab}"]`); if (button && !button.classList.contains("active")) button.click() }
   function showTabButton(tab) { const button = document.querySelector(`[data-tab="${tab}"]`); if (button) button.hidden = false }
-  function hideTabButton(tab) { const button = document.querySelector(`[data-tab="${tab}"]`); if (button) button.hidden = true }
-  function ensureNotice(id, copy) { const existing = document.getElementById(id); if (existing) { existing.textContent = copy; return } document.getElementById("incomeUx2Notice")?.remove(); document.getElementById(isIncidentMode ? "incomeModeNotice" : "incidentModeNotice")?.remove(); const header = document.querySelector(".page-header"); if (!header) return; header.insertAdjacentHTML("afterend", `<div id="${id}" class="notice neutral">${copy}</div>`) }
   function installStyles() { if (document.getElementById("ingresosCarlosUxStyles")) return; const style = document.createElement("style"); style.id = "ingresosCarlosUxStyles"; style.textContent = `.compact-stats{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin:14px 0}.flux-progress-wrap{border:1px solid var(--border);border-radius:8px;padding:12px;margin:12px 0;background:var(--bg-hover)}.flux-progress-head{display:flex;justify-content:space-between;gap:12px;font-weight:800;margin-bottom:8px}.flux-progress{height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}.flux-progress span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-text))}.flux-stepper{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0 0 12px}.flux-stepper span{border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;font-weight:800;color:var(--accent-text);background:var(--accent-dim)}.detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}.detail-card{border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg-hover)}.detail-card span,.detail-card small{display:block;color:var(--text-3);font-weight:700;font-size:11px;text-transform:uppercase}.detail-card strong{display:block;margin-top:4px;color:var(--text-1)}.inner-card{margin-top:12px}button[disabled]{opacity:.45;cursor:not-allowed}`; document.head.appendChild(style) }
   function byId(list, id) { return (list || []).find((item) => item.id === id) }
   function memberById(id, data) { return byId(data.members, id) }
