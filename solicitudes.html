@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css?v=20260610-toast-popover">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
   <style>
     /* Solicitudes-specific — layout del formulario y panel de decision */
     .search-field { position:relative }
@@ -208,7 +208,10 @@
           <h2 style="color:var(--text-1)">Nueva solicitud de pago</h2>
           <p>Completa los datos operativos y financieros para validar presupuesto al guardar.</p>
         </div>
-        <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" id="demoFillBtn" class="demo-fill-btn">⚡ Demo</button>
+          <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+        </div>
       </div>
 
       <div class="modal-scroll" style="padding:0">
@@ -419,7 +422,7 @@
   <script src="./config.js?v=20260610-no-branding"></script>
   <script src="./components.js?v=20260610-toast-popover"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260610-nowrap-btn"></script>
+  <script src="./solicitudes.js?v=20260610-demo-btn"></script>
   <script src="./cash_flow_extension.js"></script>
 </body>
 </html>

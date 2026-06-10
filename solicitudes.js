@@ -160,6 +160,7 @@ function bindEvents() {
   dom.closeRequestModalBtn?.addEventListener("click", closeNewRequestModal);
   dom.cancelRequestBtn?.addEventListener("click", closeNewRequestModal);
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
+  document.getElementById("demoFillBtn")?.addEventListener("click", fillDemoRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
   dom.detailContent?.addEventListener("click", async e => {
@@ -677,6 +678,46 @@ function openNewRequestModal() {
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
   handleCurrencyChange();
   dom.requestDialog.showModal();
+}
+
+// Botón Demo: rellena el formulario con datos de prueba para presentaciones.
+// Busca una combinación empresa+CC+mes que SÍ tenga presupuesto para que la
+// partida cargue, y selecciona el primer proveedor disponible.
+async function fillDemoRequest() {
+  const btn = document.getElementById("demoFillBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "⚡ Llenando…"; }
+  try {
+    const { data } = await supabaseClient
+      .from("budget_availability")
+      .select("company_id,cost_center_id,budget_month,budget_category_id")
+      .limit(1);
+    const row = data?.[0];
+
+    if (row) {
+      dom.companyId.value = row.company_id;
+      dom.costCenterId.value = row.cost_center_id;
+      dom.budgetMonth.value = String(row.budget_month).slice(0, 7);
+      await handleBudgetScopeChange();
+      if (row.budget_category_id) dom.budgetCategoryId.value = row.budget_category_id;
+    } else {
+      if (dom.companyId.options.length > 1) dom.companyId.selectedIndex = 1;
+      if (dom.costCenterId.options.length > 1) dom.costCenterId.selectedIndex = 1;
+      await handleBudgetScopeChange();
+    }
+
+    if (proveedores.length) selectProvider(proveedores[0].id, proveedorLabel(proveedores[0]));
+
+    dom.amountRequested.value = "5000";
+    dom.currency.value = "MXN";
+    handleCurrencyChange();
+    dom.description.value = "Demo - pago de servicios de prueba";
+    dom.notes.value = "Solicitud generada con el botón Demo";
+    updateSummaryPanel();
+  } catch (err) {
+    showToast("Demo", friendlyError(err), "warning");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "⚡ Demo"; }
+  }
 }
 
 function closeNewRequestModal() {
