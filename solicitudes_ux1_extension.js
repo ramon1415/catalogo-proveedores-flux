@@ -56,7 +56,7 @@
       .request-provider-select{min-height:88px}
       .request-provider-select.provider-live-results{min-height:158px}
       #quickProviderDialog{width:min(720px,calc(100vw - 28px));max-width:720px;margin:auto}
-      #quickProviderDialog .modal-content{max-height:90vh;overflow:auto}
+      #quickProviderDialog .modal-content{max-height:90vh;overflow:hidden}
       .quick-provider-destination{display:none}
       .quick-provider-destination.visible{display:flex;flex-direction:column;gap:5px}
       .visit-context-placeholder{border:1px dashed var(--border-strong);border-radius:12px;padding:12px;background:rgba(255,255,255,.018);display:grid;gap:6px;color:var(--text-2)}
@@ -471,8 +471,9 @@
               <h2>Nuevo proveedor</h2>
               <p>Alta rapida sin salir de la solicitud.</p>
             </div>
-            <button type="button" class="icon-btn" data-close-quick-provider>x</button>
+            <button type="button" class="icon-btn" data-close-quick-provider>✕</button>
           </div>
+          <div class="modal-scroll">
           <div class="form-grid">
             <label>Alias / nombre visible *<input id="quickProviderAlias" class="form-control" required></label>
             <label>Razon social / nombre completo *<input id="quickProviderName" class="form-control" required></label>
@@ -501,6 +502,7 @@
             <label class="quick-provider-destination" data-quick-destination="cuenta">Cuenta bancaria<input id="quickProviderAccount" class="form-control"></label>
             <label class="quick-provider-destination" data-quick-destination="convenio">Numero de convenio<input id="quickProviderConvenio" class="form-control"></label>
             <label class="full-row">Notas<textarea id="quickProviderNotes" class="form-control"></textarea></label>
+          </div>
           </div>
           <div class="modal-actions">
             <button type="button" class="secondary-btn" data-close-quick-provider>Cancelar</button>
@@ -675,6 +677,13 @@
   }
 
   function showToast(title, message, type = "success") {
+    // Usar el toast global de components.js (popover → visible sobre modales).
+    // variant: components usa "danger"/"warning"/"info"/"success".
+    if (window.Components?.showToast) {
+      const variant = type === "error" ? "danger" : type
+      window.Components.showToast({ title, desc: message, variant })
+      return
+    }
     const stack = document.getElementById("toastStack")
     if (!stack) return window.alert(`${title}\n${message}`)
     const node = document.createElement("div")
