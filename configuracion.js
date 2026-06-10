@@ -591,13 +591,13 @@ async function loadUsers() {
 
   try {
     // Traer todos los profiles con sus roles
-    const { data: profiles, error: pe } = await supabaseClient
+    const { data: profiles, error: pe } = await configClient
       .from("profiles")
       .select("id,email,full_name,created_at,active")
       .order("created_at", { ascending: false })
     if (pe) throw pe
 
-    const { data: userRoles, error: re } = await supabaseClient
+    const { data: userRoles, error: re } = await configClient
       .from("user_roles")
       .select("profile_id, roles(id,name)")
     if (re) throw re
@@ -695,18 +695,18 @@ async function saveAssignRole() {
 
   try {
     // 1. Obtener todos los roles de la tabla roles
-    const { data: rolesData, error: re } = await supabaseClient.from("roles").select("id,name")
+    const { data: rolesData, error: re } = await configClient.from("roles").select("id,name")
     if (re) throw re
 
     // 2. Borrar roles actuales del usuario
-    const { error: de } = await supabaseClient.from("user_roles").delete().eq("profile_id", assigningProfileId)
+    const { error: de } = await configClient.from("user_roles").delete().eq("profile_id", assigningProfileId)
     if (de) throw de
 
     // 3. Si no es pending, asignar el nuevo rol
     if (selected !== "pending") {
       const roleRow = rolesData.find(r => r.name.toLowerCase() === selected.toLowerCase())
       if (!roleRow) throw new Error(`Rol "${selected}" no encontrado en la tabla roles.`)
-      const { error: ie } = await supabaseClient.from("user_roles").insert({ profile_id: assigningProfileId, role_id: roleRow.id })
+      const { error: ie } = await configClient.from("user_roles").insert({ profile_id: assigningProfileId, role_id: roleRow.id })
       if (ie) throw ie
     }
 
