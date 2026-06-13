@@ -1,7 +1,64 @@
 // Configuracion Supabase
 // No uses la secret key en frontend.
-const SUPABASE_URL = "https://scsirgbuqjcwoaxfacth.supabase.co"
-const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
+;(function loadFluxRuntimeConfig() {
+  if (window.FLUX_ENV_CONFIG || window.__FLUX_RUNTIME_CONFIG_REQUESTED__) return
+  window.__FLUX_RUNTIME_CONFIG_REQUESTED__ = true
+  if (typeof document === "undefined" || document.readyState !== "loading") return
+
+  try {
+    document.write('<script src="./api/runtime-config?v=20260612-env"></scr' + 'ipt>')
+  } catch (_) {
+    // Si el runtime script no puede cargarse, se usa el fallback dev.
+  }
+})()
+
+const FLUX_FALLBACK_CONFIG = Object.freeze({
+  env: "dev",
+  source: "fallback",
+  supabaseUrl: "https://scsirgbuqjcwoaxfacth.supabase.co",
+  supabaseAnonKey: "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2",
+})
+
+const FLUX_RUNTIME_CONFIG = window.FLUX_ENV_CONFIG || {}
+
+function readFluxConfigValue(...keys) {
+  for (const key of keys) {
+    const value = FLUX_RUNTIME_CONFIG[key]
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim()
+  }
+  return ""
+}
+
+const SUPABASE_URL = readFluxConfigValue("supabaseUrl", "SUPABASE_URL", "FLUX_SUPABASE_URL") || FLUX_FALLBACK_CONFIG.supabaseUrl
+const SUPABASE_ANON_KEY = readFluxConfigValue("supabaseAnonKey", "SUPABASE_ANON_KEY", "FLUX_SUPABASE_ANON_KEY") || FLUX_FALLBACK_CONFIG.supabaseAnonKey
+const FLUX_ENV = readFluxConfigValue("env", "FLUX_ENV") || FLUX_FALLBACK_CONFIG.env
+const FLUX_CONFIG_SOURCE = readFluxConfigValue("source") || (window.FLUX_ENV_CONFIG ? "runtime" : FLUX_FALLBACK_CONFIG.source)
+
+window.SUPABASE_URL = SUPABASE_URL
+window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
+window.FLUX_CONFIG = Object.freeze({
+  env: FLUX_ENV,
+  source: FLUX_CONFIG_SOURCE,
+  supabaseUrl: SUPABASE_URL,
+  hasSupabaseAnonKey: Boolean(SUPABASE_ANON_KEY),
+  usingFallback: FLUX_CONFIG_SOURCE === "fallback",
+})
+
+try {
+  const supabaseHost = new URL(SUPABASE_URL).host
+  console.info("[Flux] Config", {
+    env: window.FLUX_CONFIG.env,
+    source: window.FLUX_CONFIG.source,
+    supabaseHost,
+    usingFallback: window.FLUX_CONFIG.usingFallback,
+  })
+} catch (_) {
+  console.info("[Flux] Config", {
+    env: window.FLUX_CONFIG.env,
+    source: window.FLUX_CONFIG.source,
+    usingFallback: window.FLUX_CONFIG.usingFallback,
+  })
+}
 
 ;(function prepareFluxShell() {
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
@@ -211,7 +268,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2"
       if (data?.id) return data
     }
 
-    // Usuario nuevo de Google OAuth — crear perfil pendiente de aprobación
+    // Usuario nuevo de Google OAuth - crear perfil pendiente de aprobacion
     const email = session.user.email || ""
     const full_name = session.user.user_metadata?.full_name || session.user.user_metadata?.name || email.split("@")[0]
     const { data: newProfile } = await client
