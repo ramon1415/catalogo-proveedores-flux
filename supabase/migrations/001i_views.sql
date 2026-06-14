@@ -10,7 +10,7 @@ create or replace view public.budget_availability as
    FROM budget_lines bl
      JOIN budget_versions bv ON bv.id = bl.budget_version_id AND bv.active = true
      LEFT JOIN payment_requests pr ON pr.company_id = bl.company_id AND pr.cost_center_id = bl.cost_center_id AND pr.budget_category_id = bl.budget_category_id AND pr.budget_month = bl.budget_month AND (pr.status::text <> ALL (ARRAY['rejected'::text, 'cancelled'::text]))
-  GROUP BY bl.company_id, bl.cost_center_id, bl.budget_category_id, bl.budget_month, bl.amount;;
+  GROUP BY bl.company_id, bl.cost_center_id, bl.budget_category_id, bl.budget_month, bl.amount;
 
 create or replace view public.budget_exceptions as
  SELECT id,
@@ -54,7 +54,7 @@ create or replace view public.budget_exceptions as
     submitted_at,
     budget_result
    FROM payment_requests pr
-  WHERE budget_decision = 'bloqueado'::text OR is_extraordinary_adjustment = true;;
+  WHERE budget_decision = 'bloqueado'::text OR is_extraordinary_adjustment = true;
 
 create or replace view public.celebration_events_with_dates as
  SELECT id,
@@ -75,4 +75,4 @@ create or replace view public.celebration_events_with_dates as
     planner_id,
     primary_contact_id
    FROM celebration_events ce
-  WHERE event_date IS NOT NULL;;
+  WHERE event_date IS NOT NULL;
