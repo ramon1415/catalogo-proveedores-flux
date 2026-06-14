@@ -1,63 +1,23 @@
--- Tanda 0C - 006_seed_base.sql
--- Flux Operadora - Seed base seguro
--- Estado: PENDIENTE DE DATOS LIMPIOS APROBADOS.
--- No ejecutar en produccion hasta que haya revision humana.
+-- Flux Operadora - Migracion 006
+-- Seed minimo seguro para Supabase prod limpio.
+-- No incluye solicitudes, pagos, fondos, facturas ni datos operativos de dev.
 
--- Este archivo debe contener solo datos minimos seguros para operar prod.
--- No debe incluir datos operativos de dev ni datos personales sin autorizacion.
+insert into public.roles (name, description) values
+  ('admin', 'Administrador del sistema'),
+  ('finance', 'Finanzas'),
+  ('finanzas', 'Finanzas'),
+  ('approver_2', 'Aprobador nivel 2'),
+  ('aprobador_2', 'Aprobador nivel 2'),
+  ('solicitante', 'Solicitante'),
+  ('operator', 'Operador'),
+  ('sysadmin', 'Administrador tecnico'),
+  ('system_admin', 'Administrador tecnico')
+on conflict (name) do nothing;
 
--- Roles base sugeridos, confirmar estructura real de roles antes de ejecutar:
--- insert into public.roles (name, active)
--- values
---   ('admin', true),
---   ('finance', true),
---   ('finanzas', true),
---   ('approver_2', true),
---   ('aprobador_2', true),
---   ('solicitante', true),
---   ('operator', true),
---   ('sysadmin', true),
---   ('system_admin', true)
--- on conflict do nothing;
-
--- Admin inicial:
--- 1. Crear usuario manualmente en Supabase Auth prod.
--- 2. Copiar auth.users.id.
--- 3. Crear profile aprobado.
--- 4. Asignar rol admin/sysadmin en user_roles.
---
--- NO insertar auth.users directamente desde este seed salvo que exista un proceso aprobado.
-
--- Catalogos minimos, dejar comentados hasta tener datos limpios aprobados:
+-- Catalogos minimos para prod deben cargarse de forma controlada despues de crear el usuario admin inicial:
 -- - companies
 -- - cost_centers
 -- - budget_categories
 -- - company_bank_accounts
--- - proveedores demo, solo si negocio lo autoriza
-
--- No insertar:
--- - solicitudes de pago
--- - layouts
--- - payment_receipts
--- - cash_funds
--- - cash_reconciliations
--- - cash_reconciliation_items
--- - members de prueba
--- - cuotas generadas
--- - cobros
--- - incident_charges
--- - invoices
--- - monthly_closures de prueba
--- - correos personales sin autorizacion
--- - tokens
--- - secrets
--- - service_role
-
--- Checklist antes de activar este seed:
--- - La estructura real de roles fue confirmada.
--- - Los catalogos fueron aprobados por negocio.
--- - No hay datos basura de dev.
--- - No hay datos personales innecesarios.
--- - No hay llaves ni secretos.
--- - RLS ya esta aplicada.
--- - El usuario admin inicial fue creado en Auth prod.
+-- - perfiles y user_roles del admin inicial
+-- - proveedores demo solo si negocio lo autoriza
