@@ -77,7 +77,7 @@ not_allowed_to_view_dashboard
 
 Ese resultado no bloquea la migracion si las funciones fueron creadas correctamente y las validaciones de tablas, views, funciones, RLS, policies, grants, buckets y seed pasaron.
 
-Para validar dashboard en un Supabase temporal hay que crear un usuario temporal, crear su `profile`, asignarle un rol autorizado y probar desde la app con sesion real. Alternativamente, se puede hacer una prueba SQL avanzada simulando claims/JWT de Supabase, pero no debe usarse con datos reales ni llaves privilegiadas.
+Para validar dashboard en un Supabase temporal hay que crear un usuario temporal desde **Authentication > Users**, crear su `profile`, asignarle un rol autorizado y probar desde la app con sesion real. Alternativamente, se puede hacer una prueba SQL avanzada simulando `request.jwt.claim.sub`, pero no debe usarse con datos reales ni llaves privilegiadas.
 
 ## Resultado de prueba temporal / Fase 0E
 
@@ -87,26 +87,27 @@ La Fase 0E fue validada manualmente en un proyecto Supabase temporal, separado d
 
 Resultado reportado:
 
-- Los archivos de migracion del PR #92 fueron ejecutados en orden en Supabase temporal.
+- Los archivos de migracion del PR #92 fueron ejecutados en orden hasta el final en Supabase temporal.
 - No se usaron datos reales.
 - No se toco Supabase dev.
 - No se toco Supabase prod.
 - No se toco `main`.
 - No se toco n8n.
-- El unico fallo inicial observado en smoke tests fue `not_allowed_to_view_dashboard` al ejecutar `dashboard_kpis` y `dashboard_closure_checklist` desde SQL Editor sin sesion/auth/rol.
+- Las views fueron creadas correctamente:
+  - `budget_availability`
+  - `budget_exceptions`
+  - `celebration_events_with_dates`
+- `information_schema.tables` puede mostrar mas objetos que el conteo de tablas base porque incluye tablas y views segun la consulta usada; en la validacion manual aparecieron 62 objetos y `information_schema.views` mostro las 3 views esperadas.
+- El unico fallo observado en smoke tests fue `not_allowed_to_view_dashboard` al ejecutar `dashboard_kpis` y `dashboard_closure_checklist` desde SQL Editor sin sesion/auth/profile/rol.
 - Ese fallo es esperado porque `dashboard_assert_access()` requiere contexto de usuario autenticado con profile y rol autorizado.
-- Se creo un usuario temporal en Auth.
-- Se creo un profile temporal.
-- Se asigno rol `sysadmin`.
-- Se simulo `request.jwt.claim.sub`.
-- `dashboard_kpis` respondio correctamente.
-- `dashboard_closure_checklist` respondio correctamente.
+- Un intento de crear `profile` temporal con UUID manual fallo por foreign key contra `auth.users`; eso tambien es esperado porque `profiles.auth_user_id` referencia `auth.users.id`.
+- Para validacion avanzada de dashboard, primero debe crearse un usuario temporal desde **Authentication > Users** y despues crear el `profile` usando el `auth.users.id` real.
 
-Con esta prueba, el paquete puede considerarse validado como base para crear un Supabase prod limpio. Antes de ejecutarlo en prod real todavia se requiere revision humana final, definicion del seed operativo minimo y validacion de variables/ambientes.
+Con esta prueba, el paquete puede considerarse validado como base para crear un Supabase prod limpio. El PR #92 ya fue mergeado a `dev`; antes de ejecutar en prod real todavia se requiere revision humana final, definicion del seed operativo minimo y validacion de variables/ambientes.
 
 ## Revision requerida antes de prod
 
 - Revisar las policies temporales de Storage para `anon` sobre `payment-receipts`.
-- Validar el paquete completo en un proyecto Supabase temporal antes de prod.
-- Crear usuario admin inicial y asignar profile/rol autorizado antes de validar dashboard desde la app.
+- Crear usuario admin inicial desde Authentication > Users y asignar profile/rol autorizado antes de validar dashboard desde la app.
 - Cargar seed operativo minimo manualmente despues del usuario admin inicial.
+- Configurar variables de Vercel Production solo cuando el Supabase prod limpio ya tenga esquema, roles base y admin inicial validados.
