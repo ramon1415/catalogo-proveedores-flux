@@ -79,6 +79,31 @@ Ese resultado no bloquea la migracion si las funciones fueron creadas correctame
 
 Para validar dashboard en un Supabase temporal hay que crear un usuario temporal, crear su `profile`, asignarle un rol autorizado y probar desde la app con sesion real. Alternativamente, se puede hacer una prueba SQL avanzada simulando claims/JWT de Supabase, pero no debe usarse con datos reales ni llaves privilegiadas.
 
+## Resultado de prueba temporal / Fase 0E
+
+Fecha de validacion: 2026-06-15.
+
+La Fase 0E fue validada manualmente en un proyecto Supabase temporal, separado de dev y prod.
+
+Resultado reportado:
+
+- Los archivos de migracion del PR #92 fueron ejecutados en orden en Supabase temporal.
+- No se usaron datos reales.
+- No se toco Supabase dev.
+- No se toco Supabase prod.
+- No se toco `main`.
+- No se toco n8n.
+- El unico fallo inicial observado en smoke tests fue `not_allowed_to_view_dashboard` al ejecutar `dashboard_kpis` y `dashboard_closure_checklist` desde SQL Editor sin sesion/auth/rol.
+- Ese fallo es esperado porque `dashboard_assert_access()` requiere contexto de usuario autenticado con profile y rol autorizado.
+- Se creo un usuario temporal en Auth.
+- Se creo un profile temporal.
+- Se asigno rol `sysadmin`.
+- Se simulo `request.jwt.claim.sub`.
+- `dashboard_kpis` respondio correctamente.
+- `dashboard_closure_checklist` respondio correctamente.
+
+Con esta prueba, el paquete puede considerarse validado como base para crear un Supabase prod limpio. Antes de ejecutarlo en prod real todavia se requiere revision humana final, definicion del seed operativo minimo y validacion de variables/ambientes.
+
 ## Revision requerida antes de prod
 
 - Revisar las policies temporales de Storage para `anon` sobre `payment-receipts`.
