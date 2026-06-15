@@ -9,7 +9,7 @@ CREATE TABLE public."cash_funds" (
   responsible_profile_id uuid NOT NULL,
   assigned_amount numeric NOT NULL CHECK (assigned_amount > 0::numeric),
   verified_amount numeric NOT NULL DEFAULT 0 CHECK (verified_amount >= 0::numeric),
-  pending_amount numeric DEFAULT (assigned_amount - verified_amount),
+  pending_amount numeric GENERATED ALWAYS AS (assigned_amount - verified_amount) STORED,
   assignment_date date NOT NULL DEFAULT CURRENT_DATE,
   due_date date NOT NULL,
   status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'pending_receipt'::text, 'blocked'::text, 'verified'::text, 'closed'::text, 'cancelled'::text, 'receipt_review'::text])),
