@@ -12,7 +12,7 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 6. `001f_cash_tables.sql` - efectivo, comprobaciones y tickets.
 7. `001g_income_tables.sql` - socios, cuotas, cobros, incidencias, facturas y entidades comerciales/eventos.
 8. `001h_closure_dashboard_tables.sql` - cierre mensual y foreign keys finales.
-9. `001i_views.sql` - indice/TODO de vistas faltantes.
+9. `001i_views.sql` - views presupuestales y de eventos.
 10. `002_enums_triggers_indexes.sql` - funciones de soporte para triggers, indices y triggers.
 11. `003a_helper_functions.sql` - helpers de perfil/roles.
 12. `003b_budget_rpcs.sql` - RPCs de presupuesto.
@@ -35,17 +35,11 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 - Indices no constraint: 62.
 - Triggers: 34.
 - Funciones/RPCs de aplicacion: 36 en chunks 003a-003g, mas 2 funciones de soporte en 002.
+- Views publicas incluidas:
+  - `public.budget_availability`
+  - `public.budget_exceptions`
+  - `public.celebration_events_with_dates`
 - Buckets de Storage: 3.
-
-## Pendientes detectados
-
-Los siguientes objetos aparecen en metadata de columnas, pero el export disponible no trae su DDL. Probablemente son vistas o vistas materializadas y deben exportarse por separado antes de considerar lista una migracion productiva:
-
-- `public.budget_availability`
-- `public.budget_exceptions`
-- `public.celebration_events_with_dates`
-
-Riesgo principal: algunas RPCs de presupuesto dependen de `public.budget_availability`; si esa vista no existe en prod, esas validaciones fallaran al ejecutarse.
 
 ## Seguridad
 
@@ -55,9 +49,39 @@ Riesgo principal: algunas RPCs de presupuesto dependen de `public.budget_availab
 - No se copian solicitudes, pagos, facturas, fondos ni datos operativos de dev.
 - Los grants se limitaron a `anon` y `authenticated`; los roles internos/plataforma no se replican.
 
+## Smoke tests de dashboard
+
+Las RPCs de dashboard ejecutan `public.dashboard_assert_access()` al inicio.
+
+Esto significa que estas funciones requieren un usuario autenticado con perfil y rol autorizado:
+
+- `admin`
+- `superadmin`
+- `sysadmin`
+- `system_admin`
+- `finance`
+- `finanzas`
+- `treasury`
+- `tesoreria`
+- `administracion`
+- `approver_2`
+- `aprobador_2`
+- `direccion`
+- `director`
+
+Si se ejecutan desde Supabase SQL Editor sin contexto de autenticacion de la app, sin `auth.uid()` o sin profile/rol asociado, es esperado que fallen con:
+
+```text
+not_allowed_to_view_dashboard
+```
+
+Ese resultado no bloquea la migracion si las funciones fueron creadas correctamente y las validaciones de tablas, views, funciones, RLS, policies, grants, buckets y seed pasaron.
+
+Para validar dashboard en un Supabase temporal hay que crear un usuario temporal, crear su `profile`, asignarle un rol autorizado y probar desde la app con sesion real. Alternativamente, se puede hacer una prueba SQL avanzada simulando claims/JWT de Supabase, pero no debe usarse con datos reales ni llaves privilegiadas.
+
 ## Revision requerida antes de prod
 
 - Revisar las policies temporales de Storage para `anon` sobre `payment-receipts`.
-- Validar el paquete en un proyecto Supabase temporal antes de prod.
-- Exportar y agregar el DDL faltante de vistas.
+- Validar el paquete completo en un proyecto Supabase temporal antes de prod.
+- Crear usuario admin inicial y asignar profile/rol autorizado antes de validar dashboard desde la app.
 - Cargar seed operativo minimo manualmente despues del usuario admin inicial.
