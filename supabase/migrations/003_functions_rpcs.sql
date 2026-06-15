@@ -1,0 +1,12 @@
+-- Flux Operadora - Migracion 003 (indice)
+-- Este archivo fue dividido en 003a-003g por tamano para evitar truncamiento del conector.
+-- Ejecutar en orden:
+-- 003a_helper_functions.sql
+-- 003b_budget_rpcs.sql
+-- 003c_payment_request_rpcs.sql
+-- 003d_layout_rpcs.sql
+-- 003e_cash_rpcs.sql
+-- 003f_income_invoice_rpcs.sql
+-- 003g_dashboard_rpcs.sql
+-- No contiene DDL para evitar duplicados.
+-- Nota: set_updated_at y update_updated_at_column viven en 002 porque los triggers dependen de ellas.

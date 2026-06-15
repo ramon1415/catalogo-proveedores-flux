@@ -1,0 +1,208 @@
+-- Flux Operadora - Migracion 004
+-- RLS, policies y grants generados desde exports reales de Supabase dev.
+
+-- RLS settings publicas.
+alter table public."activity_log" enable row level security;
+alter table public."approval_rules" enable row level security;
+alter table public."billing_periods" enable row level security;
+alter table public."budget_categories" enable row level security;
+alter table public."budget_import_batches" enable row level security;
+alter table public."budget_import_staging" enable row level security;
+alter table public."budget_lines" enable row level security;
+alter table public."budget_versions" enable row level security;
+alter table public."cash_funds" enable row level security;
+alter table public."cash_reconciliation_items" enable row level security;
+alter table public."cash_reconciliations" enable row level security;
+alter table public."celebration_concepts" enable row level security;
+alter table public."companies" enable row level security;
+alter table public."company_bank_accounts" enable row level security;
+alter table public."company_cost_center_budget_categories" enable row level security;
+alter table public."company_cost_centers" enable row level security;
+alter table public."cost_centers" enable row level security;
+alter table public."document_links" enable row level security;
+alter table public."documents" enable row level security;
+alter table public."incident_charges" enable row level security;
+alter table public."income_payment_allocations" enable row level security;
+alter table public."income_payments" enable row level security;
+alter table public."invoices" enable row level security;
+alter table public."maintenance_fee_charges" enable row level security;
+alter table public."maintenance_fee_payments" enable row level security;
+alter table public."members" enable row level security;
+alter table public."monthly_closure_comments" enable row level security;
+alter table public."monthly_closure_exports" enable row level security;
+alter table public."monthly_closures" enable row level security;
+alter table public."payment_layout_lines" enable row level security;
+alter table public."payment_layouts" enable row level security;
+alter table public."payment_receipts" enable row level security;
+alter table public."payment_request_approvals" enable row level security;
+alter table public."payment_request_items" enable row level security;
+alter table public."payment_requests" enable row level security;
+alter table public."profiles" enable row level security;
+alter table public."proveedor_provider_links" enable row level security;
+alter table public."proveedores" enable row level security;
+alter table public."provider_bank_accounts" enable row level security;
+alter table public."providers" enable row level security;
+alter table public."roles" enable row level security;
+alter table public."sales_invoices" enable row level security;
+alter table public."tax_schemes" enable row level security;
+alter table public."tickets" enable row level security;
+alter table public."user_roles" enable row level security;
+
+-- Policies publicas exportadas.
+drop policy if exists "billing_periods_admin_finance_all" on public."billing_periods";
+create policy "billing_periods_admin_finance_all" on public."billing_periods" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "billing_periods_select_authenticated" on public."billing_periods";
+create policy "billing_periods_select_authenticated" on public."billing_periods" as permissive for select to authenticated using (true);
+drop policy if exists "authenticated can read budget categories" on public."budget_categories";
+create policy "authenticated can read budget categories" on public."budget_categories" as permissive for select to authenticated using (true);
+drop policy if exists "Authenticated can delete budget import batches" on public."budget_import_batches";
+create policy "Authenticated can delete budget import batches" on public."budget_import_batches" as permissive for delete to authenticated using (true);
+drop policy if exists "Authenticated can insert budget import batches" on public."budget_import_batches";
+create policy "Authenticated can insert budget import batches" on public."budget_import_batches" as permissive for insert to authenticated with check (true);
+drop policy if exists "Authenticated can read budget import batches" on public."budget_import_batches";
+create policy "Authenticated can read budget import batches" on public."budget_import_batches" as permissive for select to authenticated using (true);
+drop policy if exists "Authenticated can update budget import batches" on public."budget_import_batches";
+create policy "Authenticated can update budget import batches" on public."budget_import_batches" as permissive for update to authenticated using (true) with check (true);
+drop policy if exists "Authenticated can delete budget import staging" on public."budget_import_staging";
+create policy "Authenticated can delete budget import staging" on public."budget_import_staging" as permissive for delete to authenticated using (true);
+drop policy if exists "Authenticated can insert budget import staging" on public."budget_import_staging";
+create policy "Authenticated can insert budget import staging" on public."budget_import_staging" as permissive for insert to authenticated with check (true);
+drop policy if exists "Authenticated can read budget import staging" on public."budget_import_staging";
+create policy "Authenticated can read budget import staging" on public."budget_import_staging" as permissive for select to authenticated using (true);
+drop policy if exists "Authenticated can update budget import staging" on public."budget_import_staging";
+create policy "Authenticated can update budget import staging" on public."budget_import_staging" as permissive for update to authenticated using (true) with check (true);
+drop policy if exists "authenticated can read budget lines" on public."budget_lines";
+create policy "authenticated can read budget lines" on public."budget_lines" as permissive for select to authenticated using (true);
+drop policy if exists "authenticated can read budget versions" on public."budget_versions";
+create policy "authenticated can read budget versions" on public."budget_versions" as permissive for select to authenticated using (true);
+drop policy if exists "cash funds manageable by finance roles" on public."cash_funds";
+create policy "cash funds manageable by finance roles" on public."cash_funds" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "cash funds readable by owner or finance roles" on public."cash_funds";
+create policy "cash funds readable by owner or finance roles" on public."cash_funds" as permissive for select to authenticated using (((responsible_profile_id = current_profile_id()) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliation items insert by owner draft or finance role" on public."cash_reconciliation_items";
+create policy "cash reconciliation items insert by owner draft or finance role" on public."cash_reconciliation_items" as permissive for insert to authenticated with check (((EXISTS ( SELECT 1
+   FROM cash_reconciliations cr
+  WHERE ((cr.id = cash_reconciliation_items.reconciliation_id) AND (cr.submitted_by = current_profile_id()) AND (cr.status = ANY (ARRAY['draft'::text, 'correction_requested'::text]))))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliation items readable by owner or finance roles" on public."cash_reconciliation_items";
+create policy "cash reconciliation items readable by owner or finance roles" on public."cash_reconciliation_items" as permissive for select to authenticated using (((EXISTS ( SELECT 1
+   FROM (cash_reconciliations cr
+     JOIN cash_funds cf ON ((cf.id = cr.cash_fund_id)))
+  WHERE ((cr.id = cash_reconciliation_items.reconciliation_id) AND ((cr.submitted_by = current_profile_id()) OR (cf.responsible_profile_id = current_profile_id()))))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliation items update by owner draft or finance role" on public."cash_reconciliation_items";
+create policy "cash reconciliation items update by owner draft or finance role" on public."cash_reconciliation_items" as permissive for update to authenticated using (((EXISTS ( SELECT 1
+   FROM cash_reconciliations cr
+  WHERE ((cr.id = cash_reconciliation_items.reconciliation_id) AND (cr.submitted_by = current_profile_id()) AND (cr.status = ANY (ARRAY['draft'::text, 'correction_requested'::text]))))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]))) with check (((EXISTS ( SELECT 1
+   FROM cash_reconciliations cr
+  WHERE ((cr.id = cash_reconciliation_items.reconciliation_id) AND (cr.submitted_by = current_profile_id()) AND (cr.status = ANY (ARRAY['draft'::text, 'correction_requested'::text]))))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliations insert by owner or finance roles" on public."cash_reconciliations";
+create policy "cash reconciliations insert by owner or finance roles" on public."cash_reconciliations" as permissive for insert to authenticated with check (((submitted_by = current_profile_id()) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliations readable by owner or finance roles" on public."cash_reconciliations";
+create policy "cash reconciliations readable by owner or finance roles" on public."cash_reconciliations" as permissive for select to authenticated using (((submitted_by = current_profile_id()) OR (EXISTS ( SELECT 1
+   FROM cash_funds cf
+  WHERE ((cf.id = cash_reconciliations.cash_fund_id) AND (cf.responsible_profile_id = current_profile_id())))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "cash reconciliations update by owner draft or finance roles" on public."cash_reconciliations";
+create policy "cash reconciliations update by owner draft or finance roles" on public."cash_reconciliations" as permissive for update to authenticated using ((((submitted_by = current_profile_id()) AND (status = ANY (ARRAY['draft'::text, 'correction_requested'::text]))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]))) with check ((((submitted_by = current_profile_id()) AND (status = ANY (ARRAY['draft'::text, 'correction_requested'::text]))) OR current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])));
+drop policy if exists "authenticated can read companies" on public."companies";
+create policy "authenticated can read companies" on public."companies" as permissive for select to authenticated using (true);
+drop policy if exists "cba_select" on public."company_bank_accounts";
+create policy "cba_select" on public."company_bank_accounts" as permissive for select to authenticated using (current_user_has_role(flux_member_roles()));
+drop policy if exists "cba_write" on public."company_bank_accounts";
+create policy "cba_write" on public."company_bank_accounts" as permissive for all to authenticated using (current_user_has_role(flux_finance_roles())) with check (current_user_has_role(flux_finance_roles()));
+drop policy if exists "authenticated can read company cost center budget categories" on public."company_cost_center_budget_categories";
+create policy "authenticated can read company cost center budget categories" on public."company_cost_center_budget_categories" as permissive for select to authenticated using (true);
+drop policy if exists "authenticated can read company cost centers" on public."company_cost_centers";
+create policy "authenticated can read company cost centers" on public."company_cost_centers" as permissive for select to authenticated using (true);
+drop policy if exists "cost_centers_authenticated_all" on public."cost_centers";
+create policy "cost_centers_authenticated_all" on public."cost_centers" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "document_links_authenticated_all" on public."document_links";
+create policy "document_links_authenticated_all" on public."document_links" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "documents_authenticated_all" on public."documents";
+create policy "documents_authenticated_all" on public."documents" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "incident_charges_authorized_all" on public."incident_charges";
+create policy "incident_charges_authorized_all" on public."incident_charges" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "incident_charges_authorized_select" on public."incident_charges";
+create policy "incident_charges_authorized_select" on public."incident_charges" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "income_payment_allocations_authenticated_all" on public."income_payment_allocations";
+create policy "income_payment_allocations_authenticated_all" on public."income_payment_allocations" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "income_payments_authenticated_all" on public."income_payments";
+create policy "income_payments_authenticated_all" on public."income_payments" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "invoices_admin_finance_all" on public."invoices";
+create policy "invoices_admin_finance_all" on public."invoices" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "invoices_admin_finance_select" on public."invoices";
+create policy "invoices_admin_finance_select" on public."invoices" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "maintenance_fee_charges_admin_finance_all" on public."maintenance_fee_charges";
+create policy "maintenance_fee_charges_admin_finance_all" on public."maintenance_fee_charges" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "maintenance_fee_charges_admin_finance_select" on public."maintenance_fee_charges";
+create policy "maintenance_fee_charges_admin_finance_select" on public."maintenance_fee_charges" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "maintenance_fee_payments_admin_finance_all" on public."maintenance_fee_payments";
+create policy "maintenance_fee_payments_admin_finance_all" on public."maintenance_fee_payments" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "maintenance_fee_payments_admin_finance_select" on public."maintenance_fee_payments";
+create policy "maintenance_fee_payments_admin_finance_select" on public."maintenance_fee_payments" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "members_admin_finance_all" on public."members";
+create policy "members_admin_finance_all" on public."members" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "members_select_authenticated" on public."members";
+create policy "members_select_authenticated" on public."members" as permissive for select to authenticated using (true);
+drop policy if exists "monthly_closure_comments_delete_finance" on public."monthly_closure_comments";
+create policy "monthly_closure_comments_delete_finance" on public."monthly_closure_comments" as permissive for delete to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "monthly_closure_comments_insert_authorized" on public."monthly_closure_comments";
+create policy "monthly_closure_comments_insert_authorized" on public."monthly_closure_comments" as permissive for insert to authenticated with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "monthly_closure_comments_select_authorized" on public."monthly_closure_comments";
+create policy "monthly_closure_comments_select_authorized" on public."monthly_closure_comments" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "monthly_closure_comments_update_authorized" on public."monthly_closure_comments";
+create policy "monthly_closure_comments_update_authorized" on public."monthly_closure_comments" as permissive for update to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "monthly_closure_exports_select_authorized" on public."monthly_closure_exports";
+create policy "monthly_closure_exports_select_authorized" on public."monthly_closure_exports" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "monthly_closure_exports_write_finance" on public."monthly_closure_exports";
+create policy "monthly_closure_exports_write_finance" on public."monthly_closure_exports" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "monthly_closures_select_authorized" on public."monthly_closures";
+create policy "monthly_closures_select_authorized" on public."monthly_closures" as permissive for select to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text, 'approver_2'::text, 'aprobador_2'::text]));
+drop policy if exists "monthly_closures_write_finance" on public."monthly_closures";
+create policy "monthly_closures_write_finance" on public."monthly_closures" as permissive for all to authenticated using (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text])) with check (current_user_has_role(ARRAY['admin'::text, 'finance'::text, 'finanzas'::text]));
+drop policy if exists "authenticated can read payment layout lines" on public."payment_layout_lines";
+create policy "authenticated can read payment layout lines" on public."payment_layout_lines" as permissive for select to authenticated using (true);
+drop policy if exists "authenticated can read payment layouts" on public."payment_layouts";
+create policy "authenticated can read payment layouts" on public."payment_layouts" as permissive for select to authenticated using (true);
+drop policy if exists "authenticated can update payment layouts" on public."payment_layouts";
+create policy "authenticated can update payment layouts" on public."payment_layouts" as permissive for update to authenticated using (true) with check (true);
+drop policy if exists "pri_all_members" on public."payment_request_items";
+create policy "pri_all_members" on public."payment_request_items" as permissive for all to authenticated using (current_user_has_role(flux_member_roles())) with check (current_user_has_role(flux_member_roles()));
+drop policy if exists "payment_requests_insert" on public."payment_requests";
+create policy "payment_requests_insert" on public."payment_requests" as permissive for insert to authenticated with check (current_user_has_role(flux_member_roles()));
+drop policy if exists "payment_requests_select" on public."payment_requests";
+create policy "payment_requests_select" on public."payment_requests" as permissive for select to authenticated using (current_user_has_role(flux_member_roles()));
+drop policy if exists "payment_requests_update" on public."payment_requests";
+create policy "payment_requests_update" on public."payment_requests" as permissive for update to authenticated using (((requested_by = current_profile_id()) OR current_user_has_role(flux_approver_roles()))) with check (((requested_by = current_profile_id()) OR current_user_has_role(flux_approver_roles())));
+drop policy if exists "profiles_insert_self" on public."profiles";
+create policy "profiles_insert_self" on public."profiles" as permissive for insert to authenticated with check ((auth_user_id = auth.uid()));
+drop policy if exists "profiles_select" on public."profiles";
+create policy "profiles_select" on public."profiles" as permissive for select to authenticated using (true);
+drop policy if exists "profiles_update_self_or_sysadmin" on public."profiles";
+create policy "profiles_update_self_or_sysadmin" on public."profiles" as permissive for update to authenticated using (((auth_user_id = auth.uid()) OR current_user_has_role(flux_sysadmin_roles()))) with check (((auth_user_id = auth.uid()) OR current_user_has_role(flux_sysadmin_roles())));
+drop policy if exists "Usuarios autenticados pueden crear proveedores" on public."proveedores";
+create policy "Usuarios autenticados pueden crear proveedores" on public."proveedores" as permissive for insert to authenticated with check (true);
+drop policy if exists "Usuarios autenticados pueden editar proveedores" on public."proveedores";
+create policy "Usuarios autenticados pueden editar proveedores" on public."proveedores" as permissive for update to authenticated using (true) with check (true);
+drop policy if exists "pba_select" on public."provider_bank_accounts";
+create policy "pba_select" on public."provider_bank_accounts" as permissive for select to authenticated using (current_user_has_role(flux_member_roles()));
+drop policy if exists "pba_write" on public."provider_bank_accounts";
+create policy "pba_write" on public."provider_bank_accounts" as permissive for all to authenticated using (current_user_has_role(flux_member_roles())) with check (current_user_has_role(flux_member_roles()));
+drop policy if exists "providers_authenticated_all" on public."providers";
+create policy "providers_authenticated_all" on public."providers" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "roles_select" on public."roles";
+create policy "roles_select" on public."roles" as permissive for select to authenticated using (true);
+drop policy if exists "roles_write_sysadmin" on public."roles";
+create policy "roles_write_sysadmin" on public."roles" as permissive for all to authenticated using (current_user_has_role(flux_sysadmin_roles())) with check (current_user_has_role(flux_sysadmin_roles()));
+drop policy if exists "sales_invoices_authenticated_all" on public."sales_invoices";
+create policy "sales_invoices_authenticated_all" on public."sales_invoices" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "tax_schemes_authenticated_all" on public."tax_schemes";
+create policy "tax_schemes_authenticated_all" on public."tax_schemes" as permissive for all to authenticated using (true) with check (true);
+drop policy if exists "user_roles_select" on public."user_roles";
+create policy "user_roles_select" on public."user_roles" as permissive for select to authenticated using (true);
+drop policy if exists "user_roles_write_sysadmin" on public."user_roles";
+create policy "user_roles_write_sysadmin" on public."user_roles" as permissive for all to authenticated using (current_user_has_role(flux_sysadmin_roles())) with check (current_user_has_role(flux_sysadmin_roles()));
+
+-- Grants normalizados para frontend. RLS/policies controlan el acceso final.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete, truncate, references, trigger on all tables in schema public to anon, authenticated;
+grant usage, select on all sequences in schema public to anon, authenticated;
+grant execute on all functions in schema public to anon, authenticated;
