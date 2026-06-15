@@ -351,7 +351,7 @@ CREATE TABLE public."production_items" (
   excluded_from_price_cost boolean NOT NULL DEFAULT false,
   notes text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now,
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
   production_location_id uuid,
   name text,
   quantity numeric NOT NULL DEFAULT 1,
