@@ -356,10 +356,11 @@ try {
     applyLoginCopy()
     applyIncomeCompatibility()
     hideLegacyNavigation()
-    loadFluxExtensions()
-    // Pinta el menú de inmediato desde el cache (si existe) para evitar el
-    // parpadeo de "menú vacío" en cada cambio de sección.
+    // Pinta el menú desde cache ANTES de loadFluxExtensions(): esa función usa
+    // XHR síncronos (bloqueantes) por cada extensión, lo que retrasaba la
+    // aparición del menú y causaba el parpadeo en cada cambio de sección.
     if (hydrateRoleStateFromCache()) applyDemoNavigation()
+    loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
       applyPostLoginRedirect()
