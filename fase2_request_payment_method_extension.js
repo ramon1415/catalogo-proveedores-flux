@@ -250,10 +250,9 @@
       await attachRequestFileIfPresent(client, requestId)
 
       const folio = result.request_number || result.payment_request_number || "Solicitud"
-      showRequestCreatedBanner(folio)
-      closeRequestModalAfterSuccess()
+      toast("Solicitud creada", `${folio} creada correctamente.`, "success")
       scheduleRequestedAmountRefresh()
-      refreshRequestsAfterSuccess(folio)
+      renderRequestCreationSuccess(result, payload)
     } catch (error) {
       toast("No se pudo crear la solicitud", friendlyError(error), "error")
       setButtonLoading(submitButton, false, "Crear solicitud")
@@ -292,42 +291,29 @@
     }, 6500)
   }
 
-  function closeRequestModalAfterSuccess() {
-    const dialog = document.getElementById("requestDialog")
-    const form = document.getElementById("requestForm")
-    window.setTimeout(() => {
-      if (dialog?.open) dialog.close()
-      if (form) form.dataset.fase2Submitting = "false"
-      setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
-    }, 350)
-  }
-
-  function refreshRequestsAfterSuccess(folio) {
-    try {
-      if (folio) window.sessionStorage?.setItem("fluxFase2RequestCreatedFolio", folio)
-    } catch (_) {
-      // Si sessionStorage no esta disponible, el banner actual sigue visible.
-    }
-    window.setTimeout(() => window.location.reload(), 1300)
-  }
-
   function renderRequestCreationSuccess(result, payload) {
     const form = document.getElementById("requestForm")
     if (!form) return
     const folio = result.request_number || result.payment_request_number || "Solicitud creada"
     const modalScroll = form.querySelector(".modal-scroll")
     const actions = form.querySelector(".modal-actions")
+    if (actions && !actions.dataset.fase2OriginalHtml) actions.dataset.fase2OriginalHtml = actions.innerHTML
+
     modalScroll?.classList.add("hidden")
     form.querySelector("[data-fase2-success]")?.remove()
-    form.querySelector(".modal-header p") && (form.querySelector(".modal-header p").textContent = "La solicitud fue registrada correctamente.")
-    form.querySelector(".modal-header h2") && (form.querySelector(".modal-header h2").textContent = "Solicitud creada correctamente")
+
+    const headerTitle = form.querySelector(".modal-header h2")
+    const headerCopy = form.querySelector(".modal-header p")
+    if (headerTitle) headerTitle.textContent = "Solicitud creada correctamente"
+    if (headerCopy) headerCopy.textContent = "La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes."
 
     const panel = document.createElement("div")
     panel.dataset.fase2Success = "true"
     panel.className = "fase2-success-panel"
     panel.innerHTML = `
       <strong>Solicitud creada correctamente</strong>
-      <span>Folio: ${escapeHtml(folio)}</span>
+      <span class="fase2-success-folio">Folio: ${escapeHtml(folio)}</span>
+      <span>La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.</span>
       <span>Tipo: ${escapeHtml(requestTypeLabel(payload.request_type))}</span>
       <span>Metodo de pago: ${escapeHtml(paymentMethodLabel(payload.payment_method))}</span>
     `
@@ -338,20 +324,44 @@
         <button type="button" id="fase2CreateAnotherRequestBtn" class="secondary-btn">Crear otra solicitud</button>
         <button type="button" id="fase2CloseAndViewRequestsBtn" class="primary-btn">Cerrar y ver solicitudes</button>
       `
-      document.getElementById("fase2CreateAnotherRequestBtn")?.addEventListener("click", () => {
-        panel.remove()
-        modalScroll?.classList.remove("hidden")
-        form.reset()
-        form.dataset.fase2Submitting = "false"
-        form.querySelector(".modal-header h2") && (form.querySelector(".modal-header h2").textContent = "Nueva solicitud de pago")
-        form.querySelector(".modal-header p") && (form.querySelector(".modal-header p").textContent = "Completa los datos operativos y financieros para validar presupuesto al guardar.")
-        ensureRequestTypeAndPaymentMethodFields()
-        setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
-      })
-      document.getElementById("fase2CloseAndViewRequestsBtn")?.addEventListener("click", () => {
-        document.getElementById("requestDialog")?.close()
-        window.location.reload()
-      })
+      document.getElementById("fase2CreateAnotherRequestBtn")?.addEventListener("click", () => resetRequestModalForAnother(form, panel, modalScroll, actions))
+      document.getElementById("fase2CloseAndViewRequestsBtn")?.addEventListener("click", () => closeAndRefreshRequests(folio))
+    }
+
+    window.setTimeout(() => panel.scrollIntoView({ block: "start", behavior: "smooth" }), 40)
+  }
+
+  function resetRequestModalForAnother(form, panel, modalScroll, actions) {
+    panel?.remove()
+    form.reset()
+    form.dataset.fase2Submitting = "false"
+    modalScroll?.classList.remove("hidden")
+    const headerTitle = form.querySelector(".modal-header h2")
+    const headerCopy = form.querySelector(".modal-header p")
+    if (headerTitle) headerTitle.textContent = "Nueva solicitud de pago"
+    if (headerCopy) headerCopy.textContent = "Completa los datos operativos y financieros para validar presupuesto al guardar."
+    if (actions?.dataset.fase2OriginalHtml) actions.innerHTML = actions.dataset.fase2OriginalHtml
+    document.getElementById("cancelRequestBtn")?.addEventListener("click", () => document.getElementById("requestDialog")?.close())
+    ensureRequestTypeAndPaymentMethodFields()
+    setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
+    updateSummaryPanelIfAvailable()
+  }
+
+  function closeAndRefreshRequests(folio) {
+    try {
+      if (folio) window.sessionStorage?.setItem("fluxFase2RequestCreatedFolio", folio)
+    } catch (_) {
+      // Solo mejora visual para resaltar el cierre.
+    }
+    document.getElementById("requestDialog")?.close()
+    window.setTimeout(() => window.location.reload(), 120)
+  }
+
+  function updateSummaryPanelIfAvailable() {
+    try {
+      if (typeof window.updateSummaryPanel === "function") window.updateSummaryPanel()
+    } catch (_) {
+      // El resumen se recalcula con los eventos existentes de la pagina.
     }
   }
 
@@ -673,6 +683,7 @@
       .fase2-success-panel{margin:0 2px 16px;padding:18px;border:1px solid rgba(18,183,106,.28);border-radius:14px;background:var(--emerald-dim);color:var(--text-1);display:flex;flex-direction:column;gap:8px}
       .fase2-success-panel strong{font-size:16px;color:var(--emerald)}
       .fase2-success-panel span{font-size:13px;color:var(--text-2)}
+      .fase2-success-folio{font-weight:900;color:var(--text-1)!important}
       .fase2-floating-success{position:fixed;top:18px;right:18px;z-index:2147483000;max-width:min(420px,calc(100vw - 32px));padding:16px 18px;border:1px solid rgba(18,183,106,.34);border-radius:16px;background:linear-gradient(135deg,rgba(6,78,59,.98),rgba(8,47,73,.98));box-shadow:0 22px 60px rgba(0,0,0,.42);color:#ecfdf5;display:flex;flex-direction:column;gap:4px;opacity:0;transform:translateY(-10px);transition:opacity .22s ease,transform .22s ease;pointer-events:none}
       .fase2-floating-success.is-visible{opacity:1;transform:translateY(0)}
       .fase2-floating-success strong{font-size:15px;font-weight:900;color:#5eead4}
