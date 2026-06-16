@@ -59,6 +59,7 @@
       patchRequestRows()
       patchRequestDetail()
       patchRequestedAmountCard()
+      showStoredRequestCreatedBanner()
     })
   }
 
@@ -248,14 +249,66 @@
 
       await attachRequestFileIfPresent(client, requestId)
 
-      toast("Solicitud creada", `${result.request_number || "Solicitud"} creada correctamente.`, "success")
-      renderRequestCreationSuccess(result, payload)
+      const folio = result.request_number || result.payment_request_number || "Solicitud"
+      showRequestCreatedBanner(folio)
+      closeRequestModalAfterSuccess()
       scheduleRequestedAmountRefresh()
+      refreshRequestsAfterSuccess(folio)
     } catch (error) {
       toast("No se pudo crear la solicitud", friendlyError(error), "error")
       setButtonLoading(submitButton, false, "Crear solicitud")
       form.dataset.fase2Submitting = "false"
     }
+  }
+
+  function showStoredRequestCreatedBanner() {
+    try {
+      const folio = window.sessionStorage?.getItem("fluxFase2RequestCreatedFolio")
+      if (!folio) return
+      window.sessionStorage.removeItem("fluxFase2RequestCreatedFolio")
+      window.setTimeout(() => showRequestCreatedBanner(folio), 450)
+    } catch (_) {
+      // El mensaje persistido es solo una mejora visual.
+    }
+  }
+
+  function showRequestCreatedBanner(folio) {
+    const safeFolio = folio && folio !== "Solicitud" ? folio : "la solicitud"
+    document.querySelector("[data-fase2-floating-success]")?.remove()
+    const banner = document.createElement("div")
+    banner.dataset.fase2FloatingSuccess = "true"
+    banner.className = "fase2-floating-success"
+    banner.setAttribute("role", "status")
+    banner.setAttribute("aria-live", "polite")
+    banner.innerHTML = `
+      <strong>Solicitud creada correctamente</strong>
+      <span>Folio: ${escapeHtml(safeFolio)}</span>
+    `
+    document.body.appendChild(banner)
+    window.setTimeout(() => banner.classList.add("is-visible"), 20)
+    window.setTimeout(() => {
+      banner.classList.remove("is-visible")
+      window.setTimeout(() => banner.remove(), 260)
+    }, 6500)
+  }
+
+  function closeRequestModalAfterSuccess() {
+    const dialog = document.getElementById("requestDialog")
+    const form = document.getElementById("requestForm")
+    window.setTimeout(() => {
+      if (dialog?.open) dialog.close()
+      if (form) form.dataset.fase2Submitting = "false"
+      setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
+    }, 350)
+  }
+
+  function refreshRequestsAfterSuccess(folio) {
+    try {
+      if (folio) window.sessionStorage?.setItem("fluxFase2RequestCreatedFolio", folio)
+    } catch (_) {
+      // Si sessionStorage no esta disponible, el banner actual sigue visible.
+    }
+    window.setTimeout(() => window.location.reload(), 1300)
   }
 
   function renderRequestCreationSuccess(result, payload) {
@@ -620,6 +673,11 @@
       .fase2-success-panel{margin:0 2px 16px;padding:18px;border:1px solid rgba(18,183,106,.28);border-radius:14px;background:var(--emerald-dim);color:var(--text-1);display:flex;flex-direction:column;gap:8px}
       .fase2-success-panel strong{font-size:16px;color:var(--emerald)}
       .fase2-success-panel span{font-size:13px;color:var(--text-2)}
+      .fase2-floating-success{position:fixed;top:18px;right:18px;z-index:2147483000;max-width:min(420px,calc(100vw - 32px));padding:16px 18px;border:1px solid rgba(18,183,106,.34);border-radius:16px;background:linear-gradient(135deg,rgba(6,78,59,.98),rgba(8,47,73,.98));box-shadow:0 22px 60px rgba(0,0,0,.42);color:#ecfdf5;display:flex;flex-direction:column;gap:4px;opacity:0;transform:translateY(-10px);transition:opacity .22s ease,transform .22s ease;pointer-events:none}
+      .fase2-floating-success.is-visible{opacity:1;transform:translateY(0)}
+      .fase2-floating-success strong{font-size:15px;font-weight:900;color:#5eead4}
+      .fase2-floating-success span{font-size:13px;font-weight:700;color:#d1fae5}
+      @media (max-width:720px){.fase2-floating-success{top:12px;left:12px;right:12px;max-width:none}}
     `
     document.head.appendChild(style)
   }
