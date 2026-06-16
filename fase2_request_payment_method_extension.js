@@ -352,7 +352,7 @@
       container.querySelectorAll(".badge, .status-badge, span").forEach((node) => {
         const text = normalize(node.textContent)
         if (text === "efectivo" || text === "cheque") {
-          node.textContent = paymentMethodLabels[text]
+          node.textContent = paymentMethodLabel(text)
           node.title = "Metodo de pago"
         }
         if (text === "transferencia") {
@@ -394,7 +394,7 @@
       const { data, error } = await query
       if (error) throw error
       const candidates = data || []
-      const nonTransfer = candidates.filter((request) => normalizePaymentMethod(request.payment_method) !== "transfer")
+      const nonTransfer = candidates.filter((request) => normalizePaymentMethodForLayout(request.payment_method) !== "transfer")
       if (nonTransfer.length) {
         event.preventDefault()
         event.stopImmediatePropagation()
@@ -449,15 +449,25 @@
     return "other"
   }
 
+  function normalizePaymentMethodForLayout(value) {
+    const key = normalize(value)
+    if (!key) return ""
+    return normalizePaymentMethod(key)
+  }
+
   function requestTypeLabel(value) {
     return legacyRequestTypeLabels[normalizeRequestType(value)] || legacyRequestTypeLabels[value] || "Pago a proveedor"
   }
 
   function paymentMethodLabel(value) {
-    return paymentMethodLabels[normalizePaymentMethod(value)] || "Transferencia"
+    const key = normalize(value)
+    if (!key) return "Sin metodo capturado"
+    return paymentMethodLabels[normalizePaymentMethod(value)] || "Otro"
   }
 
   function paymentMethodVariant(value) {
+    const key = normalize(value)
+    if (!key) return "neutral"
     const method = normalizePaymentMethod(value)
     if (method === "transfer") return "success"
     if (method === "cash") return "warning"
