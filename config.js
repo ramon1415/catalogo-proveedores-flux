@@ -8,17 +8,18 @@
   try {
     document.write('<script src="./api/runtime-config?v=20260612-env"></scr' + 'ipt>')
   } catch (_) {
-    // Si el runtime script no puede cargarse, se usa el fallback dev.
+    // La app no debe conectar a otra base si el runtime no carga.
   }
 })()
 
 const FLUX_FALLBACK_CONFIG = Object.freeze({
-  env: "dev",
-  source: "fallback",
-  supabaseUrl: "https://scsirgbuqjcwoaxfacth.supabase.co",
-  supabaseAnonKey: "sb_publishable_JNDHMoacW6ySHEtmI1Rgdw_zVZElQL2",
+  env: "local",
+  source: "missing-runtime-config",
+  supabaseUrl: "",
+  supabaseAnonKey: "",
 })
 
+const FLUX_PRODUCTION_HOSTS = new Set(["catalogo-proveedores-flux.vercel.app"])
 const FLUX_RUNTIME_CONFIG = window.FLUX_ENV_CONFIG || {}
 
 function readFluxConfigValue(...keys) {
@@ -29,10 +30,29 @@ function readFluxConfigValue(...keys) {
   return ""
 }
 
-const SUPABASE_URL = readFluxConfigValue("supabaseUrl", "SUPABASE_URL", "FLUX_SUPABASE_URL") || FLUX_FALLBACK_CONFIG.supabaseUrl
-const SUPABASE_ANON_KEY = readFluxConfigValue("supabaseAnonKey", "SUPABASE_ANON_KEY", "FLUX_SUPABASE_ANON_KEY") || FLUX_FALLBACK_CONFIG.supabaseAnonKey
+function isFluxProductionHost() {
+  return FLUX_PRODUCTION_HOSTS.has(window.location.hostname)
+}
+
+function cleanupLegacySupabaseStorage() {
+  if (!isFluxProductionHost() || typeof window.localStorage === "undefined") return
+  const legacyRefs = [["scsirgbuq", "jcwoaxfacth"].join("")]
+  try {
+    Object.keys(window.localStorage)
+      .filter((key) => legacyRefs.some((ref) => key.includes(ref)))
+      .forEach((key) => window.localStorage.removeItem(key))
+  } catch (_) {
+    // Storage puede estar bloqueado por el navegador.
+  }
+}
+
+const FLUX_RUNTIME_SUPABASE_URL = readFluxConfigValue("supabaseUrl", "SUPABASE_URL", "FLUX_SUPABASE_URL")
+const FLUX_RUNTIME_SUPABASE_ANON_KEY = readFluxConfigValue("supabaseAnonKey", "SUPABASE_ANON_KEY", "FLUX_SUPABASE_ANON_KEY")
 const FLUX_ENV = readFluxConfigValue("env", "FLUX_ENV") || FLUX_FALLBACK_CONFIG.env
 const FLUX_CONFIG_SOURCE = readFluxConfigValue("source") || (window.FLUX_ENV_CONFIG ? "runtime" : FLUX_FALLBACK_CONFIG.source)
+const FLUX_CONFIG_BLOCKED = !FLUX_RUNTIME_SUPABASE_URL || !FLUX_RUNTIME_SUPABASE_ANON_KEY
+const SUPABASE_URL = FLUX_CONFIG_BLOCKED ? "" : FLUX_RUNTIME_SUPABASE_URL
+const SUPABASE_ANON_KEY = FLUX_CONFIG_BLOCKED ? "" : FLUX_RUNTIME_SUPABASE_ANON_KEY
 
 window.SUPABASE_URL = SUPABASE_URL
 window.SUPABASE_ANON_KEY = SUPABASE_ANON_KEY
@@ -41,8 +61,59 @@ window.FLUX_CONFIG = Object.freeze({
   source: FLUX_CONFIG_SOURCE,
   supabaseUrl: SUPABASE_URL,
   hasSupabaseAnonKey: Boolean(SUPABASE_ANON_KEY),
-  usingFallback: FLUX_CONFIG_SOURCE === "fallback",
+  usingFallback: false,
+  blocked: FLUX_CONFIG_BLOCKED,
 })
+
+cleanupLegacySupabaseStorage()
+
+function renderFluxRuntimeConfigError() {
+  const message = window.FLUX_ENV_CONFIG_ERROR?.message || "No se pudo cargar la configuracion de ambiente. No se conectara a Supabase."
+  console.error("[Flux] Runtime config bloqueado", { env: FLUX_ENV, source: FLUX_CONFIG_SOURCE, message })
+  const render = () => {
+    if (document.getElementById("fluxRuntimeConfigError")) return
+    const box = document.createElement("div")
+    box.id = "fluxRuntimeConfigError"
+    box.style.cssText = "position:fixed;z-index:99999;left:16px;right:16px;bottom:16px;padding:14px 16px;border:1px solid rgba(244,63,94,.45);border-radius:12px;background:#24111b;color:#fecdd3;font-family:system-ui,sans-serif;box-shadow:0 20px 60px rgba(0,0,0,.35)"
+    box.textContent = message
+    document.body?.appendChild(box)
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", render, { once: true })
+  else render()
+}
+
+function installFluxSupabaseClientFactory() {
+  if (!window.supabase?.createClient || window.supabase.__fluxClientFactoryInstalled) return
+
+  const originalCreateClient = window.supabase.createClient.bind(window.supabase)
+
+  window.getFluxSupabaseClient = function getFluxSupabaseClient() {
+    if (window.__FLUX_SUPABASE_CLIENT) return window.__FLUX_SUPABASE_CLIENT
+    if (window.FLUX_CONFIG?.blocked || !SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      renderFluxRuntimeConfigError()
+      return null
+    }
+    window.__FLUX_SUPABASE_CLIENT = originalCreateClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    window.supabaseClient = window.__FLUX_SUPABASE_CLIENT
+    return window.__FLUX_SUPABASE_CLIENT
+  }
+
+  window.supabase.createClient = function createFluxSupabaseClient(url, anonKey, options) {
+    const requestedUrl = String(url || "")
+    const legacyDevRef = ["scsirgbuq", "jcwoaxfacth"].join("")
+    if (isFluxProductionHost() && requestedUrl.includes(legacyDevRef)) {
+      renderFluxRuntimeConfigError()
+      return window.getFluxSupabaseClient()
+    }
+    if (!requestedUrl || requestedUrl === SUPABASE_URL || requestedUrl.includes(".supabase.co")) {
+      return window.getFluxSupabaseClient()
+    }
+    return originalCreateClient(url, anonKey, options)
+  }
+  window.supabase.__fluxClientFactoryInstalled = true
+}
+
+installFluxSupabaseClientFactory()
 
 try {
   const supabaseHost = new URL(SUPABASE_URL).host
