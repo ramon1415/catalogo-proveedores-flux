@@ -1,14 +1,58 @@
 // Configuracion Supabase
 // No uses la secret key en frontend.
 ;(function loadFluxRuntimeConfig() {
-  if (window.FLUX_ENV_CONFIG || window.__FLUX_RUNTIME_CONFIG_REQUESTED__) return
+  if (window.FLUX_ENV_CONFIG) return
+  if (window.__FLUX_RUNTIME_CONFIG_REQUESTED__ && window.FLUX_ENV_CONFIG) return
   window.__FLUX_RUNTIME_CONFIG_REQUESTED__ = true
-  if (typeof document === "undefined" || document.readyState !== "loading") return
+
+  const runtimeBase = "./api/runtime-config?v=20260616-loader"
+
+  function setRuntimeError(message) {
+    window.FLUX_ENV_CONFIG_ERROR = Object.freeze({
+      env: window.FLUX_ENV_CONFIG?.env || "unknown",
+      source: "missing-runtime-config",
+      message,
+    })
+  }
+
+  function applyRuntimeConfig(config) {
+    if (!config || typeof config !== "object") return false
+    window.FLUX_ENV_CONFIG = Object.freeze({
+      env: String(config.env || ""),
+      source: String(config.source || ""),
+      supabaseUrl: String(config.supabaseUrl || ""),
+      supabaseAnonKey: String(config.supabaseAnonKey || ""),
+    })
+    if (config.error || config.message) {
+      setRuntimeError(String(config.message || config.error))
+    }
+    return true
+  }
+
+  function requestRuntimeConfig(url, accept) {
+    const request = new XMLHttpRequest()
+    request.open("GET", url, false)
+    if (accept) request.setRequestHeader("Accept", accept)
+    request.send(null)
+    if (request.status < 200 || request.status >= 300) {
+      throw new Error(`runtime_config_http_${request.status}`)
+    }
+    return request.responseText || ""
+  }
 
   try {
-    document.write('<script src="./api/runtime-config?v=20260612-env"></scr' + 'ipt>')
-  } catch (_) {
-    // La app no debe conectar a otra base si el runtime no carga.
+    const jsonText = requestRuntimeConfig(`${runtimeBase}&format=json`, "application/json")
+    if (applyRuntimeConfig(JSON.parse(jsonText))) return
+  } catch (error) {
+    setRuntimeError(`No se pudo cargar runtime config JSON: ${error.message}`)
+  }
+
+  try {
+    const scriptText = requestRuntimeConfig(runtimeBase, "application/javascript")
+    ;(0, eval)(scriptText)
+    if (window.FLUX_ENV_CONFIG) return
+  } catch (error) {
+    setRuntimeError(`No se pudo cargar runtime config JS: ${error.message}`)
   }
 })()
 
