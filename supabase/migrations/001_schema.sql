@@ -1,0 +1,13 @@
+-- Flux Operadora - Migracion 001 (indice)
+-- Este archivo fue dividido en 001a-001i por tamano para evitar truncamiento del conector.
+-- Ejecutar en orden:
+-- 001a_extensions_and_types.sql
+-- 001b_core_tables.sql
+-- 001c_budget_tables.sql
+-- 001d_payment_tables.sql
+-- 001e_layout_tables.sql
+-- 001f_cash_tables.sql
+-- 001g_income_tables.sql
+-- 001h_closure_dashboard_tables.sql
+-- 001i_views.sql
+-- No contiene DDL para evitar duplicados.
