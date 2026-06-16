@@ -3,6 +3,7 @@
   window.__fluxFase2RequestPaymentMethodLoaded = true
 
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
+  const activeRequestStatuses = ["submitted", "approved", "changes_requested", "finance_validation", "scheduled"]
   const requestTypeOptions = [
     ["supplier_payment", "Pago a proveedor"],
     ["online_purchase", "Compra en linea"],
@@ -31,6 +32,8 @@
     other: "Otro",
   }
 
+  let requestedAmountTimer = null
+
   onReady(init)
 
   function init() {
@@ -50,10 +53,12 @@
   function initRequestsPage() {
     waitForElement("requestForm", () => {
       ensureRequestTypeAndPaymentMethodFields()
+      startRequestTypeEnforcer()
       bindProviderPreferredMethod()
       bindRequestSubmitInterceptor()
       patchRequestRows()
       patchRequestDetail()
+      patchRequestedAmountCard()
     })
   }
 
@@ -105,8 +110,11 @@
       `)
       requestType = document.getElementById("requestType")
     }
-    requestType.innerHTML = requestTypeOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
-    requestType.value = normalizeRequestType(requestType.value || "supplier_payment")
+    const normalizedType = normalizeRequestType(requestType.value || "supplier_payment")
+    if (!selectMatchesOptions(requestType, requestTypeOptions)) {
+      requestType.innerHTML = requestTypeOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
+    }
+    requestType.value = normalizedType
     relabelSelect(requestType, "Tipo de solicitud *", "Define la naturaleza de la solicitud. No determina si entra a layout bancario.")
 
     let paymentMethod = document.getElementById("paymentMethod")
@@ -121,14 +129,34 @@
       `)
       paymentMethod = document.getElementById("paymentMethod")
     }
-    paymentMethod.innerHTML = paymentMethodOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
-    paymentMethod.value = normalizePaymentMethod(paymentMethod.value || "transfer")
+    const normalizedMethod = normalizePaymentMethod(paymentMethod.value || "transfer")
+    if (!selectMatchesOptions(paymentMethod, paymentMethodOptions)) {
+      paymentMethod.innerHTML = paymentMethodOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
+    }
+    paymentMethod.value = normalizedMethod
 
     const cashCheckSection = document.getElementById("cashCheckSection")
     if (cashCheckSection) {
       cashCheckSection.classList.add("hidden")
       cashCheckSection.dataset.fase2LegacyHidden = "true"
     }
+  }
+
+  function startRequestTypeEnforcer() {
+    const form = document.getElementById("requestForm")
+    if (!form || form.dataset.fase2EnforcerBound === "true") return
+    form.dataset.fase2EnforcerBound = "true"
+
+    const enforce = () => {
+      if (form.dataset.fase2Enforcing === "true") return
+      form.dataset.fase2Enforcing = "true"
+      ensureRequestTypeAndPaymentMethodFields()
+      form.dataset.fase2Enforcing = "false"
+    }
+
+    ;[0, 120, 350, 700, 1200, 2000].forEach((delay) => window.setTimeout(enforce, delay))
+    const observer = new MutationObserver(() => window.setTimeout(enforce, 40))
+    observer.observe(form, { childList: true, subtree: true })
   }
 
   function bindProviderPreferredMethod() {
@@ -220,13 +248,57 @@
 
       await attachRequestFileIfPresent(client, requestId)
 
-      toast("Solicitud creada", `${result.request_number || "Solicitud"} creada con tipo ${requestTypeLabel(payload.request_type)} y metodo ${paymentMethodLabel(payload.payment_method)}.`, "success")
-      document.getElementById("requestDialog")?.close()
-      window.setTimeout(() => window.location.reload(), 700)
+      toast("Solicitud creada", `${result.request_number || "Solicitud"} creada correctamente.`, "success")
+      renderRequestCreationSuccess(result, payload)
+      scheduleRequestedAmountRefresh()
     } catch (error) {
       toast("No se pudo crear la solicitud", friendlyError(error), "error")
       setButtonLoading(submitButton, false, "Crear solicitud")
       form.dataset.fase2Submitting = "false"
+    }
+  }
+
+  function renderRequestCreationSuccess(result, payload) {
+    const form = document.getElementById("requestForm")
+    if (!form) return
+    const folio = result.request_number || result.payment_request_number || "Solicitud creada"
+    const modalScroll = form.querySelector(".modal-scroll")
+    const actions = form.querySelector(".modal-actions")
+    modalScroll?.classList.add("hidden")
+    form.querySelector("[data-fase2-success]")?.remove()
+    form.querySelector(".modal-header p") && (form.querySelector(".modal-header p").textContent = "La solicitud fue registrada correctamente.")
+    form.querySelector(".modal-header h2") && (form.querySelector(".modal-header h2").textContent = "Solicitud creada correctamente")
+
+    const panel = document.createElement("div")
+    panel.dataset.fase2Success = "true"
+    panel.className = "fase2-success-panel"
+    panel.innerHTML = `
+      <strong>Solicitud creada correctamente</strong>
+      <span>Folio: ${escapeHtml(folio)}</span>
+      <span>Tipo: ${escapeHtml(requestTypeLabel(payload.request_type))}</span>
+      <span>Metodo de pago: ${escapeHtml(paymentMethodLabel(payload.payment_method))}</span>
+    `
+    modalScroll?.parentElement?.insertBefore(panel, modalScroll)
+
+    if (actions) {
+      actions.innerHTML = `
+        <button type="button" id="fase2CreateAnotherRequestBtn" class="secondary-btn">Crear otra solicitud</button>
+        <button type="button" id="fase2CloseAndViewRequestsBtn" class="primary-btn">Cerrar y ver solicitudes</button>
+      `
+      document.getElementById("fase2CreateAnotherRequestBtn")?.addEventListener("click", () => {
+        panel.remove()
+        modalScroll?.classList.remove("hidden")
+        form.reset()
+        form.dataset.fase2Submitting = "false"
+        form.querySelector(".modal-header h2") && (form.querySelector(".modal-header h2").textContent = "Nueva solicitud de pago")
+        form.querySelector(".modal-header p") && (form.querySelector(".modal-header p").textContent = "Completa los datos operativos y financieros para validar presupuesto al guardar.")
+        ensureRequestTypeAndPaymentMethodFields()
+        setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
+      })
+      document.getElementById("fase2CloseAndViewRequestsBtn")?.addEventListener("click", () => {
+        document.getElementById("requestDialog")?.close()
+        window.location.reload()
+      })
     }
   }
 
@@ -280,7 +352,10 @@
   function patchRequestRows() {
     const table = document.getElementById("requestsTableBody")
     if (!table) return
-    const observer = new MutationObserver(() => window.setTimeout(enrichRequestRows, 80))
+    const observer = new MutationObserver(() => {
+      window.setTimeout(enrichRequestRows, 80)
+      scheduleRequestedAmountRefresh()
+    })
     observer.observe(table, { childList: true, subtree: true })
     enrichRequestRows()
   }
@@ -344,6 +419,40 @@
       `)
     } catch (_) {
       // Solo mejora visual.
+    }
+  }
+
+  function patchRequestedAmountCard() {
+    scheduleRequestedAmountRefresh()
+    const total = document.getElementById("requestedAmount")
+    if (total && total.dataset.fase2AmountBound !== "true") {
+      total.dataset.fase2AmountBound = "true"
+      const observer = new MutationObserver(() => scheduleRequestedAmountRefresh())
+      observer.observe(total, { childList: true, characterData: true, subtree: true })
+    }
+    ;[300, 900, 1600].forEach((delay) => window.setTimeout(scheduleRequestedAmountRefresh, delay))
+  }
+
+  function scheduleRequestedAmountRefresh() {
+    window.clearTimeout(requestedAmountTimer)
+    requestedAmountTimer = window.setTimeout(updateRequestedAmountFull, 180)
+  }
+
+  async function updateRequestedAmountFull() {
+    const target = document.getElementById("requestedAmount")
+    const client = getClient()
+    if (!target || !client) return
+    try {
+      const { data, error } = await client
+        .from("payment_requests")
+        .select("amount_requested,status")
+        .in("status", activeRequestStatuses)
+      if (error) throw error
+      const total = (data || []).reduce((sum, row) => sum + numberValue(row.amount_requested), 0)
+      target.textContent = formatCurrencyFull(total)
+    } catch (_) {
+      const parsed = Number(String(target.textContent || "").replace(/[^0-9.-]/g, ""))
+      if (Number.isFinite(parsed)) target.textContent = formatCurrencyFull(parsed)
     }
   }
 
@@ -475,6 +584,12 @@
     return "neutral"
   }
 
+  function selectMatchesOptions(select, pairs) {
+    const options = Array.from(select?.options || [])
+    if (options.length !== pairs.length) return false
+    return pairs.every(([value, label], index) => options[index]?.value === value && options[index]?.textContent.trim() === label)
+  }
+
   function relabelSelect(select, labelText, helpText) {
     const label = select?.closest("label")
     if (!label) return
@@ -502,6 +617,9 @@
       .fase2-mini-badge.info{background:var(--accent-dim);border-color:rgba(15,118,110,.24);color:var(--accent-text)}
       .fase2-mini-badge.neutral{background:var(--bg-hover);color:var(--text-2)}
       .fase2-detail-strip{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.018)}
+      .fase2-success-panel{margin:0 2px 16px;padding:18px;border:1px solid rgba(18,183,106,.28);border-radius:14px;background:var(--emerald-dim);color:var(--text-1);display:flex;flex-direction:column;gap:8px}
+      .fase2-success-panel strong{font-size:16px;color:var(--emerald)}
+      .fase2-success-panel span{font-size:13px;color:var(--text-2)}
     `
     document.head.appendChild(style)
   }
@@ -532,6 +650,10 @@
 
   function normalize(value) {
     return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+  }
+
+  function formatCurrencyFull(value) {
+    return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(numberValue(value))
   }
 
   function escapeHtml(value) {
