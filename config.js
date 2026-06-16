@@ -320,11 +320,46 @@ try {
     window.supabase.__fluxIncomeCompatibility = true
   }
 
+  // Cache de roles en sessionStorage: permite pintar el menú al instante en
+  // cada navegación (es MPA) sin esperar a sesión+perfil+roles de Supabase.
+  // Solo guarda perfil/roles/grupo — NUNCA tokens de sesión. Siempre se
+  // revalida en segundo plano vía resolveRoleAccess().
+  const ROLE_CACHE_KEY = "flux-role-state-v1"
+
+  function hydrateRoleStateFromCache() {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
+      if (!cached || !cached.group) return false
+      roleState.profile = cached.profile || null
+      roleState.roles = Array.isArray(cached.roles) ? cached.roles : []
+      roleState.group = cached.group
+      roleState.loaded = true
+      return true
+    } catch (_) { return false }
+  }
+
+  function persistRoleStateCache() {
+    try {
+      sessionStorage.setItem(ROLE_CACHE_KEY, JSON.stringify({
+        profile: roleState.profile,
+        roles: roleState.roles,
+        group: roleState.group,
+      }))
+    } catch (_) {}
+  }
+
+  function clearRoleStateCache() {
+    try { sessionStorage.removeItem(ROLE_CACHE_KEY) } catch (_) {}
+  }
+
   function applyShell() {
     applyLoginCopy()
     applyIncomeCompatibility()
     hideLegacyNavigation()
     loadFluxExtensions()
+    // Pinta el menú de inmediato desde el cache (si existe) para evitar el
+    // parpadeo de "menú vacío" en cada cambio de sección.
+    if (hydrateRoleStateFromCache()) applyDemoNavigation()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
       applyPostLoginRedirect()
@@ -352,6 +387,12 @@ try {
       roleState.session = session || null
 
       if (!session?.user) {
+        // Sin sesión: limpiar todo (incluido el cache) para no mostrar menú
+        // con un grupo viejo hidratado.
+        roleState.profile = null
+        roleState.roles = []
+        roleState.group = ROLE_GROUPS.OPERATION
+        clearRoleStateCache()
         roleState.loaded = true
         return roleState
       }
@@ -359,6 +400,7 @@ try {
       roleState.profile = await resolveProfile(client, session)
       roleState.roles = await resolveRoles(client, roleState.profile)
       roleState.group = groupFromRoles(roleState.roles)
+      persistRoleStateCache()
     } catch (_) {
       roleState.roles = []
       roleState.group = ROLE_GROUPS.OPERATION
