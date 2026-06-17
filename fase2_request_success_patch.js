@@ -62,21 +62,13 @@
       const requestId = result?.payment_request_id || result?.id
       if (!requestId) throw new Error("No se obtuvo el id de la solicitud creada.")
 
-      const { error: updateError } = await client
-        .from("payment_requests")
-        .update({
-          request_type: payload.request_type,
-          payment_method: payload.payment_method,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", requestId)
-      if (updateError) throw updateError
-
+      const metadataWarning = await tryPersistFase2Metadata(client, requestId, payload)
       await attachRequestFile(client, requestId)
 
       const folio = result?.request_number || result?.payment_request_number || "Solicitud"
-      renderSuccessState(form, folio, payload)
+      renderSuccessState(form, folio, payload, metadataWarning)
       toast("Solicitud creada", `${folio} creada correctamente.`, "success")
+      if (metadataWarning) toast("Metodo de pago pendiente", metadataWarning, "warning")
       refreshRequestsList(requestId)
     } catch (error) {
       toast("No se pudo crear la solicitud", friendlyError(error), "error")
@@ -85,7 +77,37 @@
     }
   }
 
-  function renderSuccessState(form, folio, payload) {
+  async function tryPersistFase2Metadata(client, requestId, payload) {
+    try {
+      const { error } = await client
+        .from("payment_requests")
+        .update({
+          request_type: payload.request_type,
+          payment_method: payload.payment_method,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", requestId)
+
+      if (!error) return ""
+      if (isMissingFase2ColumnError(error)) {
+        return "La solicitud se creo, pero el metodo de pago no pudo guardarse porque falta actualizar el esquema de dev."
+      }
+      return `La solicitud se creo, pero no se pudo guardar la metadata de Fase 2: ${friendlyError(error)}`
+    } catch (error) {
+      if (isMissingFase2ColumnError(error)) {
+        return "La solicitud se creo, pero el metodo de pago no pudo guardarse porque falta actualizar el esquema de dev."
+      }
+      return `La solicitud se creo, pero no se pudo guardar la metadata de Fase 2: ${friendlyError(error)}`
+    }
+  }
+
+  function isMissingFase2ColumnError(error) {
+    const message = String(error?.message || error || "").toLowerCase()
+    const code = String(error?.code || "").toUpperCase()
+    return code === "PGRST204" || message.includes("schema cache") || message.includes("payment_method") || message.includes("request_type")
+  }
+
+  function renderSuccessState(form, folio, payload, metadataWarning = "") {
     const modalScroll = form.querySelector(".modal-scroll")
     const actions = form.querySelector(".modal-actions")
     const title = form.querySelector(".modal-header h2")
@@ -109,6 +131,7 @@
       <span>La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.</span>
       <span>Tipo de solicitud: ${escapeHtml(requestTypeLabels[payload.request_type] || "Pago a proveedor")}</span>
       <span>Metodo de pago: ${escapeHtml(paymentMethodLabels[payload.payment_method] || "Transferencia")}</span>
+      ${metadataWarning ? `<span class="fase2-success-warning">${escapeHtml(metadataWarning)}</span>` : ""}
     `
     modalScroll?.parentElement?.insertBefore(panel, modalScroll)
 
