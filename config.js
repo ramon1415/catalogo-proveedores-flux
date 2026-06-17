@@ -545,10 +545,30 @@ try {
     style.id = "fluxShellReadyStyles"
     style.textContent = `
       html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
-      body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+      body:not(.flux-shell-ready) .sidebar .nav{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
+      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before,
+      body:not(.flux-shell-ready) .sidebar .nav::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 10px/82px 9px no-repeat,
+        linear-gradient(90deg,rgba(20,184,166,.16),rgba(20,184,166,.08)) 0 32px/100% 40px no-repeat,
+        linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.22),rgba(148,163,184,.34)) 22px 45px/155px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 91px/175px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 137px/150px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 183px/165px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 236px/62px 9px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 271px/145px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 317px/170px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 370px/96px 9px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 405px/130px 12px no-repeat;animation:fluxShellSkeletonPulse 1.35s ease-in-out infinite}
+      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after,
+      body:not(.flux-shell-ready) .sidebar .nav::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
       body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
+      body.flux-shell-ready .sidebar .nav::before,
+      body.flux-shell-ready .sidebar .nav::after{content:none;display:none}
       .sidebar .nav-section{display:flex;flex-direction:column;gap:1px;margin-bottom:14px}
       .sidebar .nav-section-title{padding:9px 10px 4px;font-size:10px;font-weight:800;letter-spacing:.75px;text-transform:uppercase;color:var(--text-3, #666680)}
+      @keyframes fluxShellSkeletonPulse{0%,100%{opacity:.72}50%{opacity:1}}
+      @keyframes fluxShellSkeletonSweep{0%{transform:translateX(-80%)}100%{transform:translateX(80%)}}
     `
     document.head.appendChild(style)
   }
@@ -620,3 +640,5 @@ try {
     applyShell()
   }
 })()
+
+
