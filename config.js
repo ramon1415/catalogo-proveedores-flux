@@ -640,5 +640,3 @@ try {
     applyShell()
   }
 })()
-
-
