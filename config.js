@@ -1,5 +1,36 @@
 // Configuracion Supabase
 // No uses la secret key en frontend.
+;(function installEarlyFluxShellSkeleton() {
+  if (document.getElementById("fluxShellReadyStyles")) return
+  const style = document.createElement("style")
+  style.id = "fluxShellReadyStyles"
+  style.textContent = `
+    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
+    body:not(.flux-shell-ready) .sidebar .nav{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
+    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before,
+    body:not(.flux-shell-ready) .sidebar .nav::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
+      linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 10px/82px 9px no-repeat,
+      linear-gradient(90deg,rgba(20,184,166,.16),rgba(20,184,166,.08)) 0 32px/100% 40px no-repeat,
+      linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.22),rgba(148,163,184,.34)) 22px 45px/155px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 91px/175px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 137px/150px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 183px/165px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 236px/62px 9px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 271px/145px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 317px/170px 12px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 370px/96px 9px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 405px/130px 12px no-repeat;animation:fluxShellSkeletonPulse 1.35s ease-in-out infinite}
+    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after,
+    body:not(.flux-shell-ready) .sidebar .nav::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
+    body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
+    body.flux-shell-ready .sidebar .nav::before,
+    body.flux-shell-ready .sidebar .nav::after{content:none;display:none}
+    @keyframes fluxShellSkeletonPulse{0%,100%{opacity:.72}50%{opacity:1}}
+    @keyframes fluxShellSkeletonSweep{0%{transform:translateX(-80%)}100%{transform:translateX(80%)}}
+  `
+  document.head.appendChild(style)
+})()
 ;(function loadFluxRuntimeConfig() {
   if (window.FLUX_ENV_CONFIG) return
   if (window.__FLUX_RUNTIME_CONFIG_REQUESTED__ && window.FLUX_ENV_CONFIG) return
@@ -320,10 +351,46 @@ try {
     window.supabase.__fluxIncomeCompatibility = true
   }
 
+  // Cache de roles en sessionStorage: permite pintar el menú al instante en
+  // cada navegación (es MPA) sin esperar a sesión+perfil+roles de Supabase.
+  // Solo guarda perfil/roles/grupo — NUNCA tokens de sesión. Siempre se
+  // revalida en segundo plano vía resolveRoleAccess().
+  const ROLE_CACHE_KEY = "flux-role-state-v1"
+
+  function hydrateRoleStateFromCache() {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
+      if (!cached || !cached.group) return false
+      roleState.profile = cached.profile || null
+      roleState.roles = Array.isArray(cached.roles) ? cached.roles : []
+      roleState.group = cached.group
+      roleState.loaded = true
+      return true
+    } catch (_) { return false }
+  }
+
+  function persistRoleStateCache() {
+    try {
+      sessionStorage.setItem(ROLE_CACHE_KEY, JSON.stringify({
+        profile: roleState.profile,
+        roles: roleState.roles,
+        group: roleState.group,
+      }))
+    } catch (_) {}
+  }
+
+  function clearRoleStateCache() {
+    try { sessionStorage.removeItem(ROLE_CACHE_KEY) } catch (_) {}
+  }
+
   function applyShell() {
     applyLoginCopy()
     applyIncomeCompatibility()
     hideLegacyNavigation()
+    // Pinta el menú desde cache ANTES de loadFluxExtensions(): esa función usa
+    // XHR síncronos (bloqueantes) por cada extensión, lo que retrasaba la
+    // aparición del menú y causaba el parpadeo en cada cambio de sección.
+    if (hydrateRoleStateFromCache()) applyDemoNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
@@ -352,6 +419,12 @@ try {
       roleState.session = session || null
 
       if (!session?.user) {
+        // Sin sesión: limpiar todo (incluido el cache) para no mostrar menú
+        // con un grupo viejo hidratado.
+        roleState.profile = null
+        roleState.roles = []
+        roleState.group = ROLE_GROUPS.OPERATION
+        clearRoleStateCache()
         roleState.loaded = true
         return roleState
       }
@@ -359,6 +432,7 @@ try {
       roleState.profile = await resolveProfile(client, session)
       roleState.roles = await resolveRoles(client, roleState.profile)
       roleState.group = groupFromRoles(roleState.roles)
+      persistRoleStateCache()
     } catch (_) {
       roleState.roles = []
       roleState.group = ROLE_GROUPS.OPERATION
@@ -502,10 +576,30 @@ try {
     style.id = "fluxShellReadyStyles"
     style.textContent = `
       html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
-      body:not(.flux-shell-ready) .sidebar .nav{visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+      body:not(.flux-shell-ready) .sidebar .nav{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
+      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before,
+      body:not(.flux-shell-ready) .sidebar .nav::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 10px/82px 9px no-repeat,
+        linear-gradient(90deg,rgba(20,184,166,.16),rgba(20,184,166,.08)) 0 32px/100% 40px no-repeat,
+        linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.22),rgba(148,163,184,.34)) 22px 45px/155px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 91px/175px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 137px/150px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 183px/165px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 236px/62px 9px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 271px/145px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 317px/170px 12px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 370px/96px 9px no-repeat,
+        linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 405px/130px 12px no-repeat;animation:fluxShellSkeletonPulse 1.35s ease-in-out infinite}
+      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after,
+      body:not(.flux-shell-ready) .sidebar .nav::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
       body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
+      body.flux-shell-ready .sidebar .nav::before,
+      body.flux-shell-ready .sidebar .nav::after{content:none;display:none}
       .sidebar .nav-section{display:flex;flex-direction:column;gap:1px;margin-bottom:14px}
       .sidebar .nav-section-title{padding:9px 10px 4px;font-size:10px;font-weight:800;letter-spacing:.75px;text-transform:uppercase;color:var(--text-3, #666680)}
+      @keyframes fluxShellSkeletonPulse{0%,100%{opacity:.72}50%{opacity:1}}
+      @keyframes fluxShellSkeletonSweep{0%{transform:translateX(-80%)}100%{transform:translateX(80%)}}
     `
     document.head.appendChild(style)
   }
