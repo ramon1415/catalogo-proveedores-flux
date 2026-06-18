@@ -90,12 +90,12 @@
 
       if (!error) return ""
       if (isMissingFase2ColumnError(error)) {
-        return "La solicitud se creo, pero el metodo de pago no pudo guardarse porque falta actualizar el esquema de dev."
+        return "La solicitud se creo, pero el metodo de pago quedo pendiente de guardarse en este ambiente."
       }
       return `La solicitud se creo, pero no se pudo guardar la metadata de Fase 2: ${friendlyError(error)}`
     } catch (error) {
       if (isMissingFase2ColumnError(error)) {
-        return "La solicitud se creo, pero el metodo de pago no pudo guardarse porque falta actualizar el esquema de dev."
+        return "La solicitud se creo, pero el metodo de pago quedo pendiente de guardarse en este ambiente."
       }
       return `La solicitud se creo, pero no se pudo guardar la metadata de Fase 2: ${friendlyError(error)}`
     }
