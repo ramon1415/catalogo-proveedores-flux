@@ -3,6 +3,7 @@
 
   const VERSION = "20260619-budget-live-guards";
   const NORMAL_APPROVAL = "approved";
+  const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
     currentApprovalRequestId: null,
     currentEditRequestId: null,
@@ -219,7 +220,7 @@
     await renderDetailBudgetSignals(requestId, result, request);
 
     if (!result.ok || result.status === "unknown") {
-      const message = result.message || "No fue posible confirmar presupuesto disponible. No se llamo la aprobacion normal.";
+      const message = result.message || BUDGET_RECHECK_BLOCK_MESSAGE;
       notify("Aprobacion detenida", message, "warning");
       showDecisionMessage(message);
       return false;
@@ -329,7 +330,7 @@
 
   async function revalidateBudget(request) {
     const c = client();
-    if (!c) return { ok: false, status: "unknown", message: "No hay cliente de datos para revalidar presupuesto." };
+    if (!c) return { ok: false, status: "unknown", message: BUDGET_RECHECK_BLOCK_MESSAGE, details: "No hay cliente de datos para revalidar presupuesto." };
     if (!request?.company_id || !request?.cost_center_id || !request?.budget_category_id || !request?.budget_month) {
       return { ok: false, status: "unknown", message: "La solicitud no tiene clasificacion presupuestal completa." };
     }
@@ -341,19 +342,37 @@
       .eq("company_id", request.company_id)
       .eq("cost_center_id", request.cost_center_id)
       .eq("budget_category_id", request.budget_category_id)
-      .eq("budget_month", month)
-      .maybeSingle();
+      .eq("budget_month", month);
 
-    if (error) return { ok: false, status: "unknown", message: `No se pudo consultar presupuesto vivo: ${error.message || "error desconocido"}` };
-    if (!data) return { ok: false, status: "unknown", message: "No hay presupuesto activo para esta combinacion." };
+    if (error) {
+      return {
+        ok: false,
+        status: "unknown",
+        message: BUDGET_RECHECK_BLOCK_MESSAGE,
+        details: error.message || "No se pudo consultar presupuesto vivo.",
+      };
+    }
 
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) {
+      return {
+        ok: false,
+        status: "unknown",
+        message: BUDGET_RECHECK_BLOCK_MESSAGE,
+        details: "No hay presupuesto activo para esta combinacion.",
+      };
+    }
+
+    const row = pickAvailabilityRow(rows);
     const amount = numberValue(request.amount_requested);
-    const available = availableAmount(data);
+    const available = availableAmount(row);
     const after = available - amount;
     return {
       ok: true,
       status: after >= 0 ? "ok" : "insufficient",
-      row: data,
+      row,
+      rows_count: rows.length,
+      ambiguous: rows.length > 1,
       amount,
       available,
       after,
@@ -363,15 +382,19 @@
 
   function panelModelFromValidation(result, request, mode) {
     if (!result?.ok || result.status === "unknown") {
+      const details = result?.details ? ` ${result.details}` : "";
       return {
         tone: "warn",
         title: "Presupuesto no confirmado",
-        message: result?.message || "No fue posible revalidar presupuesto vivo.",
+        message: `${result?.message || "No fue posible revalidar presupuesto vivo."}${details}`,
       };
     }
 
-    const stale = staleReasons(request, result);
-    const tone = result.status === "ok" ? (stale.length ? "warn" : "ok") : "danger";
+    const warnings = staleReasons(request, result);
+    if (result.ambiguous) {
+      warnings.push("Aviso: hay varias filas de disponibilidad; se uso la mayor disponibilidad para esta validacion preventiva.");
+    }
+    const tone = result.status === "ok" ? (warnings.length ? "warn" : "ok") : "danger";
     const title = result.status === "ok" ? "Presupuesto disponible revalidado" : "Presupuesto insuficiente";
     const message = result.status === "ok"
       ? (mode === "edit" ? "El monto capturado cabe en la disponibilidad actual antes de guardar." : "La disponibilidad actual permite la aprobacion normal.")
@@ -380,7 +403,7 @@
     return {
       tone,
       title,
-      message: stale.length ? `${message} ${stale.join(" ")}` : message,
+      message: warnings.length ? `${message} ${warnings.join(" ")}` : message,
       available: result.available,
       amount: result.amount,
       after: result.after,
@@ -504,6 +527,10 @@
     const candidates = [row?.available_amount, row?.amount_available, row?.disponible, row?.available, row?.budget_available, row?.current_available, row?.remaining_amount, row?.available_before];
     const first = candidates.find((value) => value !== null && value !== undefined && value !== "");
     return numberValue(first);
+  }
+
+  function pickAvailabilityRow(rows) {
+    return [...(rows || [])].sort((a, b) => availableAmount(b) - availableAmount(a))[0] || null;
   }
 
   function monthToDate(value) {
