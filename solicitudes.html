@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
   <style>
-    /* Solicitudes-specific â€” layout del formulario y panel de decision */
+    /* Solicitudes-specific - layout del formulario y panel de decision */
     .search-field { position:relative }
     .search-field::before {
       content:''; position:absolute; left:12px; top:50%; width:13px; height:13px;
@@ -209,8 +209,8 @@
           <p>Completa los datos operativos y financieros para validar presupuesto al guardar.</p>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <button type="button" id="demoFillBtn" class="demo-fill-btn">âš¡ Demo</button>
-          <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">âœ•</button>
+          <button type="button" id="demoFillBtn" class="demo-fill-btn">Demo</button>
+          <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
         </div>
       </div>
 
@@ -236,7 +236,7 @@
                 <label class="full-row">Proveedor *
                   <div class="provider-combo" id="providerCombo">
                     <div class="provider-combo-input">
-                      <input id="providerSearch" type="text" class="form-control" placeholder="Escribe alias, razÃ³n social o RFCâ€¦" autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown" style="width:100%">
+                      <input id="providerSearch" type="text" class="form-control" placeholder="Escribe alias, razon social o RFC..." autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown" style="width:100%">
                       <ul id="providerDropdown" class="combo-list hidden" role="listbox"></ul>
                     </div>
                     <button id="newProviderFromRequestBtn" type="button" class="provider-plus-btn" title="Crear proveedor sin salir de la solicitud" aria-label="Crear proveedor sin salir de la solicitud">+</button>
@@ -279,7 +279,7 @@
                 </label>
                 <label class="full-row">Factura / comprobante
                   <input type="file" id="requestFile" class="form-file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml">
-                  <span class="file-hint">JPG, PNG, WEBP, PDF o XML Â· mÃ¡x. 10 MB</span>
+                  <span class="file-hint">JPG, PNG, WEBP, PDF o XML - max. 10 MB</span>
                 </label>
               </div>
             </section>
@@ -318,7 +318,7 @@
           <h2 id="detailTitle" style="color:var(--text-1)">Detalle de solicitud</h2>
           <p id="detailSubtitle">Validacion presupuestal automatica</p>
         </div>
-        <button type="button" id="closeDetailModalBtn" class="icon-btn" aria-label="Cerrar">âœ•</button>
+        <button type="button" id="closeDetailModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
       </div>
       <div class="modal-scroll" id="detailContent"></div>
       <div class="modal-actions">
@@ -336,7 +336,7 @@
           <h2 style="color:var(--text-1)">Editar solicitud</h2>
           <p id="editSubtitle">Modifica los datos de la solicitud.</p>
         </div>
-        <button type="button" id="closeEditModalBtn" class="icon-btn" aria-label="Cerrar">âœ•</button>
+        <button type="button" id="closeEditModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
       </div>
 
       <div class="modal-scroll" style="padding:0">
@@ -360,7 +360,7 @@
               <label class="full-row">Proveedor *
                 <div class="provider-combo" id="editProviderCombo">
                   <div class="provider-combo-input">
-                    <input id="editProviderSearch" type="text" class="form-control" placeholder="Escribe alias, razÃ³n social o RFCâ€¦" autocomplete="off" style="width:100%">
+                    <input id="editProviderSearch" type="text" class="form-control" placeholder="Escribe alias, razon social o RFC..." autocomplete="off" style="width:100%">
                     <ul id="editProviderDropdown" class="combo-list hidden" role="listbox"></ul>
                   </div>
                   <input type="hidden" id="editProveedorId">
@@ -402,7 +402,7 @@
               </label>
               <label class="full-row">Factura / comprobante
                 <input type="file" id="editRequestFile" class="form-file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml">
-                <span class="file-hint">JPG, PNG, WEBP, PDF o XML Â· mÃ¡x. 10 MB</span>
+                <span class="file-hint">JPG, PNG, WEBP, PDF o XML - max. 10 MB</span>
               </label>
             </div>
           </section>
