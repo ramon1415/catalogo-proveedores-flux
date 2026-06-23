@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260623-budget-flow";
+  const VERSION = "20260623-audit-fallback";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
@@ -51,7 +51,11 @@
       .budget-live-dialog .modal-content{max-width:560px}
       .budget-live-audit{border-top:1px solid var(--border);margin-top:12px;padding-top:12px}
       .budget-live-audit h4{margin:0 0 8px;color:var(--text-1);font-size:13px}
+      .budget-live-audit .history-item{color:var(--text-2)}
       .budget-live-audit .history-item strong{display:block;margin-bottom:3px}
+      .budget-live-audit .history-item span{color:var(--text-3)}
+      .budget-live-audit .history-item.empty{color:var(--text-3)}
+      .budget-live-audit .history-item.derived{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.07)}
       @media (max-width:720px){.budget-live-grid{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
@@ -354,8 +358,8 @@
   async function renderDecisionAudit(requestId, host) {
     if (!host || !requestId) return;
     const heading = host.closest(".approval-history")?.querySelector("h4");
-    if (heading) heading.textContent = "Bitacora de decisiones";
-    host.innerHTML = host.id === "approvalHistoryList" ? `<div class="history-item">Cargando bitacora...</div>` : `<h4>Bitacora de decisiones</h4><div class="history-list"><div class="history-item">Cargando bitacora...</div></div>`;
+    if (heading) heading.textContent = "Bitácora de decisiones";
+    host.innerHTML = host.id === "approvalHistoryList" ? `<div class="history-item">Cargando bitácora...</div>` : `<h4>Bitácora de decisiones</h4><div class="history-list"><div class="history-item">Cargando bitácora...</div></div>`;
 
     const c = client();
     if (!c) {
@@ -370,12 +374,24 @@
       .order("created_at", { ascending: false });
 
     if (error) {
-      setAuditHtml(host, `<div class="history-item">No fue posible cargar la bitacora. ${escapeHtml(error.message || "")}</div>`);
+      const request = await fetchRequest(requestId);
+      const derived = derivedAuditEvent(request);
+      if (derived) {
+        setAuditHtml(host, renderDerivedAuditEvent(derived, "No fue posible cargar el registro detallado en payment_request_approvals."));
+        return;
+      }
+      setAuditHtml(host, `<div class="history-item empty">No fue posible cargar la bitácora. ${escapeHtml(error.message || "")}</div>`);
       return;
     }
 
     if (!data?.length) {
-      setAuditHtml(host, `<div class="history-item">No hay decisiones registradas en la tabla de auditoría.</div>`);
+      const request = await fetchRequest(requestId);
+      const derived = derivedAuditEvent(request);
+      if (derived) {
+        setAuditHtml(host, renderDerivedAuditEvent(derived));
+        return;
+      }
+      setAuditHtml(host, `<div class="history-item empty">Aún no hay decisiones registradas.</div>`);
       return;
     }
 
@@ -393,9 +409,46 @@
     setAuditHtml(host, rows);
   }
 
+  function derivedAuditEvent(request) {
+    if (!request) return null;
+    const exceptionStatus = String(request.exception_status || "").toLowerCase();
+    const exceptionAction = String(request.exception_action || "").toLowerCase();
+    const status = String(request.status || "").toLowerCase();
+    const budgetDecision = String(request.budget_decision || "").toLowerCase();
+    const isExceptionApproved = exceptionStatus === "exception_approved" ||
+      exceptionAction === "exception_approved" ||
+      (request.is_extraordinary_adjustment === true && status === "approved") ||
+      (budgetDecision.includes("exception") && status === "approved");
+    const isRejected = status === "rejected" || exceptionStatus === "exception_rejected";
+    const isApproved = status === "approved";
+    if (!isExceptionApproved && !isRejected && !isApproved) return null;
+
+    const action = isExceptionApproved ? "exception_approved" : isRejected ? "rejected" : "approved";
+    return {
+      action,
+      label: decisionLabel(action),
+      from_status: request.previous_status || request.from_status || "-",
+      to_status: request.exception_status || request.status || "-",
+      comments: request.exception_comments || request.approval_comments || request.comments || "Sin comentario registrado",
+      approval_level: request.approval_level || "-",
+      created_at: request.exception_approved_at || request.approved_at || request.rejected_at || request.updated_at || request.created_at,
+    };
+  }
+
+  function renderDerivedAuditEvent(event, reason) {
+    return `
+      <div class="history-item derived">
+        <strong>${escapeHtml(event.label)}</strong>
+        ${escapeHtml(reason || "Evento derivado de la solicitud. No existe registro detallado en payment_request_approvals.")}
+        <span>Comentario: ${escapeHtml(event.comments || "Sin comentario registrado")}</span>
+        <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.from_status || "-")} -> ${escapeHtml(event.to_status || "-")} - Nivel ${escapeHtml(event.approval_level || "-")} - Usuario no disponible</span>
+      </div>
+    `;
+  }
+
   function setAuditHtml(host, html) {
     if (host.id === "approvalHistoryList") host.innerHTML = html;
-    else host.innerHTML = `<h4>Bitacora de decisiones</h4><div class="history-list">${html}</div>`;
+    else host.innerHTML = `<h4>Bitácora de decisiones</h4><div class="history-list">${html}</div>`;
   }
 
   async function fetchProfilesById(ids) {
@@ -418,7 +471,7 @@
     if (!c) return null;
     const { data, error } = await c
       .from("payment_requests")
-      .select("id,request_number,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,status,budget_decision,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,updated_at")
+      .select("*")
       .eq("id", id)
       .maybeSingle();
     if (error) return null;
@@ -704,13 +757,13 @@
       approved: "Aprobada",
       rejected: "Rechazada",
       changes_requested: "Cambios solicitados",
-      exception_approved: "Excepcion autorizada",
-      exception_rejected: "Excepcion rechazada",
+      exception_approved: "Excepción autorizada",
+      exception_rejected: "Excepción rechazada",
       amount_change_requested: "Cambio de monto solicitado",
       category_change_requested: "Cambio de partida solicitado",
       budget_adjustment_requested: "Ajuste presupuestal solicitado",
     };
-    return labels[action] || action || "Decision";
+    return labels[action] || action || "Decisión";
   }
 
   function notify(title, message, type = "info") {
