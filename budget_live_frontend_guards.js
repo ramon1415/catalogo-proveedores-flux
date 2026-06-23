@@ -1,13 +1,14 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260619-budget-live-guards";
+  const VERSION = "20260623-budget-flow";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
     currentApprovalRequestId: null,
     currentEditRequestId: null,
     editTimer: null,
+    allowNextEditSubmit: false,
     allowNextButton: new WeakSet(),
     requestCache: new Map(),
   };
@@ -18,7 +19,9 @@
     injectStyles();
     patchSolicitudesHooks();
     bindEditRevalidation();
+    bindEditSubmitGuard();
     bindApprovalClickGuard();
+    bindExceptionApprovalGuard();
     bindDetailTracking();
     watchDetailDialogs();
   }
@@ -130,6 +133,63 @@
     state.editTimer = setTimeout(() => refreshEditPanel(state.currentEditRequestId), 320);
   }
 
+  function bindEditSubmitGuard() {
+    const form = document.getElementById("editForm");
+    if (!form || form.dataset.budgetLiveSubmitGuard === "1") return;
+    form.dataset.budgetLiveSubmitGuard = "1";
+    form.addEventListener("submit", async (event) => {
+      if (state.allowNextEditSubmit) {
+        state.allowNextEditSubmit = false;
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const panel = ensureEditPanel();
+      const fields = getEditFields();
+      if (!fields.company_id || !fields.cost_center_id || !fields.budget_category_id || !fields.budget_month || !fields.amount_requested) {
+        const message = "Completa empresa, centro de costo, partida, mes y monto para revalidar presupuesto antes de guardar.";
+        renderBudgetPanel(panel, { tone: "warn", title: "Revalidacion presupuestal pendiente", message });
+        notify("Revisa la solicitud", message, "warning");
+        return;
+      }
+
+      renderBudgetPanel(panel, { tone: "info", title: "Revalidando presupuesto", message: "Consultando disponibilidad actual antes de guardar..." });
+      const request = state.currentEditRequestId ? await fetchRequest(state.currentEditRequestId) : null;
+      const result = await revalidateBudget({ ...request, ...fields });
+      renderBudgetPanel(panel, panelModelFromValidation(result, request, "edit"));
+
+      if (!result.ok || result.status === "unknown") {
+        const message = result.message || "No fue posible revalidar presupuesto antes de guardar.";
+        notify("No se guardo la solicitud", message, "warning");
+        return;
+      }
+
+      if (result.status !== "ok") {
+        const message = "No se puede guardar como solicitud aprobable porque el presupuesto actual es insuficiente. Usa flujo de excepción o ajuste presupuestal.";
+        renderBudgetPanel(panel, {
+          tone: "danger",
+          title: "Presupuesto insuficiente",
+          message,
+          available: result.available,
+          amount: result.amount,
+          after: result.after,
+          shortfall: result.shortfall,
+        });
+        notify("No se guardo la solicitud", message, "warning");
+        return;
+      }
+
+      state.allowNextEditSubmit = true;
+      const submitEvent = typeof SubmitEvent === "function"
+        ? new SubmitEvent("submit", { bubbles: true, cancelable: true })
+        : new Event("submit", { bubbles: true, cancelable: true });
+      form.dispatchEvent(submitEvent);
+    }, true);
+  }
+
   async function refreshEditPanel(requestId) {
     const panel = ensureEditPanel();
     if (!panel) return;
@@ -173,6 +233,28 @@
       amount_requested: amount * exchangeRate,
       currency,
     };
+  }
+
+  function bindExceptionApprovalGuard() {
+    document.addEventListener("click", async (event) => {
+      const btn = event.target.closest("[data-decision='exception_approved'], [data-action='exception_approved']");
+      if (!btn) return;
+      if (state.allowNextButton.has(btn)) {
+        state.allowNextButton.delete(btn);
+        return;
+      }
+
+      const requestId = btn.dataset.id || state.currentApprovalRequestId || await requestIdFromVisibleDetail();
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const confirmed = await confirmExceptionApproval(requestId);
+      if (!confirmed) return;
+
+      state.allowNextButton.add(btn);
+      btn.click();
+    }, true);
   }
 
   function bindDetailTracking() {
@@ -293,23 +375,40 @@
     }
 
     if (!data?.length) {
-      setAuditHtml(host, `<div class="history-item">Aun no hay decisiones registradas.</div>`);
+      setAuditHtml(host, `<div class="history-item">No hay decisiones registradas en la tabla de auditoría.</div>`);
       return;
     }
 
-    const rows = data.map((item) => `
-      <div class="history-item">
-        <strong>${escapeHtml(decisionLabel(item.action))}</strong>
-        ${escapeHtml(item.comments || "Sin comentario")}
-        <span>${escapeHtml(formatDateTime(item.created_at))} · ${escapeHtml(item.from_status || "-")} -> ${escapeHtml(item.to_status || "-")} · Nivel ${escapeHtml(item.approval_level || "-")}</span>
-      </div>
-    `).join("");
+    const profilesById = await fetchProfilesById(data.map((item) => item.actor_profile_id).filter(Boolean));
+    const rows = data.map((item) => {
+      const actor = profilesById.get(item.actor_profile_id) || "Usuario no disponible";
+      return `
+        <div class="history-item">
+          <strong>${escapeHtml(decisionLabel(item.action))}</strong>
+          ${escapeHtml(item.comments || "Sin comentario")}
+          <span>${escapeHtml(formatDateTime(item.created_at))} - ${escapeHtml(item.from_status || "-")} -> ${escapeHtml(item.to_status || "-")} - Nivel ${escapeHtml(item.approval_level || "-")} - ${escapeHtml(actor)}</span>
+        </div>
+      `;
+    }).join("");
     setAuditHtml(host, rows);
   }
 
   function setAuditHtml(host, html) {
     if (host.id === "approvalHistoryList") host.innerHTML = html;
     else host.innerHTML = `<h4>Bitacora de decisiones</h4><div class="history-list">${html}</div>`;
+  }
+
+  async function fetchProfilesById(ids) {
+    const uniqueIds = [...new Set((ids || []).filter(Boolean))];
+    if (!uniqueIds.length) return new Map();
+    const c = client();
+    if (!c) return new Map();
+    const { data, error } = await c
+      .from("profiles")
+      .select("id,full_name,email")
+      .in("id", uniqueIds);
+    if (error) return new Map();
+    return new Map((data || []).map((profile) => [profile.id, profile.full_name || profile.email || "Usuario no disponible"]));
   }
 
   async function fetchRequest(id) {
@@ -442,6 +541,49 @@
         ${model.shortfall ? `<p>Faltante estimado: <strong>${escapeHtml(formatCurrency(model.shortfall))}</strong></p>` : ""}
       ` : ""}
     `;
+  }
+
+  function confirmExceptionApproval(requestId) {
+    return new Promise(async (resolve) => {
+      const request = requestId ? await fetchRequest(requestId) : null;
+      let dialog = document.getElementById("budgetExceptionConfirmDialog");
+      if (!dialog) {
+        dialog = document.createElement("dialog");
+        dialog.id = "budgetExceptionConfirmDialog";
+        dialog.className = "budget-live-dialog";
+        document.body.appendChild(dialog);
+      }
+      dialog.innerHTML = `
+        <div class="modal-content">
+          <div class="modal-header">
+            <div>
+              <h2 style="color:var(--text-1)">Autorizar excepción presupuestal</h2>
+              <p>${escapeHtml(request?.request_number || "Solicitud")}</p>
+            </div>
+          </div>
+          <div class="modal-scroll">
+            <div class="budget-live-panel danger">
+              <strong>Confirmación requerida</strong>
+              <p>Esta acción autoriza una excepción presupuestal aunque el presupuesto vigente sea insuficiente.</p>
+              <p>La decisión debe quedar registrada como excepción, no como aprobación normal.</p>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary-btn" data-budget-exception-confirm="cancel">Cancelar</button>
+            <button type="button" class="primary-btn" data-budget-exception-confirm="approve">Autorizar excepción</button>
+          </div>
+        </div>
+      `;
+      const finish = (value) => {
+        dialog.close();
+        dialog.querySelectorAll("[data-budget-exception-confirm]").forEach((btn) => btn.onclick = null);
+        resolve(value);
+      };
+      dialog.querySelector("[data-budget-exception-confirm='cancel']").onclick = () => finish(false);
+      dialog.querySelector("[data-budget-exception-confirm='approve']").onclick = () => finish(true);
+      dialog.addEventListener("cancel", () => finish(false), { once: true });
+      dialog.showModal();
+    });
   }
 
   function confirmBudgetApproval(request, result) {
