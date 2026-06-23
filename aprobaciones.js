@@ -10,6 +10,7 @@ const state = {
   categories: [],
   layoutLines: [],
   cashFunds: [],
+  approvalEvents: [],
   mainTab: "decide",   // "decide" | "history"
   subFilter: "all",
   currentRequestId: null,
@@ -126,7 +127,8 @@ async function loadData() {
     ])
     const failed = [req, prov, comp, cent, cat, lines, funds].find((r) => r.error)
     if (failed) throw failed.error
-    state.requests = req.data || []
+    state.approvalEvents = await loadApprovalEvents(req.data || [])
+    state.requests = attachApprovalMetadata(req.data || [], state.approvalEvents)
     state.providers = prov.data || []
     state.companies = comp.data || []
     state.centers = cent.data || []
@@ -140,6 +142,34 @@ async function loadData() {
   }
 }
 
+async function loadApprovalEvents(requests) {
+  const ids = [...new Set((requests || []).map((request) => request.id).filter(Boolean))]
+  if (!ids.length) return []
+  const { data, error } = await supabaseClient
+    .from("payment_request_approvals")
+    .select("payment_request_id,action,from_status,to_status,comments,approval_level,created_at,actor_profile_id")
+    .in("payment_request_id", ids)
+    .in("action", ["approved", "exception_approved", "rejected", "exception_rejected"])
+    .order("created_at", { ascending: false })
+  if (error) {
+    console.warn("No se pudo cargar bitacora para fechas de aprobacion", error)
+    return []
+  }
+  return data || []
+}
+
+function attachApprovalMetadata(requests, events) {
+  const byRequest = new Map()
+  ;(events || []).forEach((event) => {
+    if (!event.payment_request_id || byRequest.has(event.payment_request_id)) return
+    byRequest.set(event.payment_request_id, event)
+  })
+  return (requests || []).map((request) => ({
+    ...request,
+    __approvalEvent: byRequest.get(request.id) || null,
+  }))
+}
+
 // ── Clasificación ─────────────────────────────────────────────
 
 function approvalRows() {
@@ -148,7 +178,7 @@ function approvalRows() {
     if (["paid", "cancelled"].includes(r.status)) return false
     if (isPending(r) || isException(r) || isChanges(r)) return true
     if (r.status === "approved" || r.status === "rejected") {
-      const t = new Date(r.updated_at || r.created_at).getTime()
+      const t = new Date(historyRelevantDate(r) || r.created_at).getTime()
       return Number.isNaN(t) || t >= cutoff
     }
     return false
@@ -279,7 +309,7 @@ function renderCard(r, colKey) {
       <div class="approval-card-head">
         <div>
           <div class="approval-card-folio">${escapeHtml(r.request_number || "Sin folio")}</div>
-          <div class="approval-card-date">${escapeHtml(formatDate(r.created_at))}</div>
+          <div class="approval-card-date">${renderCardDates(r, colKey)}</div>
         </div>
         <div class="approval-card-amount">${escapeHtml(formatCurrency(r.amount_requested, r.currency))}</div>
       </div>
@@ -300,6 +330,39 @@ function renderCard(r, colKey) {
       </div>
     </article>
   `
+}
+
+function renderCardDates(request, colKey) {
+  const created = `<span style="display:block">Creada: ${escapeHtml(formatDateTime(request.created_at))}</span>`
+  if (!["approved", "closed"].includes(colKey)) return created
+  const meta = approvalDateMeta(request)
+  if (!meta?.value) return created
+  return `<span style="display:block">${escapeHtml(meta.label)}: ${escapeHtml(formatDateTime(meta.value))}</span>${created}`
+}
+
+function approvalDateMeta(request) {
+  const event = request.__approvalEvent
+  if (event?.created_at) return { label: decisionDateLabel(event.action), value: event.created_at }
+  if (request.exception_approved_at) return { label: "Excepción autorizada", value: request.exception_approved_at }
+  if (request.approved_at) return { label: "Aprobada", value: request.approved_at }
+  if ((request.status === "approved" || request.status === "rejected") && request.updated_at) {
+    return { label: request.status === "rejected" ? "Rechazada/actualizada" : "Aprobada/actualizada", value: request.updated_at }
+  }
+  return null
+}
+
+function historyRelevantDate(request) {
+  return approvalDateMeta(request)?.value || request.updated_at || request.created_at
+}
+
+function decisionDateLabel(action) {
+  const labels = {
+    approved: "Aprobada",
+    exception_approved: "Excepción autorizada",
+    rejected: "Rechazada",
+    exception_rejected: "Excepción rechazada",
+  }
+  return labels[action] || "Decision"
 }
 
 // ── Modal ─────────────────────────────────────────────────────
@@ -529,6 +592,13 @@ function formatDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "Sin fecha"
   return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(date)
+}
+
+function formatDateTime(value) {
+  if (!value) return "Sin fecha"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "Sin fecha"
+  return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)
 }
 
 function escapeHtml(value) {
