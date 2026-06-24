@@ -237,6 +237,7 @@ try {
   ]
 
   const navSections = ["Operacion", "General", "Configuracion"]
+  const firstPaintNavKeys = ["dashboard", "requests", "providers", "approvals", "layouts", "cash", "income", "config"]
 
   const roleState = {
     loaded: false,
@@ -286,26 +287,15 @@ try {
     if (note) note.textContent = "Acceso protegido con Supabase Auth."
   }
 
-  function applyDemoNavigation() {
-    const nav = document.querySelector(".nav")
-    if (!nav) return
-    if (!roleState.loaded) {
-      nav.innerHTML = ""
-      nav.setAttribute("aria-busy", "true")
-      return
-    }
-
-    const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
-    const activeKey = currentModuleKey()
-
-    nav.innerHTML = navSections
+  function navigationHtmlFor(items, activeKey) {
+    return navSections
       .map((section) => {
-        const items = visibleModules.filter((item) => item.section === section)
-        if (!items.length) return ""
+        const sectionItems = items.filter((item) => item.section === section)
+        if (!sectionItems.length) return ""
         return `
           <div class="nav-section">
             <div class="nav-section-title">${section}</div>
-            ${items.map((item) => {
+            ${sectionItems.map((item) => {
               const isActive = activeKey === item.key
               return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
             }).join("")}
@@ -313,7 +303,45 @@ try {
         `
       })
       .join("")
-    nav.setAttribute("aria-busy", "false")
+  }
+
+  function firstPaintModules() {
+    return firstPaintNavKeys
+      .map((key) => modules.find((item) => item.key === key))
+      .filter(Boolean)
+  }
+
+  function renderNavigation(nav, items, mode) {
+    const html = navigationHtmlFor(items, currentModuleKey())
+    if (!html.trim()) return false
+    if (nav.innerHTML.trim() !== html.trim()) nav.innerHTML = html
+    nav.dataset.fluxNavMode = mode
+    nav.setAttribute("aria-busy", mode === "role" ? "false" : "true")
+    return true
+  }
+
+  function ensureFirstPaintNavigation() {
+    const nav = document.querySelector(".nav")
+    if (!nav) return
+    if (nav.dataset.fluxNavMode === "role" && nav.innerHTML.trim()) return
+    if (renderNavigation(nav, firstPaintModules(), "base")) markShellReady()
+  }
+
+  function applyDemoNavigation() {
+    const nav = document.querySelector(".nav")
+    if (!nav) return
+    if (!roleState.loaded) {
+      ensureFirstPaintNavigation()
+      return
+    }
+
+    const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
+    if (!visibleModules.length) {
+      ensureFirstPaintNavigation()
+      return
+    }
+
+    renderNavigation(nav, visibleModules, "role")
     markShellReady()
   }
 
@@ -386,6 +414,7 @@ try {
   function applyShell() {
     applyLoginCopy()
     applyIncomeCompatibility()
+    ensureFirstPaintNavigation()
     hideLegacyNavigation()
     // Pinta el menú desde cache ANTES de loadFluxExtensions(): esa función usa
     // XHR síncronos (bloqueantes) por cada extensión, lo que retrasaba la
@@ -566,7 +595,7 @@ try {
   function hideLegacyNavigation() {
     const nav = document.querySelector(".nav")
     if (!nav || roleState.loaded) return
-    nav.innerHTML = ""
+    ensureFirstPaintNavigation()
     nav.setAttribute("aria-busy", "true")
   }
 
@@ -662,6 +691,7 @@ try {
     }
   }
 
+  ensureFirstPaintNavigation()
   applyIncomeCompatibility()
   loadFluxExtensions()
 
