@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260623-audit-all-decisions";
+  const VERSION = "20260623-audit-ui-cleanup";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
@@ -369,7 +369,7 @@
 
     const c = client();
     if (!c) {
-      setAuditHtml(host, `<div class="history-item">No hay cliente de datos disponible para cargar la bitacora.</div>`);
+      setAuditHtml(host, `<div class="history-item empty">No hay cliente de datos disponible para cargar la bitácora.</div>`);
       return;
     }
 
@@ -381,7 +381,7 @@
 
     if (error) {
       const request = await fetchRequest(requestId);
-      const derived = derivedAuditEvents(request);
+      const derived = await hydrateDerivedActors(derivedAuditEvents(request));
       if (derived.length) {
         setAuditHtml(host, derived.map((event) => renderAuditEvent(event, {
           derived: true,
@@ -395,7 +395,7 @@
 
     if (!data?.length) {
       const request = await fetchRequest(requestId);
-      const derived = derivedAuditEvents(request);
+      const derived = await hydrateDerivedActors(derivedAuditEvents(request));
       if (derived.length) {
         setAuditHtml(host, derived.map((event) => renderAuditEvent(event, { derived: true })).join(""));
         return;
@@ -412,7 +412,7 @@
       to_status: item.to_status,
       comments: item.comments,
       approval_level: item.approval_level,
-      actor: profilesById.get(item.actor_profile_id) || "Usuario no disponible",
+      actor: profilesById.get(item.actor_profile_id) || "Aprobador no registrado",
       created_at: item.created_at,
     })).join("");
     setAuditHtml(host, rows);
@@ -428,8 +428,9 @@
       from_status: request.previous_status || request.from_status || "-",
       to_status: request.exception_status || request.exception_action || request.status || "-",
       comments: request.exception_comments || request.approval_comments || request.comments || "Sin comentario registrado",
-      approval_level: request.approval_level || "-",
-      actor: "Usuario no disponible",
+      approval_level: request.approval_level || null,
+      actor_profile_id: derivedActorIdFromRequest(request, action),
+      actor: "Aprobador no registrado",
       created_at: decisionDateFromRequest(request, action),
     }];
   }
@@ -457,9 +458,40 @@
     return request.updated_at || request.created_at;
   }
 
+  function derivedActorIdFromRequest(request, action) {
+    const byAction = {
+      exception_approved: ["exception_approved_by", "approved_by", "updated_by"],
+      exception_rejected: ["exception_rejected_by", "rejected_by", "updated_by"],
+      rejected: ["rejected_by", "updated_by"],
+      approved: ["approved_by", "updated_by"],
+      changes_requested: ["updated_by", "requested_by"],
+      amount_change_requested: ["updated_by", "requested_by"],
+      category_change_requested: ["updated_by", "requested_by"],
+      budget_adjustment_requested: ["updated_by", "requested_by"],
+    };
+    const keys = [...(byAction[action] || []), "actor_profile_id", "decided_by"];
+    for (const key of keys) {
+      const value = request?.[key];
+      if (hasMeaningfulValue(value)) return value;
+    }
+    return null;
+  }
+
+  async function hydrateDerivedActors(events) {
+    const ids = events.map((event) => event.actor_profile_id).filter(hasMeaningfulValue);
+    const profilesById = await fetchProfilesById(ids);
+    return events.map((event) => ({
+      ...event,
+      actor: profilesById.get(event.actor_profile_id) || "Aprobador no registrado",
+    }));
+  }
+
   function renderAuditEvent(event, options = {}) {
     const derived = Boolean(options.derived);
     const note = options.reason || (derived ? "Evento derivado de la solicitud. No existe registro detallado en payment_request_approvals." : "");
+    const levelLine = hasMeaningfulValue(event.approval_level)
+      ? `<div class="audit-line"><b>Nivel:</b> ${escapeHtml(event.approval_level)}</div>`
+      : "";
     return `
       <div class="history-item audit-event${derived ? " derived" : ""}">
         <strong>${escapeHtml(event.label)}</strong>
@@ -467,8 +499,8 @@
         ${note ? `<div class="audit-note">${escapeHtml(note)}</div>` : ""}
         <div class="audit-line"><b>Estado:</b> ${escapeHtml(event.from_status || "-")} &rarr; ${escapeHtml(event.to_status || "-")}</div>
         <div class="audit-line"><b>Comentario:</b> ${escapeHtml(event.comments || "Sin comentario registrado")}</div>
-        <div class="audit-line"><b>Nivel:</b> ${escapeHtml(event.approval_level || "-")}</div>
-        <div class="audit-line"><b>Usuario:</b> ${escapeHtml(event.actor || "Usuario no disponible")}</div>
+        ${levelLine}
+        <div class="audit-line"><b>Aprobador:</b> ${escapeHtml(event.actor || "Aprobador no registrado")}</div>
       </div>
     `;
   }
@@ -521,10 +553,31 @@
     if (!c) return new Map();
     const { data, error } = await c
       .from("profiles")
-      .select("id,full_name,email")
+      .select("id,auth_user_id,full_name,email")
       .in("id", uniqueIds);
-    if (error) return new Map();
-    return new Map((data || []).map((profile) => [profile.id, profile.full_name || profile.email || "Usuario no disponible"]));
+    const profiles = error ? [] : (data || []);
+    const found = new Set(profiles.map((profile) => profile.id));
+    const missing = uniqueIds.filter((id) => !found.has(id));
+    if (missing.length) {
+      const byAuth = await c
+        .from("profiles")
+        .select("id,auth_user_id,full_name,email")
+        .in("auth_user_id", missing);
+      if (!byAuth.error) profiles.push(...(byAuth.data || []));
+    }
+    const map = new Map();
+    profiles.forEach((profile) => {
+      const label = profile.full_name || profile.email || "Aprobador no registrado";
+      if (profile.id) map.set(profile.id, label);
+      if (profile.auth_user_id) map.set(profile.auth_user_id, label);
+    });
+    return map;
+  }
+
+  function hasMeaningfulValue(value) {
+    if (value === null || value === undefined) return false;
+    const text = String(value).trim().toLowerCase();
+    return Boolean(text) && text !== "-" && text !== "null" && text !== "undefined";
   }
 
   async function fetchRequest(id) {
