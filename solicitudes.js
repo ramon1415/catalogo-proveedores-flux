@@ -1284,7 +1284,7 @@ async function loadApprovalHistory(paymentRequestId) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    container.innerHTML = `<div class="history-item">No fue posible cargar el historial. ${escapeHtml(rlsHint("payment_request_approvals", "select", error))}</div>`;
+    container.innerHTML = `<div class="history-item">No fue posible cargar el historial de decisiones.</div>`;
     return;
   }
 

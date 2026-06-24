@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260623-audit-ui-cleanup";
+  const VERSION = "20260623-audit-final-polish";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
@@ -351,6 +351,12 @@
   }
 
   function ensureAuditHost(container) {
+    const existingHistory = document.getElementById("approvalHistoryList");
+    if (existingHistory) {
+      document.getElementById("budgetLiveAuditLog")?.remove();
+      return existingHistory;
+    }
+
     let host = document.getElementById("budgetLiveAuditLog");
     if (!host) {
       host = document.createElement("div");
@@ -385,11 +391,11 @@
       if (derived.length) {
         setAuditHtml(host, derived.map((event) => renderAuditEvent(event, {
           derived: true,
-          reason: "No fue posible cargar el registro detallado en payment_request_approvals.",
+          reason: "Registro reconstruido con la información disponible de la solicitud.",
         })).join(""));
         return;
       }
-      setAuditHtml(host, `<div class="history-item empty">No fue posible cargar la bitácora. ${escapeHtml(error.message || "")}</div>`);
+      setAuditHtml(host, `<div class="history-item empty">No fue posible cargar la bitácora con la información disponible.</div>`);
       return;
     }
 
@@ -488,7 +494,7 @@
 
   function renderAuditEvent(event, options = {}) {
     const derived = Boolean(options.derived);
-    const note = options.reason || (derived ? "Evento derivado de la solicitud. No existe registro detallado en payment_request_approvals." : "");
+    const note = options.reason || (derived ? "Evento generado a partir del estado actual de la solicitud." : "");
     const levelLine = hasMeaningfulValue(event.approval_level)
       ? `<div class="audit-line"><b>Nivel:</b> ${escapeHtml(event.approval_level)}</div>`
       : "";
