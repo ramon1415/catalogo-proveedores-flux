@@ -237,7 +237,9 @@ try {
   ]
 
   const navSections = ["Operacion", "General", "Configuracion"]
-  const firstPaintNavKeys = ["dashboard", "requests", "providers", "approvals", "layouts", "cash", "income", "config"]
+  const ROLE_CACHE_KEY = "flux-role-state-v1"
+  const NAV_HTML_CACHE_KEY = "flux-nav-html-v1"
+  const NAV_RENDER_VERSION = "20260624-menu-render-stability"
 
   const roleState = {
     loaded: false,
@@ -297,7 +299,7 @@ try {
             <div class="nav-section-title">${section}</div>
             ${sectionItems.map((item) => {
               const isActive = activeKey === item.key
-              return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
+              return `<a href="${item.href}" data-flux-nav-key="${item.key}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
             }).join("")}
           </div>
         `
@@ -305,26 +307,106 @@ try {
       .join("")
   }
 
-  function firstPaintModules() {
-    return firstPaintNavKeys
-      .map((key) => modules.find((item) => item.key === key))
+  function normalizeNavHtml(html) {
+    return String(html || "")
+      .replace(/>\s+</g, "><")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+  }
+
+  function deriveKeyFromHref(href) {
+    const cleanHref = String(href || "").replace(/^\.\//, "")
+    if (cleanHref === "configuracion.html" || cleanHref === "socios.html") return "config"
+    if (cleanHref === "ingresos.html?tab=incidents") return "incidents"
+    if (cleanHref.startsWith("ingresos.html")) return "income"
+    const match = modules.find((item) => item.href.replace(/^\.\//, "") === cleanHref || item.file === cleanHref)
+    return match?.key || ""
+  }
+
+  function navHtmlWithActiveState(html, activeKey) {
+    const wrapper = document.createElement("div")
+    wrapper.innerHTML = html || ""
+    wrapper.querySelectorAll(".nav-link").forEach((link) => {
+      const key = link.dataset.fluxNavKey || deriveKeyFromHref(link.getAttribute("href"))
+      if (key && !link.dataset.fluxNavKey) link.dataset.fluxNavKey = key
+      link.classList.toggle("active", key === activeKey)
+      link.classList.toggle("muted", key !== activeKey)
+    })
+    return wrapper.innerHTML
+  }
+
+  function navSignatureForItems(items, activeKey) {
+    return `${NAV_RENDER_VERSION}:${activeKey}:${items.map((item) => item.key).join("|")}`
+  }
+
+  function navSignatureForHtml(html, activeKey) {
+    const wrapper = document.createElement("div")
+    wrapper.innerHTML = html || ""
+    const keys = Array.from(wrapper.querySelectorAll(".nav-link"))
+      .map((link) => link.dataset.fluxNavKey || deriveKeyFromHref(link.getAttribute("href")))
       .filter(Boolean)
+    return `${NAV_RENDER_VERSION}:${activeKey}:${keys.join("|")}`
+  }
+
+  function fallbackFirstPaintModules() {
+    return modules.filter((item) => !item.hidden)
+  }
+
+  function firstPaintModules() {
+    if (roleState.loaded) return modulesForCurrentRole().filter((item) => !item.hidden)
+    return fallbackFirstPaintModules()
+  }
+
+  function readCachedNavHtml() {
+    try {
+      return sessionStorage.getItem(NAV_HTML_CACHE_KEY) || ""
+    } catch (_) {
+      return ""
+    }
+  }
+
+  function persistNavHtml(html) {
+    try {
+      if (html && html.trim()) sessionStorage.setItem(NAV_HTML_CACHE_KEY, html)
+    } catch (_) {}
+  }
+
+  function renderNavigationHtml(nav, html, mode, signature = "") {
+    if (!html.trim()) return false
+    if (signature && nav.dataset.fluxNavSignature !== signature && normalizeNavHtml(nav.innerHTML) !== normalizeNavHtml(html)) {
+      nav.innerHTML = html
+    } else if (!signature && normalizeNavHtml(nav.innerHTML) !== normalizeNavHtml(html)) {
+      nav.innerHTML = html
+    }
+    nav.dataset.fluxNavMode = mode
+    if (signature) nav.dataset.fluxNavSignature = signature
+    nav.setAttribute("aria-busy", mode === "role" || mode === "cache" ? "false" : "true")
+    if (mode === "role") persistNavHtml(html)
+    return true
   }
 
   function renderNavigation(nav, items, mode) {
-    const html = navigationHtmlFor(items, currentModuleKey())
-    if (!html.trim()) return false
-    if (nav.innerHTML.trim() !== html.trim()) nav.innerHTML = html
-    nav.dataset.fluxNavMode = mode
-    nav.setAttribute("aria-busy", mode === "role" ? "false" : "true")
-    return true
+    const activeKey = currentModuleKey()
+    return renderNavigationHtml(nav, navigationHtmlFor(items, activeKey), mode, navSignatureForItems(items, activeKey))
   }
 
   function ensureFirstPaintNavigation() {
     const nav = document.querySelector(".nav")
     if (!nav) return
     if (nav.dataset.fluxNavMode === "role" && nav.innerHTML.trim()) return
-    if (renderNavigation(nav, firstPaintModules(), "base")) markShellReady()
+    const cachedHtml = !roleState.loaded ? readCachedNavHtml() : ""
+    if (cachedHtml.trim()) {
+      const activeKey = currentModuleKey()
+      const html = navHtmlWithActiveState(cachedHtml, activeKey)
+      if (renderNavigationHtml(nav, html, "cache", navSignatureForHtml(html, activeKey))) {
+        markShellReady()
+        return
+      }
+    }
+    if (renderNavigation(nav, firstPaintModules(), roleState.loaded ? "role" : "base")) {
+      markShellReady()
+      return
+    }
   }
 
   function applyDemoNavigation() {
@@ -383,8 +465,6 @@ try {
   // cada navegación (es MPA) sin esperar a sesión+perfil+roles de Supabase.
   // Solo guarda perfil/roles/grupo — NUNCA tokens de sesión. Siempre se
   // revalida en segundo plano vía resolveRoleAccess().
-  const ROLE_CACHE_KEY = "flux-role-state-v1"
-
   function hydrateRoleStateFromCache() {
     try {
       const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
@@ -409,17 +489,19 @@ try {
 
   function clearRoleStateCache() {
     try { sessionStorage.removeItem(ROLE_CACHE_KEY) } catch (_) {}
+    try { sessionStorage.removeItem(NAV_HTML_CACHE_KEY) } catch (_) {}
   }
 
   function applyShell() {
     applyLoginCopy()
     applyIncomeCompatibility()
+    hydrateRoleStateFromCache()
     ensureFirstPaintNavigation()
     hideLegacyNavigation()
     // Pinta el menú desde cache ANTES de loadFluxExtensions(): esa función usa
     // XHR síncronos (bloqueantes) por cada extensión, lo que retrasaba la
     // aparición del menú y causaba el parpadeo en cada cambio de sección.
-    if (hydrateRoleStateFromCache()) applyDemoNavigation()
+    if (roleState.loaded) applyDemoNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
@@ -691,6 +773,7 @@ try {
     }
   }
 
+  hydrateRoleStateFromCache()
   ensureFirstPaintNavigation()
   applyIncomeCompatibility()
   loadFluxExtensions()
