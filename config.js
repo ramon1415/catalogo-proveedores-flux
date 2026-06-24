@@ -14,7 +14,7 @@
       linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.22),rgba(148,163,184,.34)) 22px 45px/155px 12px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 91px/175px 12px no-repeat,
-      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 137px/150px no-repeat,
+      linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 137px/150px 12px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 183px/165px 12px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 236px/62px 9px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 271px/145px 12px no-repeat,
