@@ -885,11 +885,6 @@ function openRequestDetail(id) {
 
     ${renderPaymentInfoSection(request)}
 
-    <details style="font-size:11px;color:var(--text-3);margin-top:8px">
-      <summary style="cursor:pointer;padding:4px 0">Ver resultado técnico de presupuesto</summary>
-      <pre style="margin-top:6px;padding:10px;background:var(--bg-surface);border-radius:8px;overflow:auto">${escapeHtml(JSON.stringify(request.budget_result || {}, null, 2))}</pre>
-    </details>
-
     ${window.FluxAuth?.canApprove?.() ? `
     <div id="detailIncidenciaSection" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px;display:flex;flex-direction:column;gap:8px">
       <div style="font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">Incidencia asociada</div>
