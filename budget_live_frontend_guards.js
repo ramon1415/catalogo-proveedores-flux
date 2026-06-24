@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260623-audit-fallback";
+  const VERSION = "20260623-audit-all-decisions";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
@@ -56,6 +56,11 @@
       .budget-live-audit .history-item span{color:var(--text-3)}
       .budget-live-audit .history-item.empty{color:var(--text-3)}
       .budget-live-audit .history-item.derived{border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.07)}
+      .budget-live-audit .audit-event{display:flex;flex-direction:column;gap:5px}
+      .budget-live-audit .audit-date{color:var(--text-3);font-size:11px}
+      .budget-live-audit .audit-line{color:var(--text-2);font-size:12px;line-height:1.45}
+      .budget-live-audit .audit-line b{color:var(--text-1)}
+      .budget-live-audit .audit-note{color:var(--text-3);font-size:11px;line-height:1.45}
       @media (max-width:720px){.budget-live-grid{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
@@ -339,6 +344,7 @@
 
     const result = precomputed || await revalidateBudget(request);
     renderBudgetPanel(panel, panelModelFromValidation(result, request, "detail"));
+    renderDecisionVisualNotice(detail, request);
 
     const auditHost = ensureAuditHost(detail);
     await renderDecisionAudit(requestId, auditHost);
@@ -375,9 +381,12 @@
 
     if (error) {
       const request = await fetchRequest(requestId);
-      const derived = derivedAuditEvent(request);
-      if (derived) {
-        setAuditHtml(host, renderDerivedAuditEvent(derived, "No fue posible cargar el registro detallado en payment_request_approvals."));
+      const derived = derivedAuditEvents(request);
+      if (derived.length) {
+        setAuditHtml(host, derived.map((event) => renderAuditEvent(event, {
+          derived: true,
+          reason: "No fue posible cargar el registro detallado en payment_request_approvals.",
+        })).join(""));
         return;
       }
       setAuditHtml(host, `<div class="history-item empty">No fue posible cargar la bitácora. ${escapeHtml(error.message || "")}</div>`);
@@ -386,9 +395,9 @@
 
     if (!data?.length) {
       const request = await fetchRequest(requestId);
-      const derived = derivedAuditEvent(request);
-      if (derived) {
-        setAuditHtml(host, renderDerivedAuditEvent(derived));
+      const derived = derivedAuditEvents(request);
+      if (derived.length) {
+        setAuditHtml(host, derived.map((event) => renderAuditEvent(event, { derived: true })).join(""));
         return;
       }
       setAuditHtml(host, `<div class="history-item empty">Aún no hay decisiones registradas.</div>`);
@@ -396,53 +405,107 @@
     }
 
     const profilesById = await fetchProfilesById(data.map((item) => item.actor_profile_id).filter(Boolean));
-    const rows = data.map((item) => {
-      const actor = profilesById.get(item.actor_profile_id) || "Usuario no disponible";
-      return `
-        <div class="history-item">
-          <strong>${escapeHtml(decisionLabel(item.action))}</strong>
-          ${escapeHtml(item.comments || "Sin comentario")}
-          <span>${escapeHtml(formatDateTime(item.created_at))} - ${escapeHtml(item.from_status || "-")} -> ${escapeHtml(item.to_status || "-")} - Nivel ${escapeHtml(item.approval_level || "-")} - ${escapeHtml(actor)}</span>
-        </div>
-      `;
-    }).join("");
+    const rows = data.map((item) => renderAuditEvent({
+      action: item.action,
+      label: decisionLabel(item.action),
+      from_status: item.from_status,
+      to_status: item.to_status,
+      comments: item.comments,
+      approval_level: item.approval_level,
+      actor: profilesById.get(item.actor_profile_id) || "Usuario no disponible",
+      created_at: item.created_at,
+    })).join("");
     setAuditHtml(host, rows);
   }
 
-  function derivedAuditEvent(request) {
-    if (!request) return null;
+  function derivedAuditEvents(request) {
+    if (!request) return [];
+    const action = derivedActionFromRequest(request);
+    if (!action) return [];
+    return [{
+      action,
+      label: derivedDecisionLabel(action),
+      from_status: request.previous_status || request.from_status || "-",
+      to_status: request.exception_status || request.exception_action || request.status || "-",
+      comments: request.exception_comments || request.approval_comments || request.comments || "Sin comentario registrado",
+      approval_level: request.approval_level || "-",
+      actor: "Usuario no disponible",
+      created_at: decisionDateFromRequest(request, action),
+    }];
+  }
+
+  function derivedActionFromRequest(request) {
     const exceptionStatus = String(request.exception_status || "").toLowerCase();
     const exceptionAction = String(request.exception_action || "").toLowerCase();
     const status = String(request.status || "").toLowerCase();
     const budgetDecision = String(request.budget_decision || "").toLowerCase();
-    const isExceptionApproved = exceptionStatus === "exception_approved" ||
-      exceptionAction === "exception_approved" ||
+    if (exceptionStatus === "exception_approved" || exceptionAction === "exception_approved" ||
       (request.is_extraordinary_adjustment === true && status === "approved") ||
-      (budgetDecision.includes("exception") && status === "approved");
-    const isRejected = status === "rejected" || exceptionStatus === "exception_rejected";
-    const isApproved = status === "approved";
-    if (!isExceptionApproved && !isRejected && !isApproved) return null;
-
-    const action = isExceptionApproved ? "exception_approved" : isRejected ? "rejected" : "approved";
-    return {
-      action,
-      label: decisionLabel(action),
-      from_status: request.previous_status || request.from_status || "-",
-      to_status: request.exception_status || request.status || "-",
-      comments: request.exception_comments || request.approval_comments || request.comments || "Sin comentario registrado",
-      approval_level: request.approval_level || "-",
-      created_at: request.exception_approved_at || request.approved_at || request.rejected_at || request.updated_at || request.created_at,
-    };
+      (budgetDecision.includes("exception") && status === "approved")) return "exception_approved";
+    if (exceptionStatus === "exception_rejected" || exceptionAction === "exception_rejected") return "exception_rejected";
+    if (["amount_change_requested", "category_change_requested", "budget_adjustment_requested"].includes(exceptionAction)) return exceptionAction;
+    if (status === "changes_requested") return exceptionAction || "changes_requested";
+    if (status === "rejected") return "rejected";
+    if (status === "approved") return "approved";
+    return null;
   }
 
-  function renderDerivedAuditEvent(event, reason) {
+  function decisionDateFromRequest(request, action) {
+    if (action === "exception_approved") return request.exception_approved_at || request.approved_at || request.updated_at || request.created_at;
+    if (action === "exception_rejected" || action === "rejected") return request.rejected_at || request.updated_at || request.created_at;
+    if (action === "approved") return request.approved_at || request.updated_at || request.created_at;
+    return request.updated_at || request.created_at;
+  }
+
+  function renderAuditEvent(event, options = {}) {
+    const derived = Boolean(options.derived);
+    const note = options.reason || (derived ? "Evento derivado de la solicitud. No existe registro detallado en payment_request_approvals." : "");
     return `
-      <div class="history-item derived">
+      <div class="history-item audit-event${derived ? " derived" : ""}">
         <strong>${escapeHtml(event.label)}</strong>
-        ${escapeHtml(reason || "Evento derivado de la solicitud. No existe registro detallado en payment_request_approvals.")}
-        <span>Comentario: ${escapeHtml(event.comments || "Sin comentario registrado")}</span>
-        <span>${escapeHtml(formatDateTime(event.created_at))} - ${escapeHtml(event.from_status || "-")} -> ${escapeHtml(event.to_status || "-")} - Nivel ${escapeHtml(event.approval_level || "-")} - Usuario no disponible</span>
+        <span class="audit-date">${escapeHtml(formatDateTime(event.created_at))}</span>
+        ${note ? `<div class="audit-note">${escapeHtml(note)}</div>` : ""}
+        <div class="audit-line"><b>Estado:</b> ${escapeHtml(event.from_status || "-")} &rarr; ${escapeHtml(event.to_status || "-")}</div>
+        <div class="audit-line"><b>Comentario:</b> ${escapeHtml(event.comments || "Sin comentario registrado")}</div>
+        <div class="audit-line"><b>Nivel:</b> ${escapeHtml(event.approval_level || "-")}</div>
+        <div class="audit-line"><b>Usuario:</b> ${escapeHtml(event.actor || "Usuario no disponible")}</div>
       </div>
+    `;
+  }
+
+  function derivedDecisionLabel(action) {
+    const labels = {
+      approved: "Aprobación registrada",
+      rejected: "Solicitud rechazada",
+      changes_requested: "Cambios solicitados",
+      exception_approved: "Excepción autorizada",
+      exception_rejected: "Excepción rechazada",
+      amount_change_requested: "Cambio de monto solicitado",
+      category_change_requested: "Cambio de partida solicitado",
+      budget_adjustment_requested: "Ajuste presupuestal solicitado",
+    };
+    return labels[action] || decisionLabel(action);
+  }
+
+  function renderDecisionVisualNotice(container, request) {
+    let notice = document.getElementById("budgetLiveDecisionNotice");
+    const action = derivedActionFromRequest(request);
+    const shouldShow = action === "exception_approved";
+    if (!shouldShow) {
+      notice?.remove();
+      return;
+    }
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "budgetLiveDecisionNotice";
+      const auditHost = document.getElementById("budgetLiveAuditLog");
+      if (auditHost) auditHost.insertAdjacentElement("beforebegin", notice);
+      else container.appendChild(notice);
+    }
+    notice.className = "budget-live-panel warn";
+    notice.innerHTML = `
+      <strong>Excepción autorizada</strong>
+      <p>La solicitud está aprobada operativamente, pero la decisión corresponde a una excepción presupuestal.</p>
     `;
   }
 
