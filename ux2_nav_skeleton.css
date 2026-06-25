@@ -1,7 +1,5 @@
 /* First-paint sidebar navigation skeleton. Loaded from <head> before shell JavaScript. */
-.sidebar .nav:empty,
-body:not(.flux-shell-ready) .sidebar .nav,
-html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav {
+.sidebar .nav:empty {
   position: relative;
   display: block;
   min-height: 430px;
@@ -9,9 +7,7 @@ html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav {
   pointer-events: none;
 }
 
-.sidebar .nav:empty::before,
-body:not(.flux-shell-ready) .sidebar .nav::before,
-html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before {
+.sidebar .nav:empty::before {
   content: "Operacion\A\A\A\A General\A\A\A Configuracion";
   position: absolute;
   inset: 10px 8px auto 8px;
@@ -25,9 +21,7 @@ html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before {
   text-transform: uppercase;
 }
 
-.sidebar .nav:empty::after,
-body:not(.flux-shell-ready) .sidebar .nav::after,
-html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after {
+.sidebar .nav:empty::after {
   content: "";
   position: absolute;
   inset: 42px 8px auto 8px;
