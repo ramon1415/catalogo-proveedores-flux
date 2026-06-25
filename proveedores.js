@@ -197,7 +197,7 @@ function handlePaymentMethodChange() {
   const convenioNumber = document.getElementById("convenio_number")
   const camposBancarios = [tipoCuenta, destinationType, banco, clabe, cuentaBancaria, convenioNumber]
 
-  if (metodoPago === "Efectivo" || metodoPago === "Tarjeta en plataforma") {
+  if (!requiresBankDetails(metodoPago)) {
     tipoCuenta.value = ""
     destinationType.value = ""
     banco.value = ""
@@ -227,7 +227,7 @@ function handleDestinationTypeChange() {
 function updateDestinationFieldVisibility() {
   const metodoPago = getValue("metodo_pago")
   const destinationType = getValue("destination_type")
-  const hidesBankFields = metodoPago === "Efectivo" || metodoPago === "Tarjeta en plataforma"
+  const hidesBankFields = !requiresBankDetails(metodoPago)
   setControlLabelVisible("tipo_cuenta", false)
   setControlLabelVisible("destination_type", !hidesBankFields)
   setControlLabelVisible("banco", !hidesBankFields && Boolean(destinationType))
@@ -272,7 +272,7 @@ async function saveSupplier(event) {
     return
   }
 
-  if (payload.metodo_pago === "Efectivo" || payload.metodo_pago === "Tarjeta en plataforma") {
+  if (!requiresBankDetails(payload.metodo_pago)) {
     payload.tipo_cuenta = null
     payload.destination_type = null
     payload.banco = null
@@ -308,13 +308,17 @@ async function saveSupplier(event) {
 }
 
 function validateDestination(payload) {
-  if (payload.metodo_pago === "Efectivo" || payload.metodo_pago === "Tarjeta en plataforma") return ""
+  if (!requiresBankDetails(payload.metodo_pago)) return ""
   if (!payload.destination_type) return "Selecciona el tipo de destino de pago: CLABE, cuenta bancaria o convenio."
-  if (payload.metodo_pago === "Transferencia bancaria" && !payload.banco) return "Para transferencia bancaria captura el banco o institucion."
+  if (!payload.banco) return "Para transferencia bancaria captura el banco o institucion."
   if (payload.destination_type === "clabe" && !payload.clabe) return "Para destino CLABE captura la CLABE del proveedor."
   if (payload.destination_type === "cuenta" && !payload.cuenta_bancaria) return "Para destino cuenta bancaria captura la cuenta del proveedor."
   if (payload.destination_type === "convenio" && !payload.convenio_number) return "Para destino convenio captura el numero de convenio."
   return ""
+}
+
+function requiresBankDetails(metodoPago) {
+  return metodoPago === "Transferencia bancaria"
 }
 
 window.toggleSupplier = async function(id, activo) {
