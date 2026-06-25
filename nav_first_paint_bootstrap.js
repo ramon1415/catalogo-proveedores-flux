@@ -1,6 +1,13 @@
 ;(function bootstrapFluxFirstPaintNav() {
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
+  if (nav.children.length) {
+    nav.dataset.fluxNavMode = nav.dataset.fluxNavMode || "static"
+    nav.setAttribute("aria-busy", "false")
+    document.documentElement?.classList.add("flux-shell-ready")
+    document.body?.classList.add("flux-shell-ready")
+    return
+  }
 
   const ROLE_CACHE_KEY = "flux-role-state-v1"
   const NAV_HTML_CACHE_KEY = "flux-nav-html-v1"

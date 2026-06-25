@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
-  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-menu-first-paint">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-static-nav">
   <style>
     .form-grid input, .form-grid select, .form-grid textarea { min-height: 34px; padding: 0 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 7px; color: var(--text-1); font-size: 12.5px; outline: none; }
     .form-grid textarea { min-height: 72px; padding: 8px 10px; resize: vertical; }
@@ -23,8 +23,27 @@
           <div class="brand-logo">FL</div>
           <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Efectivo y comprobaciones</div></div>
         </div>
-        <nav class="nav" aria-label="Menu principal"></nav>
-        <script src="./nav_first_paint_bootstrap.js?v=20260624-menu-render-stability"></script>
+        <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+          <div class="nav-section">
+            <div class="nav-section-title">Operacion</div>
+            <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link muted"><span>S</span> Solicitudes de pago</a>
+            <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link muted"><span>L</span> Layouts de pago</a>
+            <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link active"><span>E</span> Efectivo y comprobaciones</a>
+            <a href="./ingresos.html?tab=income" data-flux-nav-key="income" class="nav-link muted"><span>I</span> Ingresos</a>
+            <a href="./ingresos.html?tab=incidents" data-flux-nav-key="incidents" class="nav-link muted"><span>V</span> Incidencias</a>
+            <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">General</div>
+            <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link muted"><span>D</span> Dashboard operativo</a>
+            <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobacion</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">Configuracion</div>
+            <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link muted"><span>C</span> Configuracion</a>
+          </div>
+        </nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
       </div>
       <div class="user-card">
         <p id="userName">Usuario</p>
@@ -207,7 +226,7 @@
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260624-menu-render-stability"></script>
+  <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
   <script src="./efectivo.js"></script>
