@@ -5,10 +5,8 @@
   const style = document.createElement("style")
   style.id = "fluxShellReadyStyles"
   style.textContent = `
-    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
-    body:not(.flux-shell-ready) .sidebar .nav{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
-    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before,
-    body:not(.flux-shell-ready) .sidebar .nav::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
+     .sidebar .nav:empty{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
+     .sidebar .nav:empty::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
       linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 10px/82px 9px no-repeat,
       linear-gradient(90deg,rgba(20,184,166,.16),rgba(20,184,166,.08)) 0 32px/100% 40px no-repeat,
       linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
@@ -21,8 +19,7 @@
       linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 317px/170px 12px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 370px/96px 9px no-repeat,
       linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 405px/130px 12px no-repeat;animation:fluxShellSkeletonPulse 1.35s ease-in-out infinite}
-    html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after,
-    body:not(.flux-shell-ready) .sidebar .nav::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
+     .sidebar .nav:empty::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
     body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
     body.flux-shell-ready .sidebar .nav::before,
     body.flux-shell-ready .sidebar .nav::after{content:none;display:none}
@@ -237,6 +234,9 @@ try {
   ]
 
   const navSections = ["Operacion", "General", "Configuracion"]
+  const ROLE_CACHE_KEY = "flux-role-state-v1"
+  const NAV_HTML_CACHE_KEY = "flux-nav-html-v1"
+  const NAV_RENDER_VERSION = "20260624-menu-render-stability"
 
   const roleState = {
     loaded: false,
@@ -286,34 +286,141 @@ try {
     if (note) note.textContent = "Acceso protegido con Supabase Auth."
   }
 
-  function applyDemoNavigation() {
-    const nav = document.querySelector(".nav")
-    if (!nav) return
-    if (!roleState.loaded) {
-      nav.innerHTML = ""
-      nav.setAttribute("aria-busy", "true")
-      return
-    }
-
-    const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
-    const activeKey = currentModuleKey()
-
-    nav.innerHTML = navSections
+  function navigationHtmlFor(items, activeKey) {
+    return navSections
       .map((section) => {
-        const items = visibleModules.filter((item) => item.section === section)
-        if (!items.length) return ""
+        const sectionItems = items.filter((item) => item.section === section)
+        if (!sectionItems.length) return ""
         return `
           <div class="nav-section">
             <div class="nav-section-title">${section}</div>
-            ${items.map((item) => {
+            ${sectionItems.map((item) => {
               const isActive = activeKey === item.key
-              return `<a href="${item.href}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
+              return `<a href="${item.href}" data-flux-nav-key="${item.key}" class="nav-link ${isActive ? "active" : "muted"}"><span>${item.icon}</span> ${item.label}</a>`
             }).join("")}
           </div>
         `
       })
       .join("")
-    nav.setAttribute("aria-busy", "false")
+  }
+
+  function normalizeNavHtml(html) {
+    return String(html || "")
+      .replace(/>\s+</g, "><")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+  }
+
+  function deriveKeyFromHref(href) {
+    const cleanHref = String(href || "").replace(/^\.\//, "")
+    if (cleanHref === "configuracion.html" || cleanHref === "socios.html") return "config"
+    if (cleanHref === "ingresos.html?tab=incidents") return "incidents"
+    if (cleanHref.startsWith("ingresos.html")) return "income"
+    const match = modules.find((item) => item.href.replace(/^\.\//, "") === cleanHref || item.file === cleanHref)
+    return match?.key || ""
+  }
+
+  function navHtmlWithActiveState(html, activeKey) {
+    const wrapper = document.createElement("div")
+    wrapper.innerHTML = html || ""
+    wrapper.querySelectorAll(".nav-link").forEach((link) => {
+      const key = link.dataset.fluxNavKey || deriveKeyFromHref(link.getAttribute("href"))
+      if (key && !link.dataset.fluxNavKey) link.dataset.fluxNavKey = key
+      link.classList.toggle("active", key === activeKey)
+      link.classList.toggle("muted", key !== activeKey)
+    })
+    return wrapper.innerHTML
+  }
+
+  function navSignatureForItems(items, activeKey) {
+    return `${NAV_RENDER_VERSION}:${activeKey}:${items.map((item) => item.key).join("|")}`
+  }
+
+  function navSignatureForHtml(html, activeKey) {
+    const wrapper = document.createElement("div")
+    wrapper.innerHTML = html || ""
+    const keys = Array.from(wrapper.querySelectorAll(".nav-link"))
+      .map((link) => link.dataset.fluxNavKey || deriveKeyFromHref(link.getAttribute("href")))
+      .filter(Boolean)
+    return `${NAV_RENDER_VERSION}:${activeKey}:${keys.join("|")}`
+  }
+
+  function fallbackFirstPaintModules() {
+    return modules.filter((item) => !item.hidden)
+  }
+
+  function firstPaintModules() {
+    if (roleState.loaded) return modulesForCurrentRole().filter((item) => !item.hidden)
+    return fallbackFirstPaintModules()
+  }
+
+  function readCachedNavHtml() {
+    try {
+      return sessionStorage.getItem(NAV_HTML_CACHE_KEY) || ""
+    } catch (_) {
+      return ""
+    }
+  }
+
+  function persistNavHtml(html) {
+    try {
+      if (html && html.trim()) sessionStorage.setItem(NAV_HTML_CACHE_KEY, html)
+    } catch (_) {}
+  }
+
+  function renderNavigationHtml(nav, html, mode, signature = "") {
+    if (!html.trim()) return false
+    if (signature && nav.dataset.fluxNavSignature !== signature && normalizeNavHtml(nav.innerHTML) !== normalizeNavHtml(html)) {
+      nav.innerHTML = html
+    } else if (!signature && normalizeNavHtml(nav.innerHTML) !== normalizeNavHtml(html)) {
+      nav.innerHTML = html
+    }
+    nav.dataset.fluxNavMode = mode
+    if (signature) nav.dataset.fluxNavSignature = signature
+    nav.setAttribute("aria-busy", mode === "role" || mode === "cache" ? "false" : "true")
+    if (mode === "role") persistNavHtml(html)
+    return true
+  }
+
+  function renderNavigation(nav, items, mode) {
+    const activeKey = currentModuleKey()
+    return renderNavigationHtml(nav, navigationHtmlFor(items, activeKey), mode, navSignatureForItems(items, activeKey))
+  }
+
+  function ensureFirstPaintNavigation() {
+    const nav = document.querySelector(".nav")
+    if (!nav) return
+    if (nav.dataset.fluxNavMode === "role" && nav.innerHTML.trim()) return
+    const cachedHtml = !roleState.loaded ? readCachedNavHtml() : ""
+    if (cachedHtml.trim()) {
+      const activeKey = currentModuleKey()
+      const html = navHtmlWithActiveState(cachedHtml, activeKey)
+      if (renderNavigationHtml(nav, html, "cache", navSignatureForHtml(html, activeKey))) {
+        markShellReady()
+        return
+      }
+    }
+    if (renderNavigation(nav, firstPaintModules(), roleState.loaded ? "role" : "base")) {
+      markShellReady()
+      return
+    }
+  }
+
+  function applyDemoNavigation() {
+    const nav = document.querySelector(".nav")
+    if (!nav) return
+    if (!roleState.loaded) {
+      ensureFirstPaintNavigation()
+      return
+    }
+
+    const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
+    if (!visibleModules.length) {
+      ensureFirstPaintNavigation()
+      return
+    }
+
+    renderNavigation(nav, visibleModules, "role")
     markShellReady()
   }
 
@@ -351,12 +458,10 @@ try {
     window.supabase.__fluxIncomeCompatibility = true
   }
 
-  // Cache de roles en sessionStorage: permite pintar el menú al instante en
-  // cada navegación (es MPA) sin esperar a sesión+perfil+roles de Supabase.
-  // Solo guarda perfil/roles/grupo — NUNCA tokens de sesión. Siempre se
-  // revalida en segundo plano vía resolveRoleAccess().
-  const ROLE_CACHE_KEY = "flux-role-state-v1"
-
+  // Cache de roles en sessionStorage: permite pintar el menu al instante en
+  // cada navegacion (es MPA) sin esperar a sesion+perfil+roles de Supabase.
+  // Solo guarda perfil/roles/grupo; NUNCA tokens de sesion. Siempre se
+  // revalida en segundo plano via resolveRoleAccess().
   function hydrateRoleStateFromCache() {
     try {
       const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
@@ -381,16 +486,19 @@ try {
 
   function clearRoleStateCache() {
     try { sessionStorage.removeItem(ROLE_CACHE_KEY) } catch (_) {}
+    try { sessionStorage.removeItem(NAV_HTML_CACHE_KEY) } catch (_) {}
   }
 
   function applyShell() {
     applyLoginCopy()
     applyIncomeCompatibility()
+    hydrateRoleStateFromCache()
+    ensureFirstPaintNavigation()
     hideLegacyNavigation()
-    // Pinta el menú desde cache ANTES de loadFluxExtensions(): esa función usa
-    // XHR síncronos (bloqueantes) por cada extensión, lo que retrasaba la
-    // aparición del menú y causaba el parpadeo en cada cambio de sección.
-    if (hydrateRoleStateFromCache()) applyDemoNavigation()
+    // Pinta el menu desde cache ANTES de loadFluxExtensions(): esa funcion usa
+    // XHR sincronos (bloqueantes) por cada extension, lo que retrasaba la
+    // aparicion del menu y causaba el parpadeo en cada cambio de seccion.
+    if (roleState.loaded) applyDemoNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
       applyDemoNavigation()
@@ -419,7 +527,7 @@ try {
       roleState.session = session || null
 
       if (!session?.user) {
-        // Sin sesión: limpiar todo (incluido el cache) para no mostrar menú
+        // Sin sesion: limpiar todo (incluido el cache) para no mostrar menu
         // con un grupo viejo hidratado.
         roleState.profile = null
         roleState.roles = []
@@ -566,7 +674,7 @@ try {
   function hideLegacyNavigation() {
     const nav = document.querySelector(".nav")
     if (!nav || roleState.loaded) return
-    nav.innerHTML = ""
+    ensureFirstPaintNavigation()
     nav.setAttribute("aria-busy", "true")
   }
 
@@ -575,10 +683,8 @@ try {
     const style = document.createElement("style")
     style.id = "fluxShellReadyStyles"
     style.textContent = `
-      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav,
-      body:not(.flux-shell-ready) .sidebar .nav{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
-      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::before,
-      body:not(.flux-shell-ready) .sidebar .nav::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
+       .sidebar .nav:empty{visibility:visible!important;opacity:1!important;pointer-events:none!important;display:block!important;position:relative;min-height:430px;overflow:hidden}
+       .sidebar .nav:empty::before{content:"";display:block;width:100%;height:430px;border-radius:10px;opacity:.9;background:
         linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 10px/82px 9px no-repeat,
         linear-gradient(90deg,rgba(20,184,166,.16),rgba(20,184,166,.08)) 0 32px/100% 40px no-repeat,
         linear-gradient(90deg,rgba(20,184,166,.5),rgba(20,184,166,.18)) 0 32px/3px 40px no-repeat,
@@ -591,8 +697,7 @@ try {
         linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 317px/170px 12px no-repeat,
         linear-gradient(90deg,rgba(148,163,184,.18),rgba(148,163,184,.28)) 10px 370px/96px 9px no-repeat,
         linear-gradient(90deg,rgba(148,163,184,.14),rgba(148,163,184,.24)) 22px 405px/130px 12px no-repeat;animation:fluxShellSkeletonPulse 1.35s ease-in-out infinite}
-      html:not(.flux-shell-ready) body:not(.flux-shell-ready) .sidebar .nav::after,
-      body:not(.flux-shell-ready) .sidebar .nav::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
+       .sidebar .nav:empty::after{content:"";position:absolute;inset:0;transform:translateX(-65%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:fluxShellSkeletonSweep 1.4s ease-in-out infinite}
       body.flux-shell-ready .sidebar .nav{visibility:visible;opacity:1;pointer-events:auto;transition:opacity 120ms ease}
       body.flux-shell-ready .sidebar .nav::before,
       body.flux-shell-ready .sidebar .nav::after{content:none;display:none}
@@ -662,6 +767,8 @@ try {
     }
   }
 
+  hydrateRoleStateFromCache()
+  ensureFirstPaintNavigation()
   applyIncomeCompatibility()
   loadFluxExtensions()
 
