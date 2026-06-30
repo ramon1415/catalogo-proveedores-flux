@@ -38,7 +38,17 @@ docs/ops/dev-deployment-automation.md
 
 Los workflows usan workflow_dispatch, por lo que solo corren manualmente desde la pestana Actions de GitHub.
 
-Nota operativa de GitHub Actions: la documentacion oficial de GitHub indica que, para disparar workflow_dispatch desde la interfaz de Actions, el workflow debe existir en la rama default del repositorio. Este PR esta dirigido a dev y no toca main. Si despues de mergear a dev los workflows no aparecen en la UI, no ejecutar workarounds contra produccion; primero decidir la estrategia segura para exponerlos sin romper la regla de no tocar main/produccion.
+Nota operativa de GitHub Actions:
+
+Este documento y estos workflows pueden existir en main unicamente para que GitHub Actions los registre y los muestre en la UI, porque main es la rama default del repositorio.
+
+Aunque los archivos esten presentes en main, los jobs estan protegidos para abortar si se intentan ejecutar sobre main.
+
+Para usarlos correctamente, se debe abrir GitHub Actions, elegir el workflow manual y seleccionar la rama dev en el dropdown antes de ejecutar.
+
+No ejecutar estos workflows sobre main.
+No configurar secrets productivos.
+No ejecutar contra produccion.
 
 
 Cada workflow exige un input de confirmacion:
@@ -197,7 +207,10 @@ El actualizador tambien fuerza active=false, llama a deactivate y verifica que e
 
 Antes de correr por primera vez:
 
-- Confirmar que el PR entra a dev, no a main.
+- Confirmar que los workflows existen en main solo para registro en GitHub Actions UI.
+- Confirmar que, al ejecutar manualmente, se seleccione la rama dev.
+- Confirmar que si se intenta ejecutar sobre main, el workflow aborta por guardrail.
+- Confirmar que los secrets configurados sean DEV, no productivos.
 - Confirmar que los workflows existen en la rama seleccionada desde Actions.
 - Confirmar que GitHub Secrets estan cargados solo en GitHub, no en archivos.
 - Confirmar que SUPABASE_DEV_PROJECT_REF es scsirgbuqjcwoaxfacth.
