@@ -62,10 +62,17 @@
         renderTable()
       })
     })
-    dom.tableBody?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-cash-ux-detail]")
-      if (button) openDetail(button.dataset.cashUxDetail)
-    })
+    dom.tableBody?.addEventListener("click", handleActionClick)
+    dom.detailContent?.addEventListener("click", handleActionClick)
+  }
+
+  function handleActionClick(event) {
+    const button = event.target.closest("[data-cash-ux-detail]")
+    if (button) openDetail(button.dataset.cashUxDetail)
+    const receiptButton = event.target.closest("[data-cash-ux-receipt]")
+    if (receiptButton) openReceipt(receiptButton.dataset.cashUxReceipt)
+    const registerButton = event.target.closest("[data-cash-ux-transfer-receipt]")
+    if (registerButton) openTransferReceiptDialog(registerButton.dataset.cashUxTransferReceipt)
   }
 
   async function loadData() {
@@ -231,10 +238,11 @@
 
   function receiptCell(entry) {
     const path = receiptPath(entry.receipt)
-    if (path) return `<button class="small-btn success" type="button">Ver comprobante</button>`
+    if (path) return `<button class="small-btn success" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>`
+    if (entry.type === "transfer" && transferReceiptRegistered(entry)) return `<span class="badge good">Comprobante registrado</span>`
     if (entry.status === "pending_delivery") return `<span class="badge">No aplica hasta entrega</span>`
     if (entry.type === "transfer" && entry.status === "pending_confirmation") return `<span class="badge warn">Pendiente confirmacion bancaria</span>`
-    if (entry.type === "transfer") return `<span class="badge warn">Comprobante pendiente integracion</span>`
+    if (entry.type === "transfer") return `<span class="badge warn">Comprobante pendiente</span>`
     if (entry.status === "review") return `<span class="badge info">Comprobacion en revision</span>`
     if (entry.status === "closed") return `<span class="badge good">Comprobacion cerrada</span>`
     return `<span class="badge warn">Pendiente de cargar</span>`
@@ -248,6 +256,9 @@
     } else if ((entry.type === "cash" || entry.type === "check") && entry.raw?.fund?.id) {
       actions.push(`<a class="small-btn" href="./efectivo.html?fund_id=${encodeURIComponent(entry.raw.fund.id)}">Ver efectivo</a>`)
     } else if (entry.type === "transfer") {
+      if (entry.status === "confirmed" && !transferReceiptRegistered(entry)) {
+        actions.push(`<button class="small-btn success" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Registrar comprobante</button>`)
+      }
       actions.push(`<a class="small-btn" href="./layouts.html">Ver layout</a>`)
     }
     return actions.join("")
@@ -269,16 +280,27 @@
         ${detailCard("Monto", formatCurrency(entry.amount))}
         ${detailCard("Fecha", formatDate(entry.date))}
       </div>
-      <div class="notice warning">${paymentOperationMessage(entry)}</div>
+      <div class="notice ${transferReceiptRegistered(entry) ? "success" : "warning"}">${paymentOperationMessage(entry)}</div>
       <div class="actions">${detailActions(entry)}</div>
     `
     dom.detailDialog.showModal()
   }
 
+  function openReceipt(entryId) {
+    const entry = state.entries.find((item) => item.id === entryId)
+    const path = receiptPath(entry?.receipt)
+    if (!path) return showToast("Sin comprobante", "No hay archivo o ruta de comprobante para abrir.", "warning")
+    if (/^https?:\/\//i.test(path)) window.open(path, "_blank", "noopener")
+    else showToast("Comprobante registrado", path, "success")
+  }
+
   function paymentOperationMessage(entry) {
     if (entry.status === "pending_delivery") return "Solicitud aprobada, pendiente de entrega. Registra la entrega desde Solicitudes para crear el fondo."
     if (entry.type === "transfer" && entry.status === "pending_confirmation") return "Transferencia pendiente de confirmacion bancaria."
-    if (entry.type === "transfer") return "Comprobante de transferencia pendiente de integracion."
+    if (entry.type === "transfer" && transferReceiptRegistered(entry)) {
+      return `Comprobante de transferencia registrado.${transferReceiptSummary(entry.receipt)}`
+    }
+    if (entry.type === "transfer") return "Comprobante de transferencia pendiente. Registra la referencia bancaria, fecha y ruta/URL del comprobante si ya existe."
     if (entry.status === "review") return "La comprobacion fue enviada y esta pendiente de revision."
     if (entry.status === "closed") return "Fondo cerrado. La comprobacion fue aprobada."
     return "Fondo entregado. El responsable debe comprobar con tickets o comprobantes."
@@ -288,8 +310,154 @@
     const requestId = entry.raw?.request?.id
     if (entry.status === "pending_delivery" && requestId) return `<a class="secondary-btn" href="./solicitudes.html?request_id=${encodeURIComponent(requestId)}">Ir a solicitud / crear fondo</a>`
     if ((entry.type === "cash" || entry.type === "check") && entry.raw?.fund?.id) return `<a class="secondary-btn" href="./efectivo.html?fund_id=${encodeURIComponent(entry.raw.fund.id)}">Ver efectivo y comprobaciones</a>`
-    if (entry.type === "transfer") return `<a class="secondary-btn" href="./layouts.html">Ver layouts de pago</a>`
+    if (entry.type === "transfer") {
+      return [
+        entry.status === "confirmed" && !transferReceiptRegistered(entry)
+          ? `<button class="primary-btn" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Registrar comprobante</button>`
+          : "",
+        receiptPath(entry.receipt)
+          ? `<button class="secondary-btn" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>`
+          : "",
+        `<a class="secondary-btn" href="./layouts.html">Ver layouts de pago</a>`,
+      ].filter(Boolean).join("")
+    }
     return ""
+  }
+
+  function openTransferReceiptDialog(entryId) {
+    const entry = state.entries.find((item) => item.id === entryId)
+    if (!entry || entry.type !== "transfer") return
+    if (entry.status !== "confirmed") {
+      showToast("Pago no confirmado", "Solo puedes registrar comprobante cuando la transferencia ya esta confirmada.", "warning")
+      return
+    }
+
+    const dialog = ensureTransferReceiptDialog()
+    const receipt = entry.receipt || {}
+    if (dom.detailDialog?.open) dom.detailDialog.close()
+    dialog.dataset.entryId = entryId
+    dialog.querySelector("[data-transfer-receipt-title]").textContent = `Comprobante ${entry.subtitle}`
+    dialog.querySelector("[name='payment_date']").value = toInputDate(receipt.payment_date) || new Date().toISOString().slice(0, 10)
+    dialog.querySelector("[name='bank_reference']").value = receipt.bank_reference || ""
+    dialog.querySelector("[name='storage_path']").value = receiptPath(receipt)
+    dialog.querySelector("[name='notes']").value = localStorage.getItem(transferReceiptNotesKey(entry)) || ""
+    dialog.showModal()
+  }
+
+  function ensureTransferReceiptDialog() {
+    let dialog = document.getElementById("transferReceiptDialog")
+    if (dialog) return dialog
+
+    dialog = document.createElement("dialog")
+    dialog.id = "transferReceiptDialog"
+    dialog.innerHTML = `
+      <form class="modal-content" id="transferReceiptForm">
+        <div class="modal-header">
+          <div>
+            <h2 data-transfer-receipt-title>Registrar comprobante</h2>
+            <p>Cierre operativo de transferencia en Pagos y comprobaciones.</p>
+          </div>
+          <button type="button" class="icon-btn" data-transfer-receipt-close>x</button>
+        </div>
+        <div class="modal-scroll">
+          <div class="notice">Captura la fecha y al menos una referencia bancaria o ruta/URL del comprobante. El archivo puede quedar pendiente si storage todavia no esta integrado.</div>
+          <label>Fecha de comprobante
+            <input name="payment_date" type="date" required>
+          </label>
+          <label>Referencia bancaria / folio de operacion
+            <input name="bank_reference" type="text" placeholder="Ej. SPEI, folio banco o referencia interna">
+          </label>
+          <label>URL o ruta del comprobante
+            <input name="storage_path" type="text" placeholder="URL, ruta en storage o referencia temporal">
+          </label>
+          <label>Notas opcionales
+            <textarea name="notes" rows="3" placeholder="Notas internas para seguimiento"></textarea>
+          </label>
+          <div class="field-hint">Las notas se conservan como apoyo local del navegador hasta que exista campo formal en backend.</div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" data-transfer-receipt-close>Cancelar</button>
+          <button type="submit" class="primary-btn" data-transfer-receipt-submit>Guardar comprobante</button>
+        </div>
+      </form>
+    `
+    document.body.appendChild(dialog)
+    dialog.querySelectorAll("[data-transfer-receipt-close]").forEach((button) => {
+      button.addEventListener("click", () => dialog.close())
+    })
+    dialog.querySelector("#transferReceiptForm")?.addEventListener("submit", submitTransferReceipt)
+    return dialog
+  }
+
+  async function submitTransferReceipt(event) {
+    event.preventDefault()
+    const dialog = document.getElementById("transferReceiptDialog")
+    const entry = state.entries.find((item) => item.id === dialog?.dataset.entryId)
+    if (!entry) return
+
+    const form = event.currentTarget
+    const submit = form.querySelector("[data-transfer-receipt-submit]")
+    const paymentDate = cleanText(form.elements.payment_date.value)
+    const bankReference = cleanText(form.elements.bank_reference.value)
+    const storagePath = cleanText(form.elements.storage_path.value)
+    const notes = cleanText(form.elements.notes.value)
+
+    if (!paymentDate) return showToast("Fecha requerida", "Captura la fecha del comprobante.", "error")
+    if (!bankReference && !storagePath) {
+      return showToast("Referencia requerida", "Captura una referencia bancaria o una ruta/URL del comprobante.", "error")
+    }
+
+    setButtonLoading(submit, true, "Guardando...")
+    try {
+      const receipt = entry.receipt
+      const payload = {
+        payment_date: paymentDate,
+        bank_reference: bankReference || null,
+        storage_path: storagePath || null,
+      }
+      const profileId = currentProfileId()
+      if (profileId) payload.registered_by = profileId
+
+      let result
+      if (receipt?.id) {
+        result = await client
+          .from("payment_receipts")
+          .update(payload)
+          .eq("id", receipt.id)
+          .select("*")
+          .maybeSingle()
+      } else {
+        result = await client
+          .from("payment_receipts")
+          .insert({
+            ...payload,
+            payment_request_id: entry.raw?.request?.id || null,
+            layout_id: entry.raw?.layout?.id || entry.raw?.line?.layout_id || null,
+            amount: entry.amount || 0,
+          })
+          .select("*")
+          .maybeSingle()
+      }
+
+      if (result.error) throw result.error
+      await tryPersistReceiptNotes(result.data?.id || receipt?.id, notes)
+      localStorage.setItem(transferReceiptNotesKey(entry), notes)
+
+      dialog.close()
+      showToast("Comprobante registrado", "La transferencia quedo con comprobante recibido.", "success")
+      await loadData()
+    } catch (error) {
+      showToast("No se pudo guardar", friendlyError(error), "error")
+    } finally {
+      setButtonLoading(submit, false, "Guardar comprobante")
+    }
+  }
+
+  async function tryPersistReceiptNotes(receiptId, notes) {
+    if (!receiptId || !notes) return
+    try {
+      await client.from("payment_receipts").update({ notes }).eq("id", receiptId)
+    } catch (_) {}
   }
 
   function cashStatusFor(fund, reconciliation) {
@@ -359,8 +527,22 @@
     return receipt.storage_path || receipt.file_path || receipt.receipt_path || receipt.path || receipt.url || receipt.file_url || ""
   }
 
+  function transferReceiptRegistered(entry) {
+    if (!entry?.receipt) return false
+    return Boolean(receiptPath(entry.receipt) || entry.receipt.bank_reference)
+  }
+
+  function transferReceiptSummary(receipt) {
+    if (!receipt) return ""
+    const parts = []
+    if (receipt.payment_date) parts.push(` Fecha: ${formatDate(receipt.payment_date)}.`)
+    if (receipt.bank_reference) parts.push(` Referencia: ${receipt.bank_reference}.`)
+    if (receiptPath(receipt)) parts.push(" Archivo/ruta disponible.")
+    return parts.length ? parts.join("") : ""
+  }
+
   function transferNeedsReceipt(entry) {
-    return entry.type === "transfer" && entry.status === "confirmed" && !receiptPath(entry.receipt)
+    return entry.type === "transfer" && entry.status === "confirmed" && !transferReceiptRegistered(entry)
   }
 
   function typeBadge(type) {
@@ -406,6 +588,44 @@
     const message = error?.message || String(error || "Error desconocido")
     if (message.includes("row-level security") || error?.code === "42501") return "No tienes permiso para consultar esta informacion."
     return message
+  }
+
+  function showToast(title, message, type = "success") {
+    const stack = document.getElementById("toastStack")
+    if (!stack) {
+      window.alert(`${title}: ${message}`)
+      return
+    }
+    const node = document.createElement("div")
+    node.className = `toast ${type}`
+    node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`
+    stack.appendChild(node)
+    window.setTimeout(() => node.remove(), 5500)
+  }
+
+  function cleanText(value) {
+    return String(value || "").trim()
+  }
+
+  function currentProfileId() {
+    return window.FluxAuth?.getProfile?.()?.id || window.FluxAuth?.state?.profile?.id || null
+  }
+
+  function toInputDate(value) {
+    if (!value) return ""
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+    return date.toISOString().slice(0, 10)
+  }
+
+  function transferReceiptNotesKey(entry) {
+    return `flux-transfer-receipt-notes-${entry.raw?.request?.id || entry.raw?.line?.id || entry.id}`
+  }
+
+  function setButtonLoading(button, loading, label) {
+    if (!button) return
+    button.disabled = loading
+    button.textContent = label
   }
 
   function normalize(value) {
