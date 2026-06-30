@@ -48,6 +48,7 @@ with required_columns(column_name) as (
     ('processed_at')
 )
 select
+  'notification_events'::text as table_name,
   rc.column_name,
   exists (
     select 1
@@ -55,9 +56,38 @@ select
     where c.table_schema = 'public'
       and c.table_name = 'notification_events'
       and c.column_name = rc.column_name
-  ) as exists_in_notification_events
+  ) as exists_in_table
 from required_columns rc
 order by rc.column_name;
+
+with required_columns(table_name, column_name) as (
+  values
+    ('payment_requests', 'id'),
+    ('payment_requests', 'request_number'),
+    ('payment_requests', 'requested_by'),
+    ('payment_requests', 'amount_requested'),
+    ('payment_requests', 'currency'),
+    ('payment_requests', 'budget_month'),
+    ('payment_requests', 'created_at'),
+    ('profiles', 'id'),
+    ('profiles', 'email'),
+    ('roles', 'id'),
+    ('roles', 'name'),
+    ('user_roles', 'profile_id'),
+    ('user_roles', 'role_id')
+)
+select
+  rc.table_name,
+  rc.column_name,
+  exists (
+    select 1
+    from information_schema.columns c
+    where c.table_schema = 'public'
+      and c.table_name = rc.table_name
+      and c.column_name = rc.column_name
+  ) as exists_in_table
+from required_columns rc
+order by rc.table_name, rc.column_name;
 
 select
   count(*) as current_pending_events
@@ -154,6 +184,7 @@ select
   pr.requested_by,
   pr.amount_requested,
   pr.currency,
+  pr.budget_month::text as budget_month,
   pr.created_at
 from public.payment_requests pr
 where pr.id is not null
@@ -168,7 +199,6 @@ from public.profiles p
 join public.user_roles ur on ur.profile_id = p.id
 join public.roles r on r.id = ur.role_id
 where lower(r.name) in ('admin', 'sysadmin')
-  and coalesce(p.active, true) = true
   and nullif(btrim(coalesce(p.email, '')), '') is not null;
 
 select
@@ -179,7 +209,6 @@ from public.profiles p
 join public.user_roles ur on ur.profile_id = p.id
 join public.roles r on r.id = ur.role_id
 where lower(r.name) in ('admin', 'sysadmin')
-  and coalesce(p.active, true) = true
   and nullif(btrim(coalesce(p.email, '')), '') is not null
-order by case lower(r.name) when 'admin' then 0 else 1 end, p.created_at desc, p.id
+order by case lower(r.name) when 'admin' then 0 else 1 end, p.id
 limit 1;
