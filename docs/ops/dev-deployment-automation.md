@@ -38,6 +38,9 @@ docs/ops/dev-deployment-automation.md
 
 Los workflows usan workflow_dispatch, por lo que solo corren manualmente desde la pestana Actions de GitHub.
 
+Nota operativa de GitHub Actions: la documentacion oficial de GitHub indica que, para disparar workflow_dispatch desde la interfaz de Actions, el workflow debe existir en la rama default del repositorio. Este PR esta dirigido a dev y no toca main. Si despues de mergear a dev los workflows no aparecen en la UI, no ejecutar workarounds contra produccion; primero decidir la estrategia segura para exponerlos sin romper la regla de no tocar main/produccion.
+
+
 Cada workflow exige un input de confirmacion:
 
 - Supabase DEV: confirm_dev = scsirgbuqjcwoaxfacth
