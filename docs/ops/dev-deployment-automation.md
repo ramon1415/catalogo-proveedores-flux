@@ -142,12 +142,14 @@ El helper:
 
 - Lee el JSON desde el repo.
 - Rechaza valores con apariencia de secrets.
-- Fuerza active: false en el payload.
+- No envia active en el payload de POST /workflows porque algunas versiones de n8n lo tratan como campo read-only.
 - Deshabilita nodos tipo schedule/cron/interval.
 - Deshabilita nodos de envio email conocidos cuando detecta operacion de envio.
 - Importa por API publica de n8n usando X-N8N-API-KEY.
 - Llama a deactivate despues de crear el workflow.
 - Verifica por API que el workflow quede inactivo.
+
+Nota sobre active en n8n: algunas versiones de la API tratan active como campo read-only en POST /workflows. Por eso el importador no envia active en la creacion. La seguridad se garantiza llamando deactivate inmediatamente despues de crear el workflow y verificando despues por API que active sea false. Si la respuesta de verificacion no incluye el campo active, el helper falla con un mensaje claro.
 
 ### Guardrails n8n
 
@@ -191,7 +193,7 @@ node scripts/n8n/update_workflow.js \
   --workflow-json-path "n8n/workflows/dev/flujo_demo.json"
 ~~~
 
-El actualizador tambien fuerza active=false, llama a deactivate y verifica que el workflow quede inactivo.
+El actualizador tampoco envia active en el payload de update, llama a deactivate y verifica que el workflow quede inactivo. Si la respuesta de verificacion no incluye active, falla con un mensaje claro.
 
 ## Checklist de prueba DEV
 

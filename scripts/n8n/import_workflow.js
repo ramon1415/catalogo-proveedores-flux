@@ -189,8 +189,7 @@ function buildInactivePayload(workflow, fallbackName) {
     name: workflow.name || fallbackName,
     nodes,
     connections: workflow.connections || {},
-    settings: workflow.settings || {},
-    active: false
+    settings: workflow.settings || {}
   };
 
   if (Array.isArray(workflow.tags) && workflow.tags.length > 0) {
@@ -235,6 +234,12 @@ function getWorkflowId(response) {
   return response.id || (response.data && response.data.id) || response.workflowId || '';
 }
 
+function getVerifiedActive(response, workflowId, action) {
+  if (response && typeof response.active === 'boolean') return response.active;
+  if (response && response.data && typeof response.data.active === 'boolean') return response.data.active;
+  fail('n8n API verification response did not include active status after ' + action + '.', { workflowId, response });
+}
+
 async function main() {
   ensureDir(EVIDENCE_DIR);
   assertRequiredEnv();
@@ -247,7 +252,7 @@ async function main() {
 
   console.log('n8n DEV workflow import starting.');
   console.log('Workflow path: ' + path.relative(WORKSPACE, workflowPath));
-  console.log('Workflow will be imported with active=false. Disabled nodes: ' + (disabledNodes.join(', ') || 'none'));
+  console.log('Workflow will be imported without active in POST; deactivate will enforce active=false. Disabled nodes: ' + (disabledNodes.join(', ') || 'none'));
 
   const created = await apiRequest(base, 'POST', '/workflows', payload);
   const workflowId = getWorkflowId(created);
@@ -257,7 +262,7 @@ async function main() {
 
   await apiRequest(base, 'POST', '/workflows/' + encodeURIComponent(workflowId) + '/deactivate');
   const verified = await apiRequest(base, 'GET', '/workflows/' + encodeURIComponent(workflowId));
-  const verifiedActive = Boolean(verified.active || (verified.data && verified.data.active));
+  const verifiedActive = getVerifiedActive(verified, workflowId, 'import deactivate');
   if (verifiedActive) {
     fail('Imported workflow is still active after deactivate call.', { workflowId });
   }
