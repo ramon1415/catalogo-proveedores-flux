@@ -1,0 +1,93 @@
+name: Import n8n DEV Workflow Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_json_path:
+        description: "Repo path to the n8n workflow JSON to import into DEV."
+        required: true
+        type: string
+      confirm_dev:
+        description: "Type n8n-dev to confirm DEV import."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n8n-dev-workflow-import
+  cancel-in-progress: false
+
+jobs:
+  import-n8n-dev-workflow:
+    name: Import workflow into n8n DEV as inactive
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 15
+    if: github.ref != 'refs/heads/main'
+    env:
+      CONFIRM_DEV: ${{ inputs.confirm_dev }}
+      N8N_DEV_API_KEY: ${{ secrets.N8N_DEV_API_KEY }}
+      N8N_DEV_API_URL: ${{ secrets.N8N_DEV_API_URL }}
+      OPS_EVIDENCE_DIR: .ops-evidence/n8n-dev
+      WORKFLOW_JSON_PATH: ${{ inputs.workflow_json_path }}
+
+    steps:
+      - name: Guard DEV confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirm_dev }}" != "n8n-dev" ]]; then
+            echo "::error::DEV confirmation must be exactly n8n-dev."
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            echo "::error::This manual DEV workflow is not allowed to run from main."
+            exit 1
+          fi
+          echo "n8n DEV confirmation accepted."
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Mask sensitive values
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${N8N_DEV_API_KEY:-}" ]] && echo "::add-mask::${N8N_DEV_API_KEY}"
+          [[ -n "${N8N_DEV_API_URL:-}" ]] && echo "::add-mask::${N8N_DEV_API_URL}"
+
+      - name: Validate required DEV secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${N8N_DEV_API_URL:-}" ]]; then
+            echo "::error::Missing GitHub Secret N8N_DEV_API_URL."
+            exit 1
+          fi
+          if [[ -z "${N8N_DEV_API_KEY:-}" ]]; then
+            echo "::error::Missing GitHub Secret N8N_DEV_API_KEY."
+            exit 1
+          fi
+          echo "Required n8n DEV secrets are present."
+
+      - name: Import workflow as inactive
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/n8n/import_workflow.js --workflow-json-path "${WORKFLOW_JSON_PATH}"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: n8n-dev-import-evidence
+          path: .ops-evidence/n8n-dev/
+          if-no-files-found: warn
+          retention-days: 14
