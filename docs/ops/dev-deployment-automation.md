@@ -228,6 +228,88 @@ Prueba n8n DEV:
 9. Confirmar que no se envio ningun email automatico.
 10. Descargar artifact n8n-dev-import-evidence.
 
+## Smoke test inicial
+
+Estos smoke tests sirven para validar conectividad DEV antes de ejecutar cargas reales o importar workflows productivos. No modifican datos y no activan automatizaciones.
+
+### Supabase DEV smoke
+
+Archivos incluidos:
+
+~~~text
+ops/smoke/supabase-dev-connection/precheck.sql
+ops/smoke/supabase-dev-connection/load.sql
+ops/smoke/supabase-dev-connection/postcheck.sql
+~~~
+
+Los tres archivos usan solamente SELECT. Validan:
+
+- current_database().
+- now().
+- current_schema().
+- existencia de la tabla publica esperada profiles.
+
+Para ejecutarlo, primero configurar estos GitHub Secrets en el repo o environment dev:
+
+- SUPABASE_DEV_DB_URL
+- SUPABASE_DEV_PROJECT_REF
+
+Luego ejecutar manualmente el workflow Deploy Supabase DEV Manual con:
+
+| Input | Valor |
+|---|---|
+| script_path | ops/smoke/supabase-dev-connection |
+| confirm_dev | scsirgbuqjcwoaxfacth |
+
+Resultado esperado:
+
+- El job acepta la confirmacion DEV.
+- Ejecuta precheck.sql, load.sql y postcheck.sql.
+- No hace cambios de datos ni esquema.
+- El artifact supabase-dev-deployment-evidence contiene summary JSON y log sanitizado.
+- La salida muestra current_database, now y si public.profiles existe.
+
+### n8n DEV smoke
+
+Archivo incluido:
+
+~~~text
+ops/smoke/n8n-dev-import/smoke_manual_noop_workflow.json
+~~~
+
+El workflow JSON contiene:
+
+- Manual Trigger.
+- Code node local que devuelve ok=true y smoke=n8n-dev-import.
+- active=false.
+- Sin schedule.
+- Sin email.
+- Sin credenciales.
+- Sin llamadas externas.
+
+Para ejecutarlo, primero configurar estos GitHub Secrets en el repo o environment dev:
+
+- N8N_DEV_API_URL
+- N8N_DEV_API_KEY
+
+Luego ejecutar manualmente el workflow Import n8n DEV Workflow Manual con:
+
+| Input | Valor |
+|---|---|
+| workflow_json_path | ops/smoke/n8n-dev-import/smoke_manual_noop_workflow.json |
+| confirm_dev | n8n-dev |
+
+Resultado esperado:
+
+- El job acepta la confirmacion DEV.
+- Importa el workflow en n8n DEV.
+- El workflow queda inactive.
+- El helper llama deactivate despues de importar.
+- No se ejecuta el workflow.
+- No se activa ningun schedule.
+- No se envia ningun email.
+- El artifact n8n-dev-import-evidence contiene summary JSON sanitizado.
+
 ## Politicas de seguridad
 
 - No usar service_role en frontend.
