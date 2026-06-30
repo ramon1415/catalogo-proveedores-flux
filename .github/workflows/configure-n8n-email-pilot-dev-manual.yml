@@ -1,0 +1,151 @@
+name: Configure n8n EMAIL PILOT DEV Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_id:
+        description: "n8n workflow ID to configure"
+        required: true
+        type: string
+      confirm_dev:
+        description: "Type n8n-dev to confirm DEV configuration"
+        required: true
+        type: string
+      confirm_test_only:
+        description: "Type TEST_ONLY to confirm real recipients remain disabled"
+        required: true
+        type: string
+      enable_email_node:
+        description: "Enable Email Send Pilot node after config? true/false"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: n8n-email-pilot-dev-configuration
+  cancel-in-progress: false
+
+jobs:
+  configure-n8n-email-pilot-dev:
+    name: Configure n8n EMAIL PILOT DEV as inactive
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 15
+    if: github.ref != 'refs/heads/main'
+    env:
+      CONFIRM_DEV: ${{ inputs.confirm_dev }}
+      CONFIRM_TEST_ONLY: ${{ inputs.confirm_test_only }}
+      ENABLE_EMAIL_NODE: ${{ inputs.enable_email_node }}
+      N8N_WORKFLOW_ID: ${{ inputs.workflow_id }}
+      OPS_EVIDENCE_DIR: .ops-evidence/n8n-email-pilot-dev
+      N8N_DEV_API_URL: ${{ secrets.N8N_DEV_API_URL }}
+      N8N_DEV_API_KEY: ${{ secrets.N8N_DEV_API_KEY }}
+      FLUX_DEV_SUPABASE_URL: ${{ secrets.FLUX_DEV_SUPABASE_URL }}
+      FLUX_DEV_SUPABASE_ANON_KEY: ${{ secrets.FLUX_DEV_SUPABASE_ANON_KEY }}
+      FLUX_DEV_DISPATCHER_EMAIL: ${{ secrets.FLUX_DEV_DISPATCHER_EMAIL }}
+      FLUX_DEV_DISPATCHER_PASSWORD: ${{ secrets.FLUX_DEV_DISPATCHER_PASSWORD }}
+      FLUX_DEV_EMAIL_FROM: ${{ secrets.FLUX_DEV_EMAIL_FROM }}
+      FLUX_DEV_TEST_RECIPIENT_EMAIL: ${{ secrets.FLUX_DEV_TEST_RECIPIENT_EMAIL }}
+      FLUX_DEV_MIN_CREATED_AT: ${{ secrets.FLUX_DEV_MIN_CREATED_AT }}
+      N8N_DEV_EMAIL_CREDENTIAL_ID: ${{ secrets.N8N_DEV_EMAIL_CREDENTIAL_ID }}
+      N8N_DEV_EMAIL_CREDENTIAL_TYPE: ${{ secrets.N8N_DEV_EMAIL_CREDENTIAL_TYPE }}
+
+    steps:
+      - name: Guard DEV and TEST_ONLY confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirm_dev }}" != "n8n-dev" ]]; then
+            echo "::error::DEV confirmation must be exactly n8n-dev."
+            exit 1
+          fi
+          if [[ "${{ inputs.confirm_test_only }}" != "TEST_ONLY" ]]; then
+            echo "::error::TEST_ONLY confirmation must be exactly TEST_ONLY."
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            echo "::error::This manual DEV workflow is not allowed to run from main."
+            exit 1
+          fi
+          echo "n8n EMAIL PILOT DEV configuration confirmation accepted."
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Mask sensitive values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in \
+            N8N_DEV_API_URL \
+            N8N_DEV_API_KEY \
+            FLUX_DEV_SUPABASE_URL \
+            FLUX_DEV_SUPABASE_ANON_KEY \
+            FLUX_DEV_DISPATCHER_EMAIL \
+            FLUX_DEV_DISPATCHER_PASSWORD \
+            FLUX_DEV_EMAIL_FROM \
+            FLUX_DEV_TEST_RECIPIENT_EMAIL \
+            FLUX_DEV_MIN_CREATED_AT \
+            N8N_DEV_EMAIL_CREDENTIAL_ID \
+            N8N_DEV_EMAIL_CREDENTIAL_TYPE; do
+            value="${!name:-}"
+            if [[ -n "${value}" ]]; then
+              echo "::add-mask::${value}"
+            fi
+          done
+
+      - name: Validate required DEV secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            N8N_DEV_API_URL
+            N8N_DEV_API_KEY
+            FLUX_DEV_SUPABASE_URL
+            FLUX_DEV_SUPABASE_ANON_KEY
+            FLUX_DEV_DISPATCHER_EMAIL
+            FLUX_DEV_DISPATCHER_PASSWORD
+            FLUX_DEV_EMAIL_FROM
+            FLUX_DEV_TEST_RECIPIENT_EMAIL
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub Environment Secret ${name}."
+              exit 1
+            fi
+          done
+          if [[ -n "${N8N_DEV_EMAIL_CREDENTIAL_ID:-}" && -z "${N8N_DEV_EMAIL_CREDENTIAL_TYPE:-}" ]]; then
+            echo "::error::N8N_DEV_EMAIL_CREDENTIAL_TYPE is required when N8N_DEV_EMAIL_CREDENTIAL_ID is set."
+            exit 1
+          fi
+          if [[ -z "${N8N_DEV_EMAIL_CREDENTIAL_ID:-}" && -n "${N8N_DEV_EMAIL_CREDENTIAL_TYPE:-}" ]]; then
+            echo "::error::N8N_DEV_EMAIL_CREDENTIAL_ID is required when N8N_DEV_EMAIL_CREDENTIAL_TYPE is set."
+            exit 1
+          fi
+          echo "Required DEV secrets are present."
+
+      - name: Configure workflow and keep inactive
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/n8n/configure_email_pilot_workflow.js --workflow-id "${N8N_WORKFLOW_ID}"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: n8n-email-pilot-dev-configuration-evidence
+          path: .ops-evidence/n8n-email-pilot-dev/
+          if-no-files-found: warn
+          retention-days: 14
