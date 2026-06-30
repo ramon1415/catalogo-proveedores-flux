@@ -119,37 +119,6 @@ with candidate_request as (
     and nullif(btrim(coalesce(p.email, '')), '') is not null
   order by case lower(r.name) when 'admin' then 0 else 1 end, p.created_at desc, p.id
   limit 1
-), controlled_event as (
-  select
-    'payment_request.created'::text as event_type,
-    'payment_requests'::text as source_table,
-    cr.id as source_id,
-    cr.request_number as source_folio,
-    'administrador_sistema'::text as recipient_type,
-    ca.id as recipient_profile_id,
-    ca.email as recipient_email,
-    ca.role_name as recipient_role,
-    'email'::text as channel,
-    'normal'::text as priority,
-    'Flux DEV EMAIL PILOT - Nueva solicitud ' || cr.request_number as subject,
-    jsonb_build_object(
-      'request_id', cr.id::text,
-      'folio', cr.request_number,
-      'solicitante', coalesce(nullif(btrim(cr.requester_name), ''), 'N/D'),
-      'proveedor', coalesce(nullif(btrim(cr.provider_display_name), ''), nullif(btrim(cr.proveedor_alias), ''), nullif(btrim(cr.proveedor_name), ''), 'N/D'),
-      'monto', coalesce(cr.amount_requested::text, 'N/D'),
-      'moneda', coalesce(nullif(btrim(cr.currency), ''), 'MXN'),
-      'empresa', coalesce(nullif(btrim(cr.company_name), ''), 'N/D'),
-      'centro_costo', coalesce(nullif(btrim(cr.cost_center_name), ''), 'N/D'),
-      'partida', coalesce(nullif(btrim(cr.budget_category_name), ''), 'N/D'),
-      'mes', case when cr.budget_month is null then null else to_char(cr.budget_month, 'YYYY-MM') end,
-      'link_solicitud', 'https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/solicitudes.html?request=' || cr.id::text,
-      'fase', 'phase3-dev',
-      'email_pilot', true
-    ) as payload,
-    'phase3-dev:email-pilot:payment_request.created:' || cr.id::text || ':manual-v1' as idempotency_key
-  from candidate_request cr
-  cross join candidate_admin ca
 )
 insert into public.notification_events (
   event_type,
@@ -171,24 +140,39 @@ insert into public.notification_events (
   processed_at
 )
 select
-  event_type,
-  source_table,
-  source_id,
-  source_folio,
-  recipient_type,
-  recipient_profile_id,
-  recipient_email,
-  recipient_role,
-  channel,
-  priority,
-  subject,
-  payload,
-  idempotency_key,
-  'pending'::text as status,
-  null as locked_at,
-  null as locked_by,
-  null as processed_at
-from controlled_event
+  'payment_request.created',
+  'payment_requests',
+  cr.id,
+  cr.request_number,
+  'administrador_sistema',
+  ca.id,
+  ca.email,
+  ca.role_name,
+  'email',
+  'normal',
+  'Flux DEV EMAIL PILOT - Nueva solicitud ' || cr.request_number,
+  jsonb_build_object(
+    'request_id', cr.id::text,
+    'folio', cr.request_number,
+    'solicitante', coalesce(nullif(btrim(cr.requester_name), ''), 'N/D'),
+    'proveedor', coalesce(nullif(btrim(cr.provider_display_name), ''), nullif(btrim(cr.proveedor_alias), ''), nullif(btrim(cr.proveedor_name), ''), 'N/D'),
+    'monto', coalesce(cr.amount_requested::text, 'N/D'),
+    'moneda', coalesce(nullif(btrim(cr.currency), ''), 'MXN'),
+    'empresa', coalesce(nullif(btrim(cr.company_name), ''), 'N/D'),
+    'centro_costo', coalesce(nullif(btrim(cr.cost_center_name), ''), 'N/D'),
+    'partida', coalesce(nullif(btrim(cr.budget_category_name), ''), 'N/D'),
+    'mes', case when cr.budget_month is null then null else to_char(cr.budget_month, 'YYYY-MM') end,
+    'link_solicitud', 'https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/solicitudes.html?request=' || cr.id::text,
+    'fase', 'phase3-dev',
+    'email_pilot', true
+  ),
+  'phase3-dev:email-pilot:payment_request.created:' || cr.id::text || ':manual-v1',
+  'pending',
+  null,
+  null,
+  null
+from candidate_request cr
+cross join candidate_admin ca
 on conflict (idempotency_key) do nothing;
 
 select
