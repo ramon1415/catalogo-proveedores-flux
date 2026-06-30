@@ -1,0 +1,811 @@
+{
+  "name": "Flux DEV - Notification Dispatcher EMAIL PILOT",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0b773d23-b5a1-49e7-ae37-8e554d6d0010",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    FLUX_DEV_SUPABASE_URL: 'PEGAR_SUPABASE_DEV_URL',\n    FLUX_DEV_SUPABASE_ANON_KEY: 'PEGAR_SUPABASE_DEV_ANON_KEY',\n    FLUX_DEV_DISPATCHER_EMAIL: 'PEGAR_EMAIL_ADMIN_DEV',\n    FLUX_DEV_DISPATCHER_PASSWORD: 'PEGAR_PASSWORD_ADMIN_DEV',\n    FLUX_DEV_MIN_CREATED_AT: '2026-06-30T04:00:00.000Z',\n    FLUX_DEV_WORKER_ID: 'n8n-dev-dispatcher-email-pilot',\n    EMAIL_FROM: 'PEGAR_CORREO_REMITENTE_DEV',\n    EMAIL_PILOT_MODE: true,\n    SEND_TO_TEST_EMAIL_ONLY: true,\n    TEST_RECIPIENT_EMAIL: 'PEGAR_CORREO_INTERNO_DE_PRUEBA',\n    SEND_TO_REAL_RECIPIENT: false,\n    MAX_EVENTS_PER_RUN: 1,\n    allowed_event_types: [\n      'payment_request.created',\n      'payment_request.approved',\n      'payment_request.rejected',\n      'payment_request.changes_requested',\n      'payment_request.exception_approved',\n      'payment_request.exception_rejected'\n    ]\n  }\n}];"
+      },
+      "id": "9e4f2c38-6774-497c-9bb8-2a9769380a11",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Set Config').first().json;\nconst errors = [];\nconst placeholders = [\n  'PEGAR_SUPABASE_DEV_URL',\n  'PEGAR_SUPABASE_DEV_ANON_KEY',\n  'PEGAR_EMAIL_ADMIN_DEV',\n  'PEGAR_PASSWORD_ADMIN_DEV',\n  'PEGAR_CORREO_INTERNO_DE_PRUEBA',\n  'PEGAR_CORREO_REMITENTE_DEV'\n];\nfor (const [key, value] of Object.entries(cfg)) {\n  if (typeof value === 'string' && placeholders.includes(value)) errors.push(`${key}_placeholder_not_replaced`);\n}\nif (!String(cfg.FLUX_DEV_SUPABASE_URL || '').startsWith('https://')) errors.push('invalid_supabase_url');\nconst requiredDevHost = 'scsirgbuqjcwoaxfacth.supabase.co';\nif (!String(cfg.FLUX_DEV_SUPABASE_URL || '').includes(requiredDevHost)) errors.push('non_dev_supabase_host_not_allowed');\nconst privilegedKeyPattern = new RegExp('service' + '[_-]?' + 'role', 'i');\nif (privilegedKeyPattern.test(String(cfg.FLUX_DEV_SUPABASE_ANON_KEY || ''))) errors.push('privileged_key_not_allowed');\nif (cfg.EMAIL_PILOT_MODE !== true) errors.push('email_pilot_mode_must_be_true');\nif (Number(cfg.MAX_EVENTS_PER_RUN) !== 1) errors.push('max_events_per_run_must_be_1');\nif (cfg.SEND_TO_TEST_EMAIL_ONLY === true && cfg.SEND_TO_REAL_RECIPIENT === true) errors.push('recipient_mode_conflict');\nif (cfg.SEND_TO_TEST_EMAIL_ONLY !== true && cfg.SEND_TO_REAL_RECIPIENT !== true) errors.push('recipient_mode_missing');\nif (cfg.SEND_TO_TEST_EMAIL_ONLY === true && !String(cfg.TEST_RECIPIENT_EMAIL || '').includes('@')) errors.push('test_recipient_email_required');\nif (!cfg.FLUX_DEV_MIN_CREATED_AT || Number.isNaN(new Date(cfg.FLUX_DEV_MIN_CREATED_AT).getTime())) errors.push('invalid_min_created_at');\nif (errors.length) throw new Error(`CONFIG_INVALID: ${errors.join('; ')}`);\nreturn [{ json: cfg }];"
+      },
+      "id": "51c3e8b8-d16e-47b1-8a8e-bbe2c0c90865",
+      "name": "Validate Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1060,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/auth/v1/token?grant_type=password' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={{ { email: $('Set Config').first().json.FLUX_DEV_DISPATCHER_EMAIL, password: $('Set Config').first().json.FLUX_DEV_DISPATCHER_PASSWORD } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "9ed9eddf-c3fb-43ea-b729-6d463ed22048",
+      "name": "Supabase Auth Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/rest/v1/notification_events?select=id,event_type,source_folio,status,idempotency_key,created_at,recipient_email,channel&status=eq.pending&limit=1000' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Supabase Auth Login').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "id": "217a49a6-c743-45f0-950c-01d0670eab31",
+      "name": "Preflight Pending Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -620,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Set Config').first().json;\nconst minTime = new Date(cfg.FLUX_DEV_MIN_CREATED_AT).getTime();\nconst pending = [];\nfor (const item of $input.all()) {\n  const value = item.json;\n  if (Array.isArray(value)) pending.push(...value);\n  else if (value && value.id) pending.push(value);\n}\nconst unsafe = [];\nfor (const event of pending) {\n  const reasons = [];\n  const idempotency = event.idempotency_key || '';\n  const eventTime = new Date(event.created_at).getTime();\n  const blockedStatuses = ['sent', 'cancelled', 'dead_letter'];\n  if (blockedStatuses.includes(event.status)) reasons.push('final_status_not_allowed');\n  if (idempotency.startsWith('dev-test:')) reasons.push('dev_test_event');\n  if (!cfg.allowed_event_types.includes(event.event_type)) reasons.push('event_type_not_allowed');\n  if (!Number.isFinite(eventTime) || eventTime < minTime) reasons.push('historical_event_before_cutoff');\n  if (!event.recipient_email) reasons.push('missing_recipient_email');\n  if ((event.channel || '') !== 'email') reasons.push('channel_not_email');\n  if (reasons.length) unsafe.push({ id: event.id, event_type: event.event_type, source_folio: event.source_folio, idempotency_key: idempotency, reasons });\n}\nreturn [{ json: {\n  pending_count: pending.length,\n  unsafe_count: unsafe.length,\n  unsafe_events: unsafe,\n  message: unsafe.length ? 'UNSAFE_PENDING_EVENTS_FOUND' : 'PREFLIGHT_OK'\n} }];"
+      },
+      "id": "73d0de11-0df6-44bd-8f5d-33d1769d190d",
+      "name": "Evaluate Preflight Safety",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "unsafe-count",
+              "leftValue": "={{ $json.unsafe_count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1a863926-3180-4560-9ff1-988d8f344a73",
+      "name": "IF Unsafe Pending Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "throw new Error('UNSAFE_PENDING_EVENTS_FOUND - cancelar o aislar eventos pendientes antes de ejecutar n8n');"
+      },
+      "id": "7c139460-8d80-46e2-b2d6-602356ad8a71",
+      "name": "Stop Unsafe Pending",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/rest/v1/rpc/claim_pending_notification_events' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Supabase Auth Login').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={{ { p_limit: $('Set Config').first().json.MAX_EVENTS_PER_RUN, p_worker_id: $('Set Config').first().json.FLUX_DEV_WORKER_ID } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "alwaysOutputData": true,
+      "id": "83525946-4cd3-4ca9-bb28-0fdb6f36b69f",
+      "name": "Claim Pending Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const claimed = [];\nfor (const item of $input.all()) {\n  const value = item.json;\n  if (Array.isArray(value)) claimed.push(...value);\n  else if (value && value.id) claimed.push(value);\n}\nif (!claimed.length) return [{ json: { flow_status: 'NO_EVENTS_CLAIMED', email_sent: false } }];\nreturn [{ json: { flow_status: 'EVENT_CLAIMED', event: claimed[0] } }];"
+      },
+      "id": "51a09d3d-37a8-47f7-8217-b31a21e5f3ac",
+      "name": "Normalize Claim Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "event-claimed",
+              "leftValue": "={{ $json.flow_status }}",
+              "rightValue": "EVENT_CLAIMED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "307e05c4-db96-44cc-946f-56fff485e911",
+      "name": "IF Event Claimed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  workflow: 'Flux DEV - Notification Dispatcher EMAIL PILOT',\n  flow_status: 'NO_EVENTS_CLAIMED',\n  email_sent: false,\n  pilot_mode: true\n} }];"
+      },
+      "id": "0dc4b75a-7987-446e-8980-91654d29fbe1",
+      "name": "Final No Events Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Set Config').first().json;\nconst event = $json.event || {};\nconst payload = event.payload || {};\nconst errors = [];\nconst idempotency = event.idempotency_key || '';\nconst channel = event.channel || '';\nconst eventTime = new Date(event.created_at).getTime();\nconst minTime = new Date(cfg.FLUX_DEV_MIN_CREATED_AT).getTime();\nconst payloadText = JSON.stringify(payload).toLowerCase();\nconst sensitiveTokens = ['clabe', 'cuenta_bancaria', 'bank_account', 'account_number', 'numero_cuenta', 'convenio', 'token', 'password', 'secret', 'service' + '_role'];\nif (!event.id) errors.push('missing_event_id');\nif (!cfg.allowed_event_types.includes(event.event_type)) errors.push('event_type_not_allowed');\nif (!event.recipient_email) errors.push('missing_recipient_email');\nif (channel !== 'email') errors.push('channel_not_email');\nif (!Number.isFinite(eventTime) || eventTime < minTime) errors.push('event_created_before_cutoff');\nconst blockedStatuses = ['sent', 'cancelled', 'dead_letter'];\nif (blockedStatuses.includes(event.status)) errors.push(`event_final_status_not_allowed:${event.status}`);\nif (event.status && event.status !== 'processing') errors.push(`status_not_processing:${event.status}`);\nif (idempotency.startsWith('dev-test:')) errors.push('dev_test_event_not_allowed');\nif (sensitiveTokens.some((token) => payloadText.includes(token))) errors.push('sensitive_payload_detected');\nreturn [{ json: {\n  safety_ok: errors.length === 0,\n  error_message: errors.join('; '),\n  event_id: event.id || null,\n  event,\n  payload\n} }];"
+      },
+      "id": "56f0d860-bb62-49b2-9b13-c4a3e8e32032",
+      "name": "Safety Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "safety-ok",
+              "leftValue": "={{ $json.safety_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6f92d513-70c4-4e50-9d9d-75b0fbf2da77",
+      "name": "IF Safety OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/rest/v1/rpc/mark_notification_failed' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Supabase Auth Login').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={{ { p_event_id: $json.event_id, p_error_message: 'n8n DEV email pilot failed: ' + ($json.error_message || 'safety_failed'), p_worker_id: $('Set Config').first().json.FLUX_DEV_WORKER_ID, p_n8n_execution_id: String($execution.id) } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "19c1f866-7acd-4a44-b59f-6f2bc8ce6055",
+      "name": "Mark Failed Safety",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  workflow: 'Flux DEV - Notification Dispatcher EMAIL PILOT',\n  flow_status: 'FAILED_SAFETY_FILTER',\n  event_id: $('Safety Filter').first().json.event_id,\n  error_message: $('Safety Filter').first().json.error_message,\n  email_sent: false,\n  pilot_mode: true\n} }];"
+      },
+      "id": "b7ea0b50-b6d5-4ba1-9f4b-980268d71a70",
+      "name": "Final Failed Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Set Config').first().json;\nconst event = $('Safety Filter').first().json.event;\nconst payload = $('Safety Filter').first().json.payload || {};\nconst folio = payload.folio || event.source_folio || 'sin folio';\nconst comment = payload.comment || payload.comentario || payload.reason || '';\nconst amount = payload.monto || payload.amount || payload.amount_requested || 'N/D';\nconst currency = payload.moneda || payload.currency || 'MXN';\nconst link = payload.link_solicitud || 'https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/solicitudes.html';\nconst common = [\n  `Folio: ${folio}`,\n  `Evento: ${event.event_type}`,\n  `Monto: ${amount} ${currency}`,\n  payload.solicitante ? `Solicitante: ${payload.solicitante}` : null,\n  payload.proveedor ? `Proveedor: ${payload.proveedor}` : null,\n  payload.empresa ? `Empresa: ${payload.empresa}` : null,\n  payload.centro_costo ? `Centro de costo: ${payload.centro_costo}` : null,\n  payload.partida ? `Partida: ${payload.partida}` : null,\n  payload.mes ? `Mes: ${payload.mes}` : null,\n  comment ? `Comentario: ${comment}` : null,\n  `Link: ${link}`\n].filter(Boolean).join('\\n');\nconst templates = {\n  'payment_request.created': {\n    subject: `Nueva solicitud de pago: ${folio}`,\n    intro: 'Nueva solicitud registrada.'\n  },\n  'payment_request.approved': {\n    subject: `Solicitud aprobada: ${folio}`,\n    intro: 'La solicitud fue aprobada.'\n  },\n  'payment_request.rejected': {\n    subject: `Solicitud rechazada: ${folio}`,\n    intro: 'La solicitud fue rechazada.'\n  },\n  'payment_request.changes_requested': {\n    subject: `Se requieren cambios en la solicitud: ${folio}`,\n    intro: 'Se solicitaron cambios en la solicitud.'\n  },\n  'payment_request.exception_approved': {\n    subject: `Excepcion presupuestal autorizada: ${folio}`,\n    intro: 'La excepcion presupuestal fue autorizada.'\n  },\n  'payment_request.exception_rejected': {\n    subject: `Excepcion presupuestal rechazada: ${folio}`,\n    intro: 'La excepcion presupuestal fue rechazada.'\n  }\n};\nconst template = templates[event.event_type] || { subject: `Notificacion Flux: ${folio}`, intro: 'Actualizacion de solicitud.' };\nlet finalRecipient = null;\nif (cfg.SEND_TO_TEST_EMAIL_ONLY === true && cfg.SEND_TO_REAL_RECIPIENT !== true) finalRecipient = cfg.TEST_RECIPIENT_EMAIL;\nif (cfg.SEND_TO_REAL_RECIPIENT === true && cfg.SEND_TO_TEST_EMAIL_ONLY !== true) finalRecipient = event.recipient_email;\nif (!finalRecipient || !String(finalRecipient).includes('@')) throw new Error('EMAIL_RECIPIENT_MODE_INVALID');\nconst body = [\n  'Flux Operadora - DEV EMAIL PILOT',\n  '',\n  cfg.SEND_TO_TEST_EMAIL_ONLY ? `Modo piloto: este correo se envia al correo interno de prueba. Destinatario original: ${event.recipient_email}` : 'Envio a destinatario real autorizado.',\n  '',\n  template.intro,\n  '',\n  common,\n  '',\n  'No responder a este correo automatico.'\n].join('\\n');\nreturn [{ json: {\n  event_id: event.id,\n  event_type: event.event_type,\n  source_folio: event.source_folio || folio,\n  original_recipient_email: event.recipient_email,\n  final_recipient_email: finalRecipient,\n  rendered_subject: template.subject,\n  rendered_body: body,\n  pilot_mode: cfg.EMAIL_PILOT_MODE,\n  sent_to_test_email_only: cfg.SEND_TO_TEST_EMAIL_ONLY\n} }];"
+      },
+      "id": "6f195327-40b8-41cb-8fdd-52e9461f37f4",
+      "name": "Render Email Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Set Config').first().json.EMAIL_FROM }}",
+        "toEmail": "={{ $json.final_recipient_email }}",
+        "subject": "={{ $json.rendered_subject }}",
+        "text": "={{ $json.rendered_body }}",
+        "options": {}
+      },
+      "continueOnFail": true,
+      "id": "ec36f193-5852-43c5-bf54-774e64e9bf7c",
+      "name": "Email Send Pilot",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1360,
+        -80
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "Flux DEV Email SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rendered = $('Render Email Template').first().json;\nconst current = $input.first().json || {};\nconst failed = Boolean(current.error || current.message?.includes?.('Error'));\nreturn [{ json: {\n  ...rendered,\n  email_ok: !failed,\n  email_error: failed ? JSON.stringify(current.error || current).slice(0, 1000) : null,\n  provider_message_id: `email-pilot:${$execution.id}:${rendered.event_id}`\n} }];"
+      },
+      "id": "abde6b3b-4e59-44d7-93fb-b95244e608d4",
+      "name": "Normalize Email Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "email-ok",
+              "leftValue": "={{ $json.email_ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1ff518b2-5b82-4c92-bab5-aa5413f66c17",
+      "name": "IF Email Sent OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/rest/v1/rpc/mark_notification_processed' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Supabase Auth Login').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={{ { p_event_id: $json.event_id, p_worker_id: $('Set Config').first().json.FLUX_DEV_WORKER_ID, p_provider_message_id: $json.provider_message_id, p_n8n_execution_id: String($execution.id) } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "9a77fec6-d938-4b17-9366-f9c8b2de11c0",
+      "name": "Mark Processed Email Pilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2020,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_URL + '/rest/v1/rpc/mark_notification_failed' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set Config').first().json.FLUX_DEV_SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Supabase Auth Login').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={{ { p_event_id: $json.event_id, p_error_message: 'n8n DEV email pilot failed: ' + ($json.email_error || 'email_send_failed'), p_worker_id: $('Set Config').first().json.FLUX_DEV_WORKER_ID, p_n8n_execution_id: String($execution.id) } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "49b0a9d8-92d9-4072-b739-32782fd4385f",
+      "name": "Mark Failed Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2020,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rendered = $('Normalize Email Result').first().json;\nreturn [{ json: {\n  workflow: 'Flux DEV - Notification Dispatcher EMAIL PILOT',\n  email_sent: true,\n  pilot_mode: true,\n  sent_to_test_email_only: rendered.sent_to_test_email_only,\n  event_id: rendered.event_id,\n  event_type: rendered.event_type,\n  source_folio: rendered.source_folio,\n  original_recipient_email: rendered.original_recipient_email,\n  final_recipient_email: rendered.final_recipient_email,\n  provider_message_id: rendered.provider_message_id\n} }];"
+      },
+      "id": "eaedc4fd-e66d-4e3d-a191-3923b4f25ac9",
+      "name": "Final Success Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rendered = $('Normalize Email Result').first().json;\nreturn [{ json: {\n  workflow: 'Flux DEV - Notification Dispatcher EMAIL PILOT',\n  email_sent: false,\n  pilot_mode: true,\n  event_id: rendered.event_id,\n  event_type: rendered.event_type,\n  source_folio: rendered.source_folio,\n  original_recipient_email: rendered.original_recipient_email,\n  final_recipient_email: rendered.final_recipient_email,\n  error_message: rendered.email_error || 'email_send_failed'\n} }];"
+      },
+      "id": "3292dc23-03cc-4014-83be-a675a4ffc5e8",
+      "name": "Final Email Failed Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        40
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [
+          {
+            "node": "Validate Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Config": {
+      "main": [
+        [
+          {
+            "node": "Supabase Auth Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Auth Login": {
+      "main": [
+        [
+          {
+            "node": "Preflight Pending Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preflight Pending Events": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Preflight Safety",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Preflight Safety": {
+      "main": [
+        [
+          {
+            "node": "IF Unsafe Pending Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Unsafe Pending Exists": {
+      "main": [
+        [
+          {
+            "node": "Stop Unsafe Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim Pending Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Pending Event": {
+      "main": [
+        [
+          {
+            "node": "Normalize Claim Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Claim Result": {
+      "main": [
+        [
+          {
+            "node": "IF Event Claimed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Event Claimed": {
+      "main": [
+        [
+          {
+            "node": "Safety Filter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final No Events Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safety Filter": {
+      "main": [
+        [
+          {
+            "node": "IF Safety OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Safety OK": {
+      "main": [
+        [
+          {
+            "node": "Render Email Template",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Failed Safety",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Failed Safety": {
+      "main": [
+        [
+          {
+            "node": "Final Failed Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Email Template": {
+      "main": [
+        [
+          {
+            "node": "Email Send Pilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Send Pilot": {
+      "main": [
+        [
+          {
+            "node": "Normalize Email Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Email Result": {
+      "main": [
+        [
+          {
+            "node": "IF Email Sent OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Email Sent OK": {
+      "main": [
+        [
+          {
+            "node": "Mark Processed Email Pilot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Failed Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Processed Email Pilot": {
+      "main": [
+        [
+          {
+            "node": "Final Success Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Failed Email": {
+      "main": [
+        [
+          {
+            "node": "Final Email Failed Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-30T00:00:00.000Z",
+  "versionId": "phase3-dev-email-pilot-no-vars-v1"
+}
