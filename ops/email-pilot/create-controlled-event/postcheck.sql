@@ -1,5 +1,6 @@
 -- Flux Operadora - DEV email pilot controlled event postcheck
 -- Read-only checks after the controlled event load.
+-- This postcheck only reads public.notification_events.
 
 select
   'DEV'::text as expected_environment,
