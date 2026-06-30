@@ -118,6 +118,7 @@
       const provider = byId(state.providers, line.proveedor_id || request?.proveedor_id)
       const company = byId(state.companies, line.company_id || request?.company_id)
       const receipt = receiptFor(line, request, layout)
+      const receiptRegistered = receiptIsRegistered(receipt)
       const paid = line.status === "paid" || layout?.status === "confirmed" || request?.status === "paid"
       return {
         id: `transfer:${line.id}`,
@@ -130,7 +131,7 @@
         amount: line.amount || request?.amount_requested || 0,
         date: receipt?.payment_date || layout?.updated_at || layout?.created_at || line.updated_at || line.created_at,
         status: paid ? "confirmed" : "pending_confirmation",
-        statusLabel: paid ? "Pago confirmado" : "Transferencia pendiente de confirmacion bancaria",
+        statusLabel: receiptRegistered ? "Comprobante registrado" : paid ? "Pago confirmado" : "Transferencia pendiente de confirmacion bancaria",
         receipt,
         raw: { line, request, layout },
       }
@@ -238,8 +239,13 @@
 
   function receiptCell(entry) {
     const path = receiptPath(entry.receipt)
+    if (entry.type === "transfer" && transferReceiptRegistered(entry)) {
+      return [
+        `<span class="badge good">Comprobante registrado</span>`,
+        path ? `<button class="small-btn success" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>` : "",
+      ].filter(Boolean).join("")
+    }
     if (path) return `<button class="small-btn success" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>`
-    if (entry.type === "transfer" && transferReceiptRegistered(entry)) return `<span class="badge good">Comprobante registrado</span>`
     if (entry.status === "pending_delivery") return `<span class="badge">No aplica hasta entrega</span>`
     if (entry.type === "transfer" && entry.status === "pending_confirmation") return `<span class="badge warn">Pendiente confirmacion bancaria</span>`
     if (entry.type === "transfer") return `<span class="badge warn">Comprobante pendiente</span>`
@@ -258,6 +264,11 @@
     } else if (entry.type === "transfer") {
       if (entry.status === "confirmed" && !transferReceiptRegistered(entry)) {
         actions.push(`<button class="small-btn success" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Registrar comprobante</button>`)
+      } else if (transferReceiptRegistered(entry)) {
+        if (receiptPath(entry.receipt)) {
+          actions.push(`<button class="small-btn success" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>`)
+        }
+        actions.push(`<button class="small-btn" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Editar comprobante</button>`)
       }
       actions.push(`<a class="small-btn" href="./layouts.html">Ver layout</a>`)
     }
@@ -281,6 +292,7 @@
         ${detailCard("Fecha", formatDate(entry.date))}
       </div>
       <div class="notice ${transferReceiptRegistered(entry) ? "success" : "warning"}">${paymentOperationMessage(entry)}</div>
+      ${transferReceiptDetail(entry)}
       <div class="actions">${detailActions(entry)}</div>
     `
     dom.detailDialog.showModal()
@@ -314,6 +326,9 @@
       return [
         entry.status === "confirmed" && !transferReceiptRegistered(entry)
           ? `<button class="primary-btn" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Registrar comprobante</button>`
+          : "",
+        transferReceiptRegistered(entry)
+          ? `<button class="secondary-btn" type="button" data-cash-ux-transfer-receipt="${escapeHtml(entry.id)}">Editar comprobante</button>`
           : "",
         receiptPath(entry.receipt)
           ? `<button class="secondary-btn" type="button" data-cash-ux-receipt="${escapeHtml(entry.id)}">Ver comprobante</button>`
@@ -350,8 +365,9 @@
 
     dialog = document.createElement("dialog")
     dialog.id = "transferReceiptDialog"
+    dialog.className = "narrow"
     dialog.innerHTML = `
-      <form class="modal-content" id="transferReceiptForm">
+      <form class="modal-content transfer-receipt-modal" id="transferReceiptForm">
         <div class="modal-header">
           <div>
             <h2 data-transfer-receipt-title>Registrar comprobante</h2>
@@ -361,19 +377,25 @@
         </div>
         <div class="modal-scroll">
           <div class="notice">Captura la fecha y al menos una referencia bancaria o ruta/URL del comprobante. El archivo puede quedar pendiente si storage todavia no esta integrado.</div>
-          <label>Fecha de comprobante
-            <input name="payment_date" type="date" required>
-          </label>
-          <label>Referencia bancaria / folio de operacion
-            <input name="bank_reference" type="text" placeholder="Ej. SPEI, folio banco o referencia interna">
-          </label>
-          <label>URL o ruta del comprobante
-            <input name="storage_path" type="text" placeholder="URL, ruta en storage o referencia temporal">
-          </label>
-          <label>Notas opcionales
-            <textarea name="notes" rows="3" placeholder="Notas internas para seguimiento"></textarea>
-          </label>
-          <div class="field-hint">Las notas se conservan como apoyo local del navegador hasta que exista campo formal en backend.</div>
+          <div class="fg cols-1">
+            <label>
+              <span class="f-label">Fecha de comprobante <span class="f-req">*</span></span>
+              <input class="f-ctrl" name="payment_date" type="date" required>
+            </label>
+            <label>
+              <span class="f-label">Referencia bancaria / folio de operacion</span>
+              <input class="f-ctrl" name="bank_reference" type="text" placeholder="Ej. SPEI, folio banco o referencia interna">
+            </label>
+            <label>
+              <span class="f-label">URL o ruta del comprobante</span>
+              <input class="f-ctrl" name="storage_path" type="text" placeholder="URL, ruta en storage o referencia temporal">
+            </label>
+            <label>
+              <span class="f-label">Notas opcionales</span>
+              <textarea class="f-ctrl" name="notes" rows="3" placeholder="Notas internas para seguimiento"></textarea>
+            </label>
+            <div class="f-hint">Las notas se conservan como apoyo local del navegador hasta que exista campo formal en backend.</div>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" data-transfer-receipt-close>Cancelar</button>
@@ -419,7 +441,7 @@
       if (profileId) payload.registered_by = profileId
 
       let result
-      if (receipt?.id) {
+      if (receipt?.id && !receipt._local_transfer_receipt && !String(receipt.id).startsWith("local-")) {
         result = await client
           .from("payment_receipts")
           .update(payload)
@@ -440,11 +462,25 @@
       }
 
       if (result.error) throw result.error
-      await tryPersistReceiptNotes(result.data?.id || receipt?.id, notes)
-      localStorage.setItem(transferReceiptNotesKey(entry), notes)
+      const savedReceipt = {
+        ...(receipt || {}),
+        ...(result.data || {}),
+        ...payload,
+        id: result.data?.id || receipt?.id || localTransferReceiptId(entry),
+        payment_request_id: result.data?.payment_request_id || receipt?.payment_request_id || entry.raw?.request?.id || null,
+        layout_id: result.data?.layout_id || receipt?.layout_id || entry.raw?.layout?.id || entry.raw?.line?.layout_id || null,
+        payment_layout_line_id: result.data?.payment_layout_line_id || receipt?.payment_layout_line_id || entry.raw?.line?.id || null,
+        amount: result.data?.amount || receipt?.amount || entry.amount || 0,
+      }
+      await tryPersistReceiptNotes(savedReceipt.id, notes)
+      persistLocalTransferReceipt(entry, savedReceipt, notes)
+      upsertReceipt(savedReceipt)
+      state.entries = buildEntries()
+      renderStats()
+      renderTable()
 
       dialog.close()
-      showToast("Comprobante registrado", "La transferencia quedo con comprobante recibido.", "success")
+      showToast("Comprobante registrado correctamente", "La transferencia quedo con comprobante recibido.", "success")
       await loadData()
     } catch (error) {
       showToast("No se pudo guardar", friendlyError(error), "error")
@@ -519,7 +555,7 @@
       receipt.payment_layout_id === layout?.id ||
       receipt.payment_layout_line_id === line?.id ||
       receipt.layout_line_id === line?.id
-    )
+    ) || localTransferReceiptFor(line, request, layout)
   }
 
   function receiptPath(receipt) {
@@ -527,9 +563,13 @@
     return receipt.storage_path || receipt.file_path || receipt.receipt_path || receipt.path || receipt.url || receipt.file_url || ""
   }
 
+  function receiptIsRegistered(receipt) {
+    return Boolean(receipt && (receiptPath(receipt) || receipt.bank_reference))
+  }
+
   function transferReceiptRegistered(entry) {
     if (!entry?.receipt) return false
-    return Boolean(receiptPath(entry.receipt) || entry.receipt.bank_reference)
+    return receiptIsRegistered(entry.receipt)
   }
 
   function transferReceiptSummary(receipt) {
@@ -541,8 +581,80 @@
     return parts.length ? parts.join("") : ""
   }
 
+  function transferReceiptDetail(entry) {
+    if (entry.type !== "transfer" || !transferReceiptRegistered(entry)) return ""
+    const receipt = entry.receipt
+    const notes = localStorage.getItem(transferReceiptNotesKey(entry)) || receipt?.notes || ""
+    return `
+      <div class="detail-grid">
+        ${detailCard("Fecha de comprobante", formatDate(receipt.payment_date))}
+        ${detailCard("Referencia bancaria / folio", receipt.bank_reference || "Sin referencia")}
+        ${detailCard("URL o ruta", receiptPath(receipt) || "Sin ruta capturada")}
+        ${detailCard("Notas", notes || "Sin notas")}
+      </div>
+    `
+  }
+
   function transferNeedsReceipt(entry) {
     return entry.type === "transfer" && entry.status === "confirmed" && !transferReceiptRegistered(entry)
+  }
+
+  function localTransferReceiptFor(line, request, layout) {
+    const store = readLocalTransferReceipts()
+    const keys = localTransferReceiptKeys({ raw: { line, request, layout } })
+    for (const key of keys) {
+      if (store[key]) return store[key]
+    }
+    return null
+  }
+
+  function persistLocalTransferReceipt(entry, receipt, notes) {
+    const store = readLocalTransferReceipts()
+    const stored = {
+      ...receipt,
+      notes: notes || receipt?.notes || null,
+      _local_transfer_receipt: true,
+      _saved_at: new Date().toISOString(),
+    }
+    localTransferReceiptKeys(entry).forEach((key) => {
+      store[key] = stored
+    })
+    localStorage.setItem("flux-transfer-receipts-v1", JSON.stringify(store))
+    localStorage.setItem(transferReceiptNotesKey(entry), notes || "")
+  }
+
+  function readLocalTransferReceipts() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("flux-transfer-receipts-v1") || "{}")
+      return parsed && typeof parsed === "object" ? parsed : {}
+    } catch (_) {
+      return {}
+    }
+  }
+
+  function localTransferReceiptKeys(entry) {
+    return [
+      entry.raw?.request?.id ? `request:${entry.raw.request.id}` : "",
+      entry.raw?.layout?.id ? `layout:${entry.raw.layout.id}` : "",
+      entry.raw?.line?.layout_id ? `layout:${entry.raw.line.layout_id}` : "",
+      entry.raw?.line?.id ? `line:${entry.raw.line.id}` : "",
+      entry.id ? `entry:${entry.id}` : "",
+    ].filter(Boolean)
+  }
+
+  function localTransferReceiptId(entry) {
+    return `local-${entry.raw?.request?.id || entry.raw?.line?.id || Date.now()}`
+  }
+
+  function upsertReceipt(receipt) {
+    const index = state.receipts.findIndex((item) =>
+      (receipt.id && item.id === receipt.id) ||
+      (receipt.payment_request_id && item.payment_request_id === receipt.payment_request_id) ||
+      (receipt.payment_layout_line_id && (item.payment_layout_line_id === receipt.payment_layout_line_id || item.layout_line_id === receipt.payment_layout_line_id)) ||
+      (receipt.layout_id && (item.layout_id === receipt.layout_id || item.payment_layout_id === receipt.layout_id))
+    )
+    if (index >= 0) state.receipts.splice(index, 1, receipt)
+    else state.receipts.unshift(receipt)
   }
 
   function typeBadge(type) {
