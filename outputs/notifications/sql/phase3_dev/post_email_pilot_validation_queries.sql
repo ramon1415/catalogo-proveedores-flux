@@ -1,33 +1,57 @@
 -- Flux Operadora - Fase 3 DEV email pilot postcheck
 -- Ambiente esperado: DEV / scsirgbuqjcwoaxfacth.supabase.co
 -- Seguridad: solo SELECT. No modifica datos.
+-- Nota: provider_message_id vive en public.notification_delivery_attempts,
+-- no en public.notification_events.
 
 select
   'DEV' as expected_environment,
   'scsirgbuqjcwoaxfacth.supabase.co' as expected_supabase_host,
   now() as checked_at;
 
--- 01. Eventos procesados por email pilot.
+-- Eventos relacionados con el email pilot.
+with pilot_events as (
+  select distinct ne.id
+  from public.notification_events ne
+  left join public.notification_delivery_attempts da
+    on da.notification_event_id = ne.id
+  where ne.locked_by = 'n8n-dev-dispatcher-email-pilot'
+     or ne.idempotency_key like 'phase3-dev:%'
+     or ne.last_error ilike '%email pilot%'
+     or da.worker_id = 'n8n-dev-dispatcher-email-pilot'
+     or da.provider_message_id like 'email-pilot:%'
+     or da.error_message ilike '%email pilot%'
+)
 select
-  id,
-  event_type,
-  source_folio,
-  recipient_email,
-  status,
-  priority,
-  attempt_count,
-  provider_message_id,
-  last_error,
-  created_at,
-  updated_at
-from public.notification_events
-where provider_message_id like 'email-pilot:%'
-   or locked_by = 'n8n-dev-dispatcher-email-pilot'
-   or idempotency_key like 'phase3-dev:%'
-order by updated_at desc
+  ne.id,
+  ne.event_type,
+  ne.source_folio,
+  ne.recipient_email,
+  ne.status,
+  ne.priority,
+  ne.attempt_count,
+  latest_attempt.provider_message_id,
+  latest_attempt.attempt_status,
+  latest_attempt.attempt_created_at,
+  ne.last_error,
+  ne.created_at,
+  ne.updated_at
+from pilot_events pe
+join public.notification_events ne on ne.id = pe.id
+left join lateral (
+  select
+    da.provider_message_id,
+    da.status as attempt_status,
+    da.created_at as attempt_created_at
+  from public.notification_delivery_attempts da
+  where da.notification_event_id = ne.id
+  order by da.created_at desc
+  limit 1
+) latest_attempt on true
+order by ne.updated_at desc
 limit 50;
 
--- 02. Delivery attempts del piloto.
+-- Delivery attempts del piloto.
 select
   da.id,
   da.notification_event_id,
@@ -43,21 +67,32 @@ from public.notification_delivery_attempts da
 join public.notification_events ne on ne.id = da.notification_event_id
 where da.worker_id = 'n8n-dev-dispatcher-email-pilot'
    or da.provider_message_id like 'email-pilot:%'
+   or da.error_message ilike '%email pilot%'
 order by da.created_at desc
 limit 50;
 
--- 03. Resumen por status de eventos tocados por piloto.
+-- Resumen por status de eventos tocados por piloto.
+with pilot_events as (
+  select distinct ne.id
+  from public.notification_events ne
+  left join public.notification_delivery_attempts da
+    on da.notification_event_id = ne.id
+  where ne.locked_by = 'n8n-dev-dispatcher-email-pilot'
+     or ne.idempotency_key like 'phase3-dev:%'
+     or ne.last_error ilike '%email pilot%'
+     or da.worker_id = 'n8n-dev-dispatcher-email-pilot'
+     or da.provider_message_id like 'email-pilot:%'
+     or da.error_message ilike '%email pilot%'
+)
 select
-  status,
+  ne.status,
   count(*) as total
-from public.notification_events
-where provider_message_id like 'email-pilot:%'
-   or locked_by = 'n8n-dev-dispatcher-email-pilot'
-   or idempotency_key like 'phase3-dev:%'
-group by status
-order by status;
+from pilot_events pe
+join public.notification_events ne on ne.id = pe.id
+group by ne.status
+order by ne.status;
 
--- 04. Locks colgados del piloto.
+-- Locks colgados del piloto.
 select
   count(*) as processing_events,
   count(*) filter (where locked_at < now() - interval '15 minutes') as stale_processing_events,
@@ -67,38 +102,62 @@ from public.notification_events
 where status = 'processing'
   and locked_by = 'n8n-dev-dispatcher-email-pilot';
 
--- 05. Failed / dead_letter del piloto.
+-- Failed / dead_letter del piloto.
+with pilot_events as (
+  select distinct ne.id
+  from public.notification_events ne
+  left join public.notification_delivery_attempts da
+    on da.notification_event_id = ne.id
+  where ne.locked_by = 'n8n-dev-dispatcher-email-pilot'
+     or ne.idempotency_key like 'phase3-dev:%'
+     or ne.last_error ilike '%email pilot%'
+     or da.worker_id = 'n8n-dev-dispatcher-email-pilot'
+     or da.provider_message_id like 'email-pilot:%'
+     or da.error_message ilike '%email pilot%'
+)
 select
-  id,
-  event_type,
-  source_folio,
-  status,
-  attempt_count,
-  max_attempts,
-  last_error,
-  updated_at
-from public.notification_events
-where status in ('failed', 'dead_letter')
-  and (
-    locked_by = 'n8n-dev-dispatcher-email-pilot'
-    or provider_message_id like 'email-pilot:%'
-    or last_error ilike '%email pilot%'
-  )
-order by updated_at desc
+  ne.id,
+  ne.event_type,
+  ne.source_folio,
+  ne.status,
+  ne.attempt_count,
+  ne.max_attempts,
+  ne.last_error,
+  ne.updated_at
+from pilot_events pe
+join public.notification_events ne on ne.id = pe.id
+where ne.status in ('failed', 'dead_letter')
+order by ne.updated_at desc
 limit 50;
 
--- 06. Resultado resumido.
-with checks as (
+-- Resultado resumido.
+with pilot_events as (
+  select distinct ne.id
+  from public.notification_events ne
+  left join public.notification_delivery_attempts da
+    on da.notification_event_id = ne.id
+  where ne.locked_by = 'n8n-dev-dispatcher-email-pilot'
+     or ne.idempotency_key like 'phase3-dev:%'
+     or ne.last_error ilike '%email pilot%'
+     or da.worker_id = 'n8n-dev-dispatcher-email-pilot'
+     or da.provider_message_id like 'email-pilot:%'
+     or da.error_message ilike '%email pilot%'
+), checks as (
   select
-    count(*) filter (where provider_message_id like 'email-pilot:%') as email_pilot_sent_events,
-    count(*) filter (where status = 'failed') as failed_events,
-    count(*) filter (where status = 'dead_letter') as dead_letter_events,
-    count(*) filter (where status = 'processing') as processing_events,
-    count(*) filter (where status = 'processing' and locked_at < now() - interval '15 minutes') as stale_processing_events
-  from public.notification_events
-  where provider_message_id like 'email-pilot:%'
-     or locked_by = 'n8n-dev-dispatcher-email-pilot'
-     or idempotency_key like 'phase3-dev:%'
+    count(*) filter (
+      where exists (
+        select 1
+        from public.notification_delivery_attempts da
+        where da.notification_event_id = ne.id
+          and da.provider_message_id like 'email-pilot:%'
+      )
+    ) as email_pilot_sent_events,
+    count(*) filter (where ne.status = 'failed') as failed_events,
+    count(*) filter (where ne.status = 'dead_letter') as dead_letter_events,
+    count(*) filter (where ne.status = 'processing') as processing_events,
+    count(*) filter (where ne.status = 'processing' and ne.locked_at < now() - interval '15 minutes') as stale_processing_events
+  from pilot_events pe
+  join public.notification_events ne on ne.id = pe.id
 )
 select
   *,
