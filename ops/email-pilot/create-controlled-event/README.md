@@ -6,9 +6,21 @@ El paquete crea como maximo 1 evento `pending` en `public.notification_events`, 
 
 ## Archivos
 
-- `precheck.sql`: valida ambiente esperado, tablas, columnas, pendientes actuales, solicitud usable y admin/sysadmin con email.
+- `precheck.sql`: valida ambiente esperado, tablas, columnas base, pendientes actuales, solicitud usable y admin/sysadmin con email.
 - `load.sql`: inserta 1 evento `payment_request.created` pendiente, con `on conflict (idempotency_key) do nothing`.
 - `postcheck.sql`: valida que el evento este listo para ser reclamado por el EMAIL PILOT.
+
+## Payload minimo
+
+El evento usa datos minimos seguros para evitar dependencias con tablas opcionales:
+
+- folio de la solicitud;
+- monto, moneda y mes cuando existen en `payment_requests`;
+- email del solicitante cuando existe en `profiles`;
+- link de solicitud en DEV;
+- campos no criticos como `proveedor`, `empresa`, `centro_costo` y `partida` con `N/D`.
+
+No incluye payload crudo, datos bancarios, credenciales, tokens ni datos de cuentas.
 
 ## Ejecucion manual con GitHub Actions
 
