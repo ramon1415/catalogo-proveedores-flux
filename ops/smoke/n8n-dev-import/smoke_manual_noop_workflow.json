@@ -1,0 +1,47 @@
+{
+  "name": "Smoke DEV Import - Manual Noop",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b3a8b9b0-4fc1-4a2e-8f64-0b1876d2d6b1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { ok: true, smoke: 'n8n-dev-import' } }];"
+      },
+      "id": "9ce17c1c-3a02-418a-9d2f-9a18e2b35553",
+      "name": "Smoke Noop",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Smoke Noop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
