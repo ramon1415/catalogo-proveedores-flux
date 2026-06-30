@@ -149,8 +149,7 @@ function buildInactivePayload(workflow, fallbackName) {
     name: workflow.name || fallbackName,
     nodes,
     connections: workflow.connections || {},
-    settings: workflow.settings || {},
-    active: false
+    settings: workflow.settings || {}
   };
   if (Array.isArray(workflow.tags) && workflow.tags.length > 0) payload.tags = workflow.tags;
   return { payload, disabledNodes };
@@ -183,6 +182,12 @@ async function apiRequest(base, method, apiPath, body) {
   return parsed || {};
 }
 
+function getVerifiedActive(response, workflowId, action) {
+  if (response && typeof response.active === 'boolean') return response.active;
+  if (response && response.data && typeof response.data.active === 'boolean') return response.data.active;
+  fail('n8n API verification response did not include active status after ' + action + '.', { workflowId, response });
+}
+
 async function main() {
   ensureDir(EVIDENCE_DIR);
   assertRequiredEnv();
@@ -198,12 +203,12 @@ async function main() {
   console.log('n8n DEV workflow update starting.');
   console.log('Workflow id: ' + workflowId);
   console.log('Workflow path: ' + path.relative(WORKSPACE, workflowPath));
-  console.log('Workflow will be saved with active=false. Disabled nodes: ' + (disabledNodes.join(', ') || 'none'));
+  console.log('Workflow will be saved without active in PUT; deactivate will enforce active=false. Disabled nodes: ' + (disabledNodes.join(', ') || 'none'));
 
   await apiRequest(base, 'PUT', '/workflows/' + encodeURIComponent(workflowId), payload);
   await apiRequest(base, 'POST', '/workflows/' + encodeURIComponent(workflowId) + '/deactivate');
   const verified = await apiRequest(base, 'GET', '/workflows/' + encodeURIComponent(workflowId));
-  const verifiedActive = Boolean(verified.active || (verified.data && verified.data.active));
+  const verifiedActive = getVerifiedActive(verified, workflowId, 'update deactivate');
   if (verifiedActive) fail('Updated workflow is still active after deactivate call.', { workflowId });
 
   writeSummary({
