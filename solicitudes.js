@@ -112,7 +112,11 @@ function cacheDom() {
   dom.companyId = document.getElementById("companyId");
   dom.costCenterId = document.getElementById("costCenterId");
   dom.budgetCategoryId = document.getElementById("budgetCategoryId");
+  dom.budgetCategorySearch = document.getElementById("budgetCategorySearch");
+  dom.editBudgetCategorySearch = document.getElementById("editBudgetCategorySearch");
   dom.budgetCategoryHelp = document.getElementById("budgetCategoryHelp");
+  dom.budgetCategorySearch?.addEventListener("input", () => filterBudgetCategoryOptions(dom.budgetCategoryId, dom.budgetCategorySearch.value));
+  dom.editBudgetCategorySearch?.addEventListener("input", () => filterBudgetCategoryOptions(document.getElementById("editBudgetCategoryId"), dom.editBudgetCategorySearch.value));
   dom.budgetMonth = document.getElementById("budgetMonth");
   dom.providerSearch = document.getElementById("providerSearch");
   dom.proveedorId = document.getElementById("proveedorId");
@@ -352,6 +356,7 @@ async function loadAvailableBudgetCategories() {
   }
 
   dom.budgetCategoryId.disabled = false;
+  if (dom.budgetCategorySearch) { dom.budgetCategorySearch.disabled = false; dom.budgetCategorySearch.value = ""; }
   dom.budgetCategoryId.innerHTML = optionPlaceholder("Seleccionar partida presupuestal") +
     budgetAvailabilityRows.map(row => {
       const category = budgetCategoryById(row.budget_category_id);
@@ -1062,6 +1067,7 @@ async function loadEditBudgetCategories() {
       const cat = budgetCategoryById(row.budget_category_id);
       return `<option value="${escapeHtml(row.budget_category_id)}">${escapeHtml(budgetCategoryAvailabilityLabel(cat, row))}</option>`;
     }).join("");
+  if (dom.editBudgetCategorySearch) { dom.editBudgetCategorySearch.disabled = false; dom.editBudgetCategorySearch.value = ""; }
   dom.editBudgetCategoryHelp.textContent = `${rows.length} partidas disponibles para esta combinación.`;
 }
 
@@ -1474,6 +1480,17 @@ function optionPlaceholder(label) {
 function resetBudgetCategorySelect(label) {
   dom.budgetCategoryId.disabled = true;
   dom.budgetCategoryId.innerHTML = optionPlaceholder(label);
+  if (dom.budgetCategorySearch) { dom.budgetCategorySearch.disabled = true; dom.budgetCategorySearch.value = ""; }
+}
+
+// Filtro ligero sobre el <select> de partida: oculta opciones que no matchean.
+// No toca el valor ni la validacion (el select nativo sigue igual).
+function filterBudgetCategoryOptions(select, query) {
+  if (!select) return;
+  const q = normalize(query || "");
+  Array.from(select.options).forEach((opt) => {
+    opt.hidden = q && opt.value ? !normalize(opt.textContent).includes(q) : false;
+  });
 }
 
 function setBudgetCategoryHelp(message, state = "") {
