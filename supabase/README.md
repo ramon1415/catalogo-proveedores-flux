@@ -23,20 +23,22 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 17. `003f_income_invoice_rpcs.sql` - RPCs de ingresos, incidencias y facturas.
 18. `003g_dashboard_rpcs.sql` - RPCs de dashboard/cierre.
 19. `004_rls_policies_grants.sql` - RLS, policies y grants para `anon`/`authenticated`.
-20. `005_storage.sql` - buckets y policies de Storage.
-21. `006_seed_base.sql` - seed minimo seguro de roles.
+20. `004a_historical_actuals.sql` - tabla `historical_actuals` versionada desde auditoria DEV read-only.
+21. `005_storage.sql` - buckets y policies de Storage.
+22. `006_seed_base.sql` - seed minimo seguro de roles.
 
 `001_schema.sql` y `003_functions_rpcs.sql` quedan como indices. Se dividieron por tamano para evitar truncamiento del conector.
 
 ## Contenido incluido
 
-- Tablas publicas: 59.
+- Tablas publicas: 60.
 - Enums publicos: 27.
 - Secuencias publicas incluidas: 2.
-- Foreign keys: 154.
+- Foreign keys: 155.
 - Indices no constraint: 62.
 - Triggers: 34.
 - Funciones/RPCs de aplicacion: 36 en chunks 003a-003g, mas 2 funciones de soporte en 002.
+- `historical_actuals` versionada con RLS/policies desde auditoria DEV read-only, sin copiar filas operativas.
 - Views publicas incluidas:
   - `public.budget_availability`
   - `public.budget_exceptions`
