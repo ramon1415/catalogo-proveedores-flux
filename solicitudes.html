@@ -247,6 +247,7 @@
                   <select id="costCenterId" class="form-control" required></select>
                 </label>
                 <label class="full-row">Partida presupuestal *
+                  <input id="budgetCategorySearch" type="text" class="form-control" placeholder="Filtrar partida por nombre…" autocomplete="off" style="width:100%;margin-bottom:6px" disabled>
                   <select id="budgetCategoryId" class="form-control" required></select>
                   <div id="budgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
                 </label>
@@ -371,6 +372,7 @@
                 <select id="editCostCenterId" class="form-control" required></select>
               </label>
               <label class="full-row">Partida presupuestal *
+                <input id="editBudgetCategorySearch" type="text" class="form-control" placeholder="Filtrar partida por nombre…" autocomplete="off" style="width:100%;margin-bottom:6px" disabled>
                 <select id="editBudgetCategoryId" class="form-control" required></select>
                 <div id="editBudgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
               </label>
@@ -442,7 +444,7 @@
   <script src="./config.js?v=20260701-reconcile"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260701-quitar-demo"></script>
+  <script src="./solicitudes.js?v=20260701-reconcile"></script>
   <script src="./cash_flow_extension.js"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260630-hotfix-loop2"></script>
   <script src="./fase2_request_success_patch.js?v=20260617-schema-guard"></script>
