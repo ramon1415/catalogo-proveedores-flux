@@ -160,7 +160,6 @@ function bindEvents() {
   dom.closeRequestModalBtn?.addEventListener("click", closeNewRequestModal);
   dom.cancelRequestBtn?.addEventListener("click", closeNewRequestModal);
   dom.requestForm?.addEventListener("submit", submitPaymentRequest);
-  document.getElementById("demoFillBtn")?.addEventListener("click", fillDemoRequest);
   dom.closeDetailModalBtn?.addEventListener("click", closeRequestDetail);
   dom.closeDetailFooterBtn?.addEventListener("click", closeRequestDetail);
   dom.detailContent?.addEventListener("click", async e => {

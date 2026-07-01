@@ -472,7 +472,6 @@
               <p>Alta rapida sin salir de la solicitud.</p>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-              <button type="button" class="demo-fill-btn" data-demo-quick-provider>⚡ Demo</button>
               <button type="button" class="icon-btn" data-close-quick-provider>✕</button>
             </div>
           </div>
@@ -518,7 +517,6 @@
     document.getElementById("quickProviderDestinationType")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderPaymentMethod")?.addEventListener("change", updateQuickProviderDestinationFields)
     document.getElementById("quickProviderForm")?.addEventListener("submit", saveQuickProvider)
-    document.querySelector("[data-demo-quick-provider]")?.addEventListener("click", fillDemoQuickProvider)
     document.getElementById("quickProviderForm").dataset.ux1Bound = "true"
     upgradeQuickProviderDialog()
     updateQuickProviderDestinationFields()
