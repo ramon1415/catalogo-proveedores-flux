@@ -106,7 +106,6 @@
       firstGrid.insertAdjacentHTML("afterbegin", `
         <label class="full-row" data-fase2-request-type-label>Tipo de solicitud *
           <select id="requestType" class="form-control" required></select>
-          <span class="fase2-field-help">Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
         </label>
       `)
       requestType = document.getElementById("requestType")
@@ -512,10 +511,14 @@
         .in("status", activeRequestStatuses)
       if (error) throw error
       const total = (data || []).reduce((sum, row) => sum + numberValue(row.amount_requested), 0)
-      target.textContent = formatCurrencyFull(total)
+      const next = formatCurrencyFull(total)
+      if (target.textContent !== next) target.textContent = next
     } catch (_) {
       const parsed = Number(String(target.textContent || "").replace(/[^0-9.-]/g, ""))
-      if (Number.isFinite(parsed)) target.textContent = formatCurrencyFull(parsed)
+      if (Number.isFinite(parsed)) {
+        const nextParsed = formatCurrencyFull(parsed)
+        if (target.textContent !== nextParsed) target.textContent = nextParsed
+      }
     }
   }
 

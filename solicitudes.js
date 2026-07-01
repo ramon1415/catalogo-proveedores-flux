@@ -412,7 +412,7 @@ function renderComboList(query = "") {
       const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
       return !normalizedQuery || text.includes(normalizedQuery);
     })
-    .slice(0, 60);
+    .slice(0, 200);
 
   if (!filtered.length) {
     dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`;
@@ -1100,7 +1100,7 @@ function renderEditComboList(query = "") {
   const filtered = proveedores.filter(p => {
     const text = normalize([p.alias, p.nombre_completo, p.rfc].join(" "));
     return !nq || text.includes(nq);
-  }).slice(0, 60);
+  }).slice(0, 200);
 
   if (!filtered.length) { dropdown.innerHTML = `<li class="combo-empty">Sin resultados</li>`; return; }
   dropdown.innerHTML = filtered.map(p => `
@@ -1528,9 +1528,8 @@ function costCenterName(center) {
 
 function budgetCategoryLabel(category) {
   if (!category) return "Sin partida";
-  const code = category.code ? `${category.code} - ` : "";
   const section = category.category ? ` (${category.category})` : "";
-  return `${code}${category.name || "Sin nombre"}${section}`;
+  return `${category.name || "Sin nombre"}${section}`;
 }
 
 function budgetCategoryAvailabilityLabel(category, availabilityRow) {
