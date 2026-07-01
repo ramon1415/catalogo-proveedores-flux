@@ -416,7 +416,7 @@
     if (!table) return
     const observer = new MutationObserver(() => {
       window.setTimeout(enrichRequestRows, 80)
-      scheduleRequestedAmountRefresh()
+      // no re-disparar el total aquí: cada mutación de la tabla lo refetcheaba (loop)
     })
     observer.observe(table, { childList: true, subtree: true })
     enrichRequestRows()
@@ -485,13 +485,10 @@
   }
 
   function patchRequestedAmountCard() {
+    // NO observar #requestedAmount: fase2 y solicitudes.js escriben en el mismo
+    // elemento con formatos distintos; observarlo causaba un loop infinito de
+    // fetch a payment_requests. Se refresca en init + timers, no en cada mutación.
     scheduleRequestedAmountRefresh()
-    const total = document.getElementById("requestedAmount")
-    if (total && total.dataset.fase2AmountBound !== "true") {
-      total.dataset.fase2AmountBound = "true"
-      const observer = new MutationObserver(() => scheduleRequestedAmountRefresh())
-      observer.observe(total, { childList: true, characterData: true, subtree: true })
-    }
     ;[300, 900, 1600].forEach((delay) => window.setTimeout(scheduleRequestedAmountRefresh, delay))
   }
 
