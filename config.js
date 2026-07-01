@@ -262,6 +262,7 @@ try {
     isAdminFinance: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN].includes(roleState.group),
     canApprove: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
+    canCreateProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION].includes(roleState.group),
     canAccessConfigTab: (tab) => canAccessConfigTab(tab),
     isPending: () => roleState.group === ROLE_GROUPS.PENDING,
     isSysadmin: () => roleState.group === ROLE_GROUPS.SYSADMIN,
@@ -743,7 +744,7 @@ try {
     }
     if (pageName === "solicitudes.html") {
       loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
-      loadExtension("./solicitudes_ux1_extension.js?v=20260701-quitar-demo", "solicitudes-ux1")
+      loadExtension("./solicitudes_ux1_extension.js?v=20260701-reconcile", "solicitudes-ux1")
       loadExtension("./solicitudes_workboard_extension.js?v=20260604-table6col2", "solicitudes-workboard")
       loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }

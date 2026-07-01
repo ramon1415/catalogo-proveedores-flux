@@ -291,13 +291,13 @@
 
   function applyRoleUx() {
     const approver = canApprove()
-    const canManage = canManageProviders()
+    const canManage = canCreateProviders()
     labelForControl("isExtraordinaryAdjustment")?.classList.toggle("role-hidden", !approver)
     document.getElementById("extraordinaryHelpText")?.classList.toggle("role-hidden", !approver)
     if (!approver && dom.isExtraordinaryAdjustment) dom.isExtraordinaryAdjustment.checked = false
 
     const hint = document.getElementById("newProviderPermissionHint")
-    if (hint) hint.textContent = canManage ? "Crea el proveedor sin salir de la solicitud." : "Disponible solo para admin/finanzas."
+    if (hint) hint.textContent = canManage ? "Crea el proveedor sin salir de la solicitud." : "No tienes permiso para crear proveedores."
     softenApprovalPanel()
   }
 
@@ -564,7 +564,7 @@
   }
 
   function openQuickProviderModal() {
-    if (!canManageProviders()) {
+    if (!canCreateProviders()) {
       showToast("Permiso requerido", "No tienes permiso para crear proveedores.", "warning")
       return
     }
@@ -606,7 +606,7 @@
 
   async function saveQuickProvider(event) {
     event.preventDefault()
-    if (!canManageProviders()) return
+    if (!canCreateProviders()) return
 
     const method = value("quickProviderPaymentMethod")
     const destination = value("quickProviderDestinationType")
@@ -671,8 +671,8 @@
     return Boolean(window.FluxAuth?.canApprove?.())
   }
 
-  function canManageProviders() {
-    return Boolean(window.FluxAuth?.canManageProviders?.())
+  function canCreateProviders() {
+    return Boolean(window.FluxAuth?.canCreateProviders?.())
   }
 
   function value(id) {
