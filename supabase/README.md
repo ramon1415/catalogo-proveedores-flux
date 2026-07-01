@@ -13,17 +13,18 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 7. `001g_income_tables.sql` - socios, cuotas, cobros, incidencias, facturas y entidades comerciales/eventos.
 8. `001h_closure_dashboard_tables.sql` - cierre mensual y foreign keys finales.
 9. `001i_views.sql` - views presupuestales y de eventos.
-10. `002_enums_triggers_indexes.sql` - funciones de soporte para triggers, indices y triggers.
-11. `003a_helper_functions.sql` - helpers de perfil/roles.
-12. `003b_budget_rpcs.sql` - RPCs de presupuesto.
-13. `003c_payment_request_rpcs.sql` - RPCs de solicitudes/aprobaciones.
-14. `003d_layout_rpcs.sql` - RPCs de layouts.
-15. `003e_cash_rpcs.sql` - RPCs de efectivo/comprobaciones.
-16. `003f_income_invoice_rpcs.sql` - RPCs de ingresos, incidencias y facturas.
-17. `003g_dashboard_rpcs.sql` - RPCs de dashboard/cierre.
-18. `004_rls_policies_grants.sql` - RLS, policies y grants para `anon`/`authenticated`.
-19. `005_storage.sql` - buckets y policies de Storage.
-20. `006_seed_base.sql` - seed minimo seguro de roles.
+10. `001j_number_sequences.sql` - secuencias numericas usadas por RPCs de solicitudes y layouts.
+11. `002_enums_triggers_indexes.sql` - funciones de soporte para triggers, indices y triggers.
+12. `003a_helper_functions.sql` - helpers de perfil/roles.
+13. `003b_budget_rpcs.sql` - RPCs de presupuesto.
+14. `003c_payment_request_rpcs.sql` - RPCs de solicitudes/aprobaciones.
+15. `003d_layout_rpcs.sql` - RPCs de layouts.
+16. `003e_cash_rpcs.sql` - RPCs de efectivo/comprobaciones.
+17. `003f_income_invoice_rpcs.sql` - RPCs de ingresos, incidencias y facturas.
+18. `003g_dashboard_rpcs.sql` - RPCs de dashboard/cierre.
+19. `004_rls_policies_grants.sql` - RLS, policies y grants para `anon`/`authenticated`.
+20. `005_storage.sql` - buckets y policies de Storage.
+21. `006_seed_base.sql` - seed minimo seguro de roles.
 
 `001_schema.sql` y `003_functions_rpcs.sql` quedan como indices. Se dividieron por tamano para evitar truncamiento del conector.
 
@@ -31,6 +32,7 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 
 - Tablas publicas: 59.
 - Enums publicos: 27.
+- Secuencias publicas incluidas: 2.
 - Foreign keys: 154.
 - Indices no constraint: 62.
 - Triggers: 34.
