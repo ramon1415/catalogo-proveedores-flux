@@ -106,7 +106,6 @@
       firstGrid.insertAdjacentHTML("afterbegin", `
         <label class="full-row" data-fase2-request-type-label>Tipo de solicitud *
           <select id="requestType" class="form-control" required></select>
-          <span class="fase2-field-help">Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
         </label>
       `)
       requestType = document.getElementById("requestType")
@@ -417,7 +416,7 @@
     if (!table) return
     const observer = new MutationObserver(() => {
       window.setTimeout(enrichRequestRows, 80)
-      scheduleRequestedAmountRefresh()
+      // no re-disparar el total aquí: cada mutación de la tabla lo refetcheaba (loop)
     })
     observer.observe(table, { childList: true, subtree: true })
     enrichRequestRows()
@@ -486,13 +485,10 @@
   }
 
   function patchRequestedAmountCard() {
+    // NO observar #requestedAmount: fase2 y solicitudes.js escriben en el mismo
+    // elemento con formatos distintos; observarlo causaba un loop infinito de
+    // fetch a payment_requests. Se refresca en init + timers, no en cada mutación.
     scheduleRequestedAmountRefresh()
-    const total = document.getElementById("requestedAmount")
-    if (total && total.dataset.fase2AmountBound !== "true") {
-      total.dataset.fase2AmountBound = "true"
-      const observer = new MutationObserver(() => scheduleRequestedAmountRefresh())
-      observer.observe(total, { childList: true, characterData: true, subtree: true })
-    }
     ;[300, 900, 1600].forEach((delay) => window.setTimeout(scheduleRequestedAmountRefresh, delay))
   }
 
@@ -512,10 +508,14 @@
         .in("status", activeRequestStatuses)
       if (error) throw error
       const total = (data || []).reduce((sum, row) => sum + numberValue(row.amount_requested), 0)
-      target.textContent = formatCurrencyFull(total)
+      const next = formatCurrencyFull(total)
+      if (target.textContent !== next) target.textContent = next
     } catch (_) {
       const parsed = Number(String(target.textContent || "").replace(/[^0-9.-]/g, ""))
-      if (Number.isFinite(parsed)) target.textContent = formatCurrencyFull(parsed)
+      if (Number.isFinite(parsed)) {
+        const nextParsed = formatCurrencyFull(parsed)
+        if (target.textContent !== nextParsed) target.textContent = nextParsed
+      }
     }
   }
 
