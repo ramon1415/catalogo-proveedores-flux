@@ -22,13 +22,40 @@ It applies:
 
 ## Script path
 
-If an authorized production workflow supports `script_path`, use:
+Use this path only with an authorized production workflow or procedure:
 
 ```text
 ops/prod/fase2/apply-004b-004c-payment-receipts-method
 ```
 
-Do not use the DEV workflow for production. If no authorized PROD workflow exists, create and approve the production runner separately before execution.
+Do not use the DEV workflow for production.
+
+## Proposed GitHub Actions workflow
+
+The companion workflow PR adds:
+
+```text
+Deploy Supabase PROD Manual
+.github/workflows/deploy-supabase-prod-manual.yml
+```
+
+Expected run configuration:
+
+```text
+Branch: main
+script_path: ops/prod/fase2/apply-004b-004c-payment-receipts-method
+confirm_prod: production
+confirm_project_ref: <Supabase PROD project ref>
+```
+
+The workflow uses the protected `production` GitHub Environment and requires these secret names there:
+
+```text
+SUPABASE_PROD_DB_URL
+SUPABASE_PROD_PROJECT_REF
+```
+
+Do not paste secret values into prompts, issues, PRs, logs, or docs.
 
 ## Files
 
@@ -85,7 +112,7 @@ Preferred sequence for the final release window:
 2. Confirm production backup or restore point is available.
 3. Merge PR #147 to `main`.
 4. Confirm Vercel production deploy starts and completes.
-5. Execute this package against Supabase PROD through the authorized production process.
+5. Execute this package against Supabase PROD through the authorized production workflow/procedure.
 6. Confirm `precheck.sql`, `load.sql`, and `postcheck.sql` all succeed.
 7. Run production smoke tests.
 8. Keep monitoring payments, layouts, approvals, and transfer receipts.
