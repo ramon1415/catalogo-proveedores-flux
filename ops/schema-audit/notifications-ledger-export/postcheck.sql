@@ -9,16 +9,22 @@ with table_counts as (
   where n.nspname = 'public'
     and c.relname in ('notification_events', 'notification_delivery_attempts')
     and c.relkind in ('r', 'p')
-), function_counts as (
-  select count(*) as function_count
+), normal_public_functions as materialized (
+  select
+    p.proname as function_name,
+    pg_get_functiondef(p.oid) as function_definition
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and (
-      p.proname ilike '%notification%'
-      or pg_get_functiondef(p.oid) ilike '%notification_events%'
-      or pg_get_functiondef(p.oid) ilike '%notification_delivery_attempts%'
-    )
+    and p.prokind = 'f'
+), function_counts as (
+  select count(*) as function_count
+  from normal_public_functions
+  where function_name ilike '%notification%'
+    or function_name ilike '%notify%'
+    or function_name ilike '%delivery%'
+    or function_definition ilike '%notification_events%'
+    or function_definition ilike '%notification_delivery_attempts%'
 ), trigger_counts as (
   select count(*) as trigger_count
   from pg_trigger t
