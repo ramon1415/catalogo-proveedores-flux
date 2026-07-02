@@ -4,4 +4,4 @@
 -- Safety: this file is executed by psql through scripts/supabase/run_sql_file.js.
 
 \echo 'Applying exact versioned migration: supabase/migrations/007_notifications.sql'
-\i supabase/migrations/007_notifications.sql
+\ir ../../../supabase/migrations/007_notifications.sql
