@@ -142,7 +142,7 @@ select
 from pg_trigger t
 join pg_class c on c.oid = t.tgrelid
 join pg_namespace n on n.oid = c.relnamespace
-join pg_proc p on p.oid = t.tgfoid
+join pg_proc p on p.oid = t.tgfoid and p.prokind = 'f'
 join pg_namespace pn on pn.oid = p.pronamespace
 where not t.tgisinternal
   and n.nspname = 'public'
@@ -153,29 +153,61 @@ where not t.tgisinternal
   )
 order by n.nspname, c.relname, t.tgname;
 
--- 10) Funciones/RPCs de notificaciones. Incluye funciones nombradas notification y funciones cuyo cuerpo toca las tablas.
+-- 10) Funciones/RPCs de notificaciones. Incluye funciones nombradas notification/notify/delivery y funciones cuyo cuerpo toca las tablas.
+with normal_public_functions as materialized (
+  select
+    n.nspname as function_schema,
+    p.oid,
+    p.proname as function_name,
+    pg_get_function_identity_arguments(p.oid) as identity_arguments,
+    pg_get_function_result(p.oid) as result_type,
+    l.lanname as language_name,
+    p.prosecdef as security_definer,
+    p.provolatile as volatility,
+    p.proconfig as function_config,
+    pg_get_functiondef(p.oid) as function_definition
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  join pg_language l on l.oid = p.prolang
+  where n.nspname = 'public'
+    and p.prokind = 'f'
+)
 select
-  n.nspname as function_schema,
-  p.proname as function_name,
-  pg_get_function_identity_arguments(p.oid) as identity_arguments,
-  pg_get_function_result(p.oid) as result_type,
-  l.lanname as language_name,
-  p.prosecdef as security_definer,
-  p.provolatile as volatility,
-  p.proconfig as function_config,
-  pg_get_functiondef(p.oid) as function_definition
-from pg_proc p
-join pg_namespace n on n.oid = p.pronamespace
-join pg_language l on l.oid = p.prolang
-where n.nspname = 'public'
-  and (
-    p.proname ilike '%notification%'
-    or pg_get_functiondef(p.oid) ilike '%notification_events%'
-    or pg_get_functiondef(p.oid) ilike '%notification_delivery_attempts%'
-  )
-order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid);
+  function_schema,
+  function_name,
+  identity_arguments,
+  result_type,
+  language_name,
+  security_definer,
+  volatility,
+  function_config,
+  function_definition
+from normal_public_functions
+where function_name ilike '%notification%'
+  or function_name ilike '%notify%'
+  or function_name ilike '%delivery%'
+  or function_definition ilike '%notification_events%'
+  or function_definition ilike '%notification_delivery_attempts%'
+order by function_schema, function_name, identity_arguments;
 
 -- 11) Grants de funciones relacionadas.
+with normal_public_functions as materialized (
+  select
+    p.proname as function_name,
+    pg_get_functiondef(p.oid) as function_definition
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.prokind = 'f'
+), notification_function_names as (
+  select distinct function_name
+  from normal_public_functions
+  where function_name ilike '%notification%'
+    or function_name ilike '%notify%'
+    or function_name ilike '%delivery%'
+    or function_definition ilike '%notification_events%'
+    or function_definition ilike '%notification_delivery_attempts%'
+)
 select
   routine_schema,
   routine_name,
@@ -184,17 +216,7 @@ select
   is_grantable
 from information_schema.routine_privileges
 where routine_schema = 'public'
-  and routine_name in (
-    select p.proname
-    from pg_proc p
-    join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public'
-      and (
-        p.proname ilike '%notification%'
-        or pg_get_functiondef(p.oid) ilike '%notification_events%'
-        or pg_get_functiondef(p.oid) ilike '%notification_delivery_attempts%'
-      )
-  )
+  and routine_name in (select function_name from notification_function_names)
 order by routine_schema, routine_name, grantee, privilege_type;
 
 -- 12) Dependencias directas de funciones contra tablas de notificaciones, si PostgreSQL las registra.
@@ -206,7 +228,7 @@ select
   rc.relname as referenced_object,
   d.deptype
 from pg_depend d
-join pg_proc p on p.oid = d.objid
+join pg_proc p on p.oid = d.objid and p.prokind = 'f'
 join pg_namespace pn on pn.oid = p.pronamespace
 join pg_class rc on rc.oid = d.refobjid
 join pg_namespace rn on rn.oid = rc.relnamespace
@@ -235,16 +257,22 @@ with table_counts as (
   where n.nspname = 'public'
     and c.relname in ('notification_events', 'notification_delivery_attempts')
     and c.relkind in ('r', 'p')
-), function_counts as (
-  select count(*) as function_count
+), normal_public_functions as materialized (
+  select
+    p.proname as function_name,
+    pg_get_functiondef(p.oid) as function_definition
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and (
-      p.proname ilike '%notification%'
-      or pg_get_functiondef(p.oid) ilike '%notification_events%'
-      or pg_get_functiondef(p.oid) ilike '%notification_delivery_attempts%'
-    )
+    and p.prokind = 'f'
+), function_counts as (
+  select count(*) as function_count
+  from normal_public_functions
+  where function_name ilike '%notification%'
+    or function_name ilike '%notify%'
+    or function_name ilike '%delivery%'
+    or function_definition ilike '%notification_events%'
+    or function_definition ilike '%notification_delivery_attempts%'
 ), trigger_counts as (
   select count(*) as trigger_count
   from pg_trigger t
