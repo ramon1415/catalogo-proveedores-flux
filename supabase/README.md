@@ -25,8 +25,9 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 19. `004_rls_policies_grants.sql` - RLS, policies y grants para `anon`/`authenticated`.
 20. `004a_historical_actuals.sql` - tabla `historical_actuals` versionada desde auditoria DEV read-only.
 21. `004b_payment_receipts_policies.sql` - policies RLS para registrar comprobantes de transferencia en `payment_receipts`.
-22. `005_storage.sql` - buckets y policies de Storage.
-23. `006_seed_base.sql` - seed minimo seguro de roles.
+22. `004c_fase2_payment_method_closure.sql` - cierre Fase 2: `payment_method` separado y layouts limitados a transferencias.
+23. `005_storage.sql` - buckets y policies de Storage.
+24. `006_seed_base.sql` - seed minimo seguro de roles.
 
 `001_schema.sql` y `003_functions_rpcs.sql` quedan como indices. Se dividieron por tamano para evitar truncamiento del conector.
 
@@ -41,6 +42,7 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 - Funciones/RPCs de aplicacion: 36 en chunks 003a-003g, mas 2 funciones de soporte en 002.
 - `historical_actuals` versionada con RLS/policies desde auditoria DEV read-only, sin copiar filas operativas.
 - `payment_receipts` incluye policies RLS para lectura autenticada y escritura autorizada por roles operativos.
+- Fase 2 versiona `payment_method` separado de `request_type` y refuerza `create_payment_layout` para incluir solo transferencias aprobadas.
 - Views publicas incluidas:
   - `public.budget_availability`
   - `public.budget_exceptions`
