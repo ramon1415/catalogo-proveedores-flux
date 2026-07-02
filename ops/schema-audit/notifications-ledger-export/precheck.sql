@@ -18,16 +18,23 @@ with expected_tables(table_schema, table_name) as (
     table_name,
     to_regclass(format('%I.%I', table_schema, table_name)) is not null as exists_in_target
   from expected_tables
-), function_inventory as (
-  select count(*) as notification_function_count
+), normal_public_functions as materialized (
+  select
+    p.oid,
+    p.proname,
+    pg_get_functiondef(p.oid) as function_definition
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and (
-      p.proname ilike '%notification%'
-      or pg_get_functiondef(p.oid) ilike '%notification_events%'
-      or pg_get_functiondef(p.oid) ilike '%notification_delivery_attempts%'
-    )
+    and p.prokind = 'f'
+), function_inventory as (
+  select count(*) as notification_function_count
+  from normal_public_functions f
+  where f.proname ilike '%notification%'
+    or f.proname ilike '%notify%'
+    or f.proname ilike '%delivery%'
+    or f.function_definition ilike '%notification_events%'
+    or f.function_definition ilike '%notification_delivery_attempts%'
 ), trigger_inventory as (
   select count(*) as notification_trigger_count
   from pg_trigger t
