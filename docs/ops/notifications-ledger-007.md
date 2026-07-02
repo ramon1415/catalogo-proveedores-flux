@@ -50,8 +50,26 @@ RLS / policies:
 Grants:
 
 - Tablas: authenticated recibe select; postgres y service_role reciben permisos completos como en el artifact.
-- Funciones: execute segun el artifact.
-- La funcion trigger set_updated_at_notification_events() conserva grants exportados para PUBLIC, anon, authenticated, postgres y service_role porque asi aparece en DEV. Esto debe revisarse humanamente antes de produccion; puede venir de defaults de PostgreSQL o de grants previos.
+- Funciones: el DDL base viene del artifact DEV, pero los permisos EXECUTE se endurecieron explicitamente para evitar permisos default inseguros de PostgreSQL.
+- Todas las funciones revocan EXECUTE a PUBLIC, anon y authenticated antes de volver a conceder permisos minimos.
+- Se conserva GRANT EXECUTE a authenticated solo para wrappers/helpers necesarios y con control interno de rol o uso por RLS:
+  - claim_pending_notification_events(integer, text)
+  - enqueue_notification_event(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)
+  - mark_notification_failed(uuid, text, text, text)
+  - mark_notification_processed(uuid, text, text, text)
+  - notification_current_profile_id()
+  - notification_current_user_has_role(text[])
+- enqueue_notification_event_internal(...) queda limitado a service_role y postgres porque es SECURITY DEFINER interna y no tiene guard de rol al inicio.
+- set_updated_at_notification_events() queda limitado a service_role y postgres porque es una funcion trigger y no necesita ser invocada por PUBLIC, anon ni authenticated.
+
+## Hardening aplicado
+
+La estructura funcional de tablas, funciones, trigger, RLS y policies se mantiene basada en el artifact DEV 8031309875. El ajuste intencional esta en permisos EXECUTE:
+
+- Se agregaron REVOKE EXECUTE explicitos para PUBLIC, anon y authenticated en las 8 funciones.
+- Se eliminaron grants PUBLIC/anon/authenticated de la funcion trigger set_updated_at_notification_events().
+- Se evito que PostgreSQL deje EXECUTE a PUBLIC por default en funciones SECURITY DEFINER.
+- Este hardening altera levemente la equivalencia de grants con DEV, pero en direccion mas segura para DEV formal y PROD.
 
 ## Seguridad
 
@@ -74,15 +92,16 @@ La migracion usa:
 - drop trigger if exists seguido de create trigger
 - alter table ... enable row level security
 - drop policy if exists seguido de create policy
+- revoke execute repetibles
 - grants repetibles
 
 Debe funcionar en PROD donde los objetos aun no existen y en DEV donde ya existen ad-hoc.
 
 ## Riesgos conocidos
 
-- Los grants PUBLIC/anon sobre la funcion trigger se mantienen porque fueron exportados desde DEV. Requieren revision humana antes de PROD.
 - Las funciones SECURITY DEFINER deben revisarse con especial cuidado antes de ejecucion productiva.
 - La funcion claim_pending_notification_events conserva default manual-dev exportado desde DEV. No activa ejecuciones por si misma, pero conviene revisar si debe ajustarse en una migracion posterior.
+- CREATE TABLE IF NOT EXISTS no agrega columnas faltantes si una tabla existe parcialmente. El paquete operativo DEV debe incluir precheck de columnas antes de ejecutar 007.
 - Este PR no resuelve n8n ni envio real de correos.
 
 ## Validacion posterior sugerida
@@ -93,6 +112,7 @@ Precheck sugerido:
 
 - Confirmar que se ejecuta contra Supabase DEV.
 - Confirmar existencia de prerequisitos: profiles, roles, user_roles y gen_random_uuid().
+- Confirmar existencia y estructura de columnas si las tablas notification_events o notification_delivery_attempts ya existen parcialmente.
 - Confirmar que no se ejecutara contra PROD.
 
 Postcheck sugerido:
@@ -103,6 +123,8 @@ Postcheck sugerido:
 - Confirmar RLS activo en ambas tablas.
 - Confirmar 2 policies.
 - Confirmar grants esperados.
+- Confirmar que enqueue_notification_event_internal no tiene EXECUTE para PUBLIC, anon ni authenticated.
+- Confirmar que set_updated_at_notification_events no tiene EXECUTE para PUBLIC, anon ni authenticated.
 - Confirmar que no se copiaron datos operativos.
 
 ## Relacion con release
