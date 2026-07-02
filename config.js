@@ -459,10 +459,10 @@ try {
     window.supabase.__fluxIncomeCompatibility = true
   }
 
-  // Cache de roles en sessionStorage: permite pintar el menÃº al instante en
-  // cada navegaciÃ³n (es MPA) sin esperar a sesiÃ³n+perfil+roles de Supabase.
-  // Solo guarda perfil/roles/grupo â€” NUNCA tokens de sesiÃ³n. Siempre se
-  // revalida en segundo plano vÃ­a resolveRoleAccess().
+  // Cache de roles en sessionStorage: permite pintar el menu al instante en
+  // cada navegacion (es MPA) sin esperar a sesion+perfil+roles de Supabase.
+  // Solo guarda perfil/roles/grupo; NUNCA tokens de sesion. Siempre se
+  // revalida en segundo plano via resolveRoleAccess().
   function hydrateRoleStateFromCache() {
     try {
       const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
@@ -496,9 +496,9 @@ try {
     hydrateRoleStateFromCache()
     ensureFirstPaintNavigation()
     hideLegacyNavigation()
-    // Pinta el menÃº desde cache ANTES de loadFluxExtensions(): esa funciÃ³n usa
-    // XHR sÃ­ncronos (bloqueantes) por cada extensiÃ³n, lo que retrasaba la
-    // apariciÃ³n del menÃº y causaba el parpadeo en cada cambio de secciÃ³n.
+    // Pinta el menu desde cache ANTES de loadFluxExtensions(): esa funcion usa
+    // XHR sincronos (bloqueantes) por cada extension, lo que retrasaba la
+    // aparicion del menu y causaba el parpadeo en cada cambio de seccion.
     if (roleState.loaded) applyDemoNavigation()
     loadFluxExtensions()
     resolveRoleAccess().then(() => {
@@ -528,7 +528,7 @@ try {
       roleState.session = session || null
 
       if (!session?.user) {
-        // Sin sesiÃ³n: limpiar todo (incluido el cache) para no mostrar menÃº
+        // Sin sesion: limpiar todo (incluido el cache) para no mostrar menu
         // con un grupo viejo hidratado.
         roleState.profile = null
         roleState.roles = []
