@@ -1,11 +1,12 @@
 ;(function fluxFase2RequestPaymentMethodExtension() {
   if (window.__fluxFase2RequestPaymentMethodLoaded) return
   window.__fluxFase2RequestPaymentMethodLoaded = true
+  window.__fluxFase2RequestSuccessPatchLoaded = true
 
   const pageName = (window.location.pathname.split("/").pop() || "index.html").toLowerCase()
   const activeRequestStatuses = ["submitted", "approved", "changes_requested", "finance_validation", "scheduled"]
   const requestTypeOptions = [
-    ["supplier_payment", "Pago a proveedor"],
+    ["provider_payment", "Pago a proveedor"],
     ["online_purchase", "Compra en linea"],
     ["reimbursement", "Reembolso"],
   ]
@@ -15,14 +16,14 @@
     ["check", "Cheque"],
     ["other", "Otro"],
   ]
-  const legacyRequestTypeLabels = {
-    supplier_payment: "Pago a proveedor",
+  const requestTypeLabels = {
     provider_payment: "Pago a proveedor",
+    supplier_payment: "Pago a proveedor",
     online_purchase: "Compra en linea",
     reimbursement: "Reembolso",
+    deposit_refund: "Pago a proveedor",
     cash: "Pago a proveedor",
     check: "Pago a proveedor",
-    deposit_refund: "Pago a proveedor",
     other: "Pago a proveedor",
   }
   const paymentMethodLabels = {
@@ -31,8 +32,9 @@
     check: "Cheque",
     other: "Otro",
   }
-
   let requestedAmountTimer = null
+  let approvalsRefreshTimer = null
+  let paymentsRefreshTimer = null
 
   onReady(init)
 
@@ -42,6 +44,7 @@
     if (pageName === "solicitudes.html") initRequestsPage()
     if (pageName === "aprobaciones.html") initApprovalsPage()
     if (pageName === "layouts.html") initLayoutsPage()
+    if (pageName === "pagos_comprobaciones.html") initPaymentsPage()
   }
 
   function initProvidersPage() {
@@ -53,8 +56,11 @@
   function initRequestsPage() {
     waitForElement("requestForm", () => {
       ensureRequestTypeAndPaymentMethodFields()
+      ensureCashCheckSection()
+      bindPaymentMethodVisibility()
       startRequestTypeEnforcer()
       bindProviderPreferredMethod()
+      bindQuickProviderCreation()
       bindRequestSubmitInterceptor()
       patchRequestRows()
       patchRequestDetail()
@@ -64,19 +70,39 @@
   }
 
   function initApprovalsPage() {
-    patchApprovalLabels()
+    scheduleApprovalRefresh()
     const target = document.getElementById("approvalsTableBody") || document.body
-    const observer = new MutationObserver(() => patchApprovalLabels())
+    const observer = new MutationObserver(scheduleApprovalRefresh)
     observer.observe(target, { childList: true, subtree: true })
   }
 
   function initLayoutsPage() {
-    waitForElement("newLayoutForm", () => bindLayoutTransferGuard())
+    waitForElement("newLayoutForm", () => {
+      addLayoutTransferNotice()
+      bindLayoutTransferPreview()
+    })
+  }
+
+  function initPaymentsPage() {
+    waitForElement("paymentsTableBody", () => {
+      schedulePaymentsRefresh()
+      const target = document.getElementById("paymentsTableBody")
+      const observer = new MutationObserver(schedulePaymentsRefresh)
+      observer.observe(target, { childList: true, subtree: true })
+      document.getElementById("typeFilter")?.addEventListener("change", schedulePaymentsRefresh)
+      document.getElementById("statusFilter")?.addEventListener("change", schedulePaymentsRefresh)
+      document.getElementById("searchInput")?.addEventListener("input", schedulePaymentsRefresh)
+    })
   }
 
   function getClient() {
     if (typeof window.getFluxSupabaseClient === "function") return window.getFluxSupabaseClient()
-    return window.supabaseClient || null
+    if (window.supabaseClient) return window.supabaseClient
+    if (window.supabase?.createClient && window.SUPABASE_URL && window.SUPABASE_ANON_KEY) {
+      window.supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
+      return window.supabaseClient
+    }
+    return null
   }
 
   function relabelPreferredPaymentMethod() {
@@ -89,7 +115,6 @@
         label.insertAdjacentHTML("beforeend", `<span class="fase2-field-help" data-fase2-preferred-help>Se usa como metodo sugerido al crear una solicitud, pero puede cambiarse en la solicitud.</span>`)
       }
     }
-
     document.querySelectorAll("th").forEach((th) => {
       if (normalize(th.textContent) === "metodo") th.textContent = "Metodo preferido"
     })
@@ -110,7 +135,7 @@
       `)
       requestType = document.getElementById("requestType")
     }
-    const normalizedType = normalizeRequestType(requestType.value || "supplier_payment")
+    const normalizedType = normalizeRequestType(requestType.value || "provider_payment")
     if (!selectMatchesOptions(requestType, requestTypeOptions)) {
       requestType.innerHTML = requestTypeOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
     }
@@ -134,26 +159,73 @@
       paymentMethod.innerHTML = paymentMethodOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")
     }
     paymentMethod.value = normalizedMethod
+  }
 
-    const cashCheckSection = document.getElementById("cashCheckSection")
-    if (cashCheckSection) {
-      cashCheckSection.classList.add("hidden")
-      cashCheckSection.dataset.fase2LegacyHidden = "true"
-    }
+  function ensureCashCheckSection() {
+    const form = document.getElementById("requestForm")
+    if (!form || document.getElementById("cashCheckSection")) return
+    const firstSection = form.querySelector(".form-section")
+    const profile = window.FluxAuth?.getProfile?.()
+    const profileOption = profile?.id
+      ? `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.full_name || profile.email || "Usuario actual")}</option>`
+      : `<option value="">Seleccionar responsable</option>`
+    firstSection?.insertAdjacentHTML("afterend", `
+      <section class="form-section hidden" id="cashCheckSection">
+        <h3>Datos de entrega</h3>
+        <div class="form-grid">
+          <div class="field-hint full-row">Estos datos se usan cuando el metodo de pago es efectivo o cheque.</div>
+          <label>Responsable del gasto *
+            <select id="cashResponsibleProfileId" class="form-control">${profileOption}</select>
+          </label>
+          <label>Fecha limite de comprobacion *
+            <input id="cashDueDate" class="form-control" type="date">
+          </label>
+          <label>Metodo de entrega *
+            <select id="cashDeliveryMethod" class="form-control">
+              <option value="cash">Efectivo</option>
+              <option value="check">Cheque</option>
+            </select>
+          </label>
+          <div id="cashBlockStatus" class="field-hint full-row">Se guardara como metadata operativa local hasta que exista el fondo.</div>
+        </div>
+      </section>
+    `)
+  }
+
+  function bindPaymentMethodVisibility() {
+    const method = document.getElementById("paymentMethod")
+    if (!method || method.dataset.fase2VisibilityBound === "true") return
+    method.dataset.fase2VisibilityBound = "true"
+    method.addEventListener("change", syncPaymentMethodUi)
+    document.getElementById("cashDeliveryMethod")?.addEventListener("change", () => {
+      if (["cash", "check"].includes(method.value)) method.value = document.getElementById("cashDeliveryMethod").value
+      syncPaymentMethodUi()
+    })
+    syncPaymentMethodUi()
+  }
+
+  function syncPaymentMethodUi() {
+    const method = normalizePaymentMethod(value("paymentMethod") || "transfer")
+    const isCashOrCheck = method === "cash" || method === "check"
+    document.getElementById("cashCheckSection")?.classList.toggle("hidden", !isCashOrCheck)
+    document.getElementById("requestLayoutDetails")?.classList.toggle("hidden", isCashOrCheck)
+    const delivery = document.getElementById("cashDeliveryMethod")
+    if (delivery && isCashOrCheck) delivery.value = method
   }
 
   function startRequestTypeEnforcer() {
     const form = document.getElementById("requestForm")
     if (!form || form.dataset.fase2EnforcerBound === "true") return
     form.dataset.fase2EnforcerBound = "true"
-
     const enforce = () => {
       if (form.dataset.fase2Enforcing === "true") return
       form.dataset.fase2Enforcing = "true"
       ensureRequestTypeAndPaymentMethodFields()
+      ensureCashCheckSection()
+      bindPaymentMethodVisibility()
+      syncPaymentMethodUi()
       form.dataset.fase2Enforcing = "false"
     }
-
     ;[0, 120, 350, 700, 1200, 2000].forEach((delay) => window.setTimeout(enforce, delay))
     const observer = new MutationObserver(() => window.setTimeout(enforce, 40))
     observer.observe(form, { childList: true, subtree: true })
@@ -171,7 +243,6 @@
     const paymentMethod = document.getElementById("paymentMethod")
     const client = getClient()
     if (!providerId || !paymentMethod || !client) return
-
     try {
       const { data, error } = await client
         .from("proveedores")
@@ -187,6 +258,117 @@
       }
     } catch (error) {
       toast("Metodo preferido no disponible", friendlyError(error), "warning")
+    }
+  }
+
+  function bindQuickProviderCreation() {
+    const button = document.getElementById("newProviderFromRequestBtn")
+    if (!button || button.dataset.fase2QuickProviderBound === "true") return
+    button.dataset.fase2QuickProviderBound = "true"
+    button.addEventListener("click", openQuickProviderDialog)
+  }
+
+  function openQuickProviderDialog() {
+    const dialog = ensureQuickProviderDialog()
+    dialog.querySelector("form")?.reset()
+    dialog.showModal()
+  }
+
+  function ensureQuickProviderDialog() {
+    let dialog = document.getElementById("fase2QuickProviderDialog")
+    if (dialog) return dialog
+    dialog = document.createElement("dialog")
+    dialog.id = "fase2QuickProviderDialog"
+    dialog.className = "narrow"
+    dialog.innerHTML = `
+      <form class="modal-content" id="fase2QuickProviderForm">
+        <div class="modal-header">
+          <div>
+            <h2>Proveedor rapido</h2>
+            <p>Alta minima para continuar la solicitud sin salir de la pantalla.</p>
+          </div>
+          <button type="button" class="icon-btn" data-fase2-quick-provider-close>x</button>
+        </div>
+        <div class="modal-scroll">
+          <div class="form-grid">
+            <label>Alias *<input id="fase2ProviderAlias" class="form-control" required></label>
+            <label>Nombre completo / razon social *<input id="fase2ProviderName" class="form-control" required></label>
+            <label>Metodo preferido *
+              <select id="fase2ProviderMethod" class="form-control" required>
+                <option value="Transferencia bancaria">Transferencia bancaria</option>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Cheque">Cheque</option>
+                <option value="Otro">Otro</option>
+              </select>
+            </label>
+            <label>Destino
+              <select id="fase2ProviderDestinationType" class="form-control">
+                <option value="clabe">CLABE</option>
+                <option value="cuenta">Cuenta bancaria</option>
+                <option value="convenio">Convenio</option>
+              </select>
+            </label>
+            <label>Beneficiario para layout<input id="fase2ProviderBeneficiary" class="form-control"></label>
+            <label>Banco<input id="fase2ProviderBank" class="form-control"></label>
+            <label>CLABE<input id="fase2ProviderClabe" class="form-control" maxlength="18"></label>
+            <label>Cuenta bancaria<input id="fase2ProviderAccount" class="form-control"></label>
+            <label>Convenio<input id="fase2ProviderAgreement" class="form-control"></label>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" data-fase2-quick-provider-close>Cancelar</button>
+          <button type="submit" class="primary-btn" data-fase2-quick-provider-submit>Crear proveedor</button>
+        </div>
+      </form>
+    `
+    document.body.appendChild(dialog)
+    dialog.querySelectorAll("[data-fase2-quick-provider-close]").forEach((button) => button.addEventListener("click", () => dialog.close()))
+    dialog.querySelector("form")?.addEventListener("submit", submitQuickProvider)
+    return dialog
+  }
+
+  async function submitQuickProvider(event) {
+    event.preventDefault()
+    const client = getClient()
+    if (!client) return toast("Sin conexion", "No se encontro el cliente Supabase compartido.", "error")
+    const submit = event.currentTarget.querySelector("[data-fase2-quick-provider-submit]")
+    const metodoPago = value("fase2ProviderMethod")
+    const destinationType = value("fase2ProviderDestinationType") || "clabe"
+    const alias = value("fase2ProviderAlias")
+    const nombre = value("fase2ProviderName")
+    if (!alias || !nombre || !metodoPago) return toast("Revisa el proveedor", "Alias, nombre y metodo preferido son obligatorios.", "warning")
+
+    const payload = {
+      alias,
+      nombre_completo: nombre,
+      metodo_pago: metodoPago,
+      destination_type: requiresBankDetails(metodoPago) ? destinationType : null,
+      beneficiary_name: value("fase2ProviderBeneficiary") || nombre,
+      banco: requiresBankDetails(metodoPago) ? value("fase2ProviderBank") || null : null,
+      clabe: requiresBankDetails(metodoPago) && destinationType === "clabe" ? value("fase2ProviderClabe") || null : null,
+      cuenta_bancaria: requiresBankDetails(metodoPago) && destinationType === "cuenta" ? value("fase2ProviderAccount") || null : null,
+      convenio_number: requiresBankDetails(metodoPago) && destinationType === "convenio" ? value("fase2ProviderAgreement") || null : null,
+      tipo_cuenta: destinationType === "cuenta" ? "Cuenta" : destinationType === "clabe" ? "CLABE" : null,
+      activo: true,
+    }
+
+    setButtonLoading(submit, true, "Creando...")
+    try {
+      const { data, error } = await client.from("proveedores").insert(payload).select("id,alias,nombre_completo,metodo_pago").maybeSingle()
+      if (error) throw error
+      const provider = data || payload
+      document.getElementById("proveedorId").value = provider.id
+      const search = document.getElementById("providerSearch")
+      if (search) search.value = provider.alias || provider.nombre_completo || alias
+      document.getElementById("proveedorId").dispatchEvent(new Event("change", { bubbles: true }))
+      document.getElementById("paymentMethod").value = normalizePaymentMethod(provider.metodo_pago || metodoPago)
+      document.getElementById("paymentMethod").dispatchEvent(new Event("change", { bubbles: true }))
+      toast("Proveedor creado", "Se precargo el metodo preferido en la solicitud.", "success")
+      document.getElementById("fase2QuickProviderDialog")?.close()
+    } catch (error) {
+      toast("No se pudo crear proveedor", friendlyError(error), "error")
+    } finally {
+      setButtonLoading(submit, false, "Crear proveedor")
     }
   }
 
@@ -207,6 +389,8 @@
     if (!client) return toast("Sin conexion", "No se encontro el cliente Supabase compartido.", "error")
 
     ensureRequestTypeAndPaymentMethodFields()
+    ensureCashCheckSection()
+    syncPaymentMethodUi()
     const payload = collectRequestPayload()
     const validation = validateRequestPayload(payload)
     if (validation) return toast("Revisa la solicitud", validation, "warning")
@@ -246,6 +430,7 @@
         .eq("id", requestId)
       if (updateError) throw updateError
 
+      persistCashMetadataIfNeeded(requestId, payload)
       await attachRequestFileIfPresent(client, requestId)
 
       const folio = result.request_number || result.payment_request_number || "Solicitud"
@@ -259,35 +444,68 @@
     }
   }
 
-  function showStoredRequestCreatedBanner() {
-    try {
-      const folio = window.sessionStorage?.getItem("fluxFase2RequestCreatedFolio")
-      if (!folio) return
-      window.sessionStorage.removeItem("fluxFase2RequestCreatedFolio")
-      window.setTimeout(() => showRequestCreatedBanner(folio), 450)
-    } catch (_) {
-      // El mensaje persistido es solo una mejora visual.
+  function collectRequestPayload() {
+    const currency = value("currency") || "MXN"
+    const profile = window.FluxAuth?.getProfile?.()
+    const paymentMethod = normalizePaymentMethod(value("paymentMethod") || "transfer")
+    return {
+      request_type: normalizeRequestType(value("requestType") || "provider_payment"),
+      payment_method: paymentMethod,
+      proveedor_id: value("proveedorId"),
+      company_id: value("companyId"),
+      cost_center_id: value("costCenterId"),
+      budget_category_id: value("budgetCategoryId"),
+      budget_month: value("budgetMonth") ? `${value("budgetMonth")}-01` : null,
+      amount_requested: numberValue(value("amountRequested")),
+      currency,
+      exchange_rate: currency === "MXN" ? 1 : numberValue(value("exchangeRate") || 1),
+      description: value("description"),
+      notes: value("notes") || null,
+      requested_by: profile?.id || null,
+      is_extraordinary_adjustment: Boolean(window.FluxAuth?.canApprove?.() && document.getElementById("isExtraordinaryAdjustment")?.checked),
+      responsible_profile_id: value("cashResponsibleProfileId"),
+      due_date: value("cashDueDate"),
+      delivery_method: value("cashDeliveryMethod") || paymentMethod,
     }
   }
 
-  function showRequestCreatedBanner(folio) {
-    const safeFolio = folio && folio !== "Solicitud" ? folio : "la solicitud"
-    document.querySelector("[data-fase2-floating-success]")?.remove()
-    const banner = document.createElement("div")
-    banner.dataset.fase2FloatingSuccess = "true"
-    banner.className = "fase2-floating-success"
-    banner.setAttribute("role", "status")
-    banner.setAttribute("aria-live", "polite")
-    banner.innerHTML = `
-      <strong>Solicitud creada correctamente</strong>
-      <span>Folio: ${escapeHtml(safeFolio)}</span>
-    `
-    document.body.appendChild(banner)
-    window.setTimeout(() => banner.classList.add("is-visible"), 20)
-    window.setTimeout(() => {
-      banner.classList.remove("is-visible")
-      window.setTimeout(() => banner.remove(), 260)
-    }, 6500)
+  function validateRequestPayload(payload) {
+    if (!payload.request_type) return "Selecciona el tipo de solicitud."
+    if (!payload.payment_method) return "Selecciona el metodo de pago."
+    if (!payload.company_id) return "Selecciona una empresa."
+    if (!payload.cost_center_id) return "Selecciona un centro de costo."
+    if (!payload.budget_category_id) return "Selecciona una partida presupuestal."
+    if (!payload.budget_month) return "Selecciona el mes presupuestal."
+    if (!payload.proveedor_id) return "Selecciona un proveedor."
+    if (!payload.amount_requested || payload.amount_requested <= 0) return "El monto solicitado debe ser mayor a 0."
+    if (!payload.description) return "Captura una descripcion."
+    if (["cash", "check"].includes(payload.payment_method) && !payload.responsible_profile_id) return "Selecciona el responsable del gasto."
+    if (["cash", "check"].includes(payload.payment_method) && !payload.due_date) return "Captura la fecha limite de comprobacion."
+    return ""
+  }
+
+  function persistCashMetadataIfNeeded(requestId, payload) {
+    if (!requestId || !["cash", "check"].includes(payload.payment_method)) return
+    try {
+      localStorage.setItem(`flux-cash-request-${requestId}`, JSON.stringify({
+        responsible_profile_id: payload.responsible_profile_id,
+        due_date: payload.due_date,
+        delivery_method: payload.payment_method,
+      }))
+    } catch (_) {}
+  }
+
+  async function attachRequestFileIfPresent(client, requestId) {
+    const input = document.getElementById("requestFile")
+    const file = input?.files?.[0]
+    if (!file || !window.FluxUpload?.uploadReceipt) return
+    try {
+      const storagePath = await window.FluxUpload.uploadReceipt(file, `solicitudes/${requestId}`)
+      const { error } = await client.from("payment_requests").update({ invoice_storage_path: storagePath }).eq("id", requestId)
+      if (error) throw error
+    } catch (_) {
+      toast("Comprobante no vinculado", "La solicitud se creo, pero el comprobante no pudo subirse o vincularse.", "warning")
+    }
   }
 
   function renderRequestCreationSuccess(result, payload) {
@@ -312,8 +530,7 @@
     panel.innerHTML = `
       <strong>Solicitud creada correctamente</strong>
       <span class="fase2-success-folio">Folio: ${escapeHtml(folio)}</span>
-      <span>La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.</span>
-      <span>Tipo: ${escapeHtml(requestTypeLabel(payload.request_type))}</span>
+      <span>Tipo de solicitud: ${escapeHtml(requestTypeLabel(payload.request_type))}</span>
       <span>Metodo de pago: ${escapeHtml(paymentMethodLabel(payload.payment_method))}</span>
     `
     modalScroll?.parentElement?.insertBefore(panel, modalScroll)
@@ -342,6 +559,8 @@
     if (actions?.dataset.fase2OriginalHtml) actions.innerHTML = actions.dataset.fase2OriginalHtml
     document.getElementById("cancelRequestBtn")?.addEventListener("click", () => document.getElementById("requestDialog")?.close())
     ensureRequestTypeAndPaymentMethodFields()
+    ensureCashCheckSection()
+    bindPaymentMethodVisibility()
     setButtonLoading(document.getElementById("submitRequestBtn"), false, "Crear solicitud")
     updateSummaryPanelIfAvailable()
   }
@@ -349,75 +568,50 @@
   function closeAndRefreshRequests(folio) {
     try {
       if (folio) window.sessionStorage?.setItem("fluxFase2RequestCreatedFolio", folio)
-    } catch (_) {
-      // Solo mejora visual para resaltar el cierre.
-    }
+    } catch (_) {}
     document.getElementById("requestDialog")?.close()
     window.setTimeout(() => window.location.reload(), 120)
+  }
+
+  function showStoredRequestCreatedBanner() {
+    try {
+      const folio = window.sessionStorage?.getItem("fluxFase2RequestCreatedFolio")
+      if (!folio) return
+      window.sessionStorage.removeItem("fluxFase2RequestCreatedFolio")
+      window.setTimeout(() => showRequestCreatedBanner(folio), 450)
+    } catch (_) {}
+  }
+
+  function showRequestCreatedBanner(folio) {
+    const safeFolio = folio && folio !== "Solicitud" ? folio : "la solicitud"
+    document.querySelector("[data-fase2-floating-success]")?.remove()
+    const banner = document.createElement("div")
+    banner.dataset.fase2FloatingSuccess = "true"
+    banner.className = "fase2-floating-success"
+    banner.setAttribute("role", "status")
+    banner.setAttribute("aria-live", "polite")
+    banner.innerHTML = `
+      <strong>Solicitud creada correctamente</strong>
+      <span>Folio: ${escapeHtml(safeFolio)}</span>
+    `
+    document.body.appendChild(banner)
+    window.setTimeout(() => banner.classList.add("is-visible"), 20)
+    window.setTimeout(() => {
+      banner.classList.remove("is-visible")
+      window.setTimeout(() => banner.remove(), 260)
+    }, 6500)
   }
 
   function updateSummaryPanelIfAvailable() {
     try {
       if (typeof window.updateSummaryPanel === "function") window.updateSummaryPanel()
-    } catch (_) {
-      // El resumen se recalcula con los eventos existentes de la pagina.
-    }
-  }
-
-  function collectRequestPayload() {
-    const currency = value("currency") || "MXN"
-    const profile = window.FluxAuth?.getProfile?.()
-    return {
-      request_type: normalizeRequestType(value("requestType") || "supplier_payment"),
-      payment_method: normalizePaymentMethod(value("paymentMethod") || "transfer"),
-      proveedor_id: value("proveedorId"),
-      company_id: value("companyId"),
-      cost_center_id: value("costCenterId"),
-      budget_category_id: value("budgetCategoryId"),
-      budget_month: value("budgetMonth") ? `${value("budgetMonth")}-01` : null,
-      amount_requested: numberValue(value("amountRequested")),
-      currency,
-      exchange_rate: currency === "MXN" ? 1 : numberValue(value("exchangeRate") || 1),
-      description: value("description"),
-      notes: value("notes") || null,
-      requested_by: profile?.id || null,
-      is_extraordinary_adjustment: Boolean(window.FluxAuth?.canApprove?.() && document.getElementById("isExtraordinaryAdjustment")?.checked),
-    }
-  }
-
-  function validateRequestPayload(payload) {
-    if (!payload.request_type) return "Selecciona el tipo de solicitud."
-    if (!payload.payment_method) return "Selecciona el metodo de pago."
-    if (!payload.company_id) return "Selecciona una empresa."
-    if (!payload.cost_center_id) return "Selecciona un centro de costo."
-    if (!payload.budget_category_id) return "Selecciona una partida presupuestal."
-    if (!payload.budget_month) return "Selecciona el mes presupuestal."
-    if (!payload.proveedor_id) return "Selecciona un proveedor."
-    if (!payload.amount_requested || payload.amount_requested <= 0) return "El monto solicitado debe ser mayor a 0."
-    if (!payload.description) return "Captura una descripcion."
-    return ""
-  }
-
-  async function attachRequestFileIfPresent(client, requestId) {
-    const input = document.getElementById("requestFile")
-    const file = input?.files?.[0]
-    if (!file || !window.FluxUpload?.uploadReceipt) return
-    try {
-      const storagePath = await window.FluxUpload.uploadReceipt(file, `solicitudes/${requestId}`)
-      const { error } = await client.from("payment_requests").update({ invoice_storage_path: storagePath }).eq("id", requestId)
-      if (error) throw error
-    } catch (error) {
-      toast("Comprobante no vinculado", "La solicitud se creo, pero el comprobante no pudo subirse o vincularse.", "warning")
-    }
+    } catch (_) {}
   }
 
   function patchRequestRows() {
     const table = document.getElementById("requestsTableBody")
     if (!table) return
-    const observer = new MutationObserver(() => {
-      window.setTimeout(enrichRequestRows, 80)
-      // no re-disparar el total aquí: cada mutación de la tabla lo refetcheaba (loop)
-    })
+    const observer = new MutationObserver(() => window.setTimeout(enrichRequestRows, 80))
     observer.observe(table, { childList: true, subtree: true })
     enrichRequestRows()
   }
@@ -430,7 +624,6 @@
       .map((node) => node.textContent.trim())
       .filter(Boolean)
     if (!folios.length) return
-
     try {
       const { data, error } = await client
         .from("payment_requests")
@@ -449,9 +642,7 @@
         wrapper.innerHTML = `${miniBadge(requestTypeLabel(item.request_type), "info")}${miniBadge(paymentMethodLabel(item.payment_method), paymentMethodVariant(item.payment_method))}`
         folioNode.parentElement?.appendChild(wrapper)
       })
-    } catch (_) {
-      // Si la columna payment_method no esta lista en algun ambiente, no rompemos la tabla.
-    }
+    } catch (_) {}
   }
 
   function patchRequestDetail() {
@@ -475,19 +666,14 @@
       if (error || !data) return
       detail.insertAdjacentHTML("afterbegin", `
         <div class="fase2-detail-strip" data-fase2-detail>
-          <span>${miniBadge(requestTypeLabel(data.request_type), "info")}</span>
-          <span>${miniBadge(paymentMethodLabel(data.payment_method), paymentMethodVariant(data.payment_method))}</span>
+          <span>Tipo de solicitud: ${miniBadge(requestTypeLabel(data.request_type), "info")}</span>
+          <span>Metodo de pago: ${miniBadge(paymentMethodLabel(data.payment_method), paymentMethodVariant(data.payment_method))}</span>
         </div>
       `)
-    } catch (_) {
-      // Solo mejora visual.
-    }
+    } catch (_) {}
   }
 
   function patchRequestedAmountCard() {
-    // NO observar #requestedAmount: fase2 y solicitudes.js escriben en el mismo
-    // elemento con formatos distintos; observarlo causaba un loop infinito de
-    // fetch a payment_requests. Se refresca en init + timers, no en cada mutación.
     scheduleRequestedAmountRefresh()
     ;[300, 900, 1600].forEach((delay) => window.setTimeout(scheduleRequestedAmountRefresh, delay))
   }
@@ -510,106 +696,179 @@
       const total = (data || []).reduce((sum, row) => sum + numberValue(row.amount_requested), 0)
       const next = formatCurrencyFull(total)
       if (target.textContent !== next) target.textContent = next
-    } catch (_) {
-      const parsed = Number(String(target.textContent || "").replace(/[^0-9.-]/g, ""))
-      if (Number.isFinite(parsed)) {
-        const nextParsed = formatCurrencyFull(parsed)
-        if (target.textContent !== nextParsed) target.textContent = nextParsed
-      }
-    }
+    } catch (_) {}
   }
 
-  function patchApprovalLabels() {
-    document.querySelectorAll(".approval-card-badges, #detailSubtitle").forEach((container) => {
-      container.querySelectorAll(".badge, .status-badge, span").forEach((node) => {
-        const text = normalize(node.textContent)
-        if (text === "efectivo" || text === "cheque") {
-          node.textContent = paymentMethodLabel(text)
-          node.title = "Metodo de pago"
-        }
-        if (text === "transferencia") {
-          node.textContent = "Pago a proveedor"
-          node.title = "Tipo de solicitud legado"
-        }
-      })
-    })
+  function scheduleApprovalRefresh() {
+    window.clearTimeout(approvalsRefreshTimer)
+    approvalsRefreshTimer = window.setTimeout(enrichApprovals, 160)
   }
 
-  function bindLayoutTransferGuard() {
-    const form = document.getElementById("newLayoutForm")
-    if (!form || form.dataset.fase2LayoutGuardBound === "true") return
-    form.dataset.fase2LayoutGuardBound = "true"
-    form.addEventListener("submit", guardLayoutSubmit, true)
-  }
-
-  async function guardLayoutSubmit(event) {
-    const form = event.currentTarget
-    if (form.dataset.fase2LayoutChecking === "true") return
+  async function enrichApprovals() {
     const client = getClient()
     if (!client) return
+    const folios = Array.from(document.querySelectorAll(".approval-card-folio, #detailTitle"))
+      .map((node) => (node.textContent || "").trim())
+      .filter((text) => text.startsWith("SOL-"))
+    if (!folios.length) return
+    try {
+      const { data, error } = await client
+        .from("payment_requests")
+        .select("request_number,request_type,payment_method")
+        .in("request_number", [...new Set(folios)])
+      if (error) throw error
+      const byFolio = new Map((data || []).map((item) => [item.request_number, item]))
+      document.querySelectorAll(".approval-card").forEach((card) => {
+        const folio = card.querySelector(".approval-card-folio")?.textContent?.trim()
+        const item = byFolio.get(folio)
+        const badges = card.querySelector(".approval-card-badges")
+        if (!item || !badges || badges.querySelector("[data-fase2-approval-badge]")) return
+        badges.insertAdjacentHTML("beforeend", `
+          <span data-fase2-approval-badge>${miniBadge(`Tipo: ${requestTypeLabel(item.request_type)}`, "info")}</span>
+          <span data-fase2-approval-badge>${miniBadge(`Metodo: ${paymentMethodLabel(item.payment_method)}`, paymentMethodVariant(item.payment_method))}</span>
+        `)
+      })
+      const detailTitle = document.getElementById("detailTitle")?.textContent?.trim()
+      const detailSubtitle = document.getElementById("detailSubtitle")
+      const detailItem = byFolio.get(detailTitle)
+      if (detailSubtitle && detailItem && !detailSubtitle.querySelector("[data-fase2-detail-approval]")) {
+        detailSubtitle.insertAdjacentHTML("beforeend", `
+          <span data-fase2-detail-approval>${miniBadge(`Tipo de solicitud: ${requestTypeLabel(detailItem.request_type)}`, "info")}</span>
+          <span data-fase2-detail-approval>${miniBadge(`Metodo de pago: ${paymentMethodLabel(detailItem.payment_method)}`, paymentMethodVariant(detailItem.payment_method))}</span>
+        `)
+      }
+    } catch (_) {}
+  }
 
+  function addLayoutTransferNotice() {
+    const box = document.getElementById("layoutInvalidBox")
+    if (!box || box.dataset.fase2Notice === "true") return
+    box.dataset.fase2Notice = "true"
+    box.classList.remove("hidden")
+    box.innerHTML = `
+      <strong>Layouts bancarios solo para transferencias.</strong>
+      <p style="margin:6px 0 0;color:var(--text-2)">El RPC reforzado por la migracion 004c excluye efectivo, cheque y otros metodos aunque esten aprobados.</p>
+    `
+  }
+
+  function bindLayoutTransferPreview() {
+    const form = document.getElementById("newLayoutForm")
+    if (!form || form.dataset.fase2LayoutPreviewBound === "true") return
+    form.dataset.fase2LayoutPreviewBound = "true"
+    form.addEventListener("submit", () => renderLayoutTransferPreview(), true)
+  }
+
+  async function renderLayoutTransferPreview() {
+    const client = getClient()
+    const box = document.getElementById("layoutInvalidBox")
+    if (!client || !box) return
     const periodStart = value("layoutPeriodStart")
     const periodEnd = value("layoutPeriodEnd")
     const companyId = value("layoutCompanyId")
-    if (!periodStart || !periodEnd || periodStart > periodEnd) return
-
-    form.dataset.fase2LayoutChecking = "true"
+    if (!periodStart || !periodEnd) return
     try {
       let query = client
         .from("payment_requests")
-        .select("id,request_number,payment_method,status,company_id,created_at")
+        .select("request_number,payment_method,status,company_id,scheduled_payment_date,created_at,updated_at")
         .eq("status", "approved")
-        .gte("created_at", `${periodStart}T00:00:00`)
-        .lte("created_at", `${periodEnd}T23:59:59`)
       if (companyId) query = query.eq("company_id", companyId)
-
       const { data, error } = await query
       if (error) throw error
-      const candidates = data || []
-      const nonTransfer = candidates.filter((request) => normalizePaymentMethodForLayout(request.payment_method) !== "transfer")
-      if (nonTransfer.length) {
-        event.preventDefault()
-        event.stopImmediatePropagation()
-        renderLayoutGuardNotice(nonTransfer)
-        toast("Layout filtrado", "Hay solicitudes aprobadas que no tienen metodo Transferencia. Corrigelas antes de generar el layout bancario.", "warning")
-      }
-    } catch (error) {
-      event.preventDefault()
-      event.stopImmediatePropagation()
-      renderLayoutGuardError(error)
-      toast("No se pudo validar metodo de pago", friendlyError(error), "error")
-    } finally {
-      form.dataset.fase2LayoutChecking = "false"
-    }
+      const rows = (data || []).filter((request) => {
+        const d = String(request.scheduled_payment_date || request.updated_at || request.created_at || "").slice(0, 10)
+        return d >= periodStart && d <= periodEnd && normalizePaymentMethod(request.payment_method || "transfer") !== "transfer"
+      })
+      if (!rows.length) return
+      const items = rows.slice(0, 8).map((row) => `<li><strong>${escapeHtml(row.request_number || "Solicitud")}</strong>: ${escapeHtml(paymentMethodLabel(row.payment_method))}</li>`).join("")
+      box.classList.remove("hidden")
+      box.innerHTML = `
+        <strong>Solicitudes aprobadas fuera del layout bancario.</strong>
+        <p style="margin:6px 0 0;color:var(--text-2)">Estas solicitudes tienen metodo distinto de transferencia y el backend 004c las excluye del layout:</p>
+        <ul style="margin:6px 0 0 16px">${items}</ul>
+      `
+    } catch (_) {}
   }
 
-  function renderLayoutGuardNotice(rows) {
-    const box = document.getElementById("layoutInvalidBox")
-    if (!box) return
-    const items = rows.slice(0, 8).map((row) => `<li><strong>${escapeHtml(row.request_number || row.id)}</strong>: ${escapeHtml(paymentMethodLabel(row.payment_method))}</li>`).join("")
-    const more = rows.length > 8 ? `<p style="margin-top:6px;color:var(--text-3)">Y ${rows.length - 8} mas.</p>` : ""
-    box.innerHTML = `
-      <strong>Solo se pueden generar layouts bancarios con metodo de pago Transferencia.</strong>
-      <p style="margin:6px 0 0;color:var(--text-2)">Estas solicitudes aprobadas quedan fuera del layout por metodo de pago:</p>
-      <ul style="margin:6px 0 0 16px">${items}</ul>${more}
-      <p style="margin:8px 0 0;color:var(--text-3)">Bloqueo preventivo frontend. El refuerzo definitivo debe vivir en el RPC de layout cuando se autorice SQL/RPC.</p>
+  function schedulePaymentsRefresh() {
+    window.clearTimeout(paymentsRefreshTimer)
+    paymentsRefreshTimer = window.setTimeout(enrichPaymentsPage, 260)
+  }
+
+  async function enrichPaymentsPage() {
+    const client = getClient()
+    const body = document.getElementById("paymentsTableBody")
+    if (!client || !body) return
+    try {
+      const [requestsResult, providersResult, companiesResult] = await Promise.all([
+        client.from("payment_requests").select("id,request_number,request_type,payment_method,status,proveedor_id,company_id,amount_requested,scheduled_payment_date,updated_at,created_at").in("status", ["approved", "finance_validation", "scheduled", "paid"]),
+        client.from("proveedores").select("id,alias,nombre_completo"),
+        client.from("companies").select("id,name,legal_name"),
+      ])
+      if (requestsResult.error) throw requestsResult.error
+      const providers = new Map((providersResult.data || []).map((p) => [p.id, p]))
+      const companies = new Map((companiesResult.data || []).map((c) => [c.id, c]))
+      const existingFolios = new Set(Array.from(body.querySelectorAll("td strong")).map((node) => node.textContent.trim()))
+      const query = normalize(document.getElementById("searchInput")?.value || "")
+      const typeFilter = document.getElementById("typeFilter")?.value || "all"
+      const statusFilter = document.getElementById("statusFilter")?.value || "all"
+      const rows = (requestsResult.data || [])
+        .map((request) => ({ request, method: normalizePaymentMethod(request.payment_method || (request.request_type === "cash" || request.request_type === "check" ? request.request_type : "transfer")) }))
+        .filter(({ request, method }) => method !== "transfer" && !existingFolios.has(request.request_number))
+        .filter(({ request, method }) => typeFilter === "all" || method === typeFilter)
+        .map(({ request, method }) => {
+          const provider = providers.get(request.proveedor_id)
+          const company = companies.get(request.company_id)
+          const providerName = provider?.alias || provider?.nombre_completo || "Proveedor"
+          const companyName = company?.legal_name || company?.name || "Sin empresa"
+          const status = method === "cash" || method === "check" ? "pending_delivery" : "pending_confirmation"
+          return { request, method, providerName, companyName, status }
+        })
+        .filter((entry) => statusFilter === "all" || entry.status === statusFilter)
+        .filter((entry) => normalize([entry.request.request_number, entry.providerName, entry.companyName, paymentMethodLabel(entry.method)].join(" ")).includes(query))
+      if (!rows.length) return
+      if (body.querySelector(".empty-state")) body.innerHTML = ""
+      body.insertAdjacentHTML("beforeend", rows.map(paymentRowHtml).join(""))
+      const pendingDelivery = rows.filter((row) => row.status === "pending_delivery").length
+      bumpCounter("pendingDeliveryCount", pendingDelivery)
+    } catch (_) {}
+  }
+
+  function paymentRowHtml(entry) {
+    const { request, method, providerName, companyName, status } = entry
+    const statusLabel = status === "pending_delivery" ? "Aprobada sin entrega" : "Fuera de layout bancario"
+    return `
+      <tr data-fase2-payment-row>
+        <td>${typeBadge(method)}</td>
+        <td><strong>${escapeHtml(request.request_number || "Solicitud")}</strong><span class="muted-line">${escapeHtml(paymentMethodLabel(method))}</span></td>
+        <td><strong>${escapeHtml(providerName)}</strong></td>
+        <td>${method === "cash" || method === "check" ? "Pendiente" : "No aplica"}</td>
+        <td>${escapeHtml(companyName)}</td>
+        <td><strong>${formatCurrencyFull(request.amount_requested || 0)}</strong></td>
+        <td>${escapeHtml(formatDate(request.scheduled_payment_date || request.updated_at || request.created_at))}</td>
+        <td>${miniBadge(statusLabel, status === "pending_delivery" ? "warning" : "neutral")}</td>
+        <td><span class="badge">No aplica</span></td>
+        <td><div class="actions"><a class="small-btn" href="./solicitudes.html?request_id=${encodeURIComponent(request.id)}">Ver solicitud</a></div></td>
+      </tr>
     `
-    box.classList.remove("hidden")
   }
 
-  function renderLayoutGuardError(error) {
-    const box = document.getElementById("layoutInvalidBox")
-    if (!box) return
-    box.innerHTML = `<strong>No se pudo validar el metodo de pago antes de generar layout.</strong><p style="margin:6px 0 0;color:var(--text-2)">${escapeHtml(friendlyError(error))}</p>`
-    box.classList.remove("hidden")
+  function bumpCounter(id, amount) {
+    const node = document.getElementById(id)
+    if (!node || !amount) return
+    const current = Number(String(node.textContent || "0").replace(/[^0-9.-]/g, "")) || 0
+    node.textContent = String(current + amount)
+  }
+
+  function typeBadge(method) {
+    const variant = paymentMethodVariant(method)
+    return `<span class="fase2-mini-badge ${escapeHtml(variant)}">${escapeHtml(paymentMethodLabel(method))}</span>`
   }
 
   function normalizeRequestType(value) {
     const key = normalize(value)
-    if (key === "provider_payment" || key === "transfer" || key === "cash" || key === "check" || key === "deposit_refund" || key === "other") return "supplier_payment"
     if (key === "online_purchase") return "online_purchase"
     if (key === "reimbursement") return "reimbursement"
-    return "supplier_payment"
+    return "provider_payment"
   }
 
   function normalizePaymentMethod(value) {
@@ -621,30 +880,25 @@
     return "other"
   }
 
-  function normalizePaymentMethodForLayout(value) {
-    const key = normalize(value)
-    if (!key) return ""
-    return normalizePaymentMethod(key)
-  }
-
   function requestTypeLabel(value) {
-    return legacyRequestTypeLabels[normalizeRequestType(value)] || legacyRequestTypeLabels[value] || "Pago a proveedor"
+    return requestTypeLabels[normalizeRequestType(value)] || "Pago a proveedor"
   }
 
   function paymentMethodLabel(value) {
-    const key = normalize(value)
-    if (!key) return "Sin metodo capturado"
-    return paymentMethodLabels[normalizePaymentMethod(value)] || "Otro"
+    const key = normalizePaymentMethod(value)
+    return paymentMethodLabels[key] || "Otro"
   }
 
   function paymentMethodVariant(value) {
-    const key = normalize(value)
-    if (!key) return "neutral"
     const method = normalizePaymentMethod(value)
     if (method === "transfer") return "success"
     if (method === "cash") return "warning"
     if (method === "check") return "info"
     return "neutral"
+  }
+
+  function requiresBankDetails(method) {
+    return normalizePaymentMethod(method) === "transfer"
   }
 
   function selectMatchesOptions(select, pairs) {
@@ -712,8 +966,8 @@
     return String(document.getElementById(id)?.value || "").trim()
   }
 
-  function numberValue(value) {
-    const number = Number(value)
+  function numberValue(raw) {
+    const number = Number(String(raw || "").replace(/,/g, ""))
     return Number.isFinite(number) ? number : 0
   }
 
@@ -723,6 +977,13 @@
 
   function formatCurrencyFull(value) {
     return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 2 }).format(numberValue(value))
+  }
+
+  function formatDate(value) {
+    if (!value) return "Sin fecha"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return String(value).slice(0, 10)
+    return date.toLocaleDateString("es-MX")
   }
 
   function escapeHtml(value) {
@@ -736,16 +997,16 @@
 
   function friendlyError(error) {
     const message = error?.message || String(error || "Error desconocido")
-    if (message.includes("payment_method")) return "La columna payment_method no esta disponible en este ambiente. Falta aplicar la migracion backend correspondiente."
+    if (message.includes("payment_method")) return "La columna payment_method no esta disponible en este ambiente. Falta aplicar la migracion 004c."
+    if (message.includes("online_purchase")) return "El tipo Compra en linea no esta disponible en este ambiente. Falta aplicar la migracion 004c."
     if (message.toLowerCase().includes("row-level security") || error?.code === "42501") return "No tienes permiso para realizar esta accion."
     return message
   }
 
   function toast(title, desc, variant = "success") {
-    if (window.Components?.showToast) {
-      window.Components.showToast({ title, desc, variant, duration: 6 })
-      return
-    }
+    if (window.Components?.showToast) return window.Components.showToast({ title, desc, variant, duration: 6 })
+    if (window.FluxToast?.show) return window.FluxToast.show({ title, message: desc, type: variant })
+    if (window.showToast) return window.showToast(title, desc, variant)
     console[variant === "error" || variant === "danger" ? "error" : "log"](`[${title}] ${desc}`)
   }
 
