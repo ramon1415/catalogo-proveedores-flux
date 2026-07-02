@@ -1,0 +1,196 @@
+name: Deploy Supabase PROD Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_path:
+        description: "Repo path to an approved PROD SQL deployment folder. Must start with ops/prod/ and include precheck.sql, load.sql, postcheck.sql."
+        required: true
+        type: string
+      confirm_prod:
+        description: "Type production to confirm this is a PROD deployment window."
+        required: true
+        type: string
+      confirm_project_ref:
+        description: "Type the Supabase PROD project ref. It must match the protected environment secret SUPABASE_PROD_PROJECT_REF."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-manual
+  cancel-in-progress: false
+
+jobs:
+  deploy-supabase-prod:
+    name: Execute controlled SQL in Supabase PROD
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      OPS_EVIDENCE_DIR: .ops-evidence/supabase-prod
+      SCRIPT_PATH: ${{ inputs.script_path }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_PROD_PROJECT_REF: ${{ inputs.confirm_project_ref }}
+      SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+      SUPABASE_PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+
+    steps:
+      - name: Guard PROD branch and confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "::error::This PROD workflow is only allowed from main. Select branch main before running."
+            exit 1
+          fi
+          if [[ "${CONFIRM_PROD}" != "production" ]]; then
+            echo "::error::confirm_prod must be exactly: production"
+            exit 1
+          fi
+          if [[ -z "${SUPABASE_PROD_PROJECT_REF:-}" ]]; then
+            echo "::error::Missing protected environment secret SUPABASE_PROD_PROJECT_REF."
+            exit 1
+          fi
+          if [[ "${CONFIRM_PROD_PROJECT_REF}" != "${SUPABASE_PROD_PROJECT_REF}" ]]; then
+            echo "::error::confirm_project_ref does not match SUPABASE_PROD_PROJECT_REF."
+            exit 1
+          fi
+          echo "PROD confirmation accepted for protected environment."
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Mask sensitive values
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${SUPABASE_PROD_DB_URL:-}" ]] && echo "::add-mask::${SUPABASE_PROD_DB_URL}"
+          [[ -n "${SUPABASE_PROD_PROJECT_REF:-}" ]] && echo "::add-mask::${SUPABASE_PROD_PROJECT_REF}"
+          [[ -n "${CONFIRM_PROD_PROJECT_REF:-}" ]] && echo "::add-mask::${CONFIRM_PROD_PROJECT_REF}"
+
+      - name: Validate PROD secrets and script path
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SUPABASE_PROD_DB_URL:-}" ]]; then
+            echo "::error::Missing protected environment secret SUPABASE_PROD_DB_URL."
+            exit 1
+          fi
+          if [[ -z "${SCRIPT_PATH:-}" ]]; then
+            echo "::error::script_path is required."
+            exit 1
+          fi
+          if [[ "${SCRIPT_PATH}" == /* ]]; then
+            echo "::error::script_path must be relative to the repository root."
+            exit 1
+          fi
+          if [[ "${SCRIPT_PATH}" =~ ^[A-Za-z][A-Za-z0-9+.-]*: ]]; then
+            echo "::error::script_path must be a repository path, not a URL."
+            exit 1
+          fi
+          if [[ "${SCRIPT_PATH}" == *..* ]]; then
+            echo "::error::script_path must not contain '..'."
+            exit 1
+          fi
+          case "${SCRIPT_PATH}" in
+            ops/prod/*) ;;
+            *)
+              echo "::error::PROD workflow only allows script_path under ops/prod/."
+              exit 1
+              ;;
+          esac
+          if [[ ! -d "${SCRIPT_PATH}" ]]; then
+            echo "::error::script_path must be a deployment folder."
+            exit 1
+          fi
+          for required_file in precheck.sql load.sql postcheck.sql; do
+            if [[ ! -f "${SCRIPT_PATH}/${required_file}" ]]; then
+              echo "::error::Missing required SQL file: ${SCRIPT_PATH}/${required_file}"
+              exit 1
+            fi
+          done
+          if [[ "${SCRIPT_PATH}" == ops/prod/../* || "${SCRIPT_PATH}" == *"/../"* ]]; then
+            echo "::error::script_path attempts to escape ops/prod/."
+            exit 1
+          fi
+          if [[ "${SUPABASE_PROD_DB_URL}" != postgres://* && "${SUPABASE_PROD_DB_URL}" != postgresql://* ]]; then
+            echo "::error::SUPABASE_PROD_DB_URL must use postgres:// or postgresql://."
+            exit 1
+          fi
+          mkdir -p "${OPS_EVIDENCE_DIR}"
+          cat > "${OPS_EVIDENCE_DIR}/plan.json" <<JSON
+          {
+            "environment": "production",
+            "branch": "${GITHUB_REF_NAME}",
+            "scriptPath": "${SCRIPT_PATH}",
+            "phases": ["precheck", "load", "postcheck"]
+          }
+          JSON
+          echo "Validated approved PROD script path: ${SCRIPT_PATH}"
+
+      - name: Run precheck, load and postcheck SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${OPS_EVIDENCE_DIR}"
+          LOG_FILE="${OPS_EVIDENCE_DIR}/supabase-prod-sql-$(date -u +%Y%m%dT%H%M%SZ).log"
+          SUMMARY_FILE="${OPS_EVIDENCE_DIR}/summary.json"
+          redact() {
+            sed -E \
+              -e 's#postgres(ql)?://[^[:space:]'\''"]+#postgres://***REDACTED***#g' \
+              -e 's#(service_role|access_token|api[_-]?key|password|secret)([[:space:]]*[:=][[:space:]]*)[^[:space:],"'\''}]+#\1\2***REDACTED***#gi'
+          }
+          run_phase() {
+            local phase="$1"
+            local file="${SCRIPT_PATH}/${phase}.sql"
+            echo "===== ${phase^^} :: ${file} =====" | tee -a "${LOG_FILE}"
+            echo "::group::${phase} SQL phase"
+            set +e
+            psql --no-psqlrc --set ON_ERROR_STOP=1 --dbname "${SUPABASE_PROD_DB_URL}" --file "${file}" 2>&1 | redact | tee -a "${LOG_FILE}"
+            local status=${PIPESTATUS[0]}
+            set -e
+            echo "::endgroup::"
+            if [[ "${status}" -ne 0 ]]; then
+              cat > "${SUMMARY_FILE}" <<JSON
+          {
+            "ok": false,
+            "failedPhase": "${phase}",
+            "scriptPath": "${SCRIPT_PATH}",
+            "finishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          JSON
+              echo "::error::SQL phase failed: ${phase}."
+              exit "${status}"
+            fi
+          }
+          run_phase precheck
+          run_phase load
+          run_phase postcheck
+          cat > "${SUMMARY_FILE}" <<JSON
+          {
+            "ok": true,
+            "scriptPath": "${SCRIPT_PATH}",
+            "phases": ["precheck", "load", "postcheck"],
+            "finishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          JSON
+          echo "::notice::Supabase PROD SQL deployment finished successfully. Evidence was saved as an artifact."
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-deployment-evidence
+          path: .ops-evidence/supabase-prod/
+          if-no-files-found: warn
+          retention-days: 30
