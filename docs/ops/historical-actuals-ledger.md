@@ -2,14 +2,22 @@
 
 Documento operativo para versionar formalmente `public.historical_actuals` en el ledger de migraciones, usando la evidencia de DEV sin copiar datos.
 
-## Evidencia fuente
+## Estado actual
 
-- Auditoria: `ops/schema-audit/historical-actuals/`
-- Workflow: Deploy Supabase DEV Manual
-- Run ID: 28544701584
+`supabase/migrations/004a_historical_actuals.sql` esta versionado en `supabase/migrations/` y se queda como fuente de verdad.
+
+Las referencias historicas a auditorias, workflows o paquetes `ops` documentan como se obtuvo la evidencia original. No son el procedimiento vigente para aplicar migraciones. Para aplicar cambios futuros, usar:
+
+```text
+docs/ops/supabase-cli-migrations.md
+```
+
+## Evidencia fuente historica
+
+- Auditoria read-only DEV: `HISTORICAL_ACTUALS_BLOCKED_NEEDS_SCHEMA_EXPORT`
+- Run ID: `28544701584`
 - Branch auditada: `dev`
 - Ambiente auditado: Supabase DEV `scsirgbuqjcwoaxfacth`
-- Resultado: `HISTORICAL_ACTUALS_BLOCKED_NEEDS_SCHEMA_EXPORT`
 
 La auditoria fue read-only. No ejecuto migraciones, no modifico datos y no copio filas de negocio.
 
@@ -33,17 +41,15 @@ La auditoria fue read-only. No ejecuto migraciones, no modifico datos y no copio
   - `historical_actuals_select` para `authenticated`, `SELECT`, con `current_user_has_role(flux_member_roles())`
   - `historical_actuals_write` para `authenticated`, `ALL`, con `current_user_has_role(flux_finance_roles())`
 
-El conteo estimado reportado por la auditoria fue de 682 filas. Este PR no incluye ni exporta esas filas.
+El conteo estimado reportado por la auditoria fue de 682 filas. La migracion versionada no incluye ni exporta esas filas.
 
-## Migracion propuesta
-
-La migracion nueva es:
+## Migracion
 
 ```text
 supabase/migrations/004a_historical_actuals.sql
 ```
 
-Se ubica despues de `004_rls_policies_grants.sql` porque depende de los helpers de roles ya versionados y porque agrega su propia configuracion RLS/policies/grant para la tabla nueva.
+Se ubica despues de `004_rls_policies_grants.sql` porque depende de los helpers de roles ya versionados y agrega su propia configuracion RLS/policies/grant para la tabla.
 
 La migracion es no destructiva:
 
@@ -60,21 +66,16 @@ La migracion es no destructiva:
 
 La solicitud inicial mencionaba `company_id uuid not null`, pero la auditoria real de DEV reporto `company_id` como nullable.
 
-Este PR sigue la evidencia auditada y deja `company_id` nullable para no introducir una restriccion mas fuerte sin revisar las 682 filas existentes ni preparar una migracion de limpieza/backfill. Si negocio requiere `not null`, debe hacerse en un PR posterior con auditoria de datos y autorizacion separada.
+Este versionado sigue la evidencia auditada y deja `company_id` nullable para no introducir una restriccion mas fuerte sin revisar las 682 filas existentes ni preparar una migracion de limpieza/backfill. Si negocio requiere `not null`, debe hacerse en un PR posterior con auditoria de datos y autorizacion separada.
 
 ## Pendientes separados
 
-`payment_receipts.notes` no existe en DEV segun la auditoria previa del ledger. Ese pendiente queda fuera de este PR y debe resolverse en una decision separada: migracion formal de columna o ajuste de codigo para no depender de ella.
+`payment_receipts.notes` no existe en DEV segun la auditoria previa del ledger. Ese pendiente queda fuera y debe resolverse en una decision separada: migracion formal de columna o ajuste de codigo para no depender de ella.
 
-## Validacion esperada de este PR
+## Validacion esperada
 
-- No ejecutar SQL desde este PR.
-- No ejecutar migraciones desde este PR.
-- No tocar Supabase DEV real.
-- No tocar Supabase PROD.
-- No tocar produccion.
-- No tocar `main`.
-- No tocar n8n.
-- No modificar frontend/app.
-- No configurar variables ni secrets.
+- No ejecutar SQL desde PRs de documentacion.
+- Aplicar migraciones futuras con Supabase CLI, dry-run primero.
+- No tocar Supabase PROD sin backup y autorizacion.
+- No modificar frontend/app desde este frente.
 - Revisar humanamente si `company_id` debe permanecer nullable o pasar a `not null` en un PR posterior.

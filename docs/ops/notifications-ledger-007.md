@@ -1,75 +1,71 @@
 # Notifications ledger 007
 
-## Fuente
+## Estado actual
+
+`supabase/migrations/007_notifications.sql` ya esta versionado en `dev` como fuente de verdad del ledger de notificaciones.
+
+La migracion se queda. La feature de notificaciones se queda. Lo que se retiro fue el ceremonial operativo basado en paquetes `ops/precheck/load/postcheck` y workflows custom.
+
+La aplicacion futura de migraciones debe seguir el flujo Supabase CLI documentado en:
+
+```text
+docs/ops/supabase-cli-migrations.md
+```
+
+## Fuente historica
 
 Esta migracion se construyo a partir del export read-only de Supabase DEV:
 
-- Workflow: Deploy Supabase DEV Manual #8
 - Run: https://github.com/ramon1415/catalogo-proveedores-flux/actions/runs/28571934235
 - Artifact: supabase-dev-deployment-evidence
 - Artifact ID: 8031309875
-- Resultado: NOTIFICATIONS_LEDGER_EXPORT_READY_FOR_007_SOURCE
+- Resultado: `NOTIFICATIONS_LEDGER_EXPORT_READY_FOR_007_SOURCE`
 
-El artifact confirmo 2 tablas, 8 funciones, 1 trigger, RLS activo y 2 policies.
+Ese workflow/export fue evidencia historica para construir el DDL. No es el procedimiento vigente para aplicar migraciones.
 
 ## Problema que resuelve
 
-El esquema real de DEV tenia objetos de notificaciones fuera del ledger de migraciones. Sin este versionado, un release hacia main/produccion podria depender de tablas, funciones, trigger o policies que no existen en ambientes nuevos.
+El esquema real de DEV tenia objetos de notificaciones fuera del ledger de migraciones. Sin este versionado, un release hacia `main`/produccion podria depender de tablas, funciones, trigger o policies que no existen en ambientes nuevos.
 
-supabase/migrations/007_notifications.sql versiona esos objetos usando el DDL exportado desde DEV, sin copiar datos operativos.
+`supabase/migrations/007_notifications.sql` versiona esos objetos usando el DDL exportado desde DEV, sin copiar datos operativos.
 
 ## Objetos versionados
 
 Tablas:
 
-- public.notification_events
-- public.notification_delivery_attempts
+- `public.notification_events`
+- `public.notification_delivery_attempts`
 
 Funciones:
 
-- public.claim_pending_notification_events(integer, text)
-- public.enqueue_notification_event(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)
-- public.enqueue_notification_event_internal(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)
-- public.mark_notification_failed(uuid, text, text, text)
-- public.mark_notification_processed(uuid, text, text, text)
-- public.notification_current_profile_id()
-- public.notification_current_user_has_role(text[])
-- public.set_updated_at_notification_events()
+- `public.claim_pending_notification_events(integer, text)`
+- `public.enqueue_notification_event(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)`
+- `public.enqueue_notification_event_internal(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)`
+- `public.mark_notification_failed(uuid, text, text, text)`
+- `public.mark_notification_processed(uuid, text, text, text)`
+- `public.notification_current_profile_id()`
+- `public.notification_current_user_has_role(text[])`
+- `public.set_updated_at_notification_events()`
 
 Trigger:
 
-- set_updated_at_notification_events sobre public.notification_events
+- `set_updated_at_notification_events` sobre `public.notification_events`
 
 RLS / policies:
 
-- RLS activo en public.notification_events
-- RLS activo en public.notification_delivery_attempts
-- notification_events_select_self_or_admin
-- notification_delivery_attempts_select_self_or_admin
-
-Grants:
-
-- Tablas: authenticated recibe select; postgres y service_role reciben permisos completos como en el artifact.
-- Funciones: el DDL base viene del artifact DEV, pero los permisos EXECUTE se endurecieron explicitamente para evitar permisos default inseguros de PostgreSQL.
-- Todas las funciones revocan EXECUTE a PUBLIC, anon y authenticated antes de volver a conceder permisos minimos.
-- Se conserva GRANT EXECUTE a authenticated solo para wrappers/helpers necesarios y con control interno de rol o uso por RLS:
-  - claim_pending_notification_events(integer, text)
-  - enqueue_notification_event(text, text, uuid, text, text, uuid, text, text, jsonb, text, text)
-  - mark_notification_failed(uuid, text, text, text)
-  - mark_notification_processed(uuid, text, text, text)
-  - notification_current_profile_id()
-  - notification_current_user_has_role(text[])
-- enqueue_notification_event_internal(...) queda limitado a service_role y postgres porque es SECURITY DEFINER interna y no tiene guard de rol al inicio.
-- set_updated_at_notification_events() queda limitado a service_role y postgres porque es una funcion trigger y no necesita ser invocada por PUBLIC, anon ni authenticated.
+- RLS activo en `public.notification_events`
+- RLS activo en `public.notification_delivery_attempts`
+- `notification_events_select_self_or_admin`
+- `notification_delivery_attempts_select_self_or_admin`
 
 ## Hardening aplicado
 
-La estructura funcional de tablas, funciones, trigger, RLS y policies se mantiene basada en el artifact DEV 8031309875. El ajuste intencional esta en permisos EXECUTE:
+La estructura funcional viene del artifact DEV `8031309875`. El ajuste intencional esta en permisos `EXECUTE`:
 
-- Se agregaron REVOKE EXECUTE explicitos para PUBLIC, anon y authenticated en las 8 funciones.
-- Se eliminaron grants PUBLIC/anon/authenticated de la funcion trigger set_updated_at_notification_events().
-- Se evito que PostgreSQL deje EXECUTE a PUBLIC por default en funciones SECURITY DEFINER.
-- Este hardening altera levemente la equivalencia de grants con DEV, pero en direccion mas segura para DEV formal y PROD.
+- Se agregaron `REVOKE EXECUTE` explicitos para `PUBLIC`, `anon` y `authenticated` en las 8 funciones.
+- Se evita que PostgreSQL deje `EXECUTE` a `PUBLIC` por default en funciones `SECURITY DEFINER`.
+- `enqueue_notification_event_internal(...)` queda limitado a `service_role` y `postgres` porque es interna.
+- `set_updated_at_notification_events()` queda limitado a `service_role` y `postgres` porque es funcion trigger.
 
 ## Seguridad
 
@@ -77,45 +73,24 @@ La estructura funcional de tablas, funciones, trigger, RLS y policies se mantien
 - La migracion no importa workflows de n8n.
 - La migracion no activa schedules, cron ni envios reales por si misma.
 - La migracion no contiene secrets ni llaves.
-- service_role aparece solo como rol DB en grants exportados, no como secret/key de frontend.
+- `service_role` aparece solo como rol DB en grants exportados, no como secret/key de frontend.
 
-Nota: los cuerpos de funciones contienen logica con insert/update porque eso forma parte del DDL real exportado por pg_get_functiondef. Crear o reemplazar la funcion no ejecuta esos cuerpos.
+Nota: los cuerpos de funciones contienen logica con insert/update porque eso forma parte del DDL real exportado por `pg_get_functiondef`. Crear o reemplazar la funcion no ejecuta esos cuerpos.
 
-## Idempotencia
+## Validacion vigente
 
-La migracion usa:
+No preparar paquetes operativos por migracion.
 
-- create table if not exists
-- constraints protegidas por checks en pg_constraint
-- create index if not exists
-- create or replace function
-- drop trigger if exists seguido de create trigger
-- alter table ... enable row level security
-- drop policy if exists seguido de create policy
-- revoke execute repetibles
-- grants repetibles
+Para DEV/PROD, usar Supabase CLI con revision humana:
 
-Debe funcionar en PROD donde los objetos aun no existen y en DEV donde ya existen ad-hoc.
+```bash
+supabase db push --dry-run
+supabase db push
+```
 
-## Riesgos conocidos
+Antes de aplicar, revisar el historial remoto en `supabase_migrations.schema_migrations`, porque parte del esquema fue aplicado previamente con workflows custom. Si el historial no coincide con la realidad de la base, documentar un plan separado de `supabase migration repair`; no ejecutarlo sin autorizacion.
 
-- Las funciones SECURITY DEFINER deben revisarse con especial cuidado antes de ejecucion productiva.
-- La funcion claim_pending_notification_events conserva default manual-dev exportado desde DEV. No activa ejecuciones por si misma, pero conviene revisar si debe ajustarse en una migracion posterior.
-- CREATE TABLE IF NOT EXISTS no agrega columnas faltantes si una tabla existe parcialmente. El paquete operativo DEV debe incluir precheck de columnas antes de ejecutar 007.
-- Este PR no resuelve n8n ni envio real de correos.
-
-## Validacion posterior sugerida
-
-Despues de mergear a dev, preparar/aplicar un paquete operativo controlado para ejecutar solo 007_notifications.sql en Supabase DEV.
-
-Precheck sugerido:
-
-- Confirmar que se ejecuta contra Supabase DEV.
-- Confirmar existencia de prerequisitos: profiles, roles, user_roles y gen_random_uuid().
-- Confirmar existencia y estructura de columnas si las tablas notification_events o notification_delivery_attempts ya existen parcialmente.
-- Confirmar que no se ejecutara contra PROD.
-
-Postcheck sugerido:
+Validaciones manuales esperadas despues de aplicar:
 
 - Confirmar existencia de las 2 tablas.
 - Confirmar 8 funciones.
@@ -123,10 +98,10 @@ Postcheck sugerido:
 - Confirmar RLS activo en ambas tablas.
 - Confirmar 2 policies.
 - Confirmar grants esperados.
-- Confirmar que enqueue_notification_event_internal no tiene EXECUTE para PUBLIC, anon ni authenticated.
-- Confirmar que set_updated_at_notification_events no tiene EXECUTE para PUBLIC, anon ni authenticated.
+- Confirmar que `enqueue_notification_event_internal` no tiene `EXECUTE` para `PUBLIC`, `anon` ni `authenticated`.
+- Confirmar que `set_updated_at_notification_events` no tiene `EXECUTE` para `PUBLIC`, `anon` ni `authenticated`.
 - Confirmar que no se copiaron datos operativos.
 
 ## Relacion con release
 
-Esta migracion es prerequisito para desbloquear el ledger de notificaciones antes de avanzar con Fase 1 compania / 008_company_level y antes de revalidar el release #147.
+Esta migracion es prerequisito de ledger para notificaciones y debe viajar como migracion versionada, no como paquete operativo. Antes de release, actualizar la descripcion de PR #147 para reflejar Supabase CLI y retirar referencias a `ops` como flujo vigente.

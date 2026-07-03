@@ -4,12 +4,19 @@ This document records the release blocker found before merging PR #147 to `main`
 
 ## Current decision
 
-Do not merge PR #147 yet.
+Do not merge PR #147 until the release description and production migration procedure match the current strategy.
 
-Resolve these blockers first:
+Current strategy:
 
-1. Bring the DB migration ledger in line with the real DB objects.
-2. Add or approve a production Supabase deployment procedure.
+- Keep `supabase/migrations/` as the schema source of truth.
+- Retire custom `ops/precheck/load/postcheck` packages and manual SQL deployment workflows.
+- Apply future schema changes with Supabase CLI, dry-run first, with explicit authorization by environment.
+
+See:
+
+```text
+docs/ops/supabase-cli-migrations.md
+```
 
 Company-level F1 must start later as:
 
@@ -17,7 +24,7 @@ Company-level F1 must start later as:
 008_company_level
 ```
 
-Do not implement company-level F1 in this PR.
+Do not implement company-level F1 in this cleanup/release step.
 
 ## CLAUDE.md
 
@@ -53,84 +60,45 @@ Status: versioned.
 
 Important: `company_id` remains nullable because the DEV audit showed it as nullable. Any future `NOT NULL` decision belongs in a separate data-quality PR after auditing null rows.
 
-## Transfer receipts / PR #134
+## Transfer receipts
 
-Status: base objects versioned; `payment_receipts.notes` remains a separate pending decision.
+Status: versioned.
 
 The ledger contains:
 
 - `public.payment_receipts` in `001d_payment_tables.sql`
 - transfer receipt write policies in `004b_payment_receipts_policies.sql`
-- DEV and PROD operational packages for applying/validating 004b
 
-The known pending item is:
+The old operational packages for applying 004b/004c are retired by the cleanup strategy. Future application should use Supabase CLI.
+
+The known pending item remains:
 
 ```text
 payment_receipts.notes
 ```
 
-Prior DEV validation reported that `payment_receipts.notes` does not exist in DEV. This PR does not add it. Decide later whether the app should stop expecting that column or whether a separate migration should add it.
+Prior DEV validation reported that `payment_receipts.notes` does not exist in DEV. Decide later whether the app should stop expecting that column or whether a separate migration should add it.
 
 ## Notifications
 
-Status: not versioned yet.
+Status: versioned.
 
-Static repo audit found references to:
-
-- `public.notification_events`
-- `public.notification_delivery_attempts`
-
-The references appear in operational/audit files and n8n artifacts, but there is no exact DDL in `supabase/migrations/` for:
-
-- notification tables
-- notification functions
-- notification trigger
-- notification RLS / policies
-- notification grants
-
-Carlos reported DEV has ad-hoc notification objects:
-
-- 2 tables
-- 8 functions
-- 1 trigger
-- RLS / policies
-
-Because the exact DDL is not present in the repo, this PR intentionally does not create `supabase/migrations/007_notifications.sql`.
-
-Instead, it adds a read-only export package:
-
-```text
-ops/schema-audit/notifications-ledger-export/
-```
-
-Use that package to collect catalog definitions from DEV. Then create `007_notifications.sql` in a separate reviewed PR from the exported DDL.
-
-## Future 007
-
-The next migration needed for ledger convergence is expected to be:
-
-```text
-supabase/migrations/007_notifications.sql
-```
-
-It must be created only from exact DEV DDL evidence, not inferred from n8n workflows or SQL that merely references the tables.
-
-Expected contents after export:
+`supabase/migrations/007_notifications.sql` now versions:
 
 - 2 notification tables
 - 8 notification functions
 - 1 trigger
 - RLS / policies
-- grants
+- grants and EXECUTE hardening
 - idempotent DDL
-- no secrets
-- no service_role in frontend
 - no operational data
 - no real sends activated by the migration itself
 
+The read-only export packages and manual workflow evidence were used to build 007. They are historical evidence, not the current deployment procedure.
+
 ## Future 008
 
-After `007_notifications.sql` exists and is reviewed, company-level F1 can start as:
+After the ledger is clean and release #147 is re-described with the Supabase CLI strategy, company-level F1 can start as:
 
 ```text
 008_company_level
@@ -142,16 +110,14 @@ That work is explicitly out of scope here.
 
 Keep PR #147 Ready for review but do not merge it to `main` until:
 
-1. The notification DDL export has been run in DEV.
-2. `007_notifications.sql` has been created from the export, reviewed, and merged to `dev`.
-3. A production Supabase workflow or external procedure is approved.
-4. The release PR is updated or rechecked after those PRs land.
+1. PR #155 cleanup is reviewed and either merged or explicitly rejected.
+2. PR #147 description is updated to remove `ops` packages and custom workflows as current release procedure.
+3. The production migration procedure is confirmed as Supabase CLI with backup, dry-run, approval, apply, and smoke test.
+4. The migration history risk is reviewed for DEV/PROD because earlier SQL was applied by custom workflows.
 
 ## Confirmations
 
-This PR only prepares ledger convergence.
-
-It does not:
+This cleanup strategy does not:
 
 - merge PR #147
 - touch `main`
