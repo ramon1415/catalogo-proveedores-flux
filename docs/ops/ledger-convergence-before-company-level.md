@@ -34,7 +34,7 @@ Do not implement company-level F1 in this cleanup/release step.
 
 Status: versioned.
 
-`supabase/migrations/001j_number_sequences.sql` includes:
+`supabase/migrations/00110_number_sequences.sql` includes:
 
 ```sql
 CREATE SEQUENCE IF NOT EXISTS public.payment_request_number_seq;
@@ -47,7 +47,7 @@ This is safe for environments where the sequences already exist manually, includ
 
 Status: versioned.
 
-`supabase/migrations/004a_historical_actuals.sql` versions the audited DEV structure:
+`supabase/migrations/00401_historical_actuals.sql` versions the audited DEV structure:
 
 - `public.historical_actuals`
 - primary key on `id`
@@ -66,8 +66,8 @@ Status: versioned.
 
 The ledger contains:
 
-- `public.payment_receipts` in `001d_payment_tables.sql`
-- transfer receipt write policies in `004b_payment_receipts_policies.sql`
+- `public.payment_receipts` in `00104_payment_tables.sql`
+- transfer receipt write policies in `00402_payment_receipts_policies.sql`
 
 The old operational packages for applying 004b/004c are retired by the cleanup strategy. Future application should use Supabase CLI.
 
