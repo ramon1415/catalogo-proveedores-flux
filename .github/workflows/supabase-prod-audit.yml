@@ -1,0 +1,250 @@
+name: Supabase PROD Read-only Schema Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_prod:
+        description: "Type the PROD Supabase project ref to confirm the target"
+        required: true
+        type: string
+      confirm_mode:
+        description: "Type audit to confirm this workflow only runs read-only metadata checks"
+        required: true
+        default: "audit"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-readonly-schema-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Supabase PROD read-only schema audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: supabase-production
+
+    env:
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+
+    steps:
+      - name: Validate audit guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+            echo "::error::This workflow is restricted to the dev branch."
+            exit 1
+          fi
+
+          if [ "${CONFIRM_MODE}" != "audit" ]; then
+            echo "::error::confirm_mode must be exactly: audit"
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_PROJECT_ID}" ]; then
+            echo "::error::SUPABASE_PROJECT_REF_PROD environment variable is not configured."
+            exit 1
+          fi
+
+          if [ "${CONFIRM_PROD}" != "${SUPABASE_PROJECT_ID}" ]; then
+            echo "::error::confirm_prod does not match the configured PROD project ref."
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_DB_PASSWORD}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD_PROD secret is not configured."
+            exit 1
+          fi
+
+          echo "Guardrails passed. Running read-only metadata audit only."
+
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Ensure PostgreSQL client is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          psql --version
+
+      - name: Run read-only metadata audit
+        shell: bash
+        env:
+          PGCONNECT_TIMEOUT: "15"
+          PGOPTIONS: "-c default_transaction_read_only=on -c statement_timeout=15000"
+        run: |
+          set -euo pipefail
+
+          mkdir -p audit-output
+          REPORT="audit-output/supabase-prod-readonly-schema-audit.md"
+          PSQL_URI="host=db.${SUPABASE_PROJECT_ID}.supabase.co port=5432 dbname=postgres user=postgres sslmode=require"
+          export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
+
+          {
+            echo "# Supabase PROD read-only schema audit"
+            echo ""
+            echo "- Environment: supabase-production"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode: audit only"
+            echo "- Writes: not executed by this workflow"
+            echo "- db push: not executed by this workflow"
+            echo "- migration repair: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
+            echo ""
+          } > "${REPORT}"
+
+          run_query() {
+            local title="$1"
+            local query
+            query="$(cat)"
+            {
+              echo "## ${title}"
+              echo '```'
+              psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "${query}"
+              echo '```'
+              echo ""
+            } >> "${REPORT}"
+          }
+
+          run_query "Connection identity" <<'SQL'
+          select
+            current_database() as current_database,
+            current_user as current_user,
+            now() as checked_at;
+SQL
+
+          run_query "Schema migrations table status" <<'SQL'
+          select
+            case
+              when to_regclass('supabase_migrations.schema_migrations') is null then 'missing'
+              else 'present'
+            end as schema_migrations_table_status;
+SQL
+
+          migrations_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'missing' else 'present' end;")"
+          {
+            echo "## Supabase migration history"
+            echo '```'
+          } >> "${REPORT}"
+          if [ "${migrations_status}" = "present" ]; then
+            psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "select * from supabase_migrations.schema_migrations order by version;" >> "${REPORT}"
+          else
+            echo "supabase_migrations.schema_migrations is missing" >> "${REPORT}"
+          fi
+          {
+            echo '```'
+            echo ""
+          } >> "${REPORT}"
+
+          run_query "Public tables" <<'SQL'
+          select table_schema, table_name
+          from information_schema.tables
+          where table_schema = 'public'
+          order by table_name;
+SQL
+
+          run_query "Public views" <<'SQL'
+          select table_schema, table_name
+          from information_schema.views
+          where table_schema = 'public'
+          order by table_name;
+SQL
+
+          run_query "Public functions" <<'SQL'
+          select p.oid::regprocedure::text as function_signature
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+          order by function_signature;
+SQL
+
+          run_query "Public table RLS flags" <<'SQL'
+          select c.relname as table_name, c.relrowsecurity as rls_enabled
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relkind = 'r'
+          order by c.relname;
+SQL
+
+          run_query "Public policies" <<'SQL'
+          select schemaname, tablename, policyname, roles, cmd
+          from pg_policies
+          where schemaname = 'public'
+          order by tablename, policyname;
+SQL
+
+          storage_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('storage.buckets') is null then 'missing' else 'present' end;")"
+          {
+            echo "## Storage buckets"
+            echo '```'
+          } >> "${REPORT}"
+          if [ "${storage_status}" = "present" ]; then
+            psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "select id, name, public from storage.buckets order by name;" >> "${REPORT}"
+          else
+            echo "storage.buckets is missing" >> "${REPORT}"
+          fi
+          {
+            echo '```'
+            echo ""
+          } >> "${REPORT}"
+
+          run_query "Critical object presence" <<'SQL'
+          select object_name, to_regclass(object_name) is not null as exists
+          from (
+            values
+              ('public.profiles'),
+              ('public.roles'),
+              ('public.user_roles'),
+              ('public.suppliers'),
+              ('public.payment_requests'),
+              ('public.payment_layouts'),
+              ('public.payment_layout_lines'),
+              ('public.payment_receipts'),
+              ('public.historical_actuals'),
+              ('public.notification_events'),
+              ('public.notification_delivery_attempts')
+          ) as critical_objects(object_name)
+          order by object_name;
+SQL
+
+          unset PGPASSWORD
+          cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-readonly-schema-audit
+          path: audit-output/supabase-prod-readonly-schema-audit.md
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize audit controls
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Audit controls"
+            echo ""
+            echo "- Environment: supabase-production"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode: audit only"
+            echo "- Real db push: not executed by this workflow"
+            echo "- Migration repair: not executed by this workflow"
+            echo "- Writes/destructive SQL: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
+          } >> "${GITHUB_STEP_SUMMARY}"
