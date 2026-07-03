@@ -1,4 +1,4 @@
-name: Supabase PROD CLI Dry Run
+name: Supabase PROD CLI Release Gate
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Type dry-run to confirm this workflow must not apply migrations"
+        description: "Type dry-run or audit-readonly"
         required: true
         default: "dry-run"
         type: string
@@ -16,15 +16,19 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
-  group: supabase-prod-cli-dry-run
+  group: supabase-prod-cli-release-gate
   cancel-in-progress: false
 
 jobs:
-  dry_run:
-    name: Supabase PROD migration dry-run
+  release_gate:
+    name: Supabase PROD release gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: supabase-production
 
     env:
@@ -36,7 +40,6 @@ jobs:
 
     steps:
       - name: Validate release guardrails
-        shell: bash
         run: |
           set -euo pipefail
 
@@ -45,10 +48,14 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "dry-run" ]; then
-            echo "::error::confirm_mode must be exactly: dry-run"
-            exit 1
-          fi
+          case "${CONFIRM_MODE}" in
+            dry-run|audit-readonly)
+              ;;
+            *)
+              echo "::error::confirm_mode must be exactly one of: dry-run, audit-readonly"
+              exit 1
+              ;;
+          esac
 
           if [ -z "${SUPABASE_PROJECT_ID}" ]; then
             echo "::error::SUPABASE_PROJECT_REF_PROD environment variable is not configured."
@@ -70,7 +77,8 @@ jobs:
             exit 1
           fi
 
-          echo "Guardrails passed. Running dry-run only."
+          echo "Guardrails passed. Mode: ${CONFIRM_MODE}."
+          echo "No real db push and no migration repair are executed by this workflow."
 
       - name: Check out dev
         uses: actions/checkout@v4
@@ -81,39 +89,146 @@ jobs:
         uses: supabase/setup-cli@v2
 
       - name: Show migration files in release branch
-        shell: bash
+        if: ${{ inputs.confirm_mode == 'dry-run' }}
         run: |
           set -euo pipefail
           find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort
 
       - name: Link Supabase PROD project
-        shell: bash
         run: |
           set -euo pipefail
           supabase link --project-ref "${SUPABASE_PROJECT_ID}"
 
       - name: Review linked migration history
-        shell: bash
         run: |
           set -euo pipefail
           supabase migration list --linked
 
       - name: Dry-run Supabase PROD migrations
-        shell: bash
+        if: ${{ inputs.confirm_mode == 'dry-run' }}
         run: |
           set -euo pipefail
           supabase db push --linked --dry-run
 
-      - name: Summarize dry-run
+      - name: Install PostgreSQL client for read-only audit
+        if: ${{ inputs.confirm_mode == 'audit-readonly' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Audit PROD schema metadata read-only
+        if: ${{ inputs.confirm_mode == 'audit-readonly' }}
+        run: |
+          set -euo pipefail
+
+          audit_file="supabase-prod-readonly-audit.txt"
+          db_host="db.${SUPABASE_PROJECT_ID}.supabase.co"
+          export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
+
+          psql_args=(
+            "host=${db_host} port=5432 dbname=postgres user=postgres sslmode=require"
+            -v ON_ERROR_STOP=1
+            -X
+            -P pager=off
+          )
+
+          {
+            echo "## Supabase PROD read-only schema audit"
+            echo ""
+            echo "Environment: supabase-production"
+            echo "Branch: ${GITHUB_REF_NAME}"
+            echo "Mode: audit-readonly"
+            echo "Real db push: not executed"
+            echo "Migration repair: not executed"
+            echo ""
+          } > "${audit_file}"
+
+          psql "${psql_args[@]}" <<'SQL' | tee -a "${audit_file}"
+          BEGIN READ ONLY;
+          SET LOCAL statement_timeout = '30s';
+
+          \echo '## supabase_migrations.schema_migrations'
+          select *
+          from supabase_migrations.schema_migrations
+          order by version;
+
+          \echo '## public tables'
+          select table_name
+          from information_schema.tables
+          where table_schema = 'public'
+            and table_type = 'BASE TABLE'
+          order by table_name;
+
+          \echo '## public views'
+          select table_name
+          from information_schema.views
+          where table_schema = 'public'
+          order by table_name;
+
+          \echo '## public functions'
+          select p.oid::regprocedure::text as function_signature
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+          order by function_signature;
+
+          \echo '## public table RLS'
+          select c.relname as table_name, c.relrowsecurity as rls_enabled
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relkind = 'r'
+          order by c.relname;
+
+          \echo '## public policies'
+          select schemaname, tablename, policyname
+          from pg_policies
+          where schemaname = 'public'
+          order by tablename, policyname;
+
+          \echo '## storage.buckets presence'
+          select to_regclass('storage.buckets') as storage_buckets_regclass;
+
+          COMMIT;
+          SQL
+
+          if [ "$(psql "${psql_args[@]}" -Atqc "select to_regclass('storage.buckets') is not null")" = "t" ]; then
+            psql "${psql_args[@]}" <<'SQL' | tee -a "${audit_file}"
+          BEGIN READ ONLY;
+          SET LOCAL statement_timeout = '30s';
+
+          \echo '## storage buckets'
+          select id, name, public
+          from storage.buckets
+          order by name;
+
+          COMMIT;
+          SQL
+          else
+            {
+              echo "## storage buckets"
+              echo "storage.buckets does not exist."
+            } | tee -a "${audit_file}"
+          fi
+
+      - name: Upload PROD read-only audit artifact
+        if: ${{ inputs.confirm_mode == 'audit-readonly' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-readonly-audit
+          path: supabase-prod-readonly-audit.txt
+          if-no-files-found: error
+
+      - name: Summarize release gate
         if: always()
-        shell: bash
         run: |
           {
-            echo "## Supabase PROD CLI dry-run"
+            echo "## Supabase PROD CLI release gate"
             echo ""
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Mode: dry-run only"
+            echo "- Mode: ${CONFIRM_MODE}"
             echo "- Real db push: not executed by this workflow"
             echo "- Migration repair: not executed by this workflow"
             echo "- n8n: not touched by this workflow"
