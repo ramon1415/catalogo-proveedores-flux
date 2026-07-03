@@ -7,6 +7,8 @@ const CXC_CURRENCY_LENGTH = 3
 const CXC_AMOUNT_LENGTH = 16
 const CXC_CONCEPT_LENGTH = 30
 const CXC_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + CXC_CONCEPT_LENGTH
+const CXC_LINE_BREAK = "\r\n"
+const CXC_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}$/
 
 let layouts = []
 let companies = []
@@ -176,6 +178,10 @@ function renderLayoutsTable() {
 
 function renderLayoutActions(l) {
   const actions = [`<button class="small-btn" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Ver lineas</button>`]
+
+  if (l.status !== "cancelled") {
+    actions.push(`<button class="small-btn" type="button" onclick="validateLayoutCxc('${l.id}')" style="white-space:nowrap">Validar layout</button>`)
+  }
 
   if (l.status === "draft") {
     actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar layout de pagos</button>`)
@@ -421,6 +427,12 @@ async function downloadLayoutCxc(layoutId) {
     const cxcLines = lines.filter((line) => line.status !== "bank_rejected")
     const fileName = buildCxcFileName(layout)
     const content = buildCxcContent(cxcLines)
+    const validation = validateCxcContent(content)
+
+    if (!validation.ok) {
+      showToast("Layout invalido", validation.errors[0], "danger")
+      return
+    }
 
     downloadTextFile(content, fileName)
 
@@ -431,7 +443,7 @@ async function downloadLayoutCxc(layoutId) {
       return
     }
 
-    showToast("Archivo CxC BBVA generado", `${fileName} se descargo correctamente.`, "success")
+    showToast("Archivo CxC BBVA generado", `${fileName} se descargo correctamente. ${validation.lineCount} linea(s) validas de ${CXC_LINE_LENGTH} caracteres.`, "success")
     await loadLayouts()
   } catch (error) {
     showToast("No se pudo generar CxC BBVA", friendlyError(error), "danger")
@@ -551,6 +563,7 @@ async function submitRejectLine(event) {
 
 window.openLayoutLines = openLayoutLines
 window.downloadLayoutCxc = downloadLayoutCxc
+window.validateLayoutCxc = validateLayoutCxc
 window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
@@ -578,6 +591,7 @@ function validateLayoutLines(lines) {
       const destinationDigits = cxcDigits(line.destination_value)
       const amount = numberValue(line.amount)
       const amountText = formatCxcAmount(line.amount)
+      const conceptText = normalizeCxcText(line.payment_concept)
 
       if (!sourceDigits) missing.push("cuenta origen requerida")
       else if (sourceDigits.length > CXC_ACCOUNT_LENGTH) missing.push("cuenta origen excede 18 digitos")
@@ -589,6 +603,7 @@ function validateLayoutLines(lines) {
       else if (amountText.length > CXC_AMOUNT_LENGTH) missing.push("monto excede 16 caracteres")
 
       if (!notBlank(line.payment_concept)) missing.push("concepto requerido")
+      else if (!conceptText) missing.push("concepto sin caracteres validos para BBVA")
 
       return { payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
     })
@@ -597,7 +612,7 @@ function validateLayoutLines(lines) {
 
 function buildCxcContent(lines) {
   const rows = lines.map(buildCxcLine)
-  return `${rows.join("\r\n")}\r\n`
+  return rows.join(CXC_LINE_BREAK)
 }
 
 function buildCxcLine(line) {
@@ -613,7 +628,127 @@ function buildCxcLine(line) {
     throw new Error(`cxc_line_length_invalid_${row.length}`)
   }
 
+  if (!CXC_LINE_PATTERN.test(row)) {
+    throw new Error("cxc_line_invalid_characters")
+  }
+
   return row
+}
+
+function validateCxcContent(content) {
+  const errors = []
+
+  if (!content) errors.push("Layout invalido: el archivo no tiene lineas para descargar.")
+  if (content.charCodeAt(0) === 0xfeff) errors.push("Layout invalido: el archivo tiene BOM al inicio.")
+  if (content.startsWith("\r") || content.startsWith("\n")) errors.push("Layout invalido: existe una linea vacia al inicio del archivo.")
+  if (content.endsWith("\r") || content.endsWith("\n")) errors.push("Layout invalido: existe una linea vacia al final del archivo.")
+  if (content.includes("|")) errors.push("Layout invalido: el archivo contiene el separador | y debe ser ancho fijo.")
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00a0\u2000-\u200f\u2028\u2029\ufeff]/.test(content)) {
+    errors.push("Layout invalido: el archivo contiene caracteres invisibles o no permitidos.")
+  }
+  if (/[\r\n]/.test(content.replaceAll(CXC_LINE_BREAK, ""))) {
+    errors.push("Layout invalido: los saltos de linea deben ser CRLF.")
+  }
+
+  const lines = content ? content.split(CXC_LINE_BREAK) : []
+  const lineLengths = lines.map((line) => line.length)
+
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1
+    if (!line) {
+      errors.push(`Layout invalido: linea ${lineNumber} esta vacia.`)
+      return
+    }
+    if (line.length !== CXC_LINE_LENGTH) {
+      errors.push(`Layout invalido: linea ${lineNumber} tiene longitud ${line.length}, esperada ${CXC_LINE_LENGTH}.`)
+    }
+
+    const fields = parseCxcLine(line)
+    if (!/^\d{18}$/.test(fields.destinationAccount)) errors.push(`Layout invalido: cuenta destino de linea ${lineNumber} debe tener 18 digitos sin espacios.`)
+    if (!/^\d{18}$/.test(fields.sourceAccount)) errors.push(`Layout invalido: cuenta origen de linea ${lineNumber} debe tener 18 digitos sin espacios.`)
+    if (fields.currency !== CXC_CURRENCY) errors.push(`Layout invalido: moneda de linea ${lineNumber} debe ser ${CXC_CURRENCY}.`)
+    if (!/^\d{13}\.\d{2}$/.test(fields.amount)) errors.push(`Layout invalido: importe de linea ${lineNumber} debe medir 16 caracteres con punto decimal y 2 decimales.`)
+    if (!/^[A-Z0-9 .,&\/-]{30}$/.test(fields.concept)) errors.push(`Layout invalido: concepto de linea ${lineNumber} contiene caracteres no permitidos.`)
+    if (!CXC_LINE_PATTERN.test(line)) errors.push(`Layout invalido: linea ${lineNumber} no cumple la estructura BBVA CxC esperada.`)
+  })
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    lines,
+    lineCount: lines.length,
+    lineLengths,
+  }
+}
+
+function parseCxcLine(line) {
+  return {
+    destinationAccount: line.slice(0, 18),
+    sourceAccount: line.slice(18, 36),
+    currency: line.slice(36, 39),
+    amount: line.slice(39, 55),
+    concept: line.slice(55, 85),
+  }
+}
+
+function maskCxcLine(line) {
+  const fields = parseCxcLine(line.padEnd(CXC_LINE_LENGTH, " "))
+  const mask = (value) => value ? `****${String(value).slice(-4)}` : "****"
+  return [
+    `destino ${mask(fields.destinationAccount)}`,
+    `origen ${mask(fields.sourceAccount)}`,
+    `moneda ${fields.currency || "---"}`,
+    `importe ${fields.amount || "---"}`,
+    `concepto ${fields.concept.trim().slice(0, 18) || "---"}`,
+  ].join(" | ")
+}
+
+async function validateLayoutCxc(layoutId) {
+  const layout = layouts.find((item) => item.id === layoutId)
+  if (!layout) return
+
+  const { data: lines, error } = await fetchLayoutLines(layoutId)
+  if (error) { showToast("No se pudo validar", rlsHint("payment_layout_lines", "select", error), "danger"); return }
+
+  const cxcLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  if (!cxcLines.length) { showToast("Sin lineas", "Este layout no tiene lineas activas para validar.", "warning"); return }
+
+  const invalidLines = validateLayoutLines(cxcLines)
+  if (invalidLines.length) {
+    const first = invalidLines[0]
+    showToast("Layout invalido", `Solicitud ${first.request_number || first.payment_request_id}: ${first.missing_fields.join(", ")}.`, "danger")
+    return
+  }
+
+  try {
+    const content = buildCxcContent(cxcLines)
+    const validation = validateCxcContent(content)
+    const firstLineDebug = maskCxcLine(validation.lines[0] || "")
+
+    if (!validation.ok) {
+      showToast("Layout invalido", validation.errors[0], "danger")
+      console.warn("Diagnostico CxC BBVA", {
+        layout: layout.layout_number || layout.id,
+        expectedLength: CXC_LINE_LENGTH,
+        lineCount: validation.lineCount,
+        lineLengths: validation.lineLengths,
+        firstLine: firstLineDebug,
+        errors: validation.errors,
+      })
+      return
+    }
+
+    console.info("Diagnostico CxC BBVA", {
+      layout: layout.layout_number || layout.id,
+      expectedLength: CXC_LINE_LENGTH,
+      lineCount: validation.lineCount,
+      lineLengths: validation.lineLengths,
+      firstLine: firstLineDebug,
+    })
+    showToast("Layout valido", `${validation.lineCount} linea(s). Largo esperado/real linea 1: ${CXC_LINE_LENGTH}/${validation.lineLengths[0]}. ${firstLineDebug}`, "success")
+  } catch (error) {
+    showToast("Layout invalido", friendlyError(error), "danger")
+  }
 }
 
 function buildCxcFileName(layout) {
@@ -637,6 +772,7 @@ function formatCxcAmount(value) {
 
 function formatCxcConcept(value) {
   const text = normalizeCxcText(value)
+  if (!text) throw new Error("concepto CxC requerido")
   return text.slice(0, CXC_CONCEPT_LENGTH).padEnd(CXC_CONCEPT_LENGTH, " ")
 }
 
@@ -749,6 +885,8 @@ function friendlyError(error) {
   if (message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("url scheme")) {
     return "No se pudo conectar con Supabase. Revisa la conexion y vuelve a intentar."
   }
+  if (message.includes("cxc_line_length_invalid_")) return `Layout invalido: una linea no tiene ${CXC_LINE_LENGTH} caracteres.`
+  if (message.includes("cxc_line_invalid_characters")) return "Layout invalido: una linea contiene caracteres no permitidos."
   if (message.toLowerCase().includes("row-level security") || error?.code === "42501") return "La operacion fue bloqueada por RLS. Revisa policies."
   if (message.toLowerCase().includes("permission denied")) return "Faltan permisos para ejecutar la operacion."
   return message
