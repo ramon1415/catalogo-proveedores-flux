@@ -1,0 +1,120 @@
+name: Supabase PROD CLI Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_prod:
+        description: "Type the PROD Supabase project ref to confirm the target"
+        required: true
+        type: string
+      confirm_mode:
+        description: "Type dry-run to confirm this workflow must not apply migrations"
+        required: true
+        default: "dry-run"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-cli-dry-run
+  cancel-in-progress: false
+
+jobs:
+  dry_run:
+    name: Supabase PROD migration dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: supabase-production
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+
+    steps:
+      - name: Validate release guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+            echo "::error::This workflow is restricted to the dev branch."
+            exit 1
+          fi
+
+          if [ "${CONFIRM_MODE}" != "dry-run" ]; then
+            echo "::error::confirm_mode must be exactly: dry-run"
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_PROJECT_ID}" ]; then
+            echo "::error::SUPABASE_PROJECT_REF_PROD environment variable is not configured."
+            exit 1
+          fi
+
+          if [ "${CONFIRM_PROD}" != "${SUPABASE_PROJECT_ID}" ]; then
+            echo "::error::confirm_prod does not match the configured PROD project ref."
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          if [ -z "${SUPABASE_DB_PASSWORD}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD_PROD secret is not configured."
+            exit 1
+          fi
+
+          echo "Guardrails passed. Running dry-run only."
+
+      - name: Check out dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+
+      - name: Show migration files in release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort
+
+      - name: Link Supabase PROD project
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "${SUPABASE_PROJECT_ID}"
+
+      - name: Review linked migration history
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --linked
+
+      - name: Dry-run Supabase PROD migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db push --linked --dry-run
+
+      - name: Summarize dry-run
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Supabase PROD CLI dry-run"
+            echo ""
+            echo "- Environment: supabase-production"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode: dry-run only"
+            echo "- Real db push: not executed by this workflow"
+            echo "- Migration repair: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
+          } >> "${GITHUB_STEP_SUMMARY}"
