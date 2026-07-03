@@ -26,7 +26,7 @@ En el ledger, `public.payment_receipts` tenia RLS activo desde `004_rls_policies
 
 ## Cambio incluido
 
-- `supabase/migrations/004b_payment_receipts_policies.sql`
+- `supabase/migrations/00402_payment_receipts_policies.sql`
   - Mantiene RLS activo.
   - Permite lectura a usuarios autenticados con `flux_member_roles()`.
   - Permite insert/update/delete a usuarios autenticados con `flux_approver_roles()`.

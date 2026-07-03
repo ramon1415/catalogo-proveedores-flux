@@ -4,28 +4,28 @@ Paquete generado desde exports completos de Supabase dev para preparar un proyec
 
 ## Orden de ejecucion propuesto
 
-1. `001a_extensions_and_types.sql` - extensiones y tipos/enums.
-2. `001b_core_tables.sql` - perfiles, roles, empresas, centros, proveedores, cuentas y documentos base.
-3. `001c_budget_tables.sql` - tablas presupuestales e importacion.
-4. `001d_payment_tables.sql` - solicitudes, aprobaciones y comprobantes de pago.
-5. `001e_layout_tables.sql` - layouts y lineas de layout.
-6. `001f_cash_tables.sql` - efectivo, comprobaciones y tickets.
-7. `001g_income_tables.sql` - socios, cuotas, cobros, incidencias, facturas y entidades comerciales/eventos.
-8. `001h_closure_dashboard_tables.sql` - cierre mensual y foreign keys finales.
-9. `001i_views.sql` - views presupuestales y de eventos.
-10. `001j_number_sequences.sql` - secuencias numericas usadas por RPCs de solicitudes y layouts.
+1. `00101_extensions_and_types.sql` - extensiones y tipos/enums.
+2. `00102_core_tables.sql` - perfiles, roles, empresas, centros, proveedores, cuentas y documentos base.
+3. `00103_budget_tables.sql` - tablas presupuestales e importacion.
+4. `00104_payment_tables.sql` - solicitudes, aprobaciones y comprobantes de pago.
+5. `00105_layout_tables.sql` - layouts y lineas de layout.
+6. `00106_cash_tables.sql` - efectivo, comprobaciones y tickets.
+7. `00107_income_tables.sql` - socios, cuotas, cobros, incidencias, facturas y entidades comerciales/eventos.
+8. `00108_closure_dashboard_tables.sql` - cierre mensual y foreign keys finales.
+9. `00109_views.sql` - views presupuestales y de eventos.
+10. `00110_number_sequences.sql` - secuencias numericas usadas por RPCs de solicitudes y layouts.
 11. `002_enums_triggers_indexes.sql` - funciones de soporte para triggers, indices y triggers.
-12. `003a_helper_functions.sql` - helpers de perfil/roles.
-13. `003b_budget_rpcs.sql` - RPCs de presupuesto.
-14. `003c_payment_request_rpcs.sql` - RPCs de solicitudes/aprobaciones.
-15. `003d_layout_rpcs.sql` - RPCs de layouts.
-16. `003e_cash_rpcs.sql` - RPCs de efectivo/comprobaciones.
-17. `003f_income_invoice_rpcs.sql` - RPCs de ingresos, incidencias y facturas.
-18. `003g_dashboard_rpcs.sql` - RPCs de dashboard/cierre.
+12. `00301_helper_functions.sql` - helpers de perfil/roles.
+13. `00302_budget_rpcs.sql` - RPCs de presupuesto.
+14. `00303_payment_request_rpcs.sql` - RPCs de solicitudes/aprobaciones.
+15. `00304_layout_rpcs.sql` - RPCs de layouts.
+16. `00305_cash_rpcs.sql` - RPCs de efectivo/comprobaciones.
+17. `00306_income_invoice_rpcs.sql` - RPCs de ingresos, incidencias y facturas.
+18. `00307_dashboard_rpcs.sql` - RPCs de dashboard/cierre.
 19. `004_rls_policies_grants.sql` - RLS, policies y grants para `anon`/`authenticated`.
-20. `004a_historical_actuals.sql` - tabla `historical_actuals` versionada desde auditoria DEV read-only.
-21. `004b_payment_receipts_policies.sql` - policies RLS para registrar comprobantes de transferencia en `payment_receipts`.
-22. `004c_fase2_payment_method_closure.sql` - cierre Fase 2: `payment_method` separado y layouts limitados a transferencias.
+20. `00401_historical_actuals.sql` - tabla `historical_actuals` versionada desde auditoria DEV read-only.
+21. `00402_payment_receipts_policies.sql` - policies RLS para registrar comprobantes de transferencia en `payment_receipts`.
+22. `00403_fase2_payment_method_closure.sql` - cierre Fase 2: `payment_method` separado y layouts limitados a transferencias.
 23. `005_storage.sql` - buckets y policies de Storage.
 24. `006_seed_base.sql` - seed minimo seguro de roles.
 
