@@ -109,8 +109,7 @@ jobs:
 
           run_query() {
             local title="$1"
-            local query
-            query="$(cat)"
+            local query="$2"
             {
               echo "## ${title}"
               echo '```'
@@ -120,20 +119,8 @@ jobs:
             } >> "${REPORT}"
           }
 
-          run_query "Connection identity" <<'SQL'
-          select
-            current_database() as current_database,
-            current_user as current_user,
-            now() as checked_at;
-SQL
-
-          run_query "Schema migrations table status" <<'SQL'
-          select
-            case
-              when to_regclass('supabase_migrations.schema_migrations') is null then 'missing'
-              else 'present'
-            end as schema_migrations_table_status;
-SQL
+          run_query "Connection identity" "select current_database() as current_database, current_user as current_user, now() as checked_at;"
+          run_query "Schema migrations table status" "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'missing' else 'present' end as schema_migrations_table_status;"
 
           migrations_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'missing' else 'present' end;")"
           {
@@ -150,43 +137,11 @@ SQL
             echo ""
           } >> "${REPORT}"
 
-          run_query "Public tables" <<'SQL'
-          select table_schema, table_name
-          from information_schema.tables
-          where table_schema = 'public'
-          order by table_name;
-SQL
-
-          run_query "Public views" <<'SQL'
-          select table_schema, table_name
-          from information_schema.views
-          where table_schema = 'public'
-          order by table_name;
-SQL
-
-          run_query "Public functions" <<'SQL'
-          select p.oid::regprocedure::text as function_signature
-          from pg_proc p
-          join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public'
-          order by function_signature;
-SQL
-
-          run_query "Public table RLS flags" <<'SQL'
-          select c.relname as table_name, c.relrowsecurity as rls_enabled
-          from pg_class c
-          join pg_namespace n on n.oid = c.relnamespace
-          where n.nspname = 'public'
-            and c.relkind = 'r'
-          order by c.relname;
-SQL
-
-          run_query "Public policies" <<'SQL'
-          select schemaname, tablename, policyname, roles, cmd
-          from pg_policies
-          where schemaname = 'public'
-          order by tablename, policyname;
-SQL
+          run_query "Public tables" "select table_schema, table_name from information_schema.tables where table_schema = 'public' order by table_name;"
+          run_query "Public views" "select table_schema, table_name from information_schema.views where table_schema = 'public' order by table_name;"
+          run_query "Public functions" "select p.oid::regprocedure::text as function_signature from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' order by function_signature;"
+          run_query "Public table RLS flags" "select c.relname as table_name, c.relrowsecurity as rls_enabled from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by c.relname;"
+          run_query "Public policies" "select schemaname, tablename, policyname, roles, cmd from pg_policies where schemaname = 'public' order by tablename, policyname;"
 
           storage_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('storage.buckets') is null then 'missing' else 'present' end;")"
           {
@@ -203,24 +158,7 @@ SQL
             echo ""
           } >> "${REPORT}"
 
-          run_query "Critical object presence" <<'SQL'
-          select object_name, to_regclass(object_name) is not null as exists
-          from (
-            values
-              ('public.profiles'),
-              ('public.roles'),
-              ('public.user_roles'),
-              ('public.suppliers'),
-              ('public.payment_requests'),
-              ('public.payment_layouts'),
-              ('public.payment_layout_lines'),
-              ('public.payment_receipts'),
-              ('public.historical_actuals'),
-              ('public.notification_events'),
-              ('public.notification_delivery_attempts')
-          ) as critical_objects(object_name)
-          order by object_name;
-SQL
+          run_query "Critical object presence" "select object_name, to_regclass(object_name) is not null as exists from (values ('public.profiles'), ('public.roles'), ('public.user_roles'), ('public.suppliers'), ('public.payment_requests'), ('public.payment_layouts'), ('public.payment_layout_lines'), ('public.payment_receipts'), ('public.historical_actuals'), ('public.notification_events'), ('public.notification_delivery_attempts')) as critical_objects(object_name) order by object_name;"
 
           unset PGPASSWORD
           cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
