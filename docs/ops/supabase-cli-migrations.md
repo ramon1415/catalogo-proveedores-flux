@@ -10,10 +10,10 @@ Feature work stays in migrations and application code. Deployment should use the
 
 Keep the migration ledger and product schema, including:
 
-- `supabase/migrations/001j_number_sequences.sql`
-- `supabase/migrations/004a_historical_actuals.sql`
-- `supabase/migrations/004b_payment_receipts_policies.sql`
-- `supabase/migrations/004c_fase2_payment_method_closure.sql`
+- `supabase/migrations/00110_number_sequences.sql`
+- `supabase/migrations/00401_historical_actuals.sql`
+- `supabase/migrations/00402_payment_receipts_policies.sql`
+- `supabase/migrations/00403_fase2_payment_method_closure.sql`
 - `supabase/migrations/007_notifications.sql`
 
 The notifications feature stays as product architecture:
