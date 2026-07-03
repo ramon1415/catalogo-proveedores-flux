@@ -1,40 +1,63 @@
-# Formato de descarga CxC para layouts
+# Formato de descarga CxC BBVA para layouts
 
-Este hotfix cambia la descarga del layout bancario en `layouts.html` para que ya no genere un archivo `.xlsx`.
+Este hotfix ajusta la descarga del layout bancario en `layouts.html` para que el archivo ya no sea `.xlsx` ni TXT delimitado por `|`.
+
+El formato se basa en el archivo real de referencia `PAGOSBBV020726.txt`: TXT de ancho fijo, una linea por pago, 85 caracteres por linea antes del salto CRLF.
 
 ## Formato actual
 
-Mientras no exista una especificacion bancaria formal versionada en el repositorio, el archivo CxC se exporta como archivo plano:
-
 - Extension: `.txt`
 - MIME type: `text/plain;charset=utf-8`
-- Encoding: UTF-8 con BOM para conservar acentos al abrir en Windows
-- Saltos de linea: CRLF
-- Delimitador: `|`
+- Encoding: UTF-8 sin BOM
+- Saltos de linea: CRLF (`\r\n`)
 - Header: no incluido
+- Separadores: no usa `|`, comas ni tabs
+- Longitud por registro: 85 caracteres antes de `\r\n`
+- Nombre de archivo: `PAGOSBBV_CXC_<YYYYMMDD>_<FOLIO>.txt`
 
-## Columnas
+## Estructura por linea
 
-Cada linea representa un pago incluido en el layout, en el mismo orden operativo que antes se escribia en columnas B:H del Excel:
+| Posicion | Longitud | Campo | Regla |
+| --- | ---: | --- | --- |
+| 1-18 | 18 | Cuenta destino / abono | Solo digitos, ceros a la izquierda, falla si excede 18 |
+| 19-36 | 18 | Cuenta origen / cargo | Solo digitos, ceros a la izquierda, falla si excede 18 |
+| 37-39 | 3 | Moneda | Valor fijo `MXP` |
+| 40-55 | 16 | Importe | Punto decimal, 2 decimales, ceros a la izquierda, falla si excede 16 |
+| 56-85 | 30 | Concepto | Mayusculas, sin acentos, `N` en lugar de `Ñ`, espacios a la derecha, truncado controlado a 30 |
 
-1. `CTA_CARGO`: cuenta origen
-2. `TITULAR`: empresa/titular origen
-3. `DESTINO`: cuenta destino, CLABE o convenio
-4. `BENEFICIARIO`: beneficiario
-5. `MONTO`: monto con dos decimales
-6. `REFERENCIA`: referencia de pago
-7. `CONCEPTO`: concepto de pago
+## Mapeo desde `payment_layout_lines`
 
-Ejemplo:
+- Cuenta destino / abono: `destination_value`
+- Cuenta origen / cargo: `source_account_number`
+- Importe: `amount`
+- Concepto: `payment_concept`
+
+El archivo real no trae beneficiario ni referencia como campos separados, por eso esos campos no se exportan como columnas independientes.
+
+## Ejemplo
 
 ```text
-0123456789|Flux Operadora S.A. de C.V.|012345678901234567|Proveedor Demo|1250.50|SOL-2026-0001|Pago proveedor demo
+000000000110363553000000000191134094MXP0000000156600.00RENTA JULIO                   
+000000000468889147000000000191134094MXP0000000000324.00GALLETAS                     
 ```
+
+Cada linea mide 85 caracteres antes del salto `\r\n`.
+
+## Validaciones esperadas
+
+- Cada linea mide exactamente 85 caracteres.
+- El archivo termina cada registro con CRLF.
+- No existe el caracter `|`.
+- No hay encabezado.
+- No se genera `.xlsx`.
+- Las cuentas se normalizan a 18 digitos.
+- El importe conserva punto decimal y 2 decimales.
+- El concepto se normaliza y se rellena a 30 caracteres.
 
 ## Alcance
 
-El cambio es solo frontend. No modifica Supabase, tablas, RLS, RPCs, n8n, secrets ni variables.
+El cambio es solo frontend/documentacion. No modifica Supabase, tablas, RLS, RPCs, n8n, secrets ni variables.
 
 ## Pendiente
 
-Si Carlos/Ramon entregan una especificacion bancaria CxC formal con posiciones fijas, layouts por banco o extension diferente, este documento debe actualizarse y el exportador debe ajustarse en un PR separado.
+Si Carlos/Ramon/BBVA entregan una especificacion bancaria formal distinta, por ejemplo posiciones adicionales o reglas de layout propietario, este documento y el exportador deben ajustarse en un PR separado con esa evidencia.

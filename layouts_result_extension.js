@@ -272,7 +272,7 @@
         ${data.layout_id && included ? `
           <div class="layout-result-actions">
             <button type="button" class="small-btn success" data-open-created-lines="${escapeHtml(data.layout_id)}">Ver lineas generadas</button>
-            <span class="field-hint">El archivo CxC se descarga despues desde la tabla de layouts.</span>
+            <span class="field-hint">El archivo CxC BBVA se descarga despues desde la tabla de layouts.</span>
           </div>
         ` : ""}
         ${invalidRequests.length ? invalidPanel(invalidRequests) : ""}
