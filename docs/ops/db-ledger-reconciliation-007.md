@@ -6,8 +6,8 @@ Documento historico de reconciliacion del ledger de base de datos antes de inici
 
 Los hallazgos de este documento ya fueron atendidos en migraciones versionadas:
 
-- `001j_number_sequences.sql` versiona las secuencias faltantes.
-- `004a_historical_actuals.sql` versiona `public.historical_actuals`.
+- `00110_number_sequences.sql` versiona las secuencias faltantes.
+- `00401_historical_actuals.sql` versiona `public.historical_actuals`.
 - `007_notifications.sql` versiona el ledger de notificaciones.
 
 Las referencias antiguas a paquetes `ops/schema-audit/**` documentan como se obtuvo evidencia read-only en DEV. Esos paquetes fueron parte de la investigacion, no del flujo vigente de aplicacion.
@@ -22,13 +22,13 @@ docs/ops/supabase-cli-migrations.md
 
 Las migraciones usaban secuencias que no estaban declaradas antes en el paquete:
 
-- `003c_payment_request_rpcs.sql` usa `nextval('public.payment_request_number_seq')`.
-- `003d_layout_rpcs.sql` usa `nextval('public.payment_layout_number_seq')`.
+- `00303_payment_request_rpcs.sql` usa `nextval('public.payment_request_number_seq')`.
+- `00304_layout_rpcs.sql` usa `nextval('public.payment_layout_number_seq')`.
 
 Decision aplicada:
 
-- Agregar `001j_number_sequences.sql` con `CREATE SEQUENCE IF NOT EXISTS` para ambas secuencias.
-- Colocarlo despues de `001i_views.sql` y antes de `002_enums_triggers_indexes.sql` / `003c` / `003d`.
+- Agregar `00110_number_sequences.sql` con `CREATE SEQUENCE IF NOT EXISTS` para ambas secuencias.
+- Colocarlo despues de `00109_views.sql` y antes de `002_enums_triggers_indexes.sql` / `003c` / `003d`.
 - No reescribir las migraciones antiguas 003c/003d para reducir riesgo y mantener trazabilidad.
 
 ## Hallazgo 2: notificaciones existian fuera del ledger
@@ -52,7 +52,7 @@ Decision aplicada:
 
 - No se inventaron columnas ni constraints.
 - Se uso evidencia real de DEV.
-- Se versiono `supabase/migrations/004a_historical_actuals.sql`.
+- Se versiono `supabase/migrations/00401_historical_actuals.sql`.
 - `company_id` se dejo nullable porque DEV lo reporto nullable.
 
 ## Hallazgo 4: payment_receipts.notes
