@@ -1,5 +1,16 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-const TEMPLATE_PATH = "./templates/FORMATO_pagos_semanales.xlsx"
+const CXC_FILE_EXTENSION = "txt"
+const CXC_MIME_TYPE = "text/plain;charset=utf-8"
+const CXC_DELIMITER = "|"
+const CXC_COLUMNS = [
+  { key: "source_account_number", label: "CTA_CARGO", value: (line) => line.source_account_number },
+  { key: "company_name", label: "TITULAR", value: (line) => line.company_name },
+  { key: "destination_value", label: "DESTINO", value: (line) => line.destination_value },
+  { key: "beneficiary_name", label: "BENEFICIARIO", value: (line) => line.beneficiary_name },
+  { key: "amount", label: "MONTO", value: (line) => formatCxcAmount(line.amount) },
+  { key: "payment_reference", label: "REFERENCIA", value: (line) => line.payment_reference },
+  { key: "payment_concept", label: "CONCEPTO", value: (line) => line.payment_concept },
+]
 
 let layouts = []
 let companies = []
@@ -46,8 +57,6 @@ function cacheDom() {
   dom.refreshBtn = document.getElementById("refreshBtn")
   dom.searchInput = document.getElementById("searchInput")
   dom.statusFilter = document.getElementById("statusFilter")
-  dom.templateMode = document.getElementById("templateMode")
-  dom.templateFile = document.getElementById("templateFile")
   dom.layoutsTableBody = document.getElementById("layoutsTableBody")
   dom.newLayoutDialog = document.getElementById("newLayoutDialog")
   dom.newLayoutForm = document.getElementById("newLayoutForm")
@@ -99,9 +108,6 @@ function bindEvents() {
   dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal)
   dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal)
   dom.newLayoutForm?.addEventListener("submit", submitNewLayout)
-  dom.templateMode?.addEventListener("change", () => {
-    if (dom.templateMode.value === "file") dom.templateFile.click()
-  })
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
   dom.closeConfirmModalBtn?.addEventListener("click", closeConfirmModal)
   dom.cancelConfirmBtn?.addEventListener("click", closeConfirmModal)
@@ -176,11 +182,11 @@ function renderLayoutActions(l) {
   const actions = [`<button class="small-btn" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Ver lineas</button>`]
 
   if (l.status === "draft") {
-    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${l.id}')" style="white-space:nowrap">Generar Excel</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar CxC</button>`)
   }
 
   if (l.status === "generated") {
-    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar Excel" : "Generar Excel"}</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar CxC" : "Generar CxC"}</button>`)
     actions.push(`<button class="small-btn warning" type="button" onclick="markLayoutUploaded('${l.id}')" style="white-space:nowrap">Marcar subido</button>`)
     actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${l.id}')" style="white-space:nowrap">Confirmar pago</button>`)
   }
@@ -345,7 +351,7 @@ async function openLayoutLines(layoutId) {
 
   activeLinesLayoutId = layoutId
   dom.linesTitle.textContent = layout.layout_number || "Lineas del layout"
-  dom.linesSubtitle.textContent = `${layout.name || ""} — columnas B:H del Excel`.trim()
+  dom.linesSubtitle.textContent = `${layout.name || ""} — archivo CxC`.trim()
   dom.linesTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Cargando lineas...</td></tr>`
   dom.linesDialog.showModal()
 
@@ -392,50 +398,47 @@ function renderLineActions(line) {
   return `<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`
 }
 
-// ── Excel ───────────────────────────────────────────────────────
+// ── Archivo CxC ─────────────────────────────────────────────────
 
-async function generateLayoutExcel(layoutId) {
+async function downloadLayoutCxc(layoutId) {
   const layout = layouts.find((item) => item.id === layoutId)
   if (!layout) return
 
   if (layout.status === "cancelled") {
-    showToast("Layout cancelado", "No se puede generar Excel de un layout cancelado.", "danger")
+    showToast("Layout cancelado", "No se puede generar archivo CxC de un layout cancelado.", "danger")
     return
   }
 
   const { data: lines, error } = await fetchLayoutLines(layoutId)
   if (error) { showToast("No se pudo leer el layout", rlsHint("payment_layout_lines", "select", error), "danger"); return }
 
-  if (!lines?.length) { showToast("Sin lineas", "Este layout no tiene lineas para generar Excel.", "warning"); return }
+  if (!lines?.length) { showToast("Sin lineas", "Este layout no tiene lineas para generar archivo CxC.", "warning"); return }
 
   const invalidLines = validateLayoutLines(lines)
   if (invalidLines.length) {
     const first = invalidLines[0]
-    showToast("Lineas incompletas", `No se puede generar el Excel. Solicitud ${first.request_number || first.payment_request_id}: falta ${first.missing_fields.join(", ")}.`, "danger")
+    showToast("Lineas incompletas", `No se puede generar el archivo CxC. Solicitud ${first.request_number || first.payment_request_id}: falta ${first.missing_fields.join(", ")}.`, "danger")
     return
   }
 
   try {
-    const workbook = await loadTemplateWorkbook()
-    const sheetName = workbook.SheetNames.includes("Hoja 1") ? "Hoja 1" : workbook.SheetNames[0]
-    const sheet = workbook.Sheets[sheetName]
+    const cxcLines = lines.filter((line) => line.status !== "bank_rejected")
+    const fileName = buildCxcFileName(layout)
+    const content = buildCxcContent(cxcLines)
 
-    writeLayoutToSheet(sheet, lines)
-
-    const fileName = `${sanitizeFileName(layout.layout_number || "layout-pagos")}.xlsx`
-    XLSX.writeFile(workbook, fileName, { bookType: "xlsx", compression: true })
+    downloadTextFile(content, fileName)
 
     const update = await supabaseClient.from("payment_layouts").update({ file_name: fileName, status: "generated", updated_at: new Date().toISOString() }).eq("id", layoutId)
 
     if (update.error) {
-      showToast("Excel descargado", "El Excel fue generado, pero no se pudo actualizar el estado del layout.", "warning")
+      showToast("Archivo CxC descargado", "El archivo fue generado, pero no se pudo actualizar el estado del layout.", "warning")
       return
     }
 
-    showToast("Excel generado", `${fileName} se descargo correctamente.`, "success")
+    showToast("Archivo CxC generado", `${fileName} se descargo correctamente.`, "success")
     await loadLayouts()
   } catch (error) {
-    showToast("No se pudo generar Excel", friendlyError(error), "danger")
+    showToast("No se pudo generar CxC", friendlyError(error), "danger")
   }
 }
 
@@ -551,7 +554,8 @@ async function submitRejectLine(event) {
 // ── Expuestos en window ──────────────────────────────────────────
 
 window.openLayoutLines = openLayoutLines
-window.generateLayoutExcel = generateLayoutExcel
+window.downloadLayoutCxc = downloadLayoutCxc
+window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
 window.openRejectLineModal = openRejectLineModal
@@ -586,52 +590,39 @@ function validateLayoutLines(lines) {
     .filter((item) => item.missing_fields.length)
 }
 
-async function loadTemplateWorkbook() {
-  if (dom.templateMode.value === "file") {
-    const file = dom.templateFile.files?.[0]
-    if (!file) throw new Error("Selecciona la plantilla local FORMATO_pagos_semanales.xlsx antes de generar.")
-    const buffer = await file.arrayBuffer()
-    return XLSX.read(buffer, { type: "array", cellStyles: true })
-  }
-
-  const response = await fetch(TEMPLATE_PATH)
-  if (!response.ok) throw new Error("No se encontro la plantilla en /templates/FORMATO_pagos_semanales.xlsx.")
-  const buffer = await response.arrayBuffer()
-  return XLSX.read(buffer, { type: "array", cellStyles: true })
+function buildCxcContent(lines) {
+  const rows = lines.map((line) => CXC_COLUMNS.map((column) => formatCxcField(column.value(line))).join(CXC_DELIMITER))
+  return `${rows.join("\r\n")}\r\n`
 }
 
-function writeLayoutToSheet(sheet, lines) {
-  sheet["B3"] = sheet["B3"] || { t: "s", v: "CTA. CARGO" }
-  sheet["C3"] = sheet["C3"] || { t: "s", v: "NOMBRE TITULAR" }
-
-  const exportLines = lines.filter((line) => line.status !== "bank_rejected")
-  clearDataRange(sheet, 4, 101, 2, 8)
-
-  exportLines.forEach((line, index) => {
-    const row = 4 + index
-    setCell(sheet, `B${row}`, line.source_account_number, "s")
-    setCell(sheet, `C${row}`, line.company_name, "s")
-    setCell(sheet, `D${row}`, line.destination_value, "s")
-    setCell(sheet, `E${row}`, line.beneficiary_name, "s")
-    setCell(sheet, `F${row}`, numberValue(line.amount), "n")
-    setCell(sheet, `G${row}`, line.payment_reference, "s")
-    setCell(sheet, `H${row}`, line.payment_concept, "s")
-  })
-
-  const lastRow = Math.max(4 + exportLines.length - 1, 101)
-  sheet["!ref"] = `A1:H${lastRow}`
+function buildCxcFileName(layout) {
+  const folio = sanitizeFileName(layout.layout_number || layout.name || "layout")
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "")
+  return `layout_CxC_${folio}_${today}.${CXC_FILE_EXTENSION}`
 }
 
-function clearDataRange(sheet, startRow, endRow, startCol, endCol) {
-  for (let row = startRow; row <= endRow; row++) {
-    for (let col = startCol; col <= endCol; col++) {
-      delete sheet[XLSX.utils.encode_cell({ r: row - 1, c: col - 1 })]
-    }
-  }
+function formatCxcField(value) {
+  return String(value ?? "")
+    .normalize("NFC")
+    .replace(/[|\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
-function setCell(sheet, address, value, type) {
-  sheet[address] = { t: type, v: value ?? "" }
+function formatCxcAmount(value) {
+  return numberValue(value).toFixed(2)
+}
+
+function downloadTextFile(content, fileName) {
+  const blob = new Blob(["\ufeff", content], { type: CXC_MIME_TYPE })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 // ── Badges ───────────────────────────────────────────────────────
@@ -686,7 +677,7 @@ function friendlyRpcError(error) {
     layout_not_found: "No se encontro el layout.",
     actor_profile_not_found: "No se pudo identificar el perfil del usuario.",
     registered_by_profile_not_found: "No se pudo identificar el perfil del usuario.",
-    layout_must_be_generated_first: "Primero genera el Excel antes de marcar el layout como subido.",
+    layout_must_be_generated_first: "Primero genera el archivo CxC antes de marcar el layout como subido.",
     invalid_layout_status_for_upload: "El layout no esta en un estado valido para marcarse como subido.",
     invalid_layout_status_for_confirmation: "El layout no esta en un estado valido para confirmar pago.",
     no_included_lines_to_confirm: "No hay lineas pendientes para confirmar pago.",
