@@ -1,5 +1,12 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-const TEMPLATE_PATH = "./templates/FORMATO_pagos_semanales.xlsx"
+const CXC_FILE_EXTENSION = "txt"
+const CXC_MIME_TYPE = "text/plain;charset=utf-8"
+const CXC_CURRENCY = "MXP"
+const CXC_ACCOUNT_LENGTH = 18
+const CXC_CURRENCY_LENGTH = 3
+const CXC_AMOUNT_LENGTH = 16
+const CXC_CONCEPT_LENGTH = 30
+const CXC_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + CXC_CONCEPT_LENGTH
 
 let layouts = []
 let companies = []
@@ -46,8 +53,6 @@ function cacheDom() {
   dom.refreshBtn = document.getElementById("refreshBtn")
   dom.searchInput = document.getElementById("searchInput")
   dom.statusFilter = document.getElementById("statusFilter")
-  dom.templateMode = document.getElementById("templateMode")
-  dom.templateFile = document.getElementById("templateFile")
   dom.layoutsTableBody = document.getElementById("layoutsTableBody")
   dom.newLayoutDialog = document.getElementById("newLayoutDialog")
   dom.newLayoutForm = document.getElementById("newLayoutForm")
@@ -99,9 +104,6 @@ function bindEvents() {
   dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal)
   dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal)
   dom.newLayoutForm?.addEventListener("submit", submitNewLayout)
-  dom.templateMode?.addEventListener("change", () => {
-    if (dom.templateMode.value === "file") dom.templateFile.click()
-  })
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
   dom.closeConfirmModalBtn?.addEventListener("click", closeConfirmModal)
   dom.cancelConfirmBtn?.addEventListener("click", closeConfirmModal)
@@ -176,11 +178,11 @@ function renderLayoutActions(l) {
   const actions = [`<button class="small-btn" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Ver lineas</button>`]
 
   if (l.status === "draft") {
-    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${l.id}')" style="white-space:nowrap">Generar Excel</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar layout de pagos</button>`)
   }
 
   if (l.status === "generated") {
-    actions.push(`<button class="small-btn" type="button" onclick="generateLayoutExcel('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar Excel" : "Generar Excel"}</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar layout de pagos" : "Generar layout de pagos"}</button>`)
     actions.push(`<button class="small-btn warning" type="button" onclick="markLayoutUploaded('${l.id}')" style="white-space:nowrap">Marcar subido</button>`)
     actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${l.id}')" style="white-space:nowrap">Confirmar pago</button>`)
   }
@@ -345,7 +347,7 @@ async function openLayoutLines(layoutId) {
 
   activeLinesLayoutId = layoutId
   dom.linesTitle.textContent = layout.layout_number || "Lineas del layout"
-  dom.linesSubtitle.textContent = `${layout.name || ""} — columnas B:H del Excel`.trim()
+  dom.linesSubtitle.textContent = `${layout.name || ""} — archivo CxC BBVA`.trim()
   dom.linesTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Cargando lineas...</td></tr>`
   dom.linesDialog.showModal()
 
@@ -392,50 +394,47 @@ function renderLineActions(line) {
   return `<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`
 }
 
-// ── Excel ───────────────────────────────────────────────────────
+// ── Archivo CxC BBVA ─────────────────────────────────────────────
 
-async function generateLayoutExcel(layoutId) {
+async function downloadLayoutCxc(layoutId) {
   const layout = layouts.find((item) => item.id === layoutId)
   if (!layout) return
 
   if (layout.status === "cancelled") {
-    showToast("Layout cancelado", "No se puede generar Excel de un layout cancelado.", "danger")
+    showToast("Layout cancelado", "No se puede generar archivo CxC BBVA de un layout cancelado.", "danger")
     return
   }
 
   const { data: lines, error } = await fetchLayoutLines(layoutId)
   if (error) { showToast("No se pudo leer el layout", rlsHint("payment_layout_lines", "select", error), "danger"); return }
 
-  if (!lines?.length) { showToast("Sin lineas", "Este layout no tiene lineas para generar Excel.", "warning"); return }
+  if (!lines?.length) { showToast("Sin lineas", "Este layout no tiene lineas para generar archivo CxC BBVA.", "warning"); return }
 
   const invalidLines = validateLayoutLines(lines)
   if (invalidLines.length) {
     const first = invalidLines[0]
-    showToast("Lineas incompletas", `No se puede generar el Excel. Solicitud ${first.request_number || first.payment_request_id}: falta ${first.missing_fields.join(", ")}.`, "danger")
+    showToast("Lineas invalidas", `No se puede generar el archivo CxC BBVA. Solicitud ${first.request_number || first.payment_request_id}: ${first.missing_fields.join(", ")}.`, "danger")
     return
   }
 
   try {
-    const workbook = await loadTemplateWorkbook()
-    const sheetName = workbook.SheetNames.includes("Hoja 1") ? "Hoja 1" : workbook.SheetNames[0]
-    const sheet = workbook.Sheets[sheetName]
+    const cxcLines = lines.filter((line) => line.status !== "bank_rejected")
+    const fileName = buildCxcFileName(layout)
+    const content = buildCxcContent(cxcLines)
 
-    writeLayoutToSheet(sheet, lines)
-
-    const fileName = `${sanitizeFileName(layout.layout_number || "layout-pagos")}.xlsx`
-    XLSX.writeFile(workbook, fileName, { bookType: "xlsx", compression: true })
+    downloadTextFile(content, fileName)
 
     const update = await supabaseClient.from("payment_layouts").update({ file_name: fileName, status: "generated", updated_at: new Date().toISOString() }).eq("id", layoutId)
 
     if (update.error) {
-      showToast("Excel descargado", "El Excel fue generado, pero no se pudo actualizar el estado del layout.", "warning")
+      showToast("Archivo CxC BBVA descargado", "El archivo fue generado, pero no se pudo actualizar el estado del layout.", "warning")
       return
     }
 
-    showToast("Excel generado", `${fileName} se descargo correctamente.`, "success")
+    showToast("Archivo CxC BBVA generado", `${fileName} se descargo correctamente.`, "success")
     await loadLayouts()
   } catch (error) {
-    showToast("No se pudo generar Excel", friendlyError(error), "danger")
+    showToast("No se pudo generar CxC BBVA", friendlyError(error), "danger")
   }
 }
 
@@ -551,7 +550,8 @@ async function submitRejectLine(event) {
 // ── Expuestos en window ──────────────────────────────────────────
 
 window.openLayoutLines = openLayoutLines
-window.generateLayoutExcel = generateLayoutExcel
+window.downloadLayoutCxc = downloadLayoutCxc
+window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
 window.openRejectLineModal = openRejectLineModal
@@ -574,64 +574,102 @@ function validateLayoutLines(lines) {
     .filter((line) => line.status !== "bank_rejected")
     .map((line) => {
       const missing = []
-      if (!notBlank(line.source_account_number)) missing.push("source_account_number")
-      if (!notBlank(line.company_name)) missing.push("company_name")
-      if (!notBlank(line.destination_value)) missing.push("destination_value")
-      if (!notBlank(line.beneficiary_name)) missing.push("beneficiary_name")
-      if (!numberValue(line.amount)) missing.push("amount")
-      if (!notBlank(line.payment_reference)) missing.push("payment_reference")
-      if (!notBlank(line.payment_concept)) missing.push("payment_concept")
+      const sourceDigits = cxcDigits(line.source_account_number)
+      const destinationDigits = cxcDigits(line.destination_value)
+      const amount = numberValue(line.amount)
+      const amountText = formatCxcAmount(line.amount)
+
+      if (!sourceDigits) missing.push("cuenta origen requerida")
+      else if (sourceDigits.length > CXC_ACCOUNT_LENGTH) missing.push("cuenta origen excede 18 digitos")
+
+      if (!destinationDigits) missing.push("cuenta destino requerida")
+      else if (destinationDigits.length > CXC_ACCOUNT_LENGTH) missing.push("cuenta destino excede 18 digitos")
+
+      if (!amount) missing.push("monto requerido")
+      else if (amountText.length > CXC_AMOUNT_LENGTH) missing.push("monto excede 16 caracteres")
+
+      if (!notBlank(line.payment_concept)) missing.push("concepto requerido")
+
       return { payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
     })
     .filter((item) => item.missing_fields.length)
 }
 
-async function loadTemplateWorkbook() {
-  if (dom.templateMode.value === "file") {
-    const file = dom.templateFile.files?.[0]
-    if (!file) throw new Error("Selecciona la plantilla local FORMATO_pagos_semanales.xlsx antes de generar.")
-    const buffer = await file.arrayBuffer()
-    return XLSX.read(buffer, { type: "array", cellStyles: true })
+function buildCxcContent(lines) {
+  const rows = lines.map(buildCxcLine)
+  return `${rows.join("\r\n")}\r\n`
+}
+
+function buildCxcLine(line) {
+  const row = [
+    formatCxcAccount(line.destination_value, "cuenta destino"),
+    formatCxcAccount(line.source_account_number, "cuenta origen"),
+    CXC_CURRENCY,
+    formatCxcAmount(line.amount).padStart(CXC_AMOUNT_LENGTH, "0"),
+    formatCxcConcept(line.payment_concept),
+  ].join("")
+
+  if (row.length !== CXC_LINE_LENGTH) {
+    throw new Error(`cxc_line_length_invalid_${row.length}`)
   }
 
-  const response = await fetch(TEMPLATE_PATH)
-  if (!response.ok) throw new Error("No se encontro la plantilla en /templates/FORMATO_pagos_semanales.xlsx.")
-  const buffer = await response.arrayBuffer()
-  return XLSX.read(buffer, { type: "array", cellStyles: true })
+  return row
 }
 
-function writeLayoutToSheet(sheet, lines) {
-  sheet["B3"] = sheet["B3"] || { t: "s", v: "CTA. CARGO" }
-  sheet["C3"] = sheet["C3"] || { t: "s", v: "NOMBRE TITULAR" }
-
-  const exportLines = lines.filter((line) => line.status !== "bank_rejected")
-  clearDataRange(sheet, 4, 101, 2, 8)
-
-  exportLines.forEach((line, index) => {
-    const row = 4 + index
-    setCell(sheet, `B${row}`, line.source_account_number, "s")
-    setCell(sheet, `C${row}`, line.company_name, "s")
-    setCell(sheet, `D${row}`, line.destination_value, "s")
-    setCell(sheet, `E${row}`, line.beneficiary_name, "s")
-    setCell(sheet, `F${row}`, numberValue(line.amount), "n")
-    setCell(sheet, `G${row}`, line.payment_reference, "s")
-    setCell(sheet, `H${row}`, line.payment_concept, "s")
-  })
-
-  const lastRow = Math.max(4 + exportLines.length - 1, 101)
-  sheet["!ref"] = `A1:H${lastRow}`
+function buildCxcFileName(layout) {
+  const folio = sanitizeCxcFileToken(layout.layout_number || layout.name || "LAYOUT")
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", "")
+  return `PAGOSBBV_CXC_${today}_${folio}.${CXC_FILE_EXTENSION}`
 }
 
-function clearDataRange(sheet, startRow, endRow, startCol, endCol) {
-  for (let row = startRow; row <= endRow; row++) {
-    for (let col = startCol; col <= endCol; col++) {
-      delete sheet[XLSX.utils.encode_cell({ r: row - 1, c: col - 1 })]
-    }
-  }
+function formatCxcAccount(value, label) {
+  const digits = cxcDigits(value)
+  if (!digits) throw new Error(`${label} requerida`)
+  if (digits.length > CXC_ACCOUNT_LENGTH) throw new Error(`${label} excede ${CXC_ACCOUNT_LENGTH} digitos`)
+  return digits.padStart(CXC_ACCOUNT_LENGTH, "0")
 }
 
-function setCell(sheet, address, value, type) {
-  sheet[address] = { t: type, v: value ?? "" }
+function formatCxcAmount(value) {
+  const text = numberValue(value).toFixed(2)
+  if (text.length > CXC_AMOUNT_LENGTH) throw new Error("monto excede 16 caracteres")
+  return text
+}
+
+function formatCxcConcept(value) {
+  const text = normalizeCxcText(value)
+  return text.slice(0, CXC_CONCEPT_LENGTH).padEnd(CXC_CONCEPT_LENGTH, " ")
+}
+
+function normalizeCxcText(value) {
+  return String(value ?? "")
+    .replace(/[ñÑ]/g, "N")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .,&/\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function cxcDigits(value) {
+  return String(value ?? "").replace(/\D/g, "")
+}
+
+function sanitizeCxcFileToken(value) {
+  const token = normalizeCxcText(value).replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+  return token || "LAYOUT"
+}
+
+function downloadTextFile(content, fileName) {
+  const blob = new Blob([content], { type: CXC_MIME_TYPE })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 // ── Badges ───────────────────────────────────────────────────────
@@ -686,7 +724,7 @@ function friendlyRpcError(error) {
     layout_not_found: "No se encontro el layout.",
     actor_profile_not_found: "No se pudo identificar el perfil del usuario.",
     registered_by_profile_not_found: "No se pudo identificar el perfil del usuario.",
-    layout_must_be_generated_first: "Primero genera el Excel antes de marcar el layout como subido.",
+    layout_must_be_generated_first: "Primero genera el archivo CxC BBVA antes de marcar el layout como subido.",
     invalid_layout_status_for_upload: "El layout no esta en un estado valido para marcarse como subido.",
     invalid_layout_status_for_confirmation: "El layout no esta en un estado valido para confirmar pago.",
     no_included_lines_to_confirm: "No hay lineas pendientes para confirmar pago.",
@@ -709,7 +747,7 @@ function friendlyRpcError(error) {
 function friendlyError(error) {
   const message = error?.message || String(error || "Error desconocido")
   if (message.toLowerCase().includes("failed to fetch") || message.toLowerCase().includes("url scheme")) {
-    return "No se pudo cargar la plantilla. Si estas en file://, usa la opcion Plantilla local o despliega en Vercel."
+    return "No se pudo conectar con Supabase. Revisa la conexion y vuelve a intentar."
   }
   if (message.toLowerCase().includes("row-level security") || error?.code === "42501") return "La operacion fue bloqueada por RLS. Revisa policies."
   if (message.toLowerCase().includes("permission denied")) return "Faltan permisos para ejecutar la operacion."
