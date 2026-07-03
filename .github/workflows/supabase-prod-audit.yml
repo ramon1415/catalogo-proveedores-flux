@@ -91,7 +91,13 @@ jobs:
 
           mkdir -p audit-output
           REPORT="audit-output/supabase-prod-readonly-schema-audit.md"
-          PSQL_URI="host=db.${SUPABASE_PROJECT_ID}.supabase.co port=5432 dbname=postgres user=postgres sslmode=require"
+          PGHOST_NAME="db.${SUPABASE_PROJECT_ID}.supabase.co"
+          PGHOST_ADDR="$(getent ahostsv4 "${PGHOST_NAME}" | awk '{ print $1; exit }')"
+          if [ -z "${PGHOST_ADDR}" ]; then
+            echo "::error::Could not resolve an IPv4 address for the Supabase PROD database host."
+            exit 1
+          fi
+          PSQL_URI="host=${PGHOST_NAME} hostaddr=${PGHOST_ADDR} port=5432 dbname=postgres user=postgres sslmode=require"
           export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
 
           {
