@@ -1,13 +1,21 @@
 # Fase 2 - Tipo de solicitud vs metodo de pago
 
+## Estado actual
+
+La migracion `004c_fase2_payment_method_closure.sql` esta versionada en `supabase/migrations/` y el flujo operativo basado en paquetes `ops/precheck/load/postcheck` queda retirado por la estrategia Supabase CLI.
+
+Este documento describe la intencion funcional de Fase 2 y el checklist de validacion. Para aplicar migraciones, usar el flujo vigente documentado en:
+
+```text
+docs/ops/supabase-cli-migrations.md
+```
+
 ## Objetivo
 
 Cerrar la validacion DEV de Fase 2 separando formalmente dos conceptos que estaban mezclados:
 
 - `request_type`: naturaleza de la solicitud.
 - `payment_method`: flujo operativo de pago.
-
-Este PR no ejecuta SQL, no modifica datos reales y no toca produccion. Solo versiona los cambios necesarios para revision humana y ejecucion posterior autorizada en DEV.
 
 ## Valores versionados
 
@@ -28,7 +36,7 @@ Este PR no ejecuta SQL, no modifica datos reales y no toca produccion. Solo vers
 
 La columna nueva es `public.payment_requests.payment_method` y se mantiene separada de `request_type`.
 
-## Migracion nueva
+## Migracion
 
 Archivo:
 
@@ -67,23 +75,21 @@ Cambios clave:
 
 - No se usa `service_role` en frontend.
 - No se incluyen secrets ni credenciales.
-- No se toca `main`.
-- No se toca produccion.
-- No se toca Supabase PROD.
 - No se toca n8n.
-- No se ejecuta SQL en este PR.
-- No se ejecutan migraciones en este PR.
-- No se modifican datos operativos.
+- La migracion no modifica datos operativos fuera de su DDL previsto.
 
-## Pendiente antes de prueba final DEV
+## Aplicacion vigente
 
-Despues de mergear este PR a `dev`, aplicar en Supabase DEV la migracion:
+No usar paquetes `ops` ni workflows custom para aplicar 004c.
 
-```text
-supabase/migrations/004c_fase2_payment_method_closure.sql
+Usar Supabase CLI con revision de historial y dry-run:
+
+```bash
+supabase db push --dry-run
+supabase db push
 ```
 
-Debe ejecutarse por pipeline autorizado y con autorizacion separada. No ejecutar en PROD.
+Antes de PROD se requiere backup desde Supabase Dashboard y autorizacion explicita.
 
 ## Checklist de prueba DEV
 
@@ -102,7 +108,7 @@ Despues de aplicar `004c` en DEV:
 
 ## Pendientes separados
 
-No se resuelven en este PR:
+No se resuelven aqui:
 
 - `payment_receipts.notes` no existe en DEV.
 - Data quality de `historical_actuals.company_id` nullable.
