@@ -178,11 +178,11 @@ function renderLayoutActions(l) {
   const actions = [`<button class="small-btn" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Ver lineas</button>`]
 
   if (l.status === "draft") {
-    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar CxC BBVA</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar layout de pagos</button>`)
   }
 
   if (l.status === "generated") {
-    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar CxC BBVA" : "Generar CxC BBVA"}</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar layout de pagos" : "Generar layout de pagos"}</button>`)
     actions.push(`<button class="small-btn warning" type="button" onclick="markLayoutUploaded('${l.id}')" style="white-space:nowrap">Marcar subido</button>`)
     actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${l.id}')" style="white-space:nowrap">Confirmar pago</button>`)
   }
