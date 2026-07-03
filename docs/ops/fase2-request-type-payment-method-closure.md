@@ -2,7 +2,7 @@
 
 ## Estado actual
 
-La migracion `004c_fase2_payment_method_closure.sql` esta versionada en `supabase/migrations/` y el flujo operativo basado en paquetes `ops/precheck/load/postcheck` queda retirado por la estrategia Supabase CLI.
+La migracion `00403_fase2_payment_method_closure.sql` esta versionada en `supabase/migrations/` y el flujo operativo basado en paquetes `ops/precheck/load/postcheck` queda retirado por la estrategia Supabase CLI.
 
 Este documento describe la intencion funcional de Fase 2 y el checklist de validacion. Para aplicar migraciones, usar el flujo vigente documentado en:
 
@@ -25,7 +25,7 @@ Cerrar la validacion DEV de Fase 2 separando formalmente dos conceptos que estab
 - `online_purchase`: Compra en linea.
 - `reimbursement`: Reembolso.
 
-`online_purchase` se agrega al enum `public.payment_request_type` en la migracion `004c_fase2_payment_method_closure.sql`.
+`online_purchase` se agrega al enum `public.payment_request_type` en la migracion `00403_fase2_payment_method_closure.sql`.
 
 ### Metodo de pago
 
@@ -41,7 +41,7 @@ La columna nueva es `public.payment_requests.payment_method` y se mantiene separ
 Archivo:
 
 ```text
-supabase/migrations/004c_fase2_payment_method_closure.sql
+supabase/migrations/00403_fase2_payment_method_closure.sql
 ```
 
 La migracion:
