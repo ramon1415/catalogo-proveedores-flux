@@ -4,7 +4,7 @@ Documento operativo para versionar formalmente `public.historical_actuals` en el
 
 ## Estado actual
 
-`supabase/migrations/004a_historical_actuals.sql` esta versionado en `supabase/migrations/` y se queda como fuente de verdad.
+`supabase/migrations/00401_historical_actuals.sql` esta versionado en `supabase/migrations/` y se queda como fuente de verdad.
 
 Las referencias historicas a auditorias, workflows o paquetes `ops` documentan como se obtuvo la evidencia original. No son el procedimiento vigente para aplicar migraciones. Para aplicar cambios futuros, usar:
 
@@ -46,7 +46,7 @@ El conteo estimado reportado por la auditoria fue de 682 filas. La migracion ver
 ## Migracion
 
 ```text
-supabase/migrations/004a_historical_actuals.sql
+supabase/migrations/00401_historical_actuals.sql
 ```
 
 Se ubica despues de `004_rls_policies_grants.sql` porque depende de los helpers de roles ya versionados y agrega su propia configuracion RLS/policies/grant para la tabla.
