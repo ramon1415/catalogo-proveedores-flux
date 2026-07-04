@@ -132,6 +132,20 @@ jobs:
             fi
           }
 
+          fail_audit_guardrail() {
+            local message="$1"
+            AUDIT_FAILED=1
+            echo "::error::${message}"
+            echo "## Read-only guardrail failure" >> "${REPORT}"
+            echo "" >> "${REPORT}"
+            echo "${message}" >> "${REPORT}"
+            echo "" >> "${QUERY_LOG}"
+            echo "- Read-only guardrail: FAILED - ${message}" >> "${QUERY_LOG}"
+            sanitize_file "${REPORT}"
+            sanitize_file "${QUERY_LOG}"
+            exit 1
+          }
+
           {
             echo "# Supabase PROD fine migration audit"
             echo ""
@@ -139,7 +153,7 @@ jobs:
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- Commit: ${GITHUB_SHA}"
             echo "- Mode: ${CONFIRM_MODE}"
-            echo "- Read-only guard: PGOPTIONS default_transaction_read_only=on"
+            echo "- Read-only guard: every query is wrapped in BEGIN READ ONLY"
             echo "- db push: not executed"
             echo "- migration repair: not executed"
             echo "- DDL/DML: not executed"
@@ -195,6 +209,44 @@ jobs:
           fi
           sanitize_file "${NETWORK_REPORT}"
 
+          cat > audit-output/queries/00-readonly-guard.sql <<'SQL'
+          begin read only;
+          select current_setting('transaction_read_only') as transaction_read_only;
+          commit;
+          SQL
+
+          READONLY_GUARD_STDOUT="audit-output/query-results/readonly-guard.stdout.txt"
+          READONLY_GUARD_STDERR="audit-output/query-results/readonly-guard.stderr.txt"
+          if ! psql "${PSQL_URI}" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=verbose \
+            --echo-errors \
+            --file "audit-output/queries/00-readonly-guard.sql" \
+            > "${READONLY_GUARD_STDOUT}" 2> "${READONLY_GUARD_STDERR}"; then
+            sanitize_file "${READONLY_GUARD_STDOUT}"
+            sanitize_file "${READONLY_GUARD_STDERR}"
+            fail_audit_guardrail "Unable to start and verify a read-only transaction for PROD audit."
+          fi
+          sanitize_file "${READONLY_GUARD_STDOUT}"
+          sanitize_file "${READONLY_GUARD_STDERR}"
+          if ! grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${READONLY_GUARD_STDOUT}"; then
+            fail_audit_guardrail "Read-only transaction guard did not report transaction_read_only=on."
+          fi
+          {
+            echo "## Read-only transaction guard"
+            echo ""
+            echo "- Result: success"
+            echo "- Guard: BEGIN READ ONLY returned transaction_read_only=on"
+            echo ""
+          } >> "${QUERY_LOG}"
+          {
+            echo "## Read-only transaction guard"
+            echo ""
+            echo "Result: success - BEGIN READ ONLY returned transaction_read_only=on"
+            echo ""
+          } >> "${REPORT}"
+
           run_query() {
             local label="$1"
             local query_file="$2"
@@ -202,12 +254,22 @@ jobs:
             slug=$(echo "${label}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
             local stdout_file="audit-output/query-results/${slug}.stdout.txt"
             local stderr_file="audit-output/query-results/${slug}.stderr.txt"
+            local wrapper_file="audit-output/queries/${slug}-readonly-wrapper.sql"
+
+            cat > "${wrapper_file}" <<SQL
+          begin read only;
+          select current_setting('transaction_read_only') as transaction_read_only_guard;
+          \i ${query_file}
+          commit;
+          SQL
 
             echo "${label}" > "${LAST_QUERY_FILE}"
             {
               echo "## ${label}"
               echo ""
               echo "- Query file: ${query_file}"
+              echo "- Wrapper: ${wrapper_file}"
+              echo "- Guard: BEGIN READ ONLY"
               echo ""
             } >> "${QUERY_LOG}"
 
@@ -216,17 +278,28 @@ jobs:
               --set ON_ERROR_STOP=1 \
               --set VERBOSITY=verbose \
               --echo-errors \
-              --file "${query_file}" \
+              --file "${wrapper_file}" \
               > "${stdout_file}" 2> "${stderr_file}"; then
-              echo "- Result: success" >> "${QUERY_LOG}"
-              echo "## ${label}" >> "${REPORT}"
-              echo "" >> "${REPORT}"
-              echo "Result: success" >> "${REPORT}"
-              echo "" >> "${REPORT}"
-              echo '```text' >> "${REPORT}"
-              cat "${stdout_file}" >> "${REPORT}"
-              echo '```' >> "${REPORT}"
-              echo "" >> "${REPORT}"
+              if grep -Eq 'transaction_read_only_guard[[:space:]]*|[[:space:]]*on' "${stdout_file}" && grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${stdout_file}"; then
+                echo "- Result: success" >> "${QUERY_LOG}"
+                echo "## ${label}" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo "Result: success" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo '```text' >> "${REPORT}"
+                cat "${stdout_file}" >> "${REPORT}"
+                echo '```' >> "${REPORT}"
+                echo "" >> "${REPORT}"
+              else
+                AUDIT_FAILED=1
+                echo "- Result: failure" >> "${QUERY_LOG}"
+                echo "- Reason: transaction_read_only_guard was not confirmed as on" >> "${QUERY_LOG}"
+                echo "## ${label}" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo "Result: failure" >> "${REPORT}"
+                echo "Reason: transaction_read_only_guard was not confirmed as on" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+              fi
             else
               local exit_code=$?
               AUDIT_FAILED=1
@@ -260,6 +333,7 @@ jobs:
             current_database() as database_name,
             current_user as db_user,
             current_setting('default_transaction_read_only') as default_transaction_read_only,
+            current_setting('transaction_read_only') as transaction_read_only,
             current_setting('statement_timeout') as statement_timeout,
             now() as audited_at;
           SQL
@@ -796,6 +870,7 @@ jobs:
             echo "- Branch required: dev"
             echo "- Mode required: audit"
             echo "- Artifact: supabase-prod-fine-audit-evidence"
+            echo "- Read-only guard: BEGIN READ ONLY per query"
             echo "- db push: not executed"
             echo "- migration repair: not executed"
             echo "- migrations: not executed"

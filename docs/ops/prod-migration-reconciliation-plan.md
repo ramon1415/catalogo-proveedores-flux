@@ -2,220 +2,216 @@
 
 ## Resumen ejecutivo
 
-La auditoria read-only de Supabase PROD ya pudo ejecutarse correctamente contra el proyecto `ucantptjhwttexzmslvm` usando el workflow `Supabase PROD Read-only Schema Audit`.
+La auditoria fina read-only de Supabase PROD ya se ejecuto correctamente contra el proyecto PROD `ucantptjhwttexzmslvm`.
 
-El hallazgo central es que PROD no esta vacia: tiene tablas, funciones, RLS, policies y buckets de Storage. Sin embargo, no existe `supabase_migrations.schema_migrations`. Eso significa que Supabase CLI no tiene historial registrado para saber que migraciones ya estan representadas en la base.
+Fuente:
 
-Por ese motivo no se debe ejecutar `supabase db push` todavia. Si el historial CLI esta vacio pero los objetos ya existen, el CLI podria intentar aplicar migraciones que ya estan reflejadas total o parcialmente en PROD, provocando errores por objetos duplicados o un historial inconsistente.
+- Workflow: `Supabase PROD Read-only Schema Audit`
+- Run: `#11 / 28717477643`
+- Artifact: `supabase-prod-fine-audit-evidence`
+- Artifact ID: `8084830344`
+- Resultado: `success`
 
-Este documento no autoriza ejecucion. Su objetivo es dar a Carlos y Ramon una base clara para decidir entre `migration repair`, baseline, aplicacion controlada de faltantes o reconciliacion manual.
+Clasificacion global: **B - PROD tiene esquema parcial, pero sin historial CLI**.
 
-## Resultado de auditoria
+El hallazgo central es que PROD no esta vacia, pero tampoco tiene historial CLI:
 
-Fuente: GitHub Actions run `28715226383`, artifact `supabase-prod-readonly-audit-evidence` (`8084209519`).
+- `supabase_migrations`: no existe.
+- `supabase_migrations.schema_migrations`: no existe.
+- Hay objetos productivos relevantes ya creados fuera del historial CLI.
+- Algunas migraciones estan reflejadas, otras estan ausentes y otras estan parcialmente representadas.
 
-Resultado resumido:
+Por este motivo siguen bloqueados:
 
-- PROD accesible por workflow: si.
-- Conexion: pooler/session, TCP reachable.
-- Auditoria read-only: success.
-- `db push`: no ejecutado.
-- `migration repair`: no ejecutado.
-- DDL/DML: no ejecutado.
-- n8n: no tocado.
-- `supabase_migrations.schema_migrations`: missing.
-- Tablas publicas encontradas: 62.
-- Funciones publicas encontradas: 226.
-- Tablas publicas con RLS activo: 59.
-- Policies publicas encontradas: 71.
-- Buckets Storage privados: `celebration-contracts`, `company-receipts`, `payment-receipts`.
+- `supabase db push` real.
+- `supabase migration repair`.
+- aplicacion de migraciones.
+- merge de #147 a `main`.
+- pruebas productivas de notificaciones.
 
-Clasificacion preliminar: PROD tiene esquema aplicado fuera del flujo CLI o sin historial registrado.
+Este documento no autoriza ejecucion. Formaliza la foto real de PROD y prepara la decision tecnica para Carlos/Ramon.
 
-## Objetos criticos encontrados
+## Controles de la auditoria fina
 
-| Objeto | PROD |
-| --- | --- |
-| `public.profiles` | presente |
-| `public.roles` | presente |
-| `public.user_roles` | presente |
-| `public.payment_requests` | presente |
-| `public.payment_layouts` | presente |
-| `public.payment_layout_lines` | presente |
-| `public.payment_receipts` | presente |
-| `public.historical_actuals` | faltante |
-| `public.notification_events` | faltante |
-| `public.notification_delivery_attempts` | faltante |
-| `public.suppliers` | faltante |
+La auditoria fina:
 
-Nota: la auditoria actual valida presencia de objetos, RLS y policies generales. No valida todavia todas las columnas, constraints, indices, enum values ni el cuerpo exacto de cada funcion.
+- uso el GitHub Environment `supabase-production`;
+- uso el secret `SUPABASE_PROD_AUDIT_DB_URL`;
+- conecto por pooler/session;
+- termino en `success`;
+- ejecuto consultas de metadata/catalogo;
+- no ejecuto `db push`;
+- no ejecuto `migration repair`;
+- no aplico migraciones;
+- no ejecuto DDL/DML;
+- no toco n8n;
+- no cambio secrets ni variables.
 
-## Riesgo principal
+Nota de guardrail: el run #11 reporto `default_transaction_read_only = off` en la consulta de identidad. Aunque el workflow no ejecuto escrituras, el workflow debe endurecerse para forzar/verificar transacciones read-only antes de reutilizarlo como patron permanente.
 
-`supabase db push` calcula que aplicar con base en `supabase_migrations.schema_migrations`. Si esa tabla no existe o no tiene registros, el CLI puede interpretar que debe aplicar todo el ledger disponible en `supabase/migrations`.
+## Matriz fina por migracion
 
-En PROD ya existen objetos base como `profiles`, `roles`, `user_roles`, `payment_requests`, `payment_layouts`, `payment_layout_lines` y `payment_receipts`. Si se ejecuta `db push` sin reconciliar historial, el resultado puede ser:
-
-- fallas por objetos ya existentes;
-- migraciones parcialmente aplicadas;
-- historial CLI incorrecto;
-- necesidad posterior de reparacion con mas riesgo;
-- interrupcion de la ventana de release.
-
-Por eso el siguiente paso debe ser decision de reconciliacion, no ejecucion.
-
-## Matriz migraciones vs PROD
-
-| Migracion | Objetivo | Objetos esperados | Objetos encontrados en PROD | Estado aparente | Riesgo | Recomendacion |
+| Migracion | Estado PROD | Objetos encontrados | Objetos faltantes | Riesgo de aplicar directo | Recomendacion tecnica | Revision humana |
 | --- | --- | --- | --- | --- | --- | --- |
-| Base ledger `00101` a `00109` y `00301` a `00307` | Crear estructura base: tablas core, budget, pagos, layouts, efectivo, ingresos, dashboard, vistas y RPCs | `profiles`, `roles`, `user_roles`, `payment_requests`, `payment_layouts`, `payment_layout_lines`, funciones como `create_payment_layout`, `create_payment_request`, `confirm_payment_layout`, `decide_payment_request` | Muchos objetos base existen: 62 tablas, 226 funciones, 71 policies. Objetos criticos base presentes: `profiles`, `roles`, `user_roles`, `payment_requests`, `payment_layouts`, `payment_layout_lines` | Ya aplicada manualmente o parcialmente, pero sin historial CLI | Alto si se hace `db push` completo: podria intentar recrear objetos base | Hacer matriz detallada por archivo base antes de cualquier repair. Probable baseline/repair parcial para migraciones confirmadas |
-| `00110_number_sequences.sql` | Versionar secuencias `payment_request_number_seq` y `payment_layout_number_seq` | `public.payment_request_number_seq`, `public.payment_layout_number_seq` | La auditoria confirmo funcion `generate_payment_request_number` y `create_payment_layout`, pero no consulto secuencias directamente. `payment_layout_number_seq` era requisito del dry-run/release, pero no queda probado por esta auditoria | No concluyente | Medio: si faltan secuencias, RPCs pueden fallar; si existen y CLI aplica `CREATE SEQUENCE IF NOT EXISTS`, el riesgo tecnico es menor | Ejecutar auditoria read-only especifica de secuencias. Solo marcar/aplicar despues de confirmar |
-| `00401_historical_actuals.sql` | Versionar tabla `historical_actuals`, unique, FK, RLS y policies | `public.historical_actuals`, policies `historical_actuals_select`, `historical_actuals_write` | `public.historical_actuals` faltante | No aplicada | Bajo/medio: aplicar podria ser necesario, pero no debe hacerse antes de resolver baseline/historial | Mantener como pendiente real. Aplicar solo despues de estrategia de historial aprobada |
-| `00402_payment_receipts_policies.sql` | Agregar/ajustar policies RLS para escritura de `payment_receipts` | Tabla `payment_receipts`, RLS activo, policy `payment_receipts_select`, policy `payment_receipts_write_authorized`, grants a authenticated | `payment_receipts` presente y RLS activo. En la lista de policies no aparece `payment_receipts_write_authorized` ni `payment_receipts_select` | Parcialmente aplicada: tabla/RLS existen; policies versionadas parecen faltantes | Alto funcional: comprobantes de transferencia pueden fallar por RLS si falta policy de escritura | Confirmar con auditoria read-only especifica de policies/grants. Si falta, preparar aplicacion controlada de 00402 despues de reconciliacion |
-| `00403_fase2_payment_method_closure.sql` | Separar `request_type` de `payment_method`, agregar `online_purchase`, constraint, indice y actualizar `create_payment_layout` para incluir solo transferencias | Columna `payment_requests.payment_method`, constraint `payment_requests_payment_method_check`, enum value `online_purchase`, indice `idx_payment_requests_payment_method`, funcion `create_payment_layout` con filtro `payment_method = transfer` | `payment_requests` existe y `create_payment_layout(date,date,uuid,text,uuid,uuid)` existe. La auditoria no reviso columnas, enum values, constraints, indices ni cuerpo de la funcion | No concluyente | Alto para release: layout bancario podria incluir metodos no transferencia si la funcion no esta actualizada | Hacer auditoria read-only especifica de columnas/constraints/enum/functiondef antes de decidir repair o aplicacion |
-| `007_notifications.sql` | Versionar ledger de notificaciones: tablas, funciones, trigger, RLS, policies y grants | `notification_events`, `notification_delivery_attempts`, funciones `enqueue/claim/mark`, trigger `set_updated_at_notification_events`, RLS/policies | `notification_events` faltante y `notification_delivery_attempts` faltante | No aplicada | Medio: no debe bloquear Fase 2 si la feature queda inactiva; alto si se intenta probar notificaciones en PROD sin migracion | No probar notificaciones en PROD todavia. Aplicar 007 solo cuando historial este reconciliado y con autorizacion separada |
+| `00110_number_sequences.sql` | Aplicada | `payment_request_number_seq` existe; `payment_layout_number_seq` existe | Ninguno detectado en la auditoria fina | Medio: no debe marcarse en historial sin confirmar equivalencia completa | Candidata a `supabase migration repair` o baseline selectivo, solo si Carlos/Ramon aceptan que las secuencias coinciden con el ledger | Si |
+| `00401_historical_actuals.sql` | No aplicada | Ninguno | `historical_actuals`, columnas, constraints, RLS/policies | Medio: aplicar antes de ordenar historial perpetua el desfase CLI | Pendiente real. No aplicar hasta decidir baseline/repair y revisar ventana | Si |
+| `00402_payment_receipts_policies.sql` | Parcial | `payment_receipts` existe; RLS activo; `flux_member_roles()` y `flux_approver_roles()` existen | policies `payment_receipts_select` y `payment_receipts_write_authorized`; grants/policies versionadas equivalentes | Alto funcional: comprobantes pueden fallar por RLS; tambien hay grants amplios a `anon` detectados y requieren revision cuidadosa | Revisar si conviene aplicar 00402 idempotente o preparar patch especifico de policies/grants despues de reconciliar historial | Si |
+| `00403_fase2_payment_method_closure.sql` | Parcial | `payment_requests.request_type` existe; enum `payment_request_type` existe; `create_payment_layout(date,date,uuid,text,uuid,uuid)` existe | `payment_requests.payment_method`; constraint `payment_requests_payment_method_check`; indice `idx_payment_requests_payment_method`; enum `online_purchase`; guard backend `payment_method=transfer` en `create_payment_layout` | Alto para release: sin esto PROD no garantiza separacion de tipo/metodo ni filtro de transferencias en backend | Revisar si 00403 puede ejecutarse idempotente sin fallar por objetos existentes; probablemente requiere aplicacion controlada despues de ordenar historial | Si |
+| `007_notifications.sql` | No aplicada | Ninguno | `notification_events`; `notification_delivery_attempts`; 8 funciones; trigger; RLS/policies/grants | Medio: no bloquea si notificaciones quedan inactivas, pero no debe probarse en PROD | Pendiente real. Aplicar solo despues de resolver historial y validar primero en DEV; no activar n8n real | Si |
 
-## Clasificacion por migracion
+## Lectura tecnica por migracion
 
-- Migraciones base: no concluyente a nivel archivo, pero los objetos principales indican que una parte importante del esquema ya existe fuera del historial CLI.
-- `00110_number_sequences.sql`: no concluyente hasta auditar secuencias.
-- `00401_historical_actuals.sql`: no aplicada segun presencia de tabla.
-- `00402_payment_receipts_policies.sql`: parcialmente aplicada o incompleta; tabla/RLS existen, policies versionadas aparentan faltar.
-- `00403_fase2_payment_method_closure.sql`: no concluyente; se requiere auditoria especifica de columna, enum, constraint, indice y cuerpo de funcion.
-- `007_notifications.sql`: no aplicada segun presencia de tablas.
+### `00110_number_sequences.sql`
+
+La auditoria fina encontro ambas secuencias:
+
+- `public.payment_request_number_seq`
+- `public.payment_layout_number_seq`
+
+Lectura: la migracion esta representada en PROD a nivel de objetos principales, pero no existe historial CLI. Es candidata a marcarse como aplicada mediante `supabase migration repair` o baseline selectivo, si se valida que no hay diferencias relevantes.
+
+### `00401_historical_actuals.sql`
+
+La tabla `public.historical_actuals` no existe en PROD. Tampoco existen columnas, constraints ni policies asociadas.
+
+Lectura: es pendiente real. No aplicar hasta ordenar historial CLI.
+
+### `00402_payment_receipts_policies.sql`
+
+La tabla `public.payment_receipts` existe y RLS esta activo, pero no aparecen las policies versionadas:
+
+- `payment_receipts_select`
+- `payment_receipts_write_authorized`
+
+Tambien se observaron privilegios amplios para `anon` y `authenticated` sobre `payment_receipts`; esto requiere revision humana antes de tocar permisos.
+
+Lectura: la migracion esta parcial. Hay que decidir si se aplica 00402 tal cual o si conviene un patch especifico de policies/grants.
+
+### `00403_fase2_payment_method_closure.sql`
+
+PROD tiene `payment_requests.request_type`, pero no tiene:
+
+- `payment_requests.payment_method`
+- constraint `payment_requests_payment_method_check`
+- indice `idx_payment_requests_payment_method`
+- enum value `online_purchase`
+- guard de `create_payment_layout` basado en `payment_method` y `transfer`
+
+Lectura: la migracion esta parcial. Este punto bloquea release funcional completo a PROD porque layouts y metodo de pago no quedan cerrados desde backend.
+
+### `007_notifications.sql`
+
+PROD no tiene:
+
+- `notification_events`
+- `notification_delivery_attempts`
+- funciones de notificaciones
+- trigger de notificaciones
+- RLS/policies de notificaciones
+
+Lectura: no aplicada. No probar notificaciones en PROD hasta reconciliar historial y aplicar 007 con autorizacion separada.
 
 ## Opciones de reconciliacion
 
-### Opcion A - `supabase migration repair`
+### Opcion A - `supabase migration repair` selectivo
 
-Marcar como aplicadas solo las migraciones cuyos objetos ya existen correctamente en PROD.
+Marcar como aplicada solo una migracion cuyos objetos ya existen correctamente en PROD.
 
-Condiciones previas:
+Candidata actual:
 
-- Auditoria read-only por migracion confirma equivalencia suficiente.
-- Carlos/Ramon autorizan explicitamente los repair exactos.
-- Se documentan los ids/versiones a reparar.
-- Se ejecuta primero en una ventana controlada.
+- `00110_number_sequences.sql`, si Carlos/Ramon aceptan la equivalencia de las secuencias.
 
-Riesgo: marcar como aplicada una migracion que no esta realmente completa puede ocultar faltantes y romper futuros `db push`.
+No candidatas todavia:
 
-### Opcion B - baseline formal
+- `00401`: no aplicada.
+- `00402`: parcial.
+- `00403`: parcial.
+- `007`: no aplicada.
 
-Crear una linea base si PROD ya tiene una estructura equivalente al estado inicial del ledger, evitando que CLI intente recrear objetos base.
+Riesgo: marcar como aplicada una migracion incompleta oculta faltantes y complica futuros `db push`.
 
-Condiciones previas:
+### Opcion B - baseline controlado
 
-- Se identifica que las migraciones base estan representadas de forma suficiente.
-- Se separan migraciones realmente faltantes (`00401`, `00402`, `00403`, `007`, segun auditoria especifica).
-- Se documenta el punto exacto de baseline.
+Definir una linea base del estado real de PROD para no intentar recrear objetos ya existentes.
 
-Riesgo: requiere precision para no saltar cambios importantes.
+Condiciones:
 
-### Opcion C - aplicar faltantes
+- Inventario de objetos base suficiente.
+- Aprobacion Carlos/Ramon.
+- Lista clara de migraciones realmente faltantes o parciales.
 
-Aplicar solo objetos realmente faltantes, despues de repair/baseline o como migracion controlada si se decide no usar `db push` completo todavia.
+Riesgo: si el baseline cubre objetos incompletos, el CLI dejara de aplicar cambios necesarios.
 
-Ejemplos probables segun auditoria actual:
+### Opcion C - patches para migraciones parciales
 
-- `historical_actuals` parece faltante.
-- policies de `payment_receipts` parecen faltantes.
-- notificaciones 007 parecen faltantes.
-- Fase 2 `payment_method` requiere auditoria adicional.
+Preparar migraciones o pasos especificos para completar objetos parciales sin recrear lo que ya existe.
 
-Riesgo: aplicar faltantes sin ordenar historial puede perpetuar el desfase CLI.
+Posibles candidatos:
 
-### Opcion D - recrear PROD limpio
+- policies/grants de `payment_receipts`.
+- `payment_method`, constraint, indice, enum `online_purchase` y funcion `create_payment_layout`.
 
-Recrear PROD desde cero con `supabase/migrations` como fuente unica.
+Riesgo: si se hace fuera del historial CLI, se perpetua el desfase. Debe ir coordinado con repair/baseline.
 
-Esta opcion solo debe considerarse si se detecta inconsistencia grave y si negocio autoriza un plan completo de backup, restauracion, carga de datos y corte. No se recomienda como primer camino.
+### Opcion D - `supabase db push --dry-run` despues de repair/baseline
 
-## Recomendacion inicial
+Solo despues de resolver el historial, correr dry-run para confirmar que el CLI ya no intenta reaplicar objetos existentes indebidamente.
 
-No ejecutar todavia:
+Riesgo: correrlo antes de reconciliar no modifica datos, pero puede seguir mostrando un plan inutil o confuso.
 
-- `supabase db push`.
-- `supabase migration repair`.
-- migraciones manuales.
-- pruebas productivas de notificaciones.
-- merge de #147.
+### Opcion E - recrear PROD limpio
 
-Camino recomendado:
+Solo si se detecta inconsistencia grave y negocio autoriza backup, restauracion/carga de datos y ventana extendida.
 
-1. Revisar este documento con Carlos/Ramon.
-2. Preparar auditoria read-only especifica para columnas, constraints, indices, secuencias y cuerpos de funciones criticas.
-3. Confirmar equivalencia de migraciones base.
-4. Decidir si conviene repair, baseline o aplicacion controlada de faltantes.
-5. Documentar comandos exactos antes de ejecutarlos.
-6. Autorizar cada ejecucion por separado.
+No se recomienda como primer camino.
 
-## Plan de autorizacion requerido
+## Plan recomendado
 
-Cada paso siguiente requiere autorizacion explicita y separada:
+No ejecutar nada todavia.
 
-- Autorizar auditoria read-only adicional.
-- Autorizar `supabase migration repair` con versiones exactas.
-- Autorizar `supabase db push --dry-run`.
-- Autorizar `supabase db push` real.
-- Autorizar merge de #147.
-- Autorizar smoke test productivo.
-- Autorizar pruebas de notificaciones en PROD.
+Propuesta de orden:
 
-Sin esas autorizaciones, el estado debe permanecer detenido.
-
-## Orden sugerido posterior
-
-1. Revisar este documento de reconciliacion.
-2. Carlos/Ramon aprueban estrategia.
-3. Ejecutar auditoria read-only de detalle para:
-   - secuencias;
-   - columnas de `payment_requests`;
-   - enum `payment_request_type`;
-   - constraints e indices;
-   - policies/grants de `payment_receipts`;
-   - cuerpo de `create_payment_layout`;
-   - objetos de notificaciones.
-4. Si aplica, ejecutar `supabase migration repair` solo para migraciones confirmadas.
+1. Revisar este plan con Carlos/Ramon.
+2. Endurecer el workflow read-only para que valide transaccion `READ ONLY` y falle si no queda activa.
+3. Preparar, en PR separado, comandos propuestos de `migration repair` o baseline sin ejecutarlos.
+4. Si se autoriza, ejecutar solo repair/baseline especifico.
 5. Ejecutar `supabase db push --dry-run`.
 6. Revisar salida del dry-run.
-7. Si no hay riesgos, autorizar `supabase db push`.
-8. Smoke test PROD.
-9. Solo despues decidir merge #147 o release correspondiente.
+7. Si queda limpio, pedir autorizacion explicita para aplicar faltantes.
+8. Solo despues retomar merge/release #147.
 
 ## Notificaciones
 
-La feature de notificaciones se queda versionada en `supabase/migrations/007_notifications.sql`, pero no debe probarse en PROD hasta reconciliar historial/migraciones.
+`007_notifications.sql` no esta aplicada en PROD.
 
-Orden sugerido para notificaciones:
+No probar notificaciones en PROD todavia.
 
-1. Validar estructura despues de reconciliacion.
-2. Probar primero en DEV o entorno controlado:
-   - crear evento;
-   - `claim_pending`;
-   - `mark processed` / `mark failed`;
-   - n8n manual;
-   - Resend controlado.
-3. No activar n8n real, cron, schedule ni envios reales hasta autorizacion separada.
-4. Probar PROD solo despues de historial consistente y ventana autorizada.
+La prueba de notificaciones debe hacerse primero en DEV/controlado:
 
-## Controles de este PR
+1. verificar `notification_events`;
+2. verificar `notification_delivery_attempts`;
+3. crear evento controlado;
+4. `claim_pending`;
+5. `mark processed` / `mark failed`;
+6. n8n manual;
+7. Resend con destinatarios controlados.
 
-Este PR debe ser solo documental.
+No activar n8n real ni envios reales en PROD hasta autorizacion separada.
 
-Confirmaciones esperadas:
+## Estado bloqueado
 
-- No toca `main`.
-- No toca `dev` directo.
-- No mergea #147.
-- No ejecuta SQL.
-- No ejecuta Actions.
-- No ejecuta `db push`.
-- No ejecuta `migration repair`.
-- No aplica migraciones.
-- No toca Supabase PROD.
-- No toca Supabase DEV.
-- No toca n8n.
-- No cambia variables ni secrets.
-- No modifica frontend.
-- No modifica migraciones.
-- No borra nada.
+Siguen bloqueados hasta autorizacion explicita:
+
+- `supabase db push`;
+- `supabase migration repair`;
+- aplicacion de migraciones;
+- merge de #147;
+- pruebas PROD de notificaciones;
+- cambios en secrets/variables;
+- cambios en n8n real.
+
+## Confirmaciones de este plan
+
+Este documento es de reconciliacion. No ejecuta nada y no autoriza ejecucion.
+
+Cualquier paso operativo posterior debe tener PR/orden separados y autorizacion explicita de Carlos/Ramon.
