@@ -876,3 +876,881 @@ jobs:
             echo "- migrations: not executed"
             echo "- DDL/DML: not executed"
           } >> "${GITHUB_STEP_SUMMARY}"
+name: Supabase PROD Read-only Schema Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_prod:
+        description: "Type the PROD Supabase project ref to confirm the target"
+        required: true
+        type: string
+      confirm_mode:
+        description: "Type audit to confirm this workflow only runs read-only metadata checks"
+        required: true
+        default: "audit"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-readonly-schema-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Supabase PROD fine read-only migration audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: supabase-production
+
+    env:
+      SUPABASE_AUDIT_DB_URL: ${{ secrets.SUPABASE_PROD_AUDIT_DB_URL }}
+      SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+
+    steps:
+      - name: Validate audit guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p audit-output
+          GUARDRAILS_REPORT="audit-output/guardrails.md"
+          {
+            echo "# Supabase PROD fine read-only audit guardrails"
+            echo ""
+            echo "- Environment: supabase-production"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode requested: ${CONFIRM_MODE}"
+            echo "- Connection mode: SUPABASE_PROD_AUDIT_DB_URL"
+            echo "- Writes: not executed by this workflow"
+            echo "- db push: not executed by this workflow"
+            echo "- migration repair: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
+            echo ""
+          } > "${GUARDRAILS_REPORT}"
+
+          fail_guardrail() {
+            local message="$1"
+            echo "::error::${message}"
+            echo "- Result: FAILED - ${message}" >> "${GUARDRAILS_REPORT}"
+            exit 1
+          }
+
+          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+            fail_guardrail "This workflow is restricted to the dev branch."
+          fi
+
+          if [ "${CONFIRM_MODE}" != "audit" ]; then
+            fail_guardrail "confirm_mode must be exactly: audit"
+          fi
+
+          if [ -z "${SUPABASE_PROJECT_ID}" ]; then
+            fail_guardrail "SUPABASE_PROJECT_REF_PROD environment variable is not configured."
+          fi
+
+          if [ "${CONFIRM_PROD}" != "${SUPABASE_PROJECT_ID}" ]; then
+            fail_guardrail "confirm_prod does not match the configured PROD project ref."
+          fi
+
+          if [ -z "${SUPABASE_AUDIT_DB_URL}" ]; then
+            fail_guardrail "SUPABASE_PROD_AUDIT_DB_URL secret is not configured."
+          fi
+
+          echo "- Result: PASSED" >> "${GUARDRAILS_REPORT}"
+
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v psql >/dev/null 2>&1; then
+            psql --version
+          else
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+            psql --version
+          fi
+
+      - name: Run fine read-only migration audit
+        id: fine_audit
+        shell: bash
+        env:
+          PGCONNECT_TIMEOUT: "10"
+          PGOPTIONS: "-c default_transaction_read_only=on -c statement_timeout=15000"
+        run: |
+          set -uo pipefail
+
+          mkdir -p audit-output/queries audit-output/query-results
+          REPORT="audit-output/supabase-prod-fine-audit.md"
+          NETWORK_REPORT="audit-output/network-diagnostics.md"
+          QUERY_LOG="audit-output/query-log.md"
+          LAST_QUERY_FILE="audit-output/last-query.txt"
+          PSQL_URI="${SUPABASE_AUDIT_DB_URL}"
+          AUDIT_FAILED=0
+
+          sanitize_file() {
+            local file_path="$1"
+            if [ -f "${file_path}" ]; then
+              sed -E -i \
+                -e 's#postgres(ql)?://[^[:space:]]+#postgresql://***REDACTED***#g' \
+                -e 's#(password=)[^[:space:]]+#\1***REDACTED***#gi' \
+                -e 's#(SUPABASE_[A-Z0-9_]*=)[^[:space:]]+#\1***REDACTED***#g' \
+                -e 's#(access[_-]?token=)[^[:space:]]+#\1***REDACTED***#gi' \
+                -e 's#(apikey=)[^[:space:]]+#\1***REDACTED***#gi' \
+                "${file_path}"
+            fi
+          }
+
+          fail_audit_guardrail() {
+            local message="$1"
+            AUDIT_FAILED=1
+            echo "::error::${message}"
+            echo "## Read-only guardrail failure" >> "${REPORT}"
+            echo "" >> "${REPORT}"
+            echo "${message}" >> "${REPORT}"
+            echo "" >> "${QUERY_LOG}"
+            echo "- Read-only guardrail: FAILED - ${message}" >> "${QUERY_LOG}"
+            sanitize_file "${REPORT}"
+            sanitize_file "${QUERY_LOG}"
+            exit 1
+          }
+
+          {
+            echo "# Supabase PROD fine migration audit"
+            echo ""
+            echo "- Target project ref: ${SUPABASE_PROJECT_ID}"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Mode: ${CONFIRM_MODE}"
+            echo "- Read-only guard: every query is wrapped in BEGIN READ ONLY"
+            echo "- db push: not executed"
+            echo "- migration repair: not executed"
+            echo "- DDL/DML: not executed"
+            echo ""
+          } > "${REPORT}"
+
+          {
+            echo "# Query log"
+            echo ""
+          } > "${QUERY_LOG}"
+
+          python3 - <<'PY' > "${NETWORK_REPORT}"
+          import os
+          from urllib.parse import urlparse
+          url = os.environ.get("SUPABASE_AUDIT_DB_URL", "")
+          parsed = urlparse(url)
+          host = parsed.hostname or "unknown"
+          port = parsed.port or 5432
+          user = parsed.username or "unknown"
+          masked_host = host
+          if len(host) > 12 and "." in host:
+              first, *rest = host.split(".")
+              masked_host = first[:4] + "***." + ".".join(rest)
+          print("# Network diagnostics")
+          print("")
+          print(f"- Host: {masked_host}")
+          print(f"- Port: {port}")
+          print(f"- User: {user}")
+          print("- Connection string: redacted")
+          PY
+          sanitize_file "${NETWORK_REPORT}"
+
+          DB_HOST=$(python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          print(urlparse(os.environ.get("SUPABASE_AUDIT_DB_URL", "")).hostname or "")
+          PY
+          )
+          DB_PORT=$(python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          print(urlparse(os.environ.get("SUPABASE_AUDIT_DB_URL", "")).port or 5432)
+          PY
+          )
+
+          if [ -n "${DB_HOST}" ]; then
+            if timeout 8 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/tmp/tcp-check.err; then
+              echo "- TCP reachable: yes" >> "${NETWORK_REPORT}"
+            else
+              echo "- TCP reachable: no" >> "${NETWORK_REPORT}"
+              cat /tmp/tcp-check.err >> "${NETWORK_REPORT}" || true
+            fi
+          fi
+          sanitize_file "${NETWORK_REPORT}"
+
+          cat > audit-output/queries/00-readonly-guard.sql <<'SQL'
+          begin read only;
+          select current_setting('transaction_read_only') as transaction_read_only;
+          commit;
+          SQL
+
+          READONLY_GUARD_STDOUT="audit-output/query-results/readonly-guard.stdout.txt"
+          READONLY_GUARD_STDERR="audit-output/query-results/readonly-guard.stderr.txt"
+          if ! psql "${PSQL_URI}" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=verbose \
+            --echo-errors \
+            --file "audit-output/queries/00-readonly-guard.sql" \
+            > "${READONLY_GUARD_STDOUT}" 2> "${READONLY_GUARD_STDERR}"; then
+            sanitize_file "${READONLY_GUARD_STDOUT}"
+            sanitize_file "${READONLY_GUARD_STDERR}"
+            fail_audit_guardrail "Unable to start and verify a read-only transaction for PROD audit."
+          fi
+          sanitize_file "${READONLY_GUARD_STDOUT}"
+          sanitize_file "${READONLY_GUARD_STDERR}"
+          if ! grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${READONLY_GUARD_STDOUT}"; then
+            fail_audit_guardrail "Read-only transaction guard did not report transaction_read_only=on."
+          fi
+          {
+            echo "## Read-only transaction guard"
+            echo ""
+            echo "- Result: success"
+            echo "- Guard: BEGIN READ ONLY returned transaction_read_only=on"
+            echo ""
+          } >> "${QUERY_LOG}"
+          {
+            echo "## Read-only transaction guard"
+            echo ""
+            echo "Result: success - BEGIN READ ONLY returned transaction_read_only=on"
+            echo ""
+          } >> "${REPORT}"
+
+          run_query() {
+            local label="$1"
+            local query_file="$2"
+            local slug
+            slug=$(echo "${label}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
+            local stdout_file="audit-output/query-results/${slug}.stdout.txt"
+            local stderr_file="audit-output/query-results/${slug}.stderr.txt"
+            local wrapper_file="audit-output/queries/${slug}-readonly-wrapper.sql"
+
+            cat > "${wrapper_file}" <<SQL
+          begin read only;
+          select current_setting('transaction_read_only') as transaction_read_only_guard;
+          \i ${query_file}
+          commit;
+          SQL
+
+            echo "${label}" > "${LAST_QUERY_FILE}"
+            {
+              echo "## ${label}"
+              echo ""
+              echo "- Query file: ${query_file}"
+              echo "- Wrapper: ${wrapper_file}"
+              echo "- Guard: BEGIN READ ONLY"
+              echo ""
+            } >> "${QUERY_LOG}"
+
+            if psql "${PSQL_URI}" \
+              --no-psqlrc \
+              --set ON_ERROR_STOP=1 \
+              --set VERBOSITY=verbose \
+              --echo-errors \
+              --file "${wrapper_file}" \
+              > "${stdout_file}" 2> "${stderr_file}"; then
+              if grep -Eq 'transaction_read_only_guard[[:space:]]*|[[:space:]]*on' "${stdout_file}" && grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${stdout_file}"; then
+                echo "- Result: success" >> "${QUERY_LOG}"
+                echo "## ${label}" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo "Result: success" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo '```text' >> "${REPORT}"
+                cat "${stdout_file}" >> "${REPORT}"
+                echo '```' >> "${REPORT}"
+                echo "" >> "${REPORT}"
+              else
+                AUDIT_FAILED=1
+                echo "- Result: failure" >> "${QUERY_LOG}"
+                echo "- Reason: transaction_read_only_guard was not confirmed as on" >> "${QUERY_LOG}"
+                echo "## ${label}" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+                echo "Result: failure" >> "${REPORT}"
+                echo "Reason: transaction_read_only_guard was not confirmed as on" >> "${REPORT}"
+                echo "" >> "${REPORT}"
+              fi
+            else
+              local exit_code=$?
+              AUDIT_FAILED=1
+              echo "- Result: failure" >> "${QUERY_LOG}"
+              echo "- Exit code: ${exit_code}" >> "${QUERY_LOG}"
+              echo "## ${label}" >> "${REPORT}"
+              echo "" >> "${REPORT}"
+              echo "Result: failure" >> "${REPORT}"
+              echo "Exit code: ${exit_code}" >> "${REPORT}"
+              echo "" >> "${REPORT}"
+              echo "### stdout" >> "${REPORT}"
+              echo '```text' >> "${REPORT}"
+              cat "${stdout_file}" >> "${REPORT}" || true
+              echo '```' >> "${REPORT}"
+              echo "" >> "${REPORT}"
+              echo "### stderr" >> "${REPORT}"
+              echo '```text' >> "${REPORT}"
+              cat "${stderr_file}" >> "${REPORT}" || true
+              echo '```' >> "${REPORT}"
+              echo "" >> "${REPORT}"
+            fi
+
+            sanitize_file "${stdout_file}"
+            sanitize_file "${stderr_file}"
+            sanitize_file "${QUERY_LOG}"
+            sanitize_file "${REPORT}"
+          }
+
+          cat > audit-output/queries/01-connection-identity.sql <<'SQL'
+          select
+            current_database() as database_name,
+            current_user as db_user,
+            current_setting('default_transaction_read_only') as default_transaction_read_only,
+            current_setting('transaction_read_only') as transaction_read_only,
+            current_setting('statement_timeout') as statement_timeout,
+            now() as audited_at;
+          SQL
+
+          cat > audit-output/queries/02-schema-migrations-presence.sql <<'SQL'
+          select
+            'supabase_migrations' as object_name,
+            to_regnamespace('supabase_migrations') is not null as exists_in_prod
+          union all
+          select
+            'supabase_migrations.schema_migrations' as object_name,
+            to_regclass('supabase_migrations.schema_migrations') is not null as exists_in_prod;
+
+          select
+            n.nspname as schema_name,
+            c.relname as relation_name,
+            c.relkind as relation_kind
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'supabase_migrations'
+          order by c.relname;
+          SQL
+
+          cat > audit-output/queries/03-fine-classification-matrix.sql <<'SQL'
+          with object_status as (
+            select
+              to_regclass('public.payment_request_number_seq') is not null as payment_request_number_seq_exists,
+              to_regclass('public.payment_layout_number_seq') is not null as payment_layout_number_seq_exists,
+              to_regclass('public.historical_actuals') is not null as historical_actuals_exists,
+              exists (
+                select 1
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public'
+                  and c.relname = 'historical_actuals'
+                  and c.relrowsecurity = true
+              ) as historical_actuals_rls_enabled,
+              exists (
+                select 1
+                from pg_policies
+                where schemaname = 'public'
+                  and tablename = 'historical_actuals'
+                  and policyname in ('historical_actuals_select', 'historical_actuals_write')
+              ) as historical_actuals_policy_exists,
+              to_regclass('public.payment_receipts') is not null as payment_receipts_exists,
+              exists (
+                select 1
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public'
+                  and c.relname = 'payment_receipts'
+                  and c.relrowsecurity = true
+              ) as payment_receipts_rls_enabled,
+              exists (
+                select 1
+                from pg_policies
+                where schemaname = 'public'
+                  and tablename = 'payment_receipts'
+                  and policyname = 'payment_receipts_select'
+              ) as payment_receipts_select_policy_exists,
+              exists (
+                select 1
+                from pg_policies
+                where schemaname = 'public'
+                  and tablename = 'payment_receipts'
+                  and policyname = 'payment_receipts_write_authorized'
+              ) as payment_receipts_write_policy_exists,
+              exists (
+                select 1
+                from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = 'payment_requests'
+                  and column_name = 'request_type'
+              ) as request_type_column_exists,
+              exists (
+                select 1
+                from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = 'payment_requests'
+                  and column_name = 'payment_method'
+              ) as payment_method_column_exists,
+              exists (
+                select 1
+                from pg_constraint
+                where conrelid = to_regclass('public.payment_requests')
+                  and conname = 'payment_requests_payment_method_check'
+                  and convalidated = true
+              ) as payment_method_constraint_valid,
+              exists (
+                select 1
+                from pg_indexes
+                where schemaname = 'public'
+                  and tablename = 'payment_requests'
+                  and indexname = 'idx_payment_requests_payment_method'
+              ) as payment_method_index_exists,
+              exists (
+                select 1
+                from pg_enum e
+                join pg_type t on t.oid = e.enumtypid
+                join pg_namespace n on n.oid = t.typnamespace
+                where n.nspname = 'public'
+                  and t.typname = 'payment_request_type'
+                  and e.enumlabel = 'online_purchase'
+              ) as online_purchase_enum_exists,
+              exists (
+                select 1
+                from pg_proc p
+                join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public'
+                  and p.proname = 'create_payment_layout'
+                  and p.prokind = 'f'
+                  and pg_get_functiondef(p.oid) like '%payment_method%'
+                  and pg_get_functiondef(p.oid) like '%transfer%'
+              ) as create_payment_layout_transfer_guard_present,
+              to_regclass('public.notification_events') is not null as notification_events_exists,
+              to_regclass('public.notification_delivery_attempts') is not null as notification_delivery_attempts_exists,
+              (
+                select count(*)
+                from pg_proc p
+                join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public'
+                  and p.prokind = 'f'
+                  and p.proname in (
+                    'notification_current_profile_id',
+                    'notification_current_user_has_role',
+                    'set_updated_at_notification_events',
+                    'enqueue_notification_event_internal',
+                    'enqueue_notification_event',
+                    'claim_pending_notification_events',
+                    'mark_notification_processed',
+                    'mark_notification_failed'
+                  )
+              ) as notification_function_count,
+              exists (
+                select 1
+                from pg_trigger
+                where tgrelid = to_regclass('public.notification_events')
+                  and tgname = 'set_updated_at_notification_events'
+                  and not tgisinternal
+              ) as notification_trigger_exists,
+              exists (
+                select 1
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public'
+                  and c.relname in ('notification_events', 'notification_delivery_attempts')
+                  and c.relrowsecurity = true
+              ) as notification_rls_any_enabled,
+              exists (
+                select 1
+                from pg_policies
+                where schemaname = 'public'
+                  and tablename in ('notification_events', 'notification_delivery_attempts')
+              ) as notification_policy_any_exists
+          ), scored as (
+            select
+              (payment_request_number_seq_exists::int + payment_layout_number_seq_exists::int) as score_00110,
+              2 as total_00110,
+              (historical_actuals_exists::int + historical_actuals_rls_enabled::int + historical_actuals_policy_exists::int) as score_00401,
+              3 as total_00401,
+              (payment_receipts_exists::int + payment_receipts_rls_enabled::int + payment_receipts_select_policy_exists::int + payment_receipts_write_policy_exists::int) as score_00402,
+              4 as total_00402,
+              (request_type_column_exists::int + payment_method_column_exists::int + payment_method_constraint_valid::int + payment_method_index_exists::int + online_purchase_enum_exists::int + create_payment_layout_transfer_guard_present::int) as score_00403,
+              6 as total_00403,
+              (notification_events_exists::int + notification_delivery_attempts_exists::int + (notification_function_count = 8)::int + notification_trigger_exists::int + notification_rls_any_enabled::int + notification_policy_any_exists::int) as score_007,
+              6 as total_007,
+              *
+            from object_status
+          )
+          select
+            migration,
+            expected_object_group,
+            exists_summary,
+            case
+              when score = total then 'aplicada'
+              when score = 0 then 'no aplicada'
+              when score > 0 and score < total then 'parcial'
+              else 'no concluyente'
+            end as classification,
+            evidence,
+            risk,
+            recommendation
+          from scored
+          cross join lateral (
+            values
+              (
+                '00110_number_sequences.sql',
+                'payment_request_number_seq + payment_layout_number_seq',
+                format('%s/%s checks present', score_00110, total_00110),
+                score_00110,
+                total_00110,
+                concat('payment_request_number_seq=', payment_request_number_seq_exists, '; payment_layout_number_seq=', payment_layout_number_seq_exists),
+                case when score_00110 = total_00110 then 'bajo' when score_00110 = 0 then 'pendiente de aplicar' else 'historial parcial' end,
+                case when score_00110 = total_00110 then 'candidato a repair/baseline si se confirma equivalencia' when score_00110 = 0 then 'aplicar por flujo autorizado despues de reconciliar historial' else 'auditar diferencias antes de repair' end
+              ),
+              (
+                '00401_historical_actuals.sql',
+                'historical_actuals table + RLS/policies',
+                format('%s/%s checks present', score_00401, total_00401),
+                score_00401,
+                total_00401,
+                concat('table=', historical_actuals_exists, '; rls=', historical_actuals_rls_enabled, '; policy_any=', historical_actuals_policy_exists),
+                case when score_00401 = total_00401 then 'bajo' when score_00401 = 0 then 'pendiente de aplicar' else 'tabla/policies parciales' end,
+                case when score_00401 = total_00401 then 'candidato a repair/baseline si se confirma equivalencia' when score_00401 = 0 then 'aplicar por flujo autorizado despues de reconciliar historial' else 'no hacer db push hasta revisar detalle' end
+              ),
+              (
+                '00402_payment_receipts_policies.sql',
+                'payment_receipts RLS + select/write policies',
+                format('%s/%s checks present', score_00402, total_00402),
+                score_00402,
+                total_00402,
+                concat('table=', payment_receipts_exists, '; rls=', payment_receipts_rls_enabled, '; select_policy=', payment_receipts_select_policy_exists, '; write_policy=', payment_receipts_write_policy_exists),
+                case when score_00402 = total_00402 then 'bajo' when score_00402 = 0 then 'pendiente de aplicar' else 'RLS/policies parciales' end,
+                case when score_00402 = total_00402 then 'candidato a repair/baseline si se confirma equivalencia' when score_00402 = 0 then 'aplicar por flujo autorizado despues de reconciliar historial' else 'comparar policies antes de repair' end
+              ),
+              (
+                '00403_fase2_payment_method_closure.sql',
+                'request_type/payment_method + backend layout transfer guard',
+                format('%s/%s checks present', score_00403, total_00403),
+                score_00403,
+                total_00403,
+                concat('request_type=', request_type_column_exists, '; payment_method=', payment_method_column_exists, '; constraint_valid=', payment_method_constraint_valid, '; index=', payment_method_index_exists, '; online_purchase=', online_purchase_enum_exists, '; layout_guard=', create_payment_layout_transfer_guard_present),
+                case when score_00403 = total_00403 then 'bajo' when score_00403 = 0 then 'pendiente de aplicar' else 'Fase 2 parcial' end,
+                case when score_00403 = total_00403 then 'candidato a repair/baseline si se confirma equivalencia' when score_00403 = 0 then 'aplicar por flujo autorizado despues de reconciliar historial' else 'no liberar hasta cerrar diferencias Fase 2' end
+              ),
+              (
+                '007_notifications.sql',
+                'notification tables + functions + trigger + RLS/policies',
+                format('%s/%s checks present', score_007, total_007),
+                score_007,
+                total_007,
+                concat('events=', notification_events_exists, '; attempts=', notification_delivery_attempts_exists, '; functions=', notification_function_count, '/8; trigger=', notification_trigger_exists, '; rls_any=', notification_rls_any_enabled, '; policy_any=', notification_policy_any_exists),
+                case when score_007 = total_007 then 'bajo' when score_007 = 0 then 'pendiente de aplicar' else 'notificaciones parciales' end,
+                case when score_007 = total_007 then 'candidato a repair/baseline si se confirma equivalencia' when score_007 = 0 then 'aplicar por flujo autorizado despues de reconciliar historial; no activar n8n' else 'no activar n8n; revisar objetos faltantes' end
+              )
+          ) as matrix(migration, expected_object_group, exists_summary, score, total, evidence, risk, recommendation)
+          order by migration;
+          SQL
+
+          cat > audit-output/queries/04-number-sequences-detail.sql <<'SQL'
+          select
+            sequence_name,
+            data_type,
+            start_value,
+            minimum_value,
+            maximum_value,
+            increment
+          from information_schema.sequences
+          where sequence_schema = 'public'
+            and sequence_name in ('payment_request_number_seq', 'payment_layout_number_seq')
+          order by sequence_name;
+
+          select
+            object_name,
+            to_regclass(object_name) is not null as exists_in_prod
+          from (values
+            ('public.payment_request_number_seq'),
+            ('public.payment_layout_number_seq')
+          ) as expected_sequences(object_name)
+          order by object_name;
+          SQL
+
+          cat > audit-output/queries/05-historical-actuals-detail.sql <<'SQL'
+          select
+            'public.historical_actuals' as object_name,
+            to_regclass('public.historical_actuals') is not null as exists_in_prod;
+
+          select
+            column_name,
+            data_type,
+            is_nullable,
+            column_default
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'historical_actuals'
+          order by ordinal_position;
+
+          select
+            conname,
+            contype,
+            pg_get_constraintdef(oid) as constraint_def
+          from pg_constraint
+          where conrelid = to_regclass('public.historical_actuals')
+          order by conname;
+
+          select
+            tablename,
+            policyname,
+            roles,
+            cmd
+          from pg_policies
+          where schemaname = 'public'
+            and tablename = 'historical_actuals'
+          order by policyname;
+
+          select
+            c.relname as table_name,
+            c.relrowsecurity as rls_enabled
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relname = 'historical_actuals';
+          SQL
+
+          cat > audit-output/queries/06-payment-receipts-detail.sql <<'SQL'
+          select
+            'public.payment_receipts' as object_name,
+            to_regclass('public.payment_receipts') is not null as exists_in_prod;
+
+          select
+            c.relname as table_name,
+            c.relrowsecurity as rls_enabled
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relname = 'payment_receipts';
+
+          select
+            tablename,
+            policyname,
+            roles,
+            cmd,
+            qual,
+            with_check
+          from pg_policies
+          where schemaname = 'public'
+            and tablename = 'payment_receipts'
+          order by policyname;
+
+          select
+            grantee,
+            privilege_type
+          from information_schema.role_table_grants
+          where table_schema = 'public'
+            and table_name = 'payment_receipts'
+            and grantee in ('authenticated', 'anon', 'public')
+          order by grantee, privilege_type;
+
+          select
+            p.oid::regprocedure::text as function_signature
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and p.prokind = 'f'
+            and p.proname in ('flux_member_roles', 'flux_approver_roles')
+          order by function_signature;
+          SQL
+
+          cat > audit-output/queries/07-fase2-payment-method-detail.sql <<'SQL'
+          select
+            column_name,
+            data_type,
+            udt_name,
+            is_nullable,
+            column_default
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'payment_requests'
+            and column_name in ('request_type', 'payment_method')
+          order by column_name;
+
+          select
+            conname,
+            convalidated,
+            pg_get_constraintdef(oid) as constraint_def
+          from pg_constraint
+          where conrelid = to_regclass('public.payment_requests')
+            and conname = 'payment_requests_payment_method_check'
+          order by conname;
+
+          select
+            enumlabel
+          from pg_enum e
+          join pg_type t on t.oid = e.enumtypid
+          join pg_namespace n on n.oid = t.typnamespace
+          where n.nspname = 'public'
+            and t.typname = 'payment_request_type'
+          order by enumsortorder;
+
+          select
+            indexname,
+            indexdef
+          from pg_indexes
+          where schemaname = 'public'
+            and tablename = 'payment_requests'
+            and indexname = 'idx_payment_requests_payment_method';
+
+          select
+            p.oid::regprocedure::text as function_signature,
+            (pg_get_functiondef(p.oid) like '%payment_method%') as references_payment_method,
+            (pg_get_functiondef(p.oid) like '%transfer%') as references_transfer
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and p.prokind = 'f'
+            and p.proname = 'create_payment_layout'
+          order by function_signature;
+          SQL
+
+          cat > audit-output/queries/08-notifications-detail.sql <<'SQL'
+          select
+            object_name,
+            to_regclass(object_name) is not null as exists_in_prod
+          from (values
+            ('public.notification_events'),
+            ('public.notification_delivery_attempts')
+          ) as expected_tables(object_name)
+          order by object_name;
+
+          select
+            table_name,
+            column_name,
+            data_type,
+            is_nullable,
+            column_default
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name in ('notification_events', 'notification_delivery_attempts')
+          order by table_name, ordinal_position;
+
+          select
+            p.proname,
+            p.oid::regprocedure::text as function_signature,
+            p.prokind
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and p.prokind = 'f'
+            and p.proname in (
+              'notification_current_profile_id',
+              'notification_current_user_has_role',
+              'set_updated_at_notification_events',
+              'enqueue_notification_event_internal',
+              'enqueue_notification_event',
+              'claim_pending_notification_events',
+              'mark_notification_processed',
+              'mark_notification_failed'
+            )
+          order by p.proname, function_signature;
+
+          select
+            tgname as trigger_name,
+            tgrelid::regclass::text as table_name,
+            not tgisinternal as user_trigger
+          from pg_trigger
+          where tgrelid = to_regclass('public.notification_events')
+            and tgname = 'set_updated_at_notification_events'
+          order by tgname;
+
+          select
+            c.relname as table_name,
+            c.relrowsecurity as rls_enabled
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public'
+            and c.relname in ('notification_events', 'notification_delivery_attempts')
+          order by c.relname;
+
+          select
+            tablename,
+            policyname,
+            roles,
+            cmd
+          from pg_policies
+          where schemaname = 'public'
+            and tablename in ('notification_events', 'notification_delivery_attempts')
+          order by tablename, policyname;
+
+          select
+            routine_name,
+            privilege_type,
+            grantee
+          from information_schema.routine_privileges
+          where specific_schema = 'public'
+            and routine_name in (
+              'notification_current_profile_id',
+              'notification_current_user_has_role',
+              'set_updated_at_notification_events',
+              'enqueue_notification_event_internal',
+              'enqueue_notification_event',
+              'claim_pending_notification_events',
+              'mark_notification_processed',
+              'mark_notification_failed'
+            )
+            and grantee in ('PUBLIC', 'anon', 'authenticated', 'service_role', 'postgres')
+          order by routine_name, grantee, privilege_type;
+          SQL
+
+          run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
+          run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
+          run_query "Fine audit classification matrix" "audit-output/queries/03-fine-classification-matrix.sql"
+          run_query "Number sequences detail" "audit-output/queries/04-number-sequences-detail.sql"
+          run_query "Historical actuals detail" "audit-output/queries/05-historical-actuals-detail.sql"
+          run_query "Payment receipts detail" "audit-output/queries/06-payment-receipts-detail.sql"
+          run_query "Fase 2 payment method detail" "audit-output/queries/07-fase2-payment-method-detail.sql"
+          run_query "Notifications detail" "audit-output/queries/08-notifications-detail.sql"
+
+          unset PSQL_URI SUPABASE_AUDIT_DB_URL
+          sanitize_file "${REPORT}"
+          sanitize_file "${QUERY_LOG}"
+          sanitize_file "${NETWORK_REPORT}"
+
+          {
+            echo "# Supabase PROD fine read-only audit summary"
+            echo ""
+            echo "- Artifact: supabase-prod-fine-audit-evidence"
+            echo "- Result: $([ "${AUDIT_FAILED}" -eq 0 ] && echo success || echo failure)"
+            echo "- Last logical query: $(cat "${LAST_QUERY_FILE}" 2>/dev/null || echo none)"
+            echo ""
+            echo "See audit-output/supabase-prod-fine-audit.md for the full sanitized report."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${AUDIT_FAILED}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload fine audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-fine-audit-evidence
+          path: audit-output/
+          retention-days: 14
+
+      - name: Summarize audit controls
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Fine audit controls"
+            echo ""
+            echo "- Workflow: Supabase PROD Read-only Schema Audit"
+            echo "- Environment: supabase-production"
+            echo "- Branch required: dev"
+            echo "- Mode required: audit"
+            echo "- Artifact: supabase-prod-fine-audit-evidence"
+            echo "- Read-only guard: BEGIN READ ONLY per query"
+            echo "- db push: not executed"
+            echo "- migration repair: not executed"
+            echo "- migrations: not executed"
+            echo "- DDL/DML: not executed"
+          } >> "${GITHUB_STEP_SUMMARY}"
