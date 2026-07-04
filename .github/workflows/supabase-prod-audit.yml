@@ -28,7 +28,7 @@ jobs:
     environment: supabase-production
 
     env:
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      SUPABASE_AUDIT_DB_URL: ${{ secrets.SUPABASE_PROD_AUDIT_DB_URL }}
       SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
       CONFIRM_PROD: ${{ inputs.confirm_prod }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
@@ -47,6 +47,7 @@ jobs:
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- Mode requested: ${CONFIRM_MODE}"
+            echo "- Connection mode: audit_db_url/pooler secret"
             echo "- Writes: not executed by this workflow"
             echo "- db push: not executed by this workflow"
             echo "- migration repair: not executed by this workflow"
@@ -77,8 +78,8 @@ jobs:
             fail_guardrail "confirm_prod does not match the configured PROD project ref."
           fi
 
-          if [ -z "${SUPABASE_DB_PASSWORD}" ]; then
-            fail_guardrail "SUPABASE_DB_PASSWORD_PROD secret is not configured."
+          if [ -z "${SUPABASE_AUDIT_DB_URL}" ]; then
+            fail_guardrail "Missing SUPABASE_PROD_AUDIT_DB_URL in environment supabase-production."
           fi
 
           echo "Guardrails passed. Running read-only metadata audit only."
@@ -101,6 +102,7 @@ jobs:
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- Mode requested: ${CONFIRM_MODE}"
             echo "- Result: PASSED"
+            echo "- Connection mode: audit_db_url/pooler secret"
             echo "- Writes: not executed by this workflow"
             echo "- db push: not executed by this workflow"
             echo "- migration repair: not executed by this workflow"
@@ -129,10 +131,7 @@ jobs:
           REPORT="audit-output/supabase-prod-readonly-schema-audit.md"
           NETWORK_REPORT="audit-output/network-diagnostics.md"
           QUERY_LOG="audit-output/query-execution-log.md"
-          PGHOST_NAME="db.${SUPABASE_PROJECT_ID}.supabase.co"
-          PGHOST_ADDR="$(getent ahostsv4 "${PGHOST_NAME}" | awk '{ print $1; exit }' || true)"
-          PSQL_URI="host=${PGHOST_NAME} hostaddr=${PGHOST_ADDR} port=5432 dbname=postgres user=postgres sslmode=require"
-          export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
+          PSQL_URI="${SUPABASE_AUDIT_DB_URL}"
           AUDIT_FAILED=0
           QUERY_INDEX=0
 
@@ -140,10 +139,52 @@ jobs:
             local file="$1"
             sed -E \
               -e 's#postgres(ql)?://[^[:space:]]+#postgres://[redacted]#g' \
+              -e 's#://[^:/[:space:]]+:[^@[:space:]]+@#://[redacted-user]:[redacted-password]@#g' \
               -e 's#(password=)[^[:space:]]+#\1[redacted]#Ig' \
-              -e 's#(SUPABASE_DB_PASSWORD=)[^[:space:]]+#\1[redacted]#Ig' \
+              -e 's#(apikey=)[^[:space:]]+#\1[redacted]#Ig' \
+              -e 's#(access_token=)[^[:space:]]+#\1[redacted]#Ig' \
+              -e 's#(SUPABASE_PROD_AUDIT_DB_URL=)[^[:space:]]+#\1[redacted]#Ig' \
               "${file}" || true
           }
+
+          mapfile -t AUDIT_CONN_INFO < <(python3 - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          url = os.environ.get("SUPABASE_AUDIT_DB_URL", "")
+          host = ""
+          port = "5432"
+          mode = "audit_db_url"
+
+          try:
+              parsed = urlparse(url)
+              host = parsed.hostname or ""
+              port = str(parsed.port or 5432)
+              if "pooler" in host:
+                  mode = "pooler/session"
+          except Exception:
+              host = ""
+              port = "5432"
+              mode = "invalid"
+
+          def mask_host(value):
+              if not value:
+                  return "not parsed"
+              if len(value) <= 12:
+                  return "[redacted-host]"
+              return f"{value[:4]}...{value[-12:]}"
+
+          print(host)
+          print(mask_host(host))
+          print(port)
+          print(mode)
+          PY
+          )
+
+          AUDIT_HOST="${AUDIT_CONN_INFO[0]:-}"
+          AUDIT_HOST_MASKED="${AUDIT_CONN_INFO[1]:-not parsed}"
+          AUDIT_PORT="${AUDIT_CONN_INFO[2]:-5432}"
+          AUDIT_MODE="${AUDIT_CONN_INFO[3]:-audit_db_url}"
 
           {
             echo "# Supabase PROD read-only schema audit"
@@ -152,9 +193,11 @@ jobs:
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- Mode: audit only"
             echo "- Project ref: ${SUPABASE_PROJECT_ID}"
-            echo "- Host: ${PGHOST_NAME}"
-            echo "- Port: 5432"
-            echo "- DB user: postgres"
+            echo "- Connection mode: ${AUDIT_MODE}"
+            echo "- Host: ${AUDIT_HOST_MASKED}"
+            echo "- Port: ${AUDIT_PORT}"
+            echo "- DB user: configured in audit URL and not printed"
+            echo "- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "- Writes: not executed by this workflow"
             echo "- db push: not executed by this workflow"
             echo "- migration repair: not executed by this workflow"
@@ -165,24 +208,26 @@ jobs:
           {
             echo "# Supabase PROD network diagnostics"
             echo ""
-            echo "- Host: ${PGHOST_NAME}"
-            echo "- Resolved IPv4: ${PGHOST_ADDR:-not resolved}"
-            echo "- Port: 5432"
+            echo "- Connection mode: ${AUDIT_MODE}"
+            echo "- Host: ${AUDIT_HOST_MASKED}"
+            echo "- Port: ${AUDIT_PORT}"
+            echo "- Project ref: ${SUPABASE_PROJECT_ID}"
             echo "- Connection string: redacted; password is never written"
+            echo "- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo ""
           } > "${NETWORK_REPORT}"
 
-          if [ -z "${PGHOST_ADDR}" ]; then
-            echo "::error::Could not resolve an IPv4 address for the Supabase PROD database host."
+          if [ -z "${AUDIT_HOST}" ]; then
+            echo "::error::Could not parse a host from SUPABASE_PROD_AUDIT_DB_URL."
             {
               echo "## Audit failed before psql"
               echo ""
-              echo "- Last logical command: IPv4 DNS resolution"
-              echo "- Error: Could not resolve an IPv4 address for the Supabase PROD database host."
+              echo "- Last logical command: audit DB URL host parsing"
+              echo "- Error: Could not parse a host from SUPABASE_PROD_AUDIT_DB_URL."
             } >> "${REPORT}"
             AUDIT_FAILED=1
           else
-            if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${PGHOST_ADDR}/5432" 2> audit-output/tcp-check.err; then
+            if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${AUDIT_HOST}/${AUDIT_PORT}" 2> audit-output/tcp-check.err; then
               echo "- TCP check: reachable" >> "${NETWORK_REPORT}"
             else
               echo "- TCP check: failed" >> "${NETWORK_REPORT}"
@@ -431,7 +476,7 @@ jobs:
             } >> "${REPORT}"
           fi
 
-          unset PGPASSWORD
+          unset PSQL_URI SUPABASE_AUDIT_DB_URL
           {
             echo ""
             echo "## Final audit result"
@@ -469,6 +514,7 @@ jobs:
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
             echo "- Mode: audit only"
+            echo "- Connection mode: audit_db_url/pooler secret"
             echo "- Real db push: not executed by this workflow"
             echo "- Migration repair: not executed by this workflow"
             echo "- Writes/destructive SQL: not executed by this workflow"
