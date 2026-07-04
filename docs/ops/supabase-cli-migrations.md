@@ -81,6 +81,36 @@ supabase db push
 - pagos y comprobaciones
 - runtime config
 
+## PROD read-only audit from GitHub Actions
+
+The protected workflow `Supabase PROD Read-only Schema Audit` can be used only to inspect PROD metadata before deciding whether a future Supabase CLI dry-run is safe.
+
+Because GitHub-hosted runners may not resolve or reach the direct Supabase database host over IPv4, the audit workflow uses an environment secret named:
+
+- `SUPABASE_PROD_AUDIT_DB_URL`
+
+This secret must be configured in the GitHub Environment `supabase-production`. It should contain a Supabase Pooler connection string from Supabase Dashboard > Connect, preferably the Session Pooler / IPv4-compatible URL.
+
+Rules for this secret:
+
+- Do not commit it.
+- Do not paste it in chat.
+- Do not expose it in frontend code.
+- Do not use it for n8n.
+- Do not use it as a substitute for authorization to run migrations.
+- Do not print the full URL in logs or artifacts.
+
+The audit workflow remains read-only and must keep:
+
+- `confirm_mode=audit`
+- `confirm_prod` matching the PROD project ref
+- branch restricted to `dev`
+- `PGOPTIONS` with `default_transaction_read_only=on`
+- metadata-only `SELECT` queries
+- sanitized artifacts
+
+This workflow does not run `supabase db push`, does not run `supabase migration repair`, and does not apply migrations.
+
 ## Migration history risk
 
 Some schema changes were previously applied through custom workflows. Before relying on Supabase CLI for DEV or PROD, compare the real database state with `supabase_migrations.schema_migrations`.
