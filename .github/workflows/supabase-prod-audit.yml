@@ -259,7 +259,7 @@ jobs:
             cat > "${wrapper_file}" <<SQL
           begin read only;
           select current_setting('transaction_read_only') as transaction_read_only_guard;
-          \\i ${query_file}
+          \i ${query_file}
           commit;
           SQL
 
