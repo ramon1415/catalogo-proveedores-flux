@@ -7,6 +7,7 @@ const CXC_CURRENCY_LENGTH = 3
 const CXC_AMOUNT_LENGTH = 16
 const CXC_CONCEPT_LENGTH = 30
 const CXC_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + CXC_CONCEPT_LENGTH
+// SIM X.xlsm writes each 85-character record with a CRLF terminator, including the last record.
 const CXC_LINE_BREAK = "\r\n"
 const CXC_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}$/
 
@@ -443,7 +444,7 @@ async function downloadLayoutCxc(layoutId) {
       return
     }
 
-    showToast("Archivo CxC BBVA generado", `${fileName} se descargo correctamente. ${validation.lineCount} linea(s) validas de ${CXC_LINE_LENGTH} caracteres.`, "success")
+    showToast("Archivo CxC BBVA generado", `${fileName} se descargo correctamente. ${validation.lineCount} linea(s) validas de ${CXC_LINE_LENGTH} caracteres con CRLF final.`, "success")
     await loadLayouts()
   } catch (error) {
     showToast("No se pudo generar CxC BBVA", friendlyError(error), "danger")
@@ -612,7 +613,7 @@ function validateLayoutLines(lines) {
 
 function buildCxcContent(lines) {
   const rows = lines.map(buildCxcLine)
-  return rows.join(CXC_LINE_BREAK)
+  return rows.length ? `${rows.join(CXC_LINE_BREAK)}${CXC_LINE_BREAK}` : ""
 }
 
 function buildCxcLine(line) {
@@ -637,20 +638,27 @@ function buildCxcLine(line) {
 
 function validateCxcContent(content) {
   const errors = []
+  const hasContent = typeof content === "string" && content.length > 0
+  const hasFinalTerminator = hasContent && content.endsWith(CXC_LINE_BREAK)
+  const hasDoubleFinalTerminator = hasContent && content.endsWith(`${CXC_LINE_BREAK}${CXC_LINE_BREAK}`)
 
-  if (!content) errors.push("Layout invalido: el archivo no tiene lineas para descargar.")
-  if (content.charCodeAt(0) === 0xfeff) errors.push("Layout invalido: el archivo tiene BOM al inicio.")
-  if (content.startsWith("\r") || content.startsWith("\n")) errors.push("Layout invalido: existe una linea vacia al inicio del archivo.")
-  if (content.endsWith("\r") || content.endsWith("\n")) errors.push("Layout invalido: existe una linea vacia al final del archivo.")
-  if (content.includes("|")) errors.push("Layout invalido: el archivo contiene el separador | y debe ser ancho fijo.")
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00a0\u2000-\u200f\u2028\u2029\ufeff]/.test(content)) {
+  if (!hasContent) errors.push("Layout invalido: el archivo no tiene lineas para descargar.")
+  if (hasContent && content.charCodeAt(0) === 0xfeff) errors.push("Layout invalido: el archivo tiene BOM al inicio.")
+  if (hasContent && (content.startsWith("\r") || content.startsWith("\n"))) errors.push("Layout invalido: existe una linea vacia al inicio del archivo.")
+  if (hasContent && !hasFinalTerminator) errors.push("Layout invalido: el ultimo registro debe cerrar con CRLF, como el simulador BBVA.")
+  if (hasDoubleFinalTerminator) errors.push("Layout invalido: existe una linea vacia real al final del archivo.")
+  if (hasContent && content.includes("|")) errors.push("Layout invalido: el archivo contiene el separador | y debe ser ancho fijo.")
+
+  const contentWithoutCrLf = hasContent ? content.replaceAll(CXC_LINE_BREAK, "") : ""
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u00a0\u2000-\u200f\u2028\u2029\ufeff]/.test(contentWithoutCrLf)) {
     errors.push("Layout invalido: el archivo contiene caracteres invisibles o no permitidos.")
   }
-  if (/[\r\n]/.test(content.replaceAll(CXC_LINE_BREAK, ""))) {
+  if (/[\r\n]/.test(contentWithoutCrLf)) {
     errors.push("Layout invalido: los saltos de linea deben ser CRLF.")
   }
 
-  const lines = content ? content.split(CXC_LINE_BREAK) : []
+  const body = hasContent && hasFinalTerminator ? content.slice(0, -CXC_LINE_BREAK.length) : content || ""
+  const lines = body ? body.split(CXC_LINE_BREAK) : []
   const lineLengths = lines.map((line) => line.length)
 
   lines.forEach((line, index) => {
@@ -678,6 +686,9 @@ function validateCxcContent(content) {
     lines,
     lineCount: lines.length,
     lineLengths,
+    hasFinalTerminator,
+    hasDoubleFinalTerminator,
+    byteLength: content ? content.length : 0,
   }
 }
 
@@ -732,6 +743,9 @@ async function validateLayoutCxc(layoutId) {
         expectedLength: CXC_LINE_LENGTH,
         lineCount: validation.lineCount,
         lineLengths: validation.lineLengths,
+        hasFinalTerminator: validation.hasFinalTerminator,
+        hasDoubleFinalTerminator: validation.hasDoubleFinalTerminator,
+        byteLength: validation.byteLength,
         firstLine: firstLineDebug,
         errors: validation.errors,
       })
@@ -743,9 +757,12 @@ async function validateLayoutCxc(layoutId) {
       expectedLength: CXC_LINE_LENGTH,
       lineCount: validation.lineCount,
       lineLengths: validation.lineLengths,
+      hasFinalTerminator: validation.hasFinalTerminator,
+      hasDoubleFinalTerminator: validation.hasDoubleFinalTerminator,
+      byteLength: validation.byteLength,
       firstLine: firstLineDebug,
     })
-    showToast("Layout valido", `${validation.lineCount} linea(s). Largo esperado/real linea 1: ${CXC_LINE_LENGTH}/${validation.lineLengths[0]}. ${firstLineDebug}`, "success")
+    showToast("Layout valido", `${validation.lineCount} linea(s). Largo linea 1: ${CXC_LINE_LENGTH}/${validation.lineLengths[0]}. CRLF final: ${validation.hasFinalTerminator ? "si" : "no"}. ${firstLineDebug}`, "success")
   } catch (error) {
     showToast("Layout invalido", friendlyError(error), "danger")
   }
