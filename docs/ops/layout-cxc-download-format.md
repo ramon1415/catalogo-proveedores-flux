@@ -1,83 +1,105 @@
-# Formato de descarga CxC BBVA para layouts
+# Formatos BBVA de descarga para layouts
 
-Este hotfix ajusta la descarga del layout bancario en `layouts.html` para que el archivo ya no sea `.xlsx` ni TXT delimitado por `|`.
+Este documento reemplaza la idea de un unico layout CxC. La evidencia operativa muestra al menos dos formatos distintos generados desde el simulador `SIM X.xlsm`:
 
-El formato se basa en el archivo real de referencia `PAGOSBBV020726.txt`: TXT de ancho fijo, una linea por pago, 85 caracteres por linea. Los registros se separan con CRLF y el archivo no agrega una linea vacia al inicio ni al final.
+- `PAGOSBBV`: pagos mismo banco / CxC, 85 caracteres utiles por registro + CRLF.
+- `PAGOSINT`: pagos interbancarios, 128 caracteres utiles por registro + CRLF.
 
-## Formato actual
+El `CRLF` final es terminador del ultimo registro, no una linea vacia adicional. Los archivos no deben llevar BOM, encabezado, pipes, comas ni tabs.
 
-- Extension: `.txt`
-- MIME type: `text/plain;charset=utf-8`
-- Encoding: UTF-8 sin BOM
-- Saltos de linea: CRLF (`\r\n`) solo entre registros; no se agrega CRLF despues del ultimo registro
-- Header: no incluido
-- Separadores: no usa `|`, comas ni tabs
-- Longitud por registro: 85 caracteres exactos
-- Nombre de archivo: `PAGOSBBV_CXC_<YYYYMMDD>_<FOLIO>.txt`
+## Evidencia usada
 
-## Estructura por linea
+- `SIM X.xlsm`
+  - Hoja `Pagos Mismo Banco`: `CUENTA CARGO`, `CUENTA / TARJETA ABONO`, `MONEDA`, `IMPORTE`, `MOTIVO PAGO`.
+  - Hoja `Pagos Interbancarios`: `CUENTA CARGO`, `CUENTA CLABE / TARJETA ABONO`, `IMPORTE`, `TITULAR`, `MOTIVO PAGO`, `REF_NUMERICA`.
+  - Hoja `Pagos CIE`: existe, pero no se implementa en este hotfix.
+  - Hoja `Pagos Mixtos`: existe, pero no se implementa sin confirmacion operativa.
+- `PAGOSBBV020726 (2).txt`: 2 registros, 174 bytes, 85 caracteres utiles por registro + CRLF.
+- `PAGOSINT180626.txt`: 2 registros, 260 bytes, 128 caracteres utiles por registro + CRLF.
+
+## Matriz de formatos
+
+| Formato | Archivo ejemplo | Longitud util | Terminador | Uso esperado |
+| --- | --- | ---: | --- | --- |
+| `PAGOSBBV` | `PAGOSBBV020726` | 85 | CRLF por registro | Cuenta/tarjeta BBVA compatible, mismo banco |
+| `PAGOSINT` | `PAGOSINT180626` | 128 | CRLF por registro | CLABE/interbancario/TDC cuando aplique |
+
+## PAGOSBBV / mismo banco / 85 caracteres
 
 | Posicion | Longitud | Campo | Regla |
 | --- | ---: | --- | --- |
-| 1-18 | 18 | Cuenta destino / abono | Solo digitos, ceros a la izquierda, falla si excede 18 |
-| 19-36 | 18 | Cuenta origen / cargo | Solo digitos, ceros a la izquierda, falla si excede 18 |
-| 37-39 | 3 | Moneda | Valor fijo `MXP` |
-| 40-55 | 16 | Importe | Punto decimal, 2 decimales, ceros a la izquierda, falla si excede 16 |
-| 56-85 | 30 | Concepto | Mayusculas, sin acentos, `N` en lugar de `Ñ`, espacios a la derecha, truncado controlado a 30 |
+| 1-18 | 18 | Cuenta/tarjeta abono BBVA | Solo digitos, ceros a la izquierda |
+| 19-36 | 18 | Cuenta cargo | Solo digitos, ceros a la izquierda |
+| 37-39 | 3 | Moneda | `MXP` |
+| 40-55 | 16 | Importe | 13 digitos, punto decimal, 2 decimales |
+| 56-85 | 30 | Motivo/concepto de pago | Mayusculas, sin acentos, espacios a la derecha |
+| 86-87 | 2 | Terminador fisico | `CRLF` |
 
-## Mapeo desde `payment_layout_lines`
-
-- Cuenta destino / abono: `destination_value`
-- Cuenta origen / cargo: `source_account_number`
-- Importe: `amount`
-- Concepto: `payment_concept`
-
-El archivo real no trae beneficiario ni referencia como campos separados, por eso esos campos no se exportan como columnas independientes.
-
-## Ejemplo
+Ejemplo:
 
 ```text
-000000000110363553000000000191134094MXP0000000156600.00RENTA JULIO                   
-000000000468889147000000000191134094MXP0000000000324.00GALLETAS                     
+000000000110363553000000000191134094MXP0000000156600.00RENTA JULIO                   \r\n
 ```
 
-Cada linea mide 85 caracteres antes del salto `\r\n`.
+## PAGOSINT / interbancario / 128 caracteres
 
-## Validaciones esperadas
+| Posicion | Longitud | Campo | Regla |
+| --- | ---: | --- | --- |
+| 1-18 | 18 | CLABE/tarjeta/cuenta destino interbancaria | Solo digitos |
+| 19-36 | 18 | Cuenta cargo | Solo digitos, ceros a la izquierda |
+| 37-39 | 3 | Moneda | `MXP` |
+| 40-55 | 16 | Importe | 13 digitos, punto decimal, 2 decimales |
+| 56-85 | 30 | Titular / beneficiario | Mayusculas, sin acentos, espacios a la derecha |
+| 86-90 | 5 | Referencia numerica | Solo digitos, ceros a la izquierda |
+| 91-127 | 37 | Motivo de pago | Mayusculas, sin acentos, espacios a la derecha |
+| 128 | 1 | Indicador | `H` segun ejemplo recibido |
+| 129-130 | 2 | Terminador fisico | `CRLF` |
 
-- Cada linea mide exactamente 85 caracteres.
-- No existe linea vacia inicial ni final.
-- No existe BOM al inicio.
-- Los registros multiples se separan con CRLF.
-- No existe el caracter `|`.
-- No hay encabezado.
-- No se genera `.xlsx`.
-- Las cuentas se normalizan a 18 digitos.
-- El importe conserva punto decimal y 2 decimales.
-- El concepto se normaliza y se rellena a 30 caracteres.
+Ejemplo:
 
-## Validacion previa de descarga
+```text
+002180700287444966000000000191134094MXP0000000000806.00CLAUDIA YANIN NAVARRETE       40002REEMBOLSO                            H\r\n
+```
 
-Antes de descargar, el generador valida localmente:
+## Seleccion de formato en Flux
 
-- Numero de lineas activas.
-- Longitud real de cada linea contra 85 caracteres.
-- Ausencia de BOM, separador `|`, lineas vacias y caracteres invisibles.
-- Cuentas origen/destino como 18 digitos sin espacios.
-- Moneda fija `MXP`.
-- Importe de 16 caracteres con punto decimal y 2 decimales.
-- Concepto normalizado a 30 caracteres.
+El hotfix no mezcla registros de 85 y 128 en un mismo archivo.
 
-La pantalla tambien muestra una accion `Validar layout` que reporta el largo real y una vista diagnostica enmascarada de la linea 1. Las cuentas se muestran solo con ultimos 4 digitos.
+- `destination_type = cuenta` -> `PAGOSBBV`.
+- `destination_type = clabe` -> `PAGOSINT`.
+- `destination_type = convenio` -> bloqueado para estos formatos; requiere CIE.
+- Tipo desconocido -> bloqueado y requiere correccion del proveedor.
 
-## Causa raiz del hotfix
+Si un layout contiene ambos formatos, el sistema descarga archivos separados:
 
-El formato anterior ya generaba registros de 85 caracteres, pero agregaba un salto CRLF despues del ultimo registro y no tenia una validacion visible previa a la descarga. Si BBVA interpreta ese cierre como linea extra o caracter fuera de layout, puede devolver `El tamaño de la linea 1 del archivo no es correcto`. El generador ahora no agrega linea final vacia y bloquea la descarga si detecta longitud o caracteres inesperados.
+- `PAGOSBBV_CXC_<YYYYMMDD>_<FOLIO>.txt`
+- `PAGOSINT_<YYYYMMDD>_<FOLIO>.txt`
+
+## Validaciones locales
+
+Para ambos formatos:
+
+- Sin BOM.
+- Sin `|`.
+- Sin encabezado.
+- Sin doble CRLF final.
+- Sin linea vacia real inicial/final.
+- CRLF obligatorio despues de cada registro, incluyendo el ultimo.
+- Campos numericos sin espacios ni guiones.
+- Importe con punto decimal y 2 decimales.
+
+Validaciones adicionales:
+
+- `PAGOSBBV`: 85 caracteres utiles por registro.
+- `PAGOSINT`: 128 caracteres utiles por registro, titular 30, referencia numerica 5, motivo 37, indicador final `H`.
+
+## Riesgos / pendientes
+
+- El indicador final `H` de `PAGOSINT` se toma del ejemplo recibido; si BBVA entrega catalogo formal, validar su significado.
+- Si hay pagos por convenio, debe implementarse o habilitarse layout `CIE` en otro PR.
+- Si operacion requiere lote mixto en un solo archivo, debe validarse contra la hoja `Pagos Mixtos` antes de implementarlo.
+- Si una TDC debe ir por mismo banco y no por interbancario, hay que capturar ese tipo de destino de forma explicita; hoy Flux solo distingue `cuenta`, `clabe` y `convenio`.
 
 ## Alcance
 
-El cambio es solo frontend/documentacion. No modifica Supabase, tablas, RLS, RPCs, n8n, secrets ni variables.
-
-## Pendiente
-
-Si Carlos/Ramon/BBVA entregan una especificacion bancaria formal distinta, por ejemplo posiciones adicionales o reglas de layout propietario, este documento y el exportador deben ajustarse en un PR separado con esa evidencia.
+Cambio solo frontend/documentacion. No modifica Supabase, tablas, RLS, RPCs, migraciones, n8n, secrets ni variables.
