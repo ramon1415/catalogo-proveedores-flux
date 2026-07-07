@@ -72,8 +72,10 @@ El hotfix no mezcla registros de 85 y 128 en un mismo archivo.
 
 Si un layout contiene ambos formatos, el sistema descarga archivos separados:
 
-- `PAGOSBBV_CXC_<YYYYMMDD>_<FOLIO>.txt`
-- `PAGOSINT_<YYYYMMDD>_<FOLIO>.txt`
+- `PAGOSBBV_FLUX_<FOLIO>_<YYYYMMDD>.txt`
+- `PAGOSINT_FLUX_<FOLIO>_<YYYYMMDD>.txt`
+
+La convencion deja el tipo de layout al inicio (`PAGOSBBV` o `PAGOSINT`), conserva el folio operativo del layout y cierra con fecha de generacion `YYYYMMDD` para facilitar busqueda, conciliacion y soporte con el banco.
 
 ## Validaciones locales
 
