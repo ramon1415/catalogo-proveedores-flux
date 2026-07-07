@@ -20,6 +20,7 @@ on:
         options:
           - fine_migrations
           - base_migrations
+          - legacy_002
 
 permissions:
   contents: read
@@ -81,8 +82,8 @@ jobs:
             fail_guardrail "confirm_mode must be exactly: audit"
           fi
 
-          if [ "${AUDIT_SCOPE}" != "fine_migrations" ] && [ "${AUDIT_SCOPE}" != "base_migrations" ]; then
-            fail_guardrail "audit_scope must be exactly fine_migrations or base_migrations."
+          if [ "${AUDIT_SCOPE}" != "fine_migrations" ] && [ "${AUDIT_SCOPE}" != "base_migrations" ] && [ "${AUDIT_SCOPE}" != "legacy_002" ]; then
+            fail_guardrail "audit_scope must be exactly fine_migrations, base_migrations, or legacy_002."
           fi
 
           if [ -z "${SUPABASE_PROJECT_ID}" ]; then
@@ -131,6 +132,10 @@ jobs:
             REPORT="audit-output/supabase-prod-base-migrations-audit.md"
             ARTIFACT_NAME="supabase-prod-base-migrations-audit-evidence"
             REPORT_TITLE="Supabase PROD base migrations audit"
+          elif [ "${AUDIT_SCOPE}" = "legacy_002" ]; then
+            REPORT="audit-output/supabase-prod-legacy-002-audit.md"
+            ARTIFACT_NAME="supabase-prod-legacy-002-audit-evidence"
+            REPORT_TITLE="Supabase PROD legacy 002 read-only audit"
           else
             REPORT="audit-output/supabase-prod-fine-audit.md"
             ARTIFACT_NAME="supabase-prod-fine-audit-evidence"
@@ -537,11 +542,183 @@ jobs:
           order by e.migration, e.object_kind, e.object_name;
           SQL
 
+          cat > audit-output/queries/06-legacy-002-expected-objects.sql <<'SQL'
+          with expected(object_kind, object_name, table_name) as (
+            values
+              ('function','set_updated_at',null),
+              ('function','update_updated_at_column',null),
+              ('index','budget_import_batches_status_idx',null),
+              ('index','budget_import_staging_batch_idx',null),
+              ('index','budget_import_staging_category_idx',null),
+              ('index','budget_import_staging_lookup_idx',null),
+              ('index','budget_import_staging_validation_idx',null),
+              ('index','budget_lines_budget_version_id_idx',null),
+              ('index','budget_lines_lookup_idx',null),
+              ('index','budget_versions_one_active_per_year_idx',null),
+              ('index','cccbc_budget_category_id_idx',null),
+              ('index','cccbc_company_id_idx',null),
+              ('index','cccbc_cost_center_id_idx',null),
+              ('index','celebration_line_items_event_concept_idx',null),
+              ('index','celebration_line_items_venue_booking_id_idx',null),
+              ('index','company_bank_accounts_company_id_idx',null),
+              ('index','company_cost_centers_company_id_idx',null),
+              ('index','company_cost_centers_cost_center_id_idx',null),
+              ('index','idx_approval_rules_active',null),
+              ('index','idx_approval_rules_level',null),
+              ('index','idx_approval_rules_role',null),
+              ('index','idx_approval_rules_scope',null),
+              ('index','idx_billing_periods_cutoff_date',null),
+              ('index','idx_billing_periods_status',null),
+              ('index','idx_billing_periods_year',null),
+              ('index','idx_cash_funds_due_date',null),
+              ('index','idx_cash_funds_payment_request',null),
+              ('index','idx_cash_funds_responsible_status',null),
+              ('index','idx_cash_items_budget_category',null),
+              ('index','idx_cash_items_proveedor',null),
+              ('index','idx_cash_items_reconciliation',null),
+              ('index','idx_cash_reconciliations_fund_status',null),
+              ('index','idx_cash_reconciliations_submitted_by',null),
+              ('index','idx_celebration_events_client',null),
+              ('index','idx_celebration_events_seller',null),
+              ('index','idx_celebration_leads_created_at',null),
+              ('index','idx_celebration_leads_event_id',null),
+              ('index','idx_celebration_leads_source',null),
+              ('index','idx_celebration_leads_status',null),
+              ('index','idx_celebration_leads_utm_campaign',null),
+              ('index','idx_celebration_line_items_event',null),
+              ('index','idx_company_bank_accounts_company_active',null),
+              ('index','idx_document_links_entity',null),
+              ('index','idx_documents_type',null),
+              ('index','idx_incident_charges_budget_category_id',null),
+              ('index','idx_incident_charges_company_id',null),
+              ('index','idx_incident_charges_cost_center_id',null),
+              ('index','idx_incident_charges_external_name',null),
+              ('index','idx_incident_charges_incident_date',null),
+              ('index','idx_incident_charges_member_id',null),
+              ('index','idx_incident_charges_referred_by_member_id',null),
+              ('index','idx_incident_charges_status',null),
+              ('index','idx_income_allocations_income',null),
+              ('index','idx_income_payments_celebration',null),
+              ('index','idx_income_payments_production',null),
+              ('index','idx_invoices_charge_id',null),
+              ('index','idx_invoices_fiscal_uuid',null),
+              ('index','idx_invoices_incident_charge_id',null),
+              ('index','idx_invoices_invoice_type',null),
+              ('index','idx_invoices_issue_date',null),
+              ('index','idx_invoices_member_id',null),
+              ('index','idx_invoices_status',null),
+              ('index','idx_maintenance_fee_charges_billing_period_id',null),
+              ('index','idx_maintenance_fee_charges_member_id',null),
+              ('trigger','trg_billing_periods_updated_at','billing_periods'),
+              ('trigger','trg_cash_funds_updated_at','cash_funds'),
+              ('trigger','trg_cash_reconciliation_items_updated_at','cash_reconciliation_items'),
+              ('trigger','trg_cash_reconciliations_updated_at','cash_reconciliations'),
+              ('trigger','set_celebration_events_updated_at','celebration_events'),
+              ('trigger','trg_celebration_leads_updated_at','celebration_leads'),
+              ('trigger','set_celebration_line_items_updated_at','celebration_line_items'),
+              ('trigger','set_celebration_price_list_updated_at','celebration_price_list'),
+              ('trigger','set_client_contacts_updated_at','client_contacts'),
+              ('trigger','set_clients_updated_at','clients'),
+              ('trigger','set_company_bank_accounts_updated_at','company_bank_accounts'),
+              ('trigger','set_cost_centers_updated_at','cost_centers'),
+              ('trigger','trg_incident_charges_updated_at','incident_charges'),
+              ('trigger','set_income_payment_allocations_updated_at','income_payment_allocations'),
+              ('trigger','set_income_payments_updated_at','income_payments'),
+              ('trigger','trg_invoices_updated_at','invoices'),
+              ('trigger','trg_maintenance_fee_charges_updated_at','maintenance_fee_charges'),
+              ('trigger','trg_members_updated_at','members'),
+              ('trigger','trg_monthly_closure_comments_updated_at','monthly_closure_comments'),
+              ('trigger','trg_monthly_closure_exports_updated_at','monthly_closure_exports'),
+              ('trigger','trg_monthly_closures_updated_at','monthly_closures'),
+              ('trigger','set_payment_request_items_updated_at','payment_request_items'),
+              ('trigger','set_payment_requests_updated_at','payment_requests'),
+              ('trigger','set_production_events_updated_at','production_events'),
+              ('trigger','set_production_items_updated_at','production_items'),
+              ('trigger','set_profiles_updated_at','profiles'),
+              ('trigger','proveedores_updated_at','proveedores'),
+              ('trigger','set_provider_bank_accounts_updated_at','provider_bank_accounts'),
+              ('trigger','set_providers_updated_at','providers'),
+              ('trigger','set_sales_invoices_updated_at','sales_invoices'),
+              ('trigger','tickets_updated_at','tickets'),
+              ('trigger','set_venue_bookings_updated_at','venue_bookings'),
+              ('trigger','set_venue_spaces_updated_at','venue_spaces'),
+              ('trigger','set_venues_updated_at','venues')
+          ), observed as (
+            select
+              e.object_kind,
+              e.object_name,
+              e.table_name,
+              case e.object_kind
+                when 'function' then exists (
+                  select 1
+                  from pg_proc p
+                  join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'public'
+                    and p.prokind = 'f'
+                    and p.proname = e.object_name
+                )
+                when 'index' then exists (
+                  select 1
+                  from pg_indexes i
+                  where i.schemaname = 'public'
+                    and i.indexname = e.object_name
+                )
+                when 'trigger' then exists (
+                  select 1
+                  from pg_trigger t
+                  join pg_class c on c.oid = t.tgrelid
+                  join pg_namespace n on n.oid = c.relnamespace
+                  where n.nspname = 'public'
+                    and c.relname = e.table_name
+                    and t.tgname = e.object_name
+                    and not t.tgisinternal
+                )
+                else null
+              end as exists_in_prod
+            from expected e
+          ), grouped as (
+            select
+              object_kind,
+              count(*) as expected_count,
+              count(*) filter (where exists_in_prod) as found_count,
+              count(*) filter (where exists_in_prod is false) as missing_count,
+              string_agg(coalesce(table_name || '.', '') || object_name, ', ' order by table_name, object_name) filter (where exists_in_prod is false) as missing_objects
+            from observed
+            group by object_kind
+          )
+          select
+            object_kind,
+            expected_count,
+            found_count,
+            missing_count,
+            case
+              when found_count = expected_count then 'aplicada'
+              when found_count = 0 then 'no aplicada'
+              when found_count > 0 and found_count < expected_count then 'parcial'
+              else 'no concluyente'
+            end as classification,
+            coalesce(missing_objects, '') as missing_objects
+          from grouped
+          order by object_kind;
+
+          select
+            object_kind,
+            object_name,
+            coalesce(table_name, '') as table_name,
+            exists_in_prod
+          from observed
+          order by object_kind, table_name, object_name;
+          SQL
+
           if [ "${AUDIT_SCOPE}" = "base_migrations" ]; then
             run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
             run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
             run_query "Base migrations classification matrix" "audit-output/queries/04-base-migrations-expected-objects.sql"
             run_query "Base migrations object detail" "audit-output/queries/05-base-migrations-object-detail.sql"
+          elif [ "${AUDIT_SCOPE}" = "legacy_002" ]; then
+            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
+            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
+            run_query "Legacy 002 functions indexes triggers" "audit-output/queries/06-legacy-002-expected-objects.sql"
           else
             run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
             run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
@@ -581,6 +758,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-base-migrations-audit-evidence
+          path: audit-output/
+          retention-days: 14
+
+      - name: Upload legacy 002 audit evidence
+        if: ${{ always() && inputs.audit_scope == 'legacy_002' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-legacy-002-audit-evidence
           path: audit-output/
           retention-days: 14
 
