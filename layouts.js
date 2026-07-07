@@ -123,7 +123,7 @@ function bindEvents() {
   dom.rejectLineForm?.addEventListener("submit", submitRejectLine)
 }
 
-// â”€â”€ Carga y renderizado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Carga y renderizado
 
 async function loadLayouts() {
   dom.layoutsTableBody.innerHTML = `<tr><td colspan="9" style="padding:44px;text-align:center;color:var(--text-3)">Cargando layouts...</td></tr>`
@@ -208,7 +208,7 @@ function renderLayoutActions(l) {
   return actions.join("")
 }
 
-// â”€â”€ Nuevo layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Nuevo layout
 
 async function openNewLayoutModal() {
   if (!ensureActorProfile()) return
@@ -276,7 +276,7 @@ function renderLayoutBankAccountOptions() {
   dom.layoutBankAccountId.innerHTML = [
     `<option value="">Todas las cuentas</option>`,
     ...accounts.map((a) => {
-      const label = [a.name || "Cuenta origen", a.bank_name, a.account_number ? `cta ${a.account_number}` : a.last4 ? `termina ${a.last4}` : null].filter(Boolean).join(" Â· ")
+      const label = [a.name || "Cuenta origen", a.bank_name, a.account_number ? `cta ${a.account_number}` : a.last4 ? `termina ${a.last4}` : null].filter(Boolean).join(" - ")
       return `<option value="${a.id}">${escapeHtml(label)}</option>`
     }),
   ].join("")
@@ -353,7 +353,7 @@ function renderInvalidRequests(invalidRequests) {
   renderLayoutNotice("Solicitudes fuera del layout por datos incompletos", invalidRequests)
 }
 
-// â”€â”€ Lineas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Lineas
 
 async function openLayoutLines(layoutId) {
   const layout = layouts.find((item) => item.id === layoutId)
@@ -361,7 +361,7 @@ async function openLayoutLines(layoutId) {
 
   activeLinesLayoutId = layoutId
   dom.linesTitle.textContent = layout.layout_number || "Lineas del layout"
-  dom.linesSubtitle.textContent = `${layout.name || ""} â€” archivo CxC BBVA`.trim()
+  dom.linesSubtitle.textContent = `${layout.name || ""} - archivo CxC BBVA`.trim()
   dom.linesTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Cargando lineas...</td></tr>`
   dom.linesDialog.showModal()
 
@@ -404,11 +404,11 @@ function renderLinesTable(lines) {
 }
 
 function renderLineActions(line) {
-  if (line.status !== "included") return `<span style="color:var(--text-3);font-size:11px">â€”</span>`
+  if (line.status !== "included") return `<span style="color:var(--text-3);font-size:11px">-</span>`
   return `<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`
 }
 
-// â”€â”€ Archivo CxC BBVA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Archivo BBVA
 
 async function downloadLayoutCxc(layoutId) {
   const layout = layouts.find((item) => item.id === layoutId)
@@ -461,7 +461,7 @@ async function downloadLayoutCxc(layoutId) {
   }
 }
 
-// â”€â”€ Confirmar pago â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Confirmar pago
 
 async function markLayoutUploaded(layoutId) {
   if (!ensureActorProfile()) return
@@ -527,7 +527,7 @@ async function submitConfirmPayment(event) {
   }
 }
 
-// â”€â”€ Rechazar linea â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Rechazar linea
 
 function openRejectLineModal(lineId) {
   if (!ensureActorProfile()) return
@@ -570,7 +570,7 @@ async function submitRejectLine(event) {
   }
 }
 
-// â”€â”€ Expuestos en window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Expuestos en window
 
 window.openLayoutLines = openLayoutLines
 window.downloadLayoutCxc = downloadLayoutCxc
@@ -580,7 +580,7 @@ window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
 window.openRejectLineModal = openRejectLineModal
 
-// â”€â”€ Supabase helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Supabase helpers
 
 async function fetchLayoutLines(layoutId) {
   return supabaseClient
@@ -932,8 +932,8 @@ function buildCxcFileName(layout) {
 function buildBbvaFileName(layout, format) {
   const folio = sanitizeCxcFileToken(layout.layout_number || layout.name || "LAYOUT")
   const today = new Date().toISOString().slice(0, 10).replaceAll("-", "")
-  const prefix = format === BBVA_FORMAT_INTERBANK ? "PAGOSINT" : "PAGOSBBV_CXC"
-  return `${prefix}_${today}_${folio}.${CXC_FILE_EXTENSION}`
+  const prefix = format === BBVA_FORMAT_INTERBANK ? "PAGOSINT" : "PAGOSBBV"
+  return `${prefix}_FLUX_${folio}_${today}.${CXC_FILE_EXTENSION}`
 }
 
 function formatCxcAccount(value, label) {
@@ -968,7 +968,6 @@ function formatBbvaReference(value) {
 
 function normalizeCxcText(value) {
   return String(value ?? "")
-    .replace(/[Ã±Ã‘]/g, "N")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
@@ -998,7 +997,7 @@ function downloadTextFile(content, fileName) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-// â”€â”€ Badges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Badges
 
 function layoutStatusBadge(status) {
   const map = {
@@ -1009,7 +1008,7 @@ function layoutStatusBadge(status) {
     paid: ["Pagado", "success"],
     cancelled: ["Cancelado", "neutral"],
   }
-  const [label, variant] = map[status] || [status || "â€”", "neutral"]
+  const [label, variant] = map[status] || [status || "-", "neutral"]
   return Components.badge(label, variant)
 }
 
@@ -1020,11 +1019,11 @@ function lineStatusBadge(status) {
     bank_rejected: ["Rechazado", "danger"],
     cancelled: ["Cancelado", "neutral"],
   }
-  const [label, variant] = map[status] || [status || "â€”", "neutral"]
+  const [label, variant] = map[status] || [status || "-", "neutral"]
   return Components.badge(label, variant)
 }
 
-// â”€â”€ Utilidades â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Utilidades
 
 async function logout() { await supabaseClient.auth.signOut(); window.location.href = "./index.html" }
 
@@ -1099,9 +1098,9 @@ function compactCurrency(value) {
 }
 
 function formatDate(value) {
-  if (!value) return "â€”"
+  if (!value) return "-"
   const d = new Date(`${String(value).slice(0, 10)}T00:00:00`)
-  return isNaN(d) ? "â€”" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(d)
+  return isNaN(d) ? "-" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "short", year: "numeric" }).format(d)
 }
 
 function numberValue(value) { const n = Number(value); return Number.isFinite(n) ? n : 0 }
@@ -1110,5 +1109,4 @@ function cleanText(value) { return String(value || "").trim() }
 function normalize(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "") }
 function sanitizeFileName(value) { return String(value || "layout-pagos").replace(/[\\/:*?"<>|]+/g, "-").trim() }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;") }
-
 
