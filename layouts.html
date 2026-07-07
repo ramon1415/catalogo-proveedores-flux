@@ -179,6 +179,37 @@
     </div>
   </dialog>
 
+  <!-- Dialog: completar datos PAGOSINT -->
+  <dialog id="pagosintReferenceDialog" class="narrow">
+    <form id="pagosintReferenceForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="pagosintReferenceTitle" style="color:var(--text-1)">Completar referencia PAGOSINT</h2>
+          <p>Completa los datos faltantes de la linea para generar el archivo interbancario.</p>
+        </div>
+        <button type="button" id="closePagosintReferenceModalBtn" class="icon-btn">x</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <label>Referencia numerica *
+            <input id="pagosintReferenceInput" type="text" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 7, 42, 40002" required>
+            <span class="field-hint">Captura de 1 a 5 digitos. El TXT completa con ceros a la izquierda.</span>
+          </label>
+          <label class="full-row">Titular / beneficiario
+            <input id="pagosintBeneficiaryInput" type="text" placeholder="Titular para PAGOSINT">
+          </label>
+          <label class="full-row">Motivo de pago
+            <input id="pagosintConceptInput" type="text" placeholder="Motivo para PAGOSINT">
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelPagosintReferenceBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitPagosintReferenceBtn" class="primary-btn">Guardar referencia</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Dialog: confirmar pago -->
   <dialog id="confirmDialog" class="narrow">
     <form id="confirmPaymentForm" class="modal-content">
@@ -230,7 +261,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260703-cxc-bbva-fixed"></script>
+  <script src="./layouts.js?v=20260707-pagosint-reference"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>

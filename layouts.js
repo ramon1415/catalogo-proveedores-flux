@@ -26,6 +26,8 @@ let currentProfileId = null
 let activeLinesLayoutId = null
 let activeConfirmLayoutId = null
 let activeRejectLineId = null
+let activePagosintReferenceLineId = null
+let activeLayoutLines = []
 const dom = {}
 
 const rootElement = document.documentElement
@@ -81,6 +83,15 @@ function cacheDom() {
   dom.linesSubtitle = document.getElementById("linesSubtitle")
   dom.linesTableBody = document.getElementById("linesTableBody")
   dom.closeLinesModalBtn = document.getElementById("closeLinesModalBtn")
+  dom.pagosintReferenceDialog = document.getElementById("pagosintReferenceDialog")
+  dom.pagosintReferenceForm = document.getElementById("pagosintReferenceForm")
+  dom.pagosintReferenceTitle = document.getElementById("pagosintReferenceTitle")
+  dom.pagosintReferenceInput = document.getElementById("pagosintReferenceInput")
+  dom.pagosintBeneficiaryInput = document.getElementById("pagosintBeneficiaryInput")
+  dom.pagosintConceptInput = document.getElementById("pagosintConceptInput")
+  dom.closePagosintReferenceModalBtn = document.getElementById("closePagosintReferenceModalBtn")
+  dom.cancelPagosintReferenceBtn = document.getElementById("cancelPagosintReferenceBtn")
+  dom.submitPagosintReferenceBtn = document.getElementById("submitPagosintReferenceBtn")
   dom.confirmDialog = document.getElementById("confirmDialog")
   dom.confirmPaymentForm = document.getElementById("confirmPaymentForm")
   dom.confirmTitle = document.getElementById("confirmTitle")
@@ -116,6 +127,9 @@ function bindEvents() {
   dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal)
   dom.newLayoutForm?.addEventListener("submit", submitNewLayout)
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
+  dom.closePagosintReferenceModalBtn?.addEventListener("click", closePagosintReferenceModal)
+  dom.cancelPagosintReferenceBtn?.addEventListener("click", closePagosintReferenceModal)
+  dom.pagosintReferenceForm?.addEventListener("submit", submitPagosintReference)
   dom.closeConfirmModalBtn?.addEventListener("click", closeConfirmModal)
   dom.cancelConfirmBtn?.addEventListener("click", closeConfirmModal)
   dom.confirmPaymentForm?.addEventListener("submit", submitConfirmPayment)
@@ -341,7 +355,7 @@ async function submitNewLayout(event) {
 function renderLayoutNotice(message, invalidRequests = []) {
   const list = invalidRequests.length
     ? `<ul style="margin:6px 0 0 16px">${invalidRequests.slice(0, 8).map((item) => {
-        const fields = Array.isArray(item.missing_fields) ? item.missing_fields.join(", ") : item.missing_fields || "datos incompletos"
+        const fields = formatMissingFields(item.missing_fields)
         return `<li><strong>${escapeHtml(item.request_number || item.payment_request_id || "Solicitud")}</strong>: ${escapeHtml(fields)}</li>`
       }).join("")}</ul>` : ""
   const more = invalidRequests.length > 8 ? `<p style="margin-top:4px;color:var(--text-3)">Y ${invalidRequests.length - 8} mas.</p>` : ""
@@ -352,6 +366,17 @@ function renderLayoutNotice(message, invalidRequests = []) {
 function renderInvalidRequests(invalidRequests) {
   if (!invalidRequests.length) return
   renderLayoutNotice("Solicitudes fuera del layout por datos incompletos", invalidRequests)
+}
+
+function formatMissingFields(fields) {
+  const values = Array.isArray(fields) ? fields : fields ? [fields] : ["datos incompletos"]
+  const labels = {
+    payment_reference: "referencia de pago requerida",
+    payment_concept: "concepto de pago requerido",
+    company_bank_account_id: "cuenta origen requerida",
+    scheduled_payment_date: "fecha programada requerida",
+  }
+  return values.map((field) => labels[field] || field || "datos incompletos").join(", ")
 }
 
 // Lineas
@@ -380,10 +405,12 @@ async function refreshLayoutLines(layoutId) {
 
 function closeLinesModal() {
   activeLinesLayoutId = null
+  activeLayoutLines = []
   if (dom.linesDialog.open) dom.linesDialog.close()
 }
 
 function renderLinesTable(lines) {
+  activeLayoutLines = lines || []
   if (!lines.length) {
     dom.linesTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Este layout no tiene lineas.</td></tr>`
     return
@@ -396,7 +423,7 @@ function renderLinesTable(lines) {
       <td>${escapeHtml(line.destination_value || "")}</td>
       <td><span class="cell-main">${escapeHtml(line.beneficiary_name || "")}</span></td>
       <td>${escapeHtml(formatCurrency(line.amount))}</td>
-      <td>${escapeHtml(line.payment_reference || "")}</td>
+      <td>${renderLineReferenceCell(line)}</td>
       <td>${escapeHtml(line.payment_concept || "")}</td>
       <td>${escapeHtml(line.request_number || "")}</td>
       <td>${lineStatusBadge(line.status)}</td>
@@ -406,7 +433,44 @@ function renderLinesTable(lines) {
 
 function renderLineActions(line) {
   if (line.status !== "included") return `<span style="color:var(--text-3);font-size:11px">-</span>`
-  return `<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`
+  const actions = []
+  if (lineNeedsPagosintCompletion(line)) {
+    actions.push(`<button class="small-btn warning" type="button" onclick="openPagosintReferenceModal('${line.id}')" style="white-space:nowrap">Completar referencia</button>`)
+  }
+  actions.push(`<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`)
+  return actions.join("")
+}
+
+function renderLineReferenceCell(line) {
+  const value = escapeHtml(line.payment_reference || "")
+  if (!lineNeedsPagosintCompletion(line)) return value || `<span style="color:var(--text-3);font-size:11px">-</span>`
+  return [
+    value ? `<span class="cell-main">${value}</span>` : `<span style="color:var(--text-3);font-size:11px">Sin referencia</span>`,
+    `<span class="badge warning" style="margin-top:4px">Datos PAGOSINT incompletos</span>`,
+  ].join("")
+}
+
+function lineNeedsPagosintCompletion(line) {
+  if (line.status !== "included" || !isPagosintLine(line)) return false
+  return pagosintLineIssues(line).length > 0
+}
+
+function isPagosintLine(line) {
+  try {
+    return detectBbvaLayoutFormat(line) === BBVA_FORMAT_INTERBANK
+  } catch {
+    return false
+  }
+}
+
+function pagosintLineIssues(line) {
+  const issues = []
+  const referenceDigits = cxcDigits(line.payment_reference)
+  if (!referenceDigits) issues.push("referencia numerica")
+  else if (referenceDigits.length > BBVA_INTERBANK_REFERENCE_LENGTH) issues.push("referencia numerica mayor a 5 digitos")
+  if (!notBlank(line.beneficiary_name) || !normalizeCxcText(line.beneficiary_name)) issues.push("titular")
+  if (!notBlank(line.payment_concept) || !normalizeCxcText(line.payment_concept)) issues.push("motivo")
+  return issues
 }
 
 // Archivo BBVA
@@ -431,7 +495,7 @@ async function downloadLayoutCxc(layoutId) {
   const invalidLines = validateLayoutLines(cxcLines)
   if (invalidLines.length) {
     const first = invalidLines[0]
-    showToast("Lineas invalidas", `No se puede generar el archivo BBVA. Solicitud ${first.request_number || first.payment_request_id}: ${first.missing_fields.join(", ")}.`, "danger")
+    showToast("Lineas invalidas", formatInvalidLayoutLineMessage(first), "danger")
     return
   }
 
@@ -528,6 +592,84 @@ async function submitConfirmPayment(event) {
   }
 }
 
+// Completar datos PAGOSINT
+
+function openPagosintReferenceModal(lineId) {
+  if (!ensureActorProfile()) return
+  const line = activeLayoutLines.find((item) => item.id === lineId)
+  if (!line) {
+    showToast("Linea no encontrada", "Vuelve a abrir las lineas del layout e intenta de nuevo.", "warning")
+    return
+  }
+  if (!isPagosintLine(line)) {
+    showToast("No aplica", "La referencia PAGOSINT solo aplica a lineas interbancarias.", "warning")
+    return
+  }
+
+  activePagosintReferenceLineId = lineId
+  dom.pagosintReferenceTitle.textContent = `Completar referencia ${line.request_number || ""}`.trim()
+  dom.pagosintReferenceInput.value = cxcDigits(line.payment_reference)
+  dom.pagosintBeneficiaryInput.value = line.beneficiary_name || ""
+  dom.pagosintConceptInput.value = line.payment_concept || ""
+  dom.pagosintReferenceDialog.showModal()
+}
+
+function closePagosintReferenceModal() {
+  activePagosintReferenceLineId = null
+  dom.pagosintReferenceForm.reset()
+  if (dom.pagosintReferenceDialog.open) dom.pagosintReferenceDialog.close()
+}
+
+async function submitPagosintReference(event) {
+  event.preventDefault()
+  if (!activePagosintReferenceLineId || !ensureActorProfile()) return
+
+  const referenceDigits = cxcDigits(dom.pagosintReferenceInput.value)
+  const beneficiary = cleanText(dom.pagosintBeneficiaryInput.value)
+  const concept = cleanText(dom.pagosintConceptInput.value)
+
+  if (!referenceDigits) {
+    showToast("Referencia requerida", "Captura una referencia numerica de 1 a 5 digitos para PAGOSINT.", "warning")
+    return
+  }
+  if (referenceDigits.length > BBVA_INTERBANK_REFERENCE_LENGTH) {
+    showToast("Referencia invalida", "La referencia PAGOSINT acepta maximo 5 digitos.", "warning")
+    return
+  }
+  if (!beneficiary || !normalizeCxcText(beneficiary)) {
+    showToast("Titular requerido", "Captura titular o beneficiario para PAGOSINT.", "warning")
+    return
+  }
+  if (!concept || !normalizeCxcText(concept)) {
+    showToast("Motivo requerido", "Captura motivo de pago para PAGOSINT.", "warning")
+    return
+  }
+
+  setButtonLoading(dom.submitPagosintReferenceBtn, true, "Guardando...")
+
+  try {
+    const { error } = await supabaseClient
+      .from("payment_layout_lines")
+      .update({
+        payment_reference: referenceDigits,
+        beneficiary_name: beneficiary,
+        payment_concept: concept,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", activePagosintReferenceLineId)
+
+    if (error) throw error
+
+    showToast("Referencia guardada", `PAGOSINT usara ${formatBbvaReference(referenceDigits)} en las posiciones 86-90.`, "success")
+    closePagosintReferenceModal()
+    if (activeLinesLayoutId) await refreshLayoutLines(activeLinesLayoutId)
+  } catch (error) {
+    showToast("No se pudo guardar", rlsHint("payment_layout_lines", "update", error), "danger")
+  } finally {
+    setButtonLoading(dom.submitPagosintReferenceBtn, false, "Guardar referencia")
+  }
+}
+
 // Rechazar linea
 
 function openRejectLineModal(lineId) {
@@ -579,6 +721,7 @@ window.validateLayoutCxc = validateLayoutCxc
 window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
+window.openPagosintReferenceModal = openPagosintReferenceModal
 window.openRejectLineModal = openRejectLineModal
 
 // Supabase helpers
@@ -633,9 +776,19 @@ function validateLayoutLines(lines) {
         else if (referenceDigits.length > BBVA_INTERBANK_REFERENCE_LENGTH) missing.push("referencia numerica para PAGOSINT acepta maximo 5 digitos")
       }
 
-      return { payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
+      return { line_id: line.id, payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
     })
     .filter((item) => item.missing_fields.length)
+}
+
+function formatInvalidLayoutLineMessage(item) {
+  const request = item.request_number || item.payment_request_id || "la solicitud"
+  const missing = item.missing_fields || []
+  const needsPagosintReference = missing.some((field) => String(field).includes("referencia numerica") && String(field).includes("PAGOSINT"))
+  if (needsPagosintReference) {
+    return `La solicitud ${request} requiere referencia numerica para generar PAGOSINT. Usa 'Completar referencia' en la linea del layout.`
+  }
+  return `No se puede generar el archivo BBVA. Solicitud ${request}: ${missing.join(", ")}.`
 }
 
 function buildBbvaLayoutFiles(lines, layout) {
@@ -894,7 +1047,7 @@ async function validateLayoutCxc(layoutId) {
   const invalidLines = validateLayoutLines(cxcLines)
   if (invalidLines.length) {
     const first = invalidLines[0]
-    showToast("Layout invalido", `Solicitud ${first.request_number || first.payment_request_id}: ${first.missing_fields.join(", ")}.`, "danger")
+    showToast("Layout invalido", formatInvalidLayoutLineMessage(first), "danger")
     return
   }
 
