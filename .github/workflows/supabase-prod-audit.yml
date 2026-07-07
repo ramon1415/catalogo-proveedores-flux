@@ -428,72 +428,111 @@ jobs:
               'repair or apply only after confirming missing roles are intended'
             from role_observed
           )
+          , detail as (
+            select
+              '004_rls_policies_grants.sql' as migration,
+              'rls_enabled' as object_kind,
+              table_name as object_name,
+              exists_in_prod,
+              'schema=public; policy_source=RLS table flag' as evidence
+            from rls_observed
+            union all
+            select
+              '004_rls_policies_grants.sql',
+              'public_schema_policy',
+              table_name || '.' || policy_name,
+              exists_in_prod,
+              'schema=public; this is not the same as PUBLIC/anon access'
+            from public_policy_observed
+            union all
+            select
+              '004_rls_policies_grants.sql',
+              'grant_check',
+              check_name,
+              exists_in_prod,
+              case
+                when check_name like 'anon_%' then 'role=anon; review carefully before baseline'
+                when check_name like 'authenticated_%' then 'role=authenticated; review carefully before baseline'
+                else ''
+              end
+            from grant_checks
+            union all
+            select
+              '005_storage.sql',
+              'bucket_config',
+              bucket_id,
+              exists_in_prod,
+              'bucket_exists=' || bucket_exists::text || '; expected_private=true'
+            from bucket_observed
+            union all
+            select
+              '005_storage.sql',
+              'storage_policy',
+              policy_name,
+              exists_in_prod,
+              case
+                when policy_name ilike '%anon%' then 'policy name references anon; review as explicit storage risk'
+                else ''
+              end
+            from storage_policy_observed
+            union all
+            select
+              '006_seed_base.sql',
+              'role_seed',
+              role_name,
+              exists_in_prod,
+              'catalog role expected by seed base'
+            from role_observed
+          ), classified_matrix as (
+            select
+              migration,
+              object_group,
+              expected_count,
+              found_count,
+              missing_count,
+              case
+                when found_count = expected_count then 'aplicada'
+                when found_count = 0 then 'no aplicada'
+                when found_count > 0 and found_count < expected_count then 'parcial'
+                else 'no concluyente'
+              end as classification,
+              missing_objects,
+              risk,
+              recommendation
+            from matrix
+          )
           select
+            1 as row_order,
+            'summary' as row_type,
             migration,
             object_group,
+            '' as object_name,
+            null::boolean as exists_in_prod,
             expected_count,
             found_count,
             missing_count,
-            case
-              when found_count = expected_count then 'aplicada'
-              when found_count = 0 then 'no aplicada'
-              when found_count > 0 and found_count < expected_count then 'parcial'
-              else 'no concluyente'
-            end as classification,
-            missing_objects,
+            classification,
+            missing_objects as evidence,
             risk,
             recommendation
-          from matrix
-          order by migration, object_group;
-
-          select
-            '004_rls_policies_grants.sql' as migration,
-            'rls_enabled' as object_kind,
-            table_name as object_name,
-            exists_in_prod,
-            '' as evidence
-          from rls_observed
+          from classified_matrix
           union all
           select
-            '004_rls_policies_grants.sql',
-            'public_policy',
-            table_name || '.' || policy_name,
+            2 as row_order,
+            'detail' as row_type,
+            migration,
+            object_kind as object_group,
+            object_name,
             exists_in_prod,
-            ''
-          from public_policy_observed
-          union all
-          select
-            '004_rls_policies_grants.sql',
-            'grant_check',
-            check_name,
-            exists_in_prod,
-            ''
-          from grant_checks
-          union all
-          select
-            '005_storage.sql',
-            'bucket_config',
-            bucket_id,
-            exists_in_prod,
-            'bucket_exists=' || bucket_exists::text
-          from bucket_observed
-          union all
-          select
-            '005_storage.sql',
-            'storage_policy',
-            policy_name,
-            exists_in_prod,
-            ''
-          from storage_policy_observed
-          union all
-          select
-            '006_seed_base.sql',
-            'role_seed',
-            role_name,
-            exists_in_prod,
-            ''
-          from role_observed
-          order by migration, object_kind, object_name;
+            null::bigint as expected_count,
+            null::bigint as found_count,
+            null::bigint as missing_count,
+            case when exists_in_prod then 'encontrado' else 'faltante' end as classification,
+            evidence,
+            '' as risk,
+            '' as recommendation
+          from detail
+          order by row_order, migration, object_group, object_name;
           SQL
 
           if [ "${AUDIT_SCOPE}" = "base_migrations" ]; then
