@@ -77,6 +77,18 @@ Si un layout contiene ambos formatos, el sistema descarga archivos separados:
 
 La convencion deja el tipo de layout al inicio (`PAGOSBBV` o `PAGOSINT`), conserva el folio operativo del layout y cierra con fecha de generacion `YYYYMMDD` para facilitar busqueda, conciliacion y soporte con el banco.
 
+## Referencia PAGOSINT en layouts ya generados
+
+Si una linea `PAGOSINT` ya generada no tiene referencia numerica, la descarga queda bloqueada. Desde la pantalla de Layouts se debe abrir la linea y usar `Completar referencia` para guardar el dato en `payment_layout_lines.payment_reference`.
+
+La captura permite de 1 a 5 digitos. El archivo siempre conserva 5 posiciones en el registro:
+
+- `7` -> `00007`
+- `42` -> `00042`
+- `40002` -> `40002`
+
+La accion no aplica a `PAGOSBBV` porque el formato de 85 caracteres no usa este campo.
+
 ## Validaciones locales
 
 Para ambos formatos:
