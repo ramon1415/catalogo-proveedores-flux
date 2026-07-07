@@ -22,27 +22,27 @@
           <div class="brand-logo">FL</div>
           <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Layouts de pago</div></div>
         </div>
-              <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
-        <div class="nav-section">
-          <div class="nav-section-title">OPERACION</div>
-          <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link"><span>S</span> Solicitudes de pago</a>
-          <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link active"><span>L</span> Layouts de pago</a>
-          <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link"><span>E</span> Efectivo y comprobaciones</a>
-          <a href="./ingresos.html" data-flux-nav-key="income" class="nav-link"><span>I</span> Ingresos</a>
-          <a href="./ingresos.html" data-flux-nav-key="incidents" class="nav-link"><span>V</span> Incidencias</a>
-          <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link"><span>P</span> Proveedores</a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-title">GENERAL</div>
-          <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link"><span>D</span> Dashboard operativo</a>
-          <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link"><span>A</span> Cola de aprobacion</a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-title">CONFIGURACION</div>
-          <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link"><span>C</span> Configuracion</a>
-        </div>
-      </nav>
-      <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+        <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+          <div class="nav-section">
+            <div class="nav-section-title">Operacion</div>
+            <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link muted"><span>S</span> Solicitudes de pago</a>
+            <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link active"><span>L</span> Layouts de pago</a>
+            <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link muted"><span>E</span> Efectivo y comprobaciones</a>
+            <a href="./ingresos.html?tab=income" data-flux-nav-key="income" class="nav-link muted"><span>I</span> Ingresos</a>
+            <a href="./ingresos.html?tab=incidents" data-flux-nav-key="incidents" class="nav-link muted"><span>V</span> Incidencias</a>
+            <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">General</div>
+            <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link muted"><span>D</span> Dashboard operativo</a>
+            <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobacion</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">Configuracion</div>
+            <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link muted"><span>C</span> Configuracion</a>
+          </div>
+        </nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
       </div>
       <div class="user-card">
         <p id="userName">Usuario</p>
@@ -179,6 +179,37 @@
     </div>
   </dialog>
 
+  <!-- Dialog: completar datos PAGOSINT -->
+  <dialog id="pagosintReferenceDialog" class="narrow">
+    <form id="pagosintReferenceForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="pagosintReferenceTitle" style="color:var(--text-1)">Completar referencia PAGOSINT</h2>
+          <p>Completa los datos faltantes de la linea para generar el archivo interbancario.</p>
+        </div>
+        <button type="button" id="closePagosintReferenceModalBtn" class="icon-btn">x</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <label>Referencia numerica *
+            <input id="pagosintReferenceInput" type="text" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 7, 42, 40002" required>
+            <span class="field-hint">Captura de 1 a 5 digitos. El TXT completa con ceros a la izquierda.</span>
+          </label>
+          <label class="full-row">Titular / beneficiario
+            <input id="pagosintBeneficiaryInput" type="text" placeholder="Titular para PAGOSINT">
+          </label>
+          <label class="full-row">Motivo de pago
+            <input id="pagosintConceptInput" type="text" placeholder="Motivo para PAGOSINT">
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelPagosintReferenceBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitPagosintReferenceBtn" class="primary-btn">Guardar referencia</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Dialog: confirmar pago -->
   <dialog id="confirmDialog" class="narrow">
     <form id="confirmPaymentForm" class="modal-content">
@@ -230,7 +261,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260703-cxc-bbva-fixed"></script>
+  <script src="./layouts.js?v=20260707-pagosint-reference-ux"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>
