@@ -45,7 +45,7 @@ jobs:
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
       BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
       BACKUP_REFERENCE: ${{ inputs.backup_reference }}
-      EVIDENCE_DIR: ${{ runner.temp }}/supabase-prod-cli-evidence
+      EVIDENCE_DIR: /tmp/supabase-prod-cli-evidence
 
     steps:
       - name: Validate release guardrails
@@ -106,6 +106,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf "${EVIDENCE_DIR}"
           mkdir -p "${EVIDENCE_DIR}"
           {
             echo "# Supabase PROD CLI evidence"
@@ -244,7 +245,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-repair-base-dry-run-evidence
-          path: ${{ env.EVIDENCE_DIR }}/
+          path: /tmp/supabase-prod-cli-evidence/
           if-no-files-found: warn
 
       - name: Summarize operation
