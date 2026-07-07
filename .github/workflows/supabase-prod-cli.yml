@@ -1,4 +1,4 @@
-name: Supabase PROD CLI Dry Run
+name: Supabase PROD CLI
 
 on:
   workflow_dispatch:
@@ -8,23 +8,33 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Type dry-run to confirm this workflow must not apply migrations"
+        description: "Allowed: dry-run or repair_base_then_dry_run"
         required: true
         default: "dry-run"
+        type: string
+      backup_confirmed:
+        description: "Required true only for repair_base_then_dry_run"
+        required: false
+        default: false
+        type: boolean
+      backup_reference:
+        description: "Required for repair_base_then_dry_run: date/time/responsible"
+        required: false
+        default: ""
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: supabase-prod-cli-dry-run
+  group: supabase-prod-cli-${{ inputs.confirm_mode }}
   cancel-in-progress: false
 
 jobs:
-  dry_run:
-    name: Supabase PROD migration dry-run
+  prod_cli:
+    name: Supabase PROD CLI guarded operation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: supabase-production
 
     env:
@@ -33,6 +43,9 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
       CONFIRM_PROD: ${{ inputs.confirm_prod }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
+      BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
+      BACKUP_REFERENCE: ${{ inputs.backup_reference }}
+      EVIDENCE_DIR: supabase-prod-cli-evidence
 
     steps:
       - name: Validate release guardrails
@@ -45,8 +58,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "dry-run" ]; then
-            echo "::error::confirm_mode must be exactly: dry-run"
+          if [ "${CONFIRM_MODE}" != "dry-run" ] && [ "${CONFIRM_MODE}" != "repair_base_then_dry_run" ]; then
+            echo "::error::confirm_mode must be exactly dry-run or repair_base_then_dry_run."
             exit 1
           fi
 
@@ -70,21 +83,66 @@ jobs:
             exit 1
           fi
 
-          echo "Guardrails passed. Running dry-run only."
+          if [ "${CONFIRM_MODE}" = "repair_base_then_dry_run" ]; then
+            if [ "${BACKUP_CONFIRMED}" != "true" ]; then
+              echo "::error::backup_confirmed must be true for repair_base_then_dry_run."
+              exit 1
+            fi
+
+            if [ -z "${BACKUP_REFERENCE}" ]; then
+              echo "::error::backup_reference is required for repair_base_then_dry_run."
+              exit 1
+            fi
+          fi
+
+          echo "Guardrails passed."
 
       - name: Check out dev
         uses: actions/checkout@v4
         with:
           ref: dev
 
+      - name: Initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE_DIR}"
+          {
+            echo "# Supabase PROD CLI evidence"
+            echo ""
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode: ${CONFIRM_MODE}"
+            echo "- Project ref: ${SUPABASE_PROJECT_ID}"
+            echo "- Backup confirmed: ${BACKUP_CONFIRMED}"
+            echo "- Backup reference: ${BACKUP_REFERENCE}"
+            echo "- Real db push: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
+            echo ""
+          } > "${EVIDENCE_DIR}/summary.md"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain | tee "${EVIDENCE_DIR}/git-status.txt"
+            echo "::error::Repository checkout is not clean."
+            exit 1
+          fi
+
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
+
+      - name: Verify Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version | tee "${EVIDENCE_DIR}/supabase-version.txt"
+          supabase migration repair --help > "${EVIDENCE_DIR}/migration-repair-help.txt"
+          grep -q -- "--status" "${EVIDENCE_DIR}/migration-repair-help.txt"
+          grep -q -- "applied" "${EVIDENCE_DIR}/migration-repair-help.txt"
 
       - name: Show migration files in release branch
         shell: bash
         run: |
           set -euo pipefail
-          find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort
+          find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort | tee "${EVIDENCE_DIR}/migration-files.txt"
 
       - name: Link Supabase PROD project
         shell: bash
@@ -92,29 +150,116 @@ jobs:
           set -euo pipefail
           supabase link --project-ref "${SUPABASE_PROJECT_ID}"
 
-      - name: Review linked migration history
+          LINKED_REF="$(cat supabase/.temp/project-ref 2>/dev/null || true)"
+          if [ "${LINKED_REF}" != "${SUPABASE_PROJECT_ID}" ]; then
+            echo "::error::Linked project ref does not match PROD project ref."
+            exit 1
+          fi
+
+          echo "${LINKED_REF}" > "${EVIDENCE_DIR}/linked-project-ref.txt"
+
+      - name: Migration list before
         shell: bash
         run: |
           set -euo pipefail
-          supabase migration list --linked
+          supabase migration list --linked | tee "${EVIDENCE_DIR}/migration-list-before.txt"
+
+      - name: Repair base migration history
+        if: ${{ inputs.confirm_mode == 'repair_base_then_dry_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repair_versions=(
+            00101 00102 00103 00104 00105 00106 00107 00108 00109 00110
+            00301 00302 00303 00304 00305 00306 00307
+          )
+          forbidden_versions=(00401 00402 00403 007 008)
+
+          printf "%s\n" "${repair_versions[@]}" > "${EVIDENCE_DIR}/repair-versions.txt"
+          printf "%s\n" "${forbidden_versions[@]}" > "${EVIDENCE_DIR}/not-repaired-versions.txt"
+
+          for version in "${repair_versions[@]}"; do
+            echo "Repairing migration history version ${version} as applied" | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+            supabase migration repair "${version}" --status applied --linked --yes 2>&1 | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+          done
+
+      - name: Migration list after
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --linked | tee "${EVIDENCE_DIR}/migration-list-after.txt"
+
+      - name: Validate repair scope
+        if: ${{ inputs.confirm_mode == 'repair_base_then_dry_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repaired_versions=(
+            00101 00102 00103 00104 00105 00106 00107 00108 00109 00110
+            00301 00302 00303 00304 00305 00306 00307
+          )
+          forbidden_versions=(00401 00402 00403 007 008)
+
+          for version in "${repaired_versions[@]}"; do
+            line="$(grep -E "^[[:space:]]*${version}([^0-9]|$)" "${EVIDENCE_DIR}/migration-list-after.txt" || true)"
+            if ! printf "%s\n" "${line}" | grep -Eq "${version}[^0-9].*${version}([^0-9]|$)"; then
+              echo "::error::Expected version ${version} to appear as applied in linked migration list."
+              exit 1
+            fi
+          done
+
+          for version in "${forbidden_versions[@]}"; do
+            line="$(grep -E "^[[:space:]]*${version}([^0-9]|$)" "${EVIDENCE_DIR}/migration-list-after.txt" || true)"
+            if printf "%s\n" "${line}" | grep -Eq "${version}[^0-9].*${version}([^0-9]|$)"; then
+              echo "::error::Version ${version} appears as applied but must not be repaired by this workflow."
+              exit 1
+            fi
+          done
+
+          echo "Repair scope validation passed." | tee "${EVIDENCE_DIR}/repair-scope-validation.txt"
 
       - name: Dry-run Supabase PROD migrations
         shell: bash
         run: |
           set -euo pipefail
-          supabase db push --linked --dry-run
+          supabase db push --linked --dry-run 2>&1 | tee "${EVIDENCE_DIR}/db-push-dry-run.txt"
 
-      - name: Summarize dry-run
+      - name: Sanitize evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${EVIDENCE_DIR}" ]; then
+            find "${EVIDENCE_DIR}" -type f -print0 | xargs -0 sed -i -E \
+              -e 's#postgres(ql)?://[^[:space:]]+#postgresql://[REDACTED]#g' \
+              -e 's#(password=)[^[:space:]]+#\1[REDACTED]#gi' \
+              -e 's#(SUPABASE_ACCESS_TOKEN=)[^[:space:]]+#\1[REDACTED]#g' \
+              -e 's#(SUPABASE_DB_PASSWORD=)[^[:space:]]+#\1[REDACTED]#g' \
+              -e 's#sbp_[A-Za-z0-9_-]+#sbp_[REDACTED]#g' \
+              -e 's#eyJ[A-Za-z0-9._-]+#jwt_[REDACTED]#g'
+          fi
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-repair-base-dry-run-evidence
+          path: supabase-prod-cli-evidence/
+          if-no-files-found: warn
+
+      - name: Summarize operation
         if: always()
         shell: bash
         run: |
           {
-            echo "## Supabase PROD CLI dry-run"
+            echo "## Supabase PROD CLI guarded operation"
             echo ""
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Mode: dry-run only"
+            echo "- Mode: ${CONFIRM_MODE}"
             echo "- Real db push: not executed by this workflow"
-            echo "- Migration repair: not executed by this workflow"
+            echo "- Migration repair scope: only 00101-00110 and 00301-00307 when mode is repair_base_then_dry_run"
+            echo "- Forbidden repair versions: 00401, 00402, 00403, 007, 008"
             echo "- n8n: not touched by this workflow"
+            echo "- Evidence artifact: supabase-prod-repair-base-dry-run-evidence"
           } >> "${GITHUB_STEP_SUMMARY}"
