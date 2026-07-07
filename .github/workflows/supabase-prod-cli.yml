@@ -248,8 +248,8 @@ jobs:
             local file_path="$2"
             awk -v version="${version}" '
               {
-                split($0, cols, /[|│]/)
-                if (length(cols) >= 2) {
+                parts_count = split($0, cols, /[|│]/)
+                if (parts_count >= 2) {
                   local_version=cols[1]
                   remote_version=cols[2]
                   gsub(/^[[:space:]]+|[[:space:]]+$/, "", local_version)
