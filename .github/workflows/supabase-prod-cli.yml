@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Allowed: dry-run, repair_base_then_dry_run, or repair_legacy_then_dry_run"
+        description: "Allowed: dry-run, repair_base_then_dry_run, repair_legacy_then_dry_run, or revert_legacy_001_003_then_dry_run"
         required: true
         default: "dry-run"
         type: string
@@ -58,8 +58,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "dry-run" ] && [ "${CONFIRM_MODE}" != "repair_base_then_dry_run" ] && [ "${CONFIRM_MODE}" != "repair_legacy_then_dry_run" ]; then
-            echo "::error::confirm_mode must be exactly dry-run, repair_base_then_dry_run, or repair_legacy_then_dry_run."
+          if [ "${CONFIRM_MODE}" != "dry-run" ] && [ "${CONFIRM_MODE}" != "repair_base_then_dry_run" ] && [ "${CONFIRM_MODE}" != "repair_legacy_then_dry_run" ] && [ "${CONFIRM_MODE}" != "revert_legacy_001_003_then_dry_run" ]; then
+            echo "::error::confirm_mode must be exactly dry-run, repair_base_then_dry_run, repair_legacy_then_dry_run, or revert_legacy_001_003_then_dry_run."
             exit 1
           fi
 
@@ -83,7 +83,7 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" = "repair_base_then_dry_run" ] || [ "${CONFIRM_MODE}" = "repair_legacy_then_dry_run" ]; then
+          if [ "${CONFIRM_MODE}" = "repair_base_then_dry_run" ] || [ "${CONFIRM_MODE}" = "repair_legacy_then_dry_run" ] || [ "${CONFIRM_MODE}" = "revert_legacy_001_003_then_dry_run" ]; then
             if [ "${BACKUP_CONFIRMED}" != "true" ]; then
               echo "::error::backup_confirmed must be true for repair modes."
               exit 1
@@ -200,6 +200,20 @@ jobs:
             supabase migration repair "${version}" --status applied --linked --yes 2>&1 | tee -a "${EVIDENCE_DIR}/repair-results.txt"
           done
 
+      - name: Revert legacy 001/003 migration history
+        if: ${{ inputs.confirm_mode == 'revert_legacy_001_003_then_dry_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          revert_versions=(001 003)
+          forbidden_versions=(002 004 005 006 00401 00402 00403 007 008)
+
+          printf "%s\n" "${revert_versions[@]}" > "${EVIDENCE_DIR}/revert-versions.txt"
+          printf "%s\n" "${forbidden_versions[@]}" > "${EVIDENCE_DIR}/not-repaired-versions.txt"
+
+          echo "Reverting migration history versions 001 and 003" | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+          supabase migration repair --status reverted 001 003 --linked --yes 2>&1 | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+
       - name: Migration list after
         shell: bash
         run: |
@@ -305,6 +319,14 @@ jobs:
               -e 's#eyJ[A-Za-z0-9._-]+#jwt_[REDACTED]#g'
           fi
 
+      - name: Upload revert legacy dry-run evidence artifact
+        if: ${{ always() && inputs.confirm_mode == 'revert_legacy_001_003_then_dry_run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-revert-legacy-dry-run-evidence
+          path: /tmp/supabase-prod-cli-evidence/
+          if-no-files-found: warn
+
       - name: Upload legacy repair dry-run evidence artifact
         if: ${{ always() && inputs.confirm_mode == 'repair_legacy_then_dry_run' }}
         uses: actions/upload-artifact@v4
@@ -314,7 +336,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload evidence artifact
-        if: ${{ always() && inputs.confirm_mode != 'repair_legacy_then_dry_run' }}
+        if: ${{ always() && inputs.confirm_mode != 'repair_legacy_then_dry_run' && inputs.confirm_mode != 'revert_legacy_001_003_then_dry_run' }}
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-repair-base-dry-run-evidence
@@ -334,10 +356,14 @@ jobs:
             echo "- Real db push: not executed by this workflow"
             echo "- Migration repair scope: only 00101-00110 and 00301-00307 when mode is repair_base_then_dry_run"
             echo "- Migration repair scope: only 001, 002, and 003 when mode is repair_legacy_then_dry_run"
+            echo "- Migration repair scope: revert only 001 and 003 when mode is revert_legacy_001_003_then_dry_run"
+            echo "- Revert legacy mode leaves 002 applied and does not use --include-all"
             echo "- Forbidden repair versions for legacy mode: 004, 005, 006, 00401, 00402, 00403, 007, 008"
             echo "- n8n: not touched by this workflow"
             if [ "${CONFIRM_MODE}" = "repair_legacy_then_dry_run" ]; then
               echo "- Evidence artifact: supabase-prod-repair-legacy-dry-run-evidence"
+            elif [ "${CONFIRM_MODE}" = "revert_legacy_001_003_then_dry_run" ]; then
+              echo "- Evidence artifact: supabase-prod-revert-legacy-dry-run-evidence"
             else
               echo "- Evidence artifact: supabase-prod-repair-base-dry-run-evidence"
             fi
