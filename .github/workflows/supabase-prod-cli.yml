@@ -8,17 +8,17 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Allowed: dry-run or repair_base_then_dry_run"
+        description: "Allowed: dry-run, repair_base_then_dry_run, or repair_legacy_then_dry_run"
         required: true
         default: "dry-run"
         type: string
       backup_confirmed:
-        description: "Required true only for repair_base_then_dry_run"
+        description: "Required true only for repair modes"
         required: false
         default: false
         type: boolean
       backup_reference:
-        description: "Required for repair_base_then_dry_run: date/time/responsible"
+        description: "Required for repair modes: date/time/responsible"
         required: false
         default: ""
         type: string
@@ -58,8 +58,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "dry-run" ] && [ "${CONFIRM_MODE}" != "repair_base_then_dry_run" ]; then
-            echo "::error::confirm_mode must be exactly dry-run or repair_base_then_dry_run."
+          if [ "${CONFIRM_MODE}" != "dry-run" ] && [ "${CONFIRM_MODE}" != "repair_base_then_dry_run" ] && [ "${CONFIRM_MODE}" != "repair_legacy_then_dry_run" ]; then
+            echo "::error::confirm_mode must be exactly dry-run, repair_base_then_dry_run, or repair_legacy_then_dry_run."
             exit 1
           fi
 
@@ -83,14 +83,14 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" = "repair_base_then_dry_run" ]; then
+          if [ "${CONFIRM_MODE}" = "repair_base_then_dry_run" ] || [ "${CONFIRM_MODE}" = "repair_legacy_then_dry_run" ]; then
             if [ "${BACKUP_CONFIRMED}" != "true" ]; then
-              echo "::error::backup_confirmed must be true for repair_base_then_dry_run."
+              echo "::error::backup_confirmed must be true for repair modes."
               exit 1
             fi
 
             if [ -z "${BACKUP_REFERENCE}" ]; then
-              echo "::error::backup_reference is required for repair_base_then_dry_run."
+              echo "::error::backup_reference is required for repair modes."
               exit 1
             fi
           fi
@@ -184,6 +184,22 @@ jobs:
             supabase migration repair "${version}" --status applied --linked --yes 2>&1 | tee -a "${EVIDENCE_DIR}/repair-results.txt"
           done
 
+      - name: Repair legacy migration history
+        if: ${{ inputs.confirm_mode == 'repair_legacy_then_dry_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repair_versions=(001 002 003)
+          forbidden_versions=(004 005 006 00401 00402 00403 007 008)
+
+          printf "%s\n" "${repair_versions[@]}" > "${EVIDENCE_DIR}/repair-versions.txt"
+          printf "%s\n" "${forbidden_versions[@]}" > "${EVIDENCE_DIR}/not-repaired-versions.txt"
+
+          for version in "${repair_versions[@]}"; do
+            echo "Repairing migration history version ${version} as applied" | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+            supabase migration repair "${version}" --status applied --linked --yes 2>&1 | tee -a "${EVIDENCE_DIR}/repair-results.txt"
+          done
+
       - name: Migration list after
         shell: bash
         run: |
@@ -219,6 +235,55 @@ jobs:
 
           echo "Repair scope validation passed." | tee "${EVIDENCE_DIR}/repair-scope-validation.txt"
 
+      - name: Validate legacy repair scope
+        if: ${{ inputs.confirm_mode == 'repair_legacy_then_dry_run' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repaired_versions=(001 002 003)
+          forbidden_versions=(004 005 006 00401 00402 00403 007 008)
+
+          remote_for_version() {
+            local version="$1"
+            local file_path="$2"
+            awk -v version="${version}" '
+              {
+                split($0, cols, /[|│]/)
+                if (length(cols) >= 2) {
+                  local_version=cols[1]
+                  remote_version=cols[2]
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", local_version)
+                  gsub(/^[[:space:]]+|[[:space:]]+$/, "", remote_version)
+                  if (local_version == version || remote_version == version) {
+                    print remote_version
+                    found=1
+                    exit
+                  }
+                }
+              }
+              END { if (!found) exit 2 }
+            ' "${file_path}"
+          }
+
+          for version in "${repaired_versions[@]}"; do
+            remote_after="$(remote_for_version "${version}" "${EVIDENCE_DIR}/migration-list-after.txt" || true)"
+            if [ "${remote_after}" != "${version}" ]; then
+              echo "::error::Expected legacy version ${version} to appear as applied in linked migration list."
+              exit 1
+            fi
+          done
+
+          for version in "${forbidden_versions[@]}"; do
+            remote_before="$(remote_for_version "${version}" "${EVIDENCE_DIR}/migration-list-before.txt" || true)"
+            remote_after="$(remote_for_version "${version}" "${EVIDENCE_DIR}/migration-list-after.txt" || true)"
+            if [ "${remote_before}" != "${remote_after}" ]; then
+              echo "::error::Version ${version} changed during legacy repair but must not be repaired by this workflow."
+              exit 1
+            fi
+          done
+
+          echo "Legacy repair scope validation passed." | tee "${EVIDENCE_DIR}/repair-scope-validation.txt"
+
       - name: Dry-run Supabase PROD migrations
         shell: bash
         run: |
@@ -240,8 +305,16 @@ jobs:
               -e 's#eyJ[A-Za-z0-9._-]+#jwt_[REDACTED]#g'
           fi
 
+      - name: Upload legacy repair dry-run evidence artifact
+        if: ${{ always() && inputs.confirm_mode == 'repair_legacy_then_dry_run' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-repair-legacy-dry-run-evidence
+          path: /tmp/supabase-prod-cli-evidence/
+          if-no-files-found: warn
+
       - name: Upload evidence artifact
-        if: always()
+        if: ${{ always() && inputs.confirm_mode != 'repair_legacy_then_dry_run' }}
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-repair-base-dry-run-evidence
@@ -260,7 +333,12 @@ jobs:
             echo "- Mode: ${CONFIRM_MODE}"
             echo "- Real db push: not executed by this workflow"
             echo "- Migration repair scope: only 00101-00110 and 00301-00307 when mode is repair_base_then_dry_run"
-            echo "- Forbidden repair versions: 00401, 00402, 00403, 007, 008"
+            echo "- Migration repair scope: only 001, 002, and 003 when mode is repair_legacy_then_dry_run"
+            echo "- Forbidden repair versions for legacy mode: 004, 005, 006, 00401, 00402, 00403, 007, 008"
             echo "- n8n: not touched by this workflow"
-            echo "- Evidence artifact: supabase-prod-repair-base-dry-run-evidence"
+            if [ "${CONFIRM_MODE}" = "repair_legacy_then_dry_run" ]; then
+              echo "- Evidence artifact: supabase-prod-repair-legacy-dry-run-evidence"
+            else
+              echo "- Evidence artifact: supabase-prod-repair-base-dry-run-evidence"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
