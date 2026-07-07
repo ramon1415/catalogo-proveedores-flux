@@ -178,7 +178,7 @@ async function loadLayoutPagosintIssues() {
   }
 
   for (const line of data || []) {
-    if (!lineNeedsPagosintCompletion(line)) continue
+    if (!lineNeedsPagosintReferenceCompletion(line)) continue
     layoutPagosintIssueCounts.set(line.layout_id, (layoutPagosintIssueCounts.get(line.layout_id) || 0) + 1)
   }
 }
@@ -435,7 +435,7 @@ async function refreshLayoutLines(layoutId) {
 }
 
 function updateLayoutPagosintIssueCount(layoutId, lines) {
-  const count = (lines || []).filter((line) => lineNeedsPagosintCompletion(line)).length
+  const count = (lines || []).filter((line) => lineNeedsPagosintReferenceCompletion(line)).length
   if (count) layoutPagosintIssueCounts.set(layoutId, count)
   else layoutPagosintIssueCounts.delete(layoutId)
 }
@@ -471,7 +471,7 @@ function renderLinesTable(lines) {
 function renderLineActions(line) {
   if (line.status !== "included") return `<span style="color:var(--text-3);font-size:11px">-</span>`
   const actions = []
-  if (lineNeedsPagosintCompletion(line)) {
+  if (lineNeedsPagosintReferenceCompletion(line)) {
     actions.push(`<button class="small-btn warning" type="button" onclick="openPagosintReferenceModal('${line.id}')" style="white-space:nowrap">Completar referencia</button>`)
   }
   actions.push(`<button class="small-btn danger" type="button" onclick="openRejectLineModal('${line.id}')" style="white-space:nowrap">Rechazar</button>`)
@@ -481,7 +481,7 @@ function renderLineActions(line) {
 function renderLineReferenceCell(line) {
   const value = escapeHtml(line.payment_reference || "")
   if (!lineNeedsPagosintCompletion(line)) return value || `<span style="color:var(--text-3);font-size:11px">-</span>`
-  const badgeLabel = pagosintLineIssues(line).includes("referencia numerica") ? "Referencia pendiente" : "Datos PAGOSINT incompletos"
+  const badgeLabel = lineNeedsPagosintReferenceCompletion(line) ? "Referencia pendiente" : "Datos PAGOSINT incompletos"
   return [
     value ? `<span class="cell-main">${value}</span>` : `<span style="color:var(--text-3);font-size:11px">Sin referencia</span>`,
     `<span class="badge warning" style="margin-top:4px">${badgeLabel}</span>`,
@@ -491,6 +491,12 @@ function renderLineReferenceCell(line) {
 function lineNeedsPagosintCompletion(line) {
   if (line.status !== "included" || !isPagosintLine(line)) return false
   return pagosintLineIssues(line).length > 0
+}
+
+function lineNeedsPagosintReferenceCompletion(line) {
+  if (line.status !== "included" || !isPagosintLine(line)) return false
+  const referenceDigits = cxcDigits(line.payment_reference)
+  return !referenceDigits || referenceDigits.length > BBVA_INTERBANK_REFERENCE_LENGTH
 }
 
 function isPagosintLine(line) {
@@ -664,6 +670,7 @@ async function submitPagosintReference(event) {
   event.preventDefault()
   if (!activePagosintReferenceLineId || !ensureActorProfile()) return
 
+  const lineId = activePagosintReferenceLineId
   const referenceDigits = cxcDigits(dom.pagosintReferenceInput.value)
   const beneficiary = cleanText(dom.pagosintBeneficiaryInput.value)
   const concept = cleanText(dom.pagosintConceptInput.value)
@@ -688,25 +695,40 @@ async function submitPagosintReference(event) {
   setButtonLoading(dom.submitPagosintReferenceBtn, true, "Guardando...")
 
   try {
-    const { error } = await supabaseClient
-      .from("payment_layout_lines")
-      .update({
-        payment_reference: referenceDigits,
-        beneficiary_name: beneficiary,
-        payment_concept: concept,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", activePagosintReferenceLineId)
+    const { data, error } = await supabaseClient.rpc("update_payment_layout_line_pagosint_reference", {
+      p_line_id: lineId,
+      p_payment_reference: referenceDigits,
+      p_beneficiary_name: beneficiary,
+      p_payment_concept: concept,
+    })
 
     if (error) throw error
 
     const layoutId = activeLinesLayoutId
-    showToast("Referencia guardada", `PAGOSINT usara ${formatBbvaReference(referenceDigits)} en las posiciones 86-90.`, "success")
+    const persistedLine = Array.isArray(data) ? data[0] : data
+    const persistedReference = cxcDigits(persistedLine?.payment_reference)
+    if (persistedReference !== referenceDigits) {
+      throw new Error("La referencia no quedo persistida en payment_layout_lines.payment_reference.")
+    }
+
     closePagosintReferenceModal()
     await loadLayouts()
-    if (layoutId) await refreshLayoutLines(layoutId)
+    if (layoutId) {
+      const refreshed = await fetchLayoutLines(layoutId)
+      if (refreshed.error) throw refreshed.error
+      updateLayoutPagosintIssueCount(layoutId, refreshed.data || [])
+      renderLayoutsTable()
+      renderLinesTable(refreshed.data || [])
+
+      const refreshedLine = (refreshed.data || []).find((line) => line.id === lineId)
+      const refreshedReference = cxcDigits(refreshedLine?.payment_reference)
+      if (refreshedReference !== referenceDigits) {
+        throw new Error("La referencia no reaparecio despues de refrescar la linea del layout.")
+      }
+    }
+    showToast("Referencia guardada", `PAGOSINT usara ${formatBbvaReference(referenceDigits)} en las posiciones 86-90.`, "success")
   } catch (error) {
-    showToast("No se pudo guardar", rlsHint("payment_layout_lines", "update", error), "danger")
+    showToast("No se pudo guardar", pagosintSaveHint(error), "danger")
   } finally {
     setButtonLoading(dom.submitPagosintReferenceBtn, false, "Guardar referencia")
   }
@@ -1287,6 +1309,33 @@ function rlsHint(table, operation, error) {
     return `Operacion ${operation} bloqueada por RLS en ${table}.`
   }
   return message
+}
+
+function pagosintSaveHint(error) {
+  const raw = String(error?.message || error?.hint || error || "")
+  const message = raw.toLowerCase()
+  if (message.includes("row-level security") || error?.code === "42501" || message.includes("permission denied")) {
+    return "No se pudo guardar la referencia PAGOSINT porque la operacion fue bloqueada por permisos en payment_layout_lines."
+  }
+  if (message.includes("not_authorized_to_update_layout_lines")) {
+    return "Tu usuario no tiene permisos para completar referencias PAGOSINT en este layout."
+  }
+  if (message.includes("payment_layout_line_not_found")) {
+    return "La linea del layout ya no existe o cambio; vuelve a abrir el layout e intenta de nuevo."
+  }
+  if (message.includes("pagosint_reference_only_for_interbank_lines")) {
+    return "La referencia numerica solo aplica a lineas interbancarias PAGOSINT."
+  }
+  if (message.includes("pagosint_reference_required")) {
+    return "Captura una referencia numerica de 1 a 5 digitos para PAGOSINT."
+  }
+  if (message.includes("pagosint_reference_too_long")) {
+    return "La referencia PAGOSINT acepta maximo 5 digitos."
+  }
+  if (message.includes("persistida") || message.includes("reaparecio")) {
+    return raw
+  }
+  return raw || "No se pudo guardar la referencia PAGOSINT."
 }
 
 function formatCurrency(value) {
