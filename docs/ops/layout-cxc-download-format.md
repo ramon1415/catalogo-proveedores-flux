@@ -50,7 +50,7 @@ Ejemplo:
 | 37-39 | 3 | Moneda | `MXP` |
 | 40-55 | 16 | Importe | 13 digitos, punto decimal, 2 decimales |
 | 56-85 | 30 | Titular / beneficiario | Mayusculas, sin acentos, espacios a la derecha |
-| 86-90 | 5 | Referencia numerica | Solo digitos, ceros a la izquierda |
+| 86-90 | 5 | Referencia numerica | Captura de 1 a 5 digitos; el TXT completa con ceros a la izquierda |
 | 91-127 | 37 | Motivo de pago | Mayusculas, sin acentos, espacios a la derecha |
 | 128 | 1 | Indicador | `H` segun ejemplo recibido |
 | 129-130 | 2 | Terminador fisico | `CRLF` |
@@ -77,6 +77,18 @@ Si un layout contiene ambos formatos, el sistema descarga archivos separados:
 
 La convencion deja el tipo de layout al inicio (`PAGOSBBV` o `PAGOSINT`), conserva el folio operativo del layout y cierra con fecha de generacion `YYYYMMDD` para facilitar busqueda, conciliacion y soporte con el banco.
 
+## Referencia PAGOSINT en layouts ya generados
+
+Si una linea `PAGOSINT` ya generada no tiene referencia numerica, la descarga queda bloqueada. Desde la pantalla de Layouts se debe abrir la linea y usar `Completar referencia` para guardar el dato en `payment_layout_lines.payment_reference`.
+
+La captura permite de 1 a 5 digitos. El archivo siempre conserva 5 posiciones en el registro:
+
+- `7` -> `00007`
+- `42` -> `00042`
+- `40002` -> `40002`
+
+La accion no aplica a `PAGOSBBV` porque el formato de 85 caracteres no usa este campo.
+
 ## Validaciones locales
 
 Para ambos formatos:
@@ -93,7 +105,8 @@ Para ambos formatos:
 Validaciones adicionales:
 
 - `PAGOSBBV`: 85 caracteres utiles por registro.
-- `PAGOSINT`: 128 caracteres utiles por registro, titular 30, referencia numerica 5, motivo 37, indicador final `H`.
+- `PAGOSINT`: 128 caracteres utiles por registro, titular 30, referencia numerica de 5 posiciones en archivo, motivo 37, indicador final `H`.
+- `PAGOSINT`: la referencia capturada no tiene que ser exactamente de 5 digitos; si operacion captura `7`, `42` o `40002`, el archivo sale como `00007`, `00042` o `40002` para conservar las posiciones 86-90.
 
 ## Riesgos / pendientes
 
