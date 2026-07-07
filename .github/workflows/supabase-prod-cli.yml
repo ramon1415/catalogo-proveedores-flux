@@ -45,7 +45,7 @@ jobs:
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
       BACKUP_CONFIRMED: ${{ inputs.backup_confirmed }}
       BACKUP_REFERENCE: ${{ inputs.backup_reference }}
-      EVIDENCE_DIR: supabase-prod-cli-evidence
+      EVIDENCE_DIR: ${{ runner.temp }}/supabase-prod-cli-evidence
 
     steps:
       - name: Validate release guardrails
@@ -244,7 +244,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-repair-base-dry-run-evidence
-          path: supabase-prod-cli-evidence/
+          path: ${{ env.EVIDENCE_DIR }}/
           if-no-files-found: warn
 
       - name: Summarize operation
