@@ -21,6 +21,7 @@ on:
           - fine_migrations
           - base_migrations
           - legacy_002
+          - legacy_004_005_006
 
 permissions:
   contents: read
@@ -82,8 +83,8 @@ jobs:
             fail_guardrail "confirm_mode must be exactly: audit"
           fi
 
-          if [ "${AUDIT_SCOPE}" != "fine_migrations" ] && [ "${AUDIT_SCOPE}" != "base_migrations" ] && [ "${AUDIT_SCOPE}" != "legacy_002" ]; then
-            fail_guardrail "audit_scope must be exactly fine_migrations, base_migrations, or legacy_002."
+          if [ "${AUDIT_SCOPE}" != "fine_migrations" ] && [ "${AUDIT_SCOPE}" != "base_migrations" ] && [ "${AUDIT_SCOPE}" != "legacy_002" ] && [ "${AUDIT_SCOPE}" != "legacy_004_005_006" ]; then
+            fail_guardrail "audit_scope must be exactly fine_migrations, base_migrations, legacy_002, or legacy_004_005_006."
           fi
 
           if [ -z "${SUPABASE_PROJECT_ID}" ]; then
@@ -128,6 +129,373 @@ jobs:
           set -uo pipefail
 
           mkdir -p audit-output/queries audit-output/query-results
+          cat > audit-output/queries/07-legacy-004-005-006-expected-objects.sql <<'SQL'
+          with expected_rls(table_name) as (
+            values
+              ('activity_log'),
+              ('approval_rules'),
+              ('billing_periods'),
+              ('budget_categories'),
+              ('budget_import_batches'),
+              ('budget_import_staging'),
+              ('budget_lines'),
+              ('budget_versions'),
+              ('cash_funds'),
+              ('cash_reconciliation_items'),
+              ('cash_reconciliations'),
+              ('celebration_concepts'),
+              ('companies'),
+              ('company_bank_accounts'),
+              ('company_cost_center_budget_categories'),
+              ('company_cost_centers'),
+              ('cost_centers'),
+              ('document_links'),
+              ('documents'),
+              ('incident_charges'),
+              ('income_payment_allocations'),
+              ('income_payments'),
+              ('invoices'),
+              ('maintenance_fee_charges'),
+              ('maintenance_fee_payments'),
+              ('members'),
+              ('monthly_closure_comments'),
+              ('monthly_closure_exports'),
+              ('monthly_closures'),
+              ('payment_layout_lines'),
+              ('payment_layouts'),
+              ('payment_receipts'),
+              ('payment_request_approvals'),
+              ('payment_request_items'),
+              ('payment_requests'),
+              ('profiles'),
+              ('proveedor_provider_links'),
+              ('proveedores'),
+              ('provider_bank_accounts'),
+              ('providers'),
+              ('roles'),
+              ('sales_invoices'),
+              ('tax_schemes'),
+              ('tickets'),
+              ('user_roles')
+          ), rls_observed as (
+            select
+              e.table_name,
+              coalesce(c.relrowsecurity, false) as exists_in_prod
+            from expected_rls e
+            left join pg_class c on c.relname = e.table_name and c.relnamespace = 'public'::regnamespace
+          ), expected_public_policies(table_name, policy_name) as (
+            values
+              ('billing_periods', 'billing_periods_admin_finance_all'),
+              ('billing_periods', 'billing_periods_select_authenticated'),
+              ('budget_categories', 'authenticated can read budget categories'),
+              ('budget_import_batches', 'Authenticated can delete budget import batches'),
+              ('budget_import_batches', 'Authenticated can insert budget import batches'),
+              ('budget_import_batches', 'Authenticated can read budget import batches'),
+              ('budget_import_batches', 'Authenticated can update budget import batches'),
+              ('budget_import_staging', 'Authenticated can delete budget import staging'),
+              ('budget_import_staging', 'Authenticated can insert budget import staging'),
+              ('budget_import_staging', 'Authenticated can read budget import staging'),
+              ('budget_import_staging', 'Authenticated can update budget import staging'),
+              ('budget_lines', 'authenticated can read budget lines'),
+              ('budget_versions', 'authenticated can read budget versions'),
+              ('cash_funds', 'cash funds manageable by finance roles'),
+              ('cash_funds', 'cash funds readable by owner or finance roles'),
+              ('cash_reconciliation_items', 'cash reconciliation items insert by owner draft or finance role'),
+              ('cash_reconciliation_items', 'cash reconciliation items readable by owner or finance roles'),
+              ('cash_reconciliation_items', 'cash reconciliation items update by owner draft or finance role'),
+              ('cash_reconciliations', 'cash reconciliations insert by owner or finance roles'),
+              ('cash_reconciliations', 'cash reconciliations readable by owner or finance roles'),
+              ('cash_reconciliations', 'cash reconciliations update by owner draft or finance roles'),
+              ('companies', 'authenticated can read companies'),
+              ('company_bank_accounts', 'cba_select'),
+              ('company_bank_accounts', 'cba_write'),
+              ('company_cost_center_budget_categories', 'authenticated can read company cost center budget categories'),
+              ('company_cost_centers', 'authenticated can read company cost centers'),
+              ('cost_centers', 'cost_centers_authenticated_all'),
+              ('document_links', 'document_links_authenticated_all'),
+              ('documents', 'documents_authenticated_all'),
+              ('incident_charges', 'incident_charges_authorized_all'),
+              ('incident_charges', 'incident_charges_authorized_select'),
+              ('income_payment_allocations', 'income_payment_allocations_authenticated_all'),
+              ('income_payments', 'income_payments_authenticated_all'),
+              ('invoices', 'invoices_admin_finance_all'),
+              ('invoices', 'invoices_admin_finance_select'),
+              ('maintenance_fee_charges', 'maintenance_fee_charges_admin_finance_all'),
+              ('maintenance_fee_charges', 'maintenance_fee_charges_admin_finance_select'),
+              ('maintenance_fee_payments', 'maintenance_fee_payments_admin_finance_all'),
+              ('maintenance_fee_payments', 'maintenance_fee_payments_admin_finance_select'),
+              ('members', 'members_admin_finance_all'),
+              ('members', 'members_select_authenticated'),
+              ('monthly_closure_comments', 'monthly_closure_comments_delete_finance'),
+              ('monthly_closure_comments', 'monthly_closure_comments_insert_authorized'),
+              ('monthly_closure_comments', 'monthly_closure_comments_select_authorized'),
+              ('monthly_closure_comments', 'monthly_closure_comments_update_authorized'),
+              ('monthly_closure_exports', 'monthly_closure_exports_select_authorized'),
+              ('monthly_closure_exports', 'monthly_closure_exports_write_finance'),
+              ('monthly_closures', 'monthly_closures_select_authorized'),
+              ('monthly_closures', 'monthly_closures_write_finance'),
+              ('payment_layout_lines', 'authenticated can read payment layout lines'),
+              ('payment_layouts', 'authenticated can read payment layouts'),
+              ('payment_layouts', 'authenticated can update payment layouts'),
+              ('payment_request_items', 'pri_all_members'),
+              ('payment_requests', 'payment_requests_insert'),
+              ('payment_requests', 'payment_requests_select'),
+              ('payment_requests', 'payment_requests_update'),
+              ('profiles', 'profiles_insert_self'),
+              ('profiles', 'profiles_select'),
+              ('profiles', 'profiles_update_self_or_sysadmin'),
+              ('proveedores', 'Usuarios autenticados pueden crear proveedores'),
+              ('proveedores', 'Usuarios autenticados pueden editar proveedores'),
+              ('provider_bank_accounts', 'pba_select'),
+              ('provider_bank_accounts', 'pba_write'),
+              ('providers', 'providers_authenticated_all'),
+              ('roles', 'roles_select'),
+              ('roles', 'roles_write_sysadmin'),
+              ('sales_invoices', 'sales_invoices_authenticated_all'),
+              ('tax_schemes', 'tax_schemes_authenticated_all'),
+              ('user_roles', 'user_roles_select'),
+              ('user_roles', 'user_roles_write_sysadmin')
+          ), public_policy_observed as (
+            select
+              e.table_name,
+              e.policy_name,
+              exists (
+                select 1
+                from pg_policies p
+                where p.schemaname = 'public'
+                  and p.tablename = e.table_name
+                  and p.policyname = e.policy_name
+              ) as exists_in_prod
+            from expected_public_policies e
+          ), expected_buckets(bucket_id, expected_public, expected_file_size_limit, expected_mime_types) as (
+            values
+              ('celebration-contracts', false, null::bigint, null::text[]),
+              ('company-receipts', false, null::bigint, null::text[]),
+              ('payment-receipts', false, 10485760::bigint, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']::text[])
+          ), bucket_observed as (
+            select
+              e.bucket_id,
+              exists (select 1 from storage.buckets b where b.id = e.bucket_id) as bucket_exists,
+              exists (
+                select 1
+                from storage.buckets b
+                where b.id = e.bucket_id
+                  and b.name = e.bucket_id
+                  and b."public" = e.expected_public
+                  and b.file_size_limit is not distinct from e.expected_file_size_limit
+                  and (
+                    e.expected_mime_types is null
+                    or (b.allowed_mime_types @> e.expected_mime_types and e.expected_mime_types @> b.allowed_mime_types)
+                  )
+              ) as exists_in_prod
+            from expected_buckets e
+          ), expected_storage_policies(policy_name) as (
+            values
+              ('Anon can read payment receipts temporarily'),
+              ('Anon can upload payment receipts temporarily')
+          ), storage_policy_observed as (
+            select
+              e.policy_name,
+              exists (
+                select 1
+                from pg_policies p
+                where p.schemaname = 'storage'
+                  and p.tablename = 'objects'
+                  and p.policyname = e.policy_name
+              ) as exists_in_prod
+            from expected_storage_policies e
+          ), expected_roles(role_name) as (
+            values
+              ('admin'),
+              ('approver_2'),
+              ('aprobador_2'),
+              ('finance'),
+              ('finanzas'),
+              ('operator'),
+              ('solicitante'),
+              ('sysadmin'),
+              ('system_admin')
+          ), role_observed as (
+            select
+              e.role_name,
+              exists (select 1 from public.roles r where r.name = e.role_name) as exists_in_prod
+            from expected_roles e
+          ), grant_checks(check_name, exists_in_prod) as (
+            select
+              role_name || '_schema_usage' as check_name,
+              has_schema_privilege(role_name, 'public', 'USAGE') as exists_in_prod
+            from (values ('anon'), ('authenticated')) as roles(role_name)
+            union all
+            select
+              role_name || '_public_table_' || lower(privilege) as check_name,
+              coalesce((
+                select bool_and(has_table_privilege(role_name, c.oid, privilege))
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public'
+                  and c.relkind in ('r','p')
+                  and c.relname in (select table_name from expected_rls)
+              ), false) as exists_in_prod
+            from (values ('anon'), ('authenticated')) as roles(role_name)
+            cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) as privileges(privilege)
+            union all
+            select
+              role_name || '_public_sequence_' || lower(privilege) as check_name,
+              coalesce((
+                select bool_and(has_sequence_privilege(role_name, c.oid, privilege))
+                from pg_class c
+                join pg_namespace n on n.oid = c.relnamespace
+                where n.nspname = 'public'
+                  and c.relkind = 'S'
+              ), false) as exists_in_prod
+            from (values ('anon'), ('authenticated')) as roles(role_name)
+            cross join (values ('USAGE'), ('SELECT')) as privileges(privilege)
+            union all
+            select
+              role_name || '_public_function_execute' as check_name,
+              coalesce((
+                select bool_and(has_function_privilege(role_name, p.oid, 'EXECUTE'))
+                from pg_proc p
+                join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public'
+                  and p.prokind = 'f'
+              ), false) as exists_in_prod
+            from (values ('anon'), ('authenticated')) as roles(role_name)
+          ), matrix as (
+            select
+              '004_rls_policies_grants.sql' as migration,
+              'RLS enabled tables' as object_group,
+              count(*) as expected_count,
+              count(*) filter (where exists_in_prod) as found_count,
+              count(*) filter (where not exists_in_prod) as missing_count,
+              coalesce(string_agg(table_name, ', ' order by table_name) filter (where not exists_in_prod), '') as missing_objects,
+              'high: RLS state controls table visibility and writes' as risk,
+              'repair only if all RLS, policies, and grant checks are represented' as recommendation
+            from rls_observed
+            union all
+            select
+              '004_rls_policies_grants.sql',
+              'public policies',
+              count(*),
+              count(*) filter (where exists_in_prod),
+              count(*) filter (where not exists_in_prod),
+              coalesce(string_agg(table_name || '.' || policy_name, ', ' order by table_name, policy_name) filter (where not exists_in_prod), ''),
+              'high: policy differences can change user access',
+              'do not repair as applied if any policy is missing'
+            from public_policy_observed
+            union all
+            select
+              '004_rls_policies_grants.sql',
+              'public grants summary',
+              count(*),
+              count(*) filter (where exists_in_prod),
+              count(*) filter (where not exists_in_prod),
+              coalesce(string_agg(check_name, ', ' order by check_name) filter (where not exists_in_prod), ''),
+              'high: broad anon/authenticated grants must be understood before baseline',
+              'review missing grant checks before repair or patch'
+            from grant_checks
+            union all
+            select
+              '005_storage.sql',
+              'storage buckets config',
+              count(*),
+              count(*) filter (where exists_in_prod),
+              count(*) filter (where not exists_in_prod),
+              coalesce(string_agg(bucket_id, ', ' order by bucket_id) filter (where not exists_in_prod), ''),
+              'high: buckets and file restrictions affect uploads/downloads',
+              'repair only if bucket names, privacy and limits match'
+            from bucket_observed
+            union all
+            select
+              '005_storage.sql',
+              'storage.objects policies',
+              count(*),
+              count(*) filter (where exists_in_prod),
+              count(*) filter (where not exists_in_prod),
+              coalesce(string_agg(policy_name, ', ' order by policy_name) filter (where not exists_in_prod), ''),
+              'high: anon storage policies are intentionally sensitive',
+              'do not repair as applied if policies are missing or unintended'
+            from storage_policy_observed
+            union all
+            select
+              '006_seed_base.sql',
+              'base role seed',
+              count(*),
+              count(*) filter (where exists_in_prod),
+              count(*) filter (where not exists_in_prod),
+              coalesce(string_agg(role_name, ', ' order by role_name) filter (where not exists_in_prod), ''),
+              'low/medium: idempotent role catalog seed',
+              'repair or apply only after confirming missing roles are intended'
+            from role_observed
+          )
+          select
+            migration,
+            object_group,
+            expected_count,
+            found_count,
+            missing_count,
+            case
+              when found_count = expected_count then 'aplicada'
+              when found_count = 0 then 'no aplicada'
+              when found_count > 0 and found_count < expected_count then 'parcial'
+              else 'no concluyente'
+            end as classification,
+            missing_objects,
+            risk,
+            recommendation
+          from matrix
+          order by migration, object_group;
+
+          select
+            '004_rls_policies_grants.sql' as migration,
+            'rls_enabled' as object_kind,
+            table_name as object_name,
+            exists_in_prod,
+            '' as evidence
+          from rls_observed
+          union all
+          select
+            '004_rls_policies_grants.sql',
+            'public_policy',
+            table_name || '.' || policy_name,
+            exists_in_prod,
+            ''
+          from public_policy_observed
+          union all
+          select
+            '004_rls_policies_grants.sql',
+            'grant_check',
+            check_name,
+            exists_in_prod,
+            ''
+          from grant_checks
+          union all
+          select
+            '005_storage.sql',
+            'bucket_config',
+            bucket_id,
+            exists_in_prod,
+            'bucket_exists=' || bucket_exists::text
+          from bucket_observed
+          union all
+          select
+            '005_storage.sql',
+            'storage_policy',
+            policy_name,
+            exists_in_prod,
+            ''
+          from storage_policy_observed
+          union all
+          select
+            '006_seed_base.sql',
+            'role_seed',
+            role_name,
+            exists_in_prod,
+            ''
+          from role_observed
+          order by migration, object_kind, object_name;
+          SQL
+
           if [ "${AUDIT_SCOPE}" = "base_migrations" ]; then
             REPORT="audit-output/supabase-prod-base-migrations-audit.md"
             ARTIFACT_NAME="supabase-prod-base-migrations-audit-evidence"
@@ -136,6 +504,10 @@ jobs:
             REPORT="audit-output/supabase-prod-legacy-002-audit.md"
             ARTIFACT_NAME="supabase-prod-legacy-002-audit-evidence"
             REPORT_TITLE="Supabase PROD legacy 002 read-only audit"
+          elif [ "${AUDIT_SCOPE}" = "legacy_004_005_006" ]; then
+            REPORT="audit-output/supabase-prod-legacy-004-005-006-audit.md"
+            ARTIFACT_NAME="supabase-prod-legacy-004-005-006-audit-evidence"
+            REPORT_TITLE="Supabase PROD legacy 004/005/006 read-only audit"
           else
             REPORT="audit-output/supabase-prod-fine-audit.md"
             ARTIFACT_NAME="supabase-prod-fine-audit-evidence"
@@ -719,6 +1091,10 @@ jobs:
             run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
             run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
             run_query "Legacy 002 functions indexes triggers" "audit-output/queries/06-legacy-002-expected-objects.sql"
+          elif [ "${AUDIT_SCOPE}" = "legacy_004_005_006" ]; then
+            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
+            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
+            run_query "Legacy 004/005/006 RLS storage seed" "audit-output/queries/07-legacy-004-005-006-expected-objects.sql"
           else
             run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
             run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
@@ -766,6 +1142,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: supabase-prod-legacy-002-audit-evidence
+          path: audit-output/
+          retention-days: 14
+
+      - name: Upload legacy 004/005/006 audit evidence
+        if: ${{ always() && inputs.audit_scope == 'legacy_004_005_006' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-prod-legacy-004-005-006-audit-evidence
           path: audit-output/
           retention-days: 14
 
