@@ -44,6 +44,16 @@ function requiredEnv(name: string): string {
   return value.trim();
 }
 
+function requiredEnvAny(names: string[], label: string): string {
+  for (const name of names) {
+    const value = Deno.env.get(name);
+    if (value && value.trim()) {
+      return value.trim();
+    }
+  }
+  throw new Error(label);
+}
+
 function optionalEnv(name: string, fallback = ""): string {
   return (Deno.env.get(name) || fallback).trim();
 }
@@ -276,8 +286,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const supabaseUrl = requiredEnv("SUPABASE_URL");
-    const serviceRoleKey = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = requiredEnvAny(["SUPABASE_URL", "SUPABASEURL"], "Missing Supabase URL");
+    const serviceRoleKey = requiredEnvAny(
+      ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASESERVICEROLEKEY"],
+      "Missing Supabase service role key",
+    );
     const resendApiKey = requiredEnv("RESEND_API_KEY");
     const fromEmail = requiredEnv("NOTIFICATION_FROM_EMAIL");
     const testEmail = sendMode === "test_only" ? requiredEnv("NOTIFICATION_TEST_EMAIL") : "";
