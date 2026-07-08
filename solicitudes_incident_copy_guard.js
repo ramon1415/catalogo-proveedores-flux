@@ -86,7 +86,7 @@
   }
 
   function isProductionHost() {
-    return window.location.hostname === "catalogo-proveedores-flux.vercel.app"
+    return ["catalogo-proveedores-flux.vercel.app", "flux.quantta.mx"].includes(window.location.hostname)
   }
 
   function replaceText(root, pattern, replacement) {
