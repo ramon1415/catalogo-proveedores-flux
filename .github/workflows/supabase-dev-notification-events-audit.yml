@@ -342,23 +342,27 @@ jobs:
                 and e.attempt_count < e.max_attempts
                 and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
                 and coalesce(e.channel, 'email') = 'email'
+            ), bucketed as (
+              select
+                created_at,
+                case
+                  when created_at >= now() - interval '1 day' then 'today'
+                  when created_at >= now() - interval '2 days' then '1_to_2_days'
+                  when created_at >= now() - interval '7 days' then '3_to_7_days'
+                  else 'more_than_7_days'
+                end as age_bucket
+              from processable
             )
             select
-              case
-                when created_at >= now() - interval '1 day' then 'today'
-                when created_at >= now() - interval '2 days' then '1_to_2_days'
-                when created_at >= now() - interval '7 days' then '3_to_7_days'
-                else 'more_than_7_days'
-              end as age_bucket,
+              age_bucket,
               count(*)::int as total,
               min(created_at) as oldest_created_at,
               max(created_at) as newest_created_at
-            from processable
+            from bucketed
             group by age_bucket
-            order by case age_bucket when 'today' then 1 when '1_to_2_days' then 2 when '3_to_7_days' then 3 else 4 end
+            order by case age_bucket when 'today' then 1 when '1_to_2_days' then 2 when '3_to_7_days' then 3 when 'more_than_7_days' then 4 else 99 end
           ) to stdout with csv header;
           \o
-
           \o ${EVIDENCE_DIR}/delivery_attempts_summary.csv
           copy (
             with processable as (
