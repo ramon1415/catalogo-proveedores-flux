@@ -29,6 +29,7 @@ let activeRejectLineId = null
 let activePagosintReferenceLineId = null
 let activeLayoutLines = []
 let layoutPagosintIssueCounts = new Map()
+let layoutFormatSummaries = new Map()
 const dom = {}
 
 const rootElement = document.documentElement
@@ -82,6 +83,7 @@ function cacheDom() {
   dom.linesDialog = document.getElementById("linesDialog")
   dom.linesTitle = document.getElementById("linesTitle")
   dom.linesSubtitle = document.getElementById("linesSubtitle")
+  dom.linesFormatSummary = document.getElementById("linesFormatSummary")
   dom.linesTableBody = document.getElementById("linesTableBody")
   dom.closeLinesModalBtn = document.getElementById("closeLinesModalBtn")
   dom.pagosintReferenceDialog = document.getElementById("pagosintReferenceDialog")
@@ -163,12 +165,13 @@ async function loadLayouts() {
 
 async function loadLayoutPagosintIssues() {
   layoutPagosintIssueCounts = new Map()
+  layoutFormatSummaries = new Map()
   const layoutIds = layouts.map((layout) => layout.id).filter(Boolean)
   if (!layoutIds.length) return
 
   const { data, error } = await supabaseClient
     .from("payment_layout_lines")
-    .select("id,layout_id,destination_type,payment_reference,beneficiary_name,payment_concept,status")
+    .select("id,layout_id,destination_type,payment_reference,beneficiary_name,payment_concept,amount,status")
     .in("layout_id", layoutIds)
     .neq("status", "bank_rejected")
 
@@ -177,9 +180,16 @@ async function loadLayoutPagosintIssues() {
     return
   }
 
+  const linesByLayout = new Map()
   for (const line of data || []) {
+    if (!linesByLayout.has(line.layout_id)) linesByLayout.set(line.layout_id, [])
+    linesByLayout.get(line.layout_id).push(line)
     if (!lineNeedsPagosintReferenceCompletion(line)) continue
     layoutPagosintIssueCounts.set(line.layout_id, (layoutPagosintIssueCounts.get(line.layout_id) || 0) + 1)
+  }
+
+  for (const [layoutId, lines] of linesByLayout.entries()) {
+    layoutFormatSummaries.set(layoutId, summarizeLayoutFormats(lines))
   }
 }
 
@@ -226,21 +236,22 @@ function renderLayoutsTable() {
 function renderLayoutActions(l) {
   const actions = [`<button class="small-btn" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Ver lineas</button>`]
   const pendingPagosintReferences = layoutPagosintIssueCounts.get(l.id) || 0
+  const formatSummary = layoutFormatSummaries.get(l.id)
+  const canGenerateFiles = ["draft", "generated"].includes(l.status)
 
   if (l.status !== "cancelled") {
     actions.push(`<button class="small-btn" type="button" onclick="validateLayoutCxc('${l.id}')" style="white-space:nowrap">Validar layout</button>`)
   }
 
   if (pendingPagosintReferences > 0 && l.status !== "cancelled") {
-    actions.push(`<button class="small-btn warning" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Completar referencia</button>`)
+    actions.push(`<button class="small-btn warning" type="button" onclick="openLayoutLines('${l.id}')" style="white-space:nowrap">Completar referencias</button>`)
   }
 
-  if (l.status === "draft") {
-    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">Generar layout de pagos</button>`)
+  if (canGenerateFiles) {
+    actions.push(...renderFormatDownloadActions(l, formatSummary))
   }
 
   if (l.status === "generated") {
-    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${l.id}')" style="white-space:nowrap">${l.file_name ? "Descargar layout de pagos" : "Generar layout de pagos"}</button>`)
     actions.push(`<button class="small-btn warning" type="button" onclick="markLayoutUploaded('${l.id}')" style="white-space:nowrap">Marcar subido</button>`)
     actions.push(`<button class="small-btn success" type="button" onclick="openConfirmPaymentModal('${l.id}')" style="white-space:nowrap">Confirmar pago</button>`)
   }
@@ -250,6 +261,36 @@ function renderLayoutActions(l) {
   }
 
   return actions.join("")
+}
+
+function renderFormatDownloadActions(layout, summary) {
+  if (!summary) {
+    const label = layout.status === "draft" ? "Generar layout de pagos" : (layout.file_name ? "Descargar layout de pagos" : "Generar layout de pagos")
+    return [`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${layout.id}')" style="white-space:nowrap">${label}</button>`]
+  }
+
+  const actions = []
+  const sameBank = summary[BBVA_FORMAT_SAME_BANK]
+  const interbank = summary[BBVA_FORMAT_INTERBANK]
+  const convenio = summary.convenio
+
+  if (sameBank.count > 0) {
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_SAME_BANK}')" style="white-space:nowrap">▾ Pagos BBVA</button>`)
+  }
+
+  if (interbank.count > 0) {
+    if (interbank.referenceIssues > 0) {
+      actions.push(`<button class="small-btn warning" type="button" onclick="openLayoutLines('${layout.id}')" style="white-space:nowrap">Completar PAGOSINT</button>`)
+    } else {
+      actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_INTERBANK}')" style="white-space:nowrap">▾ Pagos Inter</button>`)
+    }
+  }
+
+  if (convenio.count > 0) {
+    actions.push(`<button class="small-btn secondary" type="button" onclick="openLayoutLines('${layout.id}')" style="white-space:nowrap">Ver CIE pendiente</button>`)
+  }
+
+  return actions.length ? actions : [`<button class="small-btn" type="button" onclick="downloadLayoutCxc('${layout.id}')" style="white-space:nowrap">Validar lineas</button>`]
 }
 
 // Nuevo layout
@@ -438,16 +479,19 @@ function updateLayoutPagosintIssueCount(layoutId, lines) {
   const count = (lines || []).filter((line) => lineNeedsPagosintReferenceCompletion(line)).length
   if (count) layoutPagosintIssueCounts.set(layoutId, count)
   else layoutPagosintIssueCounts.delete(layoutId)
+  layoutFormatSummaries.set(layoutId, summarizeLayoutFormats((lines || []).filter((line) => line.status !== "bank_rejected")))
 }
 
 function closeLinesModal() {
   activeLinesLayoutId = null
   activeLayoutLines = []
+  if (dom.linesFormatSummary) dom.linesFormatSummary.innerHTML = ""
   if (dom.linesDialog.open) dom.linesDialog.close()
 }
 
 function renderLinesTable(lines) {
   activeLayoutLines = lines || []
+  renderLinesFormatSummary(activeLayoutLines)
   if (!lines.length) {
     dom.linesTableBody.innerHTML = `<tr><td colspan="10" style="padding:44px;text-align:center;color:var(--text-3)">Este layout no tiene lineas.</td></tr>`
     return
@@ -466,6 +510,79 @@ function renderLinesTable(lines) {
       <td>${lineStatusBadge(line.status)}</td>
       <td>${renderLineActions(line)}</td>
     </tr>`).join("")
+}
+
+function renderLinesFormatSummary(lines) {
+  if (!dom.linesFormatSummary) return
+
+  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  if (!activeLines.length) {
+    dom.linesFormatSummary.innerHTML = `<span style="color:var(--text-3);font-size:12px">Sin lineas activas para generar archivos BBVA.</span>`
+    return
+  }
+
+  const summary = summarizeLayoutFormats(activeLines)
+  const rows = [
+    renderFormatSummaryRow(summary[BBVA_FORMAT_SAME_BANK], BBVA_FORMAT_SAME_BANK),
+    renderFormatSummaryRow(summary[BBVA_FORMAT_INTERBANK], BBVA_FORMAT_INTERBANK),
+    renderFormatSummaryRow(summary.convenio, "convenio"),
+    renderFormatSummaryRow(summary.unsupported, "unsupported"),
+  ].filter(Boolean).join("")
+
+  dom.linesFormatSummary.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px">
+      <strong style="color:var(--text-1);font-size:13px">Archivos del layout</strong>
+      <span style="color:var(--text-3);font-size:11px">Los formatos BBVA se descargan separados.</span>
+    </div>
+    <div class="table-wrapper" style="border-radius:8px;max-height:none;overflow:auto">
+      <table style="min-width:720px">
+        <thead>
+          <tr>
+            <th>Formato</th>
+            <th>Pagos</th>
+            <th>Monto total</th>
+            <th>Estado</th>
+            <th>Accion</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`
+}
+
+function renderFormatSummaryRow(item, key) {
+  if (!item || item.count <= 0) return ""
+
+  const amount = escapeHtml(formatCurrency(item.amount))
+  const count = numberValue(item.count)
+  let status = `<span class="badge success">Listo</span>`
+  let action = `<span style="color:var(--text-3);font-size:11px">-</span>`
+
+  if (key === BBVA_FORMAT_SAME_BANK) {
+    action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_SAME_BANK}')">▾ Pagos BBVA</button>`
+  } else if (key === BBVA_FORMAT_INTERBANK) {
+    if (item.referenceIssues > 0) {
+      status = `<span class="badge warning">${item.referenceIssues} referencia(s) pendiente(s)</span>`
+      action = `<button class="small-btn warning" type="button" onclick="focusFirstPagosintReferenceLine()">Completar referencias</button>`
+    } else {
+      action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_INTERBANK}')">▾ Pagos Inter</button>`
+    }
+  } else if (key === "convenio") {
+    status = `<span class="badge warning">Pendiente CIE</span>`
+    action = `<span style="color:var(--text-2);font-size:12px">Formato CIE/convenio pendiente de configurar</span>`
+  } else {
+    status = `<span class="badge danger">No soportado</span>`
+    action = `<span style="color:var(--text-2);font-size:12px">Revisar tipo de destino</span>`
+  }
+
+  return `
+    <tr>
+      <td><span class="cell-main">${escapeHtml(item.label)}</span></td>
+      <td>${count}</td>
+      <td><strong>${amount}</strong></td>
+      <td>${status}</td>
+      <td>${action}</td>
+    </tr>`
 }
 
 function renderLineActions(line) {
@@ -781,11 +898,13 @@ async function submitRejectLine(event) {
 
 window.openLayoutLines = openLayoutLines
 window.downloadLayoutCxc = downloadLayoutCxc
+window.downloadLayoutBbvaFormat = downloadLayoutBbvaFormat
 window.validateLayoutCxc = validateLayoutCxc
 window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
 window.openPagosintReferenceModal = openPagosintReferenceModal
+window.focusFirstPagosintReferenceLine = focusFirstPagosintReferenceLine
 window.openRejectLineModal = openRejectLineModal
 
 // Supabase helpers
@@ -799,6 +918,120 @@ async function fetchLayoutLines(layoutId) {
     .order("company_name", { ascending: true })
     .order("beneficiary_name", { ascending: true })
     .order("request_number", { ascending: true })
+}
+
+function summarizeLayoutFormats(lines) {
+  const summary = {
+    [BBVA_FORMAT_SAME_BANK]: { key: BBVA_FORMAT_SAME_BANK, label: "PAGOSBBV", count: 0, amount: 0, referenceIssues: 0 },
+    [BBVA_FORMAT_INTERBANK]: { key: BBVA_FORMAT_INTERBANK, label: "PAGOSINT", count: 0, amount: 0, referenceIssues: 0 },
+    convenio: { key: "convenio", label: "Convenio/CIE", count: 0, amount: 0, referenceIssues: 0 },
+    unsupported: { key: "unsupported", label: "No soportado", count: 0, amount: 0, referenceIssues: 0 },
+  }
+
+  for (const line of lines || []) {
+    if (line.status === "bank_rejected") continue
+    const amount = numberValue(line.amount)
+
+    try {
+      const format = detectBbvaLayoutFormat(line)
+      summary[format].count += 1
+      summary[format].amount += amount
+      if (format === BBVA_FORMAT_INTERBANK && lineNeedsPagosintReferenceCompletion(line)) summary[format].referenceIssues += 1
+    } catch (error) {
+      const type = normalizeDestinationType(line.destination_type)
+      const key = type === "convenio" ? "convenio" : "unsupported"
+      summary[key].count += 1
+      summary[key].amount += amount
+    }
+  }
+
+  return summary
+}
+
+async function downloadLayoutBbvaFormat(layoutId, format) {
+  const layout = layouts.find((item) => item.id === layoutId)
+  if (!layout) return
+
+  if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK].includes(format)) {
+    showToast("Formato no soportado", "Solo se pueden descargar PAGOSBBV o PAGOSINT.", "warning")
+    return
+  }
+
+  if (layout.status === "cancelled") {
+    showToast("Layout cancelado", "No se puede descargar archivo BBVA de un layout cancelado.", "danger")
+    return
+  }
+
+  const { data: lines, error } = await fetchLayoutLines(layoutId)
+  if (error) { showToast("No se pudo leer el layout", rlsHint("payment_layout_lines", "select", error), "danger"); return }
+
+  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const selectedLines = activeLines.filter((line) => {
+    try {
+      return detectBbvaLayoutFormat(line) === format
+    } catch {
+      return false
+    }
+  })
+
+  if (!selectedLines.length) {
+    showToast("Sin lineas", `Este layout no tiene lineas ${bbvaFormatLabel(format)} para descargar.`, "warning")
+    return
+  }
+
+  const invalidLines = validateLayoutLines(selectedLines)
+  if (invalidLines.length) {
+    const pagosintReferenceLine = invalidLines.find(invalidLineNeedsPagosintReference)
+    const first = pagosintReferenceLine || invalidLines[0]
+    showToast("Lineas invalidas", formatInvalidLayoutLineMessage(first), "danger")
+    if (pagosintReferenceLine) await openLayoutLines(layoutId)
+    return
+  }
+
+  try {
+    const files = buildBbvaLayoutFiles(selectedLines, layout)
+    const file = files.find((item) => item.format === format)
+    if (!file) {
+      showToast("Sin archivo", `No se pudo construir ${bbvaFormatLabel(format)} para este layout.`, "warning")
+      return
+    }
+
+    if (!file.validation.ok) {
+      showToast("Layout invalido", file.validation.errors[0], "danger")
+      return
+    }
+
+    downloadTextFile(file.content, file.fileName)
+
+    const update = await supabaseClient
+      .from("payment_layouts")
+      .update({ file_name: mergeLayoutFileName(layout.file_name, file.fileName), status: "generated", updated_at: new Date().toISOString() })
+      .eq("id", layoutId)
+
+    if (update.error) {
+      showToast(`${file.label} descargado`, "El archivo fue generado, pero no se pudo actualizar el estado del layout.", "warning")
+      return
+    }
+
+    showToast(`${file.label} generado`, `${file.fileName} se descargo correctamente. ${file.validation.lineCount} linea(s) de ${file.lineLength}.`, "success")
+    await loadLayouts()
+  } catch (error) {
+    showToast(`No se pudo generar ${bbvaFormatLabel(format)}`, friendlyError(error), "danger")
+  }
+}
+
+function mergeLayoutFileName(currentValue, nextFileName) {
+  const names = String(currentValue || "")
+    .split(" + ")
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (!names.includes(nextFileName)) names.push(nextFileName)
+  return names.join(" + ") || nextFileName
+}
+
+function focusFirstPagosintReferenceLine() {
+  const line = activeLayoutLines.find((item) => lineNeedsPagosintReferenceCompletion(item))
+  if (line) openPagosintReferenceModal(line.id)
 }
 
 function validateLayoutLines(lines) {
@@ -888,11 +1121,21 @@ function buildBbvaLayoutFiles(lines, layout) {
 }
 
 function detectBbvaLayoutFormat(line) {
-  const type = String(line.destination_type || "").toLowerCase()
-  if (type === "cuenta") return BBVA_FORMAT_SAME_BANK
-  if (type === "clabe") return BBVA_FORMAT_INTERBANK
+  const type = normalizeDestinationType(line.destination_type)
+  if (["cuenta", "cuenta_bancaria", "cuenta_bbva", "mismo_banco", "bbva"].includes(type)) return BBVA_FORMAT_SAME_BANK
+  if (["clabe", "interbancario", "transferencia_interbancaria", "tarjeta", "tdc"].includes(type)) return BBVA_FORMAT_INTERBANK
   if (type === "convenio") throw new Error("Destino convenio requiere layout CIE; no se incluye en PAGOSBBV/PAGOSINT.")
   throw new Error("Tipo de destino no soportado para layout BBVA; define cuenta o CLABE.")
+}
+
+function normalizeDestinationType(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
 }
 
 function bbvaFormatLabel(format) {
