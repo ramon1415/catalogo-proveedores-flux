@@ -25,7 +25,7 @@ security definer
 set search_path = public
 as $$
 declare
-  v_limit integer := least(greatest(coalesce(p_limit, 5), 1), 10);
+  v_limit integer := least(greatest(coalesce(p_limit, 5), 1), 5);
   v_worker_id text := left(coalesce(nullif(trim(p_worker_id), ''), 'edge-notification-dispatcher'), 120);
 begin
   return query

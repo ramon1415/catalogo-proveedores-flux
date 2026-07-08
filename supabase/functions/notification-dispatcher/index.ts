@@ -75,7 +75,7 @@ function money(value: unknown, currency: unknown): string {
 function clampLimit(raw: unknown): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return 5;
-  return Math.min(Math.max(Math.trunc(parsed), 1), 10);
+  return Math.min(Math.max(Math.trunc(parsed), 1), 5);
 }
 
 async function readLimit(req: Request): Promise<number> {
