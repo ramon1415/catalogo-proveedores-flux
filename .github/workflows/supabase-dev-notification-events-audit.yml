@@ -1,0 +1,420 @@
+name: Supabase DEV Notification Events Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_dev:
+        description: 'Type DEV project ref exactly: scsirgbuqjcwoaxfacth'
+        required: true
+        type: string
+      confirm_mode:
+        description: 'Type audit_notification_events_dev_read_only'
+        required: true
+        type: string
+      confirm_branch:
+        description: 'Type dev'
+        required: true
+        type: string
+      confirm_no_mutations:
+        description: 'Type read_only'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+  EVIDENCE_DIR: /tmp/supabase-dev-notification-events-audit-evidence
+
+jobs:
+  audit-notification-events:
+    name: Audit DEV notification events
+    runs-on: ubuntu-latest
+    environment: DEV
+    timeout-minutes: 10
+
+    steps:
+      - name: Guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+            echo "::error::This workflow must run from branch dev. Current branch: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+          if [ "${{ inputs.confirm_dev }}" != "${DEV_PROJECT_REF}" ]; then
+            echo "::error::confirm_dev mismatch"
+            exit 1
+          fi
+
+          if [ "${{ inputs.confirm_mode }}" != "audit_notification_events_dev_read_only" ]; then
+            echo "::error::confirm_mode mismatch"
+            exit 1
+          fi
+
+          if [ "${{ inputs.confirm_branch }}" != "dev" ]; then
+            echo "::error::confirm_branch mismatch"
+            exit 1
+          fi
+
+          if [ "${{ inputs.confirm_no_mutations }}" != "read_only" ]; then
+            echo "::error::confirm_no_mutations mismatch"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.SUPABASE_DEV_DB_URL }}" ]; then
+            echo "::error::Missing GitHub Environment secret SUPABASE_DEV_DB_URL"
+            exit 1
+          fi
+
+          echo "::add-mask::${{ secrets.SUPABASE_DEV_DB_URL }}"
+          echo "Guardrails passed for DEV read-only notification events audit."
+
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${EVIDENCE_DIR}"
+          mkdir -p "${EVIDENCE_DIR}"
+          {
+            echo "workflow=Supabase DEV Notification Events Audit"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "branch=${GITHUB_REF_NAME}"
+            echo "project_ref=${DEV_PROJECT_REF}"
+            echo "mode=read_only"
+          } > "${EVIDENCE_DIR}/guardrails.txt"
+
+      - name: Ensure psql client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+          psql --version
+
+      - name: Run read-only audit
+        shell: bash
+        env:
+          SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=20000 -c lock_timeout=5000"
+
+          psql "${SUPABASE_DEV_DB_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --set VERBOSITY=terse <<SQL
+          begin read only;
+
+          \pset format unaligned
+          \pset tuples_only on
+          \o ${EVIDENCE_DIR}/audit_summary.md
+          select '# Supabase DEV Notification Events Audit';
+          select '';
+          select '- generated_at_utc: ' || to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS') || ' UTC';
+          select '- project_ref: ${DEV_PROJECT_REF}';
+          select '- branch: ${GITHUB_REF_NAME}';
+          select '- transaction_read_only: ' || current_setting('transaction_read_only');
+          select '- audit_mode: read_only_selects';
+          select '';
+          select '## Queue Summary';
+          with processable as (
+            select e.*
+            from public.notification_events e
+            where e.status in ('pending', 'failed')
+              and coalesce(e.next_attempt_at, now()) <= now()
+              and e.attempt_count < e.max_attempts
+              and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+              and coalesce(e.channel, 'email') = 'email'
+          ), signals as (
+            select
+              count(*)::int as total,
+              count(*) filter (
+                where idempotency_key ilike '%smoke-notification-dispatcher-dev-%'
+                   or idempotency_key ilike '%smoke%'
+                   or idempotency_key ilike '%synthetic%'
+                   or idempotency_key ilike '%test%'
+                   or idempotency_key ilike '%dev%'
+                   or payload::text ilike '%smoke%'
+                   or payload::text ilike '%synthetic%'
+                   or payload::text ilike '%test%'
+                   or payload::text ilike '%dev%'
+              )::int as test_like
+            from processable
+          )
+          select '- processable_pending_total: ' || total from signals;
+          with processable as (
+            select e.*
+            from public.notification_events e
+            where e.status in ('pending', 'failed')
+              and coalesce(e.next_attempt_at, now()) <= now()
+              and e.attempt_count < e.max_attempts
+              and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+              and coalesce(e.channel, 'email') = 'email'
+          ), signals as (
+            select
+              count(*)::int as total,
+              count(*) filter (
+                where idempotency_key ilike '%smoke-notification-dispatcher-dev-%'
+                   or idempotency_key ilike '%smoke%'
+                   or idempotency_key ilike '%synthetic%'
+                   or idempotency_key ilike '%test%'
+                   or idempotency_key ilike '%dev%'
+                   or payload::text ilike '%smoke%'
+                   or payload::text ilike '%synthetic%'
+                   or payload::text ilike '%test%'
+                   or payload::text ilike '%dev%'
+              )::int as test_like
+            from processable
+          )
+          select '- test_or_smoke_signal_count: ' || test_like from signals;
+          with processable as (
+            select e.*
+            from public.notification_events e
+            where e.status in ('pending', 'failed')
+              and coalesce(e.next_attempt_at, now()) <= now()
+              and e.attempt_count < e.max_attempts
+              and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+              and coalesce(e.channel, 'email') = 'email'
+          ), signals as (
+            select
+              count(*)::int as total,
+              count(*) filter (
+                where idempotency_key ilike '%smoke-notification-dispatcher-dev-%'
+                   or idempotency_key ilike '%smoke%'
+                   or idempotency_key ilike '%synthetic%'
+                   or idempotency_key ilike '%test%'
+                   or idempotency_key ilike '%dev%'
+                   or payload::text ilike '%smoke%'
+                   or payload::text ilike '%synthetic%'
+                   or payload::text ilike '%test%'
+                   or payload::text ilike '%dev%'
+              )::int as test_like
+            from processable
+          )
+          select '- preliminary_recommendation: ' || case
+            when total = 0 then 'sin cola procesable; se puede reintentar smoke test controlado'
+            when test_like = total then 'cola parece sintetica/test'
+            when test_like = 0 then 'cola parece real DEV'
+            when test_like > 0 and test_like < total then 'cola mixta'
+            else 'no concluyente'
+          end
+          from signals;
+          with processable as (
+            select e.*
+            from public.notification_events e
+            where e.status in ('pending', 'failed')
+              and coalesce(e.next_attempt_at, now()) <= now()
+              and e.attempt_count < e.max_attempts
+              and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+              and coalesce(e.channel, 'email') = 'email'
+          ), signals as (
+            select
+              count(*)::int as total,
+              count(*) filter (
+                where idempotency_key ilike '%smoke-notification-dispatcher-dev-%'
+                   or idempotency_key ilike '%smoke%'
+                   or idempotency_key ilike '%synthetic%'
+                   or idempotency_key ilike '%test%'
+                   or idempotency_key ilike '%dev%'
+                   or payload::text ilike '%smoke%'
+                   or payload::text ilike '%synthetic%'
+                   or payload::text ilike '%test%'
+                   or payload::text ilike '%dev%'
+              )::int as test_like
+            from processable
+          )
+          select '- suggested_next_action: ' || case
+            when total = 0 then 'reintentar smoke test DEV'
+            when test_like = total then 'revisar opcion de cancelar o poner en cuarentena eventos viejos de prueba en DEV'
+            when test_like = 0 then 'revisar manualmente antes de procesar cola en test_only'
+            when test_like > 0 and test_like < total then 'separar eventos test de eventos reales DEV antes de reintentar smoke test'
+            else 'no continuar sin revision manual'
+          end
+          from signals;
+          select '';
+          select '## Files';
+          select '- pending_events_sanitized.csv';
+          select '- pending_events_by_type.csv';
+          select '- pending_events_by_age.csv';
+          select '- delivery_attempts_summary.csv';
+          \o
+          \pset tuples_only off
+          \pset format aligned
+
+          \copy (
+            with processable as (
+              select e.*
+              from public.notification_events e
+              where e.status in ('pending', 'failed')
+                and coalesce(e.next_attempt_at, now()) <= now()
+                and e.attempt_count < e.max_attempts
+                and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+                and coalesce(e.channel, 'email') = 'email'
+            ), attempts as (
+              select
+                da.notification_event_id,
+                count(*)::int as delivery_attempt_count,
+                (array_agg(da.status order by da.created_at desc, da.id desc))[1] as last_attempt_status,
+                (array_agg(da.error_message order by da.created_at desc, da.id desc))[1] as last_error_message
+              from public.notification_delivery_attempts da
+              group by da.notification_event_id
+            )
+            select
+              e.id as event_id,
+              e.event_type,
+              e.status,
+              e.attempt_count,
+              e.max_attempts,
+              e.next_attempt_at,
+              e.created_at,
+              e.updated_at,
+              e.idempotency_key,
+              case when e.locked_at is null and nullif(trim(coalesce(e.locked_by, '')), '') is null then 'not_locked' else 'lock_metadata_present' end as lock_state,
+              e.recipient_type,
+              case when nullif(trim(coalesce(e.recipient_email, '')), '') is null then false else true end as recipient_email_present,
+              e.channel,
+              e.priority,
+              array_to_string(array(select key from jsonb_object_keys(e.payload) as key order by key), '|') as payload_keys,
+              case when e.payload ? 'source' then left(regexp_replace(coalesce(e.payload->>'source', ''), '[^A-Za-z0-9_.:-]', '', 'g'), 80) else null end as payload_source,
+              case when e.source_table = 'payment_requests' then e.source_id else null end as payment_request_id,
+              case when e.payload ? 'correlation_id' then left(regexp_replace(coalesce(e.payload->>'correlation_id', ''), '[^A-Za-z0-9_.:-]', '', 'g'), 120) else null end as correlation_id,
+              coalesce(a.delivery_attempt_count, 0) as delivery_attempt_count,
+              a.last_attempt_status,
+              case when coalesce(a.last_error_message, e.last_error, '') = '' then null else left(regexp_replace(coalesce(a.last_error_message, e.last_error, ''), '(https?://[^[:space:]]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}|[0-9]{10,})', '[redacted]', 'g'), 220) end as last_error_message_sanitized,
+              case
+                when e.idempotency_key ilike '%smoke-notification-dispatcher-dev-%'
+                  or e.idempotency_key ilike '%smoke%'
+                  or e.idempotency_key ilike '%synthetic%'
+                  or e.idempotency_key ilike '%test%'
+                  or e.idempotency_key ilike '%dev%'
+                  or e.payload::text ilike '%smoke%'
+                  or e.payload::text ilike '%synthetic%'
+                  or e.payload::text ilike '%test%'
+                  or e.payload::text ilike '%dev%'
+                  then 'possible_test_or_smoke'
+                else 'not_detected'
+              end as test_signal
+            from processable e
+            left join attempts a on a.notification_event_id = e.id
+            order by
+              case e.priority when 'critical' then 1 when 'high' then 2 when 'normal' then 3 when 'low' then 4 else 5 end,
+              e.created_at,
+              e.id
+            limit 100
+          ) to '${EVIDENCE_DIR}/pending_events_sanitized.csv' with csv header;
+
+          \copy (
+            with processable as (
+              select e.*
+              from public.notification_events e
+              where e.status in ('pending', 'failed')
+                and coalesce(e.next_attempt_at, now()) <= now()
+                and e.attempt_count < e.max_attempts
+                and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+                and coalesce(e.channel, 'email') = 'email'
+            )
+            select
+              event_type,
+              status,
+              count(*)::int as total,
+              count(*) filter (where idempotency_key ilike '%smoke%' or idempotency_key ilike '%synthetic%' or idempotency_key ilike '%test%' or idempotency_key ilike '%dev%' or payload::text ilike '%smoke%' or payload::text ilike '%synthetic%' or payload::text ilike '%test%' or payload::text ilike '%dev%')::int as test_signal_total,
+              min(created_at) as oldest_created_at,
+              max(created_at) as newest_created_at
+            from processable
+            group by event_type, status
+            order by total desc, event_type, status
+          ) to '${EVIDENCE_DIR}/pending_events_by_type.csv' with csv header;
+
+          \copy (
+            with processable as (
+              select e.*
+              from public.notification_events e
+              where e.status in ('pending', 'failed')
+                and coalesce(e.next_attempt_at, now()) <= now()
+                and e.attempt_count < e.max_attempts
+                and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+                and coalesce(e.channel, 'email') = 'email'
+            )
+            select
+              case
+                when created_at >= now() - interval '1 day' then 'today'
+                when created_at >= now() - interval '2 days' then '1_to_2_days'
+                when created_at >= now() - interval '7 days' then '3_to_7_days'
+                else 'more_than_7_days'
+              end as age_bucket,
+              count(*)::int as total,
+              min(created_at) as oldest_created_at,
+              max(created_at) as newest_created_at
+            from processable
+            group by age_bucket
+            order by case age_bucket when 'today' then 1 when '1_to_2_days' then 2 when '3_to_7_days' then 3 else 4 end
+          ) to '${EVIDENCE_DIR}/pending_events_by_age.csv' with csv header;
+
+          \copy (
+            with processable as (
+              select e.*
+              from public.notification_events e
+              where e.status in ('pending', 'failed')
+                and coalesce(e.next_attempt_at, now()) <= now()
+                and e.attempt_count < e.max_attempts
+                and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
+                and coalesce(e.channel, 'email') = 'email'
+            ), attempt_summary as (
+              select
+                da.notification_event_id,
+                count(*)::int as delivery_attempt_count,
+                count(*) filter (where da.status = 'sent')::int as sent_attempt_count,
+                count(*) filter (where da.status = 'failed')::int as failed_attempt_count,
+                count(*) filter (where da.status = 'dead_letter')::int as dead_letter_attempt_count,
+                count(*) filter (where da.provider_message_id is not null)::int as provider_message_present_count,
+                count(*) filter (where da.n8n_execution_id is not null)::int as n8n_execution_present_count,
+                max(da.created_at) as last_delivery_attempt_at
+              from public.notification_delivery_attempts da
+              group by da.notification_event_id
+            )
+            select
+              e.event_type,
+              e.status as event_status,
+              coalesce(a.delivery_attempt_count, 0) as delivery_attempt_count,
+              coalesce(a.sent_attempt_count, 0) as sent_attempt_count,
+              coalesce(a.failed_attempt_count, 0) as failed_attempt_count,
+              coalesce(a.dead_letter_attempt_count, 0) as dead_letter_attempt_count,
+              coalesce(a.provider_message_present_count, 0) as provider_message_present_count,
+              coalesce(a.n8n_execution_present_count, 0) as n8n_execution_present_count,
+              a.last_delivery_attempt_at,
+              count(*)::int as event_count
+            from processable e
+            left join attempt_summary a on a.notification_event_id = e.id
+            group by e.event_type, e.status, a.delivery_attempt_count, a.sent_attempt_count, a.failed_attempt_count, a.dead_letter_attempt_count, a.provider_message_present_count, a.n8n_execution_present_count, a.last_delivery_attempt_at
+            order by event_count desc, e.event_type, e.status
+          ) to '${EVIDENCE_DIR}/delivery_attempts_summary.csv' with csv header;
+
+          commit;
+          SQL
+
+      - name: Sanitize evidence defensively
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${EVIDENCE_DIR}" ]; then
+            find "${EVIDENCE_DIR}" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' file; do
+              sed -E -i \
+                -e 's#postgres(ql)?://[^[:space:],]+#[redacted-db-url]#g' \
+                -e 's#https?://[^[:space:],]+#[redacted-url]#g' \
+                -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}#[redacted-email]#g' \
+                -e 's#(Bearer|apikey|token|secret|service_role)[[:space:]:=]+[^[:space:],]+#\1=[redacted]#Ig' \
+                "$file"
+            done
+          fi
+
+      - name: Upload sanitized audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-dev-notification-events-audit-evidence
+          path: /tmp/supabase-dev-notification-events-audit-evidence/
+          if-no-files-found: error
