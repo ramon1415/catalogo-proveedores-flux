@@ -244,7 +244,8 @@ jobs:
           \pset tuples_only off
           \pset format aligned
 
-          \copy (
+          \o ${EVIDENCE_DIR}/pending_events_sanitized.csv
+          copy (
             with processable as (
               select e.*
               from public.notification_events e
@@ -304,9 +305,11 @@ jobs:
               e.created_at,
               e.id
             limit 100
-          ) to '${EVIDENCE_DIR}/pending_events_sanitized.csv' with csv header;
+          ) to stdout with csv header;
+          \o
 
-          \copy (
+          \o ${EVIDENCE_DIR}/pending_events_by_type.csv
+          copy (
             with processable as (
               select e.*
               from public.notification_events e
@@ -326,9 +329,11 @@ jobs:
             from processable
             group by event_type, status
             order by total desc, event_type, status
-          ) to '${EVIDENCE_DIR}/pending_events_by_type.csv' with csv header;
+          ) to stdout with csv header;
+          \o
 
-          \copy (
+          \o ${EVIDENCE_DIR}/pending_events_by_age.csv
+          copy (
             with processable as (
               select e.*
               from public.notification_events e
@@ -351,9 +356,11 @@ jobs:
             from processable
             group by age_bucket
             order by case age_bucket when 'today' then 1 when '1_to_2_days' then 2 when '3_to_7_days' then 3 else 4 end
-          ) to '${EVIDENCE_DIR}/pending_events_by_age.csv' with csv header;
+          ) to stdout with csv header;
+          \o
 
-          \copy (
+          \o ${EVIDENCE_DIR}/delivery_attempts_summary.csv
+          copy (
             with processable as (
               select e.*
               from public.notification_events e
@@ -390,7 +397,8 @@ jobs:
             left join attempt_summary a on a.notification_event_id = e.id
             group by e.event_type, e.status, a.delivery_attempt_count, a.sent_attempt_count, a.failed_attempt_count, a.dead_letter_attempt_count, a.provider_message_present_count, a.n8n_execution_present_count, a.last_delivery_attempt_at
             order by event_count desc, e.event_type, e.status
-          ) to '${EVIDENCE_DIR}/delivery_attempts_summary.csv' with csv header;
+          ) to stdout with csv header;
+          \o
 
           commit;
           SQL
