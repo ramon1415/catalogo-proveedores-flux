@@ -245,7 +245,7 @@ jobs:
           select 'rpc.claim_notification_events_for_dispatcher=' || case when to_regprocedure('public.claim_notification_events_for_dispatcher(integer,text)') is not null then 'present' else 'missing' end;
           select 'rpc.mark_notification_processed_for_dispatcher=' || case when to_regprocedure('public.mark_notification_processed_for_dispatcher(uuid,text,text,text)') is not null then 'present' else 'missing' end;
           select 'rpc.mark_notification_failed_for_dispatcher=' || case when to_regprocedure('public.mark_notification_failed_for_dispatcher(uuid,text,text,text)') is not null then 'present' else 'missing' end;
-SQL
+          SQL
 
           if grep -q '=missing' "${EVIDENCE_DIR}/db-preflight.txt"; then
             echo "::error::Missing notification table or dispatcher RPC in Supabase DEV."
@@ -265,7 +265,7 @@ SQL
             and e.attempt_count < e.max_attempts
             and nullif(trim(coalesce(e.recipient_email, '')), '') is not null
             and coalesce(e.channel, 'email') = 'email';
-SQL
+          SQL
           )"
 
           echo "processable_pending_before=${pending_count}" > "${EVIDENCE_DIR}/queue-preflight.txt"
@@ -328,7 +328,7 @@ SQL
             now()
           )
           returning id;
-SQL
+          SQL
           )"
 
           {
@@ -444,7 +444,7 @@ SQL
             where e.id = :'event_id'::uuid
               and nullif(trim(coalesce(e.last_error, '')), '') is not null
           ) then 'yes' else 'no' end;
-SQL
+          SQL
 
       - name: Upload smoke evidence
         if: always()
