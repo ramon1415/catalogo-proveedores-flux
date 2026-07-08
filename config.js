@@ -91,7 +91,7 @@ const FLUX_FALLBACK_CONFIG = Object.freeze({
   supabaseAnonKey: "",
 })
 
-const FLUX_PRODUCTION_HOSTS = new Set(["catalogo-proveedores-flux.vercel.app"])
+const FLUX_PRODUCTION_HOSTS = new Set(["catalogo-proveedores-flux.vercel.app", "flux.quantta.mx"])
 const FLUX_RUNTIME_CONFIG = window.FLUX_ENV_CONFIG || {}
 
 function readFluxConfigValue(...keys) {
