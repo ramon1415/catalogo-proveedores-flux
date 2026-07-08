@@ -17,16 +17,20 @@
     .email{display:inline-block;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600;color:#eeeef6;margin-bottom:24px}
     .btn{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(255,255,255,.13);background:transparent;color:#aaaac3;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
     .btn:hover{background:rgba(255,255,255,.04);color:#eeeef6}
+    .brand-logo{width:200px;max-width:70%;height:auto;display:block;margin:0 auto 26px}
+    .powered{font-size:11px;color:#50506a;text-align:center;margin-top:26px;letter-spacing:.3px}
+    .powered span{color:#8888aa;font-weight:600}
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">⏳</div>
+    <img class="brand-logo" src="./assets/logo-flux-blanco.webp" alt="Flux">
     <h1>Acceso pendiente de aprobación</h1>
-    <p>Tu cuenta fue registrada pero aún no tiene un rol asignado. Un administrador debe aprobar tu acceso antes de que puedas usar Flux.</p>
+    <p>Tu cuenta fue registrada pero aún no tiene un rol asignado. Un administrador debe aprobar tu acceso antes de que puedas usar la Plataforma de Gestión.</p>
     <div class="email" id="pendingEmail">—</div>
     <br>
     <button class="btn" id="logoutBtn">Cerrar sesión y volver</button>
+    <p class="powered">Powered by <span>Quantta</span></p>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
