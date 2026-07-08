@@ -269,24 +269,6 @@ try {
     defaultRedirect: () => defaultLandingForRole(),
   }
 
-  function applyLoginCopy() {
-    if (pageName !== "index.html" && pageName !== "") return
-
-    document.title = "Acceso | Flux Operadora"
-
-    const logo = document.querySelector(".login-card .logo")
-    const title = document.querySelector(".login-card h1")
-    const description = document.querySelector(".login-card p:not(.note)")
-    const note = document.querySelector(".login-card .note")
-
-    if (logo) logo.textContent = "FL"
-    if (title) title.textContent = "Flux Operadora"
-    if (description) {
-      description.textContent = "Centraliza proveedores, presupuesto, solicitudes de pago, layouts y seguimiento financiero en un solo sistema."
-    }
-    if (note) note.textContent = "Acceso protegido con Supabase Auth."
-  }
-
   function navigationHtmlFor(items, activeKey) {
     return navSections
       .map((section) => {
@@ -491,7 +473,6 @@ try {
   }
 
   function applyShell() {
-    applyLoginCopy()
     applyIncomeCompatibility()
     hydrateRoleStateFromCache()
     ensureFirstPaintNavigation()
