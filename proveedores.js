@@ -57,8 +57,8 @@ function prepareSupplierFormUx() {
   if (!grid) return
 
   const orderedControls = [
-    "alias", "nombre_completo", "tipo_proveedor", "destination_type",
-    "metodo_pago", "tipo_cuenta", "beneficiary_name", "banco", "clabe",
+    "alias", "nombre_completo", "tipo_proveedor", "metodo_pago",
+    "destination_type", "tipo_cuenta", "beneficiary_name", "banco", "clabe",
     "cuenta_bancaria", "convenio_number", "rfc", "email", "telefono",
     "es_personal_eventual", "activo", "notas",
   ]
@@ -229,7 +229,7 @@ function updateDestinationFieldVisibility() {
   const destinationType = getValue("destination_type")
   const hidesBankFields = !requiresBankDetails(metodoPago)
   setControlLabelVisible("tipo_cuenta", false)
-  setControlLabelVisible("destination_type", !hidesBankFields)
+  setControlLabelVisible("destination_type", true)
   setControlLabelVisible("banco", !hidesBankFields && Boolean(destinationType))
   setControlLabelVisible("clabe", !hidesBankFields && destinationType === "clabe")
   setControlLabelVisible("cuenta_bancaria", !hidesBankFields && destinationType === "cuenta")
