@@ -30,7 +30,7 @@ jobs:
     name: Deploy notification-dispatcher to Supabase DEV
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: supabase-development
+    environment: DEV
 
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
