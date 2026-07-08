@@ -426,5 +426,3 @@ jobs:
           name: supabase-dev-notification-events-audit-evidence
           path: /tmp/supabase-dev-notification-events-audit-evidence/
           if-no-files-found: error
-
-
