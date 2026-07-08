@@ -273,17 +273,15 @@ function renderFormatDownloadActions(layout, summary) {
   const sameBank = summary[BBVA_FORMAT_SAME_BANK]
   const interbank = summary[BBVA_FORMAT_INTERBANK]
   const convenio = summary.convenio
-  const actionVerb = layout.status === "draft" ? "Generar" : "Descargar"
-
   if (sameBank.count > 0) {
-    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_SAME_BANK}')" style="white-space:nowrap">${actionVerb} PAGOSBBV</button>`)
+    actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_SAME_BANK}')" style="white-space:nowrap">▾ Pagos BBVA</button>`)
   }
 
   if (interbank.count > 0) {
     if (interbank.referenceIssues > 0) {
       actions.push(`<button class="small-btn warning" type="button" onclick="openLayoutLines('${layout.id}')" style="white-space:nowrap">Completar PAGOSINT</button>`)
     } else {
-      actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_INTERBANK}')" style="white-space:nowrap">${actionVerb} PAGOSINT</button>`)
+      actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_INTERBANK}')" style="white-space:nowrap">▾ Pagos Inter</button>`)
     }
   }
 
@@ -560,13 +558,13 @@ function renderFormatSummaryRow(item, key) {
   let action = `<span style="color:var(--text-3);font-size:11px">-</span>`
 
   if (key === BBVA_FORMAT_SAME_BANK) {
-    action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_SAME_BANK}')">Descargar PAGOSBBV</button>`
+    action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_SAME_BANK}')">▾ Pagos BBVA</button>`
   } else if (key === BBVA_FORMAT_INTERBANK) {
     if (item.referenceIssues > 0) {
       status = `<span class="badge warning">${item.referenceIssues} referencia(s) pendiente(s)</span>`
       action = `<button class="small-btn warning" type="button" onclick="focusFirstPagosintReferenceLine()">Completar referencias</button>`
     } else {
-      action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_INTERBANK}')">Descargar PAGOSINT</button>`
+      action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_INTERBANK}')">▾ Pagos Inter</button>`
     }
   } else if (key === "convenio") {
     status = `<span class="badge warning">Pendiente CIE</span>`
