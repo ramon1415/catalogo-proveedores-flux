@@ -2,6 +2,9 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 let proveedores = []
 let currentEditingId = null
+let currentProfileId = null
+let currentCsfPath = null
+let providerCsfUpload = null
 
 const rootElement = document.documentElement
 const tableBody = document.getElementById("suppliersTableBody")
@@ -19,6 +22,8 @@ async function init() {
   if (window.FluxAuth?.ready) await window.FluxAuth.ready()
   const profile = window.FluxAuth?.getProfile?.()
   const session = window.FluxAuth?.state?.session
+  currentProfileId = profile?.id || null
+  providerCsfUpload = window.FluxUpload?.initFileUpload("providerCsf") || { getFile: () => null, reset: () => {} }
 
   if (!session) {
     window.location.href = "./index.html"
@@ -39,6 +44,7 @@ async function init() {
   document.getElementById("cancelBtn").addEventListener("click", closeModal)
   document.getElementById("metodo_pago").addEventListener("change", handlePaymentMethodChange)
   document.getElementById("destination_type")?.addEventListener("change", handleDestinationTypeChange)
+  document.getElementById("providerCsfLink")?.addEventListener("click", openCurrentCsf)
 
   searchInput.addEventListener("input", renderTable)
   statusFilter.addEventListener("change", renderTable)
@@ -60,7 +66,7 @@ function prepareSupplierFormUx() {
     "alias", "nombre_completo", "tipo_proveedor", "metodo_pago",
     "destination_type", "tipo_cuenta", "beneficiary_name", "banco", "clabe",
     "cuenta_bancaria", "convenio_number", "rfc", "email", "telefono",
-    "es_personal_eventual", "activo", "notas",
+    "providerCsfFile", "es_personal_eventual", "activo", "notas",
   ]
 
   orderedControls.map(labelForControl).filter(Boolean).forEach((label) => grid.appendChild(label))
@@ -152,9 +158,12 @@ function renderTable() {
 
 function openCreateModal() {
   currentEditingId = null
+  currentCsfPath = null
   document.getElementById("modalTitle").textContent = "Nuevo proveedor"
   form.reset()
   document.getElementById("activo").checked = true
+  resetCsfControls()
+  updateCsfPermissionState()
   handlePaymentMethodChange()
   dialog.showModal()
 }
@@ -163,6 +172,7 @@ window.openEditModal = function(id) {
   const p = proveedores.find((item) => item.id === id)
   if (!p) return
   currentEditingId = id
+  currentCsfPath = p.csf_file_path || null
   document.getElementById("modalTitle").textContent = "Editar proveedor"
   setValue("supplierId", p.id)
   setValue("alias", p.alias)
@@ -182,6 +192,9 @@ window.openEditModal = function(id) {
   setValue("notas", p.notas)
   document.getElementById("es_personal_eventual").checked = Boolean(p.es_personal_eventual)
   document.getElementById("activo").checked = Boolean(p.activo)
+  resetCsfControls()
+  updateCsfPermissionState()
+  renderCsfLink()
   handlePaymentMethodChange()
   handleDestinationTypeChange()
   dialog.showModal()
@@ -246,6 +259,14 @@ function inferDestinationType() {
 
 async function saveSupplier(event) {
   event.preventDefault()
+  const csfFile = providerCsfUpload?.getFile?.() || null
+  const canUploadCsf = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
+
+  if (csfFile && !canUploadCsf) {
+    showToast("Sin permiso", "Tu usuario no tiene permiso para cargar CSF de proveedores.", "error")
+    return
+  }
+
   const payload = {
     alias: getValue("alias"),
     nombre_completo: getValue("nombre_completo"),
@@ -289,8 +310,8 @@ async function saveSupplier(event) {
   if (payload.destination_type === "convenio") payload.tipo_cuenta = null
 
   const result = currentEditingId
-    ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId)
-    : await supabaseClient.from("proveedores").insert(payload)
+    ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId).select("id").single()
+    : await supabaseClient.from("proveedores").insert(payload).select("id").single()
 
   if (result.error) {
     const msg = result.error.message?.toLowerCase().includes("row-level security") || result.error.code === "42501"
@@ -300,11 +321,34 @@ async function saveSupplier(event) {
     return
   }
 
+  const providerId = result.data?.id || currentEditingId
+  let csfUploadFailed = false
+
+  if (csfFile && providerId) {
+    try {
+      const storagePath = await window.FluxUpload.uploadReceipt(csfFile, `csf/${providerId}`)
+      const { error: csfError } = await supabaseClient
+        .from("proveedores")
+        .update({
+          csf_file_path: storagePath,
+          csf_uploaded_at: new Date().toISOString(),
+          csf_uploaded_by: currentProfileId,
+        })
+        .eq("id", providerId)
+      if (csfError) throw csfError
+    } catch (error) {
+      csfUploadFailed = true
+      showToast("CSF no vinculado", "El proveedor se guardo, pero la CSF no pudo subirse.", "warning")
+    }
+  }
+
   form.reset()
+  resetCsfControls()
   currentEditingId = null
+  currentCsfPath = null
   if (dialog.open) dialog.close()
   await loadSuppliers()
-  showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
+  if (!csfUploadFailed) showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
 }
 
 function validateDestination(payload) {
@@ -338,6 +382,61 @@ async function logout() {
 function closeModal() {
   if (dialog.open) dialog.close()
   currentEditingId = null
+  currentCsfPath = null
+  resetCsfControls()
+}
+
+function resetCsfControls() {
+  providerCsfUpload?.reset?.()
+  const link = document.getElementById("providerCsfLink")
+  if (link) {
+    link.classList.add("hidden")
+    link.removeAttribute("data-path")
+  }
+  const hint = document.getElementById("providerCsfHint")
+  if (hint) {
+    hint.textContent = hint.dataset.default || "CSF en PDF (max 10 MB)"
+    hint.style.color = ""
+  }
+}
+
+function updateCsfPermissionState() {
+  const input = document.getElementById("providerCsfFile")
+  if (!input) return
+  const allowed = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
+  input.disabled = !allowed
+  input.classList.toggle("field-disabled", !allowed)
+}
+
+function renderCsfLink() {
+  const link = document.getElementById("providerCsfLink")
+  if (!link) return
+  if (!currentCsfPath) {
+    link.classList.add("hidden")
+    link.removeAttribute("data-path")
+    return
+  }
+  link.dataset.path = currentCsfPath
+  link.classList.remove("hidden")
+}
+
+async function openCurrentCsf() {
+  if (!currentCsfPath) return
+  try {
+    const url = await window.FluxUpload?.getReceiptUrl?.(currentCsfPath)
+    if (!url) throw new Error("signed_url_unavailable")
+    window.open(url, "_blank", "noopener,noreferrer")
+  } catch (error) {
+    showToast("CSF no disponible", "No se pudo generar el link temporal de la CSF.", "error")
+  }
+}
+
+function canCreateProviderCsf() {
+  return Boolean(window.FluxAuth?.canCreateProviders?.())
+}
+
+function canManageProviderCsf() {
+  return Boolean(window.FluxAuth?.canManageProviders?.())
 }
 
 // ── Utilidades ────────────────────────────────────────────────
