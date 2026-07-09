@@ -158,6 +158,11 @@
           <label>Correo<input id="email" type="email" placeholder="correo@dominio.com"></label>
           <label>Telefono<input id="telefono" placeholder="+52 ..."></label>
           <label>Tipo de proveedor<input id="tipo_proveedor" placeholder="Servicios, materiales..."></label>
+          <label class="full-row">Constancia de Situacion Fiscal (CSF)
+            <input type="file" id="providerCsfFile" accept="application/pdf,image/*">
+            <span id="providerCsfHint" class="field-hint" data-default="CSF en PDF (max 10 MB)">CSF en PDF (max 10 MB)</span>
+            <button id="providerCsfLink" class="small-btn hidden" type="button">Ver CSF</button>
+          </label>
           <label class="check-label"><input id="es_personal_eventual" type="checkbox"> Es personal eventual</label>
           <label class="check-label"><input id="activo" type="checkbox" checked> Proveedor activo</label>
           <label class="full-row">Notas<textarea id="notas" rows="3" placeholder="Informacion adicional..."></textarea></label>
@@ -175,7 +180,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./proveedores.js?v=20260707-destination-type-visible"></script>
+  <script src="./upload_helper.js?v=20260709-provider-csf"></script>
+  <script src="./proveedores.js?v=20260709-provider-csf"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>
