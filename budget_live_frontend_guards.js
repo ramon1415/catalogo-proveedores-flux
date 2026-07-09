@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "20260623-audit-final-polish";
+  const VERSION = "20260707-detail-loop-fix";
   const NORMAL_APPROVAL = "approved";
   const BUDGET_RECHECK_BLOCK_MESSAGE = "No fue posible revalidar presupuesto. No se ejecutó la aprobación normal desde frontend.";
   const state = {
@@ -361,7 +361,8 @@
     if (!host) {
       host = document.createElement("div");
       host.id = "budgetLiveAuditLog";
-      host.className = "budget-live-audit";
+      // approval-history: hereda el estilo del h4 (chico/gris) para que el encabezado nunca se pinte como h4 por defecto (negro grande).
+      host.className = "budget-live-audit approval-history";
       container.appendChild(host);
     }
     return host;
@@ -812,11 +813,20 @@
   }
 
   function watchDetailDialogs() {
+    let rendering = false;
     const observer = new MutationObserver(() => {
+      if (rendering) return;
+      if (!document.getElementById("detailDialog")?.open) return;
+
       const solicitudesDetail = document.getElementById("detailContent");
       const requestId = state.currentApprovalRequestId;
       if (solicitudesDetail && requestId && !document.getElementById("detailBudgetLivePanel")) {
-        renderDetailBudgetSignals(requestId);
+        rendering = true;
+        Promise.resolve()
+          .then(() => renderDetailBudgetSignals(requestId))
+          .finally(() => {
+            rendering = false;
+          });
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
