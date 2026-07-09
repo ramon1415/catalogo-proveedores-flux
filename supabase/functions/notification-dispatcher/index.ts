@@ -75,11 +75,18 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#039;");
 }
 
-function money(value: unknown, currency: unknown): string {
-  const amount = Number(value || 0);
+function money(value: unknown, currency: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const amount = Number(value);
   const safeCurrency = String(currency || "MXN").slice(0, 8);
-  if (!Number.isFinite(amount)) return safeCurrency;
+  if (!Number.isFinite(amount)) return null;
   return `${safeCurrency} ${amount.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function textValue(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text ? text : null;
 }
 
 function clampLimit(raw: unknown): number {
@@ -143,14 +150,45 @@ function actionText(eventType: string): string {
   }
 }
 
+function requiresDecisionCommentFallback(eventType: string): boolean {
+  return eventType === "payment_request.changes_requested" ||
+    eventType === "payment_request.rejected";
+}
+
+function decisionCommentLabel(event: NotificationEvent): string | null {
+  const payload = event.payload || {};
+  const explicitLabel = textValue(payload.decision_label);
+  if (explicitLabel) return explicitLabel;
+
+  switch (event.event_type) {
+    case "payment_request.rejected":
+      return "Motivo de rechazo";
+    case "payment_request.changes_requested":
+      return "Motivo / comentario";
+    case "payment_request.approved":
+      return textValue(payload.decision_comment) ? "Comentario de aprobacion" : null;
+    case "payment_request.exception_approved":
+      return "Motivo / comentario de excepcion aprobada";
+    case "payment_request.exception_rejected":
+      return "Motivo / comentario de excepcion rechazada";
+    default:
+      return null;
+  }
+}
+
 function renderEmail(event: NotificationEvent, sendMode: string): { subject: string; text: string; html: string } {
   const payload = event.payload || {};
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
   const subject = `${subjectPrefix}${event.subject || baseSubject(event)}`;
+  const amountText = money(payload.amount, payload.currency);
+  const commentLabel = decisionCommentLabel(event);
+  const commentText = textValue(payload.decision_comment);
+  const shouldRenderComment = Boolean(commentLabel && (commentText || requiresDecisionCommentFallback(event.event_type)));
+  const renderedCommentText = commentText || "Sin comentario capturado.";
   const rows = [
     ["Folio", event.source_folio || payload.folio],
     ["Proveedor", payload.provider],
-    ["Monto", money(payload.amount, payload.currency)],
+    ["Monto", amountText],
     ["Empresa", payload.company],
     ["Centro de costo", payload.cost_center],
     ["Partida", payload.budget_category],
@@ -162,6 +200,11 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
     actionText(event.event_type),
     "",
     ...rows.map(([label, value]) => `${label}: ${value}`),
+    ...(shouldRenderComment ? [
+      "",
+      `${commentLabel}:`,
+      renderedCommentText,
+    ] : []),
     "",
     "Abrir Flux: /solicitudes.html",
   ];
@@ -169,11 +212,18 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
   const htmlRows = rows
     .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${escapeHtml(label)}</td><td style="padding:4px 0"><strong>${escapeHtml(value)}</strong></td></tr>`)
     .join("");
+  const htmlComment = shouldRenderComment
+    ? `<div style="margin-top:18px;padding:12px;border-left:4px solid #d97706;background:#fff7ed">
+        <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:6px">${escapeHtml(commentLabel)}</div>
+        <div style="white-space:pre-wrap;color:#111">${escapeHtml(renderedCommentText)}</div>
+      </div>`
+    : "";
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.45;color:#111">
       <p>${escapeHtml(actionText(event.event_type))}</p>
       <table style="border-collapse:collapse">${htmlRows}</table>
+      ${htmlComment}
       <p style="margin-top:18px;color:#555">Abrir Flux: <strong>/solicitudes.html</strong></p>
       ${sendMode === "test_only" ? `<p style="margin-top:18px;color:#b45309">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>` : ""}
     </div>
@@ -383,3 +433,4 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return jsonResponse({ error: message.slice(0, 300) }, 500);
   }
 });
+
