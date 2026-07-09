@@ -1,5 +1,16 @@
 // Configuracion Supabase
 // No uses la secret key en frontend.
+;(function restoreFluxTheme() {
+  // Restaura el tema (claro/oscuro) guardado en localStorage en TODAS las páginas,
+  // temprano y de forma consistente (antes iba página por página y faltaba en
+  // ingresos.js/layouts.js, por eso se perdía al cambiar de módulo).
+  try {
+    const saved = localStorage.getItem("flux-theme")
+    if (saved) document.documentElement.setAttribute("data-theme", saved)
+  } catch (_) {
+    // localStorage puede estar bloqueado por el navegador.
+  }
+})()
 ;(function installEarlyFluxShellSkeleton() {
   if (document.getElementById("fluxShellReadyStyles")) return
   const style = document.createElement("style")
