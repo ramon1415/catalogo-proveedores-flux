@@ -5,6 +5,7 @@ let currentEditingId = null
 let currentProfileId = null
 let currentCsfPath = null
 let providerCsfUpload = null
+let providerSaveInProgress = false
 
 const rootElement = document.documentElement
 const tableBody = document.getElementById("suppliersTableBody")
@@ -259,6 +260,28 @@ function inferDestinationType() {
 
 async function saveSupplier(event) {
   event.preventDefault()
+  if (providerSaveInProgress) return
+
+  providerSaveInProgress = true
+  const submitButton = form.querySelector('button[type="submit"]')
+  const submitButtonLabel = submitButton?.textContent || "Guardar proveedor"
+  if (submitButton) {
+    submitButton.disabled = true
+    submitButton.textContent = "Guardando..."
+  }
+
+  try {
+    await persistSupplier()
+  } finally {
+    providerSaveInProgress = false
+    if (submitButton) {
+      submitButton.disabled = false
+      submitButton.textContent = submitButtonLabel
+    }
+  }
+}
+
+async function persistSupplier() {
   const csfFile = providerCsfUpload?.getFile?.() || null
   const canUploadCsf = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
 
@@ -338,7 +361,12 @@ async function saveSupplier(event) {
       if (csfError) throw csfError
     } catch (error) {
       csfUploadFailed = true
-      showToast("CSF no vinculado", "El proveedor se guardo, pero la CSF no pudo subirse.", "warning")
+      console.error("[Flux] Provider CSF upload failed", {
+        code: error?.code || null,
+        message: error?.message || "unknown_error",
+        status: error?.statusCode || error?.status || null,
+      })
+      showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
     }
   }
 
