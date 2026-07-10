@@ -37,6 +37,7 @@
       const validation = validatePayload(payload)
       if (validation) {
         toast("Revisa la solicitud", validation, "warning")
+        window.focusFirstInvalidRequestField?.()
         form.dataset.fase2SuccessSubmitting = "false"
         setButtonLoading(submitButton, false, "Crear solicitud")
         return
@@ -73,7 +74,11 @@
       if (metadataWarning) toast("Metodo de pago pendiente", metadataWarning, "warning")
       refreshRequestsList(requestId)
     } catch (error) {
-      toast("No se pudo crear la solicitud", friendlyError(error), "error")
+      await window.refreshPaymentRequestApproversAfterError?.(error)
+      const message = typeof window.friendlyError === "function"
+        ? window.friendlyError(error, "create_payment_request")
+        : friendlyError(error)
+      toast("No se pudo crear la solicitud", message, "error")
       form.dataset.fase2SuccessSubmitting = "false"
       setButtonLoading(submitButton, false, "Crear solicitud")
     }
@@ -204,13 +209,16 @@
     if (!payload.request_type) return "Selecciona el tipo de solicitud."
     if (!payload.payment_method) return "Selecciona el metodo de pago."
     if (!payload.company_id) return "Selecciona una empresa."
-    if (!payload.approver_id) return "Selecciona quien revisa o aprueba la solicitud."
     if (!payload.cost_center_id) return "Selecciona un centro de costo."
     if (!payload.budget_category_id) return "Selecciona una partida presupuestal."
     if (!payload.budget_month) return "Selecciona el mes presupuestal."
     if (!payload.proveedor_id) return "Selecciona un proveedor."
     if (!payload.amount_requested || payload.amount_requested <= 0) return "El monto solicitado debe ser mayor a 0."
     if (!payload.description) return "Captura una descripcion."
+    if (typeof window.validatePaymentRequestApproverSelection === "function") {
+      return window.validatePaymentRequestApproverSelection()
+    }
+    if (!payload.approver_id) return "Selecciona quien revisara esta solicitud."
     return ""
   }
 

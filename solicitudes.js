@@ -10,6 +10,7 @@ let budgetAvailabilityRows = [];
 let approverCandidates = [];
 let approverLoadVersion = 0;
 let approverReloadTimer = null;
+let pendingApproverSelection = null;
 let highlightedRequestId = null;
 let currentDetailRequestId = null;
 let requestFileUpload = null;
@@ -322,7 +323,7 @@ async function handleBudgetScopeChange() {
 
 async function handleCompanyScopeChange() {
   approverLoadVersion += 1;
-  resetApproverSelect("Cargando aprobadores disponibles...");
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
   await handleBudgetScopeChange();
   await loadPaymentRequestApproverOptions();
   updateSummaryPanel();
@@ -330,7 +331,7 @@ async function handleCompanyScopeChange() {
 
 async function handleBudgetAndApproverScopeChange() {
   approverLoadVersion += 1;
-  resetApproverSelect("Actualizando aprobadores disponibles...");
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
   await handleBudgetScopeChange();
   await loadPaymentRequestApproverOptions();
 }
@@ -338,20 +339,47 @@ async function handleBudgetAndApproverScopeChange() {
 function scheduleApproverOptionsLoad() {
   window.clearTimeout(approverReloadTimer);
   approverLoadVersion += 1;
-  resetApproverSelect("Actualizando aprobadores disponibles...");
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
   approverReloadTimer = window.setTimeout(loadPaymentRequestApproverOptions, 300);
 }
 
-function resetApproverSelect(label = "Completa empresa, centro de costo y monto") {
+function captureApproverSelection() {
+  const selected = approverCandidates.find(candidate => candidate.profile_id === dom.approverId?.value);
+  if (!selected) return;
+  pendingApproverSelection = {
+    profile_id: selected.profile_id,
+    assignment_id: selected.assignment_id || null,
+    source: selected.source || "approval_rules",
+  };
+}
+
+function candidateMatchesSelection(candidate, selection) {
+  if (!candidate || !selection) return false;
+  if (candidate.profile_id !== selection.profile_id) return false;
+  if ((candidate.source || "approval_rules") !== selection.source) return false;
+  if (selection.source === "assigned") {
+    return (candidate.assignment_id || null) === selection.assignment_id;
+  }
+  return true;
+}
+
+function invalidateApproverOptions(label) {
+  captureApproverSelection();
+  resetApproverSelect(label, true);
+}
+
+function resetApproverSelect(label = "Completa empresa, centro de costo y monto", preservePendingSelection = false) {
+  if (!preservePendingSelection) pendingApproverSelection = null;
   approverCandidates = [];
   if (!dom.approverId) return;
   dom.approverId.disabled = true;
   dom.approverId.innerHTML = optionPlaceholder(label);
   if (dom.approverAssignmentId) dom.approverAssignmentId.value = "";
   if (dom.approverHelp) {
-    dom.approverHelp.textContent = "Selecciona empresa, centro de costo y monto para cargar aprobadores disponibles.";
+    dom.approverHelp.textContent = "Cuando completes los datos de la solicitud, mostraremos los aprobadores disponibles.";
     dom.approverHelp.style.color = "";
   }
+  updateSummaryPanel();
 }
 
 async function loadPaymentRequestApproverOptions() {
@@ -359,22 +387,21 @@ async function loadPaymentRequestApproverOptions() {
   const costCenterId = dom.costCenterId?.value || null;
   const amount = numberValue(dom.amountRequested?.value);
   const requestVersion = ++approverLoadVersion;
-  if (!companyId) {
-    resetApproverSelect();
-    updateSummaryPanel();
+  if (!companyId || !costCenterId || amount <= 0) {
+    resetApproverSelect("Completa empresa, centro de costo y monto", true);
     return;
   }
 
-  resetApproverSelect("Cargando aprobadores disponibles...");
+  resetApproverSelect("Cargando aprobadores disponibles...", true);
   const { data, error } = await supabaseClient.rpc("list_payment_request_approver_options", {
     p_company_id: companyId,
     p_cost_center_id: costCenterId,
-    p_amount: amount > 0 ? amount : null,
+    p_amount: amount,
   });
   if (requestVersion !== approverLoadVersion) return;
 
   if (error) {
-    resetApproverSelect("No se pudieron cargar aprobadores");
+    resetApproverSelect("No se pudieron cargar aprobadores", true);
     if (dom.approverHelp) {
       dom.approverHelp.textContent = friendlyError(error, "list_payment_request_approver_options");
       dom.approverHelp.style.color = "var(--ruby)";
@@ -383,14 +410,13 @@ async function loadPaymentRequestApproverOptions() {
     return;
   }
 
+  const previousSelection = pendingApproverSelection;
+  pendingApproverSelection = null;
   approverCandidates = Array.isArray(data) ? data : [];
   if (!approverCandidates.length) {
-    const scopeComplete = Boolean(costCenterId && amount > 0);
-    resetApproverSelect(scopeComplete ? "Sin aprobadores disponibles" : "Completa centro de costo y monto");
+    resetApproverSelect("Sin aprobadores disponibles");
     if (dom.approverHelp) {
-      dom.approverHelp.textContent = scopeComplete
-        ? "No hay aprobadores disponibles para esta empresa y condiciones. Solicita a un administrador configurar uno."
-        : "Completa centro de costo y monto para evaluar las reglas de aprobación.";
+      dom.approverHelp.textContent = "No hay aprobadores disponibles para esta empresa y condiciones. Solicita a un administrador configurar uno.";
       dom.approverHelp.style.color = "var(--amber)";
     }
     updateSummaryPanel();
@@ -404,26 +430,91 @@ async function loadPaymentRequestApproverOptions() {
     }).join("");
 
   dom.approverId.disabled = false;
-  if (approverCandidates.length === 1) {
+  const preservedCandidate = previousSelection
+    ? approverCandidates.find(candidate => candidateMatchesSelection(candidate, previousSelection))
+    : null;
+  if (preservedCandidate) {
+    dom.approverId.value = preservedCandidate.profile_id;
+  } else if (approverCandidates.length === 1) {
     dom.approverId.value = approverCandidates[0].profile_id;
   }
   syncApproverSelection();
   if (dom.approverHelp) {
     const source = approverCandidates[0]?.source;
-    dom.approverHelp.textContent = source === "assigned"
+    const sourceHelp = source === "assigned"
       ? "Selecciona uno de los aprobadores configurados para ti en esta empresa."
       : "No tienes aprobadores configurados. Se muestran usuarios elegibles según las reglas de aprobación.";
-    dom.approverHelp.style.color = source === "assigned" ? "var(--accent-text)" : "";
+    if (approverCandidates.length === 1) {
+      dom.approverHelp.textContent = `Único aprobador disponible para estas condiciones. ${sourceHelp}`;
+    } else if (previousSelection && !preservedCandidate) {
+      dom.approverHelp.textContent = `La selección anterior ya no está disponible. ${sourceHelp}`;
+    } else {
+      dom.approverHelp.textContent = sourceHelp;
+    }
+    dom.approverHelp.style.color = previousSelection && !preservedCandidate
+      ? "var(--amber)"
+      : source === "assigned" ? "var(--accent-text)" : "";
   }
   updateSummaryPanel();
 }
 
 function syncApproverSelection() {
+  pendingApproverSelection = null;
   const option = dom.approverId?.selectedOptions?.[0];
   if (dom.approverAssignmentId) {
     dom.approverAssignmentId.value = option?.dataset?.assignmentId || "";
   }
 }
+
+function validatePaymentRequestApproverSelection() {
+  const approverId = dom.approverId?.value || "";
+  if (!approverId) return "Selecciona quién revisará esta solicitud.";
+  const selected = approverCandidates.find(candidate => candidate.profile_id === approverId);
+  if (!selected) return "La lista de aprobadores cambió. Revisa las opciones y selecciona nuevamente.";
+  const assignmentId = dom.approverAssignmentId?.value || null;
+  if (selected.source === "assigned" && assignmentId !== (selected.assignment_id || null)) {
+    return "La opción configurada perdió su referencia. Revisa las opciones y selecciona nuevamente.";
+  }
+  return "";
+}
+
+function focusFirstInvalidRequestField() {
+  const target = dom.requestForm?.querySelector(":invalid") || dom.approverId;
+  const scrollTarget = target?.closest("label, .form-section") || target;
+  scrollTarget?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (target && !target.disabled) {
+    window.setTimeout(() => target.focus({ preventScroll: true }), 120);
+  }
+}
+
+async function refreshPaymentRequestApproversAfterError(error) {
+  const message = String(error?.message || error || "");
+  const staleKeys = [
+    "approver_assignment_id_required",
+    "approver_assignment_not_active",
+    "approver_assignment_snapshot_mismatch",
+    "approver_assignment_not_allowed_without_pool",
+    "approver_not_in_configured_pool",
+    "approver_must_come_from_configured_pool",
+    "approver_not_allowed_by_approval_rules",
+    "configured_approver_no_longer_eligible",
+  ];
+  if (!staleKeys.some(key => message.includes(key))) return false;
+
+  pendingApproverSelection = null;
+  resetApproverSelect("Actualizando aprobadores disponibles...");
+  await loadPaymentRequestApproverOptions();
+  if (dom.approverHelp) {
+    const currentHelp = dom.approverHelp.textContent || "";
+    dom.approverHelp.textContent = `La lista de aprobadores cambió. Revisa y selecciona nuevamente. ${currentHelp}`.trim();
+    dom.approverHelp.style.color = "var(--amber)";
+  }
+  return true;
+}
+
+window.validatePaymentRequestApproverSelection = validatePaymentRequestApproverSelection;
+window.focusFirstInvalidRequestField = focusFirstInvalidRequestField;
+window.refreshPaymentRequestApproversAfterError = refreshPaymentRequestApproversAfterError;
 
 async function loadAvailableBudgetCategories() {
   const companyId = dom.companyId.value;
@@ -860,6 +951,7 @@ async function submitPaymentRequest(event) {
   const validation = validateRequestPayload(payload);
   if (validation) {
     showToast("Revisa la solicitud", validation, "warning");
+    focusFirstInvalidRequestField();
     return;
   }
 
@@ -920,6 +1012,7 @@ async function submitPaymentRequest(event) {
     highlightedRequestId = newRequestId;
     await loadPaymentRequests();
   } catch (error) {
+    await refreshPaymentRequestApproversAfterError(error);
     showToast("No se pudo crear la solicitud", friendlyError(error, "create_payment_request"), "error");
     dom.submitRequestBtn.disabled = false;
     dom.submitRequestBtn.textContent = "Crear solicitud";
@@ -950,10 +1043,6 @@ function collectRequestPayload() {
 
 function validateRequestPayload(payload) {
   if (!payload.company_id) return "Selecciona una empresa.";
-  if (!payload.approver_id) return "Selecciona quién revisará esta solicitud.";
-  const selectedApprover = approverCandidates.find(candidate => candidate.profile_id === payload.approver_id);
-  if (!selectedApprover) return "El aprobador seleccionado ya no es válido. Vuelve a cargar las opciones.";
-  if (selectedApprover.source === "assigned" && !payload.approver_assignment_id) return "La opción configurada perdió su referencia. Vuelve a seleccionarla.";
   if (!payload.cost_center_id) return "Selecciona un centro de costo.";
   if (!payload.budget_category_id) return "Selecciona una partida presupuestal.";
   if (!availabilityForCategory(payload.budget_category_id)) return "La partida seleccionada no esta disponible para la empresa, centro de costo y mes.";
@@ -963,7 +1052,7 @@ function validateRequestPayload(payload) {
   if (!payload.currency) return "Selecciona la moneda.";
   if (!payload.exchange_rate || payload.exchange_rate <= 0) return "El tipo de cambio debe ser mayor a 0.";
   if (!payload.description) return "Captura una descripcion.";
-  return "";
+  return validatePaymentRequestApproverSelection();
 }
 
 function openRequestDetail(id) {
@@ -1592,9 +1681,15 @@ function updateSummaryPanel() {
 
   dom.summaryCompany.textContent = company ? companyName(company) : "Sin seleccionar";
   if (dom.summaryApprover) {
-    dom.summaryApprover.textContent = approver
-      ? `${approver.display_name || approver.email}${approver.source === "assigned" ? " · Configurado" : " · Por reglas"}`
-      : "Sin seleccionar";
+    if (approver) {
+      const roles = Array.isArray(approver.eligible_roles) && approver.eligible_roles.length
+        ? ` · ${approver.eligible_roles.join(", ")}`
+        : "";
+      const source = approver.source === "assigned" ? " · Configurado" : " · Elegible por reglas";
+      dom.summaryApprover.textContent = `${approver.display_name || approver.email}${roles}${source}`;
+    } else {
+      dom.summaryApprover.textContent = "Pendiente de seleccionar";
+    }
   }
   dom.summaryCostCenter.textContent = center ? costCenterName(center) : "Sin seleccionar";
   dom.summaryCategory.textContent = category
