@@ -311,6 +311,7 @@
         p_notes: payload.notes,
         p_requested_by: payload.requested_by,
         p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+        p_approver_id: payload.approver_id,
       })
       if (error) throw error
 
@@ -347,6 +348,7 @@
       payment_method: paymentMethod,
       proveedor_id: value("proveedorId"),
       company_id: value("companyId"),
+      approver_id: value("approverId"),
       cost_center_id: value("costCenterId"),
       budget_category_id: value("budgetCategoryId"),
       budget_month: value("budgetMonth") ? value("budgetMonth") + "-01" : null,
@@ -367,6 +369,7 @@
     if (!payload.request_type) return "Selecciona el tipo de solicitud."
     if (!payload.payment_method) return "Selecciona el metodo de pago."
     if (!payload.company_id) return "Selecciona una empresa."
+    if (!payload.approver_id) return "Selecciona quien revisa o aprueba la solicitud."
     if (!payload.cost_center_id) return "Selecciona un centro de costo."
     if (!payload.budget_category_id) return "Selecciona una partida presupuestal."
     if (!payload.budget_month) return "Selecciona el mes presupuestal."
@@ -434,6 +437,12 @@
     panel?.remove()
     form.reset()
     form.dataset.fase2Submitting = "false"
+    const approver = document.getElementById("approverId")
+    if (approver) {
+      approver.disabled = true
+      approver.innerHTML = '<option value="">Selecciona primero una empresa</option>'
+      approver.dispatchEvent(new Event("change", { bubbles: true }))
+    }
     modalScroll?.classList.remove("hidden")
     if (actions?.dataset.fase2OriginalHtml) actions.innerHTML = actions.dataset.fase2OriginalHtml
     document.getElementById("cancelRequestBtn")?.addEventListener("click", () => document.getElementById("requestDialog")?.close())

@@ -7,6 +7,8 @@ let costCenters = [];
 let budgetCategories = [];
 let proveedores = [];
 let budgetAvailabilityRows = [];
+let approverCandidates = [];
+let approverLoadVersion = 0;
 let highlightedRequestId = null;
 let currentDetailRequestId = null;
 let requestFileUpload = null;
@@ -110,6 +112,8 @@ function cacheDom() {
   dom.toastStack = document.getElementById("toastStack");
 
   dom.companyId = document.getElementById("companyId");
+  dom.approverId = document.getElementById("approverId");
+  dom.approverHelp = document.getElementById("approverHelp");
   dom.costCenterId = document.getElementById("costCenterId");
   dom.budgetCategoryId = document.getElementById("budgetCategoryId");
   dom.budgetCategorySearch = document.getElementById("budgetCategorySearch");
@@ -129,6 +133,7 @@ function cacheDom() {
   dom.notes = document.getElementById("notes");
 
   dom.summaryCompany = document.getElementById("summaryCompany");
+  dom.summaryApprover = document.getElementById("summaryApprover");
   dom.summaryCostCenter = document.getElementById("summaryCostCenter");
   dom.summaryCategory = document.getElementById("summaryCategory");
   dom.summaryProvider = document.getElementById("summaryProvider");
@@ -202,7 +207,8 @@ function bindEvents() {
     });
   });
 
-  dom.companyId?.addEventListener("change", handleBudgetScopeChange);
+  dom.companyId?.addEventListener("change", handleCompanyScopeChange);
+  dom.approverId?.addEventListener("change", updateSummaryPanel);
   dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
   dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
@@ -263,7 +269,7 @@ async function loadPaymentRequests() {
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
+    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -303,6 +309,90 @@ function renderCostCenterOptions() {
 async function handleBudgetScopeChange() {
   dom.budgetCategoryId.value = "";
   await loadAvailableBudgetCategories();
+  updateSummaryPanel();
+}
+
+async function handleCompanyScopeChange() {
+  resetApproverSelect("Cargando revisores elegibles...");
+  await Promise.all([
+    handleBudgetScopeChange(),
+    loadPaymentRequestApprovers(),
+  ]);
+  updateSummaryPanel();
+}
+
+function resetApproverSelect(label = "Selecciona primero una empresa") {
+  approverCandidates = [];
+  if (!dom.approverId) return;
+  dom.approverId.disabled = true;
+  dom.approverId.dataset.fixed = "false";
+  dom.approverId.innerHTML = optionPlaceholder(label);
+  if (dom.approverHelp) {
+    dom.approverHelp.textContent = "Solo se muestran perfiles finance/director con membresía activa en la empresa.";
+    dom.approverHelp.style.color = "";
+  }
+}
+
+async function loadPaymentRequestApprovers() {
+  const companyId = dom.companyId?.value || "";
+  const requestVersion = ++approverLoadVersion;
+  if (!companyId) {
+    resetApproverSelect();
+    updateSummaryPanel();
+    return;
+  }
+
+  resetApproverSelect("Cargando revisores elegibles...");
+  const { data, error } = await supabaseClient.rpc("list_payment_request_approvers", {
+    p_company_id: companyId,
+  });
+  if (requestVersion !== approverLoadVersion) return;
+
+  if (error) {
+    resetApproverSelect("No se pudieron cargar revisores");
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = friendlyError(error, "list_payment_request_approvers");
+      dom.approverHelp.style.color = "var(--ruby)";
+    }
+    updateSummaryPanel();
+    return;
+  }
+
+  approverCandidates = Array.isArray(data) ? data : [];
+  if (!approverCandidates.length) {
+    resetApproverSelect("Sin revisores elegibles");
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = "Configura membresías y perfiles finance/director para esta empresa.";
+      dom.approverHelp.style.color = "var(--amber)";
+    }
+    updateSummaryPanel();
+    return;
+  }
+
+  const fixed = approverCandidates.find(candidate => candidate.is_fixed);
+  dom.approverId.innerHTML = optionPlaceholder("Seleccionar revisor / aprobador") +
+    approverCandidates.map(candidate => {
+      const roleText = Array.isArray(candidate.eligible_roles) ? candidate.eligible_roles.join(", ") : "";
+      const label = [candidate.display_name || candidate.email || "Sin nombre", roleText].filter(Boolean).join(" · ");
+      return `<option value="${escapeHtml(candidate.profile_id)}">${escapeHtml(label)}</option>`;
+    }).join("");
+
+  if (fixed) {
+    dom.approverId.value = fixed.profile_id;
+    dom.approverId.disabled = true;
+    dom.approverId.dataset.fixed = "true";
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = "Aprobador asignado por configuración.";
+      dom.approverHelp.style.color = "var(--accent-text)";
+    }
+  } else {
+    dom.approverId.disabled = false;
+    dom.approverId.dataset.fixed = "false";
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = "Selecciona quién recibirá la notificación inicial de revisión.";
+      dom.approverHelp.style.color = "";
+    }
+  }
   updateSummaryPanel();
 }
 
@@ -677,6 +767,7 @@ function openNewRequestModal() {
   if (dom.providerSearch) dom.providerSearch.value = "";
   if (dom.proveedorId) { dom.proveedorId.value = ""; dom.proveedorId.dispatchEvent(new Event("change")); }
   renderProveedorOptions("");
+  resetApproverSelect();
   budgetAvailabilityRows = [];
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
@@ -701,12 +792,16 @@ async function fillDemoRequest() {
       dom.companyId.value = row.company_id;
       dom.costCenterId.value = row.cost_center_id;
       dom.budgetMonth.value = String(row.budget_month).slice(0, 7);
-      await handleBudgetScopeChange();
+      await handleCompanyScopeChange();
       if (row.budget_category_id) dom.budgetCategoryId.value = row.budget_category_id;
     } else {
       if (dom.companyId.options.length > 1) dom.companyId.selectedIndex = 1;
       if (dom.costCenterId.options.length > 1) dom.costCenterId.selectedIndex = 1;
-      await handleBudgetScopeChange();
+      await handleCompanyScopeChange();
+    }
+
+    if (!dom.approverId.disabled && dom.approverId.options.length > 1) {
+      dom.approverId.selectedIndex = 1;
     }
 
     if (proveedores.length) selectProvider(proveedores[0].id, proveedorLabel(proveedores[0]));
@@ -755,6 +850,7 @@ async function submitPaymentRequest(event) {
       p_notes: payload.notes,
       p_requested_by: currentProfileId,
       p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+      p_approver_id: payload.approver_id,
     });
 
     if (error) throw error;
@@ -806,6 +902,7 @@ function collectRequestPayload() {
   return {
     proveedor_id: dom.proveedorId.value || null,
     company_id: dom.companyId.value || null,
+    approver_id: dom.approverId?.value || null,
     cost_center_id: dom.costCenterId.value || null,
     budget_category_id: dom.budgetCategoryId.value || null,
     budget_month: monthInputToDate(dom.budgetMonth.value),
@@ -820,6 +917,7 @@ function collectRequestPayload() {
 
 function validateRequestPayload(payload) {
   if (!payload.company_id) return "Selecciona una empresa.";
+  if (!payload.approver_id) return "Selecciona quién revisa o aprueba la solicitud.";
   if (!payload.cost_center_id) return "Selecciona un centro de costo.";
   if (!payload.budget_category_id) return "Selecciona una partida presupuestal.";
   if (!availabilityForCategory(payload.budget_category_id)) return "La partida seleccionada no esta disponible para la empresa, centro de costo y mes.";
@@ -866,6 +964,7 @@ function openRequestDetail(id) {
     ${Components.refGrid([
       { label: "Proveedor",      value: escapeHtml(proveedorAlias(proveedor)) },
       { label: "Empresa",        value: escapeHtml(companyName(company)) },
+      { label: "Revisor / aprobador", value: `<span id="detailApproverRouting">Cargando...</span>`, full: true },
       { label: "Centro de costo",value: escapeHtml(costCenterName(center)), muted: true },
       { label: "Mes presupuestal",value: escapeHtml(formatMonth(request.budget_month)), muted: true },
       { label: "Partida",        value: escapeHtml(budgetCategoryLabel(category)), muted: true, full: true },
@@ -906,9 +1005,28 @@ function openRequestDetail(id) {
   if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
 
   loadApprovalHistory(request.id);
+  loadDetailApprover(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
   if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
+}
+
+async function loadDetailApprover(paymentRequestId) {
+  const target = document.getElementById("detailApproverRouting");
+  if (!target) return;
+  const { data, error } = await supabaseClient.rpc("get_payment_request_approver_details", {
+    p_payment_request_id: paymentRequestId,
+  });
+  if (error) {
+    target.textContent = "No disponible";
+    return;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.profile_id) {
+    target.textContent = "Sin revisor asignado";
+    return;
+  }
+  target.textContent = `${row.display_name || "Sin nombre"}${row.is_fixed ? " · Aprobador fijo" : " · Revisor seleccionado"}`;
 }
 
 window.openRequestDetail = openRequestDetail;
@@ -1418,6 +1536,7 @@ function renderStatusBadge(status) {
 
 function updateSummaryPanel() {
   const company = companyById(dom.companyId.value);
+  const approver = approverCandidates.find(candidate => candidate.profile_id === dom.approverId?.value);
   const center = costCenterById(dom.costCenterId.value);
   const category = budgetCategoryById(dom.budgetCategoryId.value);
   const availability = availabilityForCategory(dom.budgetCategoryId.value);
@@ -1426,6 +1545,11 @@ function updateSummaryPanel() {
   const currency = dom.currency?.value || "MXN";
 
   dom.summaryCompany.textContent = company ? companyName(company) : "Sin seleccionar";
+  if (dom.summaryApprover) {
+    dom.summaryApprover.textContent = approver
+      ? `${approver.display_name || approver.email}${approver.is_fixed ? " · Fijo" : ""}`
+      : "Sin seleccionar";
+  }
   dom.summaryCostCenter.textContent = center ? costCenterName(center) : "Sin seleccionar";
   dom.summaryCategory.textContent = category
     ? `${budgetCategoryLabel(category)} | Disp. ${formatCurrency(getAvailableAmount(availability), "MXN")}`
@@ -1686,6 +1810,17 @@ function showToast(title, message, type = "success") {
 
 function friendlyError(error, operation = "") {
   const message = error?.message || String(error || "Error desconocido");
+  const routingErrors = {
+    company_scope_required: "Tu perfil no tiene membresía activa en la empresa seleccionada.",
+    approver_id_required: "Selecciona quién revisa o aprueba la solicitud.",
+    approver_not_eligible_for_company: "El revisor ya no es elegible para esta empresa.",
+    fixed_approver_mismatch: "La empresa y el solicitante tienen un aprobador fijo diferente.",
+    fixed_approver_assignment_invalid: "La asignación fija ya no es válida. Revisa Configuración.",
+    requester_company_membership_required: "El solicitante no tiene membresía activa en la empresa.",
+    requester_cannot_be_own_approver: "El solicitante no puede aprobar su propia solicitud.",
+  };
+  const routingKey = Object.keys(routingErrors).find(key => message.includes(key));
+  if (routingKey) return routingErrors[routingKey];
   if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
     return `${operation ? `${operation}: ` : ""}la operacion fue bloqueada por RLS. Revisa policies para usuarios autenticados.`;
   }
@@ -1713,6 +1848,9 @@ function friendlyDecisionError(error) {
     actor_cannot_reject: "Tu rol no tiene permiso para rechazar esta solicitud.",
     actor_cannot_request_changes: "Tu rol no tiene permiso para solicitar cambios.",
     actor_cannot_request_budget_adjustment: "Tu rol no tiene permiso para solicitar ajuste presupuestal.",
+    fixed_approver_only: "Esta solicitud tiene un aprobador fijo. Solo esa persona puede registrar la decisión.",
+    fixed_approver_assignment_invalid: "La asignación fija ya no es válida. Revisa membresía y rol en Configuración.",
+    actor_profile_must_match_current_profile: "La sesión no coincide con el perfil que intenta decidir.",
   };
 
   const key = Object.keys(known).find(item => message.includes(item));

@@ -390,6 +390,7 @@ function openDetail(requestId) {
   dom.detailContent.innerHTML = renderDetail(request)
   dom.decisionActions.innerHTML = renderDecisionActions(request)
   dom.detailDialog.showModal()
+  loadDetailApprover(request.id)
 }
 
 function closeDetail() {
@@ -438,6 +439,10 @@ function renderDetail(request) {
           <span class="ref-label">Mes presupuestal</span>
           <span class="ref-value">${escapeHtml(formatMonth(request.budget_month))}</span>
         </div>
+        <div class="ref-cell" style="grid-column:1/-1">
+          <span class="ref-label">Revisor / aprobador</span>
+          <span class="ref-value" id="approvalDetailApprover">Cargando...</span>
+        </div>
       </div>
       ${(layoutLine || fund || request.is_extraordinary_adjustment) ? `
       <div class="data-section">
@@ -449,6 +454,24 @@ function renderDetail(request) {
       </div>` : ""}
     </div>
   `
+}
+
+async function loadDetailApprover(paymentRequestId) {
+  const target = document.getElementById("approvalDetailApprover")
+  if (!target) return
+  const { data, error } = await supabaseClient.rpc("get_payment_request_approver_details", {
+    p_payment_request_id: paymentRequestId,
+  })
+  if (error) {
+    target.textContent = "No disponible"
+    return
+  }
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.profile_id) {
+    target.textContent = "Sin revisor asignado"
+    return
+  }
+  target.textContent = `${row.display_name || "Sin nombre"}${row.is_fixed ? " · Aprobador fijo" : " · Revisor seleccionado"}`
 }
 
 function renderDecisionActions(request) {
@@ -562,7 +585,7 @@ function formatMonth(value) {
 
 function friendlyDecisionError(error) {
   const msg = error?.message || String(error || "")
-  const map = { actor_cannot_approve: "Tu rol no tiene permiso para aprobar.", actor_cannot_reject: "Tu rol no tiene permiso para rechazar.", comments_required_for_changes_requested: "El comentario es obligatorio para solicitar cambios.", comments_required_for_exception_action: "El comentario es obligatorio para decisiones de excepcion." }
+  const map = { actor_cannot_approve: "Tu rol no tiene permiso para aprobar.", actor_cannot_reject: "Tu rol no tiene permiso para rechazar.", comments_required_for_changes_requested: "El comentario es obligatorio para solicitar cambios.", comments_required_for_exception_action: "El comentario es obligatorio para decisiones de excepcion.", fixed_approver_only: "Esta solicitud tiene un aprobador fijo. Solo esa persona puede registrar la decision.", fixed_approver_assignment_invalid: "La asignacion fija ya no es valida. Revisa membresia y rol en Configuracion.", actor_profile_must_match_current_profile: "La sesion no coincide con el perfil que intenta decidir." }
   return map[msg] || friendlyError(error)
 }
 

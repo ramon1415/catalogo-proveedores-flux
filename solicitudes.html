@@ -243,6 +243,12 @@
                 <label>Empresa *
                   <select id="companyId" class="form-control" required></select>
                 </label>
+                <label class="full-row">¿Quién revisa/aprueba? *
+                  <select id="approverId" class="form-control" required disabled>
+                    <option value="">Selecciona primero una empresa</option>
+                  </select>
+                  <span id="approverHelp" class="field-hint">Solo se muestran perfiles finance/director con membresía activa en la empresa.</span>
+                </label>
                 <label>Centro de costo *
                   <select id="costCenterId" class="form-control" required></select>
                 </label>
@@ -311,6 +317,7 @@
             <p>Vista previa de la solicitud antes de validar.</p>
             <div class="sol-summary-list">
               <label>Empresa <span id="summaryCompany" class="summary-value">Sin seleccionar</span></label>
+              <label>Revisor / aprobador <span id="summaryApprover" class="summary-value">Sin seleccionar</span></label>
               <label>Centro de costo <span id="summaryCostCenter" class="summary-value">Sin seleccionar</span></label>
               <label>Partida <span id="summaryCategory" class="summary-value">Sin seleccionar</span></label>
               <label>Proveedor <span id="summaryProvider" class="summary-value">Sin seleccionar</span></label>
@@ -444,10 +451,10 @@
   <script src="./config.js?v=20260701-reconcile"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260701-reconcile"></script>
-  <script src="./cash_flow_extension.js"></script>
-  <script src="./fase2_request_payment_method_extension.js?v=20260630-hotfix-loop2"></script>
-  <script src="./fase2_request_success_patch.js?v=20260617-schema-guard"></script>
+  <script src="./solicitudes.js?v=20260709-approver-routing"></script>
+  <script src="./cash_flow_extension.js?v=20260709-approver-routing"></script>
+  <script src="./fase2_request_payment_method_extension.js?v=20260709-approver-routing"></script>
+  <script src="./fase2_request_success_patch.js?v=20260709-approver-routing"></script>
   <script src="./budget_live_frontend_guards.js?v=20260707-detail-loop-fix"></script>
 </body>
 </html>
