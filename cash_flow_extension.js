@@ -178,6 +178,7 @@
         p_requested_by: currentProfile?.id || null,
         p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
         p_approver_id: payload.approver_id,
+        p_approver_assignment_id: payload.approver_assignment_id,
       })
       if (error) throw error
 
@@ -212,6 +213,7 @@
       proveedor_id: value("proveedorId"),
       company_id: value("companyId"),
       approver_id: value("approverId"),
+      approver_assignment_id: value("approverAssignmentId") || null,
       cost_center_id: value("costCenterId"),
       budget_category_id: value("budgetCategoryId"),
       budget_month: value("budgetMonth") ? `${value("budgetMonth")}-01` : null,
