@@ -147,7 +147,9 @@ declare
 begin
   v_deactivating := tg_op = 'DELETE';
   if tg_op = 'UPDATE' then
-    v_deactivating := old.active and not new.active;
+    v_deactivating := (old.active and not new.active)
+      or new.profile_id is distinct from old.profile_id
+      or new.company_id is distinct from old.company_id;
   end if;
 
   if v_deactivating and exists (
@@ -168,7 +170,7 @@ $$;
 
 drop trigger if exists protect_assigned_company_membership on public.profile_company_memberships;
 create trigger protect_assigned_company_membership
-  before update of active or delete on public.profile_company_memberships
+  before update of profile_id, company_id, active or delete on public.profile_company_memberships
   for each row execute function public.protect_assigned_company_membership();
 
 create or replace function public.validate_payment_request_approver_scope()
@@ -182,6 +184,11 @@ declare
 begin
   if new.approver_id is null then
     if tg_op = 'INSERT' then
+      raise exception 'payment_request_approver_required';
+    end if;
+    if old.approver_id is not null
+       or new.company_id is distinct from old.company_id
+       or new.requested_by is distinct from old.requested_by then
       raise exception 'payment_request_approver_required';
     end if;
     return new;
