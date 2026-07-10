@@ -19,6 +19,7 @@ begin
         with check (
           bucket_id = 'payment-receipts'
           and name like 'csf/%'
+          and public.current_user_has_role(public.flux_approver_roles())
         )
     $policy$;
   end if;
@@ -43,6 +44,7 @@ begin
         using (
           bucket_id = 'payment-receipts'
           and name like 'csf/%'
+          and public.current_user_has_role(public.flux_approver_roles())
         )
     $policy$;
   end if;
