@@ -920,7 +920,7 @@ async function saveRoutingAssignment(event) {
       p_approver_id: approverId,
     })
     if (error) throw error
-    showToast("Aprobador agregado", "El aprobador quedó disponible para este solicitante y empresa.", "success")
+    showToast("Aprobador agregado correctamente", "El aprobador quedó disponible para este solicitante y empresa.", "success")
     await loadApproverRoutingAdmin()
   } catch (error) {
     showToast("No se pudo guardar", friendlyRoutingError(error), "danger")
@@ -966,7 +966,7 @@ async function handleRoutingAssignmentAction(event) {
         })
     if (error) throw error
     showToast(
-      activating ? "Aprobador activado" : "Aprobador eliminado",
+      activating ? "Aprobador activado correctamente" : "Aprobador eliminado correctamente",
       activating ? "Volvió a quedar disponible en el pool." : "Los demás aprobadores configurados permanecen sin cambios.",
       "success"
     )
@@ -991,6 +991,8 @@ function friendlyRoutingError(error) {
     routing_admin_required: "Solo SysAdmin puede administrar el enrutamiento.",
     membership_used_by_active_approver_pool: "Quita primero los aprobadores activos que usan esta membresía.",
     requester_company_membership_required: "El solicitante necesita membresía activa en la empresa.",
+    approver_company_membership_required: "El usuario no pertenece a la empresa o su membresía no está activa.",
+    approver_role_required: "El usuario no tiene rol finance/director.",
     approver_not_eligible_for_company: "El aprobador debe ser finance/director y pertenecer a la empresa.",
     requester_cannot_be_own_pool_approver: "El solicitante no puede agregarse como su propio aprobador.",
     approver_already_configured: "Este aprobador ya está configurado para el solicitante y la empresa.",

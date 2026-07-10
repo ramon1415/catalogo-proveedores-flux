@@ -151,8 +151,17 @@ begin
     if not public.has_active_company_membership(new.requester_id, new.company_id) then
       raise exception 'requester_company_membership_required';
     end if;
-    if not public.is_payment_request_approver_for_company(new.approver_id, new.company_id) then
-      raise exception 'approver_not_eligible_for_company';
+    if not public.has_active_company_membership(new.approver_id, new.company_id) then
+      raise exception 'approver_company_membership_required';
+    end if;
+    if not exists (
+      select 1
+      from public.user_roles ur
+      join public.roles r on r.id = ur.role_id
+      where ur.profile_id = new.approver_id
+        and lower(trim(r.name)) = any (public.payment_request_approver_role_names())
+    ) then
+      raise exception 'approver_role_required';
     end if;
   end if;
 
@@ -547,8 +556,17 @@ begin
   if not public.has_active_company_membership(p_requester_id, p_company_id) then
     raise exception 'requester_company_membership_required';
   end if;
-  if not public.is_payment_request_approver_for_company(p_approver_id, p_company_id) then
-    raise exception 'approver_not_eligible_for_company';
+  if not public.has_active_company_membership(p_approver_id, p_company_id) then
+    raise exception 'approver_company_membership_required';
+  end if;
+  if not exists (
+    select 1
+    from public.user_roles ur
+    join public.roles r on r.id = ur.role_id
+    where ur.profile_id = p_approver_id
+      and lower(trim(r.name)) = any (public.payment_request_approver_role_names())
+  ) then
+    raise exception 'approver_role_required';
   end if;
 
   insert into public.approver_assignments (
