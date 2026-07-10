@@ -758,7 +758,7 @@ async function loadApproverRoutingAdmin() {
   const membershipsBody = document.getElementById("routingMembershipsTableBody")
   const assignmentsBody = document.getElementById("routingAssignmentsTableBody")
   if (membershipsBody) membershipsBody.innerHTML = `<tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">Cargando membresías...</td></tr>`
-  if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">Cargando asignaciones...</td></tr>`
+  if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Cargando aprobadores disponibles...</td></tr>`
 
   try {
     const [companiesResult, membershipsResult, assignmentsResult] = await Promise.all([
@@ -779,7 +779,7 @@ async function loadApproverRoutingAdmin() {
   } catch (error) {
     const message = escHtml(friendlyRoutingError(error))
     if (membershipsBody) membershipsBody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ruby)">${message}</td></tr>`
-    if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ruby)">${message}</td></tr>`
+    if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--ruby)">${message}</td></tr>`
   }
 }
 
@@ -886,17 +886,23 @@ async function loadRoutingApproverOptions() {
   }
   select.disabled = true
   select.innerHTML = `<option value="">Cargando aprobadores...</option>`
-  const { data, error } = await configClient.rpc("list_payment_request_approvers", { p_company_id: companyId })
+  const { data, error } = await configClient.rpc("list_company_approver_candidates", {
+    p_company_id: companyId,
+    p_requester_id: requesterId,
+  })
   if (error) {
     select.innerHTML = `<option value="">No se pudieron cargar</option>`
     setRoutingAssignmentHelp(friendlyRoutingError(error), true)
     return
   }
-  routingApprovers = (data || []).filter(row => row.profile_id !== requesterId)
+  routingApprovers = data || []
   select.innerHTML = `<option value="">Seleccionar aprobador...</option>` +
-    routingApprovers.map(row => `<option value="${escHtml(row.profile_id)}">${escHtml(row.display_name || row.email || "Sin nombre")}</option>`).join("")
+    routingApprovers.map(row => {
+      const roles = Array.isArray(row.eligible_roles) ? row.eligible_roles.join(", ") : ""
+      return `<option value="${escHtml(row.profile_id)}">${escHtml(row.display_name || row.email || "Sin nombre")}${roles ? ` - ${escHtml(roles)}` : ""}</option>`
+    }).join("")
   select.disabled = !routingApprovers.length
-  setRoutingAssignmentHelp(routingApprovers.length ? "Solo finance/director con membresía activa en esta empresa." : "No hay aprobadores elegibles para esta empresa.", !routingApprovers.length)
+  setRoutingAssignmentHelp(routingApprovers.length ? "Se excluyen los aprobadores que ya están activos en este pool." : "No quedan aprobadores disponibles para agregar.", !routingApprovers.length)
 }
 
 async function saveRoutingAssignment(event) {
@@ -908,13 +914,13 @@ async function saveRoutingAssignment(event) {
   const button = document.getElementById("saveRoutingAssignmentBtn")
   button.disabled = true
   try {
-    const { error } = await configClient.rpc("set_approver_assignment", {
+    const { error } = await configClient.rpc("add_approver_assignment", {
       p_company_id: companyId,
       p_requester_id: requesterId,
       p_approver_id: approverId,
     })
     if (error) throw error
-    showToast("Asignación guardada", "El aprobador fijo quedó configurado.", "success")
+    showToast("Aprobador agregado", "El aprobador quedó disponible para este solicitante y empresa.", "success")
     await loadApproverRoutingAdmin()
   } catch (error) {
     showToast("No se pudo guardar", friendlyRoutingError(error), "danger")
@@ -927,7 +933,7 @@ function renderRoutingAssignments() {
   const tbody = document.getElementById("routingAssignmentsTableBody")
   if (!tbody) return
   if (!routingAssignments.length) {
-    tbody.innerHTML = `<tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">No hay aprobadores fijos configurados.</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">No hay aprobadores disponibles configurados.</td></tr>`
     return
   }
   tbody.innerHTML = routingAssignments.map(row => `
@@ -935,21 +941,35 @@ function renderRoutingAssignments() {
       <td><span class="cell-main">${escHtml(row.requester_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.requester_email || "")}</span></td>
       <td>${escHtml(row.company_name || "Sin empresa")}</td>
       <td><span class="cell-main">${escHtml(row.approver_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.approver_email || "")}</span></td>
-      <td><button type="button" class="small-btn danger" data-routing-assignment-company="${escHtml(row.company_id)}" data-routing-assignment-requester="${escHtml(row.requester_id)}">Quitar</button></td>
+      <td>${escHtml(Array.isArray(row.approver_roles) && row.approver_roles.length ? row.approver_roles.join(", ") : "Sin rol elegible")}</td>
+      <td>${Components.badge(row.active ? "Activo" : "Inactivo", row.active ? "success" : "neutral")}</td>
+      <td><button type="button" class="small-btn ${row.active ? "danger" : ""}" data-routing-assignment-id="${escHtml(row.id)}" data-routing-assignment-action="${row.active ? "remove" : "activate"}">${row.active ? "Quitar" : "Activar"}</button></td>
     </tr>`).join("")
 }
 
 async function handleRoutingAssignmentAction(event) {
-  const button = event.target.closest("[data-routing-assignment-company]")
+  const button = event.target.closest("[data-routing-assignment-id]")
   if (!button) return
+  const assignment = routingAssignments.find(row => row.id === button.dataset.routingAssignmentId)
+  if (!assignment) return
   button.disabled = true
   try {
-    const { error } = await configClient.rpc("remove_approver_assignment", {
-      p_company_id: button.dataset.routingAssignmentCompany,
-      p_requester_id: button.dataset.routingAssignmentRequester,
-    })
+    const activating = button.dataset.routingAssignmentAction === "activate"
+    const { error } = activating
+      ? await configClient.rpc("add_approver_assignment", {
+          p_company_id: assignment.company_id,
+          p_requester_id: assignment.requester_id,
+          p_approver_id: assignment.approver_id,
+        })
+      : await configClient.rpc("remove_approver_assignment", {
+          p_assignment_id: assignment.id,
+        })
     if (error) throw error
-    showToast("Asignación eliminada", "Las nuevas solicitudes volverán al selector y a las reglas de aprobación.", "success")
+    showToast(
+      activating ? "Aprobador activado" : "Aprobador eliminado",
+      activating ? "Volvió a quedar disponible en el pool." : "Los demás aprobadores configurados permanecen sin cambios.",
+      "success"
+    )
     await loadApproverRoutingAdmin()
   } catch (error) {
     showToast("No se pudo quitar", friendlyRoutingError(error), "danger")
@@ -969,10 +989,11 @@ function friendlyRoutingError(error) {
   const message = error?.message || String(error || "Error desconocido")
   const known = {
     routing_admin_required: "Solo SysAdmin puede administrar el enrutamiento.",
-    membership_used_by_approver_assignment: "Quita primero la asignación que usa esta membresía.",
+    membership_used_by_active_approver_pool: "Quita primero los aprobadores activos que usan esta membresía.",
     requester_company_membership_required: "El solicitante necesita membresía activa en la empresa.",
     approver_not_eligible_for_company: "El aprobador debe ser finance/director y pertenecer a la empresa.",
-    requester_cannot_be_own_fixed_approver: "El solicitante no puede ser su propio aprobador fijo.",
+    requester_cannot_be_own_pool_approver: "El solicitante no puede agregarse como su propio aprobador.",
+    approver_already_configured: "Este aprobador ya está configurado para el solicitante y la empresa.",
   }
   const key = Object.keys(known).find(item => message.includes(item))
   return key ? known[key] : friendlyError(error)
