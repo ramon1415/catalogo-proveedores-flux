@@ -66,7 +66,7 @@ function prepareSupplierFormUx() {
   const orderedControls = [
     "alias", "nombre_completo", "tipo_proveedor", "metodo_pago",
     "destination_type", "tipo_cuenta", "beneficiary_name", "banco", "clabe",
-    "cuenta_bancaria", "convenio_number", "rfc", "email", "telefono",
+    "cuenta_bancaria", "convenio_number", "rfc", "persona_tipo", "email", "telefono",
     "providerCsfFile", "es_personal_eventual", "activo", "notas",
   ]
 
@@ -194,6 +194,7 @@ window.openEditModal = function(id) {
   setValue("cuenta_bancaria", p.cuenta_bancaria)
   setValue("convenio_number", p.convenio_number)
   setValue("rfc", p.rfc)
+  setValue("persona_tipo", p.persona_tipo)
   setValue("email", p.email)
   setValue("telefono", p.telefono)
   setValue("tipo_proveedor", p.tipo_proveedor)
@@ -309,6 +310,7 @@ async function persistSupplier() {
     cuenta_bancaria: getValue("cuenta_bancaria"),
     convenio_number: getValue("convenio_number"),
     rfc: getValue("rfc"),
+    persona_tipo: getValue("persona_tipo"),
     email: getValue("email"),
     telefono: getValue("telefono"),
     tipo_proveedor: getValue("tipo_proveedor"),
@@ -344,9 +346,13 @@ async function persistSupplier() {
     : await supabaseClient.from("proveedores").insert(payload).select("id").single()
 
   if (result.error) {
-    const msg = result.error.message?.toLowerCase().includes("row-level security") || result.error.code === "42501"
-      ? "No se pudo guardar. Puede faltar permiso update sobre proveedores."
-      : `Error guardando proveedor: ${result.error.message}`
+    const errorMessage = result.error.message || "Error desconocido"
+    const normalizedError = errorMessage.toLowerCase()
+    const msg = normalizedError.includes("persona_tipo_invalido")
+      ? "Selecciona Persona física, Persona moral o No especificado."
+      : normalizedError.includes("row-level security") || result.error.code === "42501"
+        ? "No se pudo guardar. Puede faltar permiso update sobre proveedores."
+        : `Error guardando proveedor: ${errorMessage}`
     showToast("Error al guardar", msg, "error")
     return
   }
