@@ -103,14 +103,27 @@ Estado versionado anterior:
 
 Estado posterior:
 
-| Operacion | Policy | Roles funcionales |
+| Operacion DB | Policy | Roles funcionales |
 | --- | --- | --- |
 | SELECT | `proveedores_select_members` | `flux_member_roles()` |
 | INSERT | `proveedores_insert_members` | `flux_member_roles()` |
 | UPDATE | `proveedores_update_managers` | `flux_approver_roles()` |
 | DELETE | Sin policy y sin grant | Ninguno desde frontend |
 
-La alta para miembros conserva el alta rapida desde solicitudes. La edicion queda para Sysadmin, Finanzas/Tesoreria/Administracion y Direccion/Aprobadores, coherente con `FluxAuth.canManageProviders()`. `anon` pierde privilegios de tabla. No se usa `service_role` en frontend.
+La matriz funcional completa queda asi:
+
+| Accion | Solicitante/Operacion | Finanzas/Direccion/Sysadmin |
+| --- | --- | --- |
+| Consultar proveedores | Si | Si |
+| Alta basica | Si | Si |
+| Editar datos fiscales o bancarios | No | Si |
+| Cargar o reemplazar CSF | No | Si |
+| Desactivar o reactivar | No | Si |
+| DELETE fisico | No | No desde frontend |
+
+La alta basica para miembros conserva "Agregar proveedor" desde solicitudes sin conceder administracion posterior. La edicion, baja logica y administracion de CSF quedan restringidas a Finanzas, Direccion y Sysadmin, coherente con `FluxAuth.canManageProviders()` y con la policy de UPDATE. Los nombres `treasury`, `tesoreria` y `administracion` son aliases tecnicos heredados comprendidos dentro del grupo funcional Finanzas; no representan roles de negocio nuevos. `anon` pierde privilegios de tabla. No se usa `service_role` en frontend.
+
+En el catalogo, un miembro operativo conserva el alta basica, pero ve los registros en modo de solo lectura. El selector de CSF queda deshabilitado con el mensaje "La Constancia de Situacion Fiscal sera administrada por Finanzas". La proteccion visual complementa RLS: manipular el frontend no permite editar, desactivar ni vincular una CSF.
 
 La migracion aborta si detecta una policy de `proveedores` no reconocida, para no eliminar silenciosamente una regla creada fuera del historial versionado.
 
@@ -196,6 +209,10 @@ Migration 020 no referencia, modifica, elimina ni reconstruye `zzbackup_proveedo
 - `persona_tipo` normalizado para PF/PM y variantes con acento.
 - Edicion permitida para roles administradores y denegada para roles operativos.
 - Alta rapida permitida a un miembro autorizado.
+- Alta basica desde Operacion sin UPDATE posterior ni intento de carga CSF.
+- Catalogo abierto directamente por Operacion: filas de solo lectura, CSF deshabilitada y UPDATE denegado por RLS.
+- Alta desde catalogo por Finanzas/Direccion/Sysadmin con carga y vinculacion de CSF.
+- Reemplazo de CSF permitido solo a Finanzas/Direccion/Sysadmin.
 - Baja logica con `activo=false`.
 - CSF: carga, reemplazo y signed URL.
 - Solicitud, layout BBVA/interbancario, efectivo y comprobantes sin regresion.
@@ -235,4 +252,4 @@ Campos operativos adicionales a considerar: `destination_type`, `beneficiary_nam
 - Ruta CSF publica, signed URL o contenido binario en lugar de `csf_file_path`.
 - Direccion sin columna destino aprobada.
 
-La carga del CSV y cualquier correccion de datos requieren un proceso separado; migration 020 no importa registros.
+La carga del CSV y cualquier correccion de datos requieren un proceso posterior expresamente autorizado; migration 020 no importa registros.
