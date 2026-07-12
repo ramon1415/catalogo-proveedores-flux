@@ -160,7 +160,7 @@
           <label>Tipo de proveedor<input id="tipo_proveedor" placeholder="Servicios, materiales..."></label>
           <label class="full-row">Constancia de Situacion Fiscal (CSF)
             <input type="file" id="providerCsfFile" accept="application/pdf,image/*">
-            <span id="providerCsfHint" class="field-hint" data-default="CSF en PDF (max 10 MB)">CSF en PDF (max 10 MB)</span>
+            <span id="providerCsfHint" class="field-hint" data-default="CSF en PDF (max 10 MB)" data-restricted="La Constancia de Situacion Fiscal sera administrada por Finanzas.">CSF en PDF (max 10 MB)</span>
             <button id="providerCsfLink" class="small-btn hidden" type="button">Ver CSF</button>
           </label>
           <label class="check-label"><input id="es_personal_eventual" type="checkbox"> Es personal eventual</label>
@@ -181,7 +181,7 @@
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js?v=20260709-provider-csf"></script>
-  <script src="./proveedores.js?v=20260709-provider-csf"></script>
+  <script src="./proveedores.js?v=20260712-provider-csf-roles"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>

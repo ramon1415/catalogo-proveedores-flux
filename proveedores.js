@@ -116,6 +116,7 @@ async function loadSuppliers() {
 function renderTable() {
   const query = normalize(searchInput.value)
   const filter = statusFilter.value
+  const canManage = canManageProviders()
 
   const rows = proveedores.filter((p) => {
     const haystack = normalize([p.alias, p.nombre_completo, p.rfc, p.banco, p.email, p.telefono, p.metodo_pago].join(" "))
@@ -144,12 +145,14 @@ function renderTable() {
       <td>${escapeHtml(p.rfc || "")}</td>
       <td>${Components.badge(p.activo ? "Activo" : "Inactivo", p.activo ? "success" : "neutral")}</td>
       <td>
-        <div class="actions row-actions">
-          <button class="small-btn" type="button" onclick="openEditModal('${escapeHtml(p.id)}')">Editar</button>
-          ${p.activo
-            ? `<button class="small-btn danger" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', false)">Desactivar</button>`
-            : `<button class="small-btn" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', true)">Reactivar</button>`}
-        </div>
+        ${canManage
+          ? `<div class="actions row-actions">
+              <button class="small-btn" type="button" onclick="openEditModal('${escapeHtml(p.id)}')">Editar</button>
+              ${p.activo
+                ? `<button class="small-btn danger" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', false)">Desactivar</button>`
+                : `<button class="small-btn" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', true)">Reactivar</button>`}
+            </div>`
+          : '<span class="field-hint">Solo lectura</span>'}
       </td>
     </tr>
   `).join("")
@@ -170,6 +173,10 @@ function openCreateModal() {
 }
 
 window.openEditModal = function(id) {
+  if (!canManageProviders()) {
+    showToast("Sin permiso", "La administracion de proveedores corresponde a Finanzas, Direccion o Sysadmin.", "warning")
+    return
+  }
   const p = proveedores.find((item) => item.id === id)
   if (!p) return
   currentEditingId = id
@@ -394,6 +401,10 @@ function requiresBankDetails(metodoPago) {
 }
 
 window.toggleSupplier = async function(id, activo) {
+  if (!canManageProviders()) {
+    showToast("Sin permiso", "La administracion de proveedores corresponde a Finanzas, Direccion o Sysadmin.", "warning")
+    return
+  }
   const confirmed = confirm(activo ? "Seguro que deseas reactivar este proveedor?" : "Seguro que deseas desactivar este proveedor?")
   if (!confirmed) return
   const { error } = await supabaseClient.from("proveedores").update({ activo, updated_at: new Date().toISOString() }).eq("id", id)
@@ -434,6 +445,13 @@ function updateCsfPermissionState() {
   const allowed = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
   input.disabled = !allowed
   input.classList.toggle("field-disabled", !allowed)
+  const hint = document.getElementById("providerCsfHint")
+  if (hint) {
+    hint.textContent = allowed
+      ? hint.dataset.default || "CSF en PDF (max 10 MB)"
+      : hint.dataset.restricted || "La Constancia de Situacion Fiscal sera administrada por Finanzas."
+    hint.style.color = allowed ? "" : "var(--text-3)"
+  }
 }
 
 function renderCsfLink() {
@@ -460,10 +478,14 @@ async function openCurrentCsf() {
 }
 
 function canCreateProviderCsf() {
-  return Boolean(window.FluxAuth?.canCreateProviders?.())
+  return canManageProviders()
 }
 
 function canManageProviderCsf() {
+  return canManageProviders()
+}
+
+function canManageProviders() {
   return Boolean(window.FluxAuth?.canManageProviders?.())
 }
 
