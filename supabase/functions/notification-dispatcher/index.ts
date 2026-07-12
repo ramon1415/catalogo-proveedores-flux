@@ -126,6 +126,14 @@ function baseSubject(event: NotificationEvent): string {
       return `Excepcion presupuestal aprobada: ${folio}`;
     case "payment_request.exception_rejected":
       return `Excepcion presupuestal rechazada: ${folio}`;
+    case "approval_batch.submitted":
+      return `Corte semanal por autorizar: ${folio}`;
+    case "approval_batch.approved":
+      return `Corte semanal aprobado: ${folio}`;
+    case "approval_batch.partially_approved":
+      return `Corte semanal con rechazos: ${folio}`;
+    case "approval_batch.item_rejected":
+      return `Pago rechazado en corte: ${folio}`;
     default:
       return event.subject || `Notificacion Flux: ${folio}`;
   }
@@ -145,6 +153,14 @@ function actionText(eventType: string): string {
       return "La excepcion presupuestal fue aprobada. Continua el flujo segun corresponda.";
     case "payment_request.exception_rejected":
       return "La excepcion presupuestal fue rechazada. Revisa la solicitud en Flux.";
+    case "approval_batch.submitted":
+      return "Finanzas envio un corte semanal para autorizacion de Direccion.";
+    case "approval_batch.approved":
+      return "Direccion aprobo el corte semanal. Los pagos aprobados pueden continuar a ejecucion.";
+    case "approval_batch.partially_approved":
+      return "Direccion concluyo el corte semanal con partidas rechazadas. Revisa el detalle antes de ejecutar.";
+    case "approval_batch.item_rejected":
+      return "Direccion rechazo una partida del corte semanal. Revisa el motivo registrado.";
     default:
       return "Hay una actualizacion disponible en Flux.";
   }
@@ -171,6 +187,8 @@ function decisionCommentLabel(event: NotificationEvent): string | null {
       return "Motivo / comentario de excepcion aprobada";
     case "payment_request.exception_rejected":
       return "Motivo / comentario de excepcion rechazada";
+    case "approval_batch.item_rejected":
+      return "Motivo de rechazo";
     default:
       return null;
   }
@@ -185,16 +203,32 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
   const commentText = textValue(payload.decision_comment);
   const shouldRenderComment = Boolean(commentLabel && (commentText || requiresDecisionCommentFallback(event.event_type)));
   const renderedCommentText = commentText || "Sin comentario capturado.";
-  const rows = [
-    ["Folio", event.source_folio || payload.folio],
-    ["Proveedor", payload.provider],
-    ["Monto", amountText],
-    ["Empresa", payload.company],
-    ["Centro de costo", payload.cost_center],
-    ["Partida", payload.budget_category],
-    ["Solicitante", payload.requester],
-    ["Estatus", payload.status],
-  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const isBatchEvent = event.event_type.startsWith("approval_batch.");
+  const targetPath = textValue(payload.path) || (isBatchEvent ? "/approval_batches.html" : "/solicitudes.html");
+  const period = payload.period_start || payload.period_end
+    ? `${textValue(payload.period_start) || ""} - ${textValue(payload.period_end) || ""}`
+    : null;
+  const rows = (isBatchEvent
+    ? [
+      ["Corte", payload.batch_label || event.source_folio],
+      ["Folio", payload.folio],
+      ["Proveedor", payload.provider],
+      ["Monto", amountText],
+      ["Empresa", payload.company],
+      ["Periodo", period],
+      ["Pagos", payload.item_count],
+      ["Estatus", payload.status],
+    ]
+    : [
+      ["Folio", event.source_folio || payload.folio],
+      ["Proveedor", payload.provider],
+      ["Monto", amountText],
+      ["Empresa", payload.company],
+      ["Centro de costo", payload.cost_center],
+      ["Partida", payload.budget_category],
+      ["Solicitante", payload.requester],
+      ["Estatus", payload.status],
+    ]).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
 
   const textLines = [
     actionText(event.event_type),
@@ -206,7 +240,7 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
       renderedCommentText,
     ] : []),
     "",
-    "Abrir Flux: /solicitudes.html",
+    `Abrir Flux: ${targetPath}`,
   ];
 
   const htmlRows = rows
@@ -224,7 +258,7 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
       <p>${escapeHtml(actionText(event.event_type))}</p>
       <table style="border-collapse:collapse">${htmlRows}</table>
       ${htmlComment}
-      <p style="margin-top:18px;color:#555">Abrir Flux: <strong>/solicitudes.html</strong></p>
+      <p style="margin-top:18px;color:#555">Abrir Flux: <strong>${escapeHtml(targetPath)}</strong></p>
       ${sendMode === "test_only" ? `<p style="margin-top:18px;color:#b45309">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>` : ""}
     </div>
   `;
@@ -433,4 +467,3 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return jsonResponse({ error: message.slice(0, 300) }, 500);
   }
 });
-
