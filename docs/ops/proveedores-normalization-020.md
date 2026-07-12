@@ -94,12 +94,14 @@ La columna queda conceptualmente preparada para un futuro mapeo a `providers.pro
 
 ## 12. RLS y privilegios
 
-Estado versionado anterior:
+Estado real anterior encontrado en DEV:
 
+- SELECT: policy legacy `Autenticados pueden leer proveedores`, declarada para `public` y condicionada a `auth.role() = 'authenticated'`.
 - INSERT: cualquier `authenticated` (`with check true`).
 - UPDATE: cualquier `authenticated` (`using/with check true`).
-- SELECT: no existe policy especifica en migration 004.
 - Privilegios de tabla: el grant global de migration 004 incluye operaciones que la pantalla no necesita.
+
+La policy SELECT legacy no estaba reflejada en migration 004. Migration 020 la reconoce de forma explicita en el precheck y la elimina antes de crear `proveedores_select_members`; no se acepta ninguna policy desconocida de manera generica.
 
 Estado posterior:
 
