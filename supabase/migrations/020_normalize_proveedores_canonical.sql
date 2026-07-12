@@ -15,6 +15,7 @@ begin
     where schemaname = 'public'
       and tablename = 'proveedores'
       and policyname not in (
+        'Autenticados pueden leer proveedores',
         'Usuarios autenticados pueden crear proveedores',
         'Usuarios autenticados pueden editar proveedores',
         'proveedores_select_members',
@@ -366,6 +367,7 @@ create trigger normalize_proveedores_canonical_before_write
   for each row
   execute function public.normalize_proveedores_canonical();
 
+drop policy if exists "Autenticados pueden leer proveedores" on public.proveedores;
 drop policy if exists "Usuarios autenticados pueden crear proveedores" on public.proveedores;
 drop policy if exists "Usuarios autenticados pueden editar proveedores" on public.proveedores;
 drop policy if exists proveedores_select_members on public.proveedores;
@@ -423,13 +425,22 @@ begin
 
   if (select count(*) from pg_policies
       where schemaname = 'public'
-        and tablename = 'proveedores'
-        and policyname in (
-          'proveedores_select_members',
-          'proveedores_insert_members',
-          'proveedores_update_managers'
-        )) <> 3 then
-    raise exception '020_postcheck: faltan policies RLS de proveedores';
+        and tablename = 'proveedores') <> 3 then
+    raise exception '020_postcheck: public.proveedores debe conservar exactamente tres policies RLS';
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'proveedores'
+      and policyname not in (
+        'proveedores_select_members',
+        'proveedores_insert_members',
+        'proveedores_update_managers'
+      )
+  ) then
+    raise exception '020_postcheck: permanece una policy legacy o no reconocida en public.proveedores';
   end if;
 
   if not exists (
