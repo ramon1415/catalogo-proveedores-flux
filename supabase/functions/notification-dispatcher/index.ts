@@ -146,6 +146,10 @@ function baseSubject(event: NotificationEvent): string {
       return `Corte semanal con rechazos: ${folio}`;
     case "approval_batch.item_rejected":
       return `Pago rechazado en corte: ${folio}`;
+    case "payment_request.extraordinary_authorized":
+      return `Pago extraordinario autorizado: ${folio}`;
+    case "approval_batch.item_rebatched":
+      return `Pago habilitado para nueva autorizacion: ${folio}`;
     default:
       return event.subject || `Notificacion Flux: ${folio}`;
   }
@@ -173,6 +177,10 @@ function actionText(eventType: string): string {
       return "Direccion concluyo el corte semanal con partidas rechazadas. Revisa el detalle antes de ejecutar.";
     case "approval_batch.item_rejected":
       return "Direccion rechazo una partida del corte semanal. Revisa el motivo registrado.";
+    case "payment_request.extraordinary_authorized":
+      return "Finanzas autorizo un pago extraordinario. No requiere decision de Direccion.";
+    case "approval_batch.item_rebatched":
+      return "Finanzas documento la correccion y habilito la solicitud para una nueva autorizacion.";
     default:
       return "Hay una actualizacion disponible en Flux.";
   }
@@ -201,6 +209,10 @@ function decisionCommentLabel(event: NotificationEvent): string | null {
       return "Motivo / comentario de excepcion rechazada";
     case "approval_batch.item_rejected":
       return "Motivo de rechazo";
+    case "payment_request.extraordinary_authorized":
+      return "Motivo extraordinario";
+    case "approval_batch.item_rebatched":
+      return "Correccion documentada por Finanzas";
     default:
       return null;
   }
