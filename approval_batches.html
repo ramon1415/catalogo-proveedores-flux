@@ -107,6 +107,14 @@
     </form>
   </dialog>
 
+  <dialog id="rebatchDialog" class="narrow">
+    <form id="rebatchForm" class="modal-content">
+      <div class="modal-header"><div><h2>Habilitar para siguiente corte</h2><p>Registra por que la solicitud ya puede volver a revisarse.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="rebatchDialog">&times;</button></div>
+      <div class="modal-scroll"><label style="display:grid;gap:6px;color:var(--text-3);font-size:10.5px;font-weight:700;text-transform:uppercase">Informacion complementada / motivo de reingreso<textarea class="batch-field" id="rebatchNote" rows="4" required maxlength="1000"></textarea></label></div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="rebatchDialog">Cancelar</button><button class="primary-btn" type="submit">Habilitar solicitud</button></div>
+    </form>
+  </dialog>
+
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>

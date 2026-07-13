@@ -18,6 +18,9 @@ const forbidden = [
 const requiredSql = [
   "approval_batch_request_base_eligible",
   "approval_batch_assert_execution_authorized",
+  "rebatch_status",
+  "approval_batch_totals_by_currency",
+  "approval_batch_direction_roles",
   "approval_batch.submitted",
   "approval_batch.item_rejected",
 ]
@@ -33,6 +36,8 @@ const requiredRpcs = [
   "close_approval_batch",
   "list_finance_approval_batches",
   "list_director_approval_batches",
+  "list_approval_batch_director_candidates",
+  "release_rejected_batch_item_for_rebatch",
 ]
 
 let failed = false
@@ -68,6 +73,21 @@ if (policyCount !== 3) {
 if ((sql.match(/\balter\s+table\s+public\.(?:company_directors|approval_batches|approval_batch_items)\s+enable\s+row\s+level\s+security\b/gi) || []).length !== 3) {
   console.error("All three batch tables must enable RLS")
   failed = true
+}
+if (sql.includes("'total_amount'")) {
+  console.error("Batch list RPCs must not expose a mixed-currency scalar total")
+  failed = true
+}
+if (!/if\s+not\s+found\s+then\s+return\s+new/i.test(sql)) {
+  console.error("Execution gate must preserve the legacy flow for requests never enrolled in a batch")
+  failed = true
+}
+for (const block of sql.split(/(?=create\s+or\s+replace\s+function\s+public\.)/gi)) {
+  if (/\bsecurity\s+definer\b/i.test(block) && !/\bset\s+search_path\s*=\s*public,\s*pg_temp\b/i.test(block)) {
+    const name = block.match(/function\s+public\.([a-z0-9_]+)/i)?.[1] || "unknown"
+    console.error(`SECURITY DEFINER function without fixed search_path: ${name}`)
+    failed = true
+  }
 }
 const executableSql = sql
   .split(/\r?\n/)

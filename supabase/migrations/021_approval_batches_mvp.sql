@@ -95,6 +95,10 @@ create table public.approval_batch_items (
   finance_reviewed_at timestamptz not null default now(),
   director_status text not null default 'pending',
   director_reject_reason text,
+  rebatch_status text not null default 'not_applicable',
+  rebatch_released_by uuid references public.profiles(id),
+  rebatch_released_at timestamptz,
+  rebatch_release_note text,
   decided_by uuid references public.profiles(id),
   decided_at timestamptz,
   removed_by uuid references public.profiles(id),
@@ -102,6 +106,9 @@ create table public.approval_batch_items (
   created_at timestamptz not null default now(),
   constraint approval_batch_items_status_check check (
     director_status in ('pending', 'approved', 'rejected')
+  ),
+  constraint approval_batch_items_rebatch_status_check check (
+    rebatch_status in ('not_applicable', 'blocked', 'released')
   ),
   constraint approval_batch_items_decision_check check (
     (director_status = 'pending' and decided_by is null and decided_at is null and director_reject_reason is null)
@@ -111,6 +118,29 @@ create table public.approval_batch_items (
   constraint approval_batch_items_removal_check check (
     (removed_at is null and removed_by is null)
     or (removed_at is not null and removed_by is not null and director_status = 'pending')
+  ),
+  constraint approval_batch_items_rebatch_check check (
+    (
+      director_status <> 'rejected'
+      and rebatch_status = 'not_applicable'
+      and rebatch_released_by is null
+      and rebatch_released_at is null
+      and rebatch_release_note is null
+    )
+    or (
+      director_status = 'rejected'
+      and rebatch_status = 'blocked'
+      and rebatch_released_by is null
+      and rebatch_released_at is null
+      and rebatch_release_note is null
+    )
+    or (
+      director_status = 'rejected'
+      and rebatch_status = 'released'
+      and rebatch_released_by is not null
+      and rebatch_released_at is not null
+      and nullif(btrim(rebatch_release_note), '') is not null
+    )
   )
 );
 
@@ -121,6 +151,9 @@ create index approval_batch_items_request_idx
   on public.approval_batch_items(payment_request_id, director_status);
 create index approval_batch_items_batch_idx
   on public.approval_batch_items(batch_id, removed_at, director_status);
+create index approval_batch_items_rebatch_idx
+  on public.approval_batch_items(payment_request_id, rebatch_status)
+  where removed_at is null and director_status = 'rejected';
 
 create or replace function public.set_approval_batch_updated_at()
 returns trigger
@@ -175,6 +208,15 @@ begin
 end
 $$;
 
+create or replace function public.approval_batch_direction_roles()
+returns text[]
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+  select array['director', 'direccion', 'approver_2', 'aprobador_2']::text[];
+$$;
+
 create or replace function public.approval_batch_request_base_eligible(p_payment_request_id uuid)
 returns boolean
 language sql
@@ -213,6 +255,14 @@ as $$
           and abi.removed_at is null
           and abi.director_status = 'approved'
           and ab.status in ('approved', 'partially_approved', 'closed')
+      )
+      and not exists (
+        select 1
+        from public.approval_batch_items abi
+        where abi.payment_request_id = pr.id
+          and abi.removed_at is null
+          and abi.director_status = 'rejected'
+          and abi.rebatch_status = 'blocked'
       )
   );
 $$;
@@ -274,16 +324,26 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
+declare
+  v_item_status text;
+  v_batch_status text;
 begin
-  if not exists (
-    select 1
-    from public.approval_batch_items abi
-    join public.approval_batches ab on ab.id = abi.batch_id
-    where abi.payment_request_id = new.payment_request_id
-      and abi.removed_at is null
-      and abi.director_status = 'approved'
-      and ab.status in ('approved', 'partially_approved', 'closed')
-  ) then
+  select abi.director_status, ab.status
+    into v_item_status, v_batch_status
+  from public.approval_batch_items abi
+  join public.approval_batches ab on ab.id = abi.batch_id
+  where abi.payment_request_id = new.payment_request_id
+    and abi.removed_at is null
+  order by abi.created_at desc, abi.id desc
+  limit 1;
+
+  -- Adoption is gradual: requests never enrolled in a batch keep the legacy flow.
+  if not found then
+    return new;
+  end if;
+
+  if v_item_status <> 'approved'
+     or v_batch_status not in ('approved', 'partially_approved', 'closed') then
     raise exception 'batch_authorization_required';
   end if;
   return new;
@@ -299,6 +359,45 @@ create trigger require_batch_for_cash_fund
   before insert or update of payment_request_id
   on public.cash_funds
   for each row execute function public.approval_batch_assert_execution_authorized();
+
+create or replace function public.validate_approval_batch_final_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_pending integer;
+  v_approved integer;
+  v_rejected integer;
+begin
+  if new.status not in ('approved', 'partially_approved', 'closed') then
+    return new;
+  end if;
+
+  select count(*) filter (where director_status = 'pending'),
+         count(*) filter (where director_status = 'approved'),
+         count(*) filter (where director_status = 'rejected')
+    into v_pending, v_approved, v_rejected
+  from public.approval_batch_items
+  where batch_id = new.id and removed_at is null;
+
+  if v_pending > 0 or v_approved = 0 then
+    raise exception 'invalid_batch_final_item_mix';
+  end if;
+  if new.status = 'approved' and v_rejected > 0 then
+    raise exception 'approved_batch_cannot_have_rejected_items';
+  end if;
+  if new.status = 'partially_approved' and v_rejected = 0 then
+    raise exception 'partial_batch_requires_rejected_items';
+  end if;
+  return new;
+end
+$$;
+
+create trigger validate_approval_batch_final_status
+  before update of status on public.approval_batches
+  for each row execute function public.validate_approval_batch_final_status();
 
 alter table public.company_directors enable row level security;
 alter table public.approval_batches enable row level security;
@@ -355,12 +454,54 @@ begin
       'director_name', p.full_name,
       'director_email', p.email,
       'director_profile_active', coalesce(p.active, true),
+      'director_role_valid', exists (
+        select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
+        where ur.profile_id = cd.director_profile_id
+          and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+      ),
       'active', cd.active
     ) order by coalesce(nullif(btrim(c.legal_name), ''), c.name), p.full_name)
     from public.company_directors cd
     join public.companies c on c.id = cd.company_id
     join public.profiles p on p.id = cd.director_profile_id
     where (p_company_id is null or cd.company_id = p_company_id)
+  ), '[]'::jsonb);
+end
+$$;
+
+create or replace function public.list_approval_batch_director_candidates(
+  p_company_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform public.approval_batch_require_finance();
+  if p_company_id is not null and not exists (
+    select 1 from public.companies c where c.id = p_company_id and coalesce(c.active, true)
+  ) then
+    raise exception 'company_not_found_or_inactive';
+  end if;
+
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'profile_id', candidates.profile_id,
+      'name', candidates.full_name,
+      'email', candidates.email,
+      'roles', candidates.roles
+    ) order by candidates.full_name, candidates.email)
+    from (
+      select p.id as profile_id, p.full_name, p.email,
+             array_agg(distinct lower(btrim(r.name)) order by lower(btrim(r.name))) as roles
+      from public.profiles p
+      join public.user_roles ur on ur.profile_id = p.id
+      join public.roles r on r.id = ur.role_id
+      where coalesce(p.active, true)
+        and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+      group by p.id, p.full_name, p.email
+    ) candidates
   ), '[]'::jsonb);
 end
 $$;
@@ -385,6 +526,15 @@ begin
   end if;
   if not exists (select 1 from public.profiles where id = p_director_profile_id and coalesce(active, true)) then
     raise exception 'director_profile_not_found_or_inactive';
+  end if;
+  if coalesce(p_active, true) and not exists (
+    select 1
+    from public.user_roles ur
+    join public.roles r on r.id = ur.role_id
+    where ur.profile_id = p_director_profile_id
+      and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+  ) then
+    raise exception 'director_role_required';
   end if;
 
   select id into v_id
@@ -441,13 +591,23 @@ begin
     select count(*) into v_director_count
     from public.company_directors cd
     join public.profiles p on p.id = cd.director_profile_id
-    where cd.company_id = p_company_id and cd.active and coalesce(p.active, true);
+    where cd.company_id = p_company_id and cd.active and coalesce(p.active, true)
+      and exists (
+        select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
+        where ur.profile_id = cd.director_profile_id
+          and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+      );
     if v_director_count = 0 then raise exception 'company_director_required'; end if;
     if v_director_count > 1 then raise exception 'select_company_director'; end if;
     select director_profile_id into v_director
     from public.company_directors cd
     join public.profiles p on p.id = cd.director_profile_id
     where cd.company_id = p_company_id and cd.active and coalesce(p.active, true)
+      and exists (
+        select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
+        where ur.profile_id = cd.director_profile_id
+          and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+      )
     order by cd.created_at, cd.id
     limit 1;
   else
@@ -457,6 +617,11 @@ begin
       join public.profiles p on p.id = cd.director_profile_id
       where cd.company_id = p_company_id and cd.director_profile_id = v_director
         and cd.active and coalesce(p.active, true)
+        and exists (
+          select 1 from public.user_roles ur join public.roles r on r.id = ur.role_id
+          where ur.profile_id = cd.director_profile_id
+            and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+        )
     ) then
       raise exception 'company_director_not_active';
     end if;
@@ -643,6 +808,8 @@ declare
   v_actor uuid;
   v_batch public.approval_batches%rowtype;
   v_count integer;
+  v_rejected integer;
+  v_final_status text;
 begin
   v_actor := public.approval_batch_require_actor();
   select * into v_batch from public.approval_batches where id = p_batch_id for update;
@@ -652,15 +819,22 @@ begin
 
   update public.approval_batch_items
     set director_status = 'approved', director_reject_reason = null,
+        rebatch_status = 'not_applicable', rebatch_released_by = null,
+        rebatch_released_at = null, rebatch_release_note = null,
         decided_by = v_actor, decided_at = now()
   where batch_id = p_batch_id and removed_at is null and director_status = 'pending';
   get diagnostics v_count = row_count;
   if v_count = 0 then raise exception 'batch_has_no_pending_items'; end if;
 
+  select count(*) into v_rejected
+  from public.approval_batch_items
+  where batch_id = p_batch_id and removed_at is null and director_status = 'rejected';
+  v_final_status := case when v_rejected > 0 then 'partially_approved' else 'approved' end;
+
   update public.approval_batches
-    set status = 'approved', decided_by = v_actor, decided_at = now()
+    set status = v_final_status, decided_by = v_actor, decided_at = now()
   where id = p_batch_id;
-  return jsonb_build_object('batch_id', p_batch_id, 'status', 'approved', 'approved_items', v_count);
+  return jsonb_build_object('batch_id', p_batch_id, 'status', v_final_status, 'approved_items', v_count);
 end
 $$;
 
@@ -682,6 +856,7 @@ declare
   v_reason text;
   v_updated integer := 0;
   v_pending integer;
+  v_approved integer;
   v_rejected integer;
   v_final_status text;
 begin
@@ -704,6 +879,10 @@ begin
     update public.approval_batch_items
       set director_status = v_status,
           director_reject_reason = case when v_status = 'rejected' then v_reason else null end,
+          rebatch_status = case when v_status = 'rejected' then 'blocked' else 'not_applicable' end,
+          rebatch_released_by = null,
+          rebatch_released_at = null,
+          rebatch_release_note = null,
           decided_by = v_actor,
           decided_at = now()
     where id = v_item_id and batch_id = p_batch_id
@@ -713,12 +892,16 @@ begin
   end loop;
 
   select count(*) filter (where director_status = 'pending'),
+         count(*) filter (where director_status = 'approved'),
          count(*) filter (where director_status = 'rejected')
-    into v_pending, v_rejected
+    into v_pending, v_approved, v_rejected
   from public.approval_batch_items
   where batch_id = p_batch_id and removed_at is null;
 
   if v_pending = 0 then
+    if v_approved = 0 then
+      raise exception 'batch_requires_at_least_one_approved_item';
+    end if;
     v_final_status := case when v_rejected > 0 then 'partially_approved' else 'approved' end;
     update public.approval_batches
       set status = v_final_status, decided_by = v_actor, decided_at = now()
@@ -752,6 +935,51 @@ begin
     set status = 'closed', closed_by = v_actor, closed_at = now()
   where id = p_batch_id;
   return jsonb_build_object('batch_id', p_batch_id, 'status', 'closed');
+end
+$$;
+
+create or replace function public.release_rejected_batch_item_for_rebatch(
+  p_item_id uuid,
+  p_note text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_actor uuid;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_request_id uuid;
+begin
+  v_actor := public.approval_batch_require_finance();
+  if v_note is null then raise exception 'rebatch_release_note_required'; end if;
+
+  update public.approval_batch_items abi
+    set rebatch_status = 'released',
+        rebatch_released_by = v_actor,
+        rebatch_released_at = now(),
+        rebatch_release_note = v_note
+  from public.approval_batches ab
+  where abi.id = p_item_id
+    and ab.id = abi.batch_id
+    and abi.removed_at is null
+    and abi.director_status = 'rejected'
+    and abi.rebatch_status = 'blocked'
+    and ab.status in ('partially_approved', 'closed')
+  returning abi.payment_request_id into v_request_id;
+
+  if v_request_id is null then
+    if exists (select 1 from public.approval_batch_items where id = p_item_id and rebatch_status = 'released') then
+      raise exception 'batch_item_already_released';
+    end if;
+    raise exception 'rejected_decided_batch_item_not_found';
+  end if;
+  return jsonb_build_object(
+    'item_id', p_item_id,
+    'payment_request_id', v_request_id,
+    'rebatch_status', 'released'
+  );
 end
 $$;
 
@@ -807,6 +1035,9 @@ begin
         'currency', pr.currency, 'amount', pr.amount_requested,
         'request_status', pr.status, 'director_status', abi.director_status,
         'reject_reason', abi.director_reject_reason,
+        'rebatch_status', abi.rebatch_status,
+        'rebatch_released_at', abi.rebatch_released_at,
+        'rebatch_release_note', abi.rebatch_release_note,
         'requester_name', requester.full_name,
         'finance_reviewed_at', abi.finance_reviewed_at,
         'decided_at', abi.decided_at
@@ -824,6 +1055,27 @@ begin
 end
 $$;
 
+create or replace function public.approval_batch_totals_by_currency(p_batch_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'currency', totals.currency,
+    'amount', totals.amount
+  ) order by totals.currency), '[]'::jsonb)
+  from (
+    select coalesce(nullif(upper(btrim(pr.currency)), ''), 'MXN') as currency,
+           sum(pr.amount_requested) as amount
+    from public.approval_batch_items abi
+    join public.payment_requests pr on pr.id = abi.payment_request_id
+    where abi.batch_id = p_batch_id and abi.removed_at is null
+    group by coalesce(nullif(upper(btrim(pr.currency)), ''), 'MXN')
+  ) totals;
+$$;
+
 create or replace function public.list_finance_approval_batches(p_status text default null)
 returns jsonb
 language plpgsql
@@ -839,7 +1091,7 @@ begin
       'status', ab.status, 'period_start', ab.period_start, 'period_end', ab.period_end,
       'director_id', ab.director_id, 'director_name', dp.full_name,
       'item_count', (select count(*) from public.approval_batch_items i where i.batch_id = ab.id and i.removed_at is null),
-      'total_amount', (select coalesce(sum(pr.amount_requested), 0) from public.approval_batch_items i join public.payment_requests pr on pr.id = i.payment_request_id where i.batch_id = ab.id and i.removed_at is null),
+      'totals_by_currency', public.approval_batch_totals_by_currency(ab.id),
       'created_at', ab.created_at
     ) order by ab.created_at desc)
     from public.approval_batches ab
@@ -866,7 +1118,7 @@ begin
       'company_name', coalesce(nullif(btrim(c.legal_name), ''), c.name),
       'status', ab.status, 'period_start', ab.period_start, 'period_end', ab.period_end,
       'item_count', (select count(*) from public.approval_batch_items i where i.batch_id = ab.id and i.removed_at is null),
-      'total_amount', (select coalesce(sum(pr.amount_requested), 0) from public.approval_batch_items i join public.payment_requests pr on pr.id = i.payment_request_id where i.batch_id = ab.id and i.removed_at is null),
+      'totals_by_currency', public.approval_batch_totals_by_currency(ab.id),
       'submitted_at', ab.submitted_at
     ) order by ab.created_at desc)
     from public.approval_batches ab
@@ -925,7 +1177,7 @@ declare
   v_company_name text;
   v_director public.profiles%rowtype;
   v_recipient record;
-  v_total numeric;
+  v_totals jsonb;
   v_count integer;
   v_event_type text;
   v_has_recipient boolean := false;
@@ -934,11 +1186,11 @@ begin
   select coalesce(nullif(btrim(legal_name), ''), name) into v_company_name
   from public.companies where id = new.company_id;
   select * into v_director from public.profiles where id = new.director_id;
-  select count(*), coalesce(sum(pr.amount_requested), 0)
-    into v_count, v_total
+  select count(*)
+    into v_count
   from public.approval_batch_items abi
-  join public.payment_requests pr on pr.id = abi.payment_request_id
   where abi.batch_id = new.id and abi.removed_at is null;
+  v_totals := public.approval_batch_totals_by_currency(new.id);
 
   if new.status = 'submitted' then
     perform public.insert_approval_batch_notification(
@@ -947,7 +1199,7 @@ begin
       'Corte semanal por autorizar: ' || new.label,
       jsonb_build_object('batch_label', new.label, 'company', v_company_name,
         'period_start', new.period_start, 'period_end', new.period_end,
-        'item_count', v_count, 'amount', v_total, 'status', new.status,
+        'item_count', v_count, 'totals_by_currency', v_totals, 'status', new.status,
         'path', '/approval_batches.html'),
       'approval_batch.submitted:' || new.id::text || ':' || new.director_id::text,
       'high'
@@ -972,7 +1224,7 @@ begin
         case when new.status = 'approved' then 'Corte semanal aprobado: ' else 'Corte semanal con rechazos: ' end || new.label,
         jsonb_build_object('batch_label', new.label, 'company', v_company_name,
           'period_start', new.period_start, 'period_end', new.period_end,
-          'item_count', v_count, 'amount', v_total, 'status', new.status,
+          'item_count', v_count, 'totals_by_currency', v_totals, 'status', new.status,
           'path', '/approval_batches.html'),
         v_event_type || ':' || new.id::text || ':' || v_recipient.id::text,
         'high'
@@ -984,7 +1236,8 @@ begin
         'administrador_sistema', null, null, 'finanzas',
         'Corte semanal sin destinatario de Finanzas: ' || new.label,
         jsonb_build_object('batch_label', new.label, 'company', v_company_name,
-          'status', new.status, 'path', '/approval_batches.html'),
+          'totals_by_currency', v_totals, 'status', new.status,
+          'path', '/approval_batches.html'),
         v_event_type || ':' || new.id::text || ':missing_finance',
         'high'
       );
@@ -1077,15 +1330,19 @@ create trigger enqueue_approval_batch_item_notification
 revoke all on function public.set_approval_batch_updated_at() from public, anon, authenticated;
 revoke all on function public.approval_batch_require_actor() from public, anon, authenticated;
 revoke all on function public.approval_batch_require_finance() from public, anon, authenticated;
+revoke all on function public.approval_batch_direction_roles() from public, anon, authenticated;
 revoke all on function public.approval_batch_request_base_eligible(uuid) from public, anon, authenticated;
 revoke all on function public.approval_batch_request_open_elsewhere(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.validate_approval_batch_item() from public, anon, authenticated;
 revoke all on function public.approval_batch_assert_execution_authorized() from public, anon, authenticated;
+revoke all on function public.validate_approval_batch_final_status() from public, anon, authenticated;
+revoke all on function public.approval_batch_totals_by_currency(uuid) from public, anon, authenticated;
 revoke all on function public.insert_approval_batch_notification(text, text, uuid, text, text, uuid, text, text, text, jsonb, text, text) from public, anon, authenticated;
 revoke all on function public.enqueue_approval_batch_status_notifications() from public, anon, authenticated;
 revoke all on function public.enqueue_approval_batch_item_notification() from public, anon, authenticated;
 
 revoke all on function public.list_company_directors(uuid) from public, anon;
+revoke all on function public.list_approval_batch_director_candidates(uuid) from public, anon;
 revoke all on function public.set_company_director(uuid, uuid, boolean) from public, anon;
 revoke all on function public.create_approval_batch(uuid, text, date, date, uuid, text) from public, anon;
 revoke all on function public.list_batch_eligible_requests(uuid) from public, anon;
@@ -1096,10 +1353,12 @@ revoke all on function public.get_approval_batch_detail(uuid) from public, anon;
 revoke all on function public.approve_entire_batch(uuid) from public, anon;
 revoke all on function public.decide_approval_batch_items(uuid, jsonb) from public, anon;
 revoke all on function public.close_approval_batch(uuid) from public, anon;
+revoke all on function public.release_rejected_batch_item_for_rebatch(uuid, text) from public, anon;
 revoke all on function public.list_finance_approval_batches(text) from public, anon;
 revoke all on function public.list_director_approval_batches(text) from public, anon;
 
 grant execute on function public.list_company_directors(uuid) to authenticated;
+grant execute on function public.list_approval_batch_director_candidates(uuid) to authenticated;
 grant execute on function public.set_company_director(uuid, uuid, boolean) to authenticated;
 grant execute on function public.create_approval_batch(uuid, text, date, date, uuid, text) to authenticated;
 grant execute on function public.list_batch_eligible_requests(uuid) to authenticated;
@@ -1110,6 +1369,7 @@ grant execute on function public.get_approval_batch_detail(uuid) to authenticate
 grant execute on function public.approve_entire_batch(uuid) to authenticated;
 grant execute on function public.decide_approval_batch_items(uuid, jsonb) to authenticated;
 grant execute on function public.close_approval_batch(uuid) to authenticated;
+grant execute on function public.release_rejected_batch_item_for_rebatch(uuid, text) to authenticated;
 grant execute on function public.list_finance_approval_batches(text) to authenticated;
 grant execute on function public.list_director_approval_batches(text) to authenticated;
 
@@ -1123,6 +1383,13 @@ begin
   if not exists (select 1 from pg_trigger where tgname = 'require_batch_for_payment_layout_line' and not tgisinternal)
      or not exists (select 1 from pg_trigger where tgname = 'require_batch_for_cash_fund' and not tgisinternal) then
     raise exception '021_postcheck: faltan gates de ejecucion';
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'validate_approval_batch_final_status' and not tgisinternal) then
+    raise exception '021_postcheck: falta validacion de estado final';
+  end if;
+  if to_regprocedure('public.release_rejected_batch_item_for_rebatch(uuid,text)') is null
+     or to_regprocedure('public.list_approval_batch_director_candidates(uuid)') is null then
+    raise exception '021_postcheck: faltan RPCs de reingreso o candidatos de Direccion';
   end if;
 end
 $$;

@@ -84,6 +84,18 @@ function money(value: unknown, currency: unknown): string | null {
   return `${safeCurrency} ${amount.toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function moneyTotals(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const totals = value
+    .map((row) => {
+      if (!row || typeof row !== "object") return null;
+      const item = row as Record<string, unknown>;
+      return money(item.amount, item.currency);
+    })
+    .filter((item): item is string => Boolean(item));
+  return totals.length ? totals.join(" | ") : null;
+}
+
 function textValue(value: unknown): string | null {
   const text = String(value ?? "").trim();
   return text ? text : null;
@@ -199,6 +211,7 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
   const subject = `${subjectPrefix}${event.subject || baseSubject(event)}`;
   const amountText = money(payload.amount, payload.currency);
+  const totalsText = moneyTotals(payload.totals_by_currency);
   const commentLabel = decisionCommentLabel(event);
   const commentText = textValue(payload.decision_comment);
   const shouldRenderComment = Boolean(commentLabel && (commentText || requiresDecisionCommentFallback(event.event_type)));
@@ -213,7 +226,7 @@ function renderEmail(event: NotificationEvent, sendMode: string): { subject: str
       ["Corte", payload.batch_label || event.source_folio],
       ["Folio", payload.folio],
       ["Proveedor", payload.provider],
-      ["Monto", amountText],
+      ["Totales", totalsText || amountText],
       ["Empresa", payload.company],
       ["Periodo", period],
       ["Pagos", payload.item_count],

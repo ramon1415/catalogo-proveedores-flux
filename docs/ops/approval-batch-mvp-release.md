@@ -14,6 +14,7 @@ La inspeccion del esquema anterior a 018/019 encontro una senal estable y audita
 2. Existe una decision en `payment_request_approvals` con accion `approved` o `exception_approved`, destino `approved` y un rol incluido en `flux_finance_roles()`.
 3. No existe una linea de layout ni un fondo de efectivo para la solicitud.
 4. No esta activa en otro corte y no fue aprobada en un corte anterior.
+5. Su rechazo batch mas reciente no permanece bloqueado para correccion.
 
 La elegibilidad se vuelve a validar al agregar y al enviar el corte. No depende de campos o tablas creados por 018/019.
 
@@ -25,16 +26,22 @@ La elegibilidad se vuelve a validar al agregar y al enviar el corte. No depende 
 - RLS: lectura para Finanzas o el director snapshot.
 - Escritura: solo mediante RPCs autenticados con validacion server-side.
 - Eliminacion fisica: no permitida. Quitar una solicitud del borrador deja evidencia de remocion.
-- Ejecucion: triggers bloquean nuevas lineas de layout o fondos de efectivo sin una partida aprobada por Direccion.
+- Reingreso: un rechazo queda `blocked` hasta que Finanzas registra una nota y lo cambia a `released` mediante RPC.
+- Ejecucion gradual: los triggers solo intervienen en solicitudes inscritas activamente en un corte. Una solicitud nunca inscrita conserva el flujo existente del MVP.
+- Ejecucion batch: una participacion pendiente o rechazada bloquea layout y efectivo; la participacion mas reciente debe estar aprobada dentro de un batch decidido.
+- Direccion: solo perfiles activos con un rol versionado de Direccion pueden configurarse como director.
+- Monedas: todos los totales se agrupan por moneda; nunca se suman importes de monedas distintas.
 
 ## RPCs
 
-- Configuracion: `list_company_directors`, `set_company_director`.
+- Configuracion: `list_company_directors`, `list_approval_batch_director_candidates`, `set_company_director`.
 - Preparacion: `create_approval_batch`, `list_batch_eligible_requests`, `add_request_to_approval_batch`, `remove_request_from_approval_batch`, `submit_approval_batch`.
 - Decision: `approve_entire_batch`, `decide_approval_batch_items`.
-- Operacion y consulta: `close_approval_batch`, `get_approval_batch_detail`, `list_finance_approval_batches`, `list_director_approval_batches`.
+- Operacion y consulta: `close_approval_batch`, `release_rejected_batch_item_for_rebatch`, `get_approval_batch_detail`, `list_finance_approval_batches`, `list_director_approval_batches`.
 
 La identidad del actor siempre se deriva de la sesion autenticada. El director autorizado es el perfil copiado al batch cuando se crea.
+
+Un batch final debe conservar al menos una partida aprobada. `approved` no admite partidas rechazadas; `partially_approved` exige al menos una aprobada y una rechazada. Rechazar todo el corte no forma parte del MVP y el servidor revierte esa operacion.
 
 ## Notificaciones
 
@@ -63,9 +70,13 @@ No se debe hacer merge general de `dev` hacia `main`. El release de batch debe p
 5. Crear un corte manual con cierre por defecto en miercoles.
 6. Agregar solicitudes elegibles de transferencia, efectivo o cheque.
 7. Confirmar que un request no puede vivir en dos cortes abiertos.
-8. Validar aprobar todo y decision partida por partida con motivo obligatorio.
-9. Confirmar bloqueo de layout/efectivo antes de aprobacion y continuidad despues de aprobar.
-10. Validar eventos, CSV, PDF, RLS y auditoria.
+8. Validar aprobar todo y decision partida por partida con resumen y confirmacion explicita.
+9. Confirmar que solicitudes nunca inscritas mantienen el flujo actual.
+10. Confirmar bloqueo de layout/efectivo para items draft, submitted o rejected y continuidad despues de aprobar.
+11. Confirmar que un rechazo no reingresa hasta que Finanzas registra una nota de liberacion.
+12. Validar cortes de una moneda y multimoneda sin sumar monedas distintas.
+13. Confirmar que un perfil sin rol de Direccion no puede configurarse.
+14. Validar eventos, CSV, PDF, RLS y auditoria.
 
 No hay scheduler, nomina especial, extraordinarios, autoaprobacion ni WhatsApp en este MVP.
 
@@ -73,4 +84,4 @@ No hay scheduler, nomina especial, extraordinarios, autoaprobacion ni WhatsApp e
 
 El SQL no se ejecuta desde este PR. La aplicacion debe hacerse primero en DEV con evidencia. Para PROD se requiere una autorizacion separada, backup confirmado, dry-run del conjunto aislado y smoke test controlado.
 
-Como 021 crea un gate de ejecucion, el rollback no debe improvisarse. Si una validacion falla, se detiene la liberacion antes de producir layouts o fondos y se prepara una migracion compensatoria revisada; no se eliminan tablas ni historial manualmente.
+El MVP aplica el gate unicamente a solicitudes inscritas en un corte. La obligatoriedad global por empresa queda para una fase posterior que incluya nomina, extraordinarios y activacion formal. Si una validacion falla, se detiene la liberacion y se prepara una migracion compensatoria revisada; no se eliminan tablas ni historial manualmente.

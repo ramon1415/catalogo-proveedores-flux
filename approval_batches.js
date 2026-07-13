@@ -9,8 +9,10 @@ const state = {
   detail: null,
   eligible: [],
   companies: [],
-  profiles: [],
+  directorCandidates: [],
   directors: [],
+  releaseItemId: null,
+  mutating: false,
 }
 const dom = {}
 
@@ -24,6 +26,7 @@ async function init() {
   try {
     await loadReferenceData()
     await loadDirectors()
+    await loadDirectorCandidates()
     await loadBatches()
   } catch (error) {
     showToast("No se pudo iniciar", friendlyError(error), "error")
@@ -37,7 +40,7 @@ function cacheDom() {
     "batchDetail", "pageContext", "createBatchDialog", "createBatchForm", "createCompanyId",
     "createDirectorId", "createPeriodStart", "createPeriodEnd", "createLabel", "createNotes",
     "directorDialog", "directorForm", "directorCompanyId", "directorProfileId", "directorActive",
-    "directorList",
+    "directorList", "rebatchDialog", "rebatchForm", "rebatchNote",
   ].forEach((id) => { dom[id] = document.getElementById(id) })
 }
 
@@ -72,7 +75,9 @@ function bindEvents() {
   dom.directorConfigBtn?.addEventListener("click", openDirectorDialog)
   dom.createBatchForm?.addEventListener("submit", createBatch)
   dom.directorForm?.addEventListener("submit", saveDirector)
+  dom.rebatchForm?.addEventListener("submit", releaseRejectedItem)
   dom.createCompanyId?.addEventListener("change", fillCreateDirectors)
+  dom.directorCompanyId?.addEventListener("change", () => loadDirectorCandidates(dom.directorCompanyId.value || null))
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-close-dialog]")
     if (button) document.getElementById(button.dataset.closeDialog)?.close()
@@ -99,16 +104,10 @@ async function resolveUser() {
 
 async function loadReferenceData() {
   if (!state.isFinance) return
-  const [companies, profiles] = await Promise.all([
-    supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name"),
-    supabaseClient.from("profiles").select("id,full_name,email,active").eq("active", true).order("full_name"),
-  ])
+  const companies = await supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name")
   if (companies.error) throw companies.error
-  if (profiles.error) throw profiles.error
   state.companies = companies.data || []
-  state.profiles = profiles.data || []
   fillCompanyOptions()
-  fillProfileOptions()
 }
 
 async function loadDirectors() {
@@ -118,6 +117,18 @@ async function loadDirectors() {
   state.directors = asArray(data)
   fillCreateDirectors()
   renderDirectorList()
+}
+
+async function loadDirectorCandidates(companyId = null) {
+  if (!state.isFinance) return
+  const { data, error } = await supabaseClient.rpc("list_approval_batch_director_candidates", { p_company_id: companyId || null })
+  if (error) {
+    state.directorCandidates = []
+    fillProfileOptions()
+    return showToast("No se cargaron candidatos", friendlyError(error), "warning")
+  }
+  state.directorCandidates = asArray(data)
+  fillProfileOptions()
 }
 
 async function loadBatches() {
@@ -174,7 +185,7 @@ function renderBatchList() {
     <button class="batch-list-item ${batch.id === state.selectedId ? "active" : ""}" type="button" data-batch-id="${escapeHtml(batch.id)}">
       <span class="batch-list-head"><strong>${escapeHtml(batch.label)}</strong>${statusBadge(batch.status)}</span>
       <span class="batch-list-meta"><span>${escapeHtml(batch.company_name || "Sin empresa")}</span><span>${formatDate(batch.period_end)}</span></span>
-      <span class="batch-list-meta"><span>${Number(batch.item_count || 0)} solicitudes</span><span>${formatMoney(batch.total_amount, "MXN")}</span></span>
+      <span class="batch-list-meta"><span>${Number(batch.item_count || 0)} solicitudes</span><span>${escapeHtml(formatCurrencyTotals(asArray(batch.totals_by_currency)))}</span></span>
     </button>
   `).join("")
 }
@@ -205,7 +216,7 @@ function renderDetail() {
   const batch = state.detail?.batch
   const items = asArray(state.detail?.items)
   if (!batch) return renderEmptyDetail("No hay detalle disponible.")
-  const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  const currencyTotals = totalsByCurrency(items)
   const approved = items.filter((item) => item.director_status === "approved").length
   const rejected = items.filter((item) => item.director_status === "rejected").length
   const pending = items.filter((item) => item.director_status === "pending").length
@@ -214,7 +225,7 @@ function renderDetail() {
       <div><h2>${escapeHtml(batch.label)}</h2><div class="batch-list-meta"><span>${escapeHtml(batch.company_name)}</span><span>${formatDate(batch.period_start)} - ${formatDate(batch.period_end)}</span><span>Director: ${escapeHtml(batch.director_name || "Sin asignar")}</span></div></div>
       <div class="batch-detail-actions">${detailActions(batch, items)}</div>
     </div>
-    <div class="batch-metrics">${metric("Solicitudes", items.length)}${metric("Total", formatMoney(total, items[0]?.currency || "MXN"))}${metric("Pendientes", pending)}${metric("Aprobadas / rechazadas", `${approved} / ${rejected}`)}</div>
+    <div class="batch-metrics">${metric("Solicitudes", items.length)}${metric(currencyTotals.length > 1 ? "Varias monedas" : "Total", formatCurrencyTotals(currencyTotals))}${metric("Pendientes", pending)}${metric("Aprobadas / rechazadas", `${approved} / ${rejected}`)}</div>
     ${renderBreakdowns(items)}
     ${batch.notes ? `<div class="batch-section"><div class="batch-list-meta">Notas</div><div>${escapeHtml(batch.notes)}</div></div>` : ""}
     <div class="batch-section"><div class="batch-section-head"><h3>Solicitudes del corte</h3><span class="batch-list-meta">${escapeHtml(statusLabel(batch.status))}</span></div>${renderItemsTable(batch, items)}</div>
@@ -240,8 +251,10 @@ function renderItemsTable(batch, items) {
   if (!items.length) return `<div class="batch-empty">Agrega solicitudes elegibles antes de enviar el corte.</div>`
   const canDecide = batch.can_director_decide && batch.status === "submitted"
   const canRemove = state.isFinance && batch.status === "draft"
-  return `<div class="batch-table-wrap"><table class="batch-table"><thead><tr><th>Folio</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision</th><th>Motivo</th>${canRemove ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
-    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(item.payment_method || "-")}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}"><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : statusBadge(item.director_status)}</td><td>${canDecide && item.director_status === "pending" ? `<input class="reason-input" data-reason-item="${escapeHtml(item.id)}" placeholder="Obligatorio si rechaza">` : escapeHtml(item.reject_reason || "-")}</td>${canRemove ? `<td><button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button></td>` : ""}</tr>
+  const canReleaseAny = state.isFinance && ["partially_approved", "closed"].includes(batch.status) && items.some((item) => item.director_status === "rejected" && item.rebatch_status === "blocked")
+  const hasActionColumn = canRemove || canReleaseAny
+  return `<div class="batch-table-wrap"><table class="batch-table"><thead><tr><th>Folio</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision</th><th>Motivo</th>${hasActionColumn ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
+    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(item.payment_method || "-")}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}"><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : statusBadge(item.director_status)}</td><td>${canDecide && item.director_status === "pending" ? `<input class="reason-input" data-reason-item="${escapeHtml(item.id)}" placeholder="Obligatorio si rechaza">` : `${escapeHtml(item.reject_reason || "-")}${item.rebatch_status === "released" ? `<br><span class="batch-list-meta">Reingreso habilitado: ${escapeHtml(item.rebatch_release_note || "")}</span>` : ""}`}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Habilitar siguiente corte</button>` : ""}</td>` : ""}</tr>
   `).join("")}</tbody></table></div>`
 }
 
@@ -276,47 +289,88 @@ function groupTotals(items, keyFor) {
   return Array.from(grouped.values()).sort((a, b) => b.total - a.total)
 }
 
+function totalsByCurrency(items) {
+  return groupTotals(items, (item) => String(item.currency || "MXN").toUpperCase())
+    .map((row) => ({ currency: row.label, amount: row.total }))
+}
+
+function formatCurrencyTotals(rows) {
+  if (!rows.length) return "Sin importe"
+  return rows.map((row) => formatMoney(row.amount, row.currency)).join(" | ")
+}
+
 async function handleDetailAction(event) {
   const button = event.target.closest("[data-detail-action]")
-  if (!button || button.disabled || !state.selectedId) return
+  if (!button || button.disabled || !state.selectedId || state.mutating) return
   try {
+    state.mutating = true
     button.disabled = true
     const action = button.dataset.detailAction
     if (action === "add-selected") await addSelectedRequests()
     if (action === "remove") await runRpc("remove_request_from_approval_batch", { p_batch_id: state.selectedId, p_item_id: button.dataset.itemId }, "Solicitud retirada")
     if (action === "submit") await confirmAndRun("Enviar corte", "El director recibira el corte para su decision.", "submit_approval_batch", { p_batch_id: state.selectedId }, "Corte enviado")
-    if (action === "approve-all") await confirmAndRun("Aprobar corte completo", "Todas las solicitudes pendientes quedaran autorizadas.", "approve_entire_batch", { p_batch_id: state.selectedId }, "Corte aprobado")
+    if (action === "approve-all") await confirmAndRun("Aprobar corte completo", approveAllSummary(), "approve_entire_batch", { p_batch_id: state.selectedId }, "Corte aprobado")
     if (action === "save-decisions") await saveDecisions()
     if (action === "close") await confirmAndRun("Cerrar corte", "El corte quedara cerrado para ejecucion.", "close_approval_batch", { p_batch_id: state.selectedId }, "Corte cerrado")
+    if (action === "release-rebatch") openRebatchDialog(button.dataset.itemId)
     if (action === "csv") exportCsv()
     if (action === "pdf") exportPdf()
   } catch (error) {
     showToast("No se pudo completar", friendlyError(error), "error")
   } finally {
     button.disabled = false
+    state.mutating = false
   }
 }
 
 async function addSelectedRequests() {
   const ids = Array.from(dom.batchDetail.querySelectorAll("[data-eligible-id]:checked")).map((input) => input.dataset.eligibleId)
   if (!ids.length) throw new Error("Selecciona al menos una solicitud.")
-  for (const requestId of ids) {
-    const { error } = await supabaseClient.rpc("add_request_to_approval_batch", { p_batch_id: state.selectedId, p_payment_request_id: requestId })
-    if (error) throw error
+  let added = 0
+  try {
+    for (const requestId of ids) {
+      const { error } = await supabaseClient.rpc("add_request_to_approval_batch", { p_batch_id: state.selectedId, p_payment_request_id: requestId })
+      if (error) throw error
+      added += 1
+    }
+    showToast("Solicitudes agregadas", `${added} solicitud(es) incorporadas al corte.`, "success")
+  } catch (error) {
+    throw new Error(`${friendlyError(error)} Se agregaron ${added} de ${ids.length}; el detalle fue actualizado.`)
+  } finally {
+    await reloadSelected()
   }
-  showToast("Solicitudes agregadas", `${ids.length} solicitud(es) incorporadas al corte.`, "success")
-  await reloadSelected()
 }
 
 async function saveDecisions() {
+  if (state.detail?.batch?.status !== "submitted") throw new Error("El corte ya no esta pendiente de decision.")
   const selects = Array.from(dom.batchDetail.querySelectorAll("[data-decision-item]"))
   const decisions = selects.map((select) => {
     const reason = dom.batchDetail.querySelector(`[data-reason-item="${select.dataset.decisionItem}"]`)?.value?.trim() || ""
+    if (!["approved", "rejected"].includes(select.value)) throw new Error("Selecciona una decision para cada solicitud.")
     if (select.value === "rejected" && !reason) throw new Error("Captura el motivo para cada solicitud rechazada.")
     return { item_id: select.dataset.decisionItem, status: select.value, reject_reason: reason || null }
   })
   if (!decisions.length) throw new Error("No hay decisiones pendientes.")
+  const itemsById = new Map(asArray(state.detail?.items).map((item) => [item.id, item]))
+  const approvedItems = decisions.filter((decision) => decision.status === "approved").map((decision) => itemsById.get(decision.item_id)).filter(Boolean)
+  const rejectedItems = decisions.filter((decision) => decision.status === "rejected").map((decision) => ({ ...itemsById.get(decision.item_id), reason: decision.reject_reason })).filter((item) => item.id)
+  const alreadyApproved = asArray(state.detail?.items).filter((item) => item.director_status === "approved").length
+  if (!approvedItems.length && !alreadyApproved) throw new Error("El corte debe conservar al menos una solicitud aprobada.")
+  const summary = [
+    `Vas a aprobar ${approvedItems.length} pago(s) y rechazar ${rejectedItems.length}.`,
+    `Aprobado por moneda: ${formatCurrencyTotals(totalsByCurrency(approvedItems))}.`,
+    `Rechazado por moneda: ${formatCurrencyTotals(totalsByCurrency(rejectedItems))}.`,
+    ...(rejectedItems.length ? ["", "Folios rechazados:", ...rejectedItems.map((item) => `- ${item.request_number}: ${item.reason}`)] : []),
+    "",
+    "Esta decision autoriza la continuacion operativa de los pagos aprobados. Confirmas?",
+  ].join("\n")
+  if (!window.confirm(summary)) return
   await runRpc("decide_approval_batch_items", { p_batch_id: state.selectedId, p_decisions: decisions }, "Decisiones guardadas")
+}
+
+function approveAllSummary() {
+  const pending = asArray(state.detail?.items).filter((item) => item.director_status === "pending")
+  return `Vas a aprobar ${pending.length} pago(s) por ${formatCurrencyTotals(totalsByCurrency(pending))}. Esta decision permite que continuen al flujo operativo. Confirmas?`
 }
 
 async function runRpc(name, args, successTitle) {
@@ -370,8 +424,9 @@ async function createBatch(event) {
   }
 }
 
-function openDirectorDialog() {
+async function openDirectorDialog() {
   fillCompanyOptions()
+  await loadDirectorCandidates(dom.directorCompanyId.value || null)
   fillProfileOptions()
   renderDirectorList()
   dom.directorDialog.showModal()
@@ -397,6 +452,38 @@ async function saveDirector(event) {
   }
 }
 
+function openRebatchDialog(itemId) {
+  state.releaseItemId = itemId
+  dom.rebatchNote.value = ""
+  dom.rebatchDialog.showModal()
+}
+
+async function releaseRejectedItem(event) {
+  event.preventDefault()
+  if (state.mutating) return
+  const note = dom.rebatchNote.value.trim()
+  if (!state.releaseItemId || !note) return showToast("Nota requerida", "Explica que informacion fue complementada antes del reingreso.", "warning")
+  const submit = dom.rebatchForm.querySelector('[type="submit"]')
+  state.mutating = true
+  submit.disabled = true
+  try {
+    const { error } = await supabaseClient.rpc("release_rejected_batch_item_for_rebatch", {
+      p_item_id: state.releaseItemId,
+      p_note: note,
+    })
+    if (error) throw error
+    dom.rebatchDialog.close()
+    state.releaseItemId = null
+    showToast("Reingreso habilitado", "La solicitud puede incorporarse a un siguiente corte.", "success")
+    await reloadSelected()
+  } catch (error) {
+    showToast("No se pudo habilitar", friendlyError(error), "error")
+  } finally {
+    submit.disabled = false
+    state.mutating = false
+  }
+}
+
 function fillCompanyOptions() {
   const options = state.companies.map((company) => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.legal_name || company.name)}</option>`).join("")
   ;[dom.createCompanyId, dom.directorCompanyId].forEach((select) => {
@@ -408,18 +495,18 @@ function fillCompanyOptions() {
 }
 
 function fillProfileOptions() {
-  dom.directorProfileId.innerHTML = `<option value="">Selecciona...</option>${state.profiles.map((profile) => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.full_name || profile.email || profile.id)}</option>`).join("")}`
+  dom.directorProfileId.innerHTML = `<option value="">Selecciona...</option>${state.directorCandidates.map((profile) => `<option value="${escapeHtml(profile.profile_id)}">${escapeHtml(profile.name || profile.email || profile.profile_id)}</option>`).join("")}`
 }
 
 function fillCreateDirectors() {
   const companyId = dom.createCompanyId?.value
-  const rows = state.directors.filter((row) => row.active && row.director_profile_active !== false && (!companyId || row.company_id === companyId))
+  const rows = state.directors.filter((row) => row.active && row.director_profile_active !== false && row.director_role_valid !== false && (!companyId || row.company_id === companyId))
   dom.createDirectorId.innerHTML = `<option value="">Selecciona...</option>${rows.map((row) => `<option value="${escapeHtml(row.director_profile_id)}">${escapeHtml(row.director_name || row.director_email)}</option>`).join("")}`
 }
 
 function renderDirectorList() {
   if (!dom.directorList) return
-  dom.directorList.innerHTML = state.directors.length ? `<div class="batch-table-wrap"><table class="batch-table" style="min-width:520px"><thead><tr><th>Empresa</th><th>Director</th><th>Estado</th></tr></thead><tbody>${state.directors.map((row) => `<tr><td>${escapeHtml(row.company_name)}</td><td>${escapeHtml(row.director_name || row.director_email)}</td><td>${statusBadge(row.active ? "active" : "inactive")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="batch-empty">No hay directores configurados.</div>`
+  dom.directorList.innerHTML = state.directors.length ? `<div class="batch-table-wrap"><table class="batch-table" style="min-width:520px"><thead><tr><th>Empresa</th><th>Director</th><th>Estado</th></tr></thead><tbody>${state.directors.map((row) => `<tr><td>${escapeHtml(row.company_name)}</td><td>${escapeHtml(row.director_name || row.director_email)}</td><td>${statusBadge(row.active && row.director_profile_active !== false && row.director_role_valid !== false ? "active" : "inactive")}</td></tr>`).join("")}</tbody></table></div>` : `<div class="batch-empty">No hay directores configurados.</div>`
 }
 
 function setDefaultPeriod() {
@@ -436,8 +523,8 @@ function exportCsv() {
   const batch = state.detail?.batch
   const items = asArray(state.detail?.items)
   if (!batch) return
-  const header = ["corte", "empresa", "periodo_inicio", "periodo_fin", "estatus_corte", "folio", "proveedor", "centro_costo", "partida", "metodo_pago", "moneda", "monto", "solicitante", "decision_director", "motivo_rechazo"]
-  const rows = items.map((item) => [batch.label, batch.company_name, batch.period_start, batch.period_end, batch.status, item.request_number, item.provider_name, item.cost_center, item.budget_category, item.payment_method, item.currency, item.amount, item.requester_name, item.director_status, item.reject_reason || ""])
+  const header = ["corte", "empresa", "periodo_inicio", "periodo_fin", "estatus_corte", "folio", "proveedor", "centro_costo", "partida", "metodo_pago", "moneda", "monto", "solicitante", "decision_director", "motivo_rechazo", "estatus_reingreso", "nota_reingreso"]
+  const rows = items.map((item) => [batch.label, batch.company_name, batch.period_start, batch.period_end, batch.status, item.request_number, item.provider_name, item.cost_center, item.budget_category, item.payment_method, item.currency, item.amount, item.requester_name, item.director_status, item.reject_reason || "", item.rebatch_status, item.rebatch_release_note || ""])
   const content = [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")
   downloadBlob(new Blob(["\ufeff", content], { type: "text/csv;charset=utf-8" }), `${fileStem(batch)}.csv`)
 }
@@ -454,7 +541,7 @@ function exportPdf() {
   doc.autoTable({
     startY: 68,
     head: [["Folio", "Proveedor", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]],
-    body: items.map((item) => [item.request_number, item.provider_name || "-", `${item.cost_center || "-"}\n${item.budget_category || "-"}`, item.payment_method || "-", formatMoney(item.amount, item.currency), item.requester_name || "-", statusLabel(item.director_status), item.reject_reason || "-"]),
+    body: items.map((item) => [item.request_number, item.provider_name || "-", `${item.cost_center || "-"}\n${item.budget_category || "-"}`, item.payment_method || "-", formatMoney(item.amount, item.currency), item.requester_name || "-", statusLabel(item.director_status), `${item.reject_reason || "-"}${item.rebatch_release_note ? `\nReingreso: ${item.rebatch_release_note}` : ""}`]),
     styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak" },
     headStyles: { fillColor: [34, 40, 49] },
   })
@@ -517,6 +604,10 @@ function friendlyError(error) {
     payment_request_not_batch_eligible: "La solicitud ya no es elegible para este corte.",
     payment_request_in_another_open_batch: "La solicitud ya pertenece a otro corte abierto.",
     reject_reason_required: "El motivo de rechazo es obligatorio.",
+    director_role_required: "El perfil seleccionado no tiene un rol activo de Direccion.",
+    rebatch_release_note_required: "La nota de reingreso es obligatoria.",
+    batch_item_already_released: "Esta solicitud ya fue habilitada para otro corte.",
+    batch_requires_at_least_one_approved_item: "El corte debe conservar al menos una solicitud aprobada.",
   }
   const key = Object.keys(known).find((item) => raw.includes(item))
   return key ? known[key] : raw
