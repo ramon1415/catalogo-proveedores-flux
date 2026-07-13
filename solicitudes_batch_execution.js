@@ -202,15 +202,28 @@
       const staleDirectionNotice = context.direction_approval_stale
         ? `<div class="batch-execution-meta"><span>Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.</span></div>`
         : ""
+      const budgetLabel = context.budget_validation_current ? "Presupuesto validado" : "Presupuesto por revisar"
       panel.innerHTML = `
-        <div class="batch-execution-head"><div><strong>Control previo a pago</strong><span>${batchText}</span></div>${context.finance_approval_current ? `<span class="badge success">Finanzas vigente</span>` : `<span class="badge warning">Requiere revision</span>`}</div>
+        <div class="batch-execution-head"><div><strong>Ruta de autorizacion y pago</strong><span>${batchText}</span></div>${context.budget_validation_current ? `<span class="badge success">${budgetLabel}</span>` : `<span class="badge warning">${budgetLabel}</span>`}</div>
         ${staleDirectionNotice}
+        ${renderApprovalTimeline(context.approval_history)}
         ${context.can_authorize_extraordinary ? `<div class="batch-execution-actions"><button class="primary-btn" type="button" data-batch-execution-action="authorize">Marcar como extraordinario</button></div>` : `<div class="batch-execution-meta"><span>${escapeHtml(blockReasonLabel(context.authorization_block_reason))}</span></div>`}
       `
     }
     const firstCard = host.querySelector(".decision-card")
     if (firstCard) host.insertBefore(panel, firstCard)
     else host.appendChild(panel)
+  }
+
+  function renderApprovalTimeline(history) {
+    const rows = Array.isArray(history) ? history : []
+    if (!rows.length) return `<div class="batch-execution-meta"><span>Aun no se incorpora a un corte semanal.</span></div>`
+    return `<div class="batch-history-timeline" aria-label="Historial de revisiones de Direccion">${rows.map((row) => `<div class="batch-history-step"><span class="batch-history-dot ${escapeHtml(row.director_status || "pending")}"></span><div><strong>${escapeHtml(reviewLabel(row.review_sequence))} · ${escapeHtml(row.batch_label || "Corte")}</strong><span>${escapeHtml(batchStatusLabel(row.batch_status, row.director_status))}${row.decided_at ? ` · ${escapeHtml(formatDateTime(row.decided_at))}` : ""}</span>${row.reject_reason ? `<small>Motivo: ${escapeHtml(row.reject_reason)}</small>` : ""}${row.correction_note || row.resubmission_note ? `<small>Correccion: ${escapeHtml(row.correction_note || row.resubmission_note)}</small>` : ""}</div></div>`).join("")}</div>`
+  }
+
+  function reviewLabel(value) {
+    const sequence = Math.max(1, Number(value || 1))
+    return sequence === 1 ? "Primera revision" : `Revision ${sequence}`
   }
 
   function removeExecutionPanel() {
@@ -342,8 +355,8 @@
   function blockReasonLabel(value) {
     return ({
       finance_role_required: "Solo Finanzas puede autorizar extraordinarios.",
-      payment_request_must_be_finance_approved: "La solicitud debe estar aprobada por Finanzas.",
-      finance_reapproval_required: "Los datos cambiaron y requieren nueva revision de Finanzas.",
+      payment_request_must_be_finance_approved: "La solicitud requiere validacion de presupuesto antes de continuar.",
+      finance_reapproval_required: "Los datos cambiaron y requieren revalidacion de presupuesto.",
       direction_reapproval_required: "Los datos cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.",
       payment_request_already_executed: "La solicitud ya tiene ejecucion registrada.",
       extraordinary_authorization_already_active: "La solicitud ya tiene autorizacion extraordinaria activa.",
@@ -358,8 +371,8 @@
     const raw = String(error?.message || error || "Error no identificado")
     const known = {
       finance_role_required: "Se requiere rol de Finanzas.",
-      finance_reapproval_required: "Los datos cambiaron y requieren nueva revision de Finanzas.",
-      payment_request_must_be_finance_approved: "La solicitud debe estar aprobada por Finanzas.",
+      finance_reapproval_required: "Los datos cambiaron y requieren revalidacion de presupuesto.",
+      payment_request_must_be_finance_approved: "La solicitud requiere validacion de presupuesto antes de continuar.",
       payment_request_already_executed: "La solicitud ya tiene ejecucion registrada.",
       extraordinary_authorization_already_active: "Ya existe una autorizacion extraordinaria activa.",
       direction_rejected_request_cannot_be_extraordinary: "No se puede omitir un rechazo previo de Direccion.",

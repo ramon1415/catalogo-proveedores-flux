@@ -32,6 +32,7 @@ let layoutPagosintIssueCounts = new Map()
 let layoutFormatSummaries = new Map()
 let layoutEligibilityPreview = null
 let activeLayoutRebatchItem = null
+let activeLayoutCompletionRequest = null
 const dom = {}
 
 const rootElement = document.documentElement
@@ -92,6 +93,18 @@ function cacheDom() {
   dom.closeLayoutRebatchBtn = document.getElementById("closeLayoutRebatchBtn")
   dom.cancelLayoutRebatchBtn = document.getElementById("cancelLayoutRebatchBtn")
   dom.submitLayoutRebatchBtn = document.getElementById("submitLayoutRebatchBtn")
+  dom.layoutCompletionDialog = document.getElementById("layoutCompletionDialog")
+  dom.layoutCompletionForm = document.getElementById("layoutCompletionForm")
+  dom.layoutCompletionTitle = document.getElementById("layoutCompletionTitle")
+  dom.layoutCompletionSummary = document.getElementById("layoutCompletionSummary")
+  dom.layoutCompletionBankAccount = document.getElementById("layoutCompletionBankAccount")
+  dom.layoutCompletionReference = document.getElementById("layoutCompletionReference")
+  dom.layoutCompletionConcept = document.getElementById("layoutCompletionConcept")
+  dom.layoutCompletionDate = document.getElementById("layoutCompletionDate")
+  dom.layoutCompletionImpact = document.getElementById("layoutCompletionImpact")
+  dom.closeLayoutCompletionBtn = document.getElementById("closeLayoutCompletionBtn")
+  dom.cancelLayoutCompletionBtn = document.getElementById("cancelLayoutCompletionBtn")
+  dom.submitLayoutCompletionBtn = document.getElementById("submitLayoutCompletionBtn")
   dom.linesDialog = document.getElementById("linesDialog")
   dom.linesTitle = document.getElementById("linesTitle")
   dom.linesSubtitle = document.getElementById("linesSubtitle")
@@ -150,6 +163,9 @@ function bindEvents() {
   dom.closeLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
   dom.cancelLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
   dom.layoutRebatchForm?.addEventListener("submit", submitLayoutRebatch)
+  dom.closeLayoutCompletionBtn?.addEventListener("click", closeLayoutCompletionDialog)
+  dom.cancelLayoutCompletionBtn?.addEventListener("click", closeLayoutCompletionDialog)
+  dom.layoutCompletionForm?.addEventListener("submit", submitLayoutCompletion)
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
   dom.closePagosintReferenceModalBtn?.addEventListener("click", closePagosintReferenceModal)
   dom.cancelPagosintReferenceBtn?.addEventListener("click", closePagosintReferenceModal)
@@ -377,10 +393,10 @@ function renderLayoutCompanyOptions() {
 function renderLayoutBankAccountOptions() {
   const selectedCompanyId = dom.layoutCompanyId.value
   const selected = dom.layoutBankAccountId.value
-  let accounts = companyBankAccounts
+  let accounts = companyBankAccounts.filter((account) => cleanText(account.account_number))
 
   if (selectedCompanyId) {
-    accounts = companyBankAccounts.filter((a) => a.company_id === selectedCompanyId)
+    accounts = accounts.filter((a) => a.company_id === selectedCompanyId)
   }
 
   dom.layoutBankAccountId.innerHTML = [
@@ -454,29 +470,34 @@ function renderLayoutEligibilityPreview() {
     <div class="layout-preview-summary">
       ${previewMetric("Listas para layout", ready.length)}
       ${previewMetric("Regulares / extraordinarias", `${regular.length + legacy.length} / ${extraordinary.length}`)}
-      ${previewMetric("Rechazadas", rejected.length)}
+      ${previewMetric("Rechazadas", rejected.length, rejected.length ? "layoutPreviewRejected" : null, "danger")}
       ${previewMetric("Reautorizacion requerida", directionReapproval.length)}
+      ${previewMetric("Datos por completar", invalid.length, invalid.length ? "layoutPreviewInvalid" : null, "warning")}
       ${previewMetric("Importe listo", totals.map((row) => formatPreviewMoney(row.amount, row.currency)).join(" | ") || "Sin importe")}
     </div>
     ${renderPreviewSection("Listas para layout", "Solo estas solicitudes se incluiran", ready, "ready")}
     ${renderPreviewSection("Pendientes de cierre", "Direccion aprobo; Finanzas debe liberar el corte", pendingClose, "pending_close")}
     ${renderPreviewSection("Pendientes de Direccion", "No se incluiran en el layout", pendingDirector, "pending_director")}
     ${renderPreviewSection("Reautorizacion de Direccion", "Los datos cambiaron despues de la autorizacion", directionReapproval, "direction_reapproval")}
-    ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected")}
-    ${renderPreviewSection("Datos incompletos", "Deben corregirse antes de crear el layout", invalid, "invalid")}
+    ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected", "layoutPreviewRejected")}
+    ${renderPreviewSection("Solicitudes por completar", "Corrige aqui los datos faltantes para que vuelvan a evaluarse", invalid, "invalid", "layoutPreviewInvalid")}
   `
   dom.layoutEligibilityPreview.classList.remove("hidden")
   dom.submitNewLayoutBtn.disabled = ready.length === 0
   dom.submitNewLayoutBtn.textContent = ready.length ? `Crear layout con ${ready.length} pagos` : "Sin pagos liberados"
 }
 
-function previewMetric(label, value) {
-  return `<div class="layout-preview-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+function previewMetric(label, value, targetId = null, tone = "") {
+  const content = `<span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>`
+  if (!targetId) return `<div class="layout-preview-metric ${escapeHtml(tone)}">${content}</div>`
+  return `<button class="layout-preview-metric layout-preview-metric-action ${escapeHtml(tone)}" type="button" data-preview-action="focus-section" data-target-id="${escapeHtml(targetId)}" aria-label="Ir a ${escapeHtml(label)}">${content}<small>Ver detalle</small></button>`
 }
 
-function renderPreviewSection(title, subtitle, rows, kind) {
-  if (!rows.length) return `<section class="layout-preview-section"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>0</span></div><div class="layout-preview-empty">${escapeHtml(subtitle)}</div></section>`
-  return `<section class="layout-preview-section"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>${rows.length} · ${escapeHtml(subtitle)}</span></div><div class="layout-preview-list">${rows.map((row) => renderPreviewRow(row, kind)).join("")}</div></section>`
+function renderPreviewSection(title, subtitle, rows, kind, sectionId = null) {
+  const id = sectionId ? ` id="${escapeHtml(sectionId)}"` : ""
+  const emphasized = rows.length && ["rejected", "invalid"].includes(kind) ? " layout-preview-section-attention" : ""
+  if (!rows.length) return `<section${id} class="layout-preview-section"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>0</span></div><div class="layout-preview-empty">${escapeHtml(subtitle)}</div></section>`
+  return `<section${id} class="layout-preview-section${emphasized}" tabindex="-1"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>${rows.length} · ${escapeHtml(subtitle)}</span></div><div class="layout-preview-list">${rows.map((row) => renderPreviewRow(row, kind)).join("")}</div></section>`
 }
 
 function renderPreviewRow(row, kind) {
@@ -498,12 +519,22 @@ function renderPreviewRow(row, kind) {
     detail = "Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte."
   } else if (kind === "rejected") {
     detailIsHtml = true
-    detail = `<span class="layout-reject-reason">${escapeHtml(row.reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(batch)} · ${escapeHtml(formatDate(row.rejected_at))} · ${escapeHtml(row.rebatch_status === "released" ? "Reingreso habilitado" : "Bloqueada")}</small>`
+    detail = `<span class="layout-reject-reason">${escapeHtml(row.reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(batch)} · ${escapeHtml(formatDate(row.rejected_at))} · ${escapeHtml(row.rejected_by_name || "Direccion")}</small><small>${escapeHtml(row.latest_correction_note ? `Correccion: ${row.latest_correction_note}` : row.rebatch_status === "released" ? "Reingreso habilitado" : "Pendiente de correccion")}</small>${row.target_batch_label ? `<small>Destino: ${escapeHtml(row.target_batch_label)} · ${escapeHtml(row.target_batch_status || "borrador")}</small>` : ""}`
     if (row.rebatch_status === "blocked" && row.source_item_id) {
       actions += `<button class="small-btn warning" type="button" data-preview-action="rebatch" data-item-id="${escapeHtml(row.source_item_id)}">Enviar nuevamente</button>`
+    } else if (row.target_batch_id) {
+      actions += `<button class="small-btn" type="button" data-preview-action="open-batch" data-batch-id="${escapeHtml(row.target_batch_id)}">Abrir nuevo corte</button>`
     }
   } else if (kind === "invalid") {
-    detail = formatMissingFields(row.missing_fields)
+    detailIsHtml = true
+    detail = `<strong>Falta completar</strong><small>${escapeHtml(formatMissingFields(row.missing_fields))}</small>`
+    const missing = Array.isArray(row.missing_fields) ? row.missing_fields : []
+    if (missing.some((field) => requestOwnedLayoutFields().includes(field))) {
+      actions += `<button class="small-btn warning" type="button" data-preview-action="complete-layout-data" data-request-id="${escapeHtml(row.payment_request_id)}">Completar datos</button>`
+    }
+    if (missing.some((field) => providerOwnedLayoutFields().includes(field)) && row.proveedor_id) {
+      actions += `<button class="small-btn" type="button" data-preview-action="open-provider" data-provider-id="${escapeHtml(row.proveedor_id)}">Completar proveedor</button>`
+    }
   } else if (row.classification === "legacy_eligible") {
     detail = "Elegible por compatibilidad historica"
   }
@@ -540,6 +571,12 @@ function formatPreviewMoney(value, currency = "MXN") {
 async function handleLayoutPreviewAction(event) {
   const button = event.target.closest("[data-preview-action]")
   if (!button) return
+  if (button.dataset.previewAction === "focus-section") {
+    const section = document.getElementById(button.dataset.targetId)
+    section?.scrollIntoView({ behavior: "smooth", block: "start" })
+    window.setTimeout(() => section?.focus({ preventScroll: true }), 250)
+    return
+  }
   if (button.dataset.previewAction === "open-request") {
     window.location.href = `./solicitudes.html?request_id=${encodeURIComponent(button.dataset.requestId)}`
     return
@@ -548,7 +585,122 @@ async function handleLayoutPreviewAction(event) {
     window.location.href = `./approval_batches.html?batch_id=${encodeURIComponent(button.dataset.batchId)}`
     return
   }
+  if (button.dataset.previewAction === "open-provider") {
+    window.location.href = `./proveedores.html?provider_id=${encodeURIComponent(button.dataset.providerId)}&return_to=layouts`
+    return
+  }
+  if (button.dataset.previewAction === "complete-layout-data") {
+    openLayoutCompletionDialog(button.dataset.requestId)
+    return
+  }
   if (button.dataset.previewAction === "rebatch") await openLayoutRebatchDialog(button.dataset.itemId)
+}
+
+function requestOwnedLayoutFields() {
+  return [
+    "scheduled_payment_date",
+    "company_bank_account_id",
+    "company_bank_account_id_not_found",
+    "company_bank_account_inactive",
+    "source_account_number",
+    "payment_reference",
+    "payment_concept",
+  ]
+}
+
+function providerOwnedLayoutFields() {
+  return [
+    "proveedor_id",
+    "proveedor_not_found",
+    "proveedor_inactive",
+    "beneficiary_name",
+    "destination_type",
+    "clabe",
+    "cuenta_bancaria",
+    "convenio_number",
+  ]
+}
+
+function findPreviewRequest(requestId) {
+  return previewRows("invalid_data").find((row) => row.payment_request_id === requestId) || null
+}
+
+function openLayoutCompletionDialog(requestId) {
+  const request = findPreviewRequest(requestId)
+  if (!request || !dom.layoutCompletionDialog) return
+  activeLayoutCompletionRequest = request
+  const missing = Array.isArray(request.missing_fields) ? request.missing_fields : []
+  const accounts = companyBankAccounts.filter((account) => (
+    account.company_id === request.company_id
+    && account.active
+    && cleanText(account.account_number)
+  ))
+  dom.layoutCompletionTitle.textContent = `Completar ${request.request_number || "solicitud"}`
+  dom.layoutCompletionSummary.innerHTML = `<strong>${escapeHtml(request.provider_name || "Sin proveedor")}</strong><span>${escapeHtml(formatPreviewMoney(request.amount, request.currency))}</span><small>Pendiente: ${escapeHtml(formatMissingFields(missing))}</small>`
+  dom.layoutCompletionBankAccount.innerHTML = `<option value="">${accounts.length ? "Selecciona cuenta origen" : "No hay cuentas origen activas con numero"}</option>${accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(layoutAccountLabel(account))}</option>`).join("")}`
+  dom.layoutCompletionBankAccount.value = accounts.some((account) => account.id === request.company_bank_account_id) ? request.company_bank_account_id : ""
+  dom.layoutCompletionReference.value = request.payment_reference || ""
+  dom.layoutCompletionConcept.value = request.payment_concept || ""
+  dom.layoutCompletionDate.value = request.scheduled_payment_date || ""
+  dom.layoutCompletionBankAccount.required = missing.some((field) => [
+    "company_bank_account_id",
+    "company_bank_account_id_not_found",
+    "company_bank_account_inactive",
+    "source_account_number",
+  ].includes(field))
+  dom.layoutCompletionReference.required = missing.includes("payment_reference")
+  dom.layoutCompletionConcept.required = missing.includes("payment_concept")
+  dom.layoutCompletionDate.required = missing.includes("scheduled_payment_date")
+  dom.layoutCompletionImpact.textContent = request.direction_approval_current
+    ? "Estos datos forman parte de la autorizacion. Al guardarlos, el historial se conserva y Direccion debera revisar nuevamente la solicitud antes del pago."
+    : "Al guardar, la solicitud se volvera a evaluar automaticamente en este mismo preview."
+  dom.layoutCompletionDialog.showModal()
+}
+
+function closeLayoutCompletionDialog() {
+  activeLayoutCompletionRequest = null
+  dom.layoutCompletionForm?.reset()
+  if (dom.layoutCompletionDialog?.open) dom.layoutCompletionDialog.close()
+}
+
+async function submitLayoutCompletion(event) {
+  event.preventDefault()
+  if (!activeLayoutCompletionRequest) return
+  const reference = cleanText(dom.layoutCompletionReference.value)
+  if (reference && !/^\d{1,5}$/.test(reference)) {
+    showToast("Referencia invalida", "Captura de 1 a 5 digitos.", "warning")
+    return
+  }
+  setButtonLoading(dom.submitLayoutCompletionBtn, true, "Guardando...")
+  try {
+    const { data, error } = await supabaseClient.rpc("complete_payment_request_layout_data", {
+      p_payment_request_id: activeLayoutCompletionRequest.payment_request_id,
+      p_company_bank_account_id: dom.layoutCompletionBankAccount.value || null,
+      p_payment_reference: reference || null,
+      p_payment_concept: cleanText(dom.layoutCompletionConcept.value) || null,
+      p_scheduled_payment_date: dom.layoutCompletionDate.value || null,
+    })
+    if (error) throw error
+    const requiresDirection = Boolean(data?.direction_reapproval_required)
+    closeLayoutCompletionDialog()
+    await reviewLayoutEligibility()
+    showToast(
+      "Datos guardados",
+      requiresDirection
+        ? "La solicitud conserva su historial y ahora requiere una nueva revision de Direccion antes de entrar al layout."
+        : "La solicitud fue reevaluada. Revisa su estado actualizado en la lista.",
+      requiresDirection ? "warning" : "success"
+    )
+  } catch (error) {
+    showToast("No se pudieron guardar los datos", friendlyRpcError(error), "danger")
+  } finally {
+    setButtonLoading(dom.submitLayoutCompletionBtn, false, "Guardar y reevaluar")
+  }
+}
+
+function layoutAccountLabel(account) {
+  const suffix = account.account_number ? `cta ${account.account_number}` : account.last4 ? `termina ${account.last4}` : "sin numero"
+  return [account.name || "Cuenta origen", account.bank_name, suffix].filter(Boolean).join(" - ")
 }
 
 async function openLayoutRebatchDialog(itemId) {
@@ -692,8 +844,22 @@ function formatMissingFields(fields) {
     payment_reference: "referencia de pago requerida",
     payment_concept: "concepto de pago requerido",
     company_bank_account_id: "cuenta origen requerida",
+    company_bank_account_id_not_found: "cuenta origen no encontrada",
+    company_bank_account_inactive: "cuenta origen inactiva",
+    source_account_number: "numero de cuenta origen requerido",
     scheduled_payment_date: "fecha programada requerida",
-    finance_reapproval_required: "nueva revision de Finanzas requerida",
+    proveedor_id: "proveedor requerido",
+    proveedor_not_found: "proveedor no encontrado",
+    proveedor_inactive: "proveedor inactivo",
+    beneficiary_name: "beneficiario requerido",
+    destination_type: "tipo de cuenta destino requerido",
+    clabe: "CLABE del proveedor requerida",
+    cuenta_bancaria: "cuenta del proveedor requerida",
+    convenio_number: "numero de convenio requerido",
+    unsupported_layout_currency: "moneda no compatible con layout",
+    invalid_amount: "importe invalido",
+    budget_revalidation_required: "presupuesto por revalidar",
+    finance_reapproval_required: "revalidacion de presupuesto requerida",
     direction_reapproval_required: "nueva autorizacion de Direccion requerida",
     extraordinary_reauthorization_required: "revocar y autorizar nuevamente el extraordinario",
   }
@@ -1780,13 +1946,16 @@ function friendlyRpcError(error) {
     company_not_found: "La empresa seleccionada no existe.",
     company_bank_account_not_found_or_inactive: "La cuenta origen no existe o esta inactiva.",
     finance_role_required: "Se requiere rol de Finanzas.",
-    finance_reapproval_required: "La solicitud debe volver a revision de Finanzas por un cambio material.",
+    finance_reapproval_required: "La solicitud requiere revalidacion de presupuesto por un cambio material.",
     rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
     payment_request_in_another_open_batch: "La solicitud ya pertenece a otro corte abierto.",
     target_batch_must_be_draft: "El corte destino ya no esta en borrador.",
     target_batch_company_mismatch: "El corte destino pertenece a otra empresa.",
     payment_request_already_in_target_batch: "La solicitud ya esta en el corte destino.",
     closed_batch_authorization_required: "El pago regular requiere aprobacion de Direccion y corte cerrado.",
+    payment_request_layout_data_locked: "La solicitud ya fue pagada o tiene una ejecucion y sus datos de layout estan bloqueados.",
+    payment_reference_must_be_numeric: "La referencia debe contener solo digitos.",
+    payment_reference_too_long: "La referencia acepta de 1 a 5 digitos.",
   }
   const key = Object.keys(known).find((k) => message.includes(k))
   if (key) return known[key]

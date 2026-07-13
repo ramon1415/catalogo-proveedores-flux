@@ -10,6 +10,7 @@ const state = {
   selectedId: null,
   detail: null,
   eligible: [],
+  ineligible: [],
   companies: [],
   directorCandidates: [],
   directors: [],
@@ -76,6 +77,7 @@ function bindEvents() {
     state.selectedId = null
     state.detail = null
     state.eligible = []
+    state.ineligible = []
     state.selectedEligibleIds.clear()
     await loadBatches()
   })
@@ -283,11 +285,14 @@ async function openBatch(batchId) {
     if (error) throw error
     state.detail = data || { batch: null, items: [] }
     state.eligible = []
+    state.ineligible = []
     if (state.isFinance && state.detail.batch?.status === "draft") {
       const eligible = await supabaseClient.rpc("list_batch_eligible_requests", { p_company_id: state.detail.batch.company_id })
       if (eligible.error) throw eligible.error
       const included = new Set(asArray(state.detail.items).map((item) => item.payment_request_id))
-      state.eligible = asArray(eligible.data).filter((item) => !included.has(item.id))
+      const candidates = asArray(eligible.data).filter((item) => !included.has(item.id))
+      state.eligible = candidates.filter((item) => item.eligible !== false)
+      state.ineligible = candidates.filter((item) => item.eligible === false)
       const eligibleIds = new Set(state.eligible.map((item) => item.id))
       state.selectedEligibleIds = new Set(Array.from(state.selectedEligibleIds).filter((id) => eligibleIds.has(id)))
     }
@@ -317,7 +322,7 @@ function renderDetail() {
     ${renderBreakdowns(items)}
     ${batch.notes ? `<div class="batch-section"><div class="batch-list-meta">Notas</div><div>${escapeHtml(batch.notes)}</div></div>` : ""}
     <div class="batch-section batch-section-focus" id="batchItemsSection" tabindex="-1"><div class="batch-section-head"><h3>Solicitudes del corte</h3><span class="batch-list-meta">${escapeHtml(statusLabel(batch.status))}</span></div>${renderItemsTable(batch, items)}</div>
-    ${state.isFinance && batch.status === "draft" ? renderEligibleSection() : ""}
+    ${state.isFinance && batch.status === "draft" ? `${renderEligibleSection()}${renderIneligibleSection()}` : ""}
   `
   syncEligibleSelectionUi()
   syncDecisionUi()
@@ -368,29 +373,121 @@ function renderItemsTable(batch, items) {
   const canRemove = state.isFinance && batch.status === "draft"
   const canReleaseAny = state.isFinance && ["partially_approved", "closed"].includes(batch.status) && items.some((item) => item.director_status === "rejected" && item.rebatch_status === "blocked")
   const hasActionColumn = canRemove || canReleaseAny
-  return `<div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th>Folio</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision</th><th>Motivo</th>${hasActionColumn ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
-    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(item.payment_method || "-")}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : statusBadge(item.director_status)}</td><td>${canDecide && item.director_status === "pending" ? `<input class="reason-input" data-reason-item="${escapeHtml(item.id)}" aria-label="Motivo para ${escapeHtml(item.request_number || "solicitud")}" placeholder="Obligatorio si rechaza" disabled>` : `${escapeHtml(item.reject_reason || "-")}${item.rebatch_status === "released" ? `<br><span class="batch-list-meta">Reingreso habilitado: ${escapeHtml(item.rebatch_release_note || "")}</span>` : ""}`}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Enviar nuevamente</button>` : ""}</td>` : ""}</tr>
+  return `<div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th>Folio / revision</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision actual</th><th>Contexto</th>${hasActionColumn ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
+    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong><div class="batch-inline-badges">${item.previous_item_id ? `<span class="badge warning">Reenviada</span>` : ""}<span class="badge info">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</span></div></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : statusBadge(item.director_status)}</td><td>${renderItemReviewContext(item, canDecide)}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Enviar nuevamente</button>` : ""}</td>` : ""}</tr>
   `).join("")}</tbody></table></div>`
+}
+
+function renderItemReviewContext(item, canDecide) {
+  if (canDecide && item.director_status === "pending") {
+    const previous = item.previous_item_id
+      ? `<div class="batch-review-context"><strong>Rechazo anterior</strong><span>${escapeHtml(item.previous_reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(item.previous_batch_label || "Corte anterior")} · ${escapeHtml(formatDateTime(item.previous_rejected_at))}</small><strong>Correccion reportada</strong><span>${escapeHtml(item.resubmission_note || item.previous_correction_note || "Sin detalle de correccion")}</span></div>`
+      : ""
+    return `${previous}<input class="reason-input" data-reason-item="${escapeHtml(item.id)}" aria-label="Motivo para ${escapeHtml(item.request_number || "solicitud")}" placeholder="Obligatorio si rechaza" disabled>`
+  }
+  const current = item.reject_reason ? `<span>${escapeHtml(item.reject_reason)}</span>` : `<span class="batch-list-meta">Sin motivo vigente</span>`
+  const correction = item.rebatch_status === "released" || item.rebatch_release_note
+    ? `<small>Correccion: ${escapeHtml(item.rebatch_release_note || item.resubmission_note || "Registrada")}</small>`
+    : ""
+  return `<div class="batch-review-context compact">${current}${correction}</div>`
 }
 
 function renderEligibleSection() {
   const rows = state.eligible
   const selected = rows.filter((item) => state.selectedEligibleIds.has(item.id)).length
-  return `<div class="batch-section"><div class="batch-section-head"><h3>Solicitudes elegibles</h3><span class="batch-list-meta">Aprobadas por Finanzas y aun no ejecutadas</span></div>${rows.length ? `<div class="batch-bulk-bar" data-eligible-toolbar>
+  return `<div class="batch-section"><div class="batch-section-head"><h3>Solicitudes elegibles</h3><span class="batch-list-meta">Enviadas con presupuesto disponible y aun no ejecutadas</span></div>${rows.length ? `<div class="batch-bulk-bar" data-eligible-toolbar>
     <label class="batch-select-all"><input class="batch-check" type="checkbox" data-select-all-eligible aria-label="Seleccionar todas las solicitudes elegibles"> Seleccionar todas</label>
     <span class="batch-selection-count" data-selected-count aria-live="polite">${selected} de ${rows.length} seleccionadas</span>
     <button class="secondary-btn" type="button" data-detail-action="clear-selection" ${selected ? "" : "disabled"}>Limpiar seleccion</button>
     <button class="primary-btn" type="button" data-detail-action="add-selected" ${selected && !state.addingProgress ? "" : "disabled"}>Agregar ${selected} al corte</button>
     <span class="batch-progress" data-add-progress aria-live="polite" ${state.addingProgress ? "" : "hidden"}>${state.addingProgress ? `Agregando ${state.addingProgress.current} de ${state.addingProgress.total}...` : ""}</span>
-  </div><div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th></th><th>Folio</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th></tr></thead><tbody>${rows.map((item) => `
-    <tr class="batch-eligible-row ${state.selectedEligibleIds.has(item.id) ? "selected" : ""}" data-eligible-row data-request-id="${escapeHtml(item.id)}"><td><input class="batch-check" type="checkbox" data-eligible-id="${escapeHtml(item.id)}" aria-label="Seleccionar ${escapeHtml(item.request_number)}" ${state.selectedEligibleIds.has(item.id) ? "checked" : ""}></td><td><strong>${escapeHtml(item.request_number)}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(item.payment_method || "-")}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td></tr>
+  </div><div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th></th><th>Folio</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Presupuesto</th><th>Origen</th><th>Solicitante</th></tr></thead><tbody>${rows.map((item) => `
+    <tr class="batch-eligible-row ${state.selectedEligibleIds.has(item.id) ? "selected" : ""}" data-eligible-row data-request-id="${escapeHtml(item.id)}"><td><input class="batch-check" type="checkbox" data-eligible-id="${escapeHtml(item.id)}" aria-label="Seleccionar ${escapeHtml(item.request_number)}" ${state.selectedEligibleIds.has(item.id) ? "checked" : ""}></td><td><strong>${escapeHtml(item.request_number)}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td><span class="badge success">Presupuesto disponible</span>${item.budget_available != null ? `<small class="batch-cell-note">Disponible: ${formatMoney(item.budget_available, item.currency)}</small>` : ""}</td><td>${renderOriginContext(item)}</td><td>${escapeHtml(item.requester_name || "-")}</td></tr>
   `).join("")}</tbody></table></div>` : `<div class="batch-empty">No hay solicitudes elegibles para esta empresa.</div>`}</div>`
+}
+
+function renderIneligibleSection() {
+  const rows = state.ineligible
+  if (!rows.length) return ""
+  return `<div class="batch-section batch-ineligible-section"><div class="batch-section-head"><div><h3>Solicitudes que aun no pueden agregarse</h3><span class="batch-list-meta">El motivo viene de la validacion del servidor; no necesitas revisar la consola.</span></div><span class="badge warning">${rows.length}</span></div><div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th>Folio</th><th>Proveedor</th><th>Monto</th><th>Estado</th><th>Que falta</th></tr></thead><tbody>${rows.map((item) => `<tr><td><strong>${escapeHtml(item.request_number || "-")}</strong></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${formatMoney(item.amount, item.currency)}</td><td><span class="badge ${ineligibleTone(item.classification)}">${escapeHtml(classificationLabel(item.classification))}</span></td><td>${escapeHtml(classificationReasonLabel(item))}</td></tr>`).join("")}</tbody></table></div></div>`
+}
+
+function renderOriginContext(item) {
+  const origin = item.origin || "new"
+  const badge = origin === "resubmission" ? "Reingreso" : origin === "material_change_review" ? "Datos actualizados" : "Nueva"
+  const tone = origin === "new" ? "info" : "warning"
+  const context = origin === "new"
+    ? ""
+    : `<small class="batch-cell-note">${escapeHtml(item.previous_reject_reason || item.previous_correction_note || item.previous_batch_label || "Requiere nueva revision")}</small>`
+  return `<span class="badge ${tone}">${escapeHtml(badge)}</span><small class="batch-cell-note">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</small>${context}`
+}
+
+function reviewSequenceLabel(value) {
+  const sequence = Math.max(1, Number(value || 1))
+  return sequence === 1 ? "Primera revision" : `Revision ${sequence}`
+}
+
+function paymentMethodLabel(value) {
+  return ({
+    provider_payment: "Pago a proveedor",
+    transfer: "Transferencia",
+    cash: "Efectivo",
+    check: "Cheque",
+    online_purchase: "Compra en linea",
+  })[value] || value || "Sin metodo"
+}
+
+function classificationLabel(value) {
+  return ({
+    budget_insufficient: "Presupuesto insuficiente",
+    budget_validation_required: "Validar presupuesto",
+    already_in_open_batch: "En otro corte",
+    pending_direction: "Pendiente de Direccion",
+    rejected_by_direction: "Rechazada",
+    already_authorized: "Ya autorizada",
+    pending_finance_close: "Pendiente de liberacion",
+    already_executed: "Ya ejecutada",
+    extraordinary: "Extraordinaria",
+    invalid_data: "Informacion pendiente",
+  })[value] || "No elegible"
+}
+
+function classificationReasonLabel(item) {
+  const missing = asArray(item.missing_fields).map((field) => ({
+    company_id: "empresa",
+    requested_by: "solicitante",
+    proveedor_id: "proveedor",
+    cost_center_id: "centro de costo",
+    budget_category_id: "partida presupuestal",
+    budget_month: "mes presupuestal",
+    amount_requested: "importe",
+    currency: "moneda",
+  })[field] || field)
+  if (missing.length) return `Falta: ${missing.join(", ")}.`
+  return ({
+    sin_disponible: "El presupuesto disponible no cubre el importe.",
+    partida_no_presupuestada: "La partida no tiene presupuesto configurado.",
+    budget_validation_data_missing: "Faltan datos para validar el presupuesto.",
+    payment_request_in_another_open_batch: "Ya pertenece a otro corte abierto.",
+    direction_rejection_requires_correction: "Registra la correccion antes de enviarla nuevamente.",
+    direction_approval_already_current: "Ya tiene autorizacion vigente de Direccion.",
+    finance_close_required: "Direccion ya decidio; Finanzas debe liberar el corte.",
+    payment_request_already_executed: "Ya existe una ejecucion registrada.",
+    extraordinary_authorization_active: "Tiene una autorizacion extraordinaria activa.",
+    request_status_not_batch_eligible: "El estado actual no permite incorporarla al corte.",
+    payroll_uses_separate_flow: "Nomina utiliza un flujo independiente.",
+    minimum_direction_data_missing: "Faltan datos minimos para presentarla a Direccion.",
+  })[item.classification_reason || item.budget_reason] || "Revisa el estado y los datos de la solicitud."
+}
+
+function ineligibleTone(classification) {
+  return classification === "budget_insufficient" || classification === "rejected_by_direction" ? "danger" : "warning"
 }
 
 function renderBreakdowns(items) {
   if (!items.length) return ""
   const groups = [
-    ["Metodo de pago", groupTotals(items, (item) => item.payment_method || "Sin metodo")],
+    ["Metodo de pago", groupTotals(items, (item) => paymentMethodLabel(item.payment_method))],
     ["Centro de costo", groupTotals(items, (item) => item.cost_center || "Sin centro")],
     ["Empresa", groupTotals(items, (item) => item.company_name || state.detail?.batch?.company_name || "Sin empresa")],
     ["Moneda", groupTotals(items, (item) => item.currency || "MXN")],
@@ -972,12 +1069,13 @@ function friendlyError(error) {
     rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
     batch_item_already_released: "Esta solicitud ya fue habilitada para otro corte.",
     batch_requires_at_least_one_approved_item: "El corte debe conservar al menos una solicitud aprobada.",
-    finance_reapproval_required: "La solicitud cambio despues del rechazo. Debe volver a revision de Finanzas antes de enviarse nuevamente a Direccion.",
+    finance_reapproval_required: "La solicitud cambio despues de la decision anterior. El sistema debe revalidar presupuesto y Direccion debe revisarla nuevamente.",
     request_data_changed_after_direction_decision: "Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.",
     direction_reapproval_required: "La autorizacion de Direccion ya no esta vigente. La solicitud debe enviarse nuevamente a un corte.",
     payment_request_already_executed: "La solicitud ya tiene una ejecucion registrada.",
     extraordinary_authorization_active: "La solicitud tiene una autorizacion extraordinaria activa y no puede liberarse en este corte.",
-    batch_close_validation_failed: "El corte no se cerro porque una solicitud ya no supera la revalidacion financiera.",
+    batch_close_validation_failed: "El corte no se libero porque una solicitud ya no supera la revalidacion de presupuesto o de Direccion.",
+    batch_contains_ineligible_request: "El corte contiene una solicitud que ya no cumple presupuesto, datos o estado. Actualiza el detalle para identificarla.",
     batch_enforcement_cannot_be_disabled_in_mvp: "El control ya esta activo y no puede deshabilitarse desde el MVP.",
     target_batch_must_be_draft: "El corte destino ya no esta en borrador.",
     target_batch_company_mismatch: "El corte destino pertenece a otra empresa.",

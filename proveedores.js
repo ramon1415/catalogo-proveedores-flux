@@ -52,6 +52,18 @@ async function init() {
   form.addEventListener("submit", saveSupplier)
 
   await loadSuppliers()
+  openProviderFromQuery()
+}
+
+function openProviderFromQuery() {
+  const providerId = new URLSearchParams(window.location.search).get("provider_id")
+  if (!providerId) return
+  const provider = proveedores.find((item) => item.id === providerId)
+  if (!provider) {
+    showToast("Proveedor no encontrado", "El proveedor solicitado ya no esta disponible en el catalogo.", "warning")
+    return
+  }
+  window.openEditModal(providerId)
 }
 
 function setupTheme() {

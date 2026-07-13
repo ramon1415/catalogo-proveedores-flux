@@ -8,10 +8,13 @@ const runtimeFiles = [
   "config.js",
   "supabase/migrations/021_approval_batches_mvp.sql",
   "supabase/migrations/022_batch_execution_resubmission_extraordinary.sql",
+  "supabase/migrations/023_batch_single_direction_approval_and_resubmission.sql",
   "approval_batches.html",
   "approval_batches.js",
   "layouts.html",
   "layouts.js",
+  "proveedores.html",
+  "proveedores.js",
   "solicitudes.html",
   "solicitudes_batch_execution.js",
   "supabase/functions/notification-dispatcher/index.ts",
@@ -19,14 +22,20 @@ const runtimeFiles = [
 const prFiles = [
   "approval_batches.html",
   "approval_batches.js",
-  "docs/ops/approval-batch-execution-022.md",
   "layouts.html",
   "layouts.js",
+  "ops/batch/apply-023-single-direction/00_README.md",
+  "ops/batch/apply-023-single-direction/01_PRECHECK_READ_ONLY.sql",
+  "ops/batch/apply-023-single-direction/02_BACKUP_DEV.sql",
+  "ops/batch/apply-023-single-direction/03_LOAD_023_EXACT.sql",
+  "ops/batch/apply-023-single-direction/04_POSTCHECK_READ_ONLY.sql",
+  "ops/batch/apply-023-single-direction/05_ROLLBACK_GUIDANCE.md",
+  "proveedores.html",
+  "proveedores.js",
   "scripts/check_approval_batch_independence.js",
   "solicitudes.html",
   "solicitudes_batch_execution.js",
-  "supabase/functions/notification-dispatcher/index.ts",
-  "supabase/migrations/022_batch_execution_resubmission_extraordinary.sql",
+  "supabase/migrations/023_batch_single_direction_approval_and_resubmission.sql",
 ]
 const forbidden = [
   "approver_" + "id",
@@ -69,6 +78,23 @@ const required022Rpcs = [
   "preview_payment_layout_eligibility",
   "get_payment_request_execution_context",
   "create_payment_layout",
+]
+const required023Rpcs = [
+  "approval_batch_budget_validation",
+  "approval_batch_request_eligibility",
+  "list_batch_eligible_requests",
+  "add_request_to_approval_batch",
+  "submit_approval_batch",
+  "approve_entire_batch",
+  "decide_approval_batch_items",
+  "release_and_rebatch_rejected_request",
+  "get_approval_batch_detail",
+  "approval_batch_assert_execution_authorized",
+  "close_approval_batch",
+  "complete_payment_request_layout_data",
+  "get_payment_request_execution_context",
+  "approval_batch_payment_layout_candidates",
+  "preview_payment_layout_eligibility",
 ]
 
 function functionBlock(source, name) {
@@ -113,6 +139,7 @@ for (const relative of runtimeFiles) {
 
 const sql = fs.readFileSync(path.join(root, "supabase/migrations/021_approval_batches_mvp.sql"), "utf8")
 const sql022 = fs.readFileSync(path.join(root, "supabase/migrations/022_batch_execution_resubmission_extraordinary.sql"), "utf8")
+const sql023 = fs.readFileSync(path.join(root, "supabase/migrations/023_batch_single_direction_approval_and_resubmission.sql"), "utf8")
 for (const token of requiredSql) {
   if (!sql.includes(token)) {
     console.error(`Missing required batch guardrail: ${token}`)
@@ -128,6 +155,12 @@ for (const name of requiredRpcs) {
 for (const name of required022Rpcs) {
   if (!sql022.includes(`function public.${name}(`)) {
     console.error(`Missing 022 batch RPC: ${name}`)
+    failed = true
+  }
+}
+for (const name of required023Rpcs) {
+  if (!sql023.includes(`function public.${name}(`)) {
+    console.error(`Missing 023 batch RPC: ${name}`)
     failed = true
   }
 }
@@ -167,11 +200,11 @@ for (const token of [
     failed = true
   }
 }
-const closeBlock = functionBlock(sql022, "close_approval_batch")
+const closeBlock = functionBlock(sql023, "close_approval_batch")
 for (const token of [
   "pg_advisory_xact_lock",
   "for update",
-  "approval_batch_request_has_current_finance_approval",
+  "approval_batch_budget_validation",
   "request_data_changed_after_direction_decision",
   "payment_request_already_executed",
 ]) {
@@ -193,7 +226,7 @@ if ((createLayoutBlock.match(/jsonb_to_recordset\(v_candidates\)/gi) || []).leng
   console.error("create_payment_layout must reuse its post-lock candidate snapshot")
   failed = true
 }
-const candidateBlock = functionBlock(sql022, "approval_batch_payment_layout_candidates")
+const candidateBlock = functionBlock(sql023, "approval_batch_payment_layout_candidates")
 if (!/when\s+b\.director_status\s*=\s*'approved'\s+and\s+not\s+b\.direction_decision_fresh\s+then\s+'direction_reapproval_required'/i.test(candidateBlock)) {
   console.error("Stale Direction approval must be blocked even for a historically legacy request")
   failed = true
@@ -216,6 +249,44 @@ const materialChangeBlock = functionBlock(sql022, "mark_payment_request_material
 for (const token of ["request_type", "exchange_rate", "payment_method", "scheduled_payment_date", "due_date"]) {
   if (!materialChangeBlock.includes(token)) {
     console.error(`Material-change guard is missing: ${token}`)
+    failed = true
+  }
+}
+for (const name of [
+  "approval_batch_request_eligibility",
+  "add_request_to_approval_batch",
+  "submit_approval_batch",
+  "approval_batch_assert_execution_authorized",
+  "close_approval_batch",
+]) {
+  const block = functionBlock(sql023, name)
+  if (/approval_batch_request_has_current_finance_approval/i.test(block)) {
+    console.error(`023 regular flow must not require individual Finance approval: ${name}`)
+    failed = true
+  }
+}
+const eligibilityBlock = functionBlock(sql023, "approval_batch_request_eligibility")
+for (const token of ["approval_batch_budget_validation", "'submitted'", "'ready_for_batch'", "'resubmission'"]) {
+  if (!eligibilityBlock.includes(token)) {
+    console.error(`023 eligibility contract is missing: ${token}`)
+    failed = true
+  }
+}
+const rebatchBlock = functionBlock(sql023, "release_and_rebatch_rejected_request")
+for (const token of ["previous_item_id", "review_sequence", "resubmitted_at", "resubmitted_by", "resubmission_note"]) {
+  if (!rebatchBlock.includes(token)) {
+    console.error(`023 rebatch history is missing: ${token}`)
+    failed = true
+  }
+}
+if (!/create\s+unique\s+index\s+if\s+not\s+exists\s+approval_batch_items_request_review_uidx[\s\S]*where\s+removed_at\s+is\s+null/i.test(sql023)) {
+  console.error("023 review sequence uniqueness must ignore draft items removed before Direction review")
+  failed = true
+}
+const completionBlock = functionBlock(sql023, "complete_payment_request_layout_data")
+for (const token of ["payment_reference_must_be_numeric", "payment_reference_too_long", "direction_reapproval_required", "history_preserved"]) {
+  if (!completionBlock.includes(token)) {
+    console.error(`023 guided layout completion is missing: ${token}`)
     failed = true
   }
 }
@@ -245,14 +316,14 @@ if (!/if\s+not\s+found\s+then\s+return\s+new/i.test(sql)) {
   console.error("Execution gate must preserve the legacy flow for requests never enrolled in a batch")
   failed = true
 }
-for (const block of `${sql}\n${sql022}`.split(/(?=create\s+or\s+replace\s+function\s+public\.)/gi)) {
+for (const block of `${sql}\n${sql022}\n${sql023}`.split(/(?=create\s+or\s+replace\s+function\s+public\.)/gi)) {
   if (/\bsecurity\s+definer\b/i.test(block) && !/\bset\s+search_path\s*=\s*public,\s*pg_temp\b/i.test(block)) {
     const name = block.match(/function\s+public\.([a-z0-9_]+)/i)?.[1] || "unknown"
     console.error(`SECURITY DEFINER function without fixed search_path: ${name}`)
     failed = true
   }
 }
-const executableSql = `${sql}\n${sql022}`
+const executableSql = `${sql}\n${sql022}\n${sql023}`
   .split(/\r?\n/)
   .filter((line) => !/^\s*revoke\b/i.test(line))
   .join("\n")
@@ -275,6 +346,18 @@ if (!approvalBatchesJs.includes('rpc("set_company_batch_configuration"')) {
 if (approvalBatchesJs.includes('rpc("set_company_director"') || approvalBatchesJs.includes('rpc("set_approval_batch_company_enforcement"')) {
   console.error("Company configuration UI must not chain the legacy RPCs")
   failed = true
+}
+const layoutsJs = fs.readFileSync(path.join(root, "layouts.js"), "utf8")
+for (const token of [
+  'data-preview-action="complete-layout-data"',
+  'rpc("complete_payment_request_layout_data"',
+  'data-preview-action="open-provider"',
+  'Referencia invalida',
+]) {
+  if (!layoutsJs.includes(token)) {
+    console.error(`Guided layout completion is missing: ${token}`)
+    failed = true
+  }
 }
 
 if (failed) process.exit(1)
