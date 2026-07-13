@@ -43,11 +43,29 @@ La identidad del actor siempre se deriva de la sesion autenticada. El director a
 
 Un batch final debe conservar al menos una partida aprobada. `approved` no admite partidas rechazadas; `partially_approved` exige al menos una aprobada y una rechazada. Rechazar todo el corte no forma parte del MVP y el servidor revierte esa operacion.
 
+## Paridad de roles
+
+La UI y la base usan la misma matriz versionada:
+
+- Sysadmin: `sysadmin`, `system_admin`, `admin`, `superadmin`.
+- Finanzas: `finance`, `finanzas`, `treasury`, `tesoreria`, `administracion`.
+- Direccion: `director`, `direccion`, `approver_2`, `aprobador_2`.
+
+`FluxAuth.isAdminFinance()` habilita acciones de preparacion solamente a los grupos Sysadmin y Finanzas. `flux_finance_roles()` incluye exactamente esos roles de Sysadmin y Finanzas, por lo que un boton visible no termina rechazado por discrepancia de roles. Direccion sin rol financiero solo ve y decide los batches donde es el director snapshot; Operacion no administra batches.
+
+## Superficies de ejecucion
+
+El esquema base no tiene una tabla de ejecucion exclusiva para cheques. Efectivo y Cheque comparten `cash_funds`; el campo `delivery_method` distingue `cash` de `check`, y el RPC de creacion acepta ambos tipos de solicitud. Por eso el trigger sobre `cash_funds` protege tanto efectivo como cheque.
+
+Cheque puede formar parte del corte y queda bloqueado mientras su item batch no este aprobado. La migracion tambien protege transferencias persistidas en `payment_layout_lines`. No se crea una entidad adicional para cheques en este MVP.
+
 ## Notificaciones
 
 La migracion genera eventos separados para envio al director, resultado a Finanzas y rechazo de partidas a solicitante mas Finanzas. Incluye deduplicacion por correo, claves de idempotencia y `dead_letter` cuando no existe destinatario.
 
 La funcion `notification-dispatcher` incorpora plantillas para esos eventos. El envio real sigue dependiendo de la configuracion operativa del dispatcher.
+
+Como el esquema base no contiene una relacion financiera por empresa y el MVP no usa las membresias de 018/019, los resultados `approval_batch.approved` y `approval_batch.partially_approved` se envian a todos los perfiles activos con rol de Finanzas o Sysadmin. `approval_batch.item_rejected` se envia al solicitante y al mismo grupo financiero global, con deduplicacion por correo. Si el negocio requiere equipos financieros separados por empresa, esa segmentacion debe definirse y aprobarse antes de PROD mediante un modelo independiente; no se tomaran las membresias de 018/019 como atajo.
 
 ## Dependencias reales para un release aislado
 
