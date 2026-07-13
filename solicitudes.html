@@ -94,9 +94,21 @@
 
     #requestDialog { max-width:1060px }
     #detailDialog  { max-width:860px }
+    .batch-execution-panel { margin:12px 0; padding:12px 14px; border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:7px; background:var(--bg-surface); color:var(--text-2); font-size:12px }
+    .batch-execution-panel.extraordinary { border-left-color:#d97706; background:color-mix(in srgb,#d97706 7%,var(--bg-surface)) }
+    .batch-execution-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap }
+    .batch-execution-head strong { color:var(--text-1); display:block; margin-bottom:3px }
+    .batch-execution-meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:7px; color:var(--text-3); font-size:10.5px }
+    .batch-execution-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:10px }
+    .extraordinary-warning { padding:10px; border-left:3px solid #d97706; background:var(--amber-dim); color:var(--text-2); font-size:12px; line-height:1.5 }
+    .extraordinary-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px }
+    .extraordinary-summary div { min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:var(--bg-surface) }
+    .extraordinary-summary span { display:block; color:var(--text-3); font-size:9.5px; font-weight:700; text-transform:uppercase }
+    .extraordinary-summary strong { display:block; margin-top:3px; color:var(--text-1); font-size:11.5px; overflow-wrap:anywhere }
+    .extraordinary-row-badge { margin-left:6px }
 
     @media (max-width:1100px) { .request-layout { grid-template-columns:1fr } .summary-panel { position:static } }
-    @media (max-width:760px)  { .form-grid { grid-template-columns:1fr } .budget-strip { grid-template-columns:1fr } }
+    @media (max-width:760px)  { .form-grid { grid-template-columns:1fr } .budget-strip { grid-template-columns:1fr } .extraordinary-summary { grid-template-columns:1fr 1fr } }
   </style>
 </head>
 <body>
@@ -345,6 +357,22 @@
     </form>
   </dialog>
 
+  <dialog id="extraordinaryDialog" class="narrow">
+    <form id="extraordinaryForm" class="modal-content">
+      <div class="modal-header"><div><h2 style="color:var(--text-1)">Autorizar pago extraordinario</h2><p id="extraordinarySubtitle">Solicitud aprobada por Finanzas.</p></div><button type="button" id="closeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
+      <div class="modal-scroll"><div class="form-grid"><div class="full-row extraordinary-warning">Este pago omitira la autorizacion de Direccion y podra continuar inmediatamente a ejecucion. La accion quedara auditada.</div><div id="extraordinarySummary" class="extraordinary-summary full-row" aria-label="Resumen del pago extraordinario"></div><label class="full-row">Categoria *<select id="extraordinaryCategory" class="form-control" required><option value="">Selecciona...</option><option value="operational_emergency">Emergencia operativa / fuga</option><option value="urgent_reimbursement">Reembolso urgente</option><option value="urgent_termination">Desvinculacion o finiquito urgente</option><option value="critical_service">Servicio critico</option><option value="other">Otro</option></select></label><label class="full-row">Motivo *<textarea id="extraordinaryReason" class="form-control textarea" minlength="20" maxlength="1500" required></textarea></label><label class="checkbox-card full-row"><input id="extraordinaryConfirm" type="checkbox" required> Confirmo que existe una urgencia operativa que no puede esperar al siguiente corte.</label></div></div>
+      <div class="modal-actions"><button type="button" id="cancelExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitExtraordinaryBtn" class="primary-btn">Autorizar extraordinario</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="revokeExtraordinaryDialog" class="narrow">
+    <form id="revokeExtraordinaryForm" class="modal-content">
+      <div class="modal-header"><div><h2 style="color:var(--text-1)">Revocar extraordinario</h2><p>La autorizacion se conserva como historial y deja de habilitar la ejecucion.</p></div><button type="button" id="closeRevokeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
+      <div class="modal-scroll"><div class="form-grid"><label class="full-row">Motivo de revocacion *<textarea id="revokeExtraordinaryReason" class="form-control textarea" maxlength="1000" required></textarea></label></div></div>
+      <div class="modal-actions"><button type="button" id="cancelRevokeExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitRevokeExtraordinaryBtn" class="primary-btn">Revocar autorizacion</button></div>
+    </form>
+  </dialog>
+
   <!-- Dialog: detalle de solicitud -->
   <dialog id="detailDialog">
     <div class="modal-content">
@@ -458,7 +486,8 @@
   <script src="./config.js?v=20260701-reconcile"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260709-approver-position"></script>
+  <script src="./solicitudes.js?v=20260712-batch-execution-hooks"></script>
+  <script src="./solicitudes_batch_execution.js?v=20260712-batch-execution-022"></script>
   <script src="./cash_flow_extension.js?v=20260709-multi-approver-pool"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260709-multi-approver-pool"></script>
   <script src="./fase2_request_success_patch.js?v=20260709-approver-position"></script>

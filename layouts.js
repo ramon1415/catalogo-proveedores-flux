@@ -30,6 +30,8 @@ let activePagosintReferenceLineId = null
 let activeLayoutLines = []
 let layoutPagosintIssueCounts = new Map()
 let layoutFormatSummaries = new Map()
+let layoutEligibilityPreview = null
+let activeLayoutRebatchItem = null
 const dom = {}
 
 const rootElement = document.documentElement
@@ -76,10 +78,20 @@ function cacheDom() {
   dom.layoutName = document.getElementById("layoutName")
   dom.layoutCompanyId = document.getElementById("layoutCompanyId")
   dom.layoutBankAccountId = document.getElementById("layoutBankAccountId")
+  dom.reviewLayoutBtn = document.getElementById("reviewLayoutBtn")
+  dom.layoutEligibilityPreview = document.getElementById("layoutEligibilityPreview")
   dom.layoutInvalidBox = document.getElementById("layoutInvalidBox")
   dom.closeNewLayoutModalBtn = document.getElementById("closeNewLayoutModalBtn")
   dom.cancelNewLayoutBtn = document.getElementById("cancelNewLayoutBtn")
   dom.submitNewLayoutBtn = document.getElementById("submitNewLayoutBtn")
+  dom.layoutRebatchDialog = document.getElementById("layoutRebatchDialog")
+  dom.layoutRebatchForm = document.getElementById("layoutRebatchForm")
+  dom.layoutRebatchOriginal = document.getElementById("layoutRebatchOriginal")
+  dom.layoutRebatchNote = document.getElementById("layoutRebatchNote")
+  dom.layoutRebatchTarget = document.getElementById("layoutRebatchTarget")
+  dom.closeLayoutRebatchBtn = document.getElementById("closeLayoutRebatchBtn")
+  dom.cancelLayoutRebatchBtn = document.getElementById("cancelLayoutRebatchBtn")
+  dom.submitLayoutRebatchBtn = document.getElementById("submitLayoutRebatchBtn")
   dom.linesDialog = document.getElementById("linesDialog")
   dom.linesTitle = document.getElementById("linesTitle")
   dom.linesSubtitle = document.getElementById("linesSubtitle")
@@ -125,10 +137,19 @@ function bindEvents() {
   dom.refreshBtn?.addEventListener("click", loadLayouts)
   dom.searchInput?.addEventListener("input", renderLayoutsTable)
   dom.statusFilter?.addEventListener("change", renderLayoutsTable)
-  dom.layoutCompanyId?.addEventListener("change", renderLayoutBankAccountOptions)
+  dom.layoutCompanyId?.addEventListener("change", () => {
+    renderLayoutBankAccountOptions()
+    invalidateLayoutPreview()
+  })
+  ;[dom.layoutPeriodStart, dom.layoutPeriodEnd, dom.layoutBankAccountId].forEach((field) => field?.addEventListener("change", invalidateLayoutPreview))
+  dom.reviewLayoutBtn?.addEventListener("click", reviewLayoutEligibility)
+  dom.layoutEligibilityPreview?.addEventListener("click", handleLayoutPreviewAction)
   dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal)
   dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal)
   dom.newLayoutForm?.addEventListener("submit", submitNewLayout)
+  dom.closeLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
+  dom.cancelLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
+  dom.layoutRebatchForm?.addEventListener("submit", submitLayoutRebatch)
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
   dom.closePagosintReferenceModalBtn?.addEventListener("click", closePagosintReferenceModal)
   dom.cancelPagosintReferenceBtn?.addEventListener("click", closePagosintReferenceModal)
@@ -313,6 +334,12 @@ function closeNewLayoutModal() {
 
 function resetNewLayoutForm() {
   dom.newLayoutForm?.reset()
+  layoutEligibilityPreview = null
+  activeLayoutRebatchItem = null
+  dom.layoutEligibilityPreview.classList.add("hidden")
+  dom.layoutEligibilityPreview.innerHTML = ""
+  dom.submitNewLayoutBtn.disabled = true
+  dom.submitNewLayoutBtn.textContent = "Crear layout"
   dom.layoutInvalidBox.classList.add("hidden")
   dom.layoutInvalidBox.innerHTML = ""
 
@@ -353,8 +380,7 @@ function renderLayoutBankAccountOptions() {
   let accounts = companyBankAccounts
 
   if (selectedCompanyId) {
-    const filtered = companyBankAccounts.filter((a) => a.company_id === selectedCompanyId)
-    if (filtered.length) accounts = filtered
+    accounts = companyBankAccounts.filter((a) => a.company_id === selectedCompanyId)
   }
 
   dom.layoutBankAccountId.innerHTML = [
@@ -367,9 +393,212 @@ function renderLayoutBankAccountOptions() {
   if (selected && accounts.some((a) => a.id === selected)) dom.layoutBankAccountId.value = selected
 }
 
+function invalidateLayoutPreview() {
+  layoutEligibilityPreview = null
+  dom.layoutEligibilityPreview?.classList.add("hidden")
+  if (dom.layoutEligibilityPreview) dom.layoutEligibilityPreview.innerHTML = ""
+  if (dom.submitNewLayoutBtn) {
+    dom.submitNewLayoutBtn.disabled = true
+    dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
+  }
+}
+
+function layoutPreviewParams() {
+  return {
+    p_period_start: dom.layoutPeriodStart.value,
+    p_period_end: dom.layoutPeriodEnd.value,
+    p_company_id: dom.layoutCompanyId.value || null,
+    p_company_bank_account_id: dom.layoutBankAccountId.value || null,
+  }
+}
+
+async function reviewLayoutEligibility() {
+  if (!ensureActorProfile()) return
+  const params = layoutPreviewParams()
+  if (!params.p_period_start || !params.p_period_end) return showToast("Fechas requeridas", "Captura fecha inicio y fecha fin.", "warning")
+  if (params.p_period_start > params.p_period_end) return showToast("Rango invalido", "La fecha inicio no puede ser mayor a la fecha fin.", "warning")
+
+  setButtonLoading(dom.reviewLayoutBtn, true, "Revisando...")
+  try {
+    const { data, error } = await supabaseClient.rpc("preview_payment_layout_eligibility", params)
+    if (error) throw error
+    layoutEligibilityPreview = data || {}
+    renderLayoutEligibilityPreview()
+  } catch (error) {
+    invalidateLayoutPreview()
+    renderLayoutNotice(friendlyRpcError(error))
+    showToast("No se pudo revisar", friendlyRpcError(error), "danger")
+  } finally {
+    setButtonLoading(dom.reviewLayoutBtn, false, "Revisar solicitudes")
+  }
+}
+
+function previewRows(key) {
+  const rows = layoutEligibilityPreview?.[key]
+  return Array.isArray(rows) ? rows : []
+}
+
+function renderLayoutEligibilityPreview() {
+  const regular = previewRows("ready_regular")
+  const extraordinary = previewRows("ready_extraordinary")
+  const legacy = previewRows("legacy_eligible")
+  const rejected = previewRows("rejected_by_direction")
+  const pendingClose = previewRows("pending_finance_close")
+  const pendingDirector = previewRows("pending_director")
+  const invalid = previewRows("invalid_data")
+  const ready = [...regular, ...extraordinary, ...legacy]
+  const totals = aggregatePreviewTotals(ready)
+
+  dom.layoutEligibilityPreview.innerHTML = `
+    <div class="layout-preview-summary">
+      ${previewMetric("Listas para layout", ready.length)}
+      ${previewMetric("Regulares / extraordinarias", `${regular.length + legacy.length} / ${extraordinary.length}`)}
+      ${previewMetric("Rechazadas", rejected.length)}
+      ${previewMetric("Importe listo", totals.map((row) => formatPreviewMoney(row.amount, row.currency)).join(" | ") || "Sin importe")}
+    </div>
+    ${renderPreviewSection("Listas para layout", "Solo estas solicitudes se incluiran", ready, "ready")}
+    ${renderPreviewSection("Pendientes de cierre", "Direccion aprobo; Finanzas debe liberar el corte", pendingClose, "pending_close")}
+    ${renderPreviewSection("Pendientes de Direccion", "No se incluiran en el layout", pendingDirector, "pending_director")}
+    ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected")}
+    ${renderPreviewSection("Datos incompletos", "Deben corregirse antes de crear el layout", invalid, "invalid")}
+  `
+  dom.layoutEligibilityPreview.classList.remove("hidden")
+  dom.submitNewLayoutBtn.disabled = ready.length === 0
+  dom.submitNewLayoutBtn.textContent = ready.length ? `Crear layout con ${ready.length} pagos` : "Sin pagos liberados"
+}
+
+function previewMetric(label, value) {
+  return `<div class="layout-preview-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+}
+
+function renderPreviewSection(title, subtitle, rows, kind) {
+  if (!rows.length) return `<section class="layout-preview-section"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>0</span></div><div class="layout-preview-empty">${escapeHtml(subtitle)}</div></section>`
+  return `<section class="layout-preview-section"><div class="layout-preview-head"><h3>${escapeHtml(title)}</h3><span>${rows.length} · ${escapeHtml(subtitle)}</span></div><div class="layout-preview-list">${rows.map((row) => renderPreviewRow(row, kind)).join("")}</div></section>`
+}
+
+function renderPreviewRow(row, kind) {
+  const batch = row.source_batch_label || "Sin corte"
+  let detail = batch
+  let detailIsHtml = false
+  let actions = `<button class="small-btn" type="button" data-preview-action="open-request" data-request-id="${escapeHtml(row.payment_request_id)}">Abrir solicitud</button>`
+  let rowClass = ""
+  if (kind === "ready" && row.classification === "ready_extraordinary") {
+    rowClass = " layout-extraordinary"
+    detailIsHtml = true
+    detail = `<strong>Extraordinario · ${escapeHtml(extraordinaryCategoryLabel(row.extraordinary_category))}</strong><small>${escapeHtml(row.extraordinary_reason || "Sin motivo registrado")}</small><small>Autorizo ${escapeHtml(row.extraordinary_authorized_by_name || "Finanzas")} · ${escapeHtml(formatDate(row.extraordinary_authorized_at))}</small>`
+  } else if (kind === "pending_close") {
+    detail = `${batch} · pendiente de cierre`
+    actions += `<button class="small-btn" type="button" data-preview-action="open-batch" data-batch-id="${escapeHtml(row.source_batch_id || "")}">Ir al corte</button>`
+  } else if (kind === "pending_director") {
+    detail = `${batch} · ${row.source_batch_status || "sin decision"}`
+  } else if (kind === "rejected") {
+    detailIsHtml = true
+    detail = `<span class="layout-reject-reason">${escapeHtml(row.reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(batch)} · ${escapeHtml(formatDate(row.rejected_at))} · ${escapeHtml(row.rebatch_status === "released" ? "Reingreso habilitado" : "Bloqueada")}</small>`
+    if (row.rebatch_status === "blocked" && row.source_item_id) {
+      actions += `<button class="small-btn warning" type="button" data-preview-action="rebatch" data-item-id="${escapeHtml(row.source_item_id)}">Enviar nuevamente</button>`
+    }
+  } else if (kind === "invalid") {
+    detail = formatMissingFields(row.missing_fields)
+  } else if (row.classification === "legacy_eligible") {
+    detail = "Elegible por compatibilidad historica"
+  }
+  return `<div class="layout-preview-row${rowClass}"><div><strong>${escapeHtml(row.request_number || "Sin folio")}</strong><small>${escapeHtml(row.company_name || "Sin empresa")}</small></div><div>${escapeHtml(row.provider_name || "Sin proveedor")}</div><div><strong>${escapeHtml(formatPreviewMoney(row.amount, row.currency))}</strong></div><div>${detailIsHtml ? detail : escapeHtml(detail)}</div><div class="layout-preview-actions">${actions}</div></div>`
+}
+
+function extraordinaryCategoryLabel(value) {
+  return ({
+    operational_emergency: "Emergencia operativa / fuga",
+    urgent_reimbursement: "Reembolso urgente",
+    urgent_termination: "Desvinculacion o finiquito urgente",
+    critical_service: "Servicio critico",
+    other: "Otro",
+  })[value] || value || "Autorizado por Finanzas"
+}
+
+function aggregatePreviewTotals(rows) {
+  const totals = new Map()
+  rows.forEach((row) => {
+    const currency = String(row.currency || "MXN").toUpperCase()
+    totals.set(currency, (totals.get(currency) || 0) + Number(row.amount || 0))
+  })
+  return Array.from(totals, ([currency, amount]) => ({ currency, amount }))
+}
+
+function formatPreviewMoney(value, currency = "MXN") {
+  try {
+    return new Intl.NumberFormat("es-MX", { style: "currency", currency: currency || "MXN", maximumFractionDigits: 2 }).format(Number(value || 0))
+  } catch {
+    return `${Number(value || 0).toFixed(2)} ${currency || "MXN"}`
+  }
+}
+
+async function handleLayoutPreviewAction(event) {
+  const button = event.target.closest("[data-preview-action]")
+  if (!button) return
+  if (button.dataset.previewAction === "open-request") {
+    window.location.href = `./solicitudes.html?request_id=${encodeURIComponent(button.dataset.requestId)}`
+    return
+  }
+  if (button.dataset.previewAction === "open-batch") {
+    window.location.href = `./approval_batches.html?batch_id=${encodeURIComponent(button.dataset.batchId)}`
+    return
+  }
+  if (button.dataset.previewAction === "rebatch") await openLayoutRebatchDialog(button.dataset.itemId)
+}
+
+async function openLayoutRebatchDialog(itemId) {
+  const item = previewRows("rejected_by_direction").find((row) => row.source_item_id === itemId)
+  if (!item) return
+  activeLayoutRebatchItem = item
+  dom.layoutRebatchNote.value = ""
+  dom.layoutRebatchOriginal.innerHTML = `<strong>${escapeHtml(item.request_number || "Solicitud")}</strong><br>Motivo original: ${escapeHtml(item.reject_reason || "Sin motivo registrado")}`
+  const { data, error } = await supabaseClient.rpc("list_finance_approval_batches", { p_status: "draft" })
+  if (error) return showToast("No se cargaron cortes", friendlyRpcError(error), "danger")
+  const drafts = (Array.isArray(data) ? data : []).filter((batch) => batch.company_id === item.company_id)
+  dom.layoutRebatchTarget.innerHTML = `<option value="">Dejar disponible para siguiente corte</option>${drafts.map((batch) => `<option value="${escapeHtml(batch.id)}">${escapeHtml(batch.label)}</option>`).join("")}`
+  dom.layoutRebatchDialog.showModal()
+}
+
+function closeLayoutRebatchDialog() {
+  activeLayoutRebatchItem = null
+  if (dom.layoutRebatchDialog?.open) dom.layoutRebatchDialog.close()
+}
+
+async function submitLayoutRebatch(event) {
+  event.preventDefault()
+  const note = cleanText(dom.layoutRebatchNote.value)
+  if (!activeLayoutRebatchItem || !note || note.length < 10) return showToast("Correccion requerida", "Explica en al menos 10 caracteres que se corrigio.", "warning")
+  setButtonLoading(dom.submitLayoutRebatchBtn, true, "Registrando...")
+  try {
+    const { data, error } = await supabaseClient.rpc("release_and_rebatch_rejected_request", {
+      p_rejected_item_id: activeLayoutRebatchItem.source_item_id,
+      p_correction_note: note,
+      p_target_batch_id: dom.layoutRebatchTarget.value || null,
+    })
+    if (error) throw error
+    closeLayoutRebatchDialog()
+    showToast(
+      "Reingreso registrado",
+      data?.new_item_id
+        ? "La solicitud requiere nueva aprobacion y cierre antes de entrar a un layout."
+        : "La solicitud quedo disponible para el siguiente corte.",
+      "success"
+    )
+    await reviewLayoutEligibility()
+  } catch (error) {
+    showToast("No se pudo reenviar", friendlyRpcError(error), "danger")
+  } finally {
+    setButtonLoading(dom.submitLayoutRebatchBtn, false, "Enviar nuevamente")
+  }
+}
+
 async function submitNewLayout(event) {
   event.preventDefault()
   if (!ensureActorProfile()) return
+  if (!layoutEligibilityPreview) {
+    showToast("Revision requerida", "Revisa las solicitudes antes de crear el layout.", "warning")
+    return
+  }
 
   const periodStart = dom.layoutPeriodStart.value
   const periodEnd = dom.layoutPeriodEnd.value
@@ -401,23 +630,37 @@ async function submitNewLayout(event) {
     if (data?.message === "no_valid_payment_requests") {
       renderLayoutNotice("No hay solicitudes validas para generar layout en este periodo.", data?.invalid_requests || [])
       showToast("Sin solicitudes validas", "No hay solicitudes validas para este periodo.", "warning")
+      invalidateLayoutPreview()
       return
     }
 
     const invalidCount = numberValue(data?.invalid_count)
-    renderInvalidRequests(data?.invalid_requests || [])
+    const summary = [
+      `${numberValue(data?.ready_regular_count) + numberValue(data?.legacy_count)} regulares liberados`,
+      `${numberValue(data?.extraordinary_count)} extraordinarios`,
+      `${numberValue(data?.rejected_count)} rechazados no incluidos`,
+      `${numberValue(data?.pending_close_count)} pendientes de cierre`,
+      `${invalidCount} con datos incompletos`,
+    ].join(" · ")
+    renderLayoutNotice(`Layout ${data?.layout_number || "creado"} con ${numberValue(data?.payment_count)} pagos. ${summary}`, data?.invalid_requests || [])
     showToast(
       "Layout creado",
-      invalidCount ? "Algunas solicitudes no entraron al layout por datos incompletos." : `${data?.layout_number || "El layout"} quedo en draft.`,
-      invalidCount ? "warning" : "success"
+      summary,
+      numberValue(data?.rejected_count) || numberValue(data?.pending_close_count) || invalidCount ? "warning" : "success"
     )
-
-    if (!invalidCount) closeNewLayoutModal()
+    layoutEligibilityPreview = null
+    dom.layoutEligibilityPreview.classList.add("hidden")
+    dom.submitNewLayoutBtn.disabled = true
+    dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
   } catch (error) {
     renderLayoutNotice(friendlyRpcError(error))
     showToast("No se pudo crear layout", friendlyRpcError(error), "danger")
   } finally {
     setButtonLoading(dom.submitNewLayoutBtn, false, "Crear layout")
+    if (!layoutEligibilityPreview) {
+      dom.submitNewLayoutBtn.disabled = true
+      dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
+    }
   }
 }
 
@@ -444,6 +687,8 @@ function formatMissingFields(fields) {
     payment_concept: "concepto de pago requerido",
     company_bank_account_id: "cuenta origen requerida",
     scheduled_payment_date: "fecha programada requerida",
+    finance_reapproval_required: "nueva revision de Finanzas requerida",
+    extraordinary_reauthorization_required: "revocar y autorizar nuevamente el extraordinario",
   }
   return values.map((field) => labels[field] || field || "datos incompletos").join(", ")
 }
@@ -1527,6 +1772,14 @@ function friendlyRpcError(error) {
     invalid_period_range: "La fecha inicio no puede ser mayor a la fecha fin.",
     company_not_found: "La empresa seleccionada no existe.",
     company_bank_account_not_found_or_inactive: "La cuenta origen no existe o esta inactiva.",
+    finance_role_required: "Se requiere rol de Finanzas.",
+    finance_reapproval_required: "La solicitud debe volver a revision de Finanzas por un cambio material.",
+    rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
+    payment_request_in_another_open_batch: "La solicitud ya pertenece a otro corte abierto.",
+    target_batch_must_be_draft: "El corte destino ya no esta en borrador.",
+    target_batch_company_mismatch: "El corte destino pertenece a otra empresa.",
+    payment_request_already_in_target_batch: "La solicitud ya esta en el corte destino.",
+    closed_batch_authorization_required: "El pago regular requiere aprobacion de Direccion y corte cerrado.",
   }
   const key = Object.keys(known).find((k) => message.includes(k))
   if (key) return known[key]
@@ -1600,4 +1853,3 @@ function cleanText(value) { return String(value || "").trim() }
 function normalize(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "") }
 function sanitizeFileName(value) { return String(value || "layout-pagos").replace(/[\\/:*?"<>|]+/g, "-").trim() }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;") }
-
