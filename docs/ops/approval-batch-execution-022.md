@@ -4,7 +4,31 @@
 
 La migracion `022_batch_execution_resubmission_extraordinary.sql` convierte el cierre del corte en una autorizacion operativa de pago. Extiende el MVP de la migracion 021 sin modificarla y conserva independencia total de las migraciones 018 y 019.
 
-El release aislado requiere el esquema base, las migraciones de notificaciones ya usadas por 021, la migracion 021 y la migracion 022. No consulta asignaciones individuales de aprobador ni membresias introducidas por 018/019.
+El release aislado requiere el esquema base, las migraciones de notificaciones ya usadas por 021, la migracion 021 y la migracion 022. No consulta asignaciones individuales de aprobador ni membresias introducidas por 018/019. `solicitudes.js` queda fuera del release: la integracion usa `solicitudes_batch_execution.js` como adaptador DOM desacoplado.
+
+## Manifest de release aislado
+
+Commits de origen del batch:
+
+- `af44677caa67d5f6ceadbed92f3a38cd3af499ef`: MVP independiente de cortes (migration 021 y frontend base).
+- `a6a3f3b3fc878bf59788d039428b7e15a4ab242f`: hardening de migration 021.
+- `ce55a03790538f70a417d9d0fb38c8e09938ccd5`: migration 022 y experiencia de ejecucion.
+- El commit correctivo posterior de PR #248 completa vigencia, locks, configuracion atomica y notificaciones.
+
+Archivos runtime exactos:
+
+- `config.js`;
+- `approval_batches.html`;
+- `approval_batches.js`;
+- `layouts.html`;
+- `layouts.js`;
+- `solicitudes.html`;
+- `solicitudes_batch_execution.js`;
+- `supabase/functions/notification-dispatcher/index.ts`;
+- `supabase/migrations/021_approval_batches_mvp.sql`;
+- `supabase/migrations/022_batch_execution_resubmission_extraordinary.sql`.
+
+La validacion aislada parte de `origin/main`, incorpora solo esos commits/archivos y ejecuta sintaxis, parser y guard de contratos sin 018/019. `solicitudes.js`, `create_payment_request`, `approver_id`, `approver_assignment_id` y `list_payment_request_approver_options` no forman parte del manifest.
 
 ## Diagnostico previo
 
@@ -18,15 +42,18 @@ Antes de 022:
 
 ## Modelo de enforcement
 
-`approval_batch_company_settings` permite activar por empresa `regular_payments_require_closed_batch`. La activacion registra actor y fecha en servidor. Solo las solicitudes creadas desde `enforcement_started_at` quedan obligadas; las historicas conservan compatibilidad legacy.
+`approval_batch_company_settings` permite activar por empresa `regular_payments_require_closed_batch`. La primera activacion registra actor y fecha en servidor y es irreversible dentro del MVP. Solo las solicitudes creadas desde el primer `enforcement_started_at` quedan obligadas; las historicas conservan compatibilidad legacy.
 
-Cada cambio se agrega a `approval_batch_company_setting_events` con valor anterior, valor nuevo, actor y fecha. La tabla es inmutable desde frontend y permite auditar activaciones y desactivaciones sucesivas.
+La transicion permitida es `false -> true`; `true -> true` es idempotente y cualquier intento posterior de desactivar falla con `batch_enforcement_cannot_be_disabled_in_mvp`. `enforcement_started_at`, `enabled_by` y `enabled_at` nunca se reinician.
+
+La UI guarda director y enforcement mediante `set_company_batch_configuration`, una sola transaccion que valida Finanzas, empresa, perfil, rol, configuracion y ledger. Si falla cualquier paso, no persiste un estado parcial. Cada configuracion atomica se agrega a `approval_batch_company_setting_events` con director, estado, actor y fecha.
 
 Con enforcement activo, un pago regular nuevo solo puede materializarse si:
 
 1. La aprobacion de Finanzas es posterior al ultimo cambio material.
-2. Existe un item activo aprobado por Direccion.
-3. El batch esta `closed`.
+2. Existe un item activo aprobado por Direccion despues del ultimo cambio material.
+3. El batch esta `closed` y su `closed_at` es posterior a la decision.
+4. No existe una participacion posterior pendiente o rechazada.
 
 Los estados `draft`, `submitted`, `approved` y `partially_approved` no habilitan ejecucion. En UI, `closed` se presenta como **Liberado para pago**.
 
@@ -34,9 +61,13 @@ El gate server-side protege `payment_layout_lines` y `cash_funds`. El esquema no
 
 ## Cambios materiales
 
-`payment_requests.approval_material_updated_at` registra solo cambios financieros relevantes. Se actualiza al cambiar empresa, proveedor, cuenta de proveedor, centro, partida, importe, moneda, metodo, cuenta origen, fecha programada, referencia o concepto. Cambios en los datos bancarios canonicos del proveedor actualizan el marcador de solicitudes aun no ejecutadas.
+`payment_requests.approval_material_updated_at` registra cambios financieros relevantes. Se actualiza al cambiar empresa, proveedor, cuenta de proveedor, centro, partida, importe, moneda, tipo de cambio, `request_type`, `payment_method`, cuenta origen, vencimiento, fecha programada, referencia o concepto. Cambios en tipo de destino, CLABE, cuenta, convenio, beneficiario o banco del proveedor actualizan el marcador de solicitudes aun no ejecutadas.
 
-La elegibilidad exige una decision valida de Finanzas posterior a ese marcador. El backfill usa `created_at`, por lo que una aprobacion historica posterior sigue siendo valida y no se invalida indiscriminadamente.
+El esquema de `payment_requests` no contiene `delivery_method`, datos propios de cheque ni un `request_subtype` separado. `delivery_method` vive en `cash_funds`; para la solicitud, el metodo efectivo se determina con `payment_method` y `request_type`. La migration hace precheck de todas las columnas materiales que usa y no crea columnas hipoteticas.
+
+La elegibilidad exige decisiones validas de Finanzas y Direccion posteriores a ese marcador. Una aprobacion vieja queda como historial, se clasifica como `direction_reapproval_required` con razon `stale_direction_approval` y la solicitud puede volver a Finanzas y a un corte nuevo. El backfill usa `created_at`, por lo que una aprobacion historica posterior sigue siendo valida y no se invalida indiscriminadamente.
+
+`close_approval_batch` toma locks por solicitud en orden, bloquea `payment_requests` con `FOR UPDATE` y revalida Finanzas, Direccion, cambios materiales, extraordinarios y ejecucion previa. El cierre es todo o nada; `approved_released_count` solo cuenta pagos efectivamente liberados.
 
 ## Reingreso de rechazados
 
@@ -63,7 +94,7 @@ Una autorizacion extraordinaria requiere:
 - retiro previo si esta en un batch `draft`;
 - categoria valida y motivo de al menos 20 caracteres.
 
-Nomina queda fuera del alcance. Una autorizacion activa puede revocarse solo antes de cualquier ejecucion. Si cambian datos materiales, deja de habilitar el pago y exige nueva revision, pero permanece como historial hasta ser revocada.
+Nomina queda fuera del alcance. Una autorizacion activa puede revocarse solo antes de incorporarse a `payment_layout_lines`, `cash_funds` o `payment_receipts`. Una vez materializada, falla con `extraordinary_already_materialized`; no se eliminan lineas automaticamente. Si cambian datos materiales, deja de habilitar el pago y exige nueva revision, pero permanece como historial hasta ser revocada.
 
 ## Preview y creacion de layouts
 
@@ -79,11 +110,14 @@ Las categorias son:
 - `legacy_eligible`;
 - `rejected_by_direction`;
 - `pending_director`;
+- `direction_reapproval_required` (`stale_direction_approval`);
 - `pending_finance_close`;
 - `invalid_data`;
 - `already_executed`.
 
-El frontend no envia IDs para forzar inclusiones. `create_payment_layout` vuelve a clasificar en servidor, bloquea las solicitudes elegibles en orden estable y solo inserta regulares liberadas, extraordinarias vigentes y legacy elegibles. Los totales se mantienen separados por moneda en el preview; el layout BBVA actual conserva su soporte operativo MXN.
+El frontend no envia IDs para forzar inclusiones. `create_payment_layout` hace una clasificacion preliminar, toma el advisory lock compartido 21021, bloquea cada `payment_requests` con `FOR UPDATE` y captura un unico snapshot post-lock. Conteos, totales, insercion y respuesta reutilizan ese snapshot; no se reclasifica entre conteo e insercion. Los updates bancarios del proveedor esperan el mismo row lock porque actualizan el marcador en `payment_requests`.
+
+Solo se insertan regulares liberadas, extraordinarias vigentes y legacy elegibles. Los totales se mantienen separados por moneda en el preview; el layout BBVA actual conserva su soporte operativo MXN.
 
 ## UX
 
@@ -100,7 +134,7 @@ El frontend no envia IDs para forzar inclusiones. `create_payment_layout` vuelve
 - No existe `DELETE` fisico.
 - `payment_request.extraordinary_authorized` informa a Finanzas y Direccion sin solicitar una decision.
 - `approval_batch.item_rebatched` informa a Finanzas y solicitante; Direccion recibe el flujo normal solo cuando el nuevo corte se envia.
-- Ambos eventos usan el ledger e idempotencia existentes; no requieren desplegar de nuevo el dispatcher.
+- Ambos eventos usan el ledger e idempotencia existentes. El dispatcher incluye casos explicitos de subject, accion y etiqueta de comentario; el deploy se hara por separado y no forma parte de este PR.
 
 ## Plan DEV
 
@@ -108,11 +142,13 @@ El frontend no envia IDs para forzar inclusiones. `create_payment_layout` vuelve
 2. Confirmar backup de Supabase DEV.
 3. Aplicar unicamente la migracion 022 mediante un procedimiento autorizado.
 4. Activar enforcement solo para una empresa de prueba.
-5. Validar regular sin batch, draft, submitted, aprobado sin cierre y closed.
-6. Validar rechazo, correccion y reingreso a un nuevo corte.
-7. Validar cambio material y nueva revision de Finanzas.
-8. Validar autorizacion y revocacion extraordinaria, excluyendo nomina.
-9. Validar layout, efectivo y cheque, junto con concurrencia.
-10. Revisar eventos del ledger y responsive en 390, 768 y 1366 px.
+5. Validar el ciclo irreversible `activar -> intentar desactivar -> reactivar idempotente`, conservando siempre la primera fecha y actor.
+6. Validar regular sin batch, draft, submitted, aprobado sin cierre y closed.
+7. Validar rechazo, correccion y reingreso a un nuevo corte.
+8. Cambiar importe, moneda, tipo de cambio, metodo, proveedor, cuenta y beneficiario despues de Finanzas y despues de Direccion; confirmar `direction_reapproval_required`, nueva revision de Finanzas y nuevo corte.
+9. Validar autorizacion y revocacion extraordinaria, excluyendo nomina, antes y despues de materializar en layout draft, efectivo y comprobante.
+10. Validar concurrencia: dos layouts simultaneos, cambio de importe o CLABE durante layout, extraordinario simultaneo y reingreso simultaneo. Ninguna solicitud puede materializarse dos veces.
+11. Revisar eventos del ledger y responsive en 390, 768 y 1366 px.
+12. Desplegar el dispatcher actualizado en DEV mediante el procedimiento separado autorizado y validar los textos explicitos de extraordinario y reingreso; el PR no realiza ese deploy.
 
 La migracion no se ejecuta desde el PR. PROD, `main`, cron, Database Webhooks, n8n, secrets y variables quedan fuera de este cambio.

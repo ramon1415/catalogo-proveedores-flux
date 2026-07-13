@@ -164,13 +164,23 @@ async function loadCompanySettings() {
   state.companySettingsLoaded = false
   const { data, error } = await supabaseClient
     .from("approval_batch_company_settings")
-    .select("company_id,regular_payments_require_closed_batch,enforcement_started_at,updated_at")
+    .select("company_id,regular_payments_require_closed_batch,enforcement_started_at,enabled_by,enabled_at,updated_at")
   if (error) {
     state.companySettings = []
     syncEnforcementControl()
     return
   }
-  state.companySettings = data || []
+  const rows = data || []
+  const enabledByIds = [...new Set(rows.map((row) => row.enabled_by).filter(Boolean))]
+  let actorNames = new Map()
+  if (enabledByIds.length) {
+    const profiles = await supabaseClient.from("profiles").select("id,full_name,email").in("id", enabledByIds)
+    actorNames = new Map((profiles.data || []).map((profile) => [profile.id, profile.full_name || profile.email || "Finanzas"]))
+  }
+  state.companySettings = rows.map((row) => ({
+    ...row,
+    enabled_by_name: actorNames.get(row.enabled_by) || "Finanzas",
+  }))
   state.companySettingsLoaded = true
   syncEnforcementControl()
 }
@@ -633,7 +643,7 @@ async function closeBatch() {
   const rejected = items.filter((item) => item.director_status === "rejected").length
   const confirmed = await showConfirmation({
     title: "Liberar corte para pago",
-    bodyHtml: `<p>Finanzas cerrara el corte y liberara unicamente las solicitudes aprobadas por Direccion.</p><div class="confirm-summary-list">${confirmationRow("Pagos liberados", String(approved))}${confirmationRow("Rechazos bloqueados", String(rejected))}${confirmationTotalsRows(items.filter((item) => item.director_status === "approved"), "Importe liberado")}</div><div class="confirm-warning">Los rechazos conservaran su motivo e historial y no podran ejecutarse.</div>`,
+    bodyHtml: `<p>Finanzas cerrara el corte y el servidor revalidara cada solicitud antes de liberar pagos.</p><div class="confirm-summary-list">${confirmationRow("Pagos por revalidar", String(approved))}${confirmationRow("Rechazos bloqueados", String(rejected))}${confirmationTotalsRows(items.filter((item) => item.director_status === "approved"), "Importe por revalidar")}</div><div class="confirm-warning">Si una aprobacion dejo de estar vigente, el corte completo permanecera sin cerrar.</div>`,
     confirmLabel: `Liberar ${approved} pagos`,
   })
   if (!confirmed) return
@@ -750,17 +760,13 @@ async function saveDirector(event) {
   const submit = dom.directorForm.querySelector('[type="submit"]')
   submit.disabled = true
   try {
-    const { error } = await supabaseClient.rpc("set_company_director", {
+    const { error } = await supabaseClient.rpc("set_company_batch_configuration", {
       p_company_id: dom.directorCompanyId.value,
       p_director_profile_id: dom.directorProfileId.value,
-      p_active: dom.directorActive.checked,
+      p_director_active: dom.directorActive.checked,
+      p_enable_enforcement: Boolean(dom.batchEnforcementEnabled.checked),
     })
     if (error) throw error
-    const enforcement = await supabaseClient.rpc("set_approval_batch_company_enforcement", {
-      p_company_id: dom.directorCompanyId.value,
-      p_enabled: Boolean(dom.batchEnforcementEnabled.checked),
-    })
-    if (enforcement.error) throw enforcement.error
     showToast("Configuracion actualizada", "Director y control de cierre quedaron guardados para la empresa.", "success")
     await loadCompanySettings()
     await loadDirectors()
@@ -845,10 +851,12 @@ function syncEnforcementControl() {
   }
   const companyId = dom.directorCompanyId?.value
   const setting = state.companySettings.find((row) => row.company_id === companyId)
-  dom.batchEnforcementEnabled.checked = Boolean(setting?.regular_payments_require_closed_batch)
-  dom.batchEnforcementHelp.textContent = setting?.regular_payments_require_closed_batch
-    ? `Activo desde ${formatDateTime(setting.enforcement_started_at)}. Solo solicitudes nuevas posteriores requieren corte cerrado.`
-    : "Inactivo. Las solicitudes historicas y nuevas conservan compatibilidad legacy hasta activarlo."
+  const alreadyActivated = Boolean(setting?.enforcement_started_at)
+  dom.batchEnforcementEnabled.checked = alreadyActivated || Boolean(setting?.regular_payments_require_closed_batch)
+  dom.batchEnforcementEnabled.disabled = !state.companySettingsLoaded || alreadyActivated
+  dom.batchEnforcementHelp.textContent = alreadyActivated
+    ? `Activo desde ${formatDateTime(setting.enforcement_started_at)} por ${setting.enabled_by_name || "Finanzas"}. El control ya esta activo y no puede deshabilitarse desde el MVP.`
+    : "Inactivo. Puede activarse una sola vez; las solicitudes posteriores requeriran un corte cerrado."
 }
 
 function renderDirectorList() {
@@ -965,6 +973,12 @@ function friendlyError(error) {
     batch_item_already_released: "Esta solicitud ya fue habilitada para otro corte.",
     batch_requires_at_least_one_approved_item: "El corte debe conservar al menos una solicitud aprobada.",
     finance_reapproval_required: "La solicitud cambio despues del rechazo. Debe volver a revision de Finanzas antes de enviarse nuevamente a Direccion.",
+    request_data_changed_after_direction_decision: "Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.",
+    direction_reapproval_required: "La autorizacion de Direccion ya no esta vigente. La solicitud debe enviarse nuevamente a un corte.",
+    payment_request_already_executed: "La solicitud ya tiene una ejecucion registrada.",
+    extraordinary_authorization_active: "La solicitud tiene una autorizacion extraordinaria activa y no puede liberarse en este corte.",
+    batch_close_validation_failed: "El corte no se cerro porque una solicitud ya no supera la revalidacion financiera.",
+    batch_enforcement_cannot_be_disabled_in_mvp: "El control ya esta activo y no puede deshabilitarse desde el MVP.",
     target_batch_must_be_draft: "El corte destino ya no esta en borrador.",
     target_batch_company_mismatch: "El corte destino pertenece a otra empresa.",
     payment_request_already_in_target_batch: "La solicitud ya esta en el corte destino.",

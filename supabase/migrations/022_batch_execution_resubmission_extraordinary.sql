@@ -7,6 +7,7 @@ do $$
 declare
   v_missing text[] := array[]::text[];
   v_name text;
+  v_column text;
 begin
   foreach v_name in array array[
     'companies', 'profiles', 'roles', 'user_roles', 'proveedores',
@@ -22,6 +23,42 @@ begin
 
   if cardinality(v_missing) > 0 then
     raise exception '022_precheck: faltan dependencias requeridas: %', array_to_string(v_missing, ', ');
+  end if;
+
+  foreach v_column in array array[
+    'provider_id', 'provider_bank_account_id', 'proveedor_id', 'company_id',
+    'cost_center_id', 'budget_category_id', 'amount_requested', 'currency',
+    'exchange_rate', 'request_type', 'payment_method', 'company_bank_account_id',
+    'due_date', 'scheduled_payment_date', 'payment_reference', 'payment_concept'
+  ] loop
+    if not exists (
+      select 1
+      from information_schema.columns c
+      where c.table_schema = 'public'
+        and c.table_name = 'payment_requests'
+        and c.column_name = v_column
+    ) then
+      v_missing := array_append(v_missing, 'payment_requests.' || v_column);
+    end if;
+  end loop;
+
+  foreach v_column in array array[
+    'destination_type', 'clabe', 'cuenta_bancaria', 'convenio_number',
+    'beneficiary_name', 'banco'
+  ] loop
+    if not exists (
+      select 1
+      from information_schema.columns c
+      where c.table_schema = 'public'
+        and c.table_name = 'proveedores'
+        and c.column_name = v_column
+    ) then
+      v_missing := array_append(v_missing, 'proveedores.' || v_column);
+    end if;
+  end loop;
+
+  if cardinality(v_missing) > 0 then
+    raise exception '022_precheck: faltan columnas materiales requeridas: %', array_to_string(v_missing, ', ');
   end if;
 
   if to_regprocedure('public.approval_batch_require_actor()') is null
@@ -45,7 +82,7 @@ alter table public.payment_requests
   alter column approval_material_updated_at set not null;
 
 comment on column public.payment_requests.approval_material_updated_at is
-  'Ultimo cambio de datos financieros materiales que exige una aprobacion posterior de Finanzas.';
+  'Ultimo cambio material que exige aprobaciones posteriores de Finanzas y Direccion.';
 
 create table public.approval_batch_company_settings (
   company_id uuid primary key references public.companies(id),
@@ -64,10 +101,16 @@ create table public.approval_batch_company_settings (
 create table public.approval_batch_company_setting_events (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id),
+  event_type text not null default 'enforcement',
   previous_enabled boolean,
   new_enabled boolean not null,
+  director_profile_id uuid references public.profiles(id),
+  director_active boolean,
   changed_by uuid not null references public.profiles(id),
-  changed_at timestamptz not null default now()
+  changed_at timestamptz not null default now(),
+  constraint approval_batch_company_setting_events_type_check check (
+    event_type in ('enforcement', 'company_batch_configuration')
+  )
 );
 
 create index approval_batch_company_setting_events_company_idx
@@ -168,8 +211,11 @@ begin
     old.budget_category_id,
     old.amount_requested,
     old.currency,
+    old.exchange_rate,
+    old.request_type,
     old.payment_method,
     old.company_bank_account_id,
+    old.due_date,
     old.scheduled_payment_date,
     old.payment_reference,
     old.payment_concept
@@ -182,8 +228,11 @@ begin
     new.budget_category_id,
     new.amount_requested,
     new.currency,
+    new.exchange_rate,
+    new.request_type,
     new.payment_method,
     new.company_bank_account_id,
+    new.due_date,
     new.scheduled_payment_date,
     new.payment_reference,
     new.payment_concept
@@ -279,6 +328,41 @@ as $$
   )
   from public.payment_requests pr
   where pr.id = p_payment_request_id;
+$$;
+
+create or replace function public.approval_batch_request_has_current_direction_approval(
+  p_payment_request_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+    from public.payment_requests pr
+    join public.approval_batch_items abi
+      on abi.payment_request_id = pr.id
+     and abi.removed_at is null
+     and abi.director_status = 'approved'
+    join public.approval_batches ab
+      on ab.id = abi.batch_id
+     and ab.status = 'closed'
+    where pr.id = p_payment_request_id
+      and abi.decided_at is not null
+      and abi.decided_at >= pr.approval_material_updated_at
+      and ab.closed_at is not null
+      and ab.closed_at >= abi.decided_at
+      and not exists (
+        select 1
+        from public.approval_batch_items later
+        where later.payment_request_id = pr.id
+          and later.removed_at is null
+          and later.director_status in ('pending', 'rejected')
+          and coalesce(later.decided_at, later.created_at) > abi.decided_at
+      )
+  );
 $$;
 
 create or replace function public.approval_batch_request_has_execution(
@@ -445,6 +529,12 @@ begin
     else null
   end;
 
+  if found
+     and v_existing.enforcement_started_at is not null
+     and not p_enabled then
+    raise exception 'batch_enforcement_cannot_be_disabled_in_mvp';
+  end if;
+
   if not found then
     insert into public.approval_batch_company_settings(
       company_id,
@@ -466,19 +556,16 @@ begin
     update public.approval_batch_company_settings
     set regular_payments_require_closed_batch = p_enabled,
         enforcement_started_at = case
-          when p_enabled and not v_existing.regular_payments_require_closed_batch then now()
-          when p_enabled then v_existing.enforcement_started_at
-          else null
+          when p_enabled and v_existing.enforcement_started_at is null then now()
+          else v_existing.enforcement_started_at
         end,
         enabled_by = case
-          when p_enabled and not v_existing.regular_payments_require_closed_batch then v_actor
-          when p_enabled then v_existing.enabled_by
-          else null
+          when p_enabled and v_existing.enforcement_started_at is null then v_actor
+          else v_existing.enabled_by
         end,
         enabled_at = case
-          when p_enabled and not v_existing.regular_payments_require_closed_batch then now()
-          when p_enabled then v_existing.enabled_at
-          else null
+          when p_enabled and v_existing.enforcement_started_at is null then now()
+          else v_existing.enabled_at
         end,
         updated_by = v_actor,
         updated_at = now()
@@ -505,6 +592,178 @@ begin
     'regular_payments_require_closed_batch', v_row.regular_payments_require_closed_batch,
     'enforcement_started_at', v_row.enforcement_started_at,
     'updated_at', v_row.updated_at
+  );
+end
+$$;
+
+create or replace function public.set_company_batch_configuration(
+  p_company_id uuid,
+  p_director_profile_id uuid,
+  p_director_active boolean,
+  p_enable_enforcement boolean
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_actor uuid;
+  v_director_id uuid;
+  v_existing public.approval_batch_company_settings%rowtype;
+  v_setting public.approval_batch_company_settings%rowtype;
+  v_previous_enabled boolean;
+  v_now timestamptz := clock_timestamp();
+begin
+  v_actor := public.approval_batch_require_finance();
+  if p_company_id is null
+     or p_director_profile_id is null
+     or p_director_active is null
+     or p_enable_enforcement is null then
+    raise exception 'company_batch_configuration_required';
+  end if;
+
+  perform 1
+  from public.companies c
+  where c.id = p_company_id
+    and coalesce(c.active, true)
+  for update;
+  if not found then raise exception 'company_not_found_or_inactive'; end if;
+
+  if not exists (
+    select 1
+    from public.profiles p
+    where p.id = p_director_profile_id
+      and coalesce(p.active, true)
+  ) then
+    raise exception 'director_profile_not_found_or_inactive';
+  end if;
+  if p_director_active and not exists (
+    select 1
+    from public.user_roles ur
+    join public.roles r on r.id = ur.role_id
+    where ur.profile_id = p_director_profile_id
+      and lower(btrim(r.name)) = any (public.approval_batch_direction_roles())
+  ) then
+    raise exception 'director_role_required';
+  end if;
+  if p_enable_enforcement and not p_director_active then
+    raise exception 'company_director_required';
+  end if;
+
+  select cd.id into v_director_id
+  from public.company_directors cd
+  where cd.company_id = p_company_id
+    and cd.director_profile_id = p_director_profile_id
+  order by cd.created_at desc
+  limit 1
+  for update;
+
+  if v_director_id is null then
+    insert into public.company_directors(
+      company_id,
+      director_profile_id,
+      active,
+      created_by
+    ) values (
+      p_company_id,
+      p_director_profile_id,
+      p_director_active,
+      v_actor
+    )
+    returning id into v_director_id;
+  else
+    update public.company_directors
+    set active = p_director_active,
+        updated_at = v_now
+    where id = v_director_id;
+  end if;
+
+  select * into v_existing
+  from public.approval_batch_company_settings
+  where company_id = p_company_id
+  for update;
+  v_previous_enabled := case
+    when found then v_existing.regular_payments_require_closed_batch
+    else null
+  end;
+
+  if found
+     and v_existing.enforcement_started_at is not null
+     and not p_enable_enforcement then
+    raise exception 'batch_enforcement_cannot_be_disabled_in_mvp';
+  end if;
+
+  if not found then
+    insert into public.approval_batch_company_settings(
+      company_id,
+      regular_payments_require_closed_batch,
+      enforcement_started_at,
+      enabled_by,
+      enabled_at,
+      updated_by,
+      updated_at
+    ) values (
+      p_company_id,
+      p_enable_enforcement,
+      case when p_enable_enforcement then v_now else null end,
+      case when p_enable_enforcement then v_actor else null end,
+      case when p_enable_enforcement then v_now else null end,
+      v_actor,
+      v_now
+    )
+    returning * into v_setting;
+  else
+    update public.approval_batch_company_settings
+    set regular_payments_require_closed_batch = p_enable_enforcement,
+        enforcement_started_at = case
+          when p_enable_enforcement and v_existing.enforcement_started_at is null then v_now
+          else v_existing.enforcement_started_at
+        end,
+        enabled_by = case
+          when p_enable_enforcement and v_existing.enforcement_started_at is null then v_actor
+          else v_existing.enabled_by
+        end,
+        enabled_at = case
+          when p_enable_enforcement and v_existing.enforcement_started_at is null then v_now
+          else v_existing.enabled_at
+        end,
+        updated_by = v_actor,
+        updated_at = v_now
+    where company_id = p_company_id
+    returning * into v_setting;
+  end if;
+
+  insert into public.approval_batch_company_setting_events(
+    company_id,
+    event_type,
+    previous_enabled,
+    new_enabled,
+    director_profile_id,
+    director_active,
+    changed_by,
+    changed_at
+  ) values (
+    p_company_id,
+    'company_batch_configuration',
+    v_previous_enabled,
+    p_enable_enforcement,
+    p_director_profile_id,
+    p_director_active,
+    v_actor,
+    v_now
+  );
+
+  return jsonb_build_object(
+    'company_id', p_company_id,
+    'director_id', v_director_id,
+    'director_profile_id', p_director_profile_id,
+    'director_active', p_director_active,
+    'regular_payments_require_closed_batch', v_setting.regular_payments_require_closed_batch,
+    'enforcement_started_at', v_setting.enforcement_started_at,
+    'enabled_by', v_setting.enabled_by,
+    'enabled_at', v_setting.enabled_at,
+    'updated_at', v_setting.updated_at
   );
 end
 $$;
@@ -573,15 +832,7 @@ begin
   ) then
     raise exception 'direction_rejected_request_cannot_be_extraordinary';
   end if;
-  if exists (
-    select 1
-    from public.approval_batch_items abi
-    join public.approval_batches ab on ab.id = abi.batch_id
-    where abi.payment_request_id = v_request.id
-      and abi.removed_at is null
-      and abi.director_status = 'approved'
-      and ab.status in ('approved', 'partially_approved', 'closed')
-  ) then
+  if public.approval_batch_request_has_current_direction_approval(v_request.id) then
     raise exception 'batch_approved_request_cannot_be_extraordinary';
   end if;
   if exists (
@@ -649,7 +900,7 @@ begin
 
   perform pg_advisory_xact_lock(hashtextextended(p_payment_request_id::text, 21021));
   if public.approval_batch_request_has_any_execution_record(p_payment_request_id) then
-    raise exception 'executed_extraordinary_cannot_be_revoked';
+    raise exception 'extraordinary_already_materialized';
   end if;
 
   select id into v_id
@@ -695,15 +946,7 @@ as $$
       and public.approval_batch_request_has_current_finance_approval(pr.id)
       and not public.approval_batch_request_has_active_extraordinary(pr.id)
       and not public.approval_batch_request_has_execution(pr.id)
-      and not exists (
-        select 1
-        from public.approval_batch_items abi
-        join public.approval_batches ab on ab.id = abi.batch_id
-        where abi.payment_request_id = pr.id
-          and abi.removed_at is null
-          and abi.director_status = 'approved'
-          and ab.status in ('approved', 'partially_approved', 'closed')
-      )
+      and not public.approval_batch_request_has_current_direction_approval(pr.id)
       and not exists (
         select 1
         from public.approval_batch_items abi
@@ -711,6 +954,7 @@ as $$
           and abi.removed_at is null
           and abi.director_status = 'rejected'
           and abi.rebatch_status = 'blocked'
+          and abi.decided_at >= pr.approval_material_updated_at
       )
   );
 $$;
@@ -851,6 +1095,8 @@ declare
   v_request public.payment_requests%rowtype;
   v_item_status text;
   v_batch_status text;
+  v_has_batch_item boolean := false;
+  v_direction_current boolean := false;
   v_enforced boolean := false;
   v_enforcement_started_at timestamptz;
   v_extraordinary_authorized_at timestamptz;
@@ -861,6 +1107,9 @@ begin
   where id = new.payment_request_id
   for update;
   if not found then raise exception 'payment_request_not_found'; end if;
+  if public.approval_batch_request_has_execution(v_request.id) then
+    raise exception 'payment_request_already_executed';
+  end if;
 
   select prea.authorized_at
     into v_extraordinary_authorized_at
@@ -912,11 +1161,16 @@ begin
     and abi.removed_at is null
   order by abi.created_at desc, abi.id desc
   limit 1;
+  v_has_batch_item := found;
+  v_direction_current := public.approval_batch_request_has_current_direction_approval(v_request.id);
 
   if not v_enforced then
-    if not found then return new; end if;
-    if v_item_status <> 'approved'
-       or v_batch_status not in ('approved', 'partially_approved', 'closed') then
+    if not v_has_batch_item then return new; end if;
+    if not v_direction_current then
+      if v_item_status = 'approved'
+         and v_batch_status in ('approved', 'partially_approved', 'closed') then
+        raise exception 'direction_reapproval_required';
+      end if;
       raise exception 'batch_authorization_required';
     end if;
     return new;
@@ -925,9 +1179,11 @@ begin
   if not public.approval_batch_request_has_current_finance_approval(v_request.id) then
     raise exception 'finance_reapproval_required';
   end if;
-  if v_item_status is null
-     or v_item_status <> 'approved'
-     or v_batch_status <> 'closed' then
+  if not v_direction_current then
+    if v_item_status = 'approved'
+       and v_batch_status in ('approved', 'partially_approved', 'closed') then
+      raise exception 'direction_reapproval_required';
+    end if;
     raise exception 'closed_batch_authorization_required';
   end if;
   return new;
@@ -943,6 +1199,9 @@ as $$
 declare
   v_actor uuid;
   v_status text;
+  v_item record;
+  v_request public.payment_requests%rowtype;
+  v_reason text;
   v_pending integer;
   v_approved integer;
   v_rejected integer;
@@ -969,9 +1228,71 @@ begin
   if v_pending > 0 then raise exception 'batch_has_pending_items'; end if;
   if v_approved = 0 then raise exception 'batch_requires_at_least_one_approved_item'; end if;
 
+  for v_item in
+    select
+      abi.id as item_id,
+      abi.payment_request_id,
+      abi.decided_at,
+      pr.request_number
+    from public.approval_batch_items abi
+    join public.payment_requests pr on pr.id = abi.payment_request_id
+    where abi.batch_id = p_batch_id
+      and abi.removed_at is null
+      and abi.director_status = 'approved'
+    order by abi.payment_request_id
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(v_item.payment_request_id::text, 21021));
+    select * into v_request
+    from public.payment_requests pr
+    where pr.id = v_item.payment_request_id
+    for update;
+
+    v_reason := null;
+    if not public.approval_batch_request_has_current_finance_approval(v_request.id) then
+      v_reason := 'finance_reapproval_required';
+    elsif v_item.decided_at is null then
+      v_reason := 'direction_reapproval_required';
+    elsif v_item.decided_at < v_request.approval_material_updated_at then
+      v_reason := 'request_data_changed_after_direction_decision';
+    elsif exists (
+      select 1
+      from public.approval_batch_items later
+      where later.payment_request_id = v_request.id
+        and later.removed_at is null
+        and later.id <> v_item.item_id
+        and later.director_status in ('pending', 'rejected')
+        and coalesce(later.decided_at, later.created_at) > v_item.decided_at
+    ) then
+      v_reason := 'direction_reapproval_required';
+    elsif public.approval_batch_request_has_any_execution_record(v_request.id) then
+      v_reason := 'payment_request_already_executed';
+    elsif public.approval_batch_request_has_active_extraordinary(v_request.id) then
+      v_reason := 'extraordinary_authorization_active';
+    end if;
+
+    if v_reason is not null then
+      raise exception 'batch_close_validation_failed:%', jsonb_build_object(
+        'payment_request_id', v_request.id,
+        'request_number', coalesce(v_request.request_number, v_request.id::text),
+        'reason', v_reason
+      )::text;
+    end if;
+  end loop;
+
   update public.approval_batches
   set status = 'closed', closed_by = v_actor, closed_at = now()
   where id = p_batch_id;
+
+  if exists (
+    select 1
+    from public.approval_batch_items abi
+    where abi.batch_id = p_batch_id
+      and abi.removed_at is null
+      and abi.director_status = 'approved'
+      and not public.approval_batch_request_has_current_direction_approval(abi.payment_request_id)
+  ) then
+    raise exception 'batch_close_validation_failed:direction_reapproval_required';
+  end if;
 
   select coalesce(jsonb_agg(jsonb_build_object(
     'currency', totals.currency,
@@ -1014,6 +1335,8 @@ declare
   v_is_finance boolean;
   v_executed boolean;
   v_finance_current boolean;
+  v_direction_current boolean;
+  v_direction_stale boolean;
   v_can_authorize boolean;
   v_block_reason text;
 begin
@@ -1045,8 +1368,9 @@ begin
   limit 1;
 
   select abi.id as item_id, abi.director_status, abi.director_reject_reason,
-         abi.rebatch_status, abi.rebatch_release_note,
-         ab.id as batch_id, ab.label as batch_label, ab.status as batch_status
+         abi.rebatch_status, abi.rebatch_release_note, abi.decided_at,
+         ab.id as batch_id, ab.label as batch_label, ab.status as batch_status,
+         ab.closed_at
     into v_batch
   from public.approval_batch_items abi
   join public.approval_batches ab on ab.id = abi.batch_id
@@ -1057,6 +1381,15 @@ begin
 
   v_executed := public.approval_batch_request_has_any_execution_record(v_request.id);
   v_finance_current := public.approval_batch_request_has_current_finance_approval(v_request.id);
+  v_direction_current := public.approval_batch_request_has_current_direction_approval(v_request.id);
+  v_direction_stale := coalesce(
+    v_batch.director_status = 'approved'
+    and (
+      v_batch.decided_at is null
+      or v_batch.decided_at < v_request.approval_material_updated_at
+    ),
+    false
+  );
   v_block_reason := case
     when not v_is_finance then 'finance_role_required'
     when v_request.status::text <> 'approved' then 'payment_request_must_be_finance_approved'
@@ -1083,14 +1416,7 @@ begin
         and abi.removed_at is null
         and ab.status = 'draft'
     ) then 'remove_request_from_draft_batch_first'
-    when exists (
-      select 1 from public.approval_batch_items abi
-      join public.approval_batches ab on ab.id = abi.batch_id
-      where abi.payment_request_id = v_request.id
-        and abi.removed_at is null
-        and abi.director_status = 'approved'
-        and ab.status in ('approved', 'partially_approved', 'closed')
-    ) then 'batch_approved_request_cannot_be_extraordinary'
+    when v_direction_current then 'batch_approved_request_cannot_be_extraordinary'
     else null
   end;
   v_can_authorize := v_block_reason is null;
@@ -1099,6 +1425,14 @@ begin
     'payment_request_id', v_request.id,
     'is_finance', v_is_finance,
     'finance_approval_current', v_finance_current,
+    'direction_approval_current', v_direction_current,
+    'direction_approval_stale', v_direction_stale,
+    'execution_block_reason', case
+      when v_direction_stale then 'direction_reapproval_required'
+      when not v_finance_current then 'finance_reapproval_required'
+      when v_executed then 'payment_request_already_executed'
+      else null
+    end,
     'executed', v_executed,
     'can_authorize_extraordinary', v_can_authorize,
     'authorization_block_reason', v_block_reason,
@@ -1110,7 +1444,8 @@ begin
       'authorized_by_name', v_extra.authorized_by_name,
       'authorized_at', v_extra.authorized_at,
       'authorization_current', v_extra.authorized_at >= v_request.approval_material_updated_at and v_finance_current,
-      'can_revoke', v_is_finance and not v_executed
+      'can_revoke', v_is_finance and not v_executed,
+      'revoke_block_reason', case when v_executed then 'extraordinary_already_materialized' else null end
     ) end,
     'latest_batch', case when v_batch.item_id is null then null else jsonb_build_object(
       'item_id', v_batch.item_id,
@@ -1118,6 +1453,9 @@ begin
       'batch_label', v_batch.batch_label,
       'batch_status', v_batch.batch_status,
       'director_status', v_batch.director_status,
+      'direction_approval_current', v_direction_current,
+      'direction_decided_at', v_batch.decided_at,
+      'closed_at', v_batch.closed_at,
       'reject_reason', v_batch.director_reject_reason,
       'rebatch_status', v_batch.rebatch_status,
       'correction_note', v_batch.rebatch_release_note
@@ -1369,6 +1707,8 @@ returns table (
   scheduled_payment_date date,
   missing_fields text[],
   finance_approval_current boolean,
+  direction_approval_current boolean,
+  direction_decided_at timestamptz,
   enforcement_required boolean,
   source_item_id uuid,
   source_batch_id uuid,
@@ -1423,6 +1763,9 @@ as $$
       nullif(btrim(pr.payment_concept), '') as payment_concept,
       pr.scheduled_payment_date,
       public.approval_batch_request_has_current_finance_approval(pr.id) as finance_approval_current,
+      public.approval_batch_request_has_current_direction_approval(pr.id) as direction_approval_current,
+      latest_item.decided_at as direction_decided_at,
+      coalesce(latest_item.decided_at >= pr.approval_material_updated_at, false) as direction_decision_fresh,
       coalesce(settings.regular_payments_require_closed_batch, false)
         and settings.enforcement_started_at is not null
         and pr.created_at >= settings.enforcement_started_at as enforcement_required,
@@ -1480,6 +1823,7 @@ as $$
         abi.director_reject_reason as reject_reason,
         abi.decided_by as rejected_by,
         abi.decided_at as rejected_at,
+        abi.decided_at,
         abi.rebatch_status,
         abi.rebatch_release_note as latest_correction_note
       from public.approval_batch_items abi
@@ -1522,17 +1866,18 @@ as $$
         when b.extraordinary_authorization_id is not null
           and cardinality(b.missing_fields) = 0 then 'ready_extraordinary'
         when not b.finance_approval_current then 'invalid_data'
-        when b.enforcement_required
-          and b.director_status = 'approved'
-          and b.source_batch_status in ('approved', 'partially_approved') then 'pending_finance_close'
         when cardinality(b.missing_fields) > 0 then 'invalid_data'
-        when b.enforcement_required
-          and b.director_status = 'approved'
-          and b.source_batch_status = 'closed' then 'ready_regular'
+        when b.director_status = 'approved'
+          and not b.direction_decision_fresh then 'direction_reapproval_required'
+        when b.director_status = 'approved'
+          and b.source_batch_status in ('approved', 'partially_approved') then 'pending_finance_close'
+        when b.director_status = 'approved'
+          and b.source_batch_status = 'closed'
+          and b.direction_approval_current then 'ready_regular'
+        when b.director_status = 'approved'
+          and b.source_batch_status = 'closed' then 'direction_reapproval_required'
         when b.enforcement_required then 'pending_director'
         when b.source_item_id is null then 'legacy_eligible'
-        when b.director_status = 'approved'
-          and b.source_batch_status in ('approved', 'partially_approved', 'closed') then 'legacy_eligible'
         else 'pending_director'
       end as classification,
       case
@@ -1547,10 +1892,11 @@ as $$
         when b.extraordinary_authorization_id is not null
           and cardinality(b.missing_fields) > 0 then 'incomplete_layout_data'
         when not b.finance_approval_current then 'finance_reapproval_required'
-        when b.enforcement_required
-          and b.director_status = 'approved'
-          and b.source_batch_status in ('approved', 'partially_approved') then 'finance_close_required'
         when cardinality(b.missing_fields) > 0 then 'incomplete_layout_data'
+        when b.director_status = 'approved'
+          and not b.direction_decision_fresh then 'stale_direction_approval'
+        when b.director_status = 'approved'
+          and b.source_batch_status in ('approved', 'partially_approved') then 'finance_close_required'
         when b.enforcement_required
           and b.source_item_id is null then 'closed_batch_required'
         when b.enforcement_required then 'direction_approval_required'
@@ -1580,17 +1926,21 @@ as $$
     m.payment_reference,
     m.payment_concept,
     m.scheduled_payment_date,
-    case
-      when m.extraordinary_authorization_id is not null
-        and not coalesce(m.extraordinary_authorization_current, false)
-        and not (m.missing_fields @> array['extraordinary_reauthorization_required']::text[])
-        then array_append(m.missing_fields, 'extraordinary_reauthorization_required')
-      when not m.finance_approval_current
-        and not (m.missing_fields @> array['finance_reapproval_required']::text[])
-        then array_append(m.missing_fields, 'finance_reapproval_required')
-      else m.missing_fields
-    end,
+    array_remove(m.missing_fields || array[
+      case
+        when m.extraordinary_authorization_id is not null
+          and not coalesce(m.extraordinary_authorization_current, false)
+          then 'extraordinary_reauthorization_required'
+      end,
+      case when not m.finance_approval_current then 'finance_reapproval_required' end,
+      case
+        when m.classification = 'direction_reapproval_required'
+          then 'direction_reapproval_required'
+      end
+    ]::text[], null),
     m.finance_approval_current,
+    m.direction_approval_current,
+    m.direction_decided_at,
     m.enforcement_required,
     m.source_item_id,
     m.source_batch_id,
@@ -1665,6 +2015,7 @@ begin
     'ready_extraordinary', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'ready_extraordinary'), '[]'::jsonb),
     'rejected_by_direction', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.rejected_at desc nulls last, c.request_number) from candidates c where c.classification = 'rejected_by_direction'), '[]'::jsonb),
     'pending_director', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'pending_director'), '[]'::jsonb),
+    'direction_reapproval_required', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'direction_reapproval_required'), '[]'::jsonb),
     'pending_finance_close', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'pending_finance_close'), '[]'::jsonb),
     'legacy_eligible', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'legacy_eligible'), '[]'::jsonb),
     'invalid_data', coalesce((select jsonb_agg(to_jsonb(c) - 'source_account_number' - 'destination_value' order by c.request_number) from candidates c where c.classification = 'invalid_data'), '[]'::jsonb),
@@ -1701,6 +2052,7 @@ declare
   v_layout_name text;
   v_request_id uuid;
   v_locked_request_ids uuid[] := array[]::uuid[];
+  v_candidates jsonb := '[]'::jsonb;
   v_payment_count integer := 0;
   v_company_count integer := 0;
   v_total_amount numeric := 0;
@@ -1710,6 +2062,7 @@ declare
   v_rejected_count integer := 0;
   v_pending_close_count integer := 0;
   v_pending_director_count integer := 0;
+  v_direction_reapproval_count integer := 0;
   v_invalid_count integer := 0;
   v_already_executed_count integer := 0;
   v_invalid_requests jsonb := '[]'::jsonb;
@@ -1739,36 +2092,43 @@ begin
   end if;
 
   for v_request_id in
-    select c.payment_request_id
+    select distinct c.payment_request_id
     from public.approval_batch_payment_layout_candidates(
       p_period_start,
       p_period_end,
       p_company_id,
       p_company_bank_account_id
     ) c
-    where c.classification in ('ready_regular', 'ready_extraordinary', 'legacy_eligible')
     order by c.payment_request_id
   loop
     perform pg_advisory_xact_lock(hashtextextended(v_request_id::text, 21021));
-    v_locked_request_ids := array_append(v_locked_request_ids, v_request_id);
+    perform 1
+    from public.payment_requests pr
+    where pr.id = v_request_id
+    for update;
+    if found then
+      v_locked_request_ids := array_append(v_locked_request_ids, v_request_id);
+    end if;
   end loop;
 
+  select coalesce(jsonb_agg(to_jsonb(c) order by c.payment_request_id), '[]'::jsonb)
+    into v_candidates
+  from public.approval_batch_payment_layout_candidates(
+    p_period_start,
+    p_period_end,
+    p_company_id,
+    p_company_bank_account_id
+  ) c
+  where c.payment_request_id = any(v_locked_request_ids);
+
   select
-    count(*) filter (
-      where c.classification = 'ready_regular'
-        and c.payment_request_id = any(v_locked_request_ids)
-    ),
-    count(*) filter (
-      where c.classification = 'ready_extraordinary'
-        and c.payment_request_id = any(v_locked_request_ids)
-    ),
-    count(*) filter (
-      where c.classification = 'legacy_eligible'
-        and c.payment_request_id = any(v_locked_request_ids)
-    ),
+    count(*) filter (where c.classification = 'ready_regular'),
+    count(*) filter (where c.classification = 'ready_extraordinary'),
+    count(*) filter (where c.classification = 'legacy_eligible'),
     count(*) filter (where c.classification = 'rejected_by_direction'),
     count(*) filter (where c.classification = 'pending_finance_close'),
     count(*) filter (where c.classification = 'pending_director'),
+    count(*) filter (where c.classification = 'direction_reapproval_required'),
     count(*) filter (where c.classification = 'invalid_data'),
     count(*) filter (where c.classification = 'already_executed')
   into
@@ -1778,14 +2138,13 @@ begin
     v_rejected_count,
     v_pending_close_count,
     v_pending_director_count,
+    v_direction_reapproval_count,
     v_invalid_count,
     v_already_executed_count
-  from public.approval_batch_payment_layout_candidates(
-    p_period_start,
-    p_period_end,
-    p_company_id,
-    p_company_bank_account_id
-  ) c;
+  from jsonb_to_recordset(v_candidates) as c(
+    classification text,
+    payment_request_id uuid
+  );
 
   v_payment_count := v_regular_count + v_extraordinary_count + v_legacy_count;
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -1795,12 +2154,13 @@ begin
     'missing_fields', c.missing_fields
   ) order by c.request_number), '[]'::jsonb)
   into v_invalid_requests
-  from public.approval_batch_payment_layout_candidates(
-    p_period_start,
-    p_period_end,
-    p_company_id,
-    p_company_bank_account_id
-  ) c
+  from jsonb_to_recordset(v_candidates) as c(
+    classification text,
+    classification_reason text,
+    payment_request_id uuid,
+    request_number text,
+    missing_fields text[]
+  )
   where c.classification = 'invalid_data';
 
   if v_payment_count = 0 then
@@ -1816,6 +2176,7 @@ begin
       'rejected_count', v_rejected_count,
       'pending_close_count', v_pending_close_count,
       'pending_director_count', v_pending_director_count,
+      'direction_reapproval_count', v_direction_reapproval_count,
       'invalid_count', v_invalid_count,
       'already_executed_count', v_already_executed_count,
       'invalid_requests', v_invalid_requests,
@@ -1881,14 +2242,23 @@ begin
     payment_concept,
     request_number,
     'included'
-  from public.approval_batch_payment_layout_candidates(
-    p_period_start,
-    p_period_end,
-    p_company_id,
-    p_company_bank_account_id
-  ) c
+  from jsonb_to_recordset(v_candidates) as c(
+    classification text,
+    payment_request_id uuid,
+    request_number text,
+    company_id uuid,
+    proveedor_id uuid,
+    company_bank_account_id uuid,
+    source_account_number text,
+    company_name text,
+    destination_type text,
+    destination_value text,
+    beneficiary_name text,
+    amount numeric,
+    payment_reference text,
+    payment_concept text
+  )
   where c.classification in ('ready_regular', 'ready_extraordinary', 'legacy_eligible')
-    and c.payment_request_id = any(v_locked_request_ids)
   order by c.request_number, c.payment_request_id;
 
   get diagnostics v_payment_count = row_count;
@@ -1928,6 +2298,7 @@ begin
     'rejected_count', v_rejected_count,
     'pending_close_count', v_pending_close_count,
     'pending_director_count', v_pending_director_count,
+    'direction_reapproval_count', v_direction_reapproval_count,
     'invalid_count', v_invalid_count,
     'already_executed_count', v_already_executed_count,
     'invalid_requests', v_invalid_requests,
@@ -1941,6 +2312,7 @@ revoke all on function public.mark_payment_request_material_change() from public
 revoke all on function public.mark_provider_payment_material_change() from public, anon, authenticated;
 revoke all on function public.approval_batch_latest_finance_approval_at(uuid) from public, anon, authenticated;
 revoke all on function public.approval_batch_request_has_current_finance_approval(uuid) from public, anon, authenticated;
+revoke all on function public.approval_batch_request_has_current_direction_approval(uuid) from public, anon, authenticated;
 revoke all on function public.approval_batch_request_has_execution(uuid) from public, anon, authenticated;
 revoke all on function public.approval_batch_request_has_any_execution_record(uuid) from public, anon, authenticated;
 revoke all on function public.approval_batch_request_has_active_extraordinary(uuid) from public, anon, authenticated;
@@ -1951,6 +2323,7 @@ revoke all on function public.enqueue_rebatched_item_notification() from public,
 revoke all on function public.approval_batch_payment_layout_candidates(date,date,uuid,uuid) from public, anon, authenticated;
 
 revoke all on function public.set_approval_batch_company_enforcement(uuid,boolean) from public, anon;
+revoke all on function public.set_company_batch_configuration(uuid,uuid,boolean,boolean) from public, anon;
 revoke all on function public.authorize_payment_request_extraordinary(uuid,text,text) from public, anon;
 revoke all on function public.revoke_payment_request_extraordinary(uuid,text) from public, anon;
 revoke all on function public.release_and_rebatch_rejected_request(uuid,text,uuid) from public, anon;
@@ -1960,6 +2333,7 @@ revoke all on function public.preview_payment_layout_eligibility(date,date,uuid,
 revoke all on function public.create_payment_layout(date,date,uuid,text,uuid,uuid) from public, anon;
 
 grant execute on function public.set_approval_batch_company_enforcement(uuid,boolean) to authenticated;
+grant execute on function public.set_company_batch_configuration(uuid,uuid,boolean,boolean) to authenticated;
 grant execute on function public.authorize_payment_request_extraordinary(uuid,text,text) to authenticated;
 grant execute on function public.revoke_payment_request_extraordinary(uuid,text) to authenticated;
 grant execute on function public.release_and_rebatch_rejected_request(uuid,text,uuid) to authenticated;
@@ -1977,7 +2351,9 @@ begin
   end if;
   if to_regprocedure('public.release_and_rebatch_rejected_request(uuid,text,uuid)') is null
      or to_regprocedure('public.preview_payment_layout_eligibility(date,date,uuid,uuid)') is null
-     or to_regprocedure('public.authorize_payment_request_extraordinary(uuid,text,text)') is null then
+     or to_regprocedure('public.authorize_payment_request_extraordinary(uuid,text,text)') is null
+     or to_regprocedure('public.set_company_batch_configuration(uuid,uuid,boolean,boolean)') is null
+     or to_regprocedure('public.approval_batch_request_has_current_direction_approval(uuid)') is null then
     raise exception '022_postcheck: faltan RPCs requeridos';
   end if;
   if not exists (

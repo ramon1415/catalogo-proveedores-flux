@@ -76,8 +76,6 @@ async function initSolicitudesPage() {
     setDefaultMonth();
     updateSummaryPanel();
     await loadPaymentRequests();
-    const requestedId = new URLSearchParams(window.location.search).get("request_id");
-    if (requestedId && paymentRequests.some(item => item.id === requestedId)) openRequestDetail(requestedId);
   } catch (error) {
     showMessage(error.message || "No fue posible cargar la pantalla.", true);
     showToast("No fue posible iniciar", friendlyError(error), "error");
@@ -280,7 +278,7 @@ async function loadPaymentRequests() {
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,request_type,payment_method,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
+    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -844,7 +842,7 @@ function renderPaymentRequestsTable() {
     const statusCell = `${renderStatusBadge(request.status)} ${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}`;
 
     return `
-      <tr class="${isHighlighted ? "highlight-row" : ""}" data-payment-request-id="${escapeHtml(request.id)}">
+      <tr class="${isHighlighted ? "highlight-row" : ""}">
         <td>
           <span class="cell-main">${escapeHtml(request.request_number || "Sin folio")}</span>${folioExtra}
           <span class="cell-sub">${escapeHtml(formatDate(request.submitted_at || request.created_at))}</span>
@@ -868,10 +866,6 @@ function renderPaymentRequestsTable() {
         </td>
       </tr>`;
   }).join("");
-
-  document.dispatchEvent(new CustomEvent("flux:payment-requests-rendered", {
-    detail: { requestIds: rows.map(request => request.id) },
-  }));
 
   if (highlightedRequestId) {
     window.setTimeout(() => {
@@ -1139,18 +1133,6 @@ function openRequestDetail(id) {
   loadDetailApprover(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
-  document.dispatchEvent(new CustomEvent("flux:payment-request-detail-opened", {
-    detail: {
-      id: request.id,
-      requestNumber: request.request_number,
-      companyName: companyName(company),
-      providerName: proveedorAlias(proveedor),
-      amount: request.amount_requested,
-      currency: request.currency || "MXN",
-      paymentMethod: request.payment_method || request.request_type || "-",
-      status: request.status,
-    },
-  }));
   if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
 }
 

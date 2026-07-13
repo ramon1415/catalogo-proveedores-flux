@@ -360,14 +360,14 @@
   <dialog id="extraordinaryDialog" class="narrow">
     <form id="extraordinaryForm" class="modal-content">
       <div class="modal-header"><div><h2 style="color:var(--text-1)">Autorizar pago extraordinario</h2><p id="extraordinarySubtitle">Solicitud aprobada por Finanzas.</p></div><button type="button" id="closeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
-      <div class="modal-scroll"><div class="form-grid"><div class="full-row extraordinary-warning">Este pago omitira la autorizacion de Direccion y podra continuar inmediatamente a ejecucion. La accion quedara auditada.</div><div id="extraordinarySummary" class="extraordinary-summary full-row" aria-label="Resumen del pago extraordinario"></div><label class="full-row">Categoria *<select id="extraordinaryCategory" class="form-control" required><option value="">Selecciona...</option><option value="operational_emergency">Emergencia operativa / fuga</option><option value="urgent_reimbursement">Reembolso urgente</option><option value="urgent_termination">Desvinculacion o finiquito urgente</option><option value="critical_service">Servicio critico</option><option value="other">Otro</option></select></label><label class="full-row">Motivo *<textarea id="extraordinaryReason" class="form-control textarea" minlength="20" maxlength="1500" required></textarea></label><label class="checkbox-card full-row"><input id="extraordinaryConfirm" type="checkbox" required> Confirmo que existe una urgencia operativa que no puede esperar al siguiente corte.</label></div></div>
+      <div class="modal-scroll"><div class="form-grid"><div class="full-row extraordinary-warning">Este pago omitira la autorizacion de Direccion y podra continuar inmediatamente a ejecucion. Es revocable solo antes de incorporarse a un layout, fondo de efectivo o registro de pago.</div><div id="extraordinarySummary" class="extraordinary-summary full-row" aria-label="Resumen del pago extraordinario"></div><label class="full-row">Categoria *<select id="extraordinaryCategory" class="form-control" required><option value="">Selecciona...</option><option value="operational_emergency">Emergencia operativa / fuga</option><option value="urgent_reimbursement">Reembolso urgente</option><option value="urgent_termination">Desvinculacion o finiquito urgente</option><option value="critical_service">Servicio critico</option><option value="other">Otro</option></select></label><label class="full-row">Motivo *<textarea id="extraordinaryReason" class="form-control textarea" minlength="20" maxlength="1500" required></textarea></label><label class="checkbox-card full-row"><input id="extraordinaryConfirm" type="checkbox" required> Confirmo que existe una urgencia operativa que no puede esperar al siguiente corte.</label></div></div>
       <div class="modal-actions"><button type="button" id="cancelExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitExtraordinaryBtn" class="primary-btn">Autorizar extraordinario</button></div>
     </form>
   </dialog>
 
   <dialog id="revokeExtraordinaryDialog" class="narrow">
     <form id="revokeExtraordinaryForm" class="modal-content">
-      <div class="modal-header"><div><h2 style="color:var(--text-1)">Revocar extraordinario</h2><p>La autorizacion se conserva como historial y deja de habilitar la ejecucion.</p></div><button type="button" id="closeRevokeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
+      <div class="modal-header"><div><h2 style="color:var(--text-1)">Revocar extraordinario</h2><p>Solo puede revocarse antes de incorporarse a un layout, fondo de efectivo o registro de pago.</p></div><button type="button" id="closeRevokeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
       <div class="modal-scroll"><div class="form-grid"><label class="full-row">Motivo de revocacion *<textarea id="revokeExtraordinaryReason" class="form-control textarea" maxlength="1000" required></textarea></label></div></div>
       <div class="modal-actions"><button type="button" id="cancelRevokeExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitRevokeExtraordinaryBtn" class="primary-btn">Revocar autorizacion</button></div>
     </form>
@@ -486,7 +486,7 @@
   <script src="./config.js?v=20260701-reconcile"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260712-batch-execution-hooks"></script>
+  <script src="./solicitudes.js?v=20260709-approver-position"></script>
   <script src="./solicitudes_batch_execution.js?v=20260712-batch-execution-022"></script>
   <script src="./cash_flow_extension.js?v=20260709-multi-approver-pool"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260709-multi-approver-pool"></script>

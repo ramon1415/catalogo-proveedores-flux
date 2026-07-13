@@ -445,6 +445,7 @@ function renderLayoutEligibilityPreview() {
   const rejected = previewRows("rejected_by_direction")
   const pendingClose = previewRows("pending_finance_close")
   const pendingDirector = previewRows("pending_director")
+  const directionReapproval = previewRows("direction_reapproval_required")
   const invalid = previewRows("invalid_data")
   const ready = [...regular, ...extraordinary, ...legacy]
   const totals = aggregatePreviewTotals(ready)
@@ -454,11 +455,13 @@ function renderLayoutEligibilityPreview() {
       ${previewMetric("Listas para layout", ready.length)}
       ${previewMetric("Regulares / extraordinarias", `${regular.length + legacy.length} / ${extraordinary.length}`)}
       ${previewMetric("Rechazadas", rejected.length)}
+      ${previewMetric("Reautorizacion requerida", directionReapproval.length)}
       ${previewMetric("Importe listo", totals.map((row) => formatPreviewMoney(row.amount, row.currency)).join(" | ") || "Sin importe")}
     </div>
     ${renderPreviewSection("Listas para layout", "Solo estas solicitudes se incluiran", ready, "ready")}
     ${renderPreviewSection("Pendientes de cierre", "Direccion aprobo; Finanzas debe liberar el corte", pendingClose, "pending_close")}
     ${renderPreviewSection("Pendientes de Direccion", "No se incluiran en el layout", pendingDirector, "pending_director")}
+    ${renderPreviewSection("Reautorizacion de Direccion", "Los datos cambiaron despues de la autorizacion", directionReapproval, "direction_reapproval")}
     ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected")}
     ${renderPreviewSection("Datos incompletos", "Deben corregirse antes de crear el layout", invalid, "invalid")}
   `
@@ -491,6 +494,8 @@ function renderPreviewRow(row, kind) {
     actions += `<button class="small-btn" type="button" data-preview-action="open-batch" data-batch-id="${escapeHtml(row.source_batch_id || "")}">Ir al corte</button>`
   } else if (kind === "pending_director") {
     detail = `${batch} · ${row.source_batch_status || "sin decision"}`
+  } else if (kind === "direction_reapproval") {
+    detail = "Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte."
   } else if (kind === "rejected") {
     detailIsHtml = true
     detail = `<span class="layout-reject-reason">${escapeHtml(row.reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(batch)} · ${escapeHtml(formatDate(row.rejected_at))} · ${escapeHtml(row.rebatch_status === "released" ? "Reingreso habilitado" : "Bloqueada")}</small>`
@@ -640,13 +645,14 @@ async function submitNewLayout(event) {
       `${numberValue(data?.extraordinary_count)} extraordinarios`,
       `${numberValue(data?.rejected_count)} rechazados no incluidos`,
       `${numberValue(data?.pending_close_count)} pendientes de cierre`,
+      `${numberValue(data?.direction_reapproval_count)} requieren nueva autorizacion de Direccion`,
       `${invalidCount} con datos incompletos`,
     ].join(" · ")
     renderLayoutNotice(`Layout ${data?.layout_number || "creado"} con ${numberValue(data?.payment_count)} pagos. ${summary}`, data?.invalid_requests || [])
     showToast(
       "Layout creado",
       summary,
-      numberValue(data?.rejected_count) || numberValue(data?.pending_close_count) || invalidCount ? "warning" : "success"
+      numberValue(data?.rejected_count) || numberValue(data?.pending_close_count) || numberValue(data?.direction_reapproval_count) || invalidCount ? "warning" : "success"
     )
     layoutEligibilityPreview = null
     dom.layoutEligibilityPreview.classList.add("hidden")
@@ -688,6 +694,7 @@ function formatMissingFields(fields) {
     company_bank_account_id: "cuenta origen requerida",
     scheduled_payment_date: "fecha programada requerida",
     finance_reapproval_required: "nueva revision de Finanzas requerida",
+    direction_reapproval_required: "nueva autorizacion de Direccion requerida",
     extraordinary_reauthorization_required: "revocar y autorizar nuevamente el extraordinario",
   }
   return values.map((field) => labels[field] || field || "datos incompletos").join(", ")
