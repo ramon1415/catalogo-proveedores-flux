@@ -22,6 +22,7 @@
     .batch-list-item{border:0;border-bottom:1px solid var(--border);background:transparent;padding:12px;text-align:left;color:var(--text-2);cursor:pointer;display:grid;gap:6px}
     .batch-list-item:hover,.batch-list-item.active{background:var(--bg-hover)}
     .batch-list-item.active{box-shadow:inset 3px 0 0 var(--accent)}
+    .batch-list-item.attention{box-shadow:inset 3px 0 0 #d97706;background:color-mix(in srgb,#d97706 8%,transparent)}
     .batch-list-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
     .batch-list-head strong{color:var(--text-1);font-size:12.5px}
     .batch-list-meta{font-size:11px;color:var(--text-3);display:flex;gap:8px;flex-wrap:wrap}
@@ -39,20 +40,49 @@
     .batch-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
     .batch-section-head h3{font-size:12px;color:var(--text-1);margin:0}
     .batch-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:7px}
+    .batch-table-scroll{max-height:430px;overflow:auto;scrollbar-gutter:stable both-edges}
     .batch-table{width:100%;border-collapse:collapse;min-width:900px;font-size:11.5px}
     .batch-table th,.batch-table td{padding:8px 9px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
     .batch-table th{font-size:9.5px;color:var(--text-3);text-transform:uppercase;background:var(--bg-surface);position:sticky;top:0;z-index:1}
     .batch-table td{color:var(--text-2)}
     .batch-table tr:last-child td{border-bottom:0}
+    .batch-table tbody tr{transition:background-color .14s ease,box-shadow .14s ease}
+    .batch-eligible-row{cursor:pointer}
+    .batch-eligible-row:hover{background:var(--bg-hover)}
+    .batch-eligible-row.selected{background:color-mix(in srgb,var(--accent) 11%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
     .decision-select,.reason-input,.batch-field{min-height:32px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-1);font:inherit}
     .reason-input{min-width:190px}
     .batch-empty{padding:34px 18px;text-align:center;color:var(--text-3);font-size:12px}
     .batch-check{width:16px;height:16px;accent-color:var(--accent)}
+    .batch-bulk-bar{position:sticky;top:0;z-index:4;display:grid;grid-template-columns:auto minmax(110px,1fr) auto auto;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-bottom:0;border-radius:7px 7px 0 0;background:var(--bg-surface);box-shadow:0 5px 12px color-mix(in srgb,#000 10%,transparent)}
+    .batch-bulk-bar+.batch-table-wrap{border-radius:0 0 7px 7px}
+    .batch-select-all{display:flex;align-items:center;gap:7px;color:var(--text-1);font-size:11.5px;font-weight:700;white-space:nowrap}
+    .batch-selection-count{color:var(--text-3);font-size:11px}
+    .batch-progress{grid-column:1/-1;color:var(--accent-text);font-size:11px;font-weight:700}
+    .batch-action-help{width:100%;font-size:10.5px;color:var(--text-3);text-align:right}
+    .batch-status-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:11.5px}
+    .batch-status-banner strong{display:block;color:var(--text-1);margin-bottom:2px}
+    .batch-status-banner.info{background:color-mix(in srgb,#2563eb 8%,transparent)}
+    .batch-status-banner.success{background:color-mix(in srgb,#15803d 9%,transparent)}
+    .batch-status-banner.warning{background:color-mix(in srgb,#d97706 9%,transparent)}
+    .batch-decision-bar{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:minmax(220px,1fr) auto;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-surface);box-shadow:0 6px 14px color-mix(in srgb,#000 12%,transparent)}
+    .batch-decision-copy{display:grid;gap:3px}
+    .batch-decision-copy strong{font-size:12px;color:var(--text-1)}
+    .batch-decision-stats{font-size:10.5px;color:var(--text-3)}
+    .batch-decision-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+    .batch-section-focus{scroll-margin-top:84px;outline:none}
+    .batch-section-focus:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+    .batch-table :is(button,input,select):focus-visible,.batch-bulk-bar :is(button,input):focus-visible,.batch-decision-bar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .confirm-summary{display:grid;gap:10px;color:var(--text-2);font-size:12px;line-height:1.5}
+    .confirm-summary-list{display:grid;gap:5px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-surface)}
+    .confirm-summary-row{display:flex;justify-content:space-between;gap:16px}
+    .confirm-summary-row strong{color:var(--text-1);text-align:right}
+    .confirm-warning{padding:9px 10px;border-left:3px solid #d97706;background:color-mix(in srgb,#d97706 8%,transparent)}
     .modal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
     .modal-grid label{display:grid;gap:5px;color:var(--text-3);font-size:10.5px;font-weight:700;text-transform:uppercase}
     .modal-grid .full{grid-column:1/-1}
-    @media(max-width:980px){.batch-workspace{grid-template-columns:1fr}.batch-list-panel{border-right:0;border-bottom:1px solid var(--border)}.batch-list{max-height:260px}.batch-metrics{grid-template-columns:repeat(2,1fr)}.batch-metric:nth-child(2){border-right:0}.modal-grid{grid-template-columns:1fr}.modal-grid .full{grid-column:auto}}
-    @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content,.page{overflow:visible}.topbar{padding:0 14px}.batch-workspace{min-height:560px}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}}
+    @media(max-width:980px){.batch-workspace{grid-template-columns:1fr}.batch-list-panel{border-right:0;border-bottom:1px solid var(--border)}.batch-list{max-height:260px}.batch-metrics{grid-template-columns:repeat(2,1fr)}.batch-metric:nth-child(2){border-right:0}.batch-decision-bar{grid-template-columns:1fr}.batch-decision-actions{justify-content:flex-start}.modal-grid{grid-template-columns:1fr}.modal-grid .full{grid-column:auto}}
+    @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content,.page{overflow:visible}.topbar{padding:0 14px}.batch-workspace{min-height:560px}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}.batch-bulk-bar{position:static;grid-template-columns:1fr 1fr}.batch-select-all,.batch-selection-count{grid-column:1/-1}.batch-bulk-bar button{width:100%}.batch-action-help{text-align:left}.batch-decision-bar{position:static}.batch-decision-actions{display:grid;grid-template-columns:1fr}.batch-decision-actions button{width:100%}.batch-status-banner{flex-direction:column}.batch-table-scroll{max-height:400px}}
   </style>
 </head>
 <body>
@@ -115,12 +145,20 @@
     </form>
   </dialog>
 
+  <dialog id="confirmActionDialog" class="narrow">
+    <div class="modal-content">
+      <div class="modal-header"><div><h2 id="confirmActionTitle">Confirmar operacion</h2><p>Revisa el alcance antes de continuar.</p></div><button class="icon-btn" id="confirmActionCloseBtn" type="button" aria-label="Cerrar">&times;</button></div>
+      <div class="modal-scroll"><div class="confirm-summary" id="confirmActionBody"></div></div>
+      <div class="modal-actions"><button class="secondary-btn" id="confirmActionCancelBtn" type="button">Cancelar</button><button class="primary-btn" id="confirmActionConfirmBtn" type="button">Confirmar</button></div>
+    </div>
+  </dialog>
+
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
   <script src="./config.js?v=20260712-approval-batches"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./approval_batches.js?v=20260712-mvp"></script>
+  <script src="./approval_batches.js?v=20260712-bulk-selection-ux"></script>
 </body>
 </html>
