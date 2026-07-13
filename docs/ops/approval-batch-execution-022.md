@@ -12,8 +12,10 @@ Commits de origen del batch:
 
 - `af44677caa67d5f6ceadbed92f3a38cd3af499ef`: MVP independiente de cortes (migration 021 y frontend base).
 - `a6a3f3b3fc878bf59788d039428b7e15a4ab242f`: hardening de migration 021.
+- `3c9af6ce235557b5f8ffcbb997caea21213b7747`: flujo masivo y UX del frontend de cortes.
+- `872724f577e53f25c95bad459c2a6941ee3c114d`: guard de acceso por rol del frontend de cortes.
 - `ce55a03790538f70a417d9d0fb38c8e09938ccd5`: migration 022 y experiencia de ejecucion.
-- El commit correctivo posterior de PR #248 completa vigencia, locks, configuracion atomica y notificaciones.
+- `1684f766d29ff8f3d07e1f8e256781f6b723079d`: vigencia, locks, configuracion atomica, independencia y notificaciones.
 
 Archivos runtime exactos:
 
@@ -29,6 +31,21 @@ Archivos runtime exactos:
 - `supabase/migrations/022_batch_execution_resubmission_extraordinary.sql`.
 
 La validacion aislada parte de `origin/main`, incorpora solo esos commits/archivos y ejecuta sintaxis, parser y guard de contratos sin 018/019. `solicitudes.js`, `create_payment_request`, `approver_id`, `approver_assignment_id` y `list_payment_request_approver_options` no forman parte del manifest.
+
+### Resultado de la validacion aislada
+
+Se probo desde `origin/main` en `034a89d699f155c93ba918baa3be7e4055b73b1b`. El dispatcher no existia en esa base, por lo que se incorporo como archivo runtime declarado por el batch. `solicitudes.html` conservo los scripts y cache-busters de `main` y agrego solo `solicitudes_batch_execution.js`; `solicitudes.js` quedo sin diferencias contra `main`.
+
+El arbol aislado paso:
+
+- parser PostgreSQL para 021 y 022;
+- `node --check` en todo el JavaScript del batch;
+- TypeScript del dispatcher;
+- guard en modo `isolated-main`;
+- HTML sin IDs duplicados;
+- `git diff --check`;
+- cero cambios en migrations 018/019;
+- cero cambios en `solicitudes.js`.
 
 ## Diagnostico previo
 
