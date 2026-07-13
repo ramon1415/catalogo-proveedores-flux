@@ -4,6 +4,7 @@ const state = {
   profile: null,
   isFinance: false,
   isDirector: false,
+  isAuthorized: false,
   view: "finance",
   batches: [],
   selectedId: null,
@@ -26,7 +27,8 @@ async function init() {
   cacheDom()
   bindEvents()
   applyTheme()
-  await resolveUser()
+  const authorized = await resolveUser()
+  if (!authorized) return
   try {
     await loadReferenceData()
     await loadDirectors()
@@ -110,11 +112,36 @@ async function resolveUser() {
   state.profile = window.FluxAuth?.getProfile?.() || null
   state.isFinance = Boolean(window.FluxAuth?.isAdminFinance?.())
   state.isDirector = Boolean(window.FluxAuth?.hasRole?.(["approver_2", "aprobador_2", "direccion", "director"]))
+  state.isAuthorized = state.isFinance || state.isDirector
   const session = window.FluxAuth?.state?.session
   dom.userName.textContent = state.profile?.full_name || session?.user?.email || "Usuario"
   dom.userEmail.textContent = state.profile?.email || session?.user?.email || "Sesion activa"
+  if (!state.isAuthorized) {
+    renderUnauthorized()
+    return false
+  }
   state.view = state.isDirector ? "director" : "finance"
+  dom.viewTabs.hidden = false
+  dom.refreshBtn.hidden = false
+  const listPanel = dom.batchList?.closest(".batch-list-panel")
+  if (listPanel) listPanel.hidden = false
+  const workspace = dom.batchDetail?.closest(".batch-workspace")
+  if (workspace) workspace.style.removeProperty("grid-template-columns")
   renderViewTabs()
+  return true
+}
+
+function renderUnauthorized() {
+  dom.pageContext.textContent = "Acceso restringido"
+  dom.viewTabs.hidden = true
+  dom.createBatchBtn.hidden = true
+  dom.directorConfigBtn.hidden = true
+  dom.refreshBtn.hidden = true
+  const listPanel = dom.batchList?.closest(".batch-list-panel")
+  if (listPanel) listPanel.hidden = true
+  const workspace = dom.batchDetail?.closest(".batch-workspace")
+  if (workspace) workspace.style.gridTemplateColumns = "1fr"
+  dom.batchDetail.innerHTML = `<div class="batch-empty" role="status"><h2 style="font-size:16px;color:var(--text-1);margin-bottom:7px">Acceso restringido</h2><p style="margin:0 auto 16px;max-width:520px">No tienes permisos para administrar o autorizar cortes semanales.</p><a class="primary-btn" style="display:inline-flex;text-decoration:none" href="./dashboard.html">Volver al dashboard</a></div>`
 }
 
 async function loadReferenceData() {
