@@ -100,6 +100,16 @@
     .batch-execution-head strong { color:var(--text-1); display:block; margin-bottom:3px }
     .batch-execution-meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:7px; color:var(--text-3); font-size:10.5px }
     .batch-execution-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:10px }
+    .batch-history-timeline { display:grid; gap:0; margin-top:10px; padding-top:2px }
+    .batch-history-step { display:grid; grid-template-columns:14px minmax(0,1fr); gap:8px; position:relative; padding-bottom:10px }
+    .batch-history-step:not(:last-child)::before { content:""; position:absolute; left:5px; top:12px; bottom:0; width:1px; background:var(--border) }
+    .batch-history-dot { width:11px; height:11px; margin-top:2px; border-radius:50%; background:var(--text-3); border:2px solid var(--bg-surface); box-shadow:0 0 0 1px var(--border); z-index:1 }
+    .batch-history-dot.approved { background:#15803d }
+    .batch-history-dot.rejected { background:#dc2626 }
+    .batch-history-dot.pending { background:#d97706 }
+    .batch-history-step div { display:grid; gap:2px; min-width:0 }
+    .batch-history-step strong { color:var(--text-1); font-size:11px }
+    .batch-history-step span,.batch-history-step small { color:var(--text-3); font-size:10.5px; line-height:1.4 }
     .extraordinary-warning { padding:10px; border-left:3px solid #d97706; background:var(--amber-dim); color:var(--text-2); font-size:12px; line-height:1.5 }
     .extraordinary-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px }
     .extraordinary-summary div { min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:var(--bg-surface) }
@@ -487,7 +497,7 @@
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
   <script src="./solicitudes.js?v=20260709-approver-position"></script>
-  <script src="./solicitudes_batch_execution.js?v=20260712-batch-execution-022"></script>
+  <script src="./solicitudes_batch_execution.js?v=20260713-single-direction-023"></script>
   <script src="./cash_flow_extension.js?v=20260709-multi-approver-pool"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260709-multi-approver-pool"></script>
   <script src="./fase2_request_success_patch.js?v=20260709-approver-position"></script>
