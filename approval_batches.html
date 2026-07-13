@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cortes semanales | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-static-nav">
+  <style>
+    [hidden]{display:none!important}
+    .batch-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .batch-tabs{display:inline-flex;padding:3px;border:1px solid var(--border);border-radius:7px;background:var(--bg-surface)}
+    .batch-tab{min-height:32px;padding:5px 12px;border:0;border-radius:5px;background:transparent;color:var(--text-3);font-size:12px;font-weight:700;cursor:pointer}
+    .batch-tab.active{background:var(--bg-card);color:var(--accent-text);border:1px solid var(--border)}
+    .batch-workspace{display:grid;grid-template-columns:minmax(250px,330px) minmax(0,1fr);border:1px solid var(--border);border-radius:8px;min-height:620px;overflow:hidden;background:var(--bg-surface)}
+    .batch-list-panel{border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+    .batch-list-controls{display:grid;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
+    .batch-list{display:flex;flex-direction:column;overflow:auto;max-height:650px}
+    .batch-list-item{border:0;border-bottom:1px solid var(--border);background:transparent;padding:12px;text-align:left;color:var(--text-2);cursor:pointer;display:grid;gap:6px}
+    .batch-list-item:hover,.batch-list-item.active{background:var(--bg-hover)}
+    .batch-list-item.active{box-shadow:inset 3px 0 0 var(--accent)}
+    .batch-list-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .batch-list-head strong{color:var(--text-1);font-size:12.5px}
+    .batch-list-meta{font-size:11px;color:var(--text-3);display:flex;gap:8px;flex-wrap:wrap}
+    .batch-detail{min-width:0;display:flex;flex-direction:column}
+    .batch-detail-head{padding:15px 17px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .batch-detail-head h2{font-size:16px;color:var(--text-1);margin:0}
+    .batch-detail-actions{display:flex;gap:7px;flex-wrap:wrap}
+    .batch-metrics{display:grid;grid-template-columns:repeat(4,minmax(100px,1fr));border-bottom:1px solid var(--border)}
+    .batch-metric{padding:12px 16px;border-right:1px solid var(--border)}
+    .batch-metric:last-child{border-right:0}
+    .batch-metric span{display:block;font-size:10px;color:var(--text-3);text-transform:uppercase}
+    .batch-metric strong{display:block;margin-top:4px;font-size:15px;color:var(--text-1)}
+    .batch-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+    .batch-section:last-child{border-bottom:0}
+    .batch-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .batch-section-head h3{font-size:12px;color:var(--text-1);margin:0}
+    .batch-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:7px}
+    .batch-table{width:100%;border-collapse:collapse;min-width:900px;font-size:11.5px}
+    .batch-table th,.batch-table td{padding:8px 9px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    .batch-table th{font-size:9.5px;color:var(--text-3);text-transform:uppercase;background:var(--bg-surface);position:sticky;top:0;z-index:1}
+    .batch-table td{color:var(--text-2)}
+    .batch-table tr:last-child td{border-bottom:0}
+    .decision-select,.reason-input,.batch-field{min-height:32px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-input);color:var(--text-1);font:inherit}
+    .reason-input{min-width:190px}
+    .batch-empty{padding:34px 18px;text-align:center;color:var(--text-3);font-size:12px}
+    .batch-check{width:16px;height:16px;accent-color:var(--accent)}
+    .modal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .modal-grid label{display:grid;gap:5px;color:var(--text-3);font-size:10.5px;font-weight:700;text-transform:uppercase}
+    .modal-grid .full{grid-column:1/-1}
+    @media(max-width:980px){.batch-workspace{grid-template-columns:1fr}.batch-list-panel{border-right:0;border-bottom:1px solid var(--border)}.batch-list{max-height:260px}.batch-metrics{grid-template-columns:repeat(2,1fr)}.batch-metric:nth-child(2){border-right:0}.modal-grid{grid-template-columns:1fr}.modal-grid .full{grid-column:auto}}
+    @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content,.page{overflow:visible}.topbar{padding:0 14px}.batch-workspace{min-height:560px}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand"><div class="brand-logo">FL</div><div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Cortes semanales</div></div></div>
+        <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+          <div class="nav-section"><div class="nav-section-title">Operacion</div><a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link muted"><span>S</span> Solicitudes de pago</a><a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link muted"><span>L</span> Layouts de pago</a><a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link muted"><span>E</span> Efectivo y comprobaciones</a><a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a></div>
+          <div class="nav-section"><div class="nav-section-title">General</div><a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link muted"><span>D</span> Dashboard operativo</a><a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobacion</a><a href="./approval_batches.html" data-flux-nav-key="approval-batches" class="nav-link active"><span>C</span> Cortes semanales</a></div>
+          <div class="nav-section"><div class="nav-section-title">Configuracion</div><a href="./configuracion.html" data-flux-nav-key="config" class="nav-link muted"><span>C</span> Configuracion</a></div>
+        </nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card"><p id="userName">Usuario</p><span id="userEmail">Sesion activa</span><button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button></div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar"><div class="topbar-kicker">Autorizacion de erogacion</div><div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div></header>
+      <section class="page">
+        <div class="page-header">
+          <div><h1>Cortes semanales</h1><p id="pageContext">Finanzas</p></div>
+          <div class="batch-toolbar"><button class="secondary-btn" id="directorConfigBtn" type="button">Configurar director</button><button class="primary-btn" id="createBatchBtn" type="button">Crear corte</button><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button></div>
+        </div>
+        <div class="batch-toolbar" style="margin-bottom:10px">
+          <div class="batch-tabs" id="viewTabs"><button class="batch-tab active" type="button" data-view="finance">Finanzas</button><button class="batch-tab" type="button" data-view="director">Direccion</button></div>
+        </div>
+        <section class="batch-workspace">
+          <div class="batch-list-panel">
+            <div class="batch-list-controls"><input class="batch-field" id="batchSearch" type="search" placeholder="Buscar corte o empresa"><select class="batch-field" id="batchStatusFilter"><option value="">Todos los estatus</option><option value="draft">Borrador</option><option value="submitted">Enviado</option><option value="approved">Aprobado</option><option value="partially_approved">Con rechazos</option><option value="closed">Cerrado</option></select></div>
+            <div class="batch-list" id="batchList"><div class="batch-empty">Cargando cortes...</div></div>
+          </div>
+          <div class="batch-detail" id="batchDetail"><div class="batch-empty">Selecciona un corte.</div></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="createBatchDialog">
+    <form id="createBatchForm" class="modal-content">
+      <div class="modal-header"><div><h2>Crear corte semanal</h2><p>Nuevo batch de erogacion.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="createBatchDialog">&times;</button></div>
+      <div class="modal-scroll"><div class="modal-grid"><label>Empresa<select class="batch-field" id="createCompanyId" required></select></label><label>Director<select class="batch-field" id="createDirectorId" required></select></label><label>Inicio<input class="batch-field" id="createPeriodStart" type="date" required></label><label>Fin<input class="batch-field" id="createPeriodEnd" type="date" required></label><label class="full">Nombre<input class="batch-field" id="createLabel" placeholder="Corte Operadora 2026-W28"></label><label class="full">Notas<textarea class="batch-field" id="createNotes" rows="3"></textarea></label></div></div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="createBatchDialog">Cancelar</button><button class="primary-btn" type="submit">Crear corte</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="directorDialog">
+    <form id="directorForm" class="modal-content">
+      <div class="modal-header"><div><h2>Director por empresa</h2><p>Autorizador final de cortes.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="directorDialog">&times;</button></div>
+      <div class="modal-scroll"><div class="modal-grid"><label>Empresa<select class="batch-field" id="directorCompanyId" required></select></label><label>Perfil<select class="batch-field" id="directorProfileId" required></select></label><label class="check-label full"><input id="directorActive" type="checkbox" checked> Configuracion activa</label></div><div id="directorList" style="margin-top:14px"></div></div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="directorDialog">Cerrar</button><button class="primary-btn" type="submit">Guardar</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="rebatchDialog" class="narrow">
+    <form id="rebatchForm" class="modal-content">
+      <div class="modal-header"><div><h2>Habilitar para siguiente corte</h2><p>Registra por que la solicitud ya puede volver a revisarse.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="rebatchDialog">&times;</button></div>
+      <div class="modal-scroll"><label style="display:grid;gap:6px;color:var(--text-3);font-size:10.5px;font-weight:700;text-transform:uppercase">Informacion complementada / motivo de reingreso<textarea class="batch-field" id="rebatchNote" rows="4" required maxlength="1000"></textarea></label></div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="rebatchDialog">Cancelar</button><button class="primary-btn" type="submit">Habilitar solicitud</button></div>
+    </form>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="./config.js?v=20260712-approval-batches"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./approval_batches.js?v=20260712-mvp"></script>
+</body>
+</html>
