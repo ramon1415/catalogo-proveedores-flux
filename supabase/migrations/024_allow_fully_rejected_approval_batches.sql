@@ -175,12 +175,12 @@ begin
   where n.nspname = 'public'
     and p.oid = 'public.validate_approval_batch_final_status()'::regprocedure;
 
-  if position('if v_approved = 0 then' in lower(v_decide_source)) > 0
-     or position('v_pending > 0 or v_approved = 0' in lower(v_validate_source)) > 0 then
+  if v_decide_source ~* 'if\s+v_approved\s*=\s*0\s+then'
+     or v_validate_source ~* 'v_pending\s*>\s*0\s+or\s+v_approved\s*=\s*0' then
     raise exception '024_postcheck: fully rejected batches remain blocked';
   end if;
-  if position('v_final_status := case when v_rejected > 0 then ''partially_approved'' else ''approved'' end' in lower(v_decide_source)) = 0
-     or position('new.status = ''partially_approved'' and v_rejected = 0' in lower(v_validate_source)) = 0 then
+  if v_decide_source !~* 'v_final_status\s*:=\s*case\s+when\s+v_rejected\s*>\s*0\s+then\s+''partially_approved''\s+else\s+''approved''\s+end'
+     or v_validate_source !~* 'new\.status\s*=\s*''partially_approved''\s+and\s+v_rejected\s*=\s*0' then
     raise exception '024_postcheck: expected final status guards are missing';
   end if;
   if not has_function_privilege('authenticated', 'public.decide_approval_batch_items(uuid,jsonb)', 'EXECUTE')
