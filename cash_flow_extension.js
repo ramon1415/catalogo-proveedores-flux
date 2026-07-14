@@ -595,8 +595,14 @@
   }
 
   function toast(title, message, type = "success") {
-    const stack = document.getElementById("toastStack")
-    if (!stack) return window.alert(`${title}\n${message}`)
+    let stack = document.getElementById("toastStack")
+    if (!stack) {
+      stack = document.createElement("div")
+      stack.id = "toastStack"
+      stack.className = "toast-stack-v2"
+      stack.setAttribute("aria-live", "polite")
+      document.body.appendChild(stack)
+    }
     const node = document.createElement("div")
     node.className = `toast ${type}`
     node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`
