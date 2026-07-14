@@ -256,8 +256,8 @@
     if (!tbody) return
 
     const apply = async () => {
-      const { data } = await client.from("payment_requests").select("request_number,request_type")
-      const byNumber = new Map((data || []).map((request) => [request.request_number, request.request_type]))
+      const { data } = await client.from("payment_requests").select("request_number,request_type,payment_method")
+      const byNumber = new Map((data || []).map((request) => [request.request_number, effectivePaymentType(request)]))
       tbody.querySelectorAll("tr").forEach((row) => {
         const strong = row.querySelector("td:first-child strong")
         if (!strong || row.querySelector("[data-request-type-badge]")) return
@@ -286,10 +286,11 @@
 
     const { data: request } = await client
       .from("payment_requests")
-      .select("id,request_number,request_type,status,amount_requested,currency")
+      .select("id,request_number,request_type,payment_method,status,amount_requested,currency")
       .eq("request_number", requestNumber)
       .maybeSingle()
-    if (!request || !["cash", "check"].includes(request.request_type)) return
+    const method = effectivePaymentType(request)
+    if (!request || !["cash", "check"].includes(method)) return
 
     const layoutSection = Array.from(target.querySelectorAll("section")).find((section) => /Preparacion para layout/i.test(section.textContent))
     if (layoutSection) layoutSection.classList.add("hidden")
@@ -298,17 +299,16 @@
     const fund = funds?.[0] || null
     const draft = getDraft(request.id)
     const canCreate = request.status === "approved" && !fund
-    const method = request.request_type === "check" ? "check" : "cash"
 
     target.insertAdjacentHTML("beforeend", `
       <section class="decision-card" data-cash-fund-section>
         <h3>Fondo y comprobacion</h3>
-        <p>Esta solicitud se opera como ${escapeHtml(requestTypeLabels[request.request_type].toLowerCase())}. El fondo se comprueba desde Efectivo y comprobaciones.</p>
+        <p>Esta solicitud se opera como ${escapeHtml(requestTypeLabels[method].toLowerCase())}. El fondo se comprueba desde Efectivo y comprobaciones.</p>
         <div class="decision-note ${fund ? "success" : canCreate ? "warning" : "neutral"}">
           ${fund ? "El fondo ya fue creado y esta disponible para comprobacion." : canCreate ? "La solicitud esta aprobada. Registra la entrega para crear el fondo." : "El fondo podra crearse cuando la solicitud este aprobada."}
         </div>
         <div class="detail-grid">
-          ${detailCard("Tipo", requestTypeLabels[request.request_type])}
+          ${detailCard("Tipo", requestTypeLabels[method])}
           ${detailCard("Responsable", fund ? profileName(fund.responsible_profile_id) : profileName(draft?.responsible_profile_id))}
           ${detailCard("Fecha limite", fund ? formatDate(fund.due_date) : formatDate(draft?.due_date))}
           ${detailCard("Metodo", requestTypeLabels[method])}
@@ -372,7 +372,7 @@
   function openCashFundDialog(request, draft) {
     activeCashRequest = request
     ensureCashFundDialog()
-    const method = request.request_type === "check" ? "check" : "cash"
+    const method = effectivePaymentType(request)
     document.getElementById("cashFundTitle").textContent = method === "check" ? "Registrar entrega de cheque" : "Registrar entrega de efectivo"
     document.getElementById("fundResponsibleProfileId").value = draft?.responsible_profile_id || ""
     document.getElementById("fundDueDate").value = draft?.due_date || ""
@@ -381,6 +381,14 @@
     document.getElementById("fundNotes").value = ""
     verifyCashBlock(document.getElementById("fundResponsibleProfileId").value, document.getElementById("fundResponsibleHelp"))
     document.getElementById("cashFundDialog").showModal()
+  }
+
+  function effectivePaymentType(request) {
+    const paymentMethod = String(request?.payment_method || "").trim().toLowerCase()
+    if (["cash", "check"].includes(paymentMethod)) return paymentMethod
+    const requestType = String(request?.request_type || "").trim().toLowerCase()
+    if (["cash", "check"].includes(requestType)) return requestType
+    return requestType || "provider_payment"
   }
 
   function closeCashFundDialog() {

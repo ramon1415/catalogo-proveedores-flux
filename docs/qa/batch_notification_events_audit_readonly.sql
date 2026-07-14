@@ -10,7 +10,7 @@ set transaction read only;
 with params as (
   select
     'QA-CIERRE-BATCH%'::text as qa_prefix,
-    timestamptz '2026-07-14 00:00:00-06' as qa_started_at
+    timestamptz '2026-07-13 21:00:00-06' as qa_started_at
 ),
 audit_scope as (
   select ne.*
@@ -52,7 +52,7 @@ order by created_at, event_type, recipient_email nulls last;
 -- Debe devolver cero filas: idempotency_key duplicada dentro del alcance QA.
 with params as (
   select 'QA-CIERRE-BATCH%'::text as qa_prefix,
-    timestamptz '2026-07-14 00:00:00-06' as qa_started_at
+    timestamptz '2026-07-13 21:00:00-06' as qa_started_at
 ),
 audit_scope as (
   select ne.*
@@ -78,7 +78,7 @@ having count(*) > 1;
 
 -- Debe devolver cero filas: payload incompleto para item_rebatched.
 with params as (
-  select timestamptz '2026-07-14 00:00:00-06' as qa_started_at
+  select timestamptz '2026-07-13 21:00:00-06' as qa_started_at
 )
 select
   ne.id,
@@ -107,7 +107,7 @@ where ne.event_type = 'approval_batch.item_rebatched'
 
 -- Resumen de destinatarios para contrastar con el contrato esperado.
 with params as (
-  select timestamptz '2026-07-14 00:00:00-06' as qa_started_at
+  select timestamptz '2026-07-13 21:00:00-06' as qa_started_at
 )
 select
   ne.event_type,
@@ -129,7 +129,7 @@ order by ne.event_type, ne.recipient_role;
 -- Sin dispatcher en este cierre: los eventos QA no deben mostrar intentos o
 -- procesamiento inesperado. Debe devolver cero filas para el batch actual.
 with params as (
-  select timestamptz '2026-07-14 00:00:00-06' as qa_started_at
+  select timestamptz '2026-07-13 21:00:00-06' as qa_started_at
 )
 select
   ne.id,

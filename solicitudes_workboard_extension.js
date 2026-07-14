@@ -165,7 +165,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,payment_method,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -701,7 +701,8 @@
   }
 
   function isCashOrCheck(request) {
-    return request.request_type === "cash" || request.request_type === "check";
+    const method = String(request?.payment_method || request?.request_type || "").toLowerCase();
+    return method === "cash" || method === "check";
   }
 
   function isBudgetException(request) {
