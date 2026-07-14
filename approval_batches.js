@@ -334,7 +334,8 @@ function detailActions(batch, items) {
     `<button class="secondary-btn" type="button" data-detail-action="pdf">PDF</button>`,
   ]
   if (state.isFinance && batch.status === "draft") actions.push(`<button class="primary-btn" type="button" data-detail-action="submit" aria-describedby="sendBatchHelp" title="${items.length ? `Enviar ${items.length} solicitudes a ${escapeHtml(batch.director_name || "Direccion")}` : "Agrega solicitudes antes de enviar"}" ${items.length && !state.addingProgress ? "" : "disabled"}>Enviar ${items.length} a Direccion</button><span class="batch-action-help" id="sendBatchHelp">${items.length ? `Se enviaran ${items.length} solicitudes a ${escapeHtml(batch.director_name || "Direccion")}.` : "Agrega al menos una solicitud para habilitar el envio."}</span>`)
-  if (state.isFinance && ["approved", "partially_approved"].includes(batch.status)) actions.push(`<button class="primary-btn" type="button" data-detail-action="close">Liberar para pago</button>`)
+  const hasApprovedItems = items.some((item) => item.director_status === "approved")
+  if (state.isFinance && hasApprovedItems && ["approved", "partially_approved"].includes(batch.status)) actions.push(`<button class="primary-btn" type="button" data-detail-action="close">Liberar para pago</button>`)
   return actions.join("")
 }
 
@@ -348,6 +349,9 @@ function renderStatusBanner(batch, items) {
   if (batch.status === "partially_approved") {
     const approved = items.filter((item) => item.director_status === "approved").length
     const rejected = items.filter((item) => item.director_status === "rejected").length
+    if (!approved) {
+      return `<div class="batch-status-banner warning"><div><strong>Direccion rechazo todas las solicitudes</strong><span>${rejected} solicitudes permanecen bloqueadas. Finanzas puede corregirlas y enviarlas nuevamente.</span></div><span>${escapeHtml(formatDateTime(batch.decided_at))}</span></div>`
+    }
     return `<div class="batch-status-banner warning"><div><strong>Direccion decidio con rechazos</strong><span>${approved} aprobadas esperan cierre y ${rejected} permanecen bloqueadas con su motivo.</span></div><span>${escapeHtml(formatDateTime(batch.decided_at))}</span></div>`
   }
   if (batch.status === "closed") {
@@ -692,8 +696,6 @@ async function saveDecisions() {
   const itemsById = new Map(asArray(state.detail?.items).map((item) => [item.id, item]))
   const approvedItems = decisions.filter((decision) => decision.status === "approved").map((decision) => itemsById.get(decision.item_id)).filter(Boolean)
   const rejectedItems = decisions.filter((decision) => decision.status === "rejected").map((decision) => ({ ...itemsById.get(decision.item_id), reason: decision.reject_reason })).filter((item) => item.id)
-  const alreadyApproved = asArray(state.detail?.items).filter((item) => item.director_status === "approved").length
-  if (!approvedItems.length && !alreadyApproved) throw new Error("El corte debe conservar al menos una solicitud aprobada.")
   const summary = [
     confirmationRow("Aprobadas", String(approvedItems.length)),
     confirmationTotalsRows(approvedItems, "Total aprobado"),
@@ -701,9 +703,12 @@ async function saveDecisions() {
     confirmationTotalsRows(rejectedItems, "Total rechazado"),
   ].join("")
   const rejectedDetail = rejectedItems.length ? `<div><strong>Solicitudes rechazadas</strong><div class="confirm-summary-list">${rejectedItems.map((item) => `<div><strong>${escapeHtml(item.request_number || "-")}</strong><br>${escapeHtml(item.reason)}</div>`).join("")}</div></div>` : ""
+  const decisionWarning = approvedItems.length
+    ? "Las solicitudes aprobadas continuaran al flujo operativo. Esta accion no se puede deshacer desde esta pantalla."
+    : "Todas las solicitudes quedaran rechazadas y bloqueadas. Finanzas podra corregirlas y enviarlas nuevamente."
   const confirmed = await showConfirmation({
     title: "Guardar decisiones del corte",
-    bodyHtml: `<p>Revisa la decision mixta antes de autorizar la continuacion operativa.</p><div class="confirm-summary-list">${summary}</div>${rejectedDetail}<div class="confirm-warning">Las solicitudes aprobadas continuaran al flujo operativo. Esta accion no se puede deshacer desde esta pantalla.</div>`,
+    bodyHtml: `<p>Revisa las decisiones antes de guardarlas.</p><div class="confirm-summary-list">${summary}</div>${rejectedDetail}<div class="confirm-warning">${decisionWarning}</div>`,
     confirmLabel: "Guardar decisiones",
   })
   if (!confirmed) return
@@ -1028,7 +1033,7 @@ function statusBadge(status) {
 }
 
 function statusLabel(status) {
-  return ({ draft: "Borrador", submitted: "Enviado", approved: "Direccion aprobo · pendiente de cierre", partially_approved: "Con rechazos · pendiente de cierre", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazado", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
+  return ({ draft: "Borrador", submitted: "Enviado", approved: "Direccion aprobo · pendiente de cierre", partially_approved: "Direccion decidio con rechazos", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazado", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
 }
 
 function formatMoney(value, currency = "MXN") {
