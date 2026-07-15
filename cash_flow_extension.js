@@ -25,6 +25,7 @@
   let profiles = []
   let currentProfile = null
   let activeCashRequest = null
+  let cashFundSectionLoading = false
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initExtension)
@@ -279,34 +280,39 @@
 
   async function appendCashFundSection() {
     const target = document.getElementById("detailContent")
-    if (!target || target.querySelector("[data-cash-fund-section]")) return
+    if (!target || target.querySelector("[data-cash-fund-section]") || cashFundSectionLoading) return
 
     const requestNumber = document.getElementById("detailTitle")?.textContent?.trim()
     if (!requestNumber || requestNumber === "Detalle de solicitud") return
+    cashFundSectionLoading = true
 
-    const { data: request } = await client
-      .from("payment_requests")
-      .select("id,request_number,request_type,payment_method,amount_requested,currency")
-      .eq("request_number", requestNumber)
-      .maybeSingle()
-    const method = effectivePaymentType(request)
-    if (!request || !["cash", "check"].includes(method)) return
+    try {
+      const { data: request } = await client
+        .from("payment_requests")
+        .select("id,request_number,request_type,payment_method,amount_requested,currency")
+        .eq("request_number", requestNumber)
+        .maybeSingle()
+      const method = effectivePaymentType(request)
+      if (!request || !["cash", "check"].includes(method)) return
 
-    const layoutSection = Array.from(target.querySelectorAll("section")).find((section) => /Preparacion para layout/i.test(section.textContent))
-    if (layoutSection) layoutSection.classList.add("hidden")
+      const layoutSection = Array.from(target.querySelectorAll("section")).find((section) => /Preparacion para layout/i.test(section.textContent))
+      if (layoutSection) layoutSection.classList.add("hidden")
 
-    const [{ data: funds, error: fundsError }, contextResult] = await Promise.all([
-      client.from("cash_funds").select("*").eq("payment_request_id", request.id).order("created_at", { ascending: false }),
-      loadExecutionContext(request.id),
-    ])
-    const fund = funds?.[0] || null
-    const context = contextResult.data || null
-    const draft = getDraft(request.id)
-    const canCreate = !fundsError && context?.can_create_cash_fund === true && !fund
-    const availabilityMessage = cashFundAvailabilityMessage(context, fund, contextResult.error || fundsError)
-    const authorizationSource = executionAuthorizationSourceLabel(context?.execution_authorization_source)
+      const [{ data: funds, error: fundsError }, contextResult] = await Promise.all([
+        client.from("cash_funds").select("*").eq("payment_request_id", request.id).order("created_at", { ascending: false }),
+        loadExecutionContext(request.id),
+      ])
+      const fund = funds?.[0] || null
+      const context = contextResult.data || null
+      const draft = getDraft(request.id)
+      const canCreate = !fundsError && context?.can_create_cash_fund === true && !fund
+      const availabilityMessage = cashFundAvailabilityMessage(context, fund, contextResult.error || fundsError)
+      const authorizationSource = executionAuthorizationSourceLabel(context?.execution_authorization_source)
 
-    target.insertAdjacentHTML("beforeend", `
+      if (document.getElementById("detailTitle")?.textContent?.trim() !== requestNumber
+          || target.querySelector("[data-cash-fund-section]")) return
+
+      target.insertAdjacentHTML("beforeend", `
       <section class="decision-card" data-cash-fund-section>
         <h3>Fondo y comprobacion</h3>
         <p>Esta solicitud se opera como ${escapeHtml(requestTypeLabels[method].toLowerCase())}. El fondo se comprueba desde Efectivo y comprobaciones.</p>
@@ -329,13 +335,16 @@
           <button type="button" class="decision-btn change" data-go-cash-funds="${fund ? escapeHtml(fund.id) : ""}">Ver en Efectivo y comprobaciones</button>
         </div>
       </section>
-    `)
+      `)
 
-    target.querySelector("[data-create-cash-fund]")?.addEventListener("click", () => openCashFundDialog(request, draft, context))
-    target.querySelector("[data-go-cash-funds]")?.addEventListener("click", (event) => {
-      const fundId = event.currentTarget.dataset.goCashFunds
-      window.location.href = `./efectivo.html${fundId ? `?fund_id=${fundId}` : ""}`
-    })
+      target.querySelector("[data-create-cash-fund]")?.addEventListener("click", () => openCashFundDialog(request, draft, context))
+      target.querySelector("[data-go-cash-funds]")?.addEventListener("click", (event) => {
+        const fundId = event.currentTarget.dataset.goCashFunds
+        window.location.href = `./efectivo.html${fundId ? `?fund_id=${fundId}` : ""}`
+      })
+    } finally {
+      cashFundSectionLoading = false
+    }
   }
 
   async function loadExecutionContext(requestId) {
