@@ -48,6 +48,20 @@ jobs:
             exit 1
           fi
 
+          echo "Deployment guardrails passed; secret values were not printed."
+
+      - name: Check out exact triggering commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate deployment authorization marker
+        shell: bash
+        run: |
+          set -euo pipefail
+
           if [[ ! -f "${AUTH_FILE}" ]]; then
             echo "::error::Deployment authorization marker is absent."
             exit 1
@@ -62,14 +76,7 @@ jobs:
             and .expected_max_total_mb == 12
           ' "${AUTH_FILE}" >/dev/null
 
-          echo "Deployment guardrails passed; secret values were not printed."
-
-      - name: Check out exact triggering commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+          echo "Deployment authorization marker accepted."
 
       - name: Validate exact PR head and allowed post-base changes
         shell: bash
