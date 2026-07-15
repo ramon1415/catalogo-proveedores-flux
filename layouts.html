@@ -287,6 +287,25 @@
     </form>
   </dialog>
 
+  <dialog id="layoutActionConfirmDialog" class="narrow">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="layoutActionConfirmTitle">Confirmar operacion</h2>
+          <p>Revisa el alcance antes de continuar.</p>
+        </div>
+        <button type="button" id="layoutActionConfirmCloseBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="modal-scroll">
+        <p id="layoutActionConfirmBody"></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="layoutActionConfirmCancelBtn" class="secondary-btn">Cancelar</button>
+        <button type="button" id="layoutActionConfirmAcceptBtn" class="primary-btn">Confirmar</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Dialog: confirmar pago -->
   <dialog id="confirmDialog" class="narrow">
     <form id="confirmPaymentForm" class="modal-content">
@@ -338,7 +357,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260713-single-direction-023"></script>
+  <script src="./layouts.js?v=20260714-qa-closure-p2"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>

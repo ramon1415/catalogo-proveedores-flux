@@ -33,6 +33,7 @@ let layoutFormatSummaries = new Map()
 let layoutEligibilityPreview = null
 let activeLayoutRebatchItem = null
 let activeLayoutCompletionRequest = null
+let layoutActionConfirmResolve = null
 const dom = {}
 
 const rootElement = document.documentElement
@@ -129,6 +130,12 @@ function cacheDom() {
   dom.closeConfirmModalBtn = document.getElementById("closeConfirmModalBtn")
   dom.cancelConfirmBtn = document.getElementById("cancelConfirmBtn")
   dom.submitConfirmBtn = document.getElementById("submitConfirmBtn")
+  dom.layoutActionConfirmDialog = document.getElementById("layoutActionConfirmDialog")
+  dom.layoutActionConfirmTitle = document.getElementById("layoutActionConfirmTitle")
+  dom.layoutActionConfirmBody = document.getElementById("layoutActionConfirmBody")
+  dom.layoutActionConfirmCloseBtn = document.getElementById("layoutActionConfirmCloseBtn")
+  dom.layoutActionConfirmCancelBtn = document.getElementById("layoutActionConfirmCancelBtn")
+  dom.layoutActionConfirmAcceptBtn = document.getElementById("layoutActionConfirmAcceptBtn")
   dom.rejectLineDialog = document.getElementById("rejectLineDialog")
   dom.rejectLineForm = document.getElementById("rejectLineForm")
   dom.rejectLineTitle = document.getElementById("rejectLineTitle")
@@ -173,6 +180,13 @@ function bindEvents() {
   dom.closeConfirmModalBtn?.addEventListener("click", closeConfirmModal)
   dom.cancelConfirmBtn?.addEventListener("click", closeConfirmModal)
   dom.confirmPaymentForm?.addEventListener("submit", submitConfirmPayment)
+  dom.layoutActionConfirmCloseBtn?.addEventListener("click", () => closeLayoutActionConfirmation(false))
+  dom.layoutActionConfirmCancelBtn?.addEventListener("click", () => closeLayoutActionConfirmation(false))
+  dom.layoutActionConfirmAcceptBtn?.addEventListener("click", () => closeLayoutActionConfirmation(true))
+  dom.layoutActionConfirmDialog?.addEventListener("cancel", (event) => {
+    event.preventDefault()
+    closeLayoutActionConfirmation(false)
+  })
   dom.closeRejectLineModalBtn?.addEventListener("click", closeRejectLineModal)
   dom.cancelRejectLineBtn?.addEventListener("click", closeRejectLineModal)
   dom.rejectLineForm?.addEventListener("submit", submitRejectLine)
@@ -1111,7 +1125,12 @@ async function downloadLayoutCxc(layoutId) {
 async function markLayoutUploaded(layoutId) {
   if (!ensureActorProfile()) return
   const layout = layouts.find((item) => item.id === layoutId)
-  if (!confirm(`Marcar ${layout?.layout_number || "este layout"} como subido al banco?`)) return
+  const confirmed = await showLayoutActionConfirmation({
+    title: "Marcar layout como subido",
+    message: `Se registrara ${layout?.layout_number || "este layout"} como enviado al banco. Esta accion no confirma el pago.`,
+    confirmLabel: "Marcar como subido",
+  })
+  if (!confirmed) return
 
   try {
     const { data, error } = await supabaseClient.rpc("mark_payment_layout_uploaded", {
@@ -1125,6 +1144,23 @@ async function markLayoutUploaded(layoutId) {
   } catch (error) {
     showToast("No se pudo marcar como subido", friendlyRpcError(error), "danger")
   }
+}
+
+function showLayoutActionConfirmation({ title, message, confirmLabel }) {
+  if (!dom.layoutActionConfirmDialog) return Promise.resolve(false)
+  if (layoutActionConfirmResolve) closeLayoutActionConfirmation(false)
+  dom.layoutActionConfirmTitle.textContent = title
+  dom.layoutActionConfirmBody.textContent = message
+  dom.layoutActionConfirmAcceptBtn.textContent = confirmLabel
+  dom.layoutActionConfirmDialog.showModal()
+  return new Promise((resolve) => { layoutActionConfirmResolve = resolve })
+}
+
+function closeLayoutActionConfirmation(confirmed) {
+  const resolve = layoutActionConfirmResolve
+  layoutActionConfirmResolve = null
+  if (dom.layoutActionConfirmDialog?.open) dom.layoutActionConfirmDialog.close()
+  if (resolve) resolve(Boolean(confirmed))
 }
 
 function openConfirmPaymentModal(layoutId) {
