@@ -476,18 +476,44 @@
     button.disabled = true
     button.textContent = "Creando fondo..."
     try {
-      const { error } = await client.rpc("create_cash_fund", payload)
+      const { data, error } = await client.rpc("create_cash_fund", payload)
       if (error) throw error
+      const result = Array.isArray(data) ? (data[0] || {}) : (data || {})
       localStorage.removeItem(`flux-cash-request-${activeCashRequest.id}`)
-      toast("Fondo creado", "Fondo creado correctamente. Queda pendiente de comprobacion.", "success")
+      renderCreatedCashFundResult(result)
+      toast("Fondo creado", `Fondo ${result.cash_fund_id || "QA"} creado correctamente. Queda pendiente de comprobacion.`, "success")
       closeCashFundDialog()
-      window.setTimeout(() => window.location.reload(), 900)
     } catch (error) {
       toast("No se pudo crear el fondo", friendlyCashFundError(error), "error")
     } finally {
       button.disabled = false
       button.textContent = "Crear fondo"
     }
+  }
+
+  function renderCreatedCashFundResult(result) {
+    const section = document.querySelector("[data-cash-fund-section]")
+    if (!section) return
+    const note = section.querySelector(".decision-note")
+    if (note) {
+      note.className = "decision-note success"
+      note.textContent = "El fondo ya fue creado."
+    }
+    section.querySelector("[data-create-cash-fund]")?.remove()
+    const viewButton = section.querySelector("[data-go-cash-funds]")
+    if (viewButton && result.cash_fund_id) viewButton.dataset.goCashFunds = result.cash_fund_id
+    section.querySelector("[data-created-cash-fund-result]")?.remove()
+    const actions = section.querySelector(".decision-actions")
+    actions?.insertAdjacentHTML("beforebegin", `
+      <div class="detail-grid" data-created-cash-fund-result>
+        ${detailCard("ID del fondo", result.cash_fund_id || "No disponible")}
+        ${detailCard("Metodo registrado", requestTypeLabels[result.delivery_method] || result.delivery_method || "Sin metodo")}
+        ${detailCard("Monto asignado", formatCurrency(result.assigned_amount))}
+        ${detailCard("Monto comprobado", formatCurrency(0))}
+        ${detailCard("Fecha limite", formatDate(result.due_date))}
+        ${detailCard("Estado registrado", cashStatuses[result.status] || result.status || "Sin estatus")}
+      </div>
+    `)
   }
 
   async function initEfectivoQuickFilters() {
