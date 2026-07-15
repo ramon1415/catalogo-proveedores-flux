@@ -142,7 +142,7 @@ jobs:
           deno lint supabase/functions/provider-intake
           deno test supabase/functions/provider-intake/provider-intake_test.ts
 
-          if rg -n --hidden --glob '!*.md' --glob '!*.json'             '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk_(live|test)_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}'             supabase/functions/provider-intake; then
+          if rg -n --hidden --glob '!*.md' --glob '!*.json' -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk_(live|test)_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}'             supabase/functions/provider-intake; then
             echo "::error::Potential credential material found in provider-intake source."
             exit 1
           fi
