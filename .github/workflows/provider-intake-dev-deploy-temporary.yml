@@ -1,0 +1,213 @@
+name: Temporary DEV provider-intake deploy
+
+on:
+  push:
+    branches:
+      - feature/ramon-provider-intake-edge-function
+    paths:
+      - ops/provider-intake/deploy-dev.authorization.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-intake-dev-temporary-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy_provider_intake:
+    name: Deploy provider-intake to Supabase DEV
+    if: ${{ github.event_name == 'push' && github.ref_name == 'feature/ramon-provider-intake-edge-function' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: scsirgbuqjcwoaxfacth
+      FUNCTION_NAME: provider-intake
+      EXPECTED_FUNCTION_TREE: b72b1e620be561207bca7b9b9bd34e57d151de4b
+      EXPECTED_MAX_TOTAL_MB: "12"
+      BASE_COMMIT: 60966c5d943c07fd8be7e6ebb0c3babcfa69b6c6
+      AUTH_FILE: ops/provider-intake/deploy-dev.authorization.json
+      EVIDENCE_DIR: ${{ runner.temp }}/provider-intake-dev-deploy-evidence
+
+    steps:
+      - name: Guard branch and deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_NAME}" != "feature/ramon-provider-intake-edge-function" ]]; then
+            echo "::error::This workflow is restricted to the provider-intake PR branch."
+            exit 1
+          fi
+
+          if [[ -z "${SUPABASE_ACCESS_TOKEN:-}" ]]; then
+            echo "::error::Missing GitHub Environment secret SUPABASE_ACCESS_TOKEN."
+            exit 1
+          fi
+
+          if [[ ! -f "${AUTH_FILE}" ]]; then
+            echo "::error::Deployment authorization marker is absent."
+            exit 1
+          fi
+
+          jq -e --arg expected_tree "${EXPECTED_FUNCTION_TREE}" '
+            (keys | sort) == ["confirm","expected_function_tree","expected_max_total_mb","function_name","project_ref"]
+            and .confirm == "DEPLOY_PROVIDER_INTAKE_DEV_ONLY"
+            and .project_ref == "scsirgbuqjcwoaxfacth"
+            and .function_name == "provider-intake"
+            and .expected_function_tree == $expected_tree
+            and .expected_max_total_mb == 12
+          ' "${AUTH_FILE}" >/dev/null
+
+          echo "Deployment guardrails passed; secret values were not printed."
+
+      - name: Check out exact triggering commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate exact PR head and allowed post-base changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! git merge-base --is-ancestor "${BASE_COMMIT}" "${GITHUB_SHA}"; then
+            echo "::error::The triggering commit is not based on the approved corrective commit."
+            exit 1
+          fi
+
+          actual_tree="$(git rev-parse "HEAD:supabase/functions/${FUNCTION_NAME}")"
+          if [[ "${actual_tree}" != "${EXPECTED_FUNCTION_TREE}" ]]; then
+            echo "::error::The provider-intake function tree does not match the approved tree."
+            exit 1
+          fi
+
+          changed_files="$(git diff --name-only "${BASE_COMMIT}" "${GITHUB_SHA}" | sort)"
+          changed_count="$(printf '%s
+' "${changed_files}" | sed '/^$/d' | wc -l)"
+
+          if [[ "${changed_count}" -ne 2 ]]; then
+            echo "::error::Only the temporary workflow and authorization marker may be added after the approved head."
+            exit 1
+          fi
+
+          while IFS= read -r file; do
+            case "${file}" in
+              .github/workflows/provider-intake-dev-deploy-temporary.yml|ops/provider-intake/deploy-dev.authorization.json)
+                ;;
+              *)
+                echo "::error::Unexpected post-base file: ${file}"
+                exit 1
+                ;;
+            esac
+          done <<< "${changed_files}"
+
+          if git diff --name-only "${BASE_COMMIT}" "${GITHUB_SHA}" | grep -Eq '^supabase/migrations/|^supabase/functions/'; then
+            echo "::error::Post-base changes include migrations or Edge Function source."
+            exit 1
+          fi
+
+          if ! grep -Fq '[functions.provider-intake]' supabase/config.toml ||
+             ! grep -Fq 'verify_jwt = false' supabase/config.toml; then
+            echo "::error::provider-intake verify_jwt=false configuration is missing."
+            exit 1
+          fi
+
+          git diff --check "${BASE_COMMIT}" "${GITHUB_SHA}"
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run provider-intake static and contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deno check supabase/functions/provider-intake/*.ts
+          deno fmt --check supabase/functions/provider-intake
+          deno lint supabase/functions/provider-intake
+          deno test supabase/functions/provider-intake/provider-intake_test.ts
+
+          if rg -n --hidden --glob '!*.md' --glob '!*.json'             '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|sk_(live|test)_[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}'             supabase/functions/provider-intake; then
+            echo "::error::Potential credential material found in provider-intake source."
+            exit 1
+          fi
+
+          if rg -n -i             'console\.(log|warn|error)\([^\n]*(token|payload|password|secret|service_role|rfc|clabe|bank|email)'             supabase/functions/provider-intake; then
+            echo "::error::Potential sensitive logging pattern found."
+            exit 1
+          fi
+
+          echo "Static, formatting, lint, contract, secret, and logging checks passed."
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+
+      - name: Deploy provider-intake only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${EVIDENCE_DIR}"
+
+          if supabase functions deploy "${FUNCTION_NAME}"             --project-ref "${SUPABASE_PROJECT_REF}"             >"${RUNNER_TEMP}/provider-intake-deploy.stdout"             2>"${RUNNER_TEMP}/provider-intake-deploy.stderr"; then
+            deploy_status=0
+          else
+            deploy_status=$?
+          fi
+
+          if [[ "${deploy_status}" -ne 0 ]]; then
+            echo "::error::provider-intake deployment failed; raw CLI output was not published."
+            exit "${deploy_status}"
+          fi
+
+          function_list="${RUNNER_TEMP}/provider-intake-functions.json"
+          supabase functions list --project-ref "${SUPABASE_PROJECT_REF}" -o json >"${function_list}"
+
+          jq -e --arg function "${FUNCTION_NAME}" '
+            .[] | select(.slug == $function)
+            | (.status == "ACTIVE" and (.version | tonumber) > 11 and .verify_jwt == false)
+          ' "${function_list}" >/dev/null
+
+          function_record="$(jq -c --arg function "${FUNCTION_NAME}" '.[] | select(.slug == $function)' "${function_list}")"
+          function_id="$(jq -r '.id' <<<"${function_record}")"
+          function_version="$(jq -r '.version' <<<"${function_record}")"
+          verify_jwt="$(jq -r '.verify_jwt' <<<"${function_record}")"
+          deployed_at="$(jq -r '.updated_at' <<<"${function_record}")"
+
+          cat >"${EVIDENCE_DIR}/DEPLOYMENT_REPORT.md" <<EOF
+          # DEV provider-intake deployment report
+
+          - Repository: ramon1415/catalogo-proveedores-flux
+          - Branch: ${GITHUB_REF_NAME}
+          - Commit: ${GITHUB_SHA}
+          - Function tree: ${EXPECTED_FUNCTION_TREE}
+          - Project ref: ${SUPABASE_PROJECT_REF}
+          - Function: ${FUNCTION_NAME}
+          - Function ID: ${function_id}
+          - Version: ${function_version}
+          - Status: ACTIVE
+          - verify_jwt: ${verify_jwt}
+          - max_total_mb contract: ${EXPECTED_MAX_TOTAL_MB}
+          - Updated at: ${deployed_at}
+          - Deploy scope: provider-intake only
+          - Migrations: not executed
+          - Secrets: values not printed
+          EOF
+
+          rm -f "${RUNNER_TEMP}/provider-intake-deploy.stdout"             "${RUNNER_TEMP}/provider-intake-deploy.stderr" "${function_list}"
+
+      - name: Upload sanitized deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-intake-dev-deployment-evidence
+          path: ${{ runner.temp }}/provider-intake-dev-deploy-evidence
+          if-no-files-found: warn
+          retention-days: 14
