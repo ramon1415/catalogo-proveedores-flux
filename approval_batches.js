@@ -1034,17 +1034,17 @@ function statusBadge(status) {
 
 function itemDecisionBadge(batchStatus, item) {
   const itemStatus = item?.director_status
-  if (itemStatus === "rejected") return `<span class="badge danger">Rechazada por Direccion</span>`
+  if (itemStatus === "rejected") return `<span class="badge danger">Rechazada por Dirección</span>`
   if (itemStatus === "approved" && batchStatus === "closed") return `<span class="badge success">Aprobada y liberada para pago</span>`
   if (itemStatus === "approved" && ["approved", "partially_approved"].includes(batchStatus)) {
-    return `<span class="badge success">Direccion aprobo &middot; pendiente de liberacion</span>`
+    return `<span class="badge success">Dirección aprobó &middot; pendiente de liberación</span>`
   }
-  if (itemStatus === "pending" && batchStatus === "submitted") return `<span class="badge warning">Pendiente de decision de Direccion</span>`
+  if (itemStatus === "pending" && batchStatus === "submitted") return `<span class="badge warning">Pendiente de decisión de Dirección</span>`
   return statusBadge(itemStatus)
 }
 
 function statusLabel(status) {
-  return ({ draft: "Borrador", submitted: "Pendiente de decision de Direccion", approved: "Direccion aprobo · pendiente de liberacion", partially_approved: "Direccion decidio con rechazos", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazada por Direccion", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
+  return ({ draft: "Borrador", submitted: "Pendiente de decisión de Dirección", approved: "Dirección aprobó · pendiente de liberación", partially_approved: "Dirección decidió con rechazos", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazada por Dirección", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
 }
 
 function formatMoney(value, currency = "MXN") {

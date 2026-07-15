@@ -295,23 +295,30 @@
     const layoutSection = Array.from(target.querySelectorAll("section")).find((section) => /Preparacion para layout/i.test(section.textContent))
     if (layoutSection) layoutSection.classList.add("hidden")
 
-    const { data: funds } = await client.from("cash_funds").select("*").eq("payment_request_id", request.id).order("created_at", { ascending: false })
+    const [{ data: funds }, contextResult] = await Promise.all([
+      client.from("cash_funds").select("*").eq("payment_request_id", request.id).order("created_at", { ascending: false }),
+      loadExecutionContext(request.id),
+    ])
     const fund = funds?.[0] || null
+    const context = contextResult.data || null
     const draft = getDraft(request.id)
-    const canCreate = request.status === "approved" && !fund
+    const canCreate = context?.can_create_cash_fund === true && !fund
+    const availabilityMessage = cashFundAvailabilityMessage(context, fund, contextResult.error)
+    const authorizationSource = executionAuthorizationSourceLabel(context?.execution_authorization_source)
 
     target.insertAdjacentHTML("beforeend", `
       <section class="decision-card" data-cash-fund-section>
         <h3>Fondo y comprobacion</h3>
         <p>Esta solicitud se opera como ${escapeHtml(requestTypeLabels[method].toLowerCase())}. El fondo se comprueba desde Efectivo y comprobaciones.</p>
-        <div class="decision-note ${fund ? "success" : canCreate ? "warning" : "neutral"}">
-          ${fund ? "El fondo ya fue creado y esta disponible para comprobacion." : canCreate ? "La solicitud esta aprobada. Registra la entrega para crear el fondo." : "El fondo podra crearse cuando la solicitud este aprobada."}
+        <div class="decision-note ${fund || canCreate ? "success" : "neutral"}">
+          ${escapeHtml(availabilityMessage)}
         </div>
         <div class="detail-grid">
           ${detailCard("Tipo", requestTypeLabels[method])}
           ${detailCard("Responsable", fund ? profileName(fund.responsible_profile_id) : profileName(draft?.responsible_profile_id))}
           ${detailCard("Fecha limite", fund ? formatDate(fund.due_date) : formatDate(draft?.due_date))}
           ${detailCard("Metodo", requestTypeLabels[method])}
+          ${detailCard("Autorizacion", authorizationSource)}
           ${detailCard("Estado del fondo", fund ? cashStatuses[fund.status] || fund.status : "Sin fondo creado")}
           ${detailCard("Monto pendiente", fund ? formatCurrency(fund.pending_amount) : "Pendiente de crear fondo")}
         </div>
@@ -327,6 +334,39 @@
       const fundId = event.currentTarget.dataset.goCashFunds
       window.location.href = `./efectivo.html${fundId ? `?fund_id=${fundId}` : ""}`
     })
+  }
+
+  async function loadExecutionContext(requestId) {
+    const sharedLoader = window.FluxBatchExecutionContext?.get
+    if (typeof sharedLoader === "function") return sharedLoader(requestId)
+    return client.rpc("get_payment_request_execution_context", {
+      p_payment_request_id: requestId,
+    })
+  }
+
+  function cashFundAvailabilityMessage(context, fund, error) {
+    if (fund) return "El fondo ya fue creado."
+    if (error || !context) return "No se pudo confirmar si la solicitud esta autorizada para crear un fondo."
+    if (context.can_create_cash_fund === true) return "Autorizada y liberada para crear fondo."
+    return ({
+      finance_role_required: "Solo Finanzas puede crear el fondo.",
+      cash_fund_batch_not_closed: "Dirección aprobó; Finanzas debe liberar el corte.",
+      cash_fund_direction_pending: "Pendiente de decisión de Dirección.",
+      cash_fund_direction_rejected: "La solicitud fue rechazada por Dirección.",
+      cash_fund_material_change_requires_reapproval: "Los datos cambiaron y requieren una nueva revisión de Dirección.",
+      cash_fund_extraordinary_not_current: "La autorización extraordinaria ya no está vigente.",
+      cash_fund_already_exists: "El fondo ya fue creado.",
+      cash_fund_execution_not_authorized: "La solicitud todavía no está autorizada para crear un fondo.",
+      payment_request_must_be_cash_or_check: "Solo solicitudes de efectivo o cheque pueden generar fondo.",
+    })[context.cash_fund_block_reason] || "La solicitud todavía no está autorizada para crear un fondo."
+  }
+
+  function executionAuthorizationSourceLabel(source) {
+    return ({
+      closed_batch: "Corte cerrado",
+      extraordinary: "Autorización extraordinaria",
+      legacy_approved: "Aprobación heredada",
+    })[source] || "No autorizada"
   }
 
   function ensureCashFundDialog() {
@@ -623,7 +663,14 @@
     const known = {
       payment_request_must_be_approved: "La solicitud debe estar aprobada para crear el fondo.",
       payment_request_must_be_cash_or_check: "Solo solicitudes de efectivo o cheque pueden generar fondo.",
-      cash_fund_already_exists: "Esta solicitud ya tiene un fondo creado.",
+      finance_role_required: "Solo Finanzas puede crear el fondo.",
+      cash_fund_batch_not_closed: "Dirección aprobó; Finanzas debe liberar el corte.",
+      cash_fund_direction_pending: "Pendiente de decisión de Dirección.",
+      cash_fund_direction_rejected: "La solicitud fue rechazada por Dirección.",
+      cash_fund_material_change_requires_reapproval: "Los datos cambiaron y requieren una nueva revisión de Dirección.",
+      cash_fund_extraordinary_not_current: "La autorización extraordinaria ya no está vigente.",
+      cash_fund_already_exists: "El fondo ya fue creado.",
+      cash_fund_execution_not_authorized: "La solicitud todavía no está autorizada para crear un fondo.",
       responsible_profile_not_found: "No se encontro el responsable.",
       invalid_delivery_method: "Metodo de entrega invalido.",
     }
