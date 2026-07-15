@@ -733,12 +733,11 @@ try {
     if (!enabledPages.includes(pageName)) return
 
     if (["efectivo.html", "layouts.html"].includes(pageName)) {
-      loadExtension("./cash_flow_extension.js?v=20260603-cash-ux", "cash-flow")
+      loadExtension("./cash_flow_extension.js?v=20260714-payment-method", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
       loadExtension("./solicitudes_ux1_extension.js?v=20260701-reconcile", "solicitudes-ux1")
-      loadExtension("./solicitudes_workboard_extension.js?v=20260604-table6col2", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260714-payment-method", "solicitudes-workboard")
       loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }
     if (pageName === "layouts.html") {

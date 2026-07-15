@@ -378,7 +378,7 @@ function renderItemsTable(batch, items) {
   const canReleaseAny = state.isFinance && ["partially_approved", "closed"].includes(batch.status) && items.some((item) => item.director_status === "rejected" && item.rebatch_status === "blocked")
   const hasActionColumn = canRemove || canReleaseAny
   return `<div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th>Folio / revision</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision actual</th><th>Contexto</th>${hasActionColumn ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
-    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong><div class="batch-inline-badges">${item.previous_item_id ? `<span class="badge warning">Reenviada</span>` : ""}<span class="badge info">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</span></div></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : statusBadge(item.director_status)}</td><td>${renderItemReviewContext(item, canDecide)}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Enviar nuevamente</button>` : ""}</td>` : ""}</tr>
+    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong><div class="batch-inline-badges">${item.previous_item_id ? `<span class="badge warning">Reenviada</span>` : ""}<span class="badge info">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</span></div></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : itemDecisionBadge(batch.status, item)}</td><td>${renderItemReviewContext(item, canDecide)}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Enviar nuevamente</button>` : ""}</td>` : ""}</tr>
   `).join("")}</tbody></table></div>`
 }
 
@@ -1032,8 +1032,19 @@ function statusBadge(status) {
   return `<span class="badge ${tone}">${escapeHtml(statusLabel(status))}</span>`
 }
 
+function itemDecisionBadge(batchStatus, item) {
+  const itemStatus = item?.director_status
+  if (itemStatus === "rejected") return `<span class="badge danger">Rechazada por Dirección</span>`
+  if (itemStatus === "approved" && batchStatus === "closed") return `<span class="badge success">Aprobada y liberada para pago</span>`
+  if (itemStatus === "approved" && ["approved", "partially_approved"].includes(batchStatus)) {
+    return `<span class="badge success">Dirección aprobó &middot; pendiente de liberación</span>`
+  }
+  if (itemStatus === "pending" && batchStatus === "submitted") return `<span class="badge warning">Pendiente de decisión de Dirección</span>`
+  return statusBadge(itemStatus)
+}
+
 function statusLabel(status) {
-  return ({ draft: "Borrador", submitted: "Enviado", approved: "Direccion aprobo · pendiente de cierre", partially_approved: "Direccion decidio con rechazos", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazado", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
+  return ({ draft: "Borrador", submitted: "Pendiente de decisión de Dirección", approved: "Dirección aprobó · pendiente de liberación", partially_approved: "Dirección decidió con rechazos", closed: "Liberado para pago", pending: "Pendiente", rejected: "Rechazada por Dirección", active: "Activo", inactive: "Inactivo" })[status] || String(status || "-")
 }
 
 function formatMoney(value, currency = "MXN") {
@@ -1094,9 +1105,19 @@ function showToast(title, message, type = "success") {
   const variants = { error: "danger", warning: "warning", success: "success", info: "info" }
   if (window.Components?.showToast) {
     window.Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variants[type] || "info", duration: 6 })
-  } else {
-    window.alert(`${title}: ${message}`)
+    return
   }
+  const stack = document.getElementById("toastStack") || document.body
+  const toast = document.createElement("div")
+  toast.className = `toast-v2 ${variants[type] || "info"}`
+  toast.setAttribute("role", type === "error" ? "alert" : "status")
+  const heading = document.createElement("strong")
+  heading.textContent = title
+  const description = document.createElement("span")
+  description.textContent = message
+  toast.append(heading, description)
+  stack.appendChild(toast)
+  window.setTimeout(() => toast.remove(), 6000)
 }
 
 function escapeHtml(value) {

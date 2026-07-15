@@ -9,6 +9,12 @@
     tableSignature: "",
   }
   const dom = {}
+  const executionContextCache = new Map()
+
+  window.FluxBatchExecutionContext = {
+    get: getExecutionContext,
+    clear: clearExecutionContext,
+  }
 
   document.addEventListener("DOMContentLoaded", init)
 
@@ -129,10 +135,29 @@
   }
 
   function resetDetailState() {
+    const requestId = state.currentRequest?.id || state.pendingRequestId
     state.currentRequest = null
     state.currentContext = null
     state.pendingRequestId = null
+    clearExecutionContext(requestId)
     removeExecutionPanel()
+  }
+
+  function clearExecutionContext(requestId) {
+    if (requestId) executionContextCache.delete(requestId)
+    else executionContextCache.clear()
+  }
+
+  async function getExecutionContext(requestId, options = {}) {
+    if (!requestId) return { data: null, error: new Error("payment_request_id_required") }
+    if (options.force) executionContextCache.delete(requestId)
+    if (!executionContextCache.has(requestId)) {
+      const request = Promise.resolve(supabaseClient.rpc("get_payment_request_execution_context", {
+        p_payment_request_id: requestId,
+      })).catch((error) => ({ data: null, error }))
+      executionContextCache.set(requestId, request)
+    }
+    return executionContextCache.get(requestId)
   }
 
   async function decorateExtraordinaryRows(requestIds) {
@@ -164,9 +189,7 @@
     const requestId = state.currentRequest?.id
     if (!requestId) return
     removeExecutionPanel()
-    const { data, error } = await supabaseClient.rpc("get_payment_request_execution_context", {
-      p_payment_request_id: requestId,
-    })
+    const { data, error } = await getExecutionContext(requestId)
     if (state.currentRequest?.id !== requestId) return
     if (error) return
     state.currentContext = data || null
@@ -313,6 +336,7 @@
   }
 
   async function refreshCurrentState() {
+    clearExecutionContext(state.currentRequest?.id)
     await loadExecutionContext()
     await decorateExtraordinaryRows(state.tableRequestIds)
   }
@@ -342,13 +366,13 @@
   }
 
   function batchStatusLabel(batchStatus, directorStatus) {
-    if (directorStatus === "rejected") return "Rechazada por Direccion"
+    if (directorStatus === "rejected") return "Rechazada por Dirección"
     return ({
       draft: "Borrador",
-      submitted: "Pendiente de Direccion",
-      approved: "Aprobado - pendiente de cierre",
-      partially_approved: "Con rechazos - pendiente de cierre",
-      closed: "Liberado para pago",
+      submitted: "Pendiente de decisión de Dirección",
+      approved: "Dirección aprobó · pendiente de liberación",
+      partially_approved: "Dirección decidió con rechazos · pendiente de liberación",
+      closed: "Aprobada y liberada para pago",
     })[batchStatus] || batchStatus || "Sin estado"
   }
 
