@@ -286,7 +286,7 @@
 
     const { data: request } = await client
       .from("payment_requests")
-      .select("id,request_number,request_type,payment_method,status,amount_requested,currency")
+      .select("id,request_number,request_type,payment_method,amount_requested,currency")
       .eq("request_number", requestNumber)
       .maybeSingle()
     const method = effectivePaymentType(request)
@@ -295,15 +295,15 @@
     const layoutSection = Array.from(target.querySelectorAll("section")).find((section) => /Preparacion para layout/i.test(section.textContent))
     if (layoutSection) layoutSection.classList.add("hidden")
 
-    const [{ data: funds }, contextResult] = await Promise.all([
+    const [{ data: funds, error: fundsError }, contextResult] = await Promise.all([
       client.from("cash_funds").select("*").eq("payment_request_id", request.id).order("created_at", { ascending: false }),
       loadExecutionContext(request.id),
     ])
     const fund = funds?.[0] || null
     const context = contextResult.data || null
     const draft = getDraft(request.id)
-    const canCreate = context?.can_create_cash_fund === true && !fund
-    const availabilityMessage = cashFundAvailabilityMessage(context, fund, contextResult.error)
+    const canCreate = !fundsError && context?.can_create_cash_fund === true && !fund
+    const availabilityMessage = cashFundAvailabilityMessage(context, fund, contextResult.error || fundsError)
     const authorizationSource = executionAuthorizationSourceLabel(context?.execution_authorization_source)
 
     target.insertAdjacentHTML("beforeend", `
@@ -318,6 +318,8 @@
           ${detailCard("Responsable", fund ? profileName(fund.responsible_profile_id) : profileName(draft?.responsible_profile_id))}
           ${detailCard("Fecha limite", fund ? formatDate(fund.due_date) : formatDate(draft?.due_date))}
           ${detailCard("Metodo", requestTypeLabels[method])}
+          ${detailCard("Importe autorizado", formatCurrency(request.amount_requested))}
+          ${detailCard("Actor de ejecucion", context?.is_finance === true ? "Finanzas" : "Sin rol de Finanzas")}
           ${detailCard("Autorizacion", authorizationSource)}
           ${detailCard("Estado del fondo", fund ? cashStatuses[fund.status] || fund.status : "Sin fondo creado")}
           ${detailCard("Monto pendiente", fund ? formatCurrency(fund.pending_amount) : "Pendiente de crear fondo")}
@@ -329,7 +331,7 @@
       </section>
     `)
 
-    target.querySelector("[data-create-cash-fund]")?.addEventListener("click", () => openCashFundDialog(request, draft))
+    target.querySelector("[data-create-cash-fund]")?.addEventListener("click", () => openCashFundDialog(request, draft, context))
     target.querySelector("[data-go-cash-funds]")?.addEventListener("click", (event) => {
       const fundId = event.currentTarget.dataset.goCashFunds
       window.location.href = `./efectivo.html${fundId ? `?fund_id=${fundId}` : ""}`
@@ -378,6 +380,11 @@
             <div><h2 id="cashFundTitle">Registrar entrega</h2><p>Crea el fondo para que el responsable pueda comprobarlo.</p></div>
             <button type="button" id="closeCashFundModalBtn" class="icon-btn" aria-label="Cerrar">x</button>
           </div>
+          <div class="cash-fund-request-summary" aria-live="polite">
+            <div><span>Solicitud</span><strong id="fundRequestNumber">-</strong></div>
+            <div><span>Importe</span><strong id="fundAssignedAmount">$0.00</strong></div>
+            <div><span>Autorizacion</span><strong id="fundAuthorizationSource">-</strong></div>
+          </div>
           <div class="form-grid">
             <label class="full-row">Responsable del gasto *
               <select id="fundResponsibleProfileId" class="form-control" required>${profileOptions()}</select>
@@ -409,11 +416,14 @@
     document.getElementById("cashFundForm").addEventListener("submit", submitCashFund)
   }
 
-  function openCashFundDialog(request, draft) {
+  function openCashFundDialog(request, draft, context) {
     activeCashRequest = request
     ensureCashFundDialog()
     const method = effectivePaymentType(request)
     document.getElementById("cashFundTitle").textContent = method === "check" ? "Registrar entrega de cheque" : "Registrar entrega de efectivo"
+    document.getElementById("fundRequestNumber").textContent = request.request_number || "Solicitud"
+    document.getElementById("fundAssignedAmount").textContent = formatCurrency(request.amount_requested)
+    document.getElementById("fundAuthorizationSource").textContent = executionAuthorizationSourceLabel(context?.execution_authorization_source)
     document.getElementById("fundResponsibleProfileId").value = draft?.responsible_profile_id || ""
     document.getElementById("fundDueDate").value = draft?.due_date || ""
     document.getElementById("fundDeliveryMethod").value = draft?.delivery_method || method
@@ -695,6 +705,11 @@
       .stat-card.selected{border-color:rgba(94,234,212,.34);box-shadow:0 0 0 3px var(--accent-dim)}
       .filter-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);background:rgba(15,118,110,.07)}
       .filter-strip span{color:var(--accent-text);font-size:12px;font-weight:700}
+      .cash-fund-request-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-soft)}
+      .cash-fund-request-summary div{display:grid;gap:3px;min-width:0}
+      .cash-fund-request-summary span{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+      .cash-fund-request-summary strong{font-size:14px;overflow-wrap:anywhere}
+      @media (max-width:640px){.cash-fund-request-summary{grid-template-columns:1fr}}
     `
     document.head.appendChild(style)
   }
