@@ -1,0 +1,2 @@
+supabase/migrations/028_cash_fund_batch_execution_readiness.sql text eol=lf
+ops/cash-funds/apply-028-batch-readiness/03_LOAD_028_EXACT.sql text eol=lf
