@@ -42,6 +42,7 @@ export type IntakeConfig = {
   allowedOrigins: string[];
   allowNoOrigin: boolean;
   maxFiles: number;
+  maxTotalMb: number;
   maxTotalBytes: number;
   maxAmount: number;
   allowedCurrencies: string[];

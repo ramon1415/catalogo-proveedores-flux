@@ -1,8 +1,8 @@
 import { parseAllowedOrigins } from "./cors.ts";
 import {
   ALLOWED_PAYLOAD_FIELDS,
-  IntakeError,
   type IntakeConfig,
+  IntakeError,
   type IntakePayload,
   type SubmitEnvelope,
 } from "./types.ts";
@@ -11,7 +11,8 @@ const controlCharacters = /[\u0000-\u001f\u007f]/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const rfcPattern = /^[A-Z&\u00D1]{3,4}\d{6}[A-Z0-9]{3}$/;
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
-const invoiceUuidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
+const invoiceUuidPattern =
+  /^[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
 const tokenPattern = /^[A-Za-z0-9_-]{32,256}$/;
 const idempotencyPattern = /^[A-Za-z0-9._:-]{8,128}$/;
 
@@ -25,7 +26,11 @@ function envNumber(reader: EnvReader, name: string, fallback: number): number {
   return value;
 }
 
-function envBoolean(reader: EnvReader, name: string, fallback: boolean): boolean {
+function envBoolean(
+  reader: EnvReader,
+  name: string,
+  fallback: boolean,
+): boolean {
   const raw = reader(name)?.trim().toLowerCase();
   if (!raw) return fallback;
   if (raw === "true") return true;
@@ -34,9 +39,11 @@ function envBoolean(reader: EnvReader, name: string, fallback: boolean): boolean
 }
 
 export function readIntakeConfig(reader: EnvReader): IntakeConfig {
-  const allowedOrigins = parseAllowedOrigins(reader("INTAKE_ALLOWED_ORIGINS") || "");
+  const allowedOrigins = parseAllowedOrigins(
+    reader("INTAKE_ALLOWED_ORIGINS") || "",
+  );
   const maxFiles = Math.trunc(envNumber(reader, "INTAKE_MAX_FILES", 3));
-  const maxTotalMb = envNumber(reader, "INTAKE_MAX_TOTAL_MB", 20);
+  const maxTotalMb = envNumber(reader, "INTAKE_MAX_TOTAL_MB", 15);
   const maxAmount = envNumber(reader, "INTAKE_MAX_AMOUNT", 1000000000);
   const fingerprintWindowSeconds = Math.trunc(
     envNumber(reader, "INTAKE_RATE_LIMIT_WINDOW_SECONDS", 86400),
@@ -47,16 +54,28 @@ export function readIntakeConfig(reader: EnvReader): IntakeConfig {
     .filter((value) => /^[A-Z]{3}$/.test(value));
   const privacyNoticeUrl = reader("INTAKE_PRIVACY_NOTICE_URL")?.trim() || "";
 
-  if (!allowedOrigins.length) throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
-  if (maxFiles < 0 || maxFiles > 3) throw new Error("invalid_configuration:INTAKE_MAX_FILES");
-  if (maxTotalMb <= 0 || maxTotalMb > 30) throw new Error("invalid_configuration:INTAKE_MAX_TOTAL_MB");
-  if (maxAmount <= 0) throw new Error("invalid_configuration:INTAKE_MAX_AMOUNT");
+  if (!allowedOrigins.length) {
+    throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
+  }
+  if (maxFiles < 0 || maxFiles > 3) {
+    throw new Error("invalid_configuration:INTAKE_MAX_FILES");
+  }
+  if (maxTotalMb <= 0 || maxTotalMb > 15) {
+    throw new Error("invalid_configuration:INTAKE_MAX_TOTAL_MB");
+  }
+  if (maxAmount <= 0) {
+    throw new Error("invalid_configuration:INTAKE_MAX_AMOUNT");
+  }
   if (fingerprintWindowSeconds < 60 || fingerprintWindowSeconds > 86400) {
     throw new Error("invalid_configuration:INTAKE_RATE_LIMIT_WINDOW_SECONDS");
   }
-  if (!allowedCurrencies.length) throw new Error("invalid_configuration:INTAKE_ALLOWED_CURRENCIES");
+  if (!allowedCurrencies.length) {
+    throw new Error("invalid_configuration:INTAKE_ALLOWED_CURRENCIES");
+  }
   try {
-    if (!privacyNoticeUrl || new URL(privacyNoticeUrl).protocol !== "https:") throw new Error();
+    if (!privacyNoticeUrl || new URL(privacyNoticeUrl).protocol !== "https:") {
+      throw new Error();
+    }
   } catch {
     throw new Error("invalid_configuration:INTAKE_PRIVACY_NOTICE_URL");
   }
@@ -65,6 +84,7 @@ export function readIntakeConfig(reader: EnvReader): IntakeConfig {
     allowedOrigins,
     allowNoOrigin: envBoolean(reader, "INTAKE_ALLOW_NO_ORIGIN", false),
     maxFiles,
+    maxTotalMb,
     maxTotalBytes: Math.floor(maxTotalMb * 1024 * 1024),
     maxAmount,
     allowedCurrencies,
@@ -97,7 +117,9 @@ function normalizedText(
   required = false,
 ): string | undefined {
   if (value === null || value === undefined) {
-    if (required) throw new IntakeError("invalid_request", 400, `${field}_required`);
+    if (required) {
+      throw new IntakeError("invalid_request", 400, `${field}_required`);
+    }
     return undefined;
   }
   if (typeof value !== "string") {
@@ -105,7 +127,9 @@ function normalizedText(
   }
   const result = value.trim().replace(/\s+/g, " ");
   if (!result) {
-    if (required) throw new IntakeError("invalid_request", 400, `${field}_required`);
+    if (required) {
+      throw new IntakeError("invalid_request", 400, `${field}_required`);
+    }
     return undefined;
   }
   if (result.length > maxLength || controlCharacters.test(result)) {
@@ -132,17 +156,32 @@ function isoDate(value: unknown, field: string): string | undefined {
   return result;
 }
 
-export function validatePayload(value: unknown, config: IntakeConfig): IntakePayload {
+export function validatePayload(
+  value: unknown,
+  config: IntakeConfig,
+): IntakePayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new IntakeError("invalid_request", 400, "payload_invalid");
   }
   const raw = value as Record<string, unknown>;
   const allowed = new Set<string>(ALLOWED_PAYLOAD_FIELDS);
   const unknown = Object.keys(raw).find((key) => !allowed.has(key));
-  if (unknown) throw new IntakeError("invalid_request", 400, "payload_unknown_field");
+  if (unknown) {
+    throw new IntakeError("invalid_request", 400, "payload_unknown_field");
+  }
 
-  const providerName = normalizedText(raw.provider_name, "provider_name", 200, true)!;
-  const providerEmail = normalizedText(raw.provider_email, "provider_email", 254, true)!.toLowerCase();
+  const providerName = normalizedText(
+    raw.provider_name,
+    "provider_name",
+    200,
+    true,
+  )!;
+  const providerEmail = normalizedText(
+    raw.provider_email,
+    "provider_email",
+    254,
+    true,
+  )!.toLowerCase();
   if (!emailPattern.test(providerEmail)) {
     throw new IntakeError("invalid_email", 400, "provider_email_invalid");
   }
@@ -160,7 +199,8 @@ export function validatePayload(value: unknown, config: IntakeConfig): IntakePay
     throw new IntakeError("invalid_amount", 400, "amount_invalid");
   }
 
-  const currency = normalizedText(raw.currency ?? "MXN", "currency", 3, true)!.toUpperCase();
+  const currency = normalizedText(raw.currency ?? "MXN", "currency", 3, true)!
+    .toUpperCase();
   if (!config.allowedCurrencies.includes(currency)) {
     throw new IntakeError("invalid_request", 400, "currency_invalid");
   }
@@ -171,17 +211,22 @@ export function validatePayload(value: unknown, config: IntakeConfig): IntakePay
     throw new IntakeError("invalid_request", 400, "provider_rfc_invalid");
   }
 
-  const bankClabe = normalizedText(raw.bank_clabe, "bank_clabe", 30)?.replace(/[\s-]/g, "");
+  const bankClabe = normalizedText(raw.bank_clabe, "bank_clabe", 30)?.replace(
+    /[\s-]/g,
+    "",
+  );
   if (bankClabe && !/^\d{18}$/.test(bankClabe)) {
     throw new IntakeError("invalid_request", 400, "bank_clabe_invalid");
   }
 
-  const bankAccount = normalizedText(raw.bank_account, "bank_account", 34)?.replace(/[\s-]/g, "");
+  const bankAccount = normalizedText(raw.bank_account, "bank_account", 34)
+    ?.replace(/[\s-]/g, "");
   if (bankAccount && !/^[A-Za-z0-9]{4,34}$/.test(bankAccount)) {
     throw new IntakeError("invalid_request", 400, "bank_account_invalid");
   }
 
-  const invoiceUuid = normalizedText(raw.invoice_uuid, "invoice_uuid", 36)?.toUpperCase();
+  const invoiceUuid = normalizedText(raw.invoice_uuid, "invoice_uuid", 36)
+    ?.toUpperCase();
   if (invoiceUuid && !invoiceUuidPattern.test(invoiceUuid)) {
     throw new IntakeError("invalid_request", 400, "invoice_uuid_invalid");
   }
@@ -195,19 +240,28 @@ export function validatePayload(value: unknown, config: IntakeConfig): IntakePay
     description: normalizedText(raw.description, "description", 4000),
     amount_requested: amount,
     currency,
-    requested_payment_date: isoDate(raw.requested_payment_date, "requested_payment_date"),
+    requested_payment_date: isoDate(
+      raw.requested_payment_date,
+      "requested_payment_date",
+    ),
     invoice_folio: normalizedText(raw.invoice_folio, "invoice_folio", 120),
     invoice_uuid: invoiceUuid,
     invoice_date: isoDate(raw.invoice_date, "invoice_date"),
     bank_name: normalizedText(raw.bank_name, "bank_name", 160),
     bank_account: bankAccount,
     bank_clabe: bankClabe,
-    beneficiary_name: normalizedText(raw.beneficiary_name, "beneficiary_name", 200),
+    beneficiary_name: normalizedText(
+      raw.beneficiary_name,
+      "beneficiary_name",
+      200,
+    ),
   };
 }
 
 function parseJson(value: FormDataEntryValue | null, label: string): unknown {
-  if (typeof value !== "string") throw new IntakeError("invalid_request", 400, `${label}_invalid`);
+  if (typeof value !== "string") {
+    throw new IntakeError("invalid_request", 400, `${label}_invalid`);
+  }
   try {
     return JSON.parse(value);
   } catch {
@@ -215,7 +269,9 @@ function parseJson(value: FormDataEntryValue | null, label: string): unknown {
   }
 }
 
-export async function readSubmitEnvelope(req: Request): Promise<SubmitEnvelope> {
+export async function readSubmitEnvelope(
+  req: Request,
+): Promise<SubmitEnvelope> {
   const contentType = req.headers.get("content-type")?.toLowerCase() || "";
   if (contentType.includes("multipart/form-data")) {
     const form = await req.formData();
@@ -229,9 +285,13 @@ export async function readSubmitEnvelope(req: Request): Promise<SubmitEnvelope> 
       captchaToken: typeof form.get("captcha_token") === "string"
         ? String(form.get("captcha_token")).trim()
         : "",
-      honeypot: typeof form.get("honeypot") === "string" ? String(form.get("honeypot")).trim() : "",
+      honeypot: typeof form.get("honeypot") === "string"
+        ? String(form.get("honeypot")).trim()
+        : "",
       files,
-      fileKinds: form.has("file_kinds") ? parseJson(form.get("file_kinds"), "file_kinds") : [],
+      fileKinds: form.has("file_kinds")
+        ? parseJson(form.get("file_kinds"), "file_kinds")
+        : [],
     };
   }
 
@@ -246,12 +306,20 @@ export async function readSubmitEnvelope(req: Request): Promise<SubmitEnvelope> 
       throw new IntakeError("invalid_request", 400, "invalid_json_envelope");
     }
     const envelope = body as Record<string, unknown>;
-    const unknown = Object.keys(envelope).find((key) => !["payload", "captcha_token", "honeypot"].includes(key));
-    if (unknown) throw new IntakeError("invalid_request", 400, "envelope_unknown_field");
+    const unknown = Object.keys(envelope).find((key) =>
+      !["payload", "captcha_token", "honeypot"].includes(key)
+    );
+    if (unknown) {
+      throw new IntakeError("invalid_request", 400, "envelope_unknown_field");
+    }
     return {
       payload: envelope.payload,
-      captchaToken: typeof envelope.captcha_token === "string" ? envelope.captcha_token.trim() : "",
-      honeypot: typeof envelope.honeypot === "string" ? envelope.honeypot.trim() : "",
+      captchaToken: typeof envelope.captcha_token === "string"
+        ? envelope.captcha_token.trim()
+        : "",
+      honeypot: typeof envelope.honeypot === "string"
+        ? envelope.honeypot.trim()
+        : "",
       files: [],
       fileKinds: [],
     };

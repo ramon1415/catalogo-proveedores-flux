@@ -26,6 +26,7 @@ The response contains only:
 
 - company display name;
 - maximum file size;
+- maximum total request size (`max_total_mb`);
 - maximum number of files configured by the Edge Function, capped at three;
 - allowed MIME types from the link;
 - privacy notice URL.
@@ -46,6 +47,10 @@ Accepted bodies:
 - `application/json` with `payload`, `captcha_token`, and `honeypot`, only when no files exist.
 
 Unknown envelope and payload fields are rejected. This prevents callers from supplying company, link, status, requester, approver, batch, triage, timestamp, token, or Storage fields.
+
+`max_file_mb` applies to each file. `max_total_mb` applies to the complete HTTP request, including multipart metadata, and is capped at 15 MB for this MVP. The DEV boundary calibration reached the function reliably from 10 through 18 MB; a previously observed request above 20 MB was rejected by the platform relay before the handler. The 15 MB functional limit preserves at least a 25% margin below that known boundary while allowing one 10 MB file plus multipart metadata.
+
+The JSON application contract is guaranteed only after a request reaches the Edge Function. A client must inspect `Content-Type` before parsing a response. Non-JSON 403 means the perimeter rejected the content, non-JSON 413 means the platform rejected its size, and non-JSON 502/503 or relay/fetch failures mean the request was not processed normally. Clients must show a generic safe message, never expose the infrastructure response body, and never retry an oversized body automatically. Phase 1C must reject a request locally when its estimated total exceeds `max_total_mb`.
 
 New submissions return HTTP 201. Idempotent retries return HTTP 200 with the same public folio. Neither response contains the internal intake UUID.
 
@@ -74,6 +79,8 @@ Raw IP, User-Agent, token, CAPTCHA response, cookies, headers, and raw payload a
 
 Files are validated before intake creation for declared MIME, extension, size, count, total size, `file_kind`, safe filename, and basic magic bytes. HTML, SVG, archives, executables, generic binary files, path traversal, and mismatched signatures are rejected.
 
+XML is treated as bytes and is never parsed or used to resolve namespaces or external resources. Case-insensitive `DOCTYPE` and `ENTITY` declarations are rejected with `file_type_not_allowed` when the request reaches the function. A perimeter HTTP 403 for the same content is also accepted security behavior when it produces no persistence and no information leak. A normal XML declaration and escaped text such as `&lt;!DOCTYPE` remain valid.
+
 Objects use only opaque paths:
 
 ```text
@@ -99,6 +106,7 @@ Status: **BLOCKED/N/A until the notification contract and template are explicitl
 ## Residual risks
 
 - Malware scanning and content disarm are not implemented; files remain quarantined for later review.
+- The physical request-body limit belongs to the Supabase platform and may produce a non-JSON infrastructure response before function code runs; the 15 MB functional limit and future client-side gate reduce this exposure.
 - Failed uploads require a later correction flow; an idempotent retry does not silently attach a second file set.
 - Invalid-token and pre-transaction abuse controls need platform-level rate limiting before production.
 - The public form, link issuance, internal triage, matching, conversion, and public tracking remain later phases.

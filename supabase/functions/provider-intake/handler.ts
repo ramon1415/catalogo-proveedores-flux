@@ -3,9 +3,9 @@ import { hmacSha256Hex, sha256Hex, stableCanonicalString } from "./crypto.ts";
 import { prepareStorageFiles, validateIncomingFiles } from "./files.ts";
 import { jsonResponse, mapError, publicError } from "./responses.ts";
 import {
-  IntakeError,
   type CaptchaVerifier,
   type IntakeConfig,
+  IntakeError,
   type IntakePayload,
   type IntakeRepository,
   type LinkResolution,
@@ -43,13 +43,17 @@ function clientIp(req: Request): string | undefined {
 
 function fingerprintSource(linkId: string, payload: IntakePayload): string {
   const entries = Object.entries(payload)
-    .filter((entry): entry is [string, string | number] => entry[1] !== undefined)
+    .filter((entry): entry is [string, string | number] =>
+      entry[1] !== undefined
+    )
     .map(([key, value]) => [key, String(value)] as [string, string])
     .sort(([left], [right]) => left.localeCompare(right));
   return stableCanonicalString([["intake_link", linkId], ...entries]);
 }
 
-function storedMetadata(files: ReturnType<typeof prepareStorageFiles>): StoredFileMetadata[] {
+function storedMetadata(
+  files: ReturnType<typeof prepareStorageFiles>,
+): StoredFileMetadata[] {
   return files.map((file) => ({
     file_id: file.fileId,
     storage_path: file.storagePath,
@@ -59,6 +63,28 @@ function storedMetadata(files: ReturnType<typeof prepareStorageFiles>): StoredFi
     file_kind: file.fileKind,
     sha256: file.sha256,
   }));
+}
+
+async function enforceRequestSize(
+  req: Request,
+  maxTotalBytes: number,
+): Promise<void> {
+  const rawContentLength = req.headers.get("content-length");
+  if (rawContentLength) {
+    const contentLength = Number(rawContentLength);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      throw new IntakeError("invalid_request", 400, "content_length_invalid");
+    }
+    if (contentLength > maxTotalBytes) {
+      throw new IntakeError("payload_too_large", 413, "request_too_large");
+    }
+    return;
+  }
+
+  const requestBytes = (await req.clone().arrayBuffer()).byteLength;
+  if (requestBytes > maxTotalBytes) {
+    throw new IntakeError("payload_too_large", 413, "request_too_large");
+  }
 }
 
 async function markIssueBestEffort(
@@ -90,8 +116,11 @@ async function cleanupBestEffort(
 
 export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
   const now = dependencies.now || Date.now;
-  const logger = dependencies.logger || ((entry: Record<string, unknown>) => console.info(JSON.stringify(entry)));
-  if (!dependencies.hashPepper.trim()) throw new Error("missing_required_secret:INTAKE_HASH_PEPPER");
+  const logger = dependencies.logger ||
+    ((entry: Record<string, unknown>) => console.info(JSON.stringify(entry)));
+  if (!dependencies.hashPepper.trim()) {
+    throw new Error("missing_required_secret:INTAKE_HASH_PEPPER");
+  }
 
   return async (req: Request): Promise<Response> => {
     const startedAt = now();
@@ -115,19 +144,26 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
           headers: {
             ...corsHeaders(origin),
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            "Content-Security-Policy":
+              "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
           },
         });
       }
 
-      if (route === "unknown") throw new IntakeError("invalid_request", 404, "route_not_found");
+      if (route === "unknown") {
+        throw new IntakeError("invalid_request", 404, "route_not_found");
+      }
       if (route === "link-info" && req.method !== "GET") {
         throw new IntakeError("invalid_request", 405, "method_not_allowed");
       }
       if (route === "submit" && req.method !== "POST") {
         throw new IntakeError("invalid_request", 405, "method_not_allowed");
+      }
+
+      if (route === "submit") {
+        await enforceRequestSize(req, dependencies.config.maxTotalBytes);
       }
 
       const tokenHash = await sha256Hex(intakeToken(req));
@@ -137,42 +173,49 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
       } catch (error) {
         const mapped = mapError(error);
         if (mapped.code === "link_not_available") throw mapped;
-        throw new IntakeError("service_unavailable", 503, "link_repository_unavailable");
+        throw new IntakeError(
+          "service_unavailable",
+          503,
+          "link_repository_unavailable",
+        );
       }
 
       if (route === "link-info") {
         statusCode = 200;
         outcome = "link_available";
-        return jsonResponse({
-          ok: true,
-          company: { display_name: link.company_display_name },
-          link: {
-            max_file_mb: link.max_file_mb,
-            max_files: dependencies.config.maxFiles,
-            allowed_file_types: link.allowed_file_types,
+        return jsonResponse(
+          {
+            ok: true,
+            company: { display_name: link.company_display_name },
+            link: {
+              max_file_mb: link.max_file_mb,
+              max_files: dependencies.config.maxFiles,
+              max_total_mb: dependencies.config.maxTotalMb,
+              allowed_file_types: link.allowed_file_types,
+            },
+            privacy_notice: { url: dependencies.config.privacyNoticeUrl },
           },
-          privacy_notice: { url: dependencies.config.privacyNoticeUrl },
-        }, statusCode, origin);
-      }
-
-      const rawContentLength = req.headers.get("content-length");
-      const contentLength = Number(rawContentLength || "0");
-      if (rawContentLength && (!Number.isFinite(contentLength) || contentLength < 0)) {
-        throw new IntakeError("invalid_request", 400, "content_length_invalid");
-      }
-      if (contentLength > dependencies.config.maxTotalBytes + 1048576) {
-        throw new IntakeError("payload_too_large", 413, "request_too_large");
+          statusCode,
+          origin,
+        );
       }
 
       const envelope = await readSubmitEnvelope(req);
       fileCount = envelope.files.length;
-      if (envelope.honeypot) throw new IntakeError("invalid_request", 400, "honeypot_triggered");
+      if (envelope.honeypot) {
+        throw new IntakeError("invalid_request", 400, "honeypot_triggered");
+      }
 
       const payload = validatePayload(envelope.payload, dependencies.config);
       const captchaToken = validateCaptchaToken(envelope.captchaToken);
       const remoteIp = clientIp(req);
-      const captchaOk = await dependencies.captcha.verify({ token: captchaToken, remoteIp });
-      if (!captchaOk) throw new IntakeError("captcha_failed", 400, "captcha_failed");
+      const captchaOk = await dependencies.captcha.verify({
+        token: captchaToken,
+        remoteIp,
+      });
+      if (!captchaOk) {
+        throw new IntakeError("captcha_failed", 400, "captcha_failed");
+      }
 
       const validatedFiles = await validateIncomingFiles(
         envelope.files,
@@ -186,7 +229,9 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
         `submission:${fingerprintSource(link.intake_link_id, payload)}`,
       );
       const suppliedIdempotencyKey = idempotencyKey(req);
-      const bucket = Math.floor(now() / (dependencies.config.fingerprintWindowSeconds * 1000));
+      const bucket = Math.floor(
+        now() / (dependencies.config.fingerprintWindowSeconds * 1000),
+      );
       const idempotencyKeyHash = await hmacSha256Hex(
         dependencies.hashPepper,
         suppliedIdempotencyKey
@@ -214,7 +259,10 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
       duplicate = created.duplicate;
 
       if (!created.duplicate && validatedFiles.length) {
-        const storageFiles = prepareStorageFiles(validatedFiles, created.payment_intake_id);
+        const storageFiles = prepareStorageFiles(
+          validatedFiles,
+          created.payment_intake_id,
+        );
         const uploadedPaths: string[] = [];
         try {
           for (const file of storageFiles) {
@@ -249,15 +297,19 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
 
       statusCode = created.duplicate ? 200 : 201;
       outcome = created.duplicate ? "duplicate" : "created";
-      return jsonResponse({
-        ok: true,
-        public_folio: created.public_folio,
-        status: "received",
-        duplicate: created.duplicate,
-        message: created.duplicate
-          ? "Esta solicitud ya habia sido recibida."
-          : "Solicitud recibida correctamente.",
-      }, statusCode, origin);
+      return jsonResponse(
+        {
+          ok: true,
+          public_folio: created.public_folio,
+          status: "received",
+          duplicate: created.duplicate,
+          message: created.duplicate
+            ? "Esta solicitud ya habia sido recibida."
+            : "Solicitud recibida correctamente.",
+        },
+        statusCode,
+        origin,
+      );
     } catch (error) {
       const mapped = mapError(error);
       statusCode = mapped.status;
