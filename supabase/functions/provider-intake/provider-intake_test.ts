@@ -40,8 +40,8 @@ const config: IntakeConfig = {
   ],
   allowNoOrigin: false,
   maxFiles: 3,
-  maxTotalMb: 15,
-  maxTotalBytes: 15 * 1024 * 1024,
+  maxTotalMb: 12,
+  maxTotalBytes: 12 * 1024 * 1024,
   maxAmount: 1000000,
   allowedCurrencies: ["MXN"],
   privacyNoticeUrl: "https://example.test/privacy",
@@ -174,7 +174,7 @@ Deno.test("link-info exposes only the public contract", async () => {
   assertEquals(response.status, 200);
   assertEquals(body.company.display_name, "Operadora DEV");
   assertEquals(body.link.max_files, 3);
-  assertEquals(body.link.max_total_mb, 15);
+  assertEquals(body.link.max_total_mb, 12);
   assert(!JSON.stringify(body).includes("company_id"));
   assert(!JSON.stringify(body).includes("intake_link_id"));
   assert(!JSON.stringify(body).includes("token_hash"));
@@ -205,14 +205,14 @@ Deno.test("submit rejects total request size before repository access", async ()
   }
 });
 
-Deno.test("runtime total limit defaults to 15 MB and rejects larger configuration", () => {
+Deno.test("runtime total limit defaults to 12 MB and rejects larger configuration", () => {
   const values: Record<string, string> = {
     INTAKE_ALLOWED_ORIGINS: "https://example.test",
     INTAKE_PRIVACY_NOTICE_URL: "https://example.test/privacy",
   };
   const parsed = readIntakeConfig((name) => values[name]);
-  assertEquals(parsed.maxTotalMb, 15);
-  assertEquals(parsed.maxTotalBytes, 15 * 1024 * 1024);
+  assertEquals(parsed.maxTotalMb, 12);
+  assertEquals(parsed.maxTotalBytes, 12 * 1024 * 1024);
 
   values.INTAKE_MAX_TOTAL_MB = "16";
   let error: unknown;

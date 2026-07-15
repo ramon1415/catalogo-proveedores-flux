@@ -43,7 +43,7 @@ export function readIntakeConfig(reader: EnvReader): IntakeConfig {
     reader("INTAKE_ALLOWED_ORIGINS") || "",
   );
   const maxFiles = Math.trunc(envNumber(reader, "INTAKE_MAX_FILES", 3));
-  const maxTotalMb = envNumber(reader, "INTAKE_MAX_TOTAL_MB", 15);
+  const maxTotalMb = envNumber(reader, "INTAKE_MAX_TOTAL_MB", 12);
   const maxAmount = envNumber(reader, "INTAKE_MAX_AMOUNT", 1000000000);
   const fingerprintWindowSeconds = Math.trunc(
     envNumber(reader, "INTAKE_RATE_LIMIT_WINDOW_SECONDS", 86400),

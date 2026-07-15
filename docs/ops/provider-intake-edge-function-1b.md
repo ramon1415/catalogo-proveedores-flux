@@ -18,7 +18,7 @@ Names only; never commit values:
 - `INTAKE_ALLOWED_ORIGINS`
 - `INTAKE_ALLOW_NO_ORIGIN=false`
 - `INTAKE_ALLOW_QUERY_TOKEN=false`
-- `INTAKE_MAX_TOTAL_MB` (15 in DEV and the code default; never greater than 15 for this MVP)
+- `INTAKE_MAX_TOTAL_MB` (12 in DEV and the code default; never greater than 15 for this MVP)
 - `INTAKE_MAX_FILES` (0-3)
 - `INTAKE_MAX_AMOUNT`
 - `INTAKE_ALLOWED_CURRENCIES`
@@ -59,14 +59,14 @@ The functional battery must prove:
 - logs contain no token, payload, RFC, email, phone, account, CLABE, filenames, IP, User-Agent, CAPTCHA, or service key;
 - tables remain RLS protected and the bucket remains private;
 - no `notification_events` row is created until its event type is supported safely.
-- `link-info` exposes `max_total_mb=15` without internal identifiers;
-- a total request just above 15 MB but below the calibrated platform boundary returns HTTP 413 JSON `payload_too_large` with zero persistence;
-- a request below 15 MB continues to the next applicable validation gate;
+- `link-info` exposes `max_total_mb=12` without internal identifiers;
+- a total request just above 12 MB but below the calibrated platform boundary returns HTTP 413 JSON `payload_too_large` with zero persistence;
+- a request below 12 MB continues to the next applicable validation gate;
 - XML containing `DOCTYPE` or `ENTITY` is blocked by the function with HTTP 415 JSON, or by the perimeter with HTTP 403, with zero persistence in either case.
 
 ## Platform boundary and Phase 1C client behavior
 
-DEV calibration reached `provider-intake` at approximately 10, 12, 14, 16, and 18 MB. The known non-JSON relay rejection occurs above 20 MB. `SAFE_TOTAL_MB` is therefore 15 MB: it stays at least 25% below the known boundary, respects the MVP cap, and leaves multipart headroom around a 10 MB file.
+DEV calibration reached `provider-intake` at approximately 10, 12, 14, 16, and 18 MB. The known non-JSON relay rejection occurs above 20 MB. `SAFE_TOTAL_MB` is therefore 12 MB: it stays at least 40% below the known boundary, respects the MVP cap, leaves multipart headroom around a 10 MB file, and permits a reproducible DEV retest above the functional limit without approaching the platform boundary.
 
 The Edge Function enforces the full request size before link lookup or persistence. The platform may still reject a larger body before the handler. Phase 1C must read JSON only when the response advertises `application/json`; map non-JSON 403 to a security-content rejection, non-JSON 413 to an oversized request, and non-JSON 502/503/relay failures to a generic unprocessed-request message. It must not show infrastructure bodies or automatically retry oversized requests.
 
