@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Aviso provisional DEV | Flux Operadora</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18202a;
+      --muted: #5d6976;
+      --line: #dce2e8;
+      --surface: #ffffff;
+      --canvas: #f4f6f8;
+      --teal: #0f766e;
+      --teal-soft: #e8f5f3;
+      --amber: #9a4d08;
+      --amber-soft: #fff5e7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+
+    header {
+      background: #161b22;
+      border-bottom: 4px solid var(--teal);
+      color: #ffffff;
+    }
+
+    .header-inner,
+    main,
+    footer {
+      width: min(100% - 40px, 820px);
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 112px;
+      padding: 24px 0;
+    }
+
+    .brand-logo {
+      display: block;
+      width: min(220px, 58vw);
+      height: auto;
+    }
+
+    .environment {
+      flex: 0 0 auto;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: #c7f4ed;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    main {
+      padding: 52px 0 44px;
+    }
+
+    h1,
+    h2 {
+      margin: 0;
+      letter-spacing: 0;
+      line-height: 1.25;
+    }
+
+    h1 {
+      max-width: 680px;
+      font-size: clamp(30px, 6vw, 46px);
+    }
+
+    .lead {
+      max-width: 700px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .warning {
+      margin: 32px 0 38px;
+      border-left: 4px solid #d97706;
+      background: var(--amber-soft);
+      padding: 18px 20px;
+      color: #62320b;
+    }
+
+    .warning strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--amber);
+    }
+
+    section {
+      padding: 28px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    section h2 {
+      margin-bottom: 14px;
+      font-size: 21px;
+    }
+
+    section p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 22px;
+      color: var(--muted);
+    }
+
+    li + li { margin-top: 8px; }
+
+    .scope-note {
+      background: var(--teal-soft);
+      color: #174f4a;
+      padding: 18px 20px;
+    }
+
+    footer {
+      padding: 22px 0 36px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 560px) {
+      .header-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      main { padding-top: 38px; }
+      .lead { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <img class="brand-logo" src="./assets/logo-flux-blanco.webp" alt="Flux Operadora">
+      <span class="environment">Entorno DEV</span>
+    </div>
+  </header>
+
+  <main>
+    <h1>Aviso provisional de privacidad para pruebas</h1>
+    <p class="lead">
+      Esta página corresponde exclusivamente al ambiente de desarrollo del portal público de proveedores de Flux Operadora.
+    </p>
+
+    <div class="warning" role="alert">
+      <strong>No introduzcas información real o productiva.</strong>
+      Utiliza únicamente datos ficticios y archivos preparados expresamente para las pruebas autorizadas en DEV.
+    </div>
+
+    <section aria-labelledby="purpose-title">
+      <h2 id="purpose-title">Finalidad de esta prueba</h2>
+      <p>
+        El ambiente permite validar de forma controlada la recepción técnica de información y documentos de prueba. Este aviso es provisional y no constituye un aviso de privacidad válido para producción.
+      </p>
+    </section>
+
+    <section aria-labelledby="scope-title">
+      <h2 id="scope-title">Alcance funcional</h2>
+      <ul>
+        <li>El envío de pruebas no crea automáticamente proveedores.</li>
+        <li>No crea solicitudes de pago en <code>payment_requests</code>.</li>
+        <li>No genera aprobaciones, cortes, batches ni pagos.</li>
+        <li>No activa notificaciones ni comunicaciones a usuarios reales.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="files-title">
+      <h2 id="files-title">Tratamiento de archivos de prueba</h2>
+      <p class="scope-note">
+        Los archivos aceptados permanecen en almacenamiento privado y con estado de cuarentena pendiente. No se publican ni se convierten automáticamente en documentación operativa.
+      </p>
+    </section>
+
+    <section aria-labelledby="validity-title">
+      <h2 id="validity-title">Vigencia y uso</h2>
+      <p>
+        El acceso está limitado a pruebas DEV autorizadas. Este contenido deberá sustituirse por el aviso legal aprobado antes de cualquier uso productivo o recepción de información real.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    Flux Operadora · Portal público de proveedores · Aviso provisional exclusivo para DEV
+  </footer>
+</body>
+</html>
