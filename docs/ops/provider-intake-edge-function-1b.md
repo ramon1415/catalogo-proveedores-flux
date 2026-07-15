@@ -2,9 +2,7 @@
 
 ## Gate 1B.1
 
-This repository change prepares code only. It must not execute SQL, configure secrets, deploy the function, create a link, create an intake, or upload a file.
-
-Migration 026 is reserved by another Draft PR and must be integrated before the manual 027 gate. Migration 025 must not be rerun or edited.
+Gate 1B.1 prepared the code without deploying the function or creating a link, intake, or file. Migrations 025, 026, 027, and 028 are now integrated and applied in DEV. They must not be rerun or edited.
 
 ## Required runtime configuration
 
@@ -31,18 +29,17 @@ Names only; never commit values:
 
 ## Gate 1B.2 order
 
-1. Confirm migration 026 has been integrated and its gate is closed.
+1. Confirm migrations 025, 026, 027, and 028 are integrated and already applied in DEV. Do not rerun any load script.
 2. Confirm the target is DEV `scsirgbuqjcwoaxfacth`.
-3. Run `ops/provider-intake/apply-027-edge-support/01_PRECHECK_READ_ONLY.sql`.
-4. Capture `02_BACKUP_DEV.sql` evidence without PII.
-5. Verify the exact-load SHA documented in `00_README.md`.
-6. Execute `03_LOAD_027_EXACT.sql` once.
-7. Run `04_POSTCHECK_READ_ONLY.sql` and reconcile protected counts.
-8. Configure runtime secrets in Supabase DEV without printing values.
-9. Deploy only `provider-intake` from branch `dev` after separate authorization.
-10. Create one controlled QA link through a separately authorized server-side procedure.
-11. Execute token, CAPTCHA, CORS, payload, idempotency, file, concurrency, privacy, and logging QA.
-12. Do not merge until the real DEV battery is reviewed.
+3. Run only `ops/provider-intake/apply-027-edge-support/04_POSTCHECK_READ_ONLY.sql` and reconcile protected counts.
+4. Configure runtime secrets in Supabase DEV without printing values.
+5. Confirm the PR branch is clean and record the exact branch name, commit SHA, and function source tree hash from `git rev-parse HEAD:supabase/functions/provider-intake`.
+6. Deploy only `provider-intake` from that exact validated PR head. Do not deploy an uncommitted local copy or a different branch.
+7. Record the deployed branch, commit SHA, function source tree hash, deployment timestamp, and deployment/version identifier.
+8. Create one controlled QA link through a separately authorized server-side procedure.
+9. Execute token, CAPTCHA, CORS, payload, idempotency, file, concurrency, privacy, and logging QA.
+10. Do not merge until the real DEV battery is reviewed and Ramon explicitly authorizes the merge.
+11. After merge, confirm the merged function tree is identical to the validated deployed tree. Redeploy from `dev` only if the code differs or the release process requires the merge commit to be recorded as the deployment source.
 
 Do not use `db push`, `migration repair`, PROD, n8n, cron, Database Webhooks, or `notification-dispatcher`.
 
