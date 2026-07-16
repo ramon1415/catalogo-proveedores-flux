@@ -32,13 +32,26 @@ function extensionOf(filename: string): string {
   return match?.[1] || "";
 }
 
+function hasAsciiControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      (codePoint <= 0x1f || codePoint === 0x7f)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function safeFilename(filename: string): boolean {
   return Boolean(filename.trim()) &&
     filename.length <= 255 &&
     !filename.includes("/") &&
     !filename.includes("\\") &&
     !filename.includes("..") &&
-    !/[\u0000-\u001f\u007f]/.test(filename);
+    !hasAsciiControlCharacter(filename);
 }
 
 function hasMagicBytes(mimeType: string, bytes: Uint8Array): boolean {

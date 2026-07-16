@@ -76,47 +76,57 @@ class FakeRepository implements IntakeRepository {
   attachFails = false;
   resolveError: string | null = null;
 
-  async resolveLink(): Promise<LinkResolution> {
+  resolveLink(): Promise<LinkResolution> {
     this.resolveCalls += 1;
-    if (this.resolveError) throw new Error(this.resolveError);
-    return link;
+    if (this.resolveError) {
+      return Promise.reject(new Error(this.resolveError));
+    }
+    return Promise.resolve(link);
   }
 
-  async createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult> {
+  createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult> {
     this.createCalls.push(input);
-    return {
+    return Promise.resolve({
       payment_intake_id: "33333333-3333-4333-8333-333333333333",
       public_folio: "INT-2026-000001",
       status: "received",
       duplicate: this.duplicate,
-    };
+    });
   }
 
-  async uploadFile(file: PreparedFile): Promise<void> {
-    if (this.uploadFails) throw new Error("upload_failed");
+  uploadFile(file: PreparedFile): Promise<void> {
+    if (this.uploadFails) {
+      return Promise.reject(new Error("upload_failed"));
+    }
     this.uploads.push(file);
+    return Promise.resolve();
   }
 
-  async removeUploadedFiles(paths: string[]): Promise<void> {
+  removeUploadedFiles(paths: string[]): Promise<void> {
     this.removed.push(...paths);
+    return Promise.resolve();
   }
 
-  async attachFiles(
+  attachFiles(
     _intakeId: string,
     files: StoredFileMetadata[],
   ): Promise<void> {
-    if (this.attachFails) throw new Error("attach_failed");
+    if (this.attachFails) {
+      return Promise.reject(new Error("attach_failed"));
+    }
     this.attached.push(...files);
+    return Promise.resolve();
   }
 
-  async markUploadIssue(_intakeId: string, issueCode: string): Promise<void> {
+  markUploadIssue(_intakeId: string, issueCode: string): Promise<void> {
     this.issues.push(issueCode);
+    return Promise.resolve();
   }
 }
 
 const captcha: CaptchaVerifier = {
   provider: "turnstile",
-  verify: async () => true,
+  verify: () => Promise.resolve(true),
 };
 
 const origin = config.allowedOrigins[0];
@@ -531,7 +541,7 @@ Deno.test("invalid CAPTCHA fails closed before intake creation", async () => {
   const repository = new FakeRepository();
   const failingCaptcha: CaptchaVerifier = {
     provider: "turnstile",
-    verify: async () => false,
+    verify: () => Promise.resolve(false),
   };
   const handler = createProviderIntakeHandler({
     config,
@@ -555,15 +565,18 @@ Deno.test("Turnstile validates timestamp hostname and action and fails closed", 
       "catalogo-proveedores-flux-git-dev-quantta-team.vercel.app",
     expectedAction: "provider_intake",
     now: () => now,
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          success: true,
-          hostname: "catalogo-proveedores-flux-git-dev-quantta-team.vercel.app",
-          action: "provider_intake",
-          challenge_ts: "2026-07-14T11:59:30Z",
-        }),
-        { status: 200 },
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            success: true,
+            hostname:
+              "catalogo-proveedores-flux-git-dev-quantta-team.vercel.app",
+            action: "provider_intake",
+            challenge_ts: "2026-07-14T11:59:30Z",
+          }),
+          { status: 200 },
+        ),
       ),
   });
   assertEquals(
@@ -574,13 +587,15 @@ Deno.test("Turnstile validates timestamp hostname and action and fails closed", 
   const stale = new TurnstileVerifier({
     secret: "test-secret",
     now: () => now,
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          success: true,
-          challenge_ts: "2026-07-14T10:00:00Z",
-        }),
-        { status: 200 },
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            success: true,
+            challenge_ts: "2026-07-14T10:00:00Z",
+          }),
+          { status: 200 },
+        ),
       ),
   });
   assertEquals(await stale.verify({ token: "captcha-token" }), false);
@@ -589,14 +604,16 @@ Deno.test("Turnstile validates timestamp hostname and action and fails closed", 
     secret: "test-secret",
     expectedHostname: "expected.example",
     now: () => now,
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          success: true,
-          hostname: "wrong.example",
-          challenge_ts: "2026-07-14T11:59:30Z",
-        }),
-        { status: 200 },
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            success: true,
+            hostname: "wrong.example",
+            challenge_ts: "2026-07-14T11:59:30Z",
+          }),
+          { status: 200 },
+        ),
       ),
   });
   assertEquals(await wrongHost.verify({ token: "captcha-token" }), false);

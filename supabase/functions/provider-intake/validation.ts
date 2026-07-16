@@ -7,7 +7,6 @@ import {
   type SubmitEnvelope,
 } from "./types.ts";
 
-const controlCharacters = /[\u0000-\u001f\u007f]/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const rfcPattern = /^[A-Z&\u00D1]{3,4}\d{6}[A-Z0-9]{3}$/;
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -17,6 +16,19 @@ const tokenPattern = /^[A-Za-z0-9_-]{32,256}$/;
 const idempotencyPattern = /^[A-Za-z0-9._:-]{8,128}$/;
 
 type EnvReader = (name: string) => string | undefined;
+
+function hasAsciiControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      (codePoint <= 0x1f || codePoint === 0x7f)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function envNumber(reader: EnvReader, name: string, fallback: number): number {
   const raw = reader(name)?.trim();
@@ -132,7 +144,7 @@ function normalizedText(
     }
     return undefined;
   }
-  if (result.length > maxLength || controlCharacters.test(result)) {
+  if (result.length > maxLength || hasAsciiControlCharacter(result)) {
     throw new IntakeError("invalid_request", 400, `${field}_invalid`);
   }
   return result;
@@ -329,7 +341,7 @@ export async function readSubmitEnvelope(
 }
 
 export function validateCaptchaToken(token: string): string {
-  if (!token || token.length > 4096 || controlCharacters.test(token)) {
+  if (!token || token.length > 4096 || hasAsciiControlCharacter(token)) {
     throw new IntakeError("captcha_failed", 400, "captcha_token_invalid");
   }
   return token;
