@@ -26,9 +26,9 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF: scsirgbuqjcwoaxfacth
       FUNCTION_NAME: provider-intake
-      EXPECTED_FUNCTION_TREE: b72b1e620be561207bca7b9b9bd34e57d151de4b
+      EXPECTED_FUNCTION_TREE: 0327887346f8ad175750ff859fa5a4ccb56c6601
       EXPECTED_MAX_TOTAL_MB: "12"
-      BASE_COMMIT: 60966c5d943c07fd8be7e6ebb0c3babcfa69b6c6
+      BASE_COMMIT: f1894ab63a5f4652eaa1c36ddcf9da913f7f13fd
       AUTH_FILE: ops/provider-intake/deploy-dev.authorization.json
 
     steps:

@@ -2,6 +2,6 @@
   "confirm": "DEPLOY_PROVIDER_INTAKE_DEV_ONLY",
   "project_ref": "scsirgbuqjcwoaxfacth",
   "function_name": "provider-intake",
-  "expected_function_tree": "b72b1e620be561207bca7b9b9bd34e57d151de4b",
+  "expected_function_tree": "0327887346f8ad175750ff859fa5a4ccb56c6601",
   "expected_max_total_mb": 12
 }
