@@ -1,8 +1,0 @@
-{
-  "confirm": "RUN_PROVIDER_INTAKE_DEV_FOCAL_RETEST_ONLY",
-  "project_ref": "scsirgbuqjcwoaxfacth",
-  "function_name": "provider-intake",
-  "expected_function_tree": "379f65801609e40143d948b3de702e391636c512",
-  "expected_script_blob": "7e45aebc351671435e2c295e27366c0d7e018366",
-  "expected_max_total_mb": 12
-}
