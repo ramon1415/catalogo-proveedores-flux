@@ -13,12 +13,19 @@ function optionalEnv(name: string): string | undefined {
   return Deno.env.get(name)?.trim() || undefined;
 }
 
-if ((Deno.env.get("INTAKE_ALLOW_QUERY_TOKEN") || "false").trim().toLowerCase() !== "false") {
-  throw new Error("invalid_configuration:INTAKE_ALLOW_QUERY_TOKEN_must_be_false");
+if (
+  (Deno.env.get("INTAKE_ALLOW_QUERY_TOKEN") || "false").trim().toLowerCase() !==
+    "false"
+) {
+  throw new Error(
+    "invalid_configuration:INTAKE_ALLOW_QUERY_TOKEN_must_be_false",
+  );
 }
 
 const captchaProvider = requiredEnv("CAPTCHA_PROVIDER").toLowerCase();
-if (captchaProvider !== "turnstile") throw new Error("invalid_configuration:CAPTCHA_PROVIDER");
+if (captchaProvider !== "turnstile") {
+  throw new Error("invalid_configuration:CAPTCHA_PROVIDER");
+}
 
 const repository = new SupabaseIntakeRepository({
   supabaseUrl: requiredEnv("SUPABASE_URL"),

@@ -15,7 +15,9 @@ type RepositoryOptions = {
 
 function safeBaseUrl(value: string): string {
   const url = new URL(value);
-  if (url.protocol !== "https:") throw new Error("invalid_configuration:SUPABASE_URL");
+  if (url.protocol !== "https:") {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
   return url.toString().replace(/\/$/, "");
 }
 
@@ -31,7 +33,8 @@ function knownRpcError(message: string): string {
     "provider_intake_file_metadata_conflict",
     "provider_intake_not_attachable",
   ];
-  return known.find((code) => message.includes(code)) || "provider_intake_repository_error";
+  return known.find((code) => message.includes(code)) ||
+    "provider_intake_repository_error";
 }
 
 export class SupabaseIntakeRepository implements IntakeRepository {
@@ -42,7 +45,9 @@ export class SupabaseIntakeRepository implements IntakeRepository {
   constructor(options: RepositoryOptions) {
     this.options = options;
     this.baseUrl = safeBaseUrl(options.supabaseUrl);
-    if (!options.serviceRoleKey.trim()) throw new Error("missing_required_secret:SUPABASE_SERVICE_ROLE_KEY");
+    if (!options.serviceRoleKey.trim()) {
+      throw new Error("missing_required_secret:SUPABASE_SERVICE_ROLE_KEY");
+    }
     this.fetchImpl = options.fetchImpl || fetch;
   }
 
@@ -54,12 +59,18 @@ export class SupabaseIntakeRepository implements IntakeRepository {
     };
   }
 
-  private async rpc<T>(name: string, body: Record<string, unknown>): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl}/rest/v1/rpc/${name}`, {
-      method: "POST",
-      headers: this.headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify(body),
-    });
+  private async rpc<T>(
+    name: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/rest/v1/rpc/${name}`,
+      {
+        method: "POST",
+        headers: this.headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      },
+    );
     if (!response.ok) {
       let message = "";
       try {
@@ -74,7 +85,9 @@ export class SupabaseIntakeRepository implements IntakeRepository {
   }
 
   resolveLink(tokenHash: string): Promise<LinkResolution> {
-    return this.rpc("resolve_provider_intake_link_internal", { p_token_hash: tokenHash });
+    return this.rpc("resolve_provider_intake_link_internal", {
+      p_token_hash: tokenHash,
+    });
   }
 
   createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult> {
@@ -91,12 +104,16 @@ export class SupabaseIntakeRepository implements IntakeRepository {
   }
 
   async uploadFile(file: PreparedFile): Promise<void> {
-    const encodedPath = file.storagePath.split("/").map(encodeURIComponent).join("/");
+    const encodedPath = file.storagePath.split("/").map(encodeURIComponent)
+      .join("/");
     const response = await this.fetchImpl(
       `${this.baseUrl}/storage/v1/object/intake-uploads/${encodedPath}`,
       {
         method: "POST",
-        headers: this.headers({ "Content-Type": file.mimeType, "x-upsert": "false" }),
+        headers: this.headers({
+          "Content-Type": file.mimeType,
+          "x-upsert": "false",
+        }),
         body: file.bytes.slice().buffer as ArrayBuffer,
       },
     );
@@ -105,15 +122,21 @@ export class SupabaseIntakeRepository implements IntakeRepository {
 
   async removeUploadedFiles(paths: string[]): Promise<void> {
     if (!paths.length) return;
-    const response = await this.fetchImpl(`${this.baseUrl}/storage/v1/object/intake-uploads`, {
-      method: "DELETE",
-      headers: this.headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ prefixes: paths }),
-    });
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/storage/v1/object/intake-uploads`,
+      {
+        method: "DELETE",
+        headers: this.headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ prefixes: paths }),
+      },
+    );
     if (!response.ok) throw new Error("provider_intake_storage_cleanup_failed");
   }
 
-  async attachFiles(intakeId: string, files: StoredFileMetadata[]): Promise<void> {
+  async attachFiles(
+    intakeId: string,
+    files: StoredFileMetadata[],
+  ): Promise<void> {
     await this.rpc("attach_provider_intake_files_internal", {
       p_payment_intake_id: intakeId,
       p_files: files,

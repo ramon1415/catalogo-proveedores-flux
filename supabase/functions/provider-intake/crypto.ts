@@ -1,7 +1,9 @@
 const encoder = new TextEncoder();
 
 function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
 }
 
 export async function sha256Hex(value: string | Uint8Array): Promise<string> {
@@ -10,7 +12,10 @@ export async function sha256Hex(value: string | Uint8Array): Promise<string> {
   return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)));
 }
 
-export async function hmacSha256Hex(secret: string, value: string): Promise<string> {
+export async function hmacSha256Hex(
+  secret: string,
+  value: string,
+): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
@@ -18,9 +23,17 @@ export async function hmacSha256Hex(secret: string, value: string): Promise<stri
     false,
     ["sign"],
   );
-  return toHex(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value))));
+  return toHex(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, encoder.encode(value)),
+    ),
+  );
 }
 
-export function stableCanonicalString(entries: Array<[string, string]>): string {
-  return entries.map(([key, value]) => `${key.length}:${key}:${value.length}:${value}`).join("|");
+export function stableCanonicalString(
+  entries: Array<[string, string]>,
+): string {
+  return entries.map(([key, value]) =>
+    `${key.length}:${key}:${value.length}:${value}`
+  ).join("|");
 }

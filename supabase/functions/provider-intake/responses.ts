@@ -3,7 +3,8 @@ import { IntakeError, type PublicErrorCode } from "./types.ts";
 
 const securityHeaders: HeadersInit = {
   "Cache-Control": "no-store",
-  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  "Content-Security-Policy":
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
   "Content-Type": "application/json; charset=utf-8",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
@@ -26,7 +27,11 @@ export function publicError(
   origin: string | null,
   requestId: string,
 ): Response {
-  return jsonResponse({ ok: false, error: code, request_id: requestId }, status, origin);
+  return jsonResponse(
+    { ok: false, error: code, request_id: requestId },
+    status,
+    origin,
+  );
 }
 
 export function mapError(error: unknown): IntakeError {
@@ -41,7 +46,10 @@ export function mapError(error: unknown): IntakeError {
   if (message.includes("provider_intake_invalid_amount")) {
     return new IntakeError("invalid_amount", 400, "invalid_amount");
   }
-  if (message.includes("provider_intake_invalid") || message.includes("unknown_field")) {
+  if (
+    message.includes("provider_intake_invalid") ||
+    message.includes("unknown_field")
+  ) {
     return new IntakeError("invalid_request", 400, "invalid_request");
   }
   return new IntakeError("service_unavailable", 503, "service_unavailable");

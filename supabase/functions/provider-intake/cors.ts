@@ -1,17 +1,22 @@
-import { IntakeError, type IntakeConfig } from "./types.ts";
+import { type IntakeConfig, IntakeError } from "./types.ts";
 
 export function parseAllowedOrigins(raw: string): string[] {
   const origins = raw.split(",").map((value) => value.trim()).filter(Boolean);
   const unique = new Set<string>();
   for (const origin of origins) {
-    if (origin === "*") throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
+    if (origin === "*") {
+      throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
+    }
     let parsed: URL;
     try {
       parsed = new URL(origin);
     } catch {
       throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
     }
-    if (parsed.protocol !== "https:" || parsed.origin !== origin || parsed.username || parsed.password) {
+    if (
+      parsed.protocol !== "https:" || parsed.origin !== origin ||
+      parsed.username || parsed.password
+    ) {
       throw new Error("invalid_configuration:INTAKE_ALLOWED_ORIGINS");
     }
     unique.add(origin);
@@ -19,7 +24,10 @@ export function parseAllowedOrigins(raw: string): string[] {
   return [...unique];
 }
 
-export function validateOrigin(req: Request, config: IntakeConfig): string | null {
+export function validateOrigin(
+  req: Request,
+  config: IntakeConfig,
+): string | null {
   const origin = req.headers.get("origin");
   if (!origin) {
     if (!config.allowNoOrigin) {
@@ -35,7 +43,8 @@ export function validateOrigin(req: Request, config: IntakeConfig): string | nul
 
 export function corsHeaders(origin: string | null): HeadersInit {
   const headers: Record<string, string> = {
-    "Access-Control-Allow-Headers": "Content-Type, X-Intake-Token, Idempotency-Key",
+    "Access-Control-Allow-Headers":
+      "Content-Type, X-Intake-Token, Idempotency-Key",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Max-Age": "600",
     "Vary": "Origin",
