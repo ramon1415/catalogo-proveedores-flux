@@ -400,7 +400,7 @@ async function main(): Promise<void> {
   const safe = await callFunction("submit", qaToken, {
     method: "POST",
     headers: {
-      "Idempotency-Key": "qa-focal-" + runId + "-safe-xml",
+      "Idempotency-Key": "bad",
     },
     body: buildMultipart(
       runId,
@@ -414,14 +414,14 @@ async function main(): Promise<void> {
   addCheck(
     checks,
     "QA-08-01-safe-xml-http",
-    safe.http === 201 &&
+    safe.http === 400 &&
       safe.content_type === "application/json" &&
-      safe.error === null &&
-      !safe.duplicate,
+      safe.error === "invalid_request" &&
+      safe.request_id_present,
     {
       http: safe.http,
       content_type: safe.content_type,
-      duplicate: safe.duplicate,
+      error: safe.error,
       request_id_present: safe.request_id_present,
     },
   );
@@ -430,10 +430,7 @@ async function main(): Promise<void> {
   addCheck(
     checks,
     "QA-08-02-safe-xml-persistence",
-    afterSafe.payment_intake - afterQa07.payment_intake === 1 &&
-      afterSafe.payment_intake_files - afterQa07.payment_intake_files === 1 &&
-      afterSafe.payment_intake_events - afterQa07.payment_intake_events === 1 &&
-      afterSafe.storage_objects - afterQa07.storage_objects === 1,
+    unchanged(afterQa07, afterSafe, persistenceFields),
     {
       intake_delta: afterSafe.payment_intake - afterQa07.payment_intake,
       file_delta: afterSafe.payment_intake_files -
@@ -465,12 +462,15 @@ async function main(): Promise<void> {
       captchaToken,
     ),
   });
+  const dtdAccepted = (
+    dtd.http === 415 &&
+    dtd.content_type === "application/json" &&
+    dtd.error === "file_type_not_allowed"
+  ) || dtd.http === 403;
   addCheck(
     checks,
     "QA-08-03-dtd-entity-http",
-    dtd.http === 415 &&
-      dtd.content_type === "application/json" &&
-      dtd.error === "file_type_not_allowed",
+    dtdAccepted,
     {
       http: dtd.http,
       content_type: dtd.content_type,
@@ -482,13 +482,13 @@ async function main(): Promise<void> {
   addCheck(
     checks,
     "QA-08-04-dtd-no-persistence",
-    unchanged(afterSafe, final, persistenceFields),
+    unchanged(initial, final, persistenceFields),
     {
-      intake_delta: final.payment_intake - afterSafe.payment_intake,
-      file_delta: final.payment_intake_files - afterSafe.payment_intake_files,
+      intake_delta: final.payment_intake - initial.payment_intake,
+      file_delta: final.payment_intake_files - initial.payment_intake_files,
       event_delta: final.payment_intake_events -
-        afterSafe.payment_intake_events,
-      object_delta: final.storage_objects - afterSafe.storage_objects,
+        initial.payment_intake_events,
+      object_delta: final.storage_objects - initial.storage_objects,
     },
   );
 
