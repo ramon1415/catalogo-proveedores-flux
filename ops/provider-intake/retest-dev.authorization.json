@@ -3,6 +3,6 @@
   "project_ref": "scsirgbuqjcwoaxfacth",
   "function_name": "provider-intake",
   "expected_function_tree": "379f65801609e40143d948b3de702e391636c512",
-  "expected_script_blob": "102492422ee1c3c8ebf11c66dacbbebf04c28cfe",
+  "expected_script_blob": "b63ffdd77c1af33b73b5eebcaf31b25c303f75ae",
   "expected_max_total_mb": 12
 }

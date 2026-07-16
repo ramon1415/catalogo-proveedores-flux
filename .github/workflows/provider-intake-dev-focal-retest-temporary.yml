@@ -30,9 +30,9 @@ jobs:
       FUNCTION_NAME: provider-intake
       EXPECTED_FUNCTION_TREE: 379f65801609e40143d948b3de702e391636c512
       EXPECTED_MAX_TOTAL_MB: "12"
-      BASE_COMMIT: d97610f4ce439804e5e3a5d29c8b7faf04b6a9ca
+      BASE_COMMIT: dce70465c67e0337fe22b71a720ead8760c869ed
       RETEST_SCRIPT: ops/provider-intake/retest-dev/provider-intake-focal-retest.ts
-      EXPECTED_SCRIPT_BLOB: 102492422ee1c3c8ebf11c66dacbbebf04c28cfe
+      EXPECTED_SCRIPT_BLOB: b63ffdd77c1af33b73b5eebcaf31b25c303f75ae
       AUTH_FILE: ops/provider-intake/retest-dev.authorization.json
 
     steps:
