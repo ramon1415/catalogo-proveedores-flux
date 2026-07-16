@@ -30,7 +30,6 @@ jobs:
       EXPECTED_MAX_TOTAL_MB: "12"
       BASE_COMMIT: 60966c5d943c07fd8be7e6ebb0c3babcfa69b6c6
       AUTH_FILE: ops/provider-intake/deploy-dev.authorization.json
-      EVIDENCE_DIR: ${{ runner.temp }}/provider-intake-dev-deploy-evidence
 
     steps:
       - name: Guard branch and deployment inputs
@@ -160,6 +159,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          EVIDENCE_DIR="${RUNNER_TEMP}/provider-intake-dev-deploy-evidence"
           mkdir -p "${EVIDENCE_DIR}"
 
           if supabase functions deploy "${FUNCTION_NAME}"             --project-ref "${SUPABASE_PROJECT_REF}"             >"${RUNNER_TEMP}/provider-intake-deploy.stdout"             2>"${RUNNER_TEMP}/provider-intake-deploy.stderr"; then
