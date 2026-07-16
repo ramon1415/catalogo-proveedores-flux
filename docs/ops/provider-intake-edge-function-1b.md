@@ -60,15 +60,15 @@ The functional battery must prove:
 - tables remain RLS protected and the bucket remains private;
 - no `notification_events` row is created until its event type is supported safely.
 - `link-info` exposes `max_total_mb=12` without internal identifiers;
-- a total request just above 12 MB but below the calibrated platform boundary returns HTTP 413 JSON `payload_too_large` with zero persistence;
+- a request above 12 MB is rejected either by the application with HTTP 413 JSON `payload_too_large` or by the perimeter with non-JSON HTTP 413, 502, or 503, always with zero persistence;
 - a request below 12 MB continues to the next applicable validation gate;
 - XML containing `DOCTYPE` or `ENTITY` is blocked by the function with HTTP 415 JSON, or by the perimeter with HTTP 403, with zero persistence in either case.
 
 ## Platform boundary and Phase 1C client behavior
 
-DEV calibration reached `provider-intake` at approximately 10, 12, 14, 16, and 18 MB. The known non-JSON relay rejection occurs above 20 MB. `SAFE_TOTAL_MB` is therefore 12 MB: it stays at least 40% below the known boundary, respects the MVP cap, leaves multipart headroom around a 10 MB file, and permits a reproducible DEV retest above the functional limit without approaching the platform boundary.
+`INTAKE_MAX_TOTAL_MB` remains 12 MB in DEV. This is the functional limit exposed by `link-info`, not a guaranteed physical gateway threshold. If an oversized body reaches `provider-intake`, the function returns HTTP 413 JSON `payload_too_large`. The hosting perimeter may reject the body first with a non-JSON HTTP 413, 502, or 503. This is classified as **Accepted Platform Boundary / P2 residual operativo** when the request creates no database or Storage persistence and exposes no sensitive information.
 
-The Edge Function enforces the full request size before link lookup or persistence. The platform may still reject a larger body before the handler. Phase 1C must read JSON only when the response advertises `application/json`; map non-JSON 403 to a security-content rejection, non-JSON 413 to an oversized request, and non-JSON 502/503/relay failures to a generic unprocessed-request message. It must not show infrastructure bodies or automatically retry oversized requests.
+Phase 1C must read `max_total_mb` from `link-info`, calculate the total upload size before sending, block submissions above 12 MB, and translate non-JSON HTTP 413, 502, or 503 responses to `El tamaño total de los archivos excede el límite permitido.` It must never show an infrastructure response body or retry the oversized request automatically.
 
 ## Roll-forward rule
 

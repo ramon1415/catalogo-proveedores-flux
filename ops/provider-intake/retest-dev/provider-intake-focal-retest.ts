@@ -466,16 +466,24 @@ async function main(): Promise<void> {
       "not-used",
     ),
   });
+  const applicationRejected = over.http === 413 &&
+    over.content_type === "application/json" &&
+    over.error === "payload_too_large";
+  const platformRejected = [413, 502, 503].includes(over.http) &&
+    over.content_type !== "application/json";
+  const overLimitAccepted = applicationRejected || platformRejected;
+  const rejectionLayer = over.content_type === "application/json"
+    ? "application"
+    : "platform";
   addCheck(
     checks,
     "QA-07-03-request-12_5mb",
-    over.http === 413 &&
-      over.content_type === "application/json" &&
-      over.error === "payload_too_large",
+    overLimitAccepted,
     {
       http: over.http,
       content_type: over.content_type,
       error: over.error,
+      rejection_layer: rejectionLayer,
     },
   );
 
