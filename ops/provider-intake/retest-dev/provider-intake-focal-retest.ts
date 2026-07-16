@@ -602,8 +602,13 @@ async function main(): Promise<void> {
     checks,
   };
 
-  await Deno.writeTextFile(evidenceFile, JSON.stringify(evidence, null, 2) + "\n");
-  console.log("Focal retest completed: " + passed + " PASS / " + failed + " FAIL.");
+  await Deno.writeTextFile(
+    evidenceFile,
+    JSON.stringify(evidence, null, 2) + "\n",
+  );
+  console.log(
+    "Focal retest completed: " + passed + " PASS / " + failed + " FAIL.",
+  );
 
   if (failed > 0) {
     Deno.exit(1);
