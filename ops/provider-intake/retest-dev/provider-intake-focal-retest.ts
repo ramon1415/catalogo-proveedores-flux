@@ -36,6 +36,30 @@ type Check = {
   observed: Record<string, boolean | number | string | null>;
 };
 
+type RetestStage =
+  | "startup"
+  | "initial_snapshot"
+  | "link_info"
+  | "under_limit_request"
+  | "over_limit_request"
+  | "qa07_post_snapshot"
+  | "safe_xml_request"
+  | "safe_xml_post_snapshot"
+  | "dtd_request"
+  | "final_snapshot"
+  | "write_final_evidence";
+
+type SanitizedErrorCode =
+  | "required_environment_missing"
+  | "read_only_postcheck_failed"
+  | "invalid_snapshot"
+  | "unexpected_check_count"
+  | "network_request_failed"
+  | "evidence_write_failed"
+  | "sanitized_execution_error";
+
+let currentStage: RetestStage = "startup";
+
 const projectRef = "scsirgbuqjcwoaxfacth";
 const functionTree = "379f65801609e40143d948b3de702e391636c512";
 const expectedMaxTotalMb = 12;
@@ -51,6 +75,74 @@ const baseUrl =
   "https://scsirgbuqjcwoaxfacth.functions.supabase.co/provider-intake";
 const allowedOrigin =
   "https://catalogo-proveedores-flux-git-feature-ramon-4c89bf-quantta-team.vercel.app";
+
+function sanitizeError(error: unknown): SanitizedErrorCode {
+  const message = error instanceof Error ? error.message : "";
+  if (message.startsWith("invalid_snapshot")) {
+    return "invalid_snapshot";
+  }
+
+  switch (message) {
+    case "required_environment_missing":
+    case "read_only_postcheck_failed":
+    case "unexpected_check_count":
+    case "network_request_failed":
+    case "evidence_write_failed":
+      return message;
+    default:
+      return "sanitized_execution_error";
+  }
+}
+
+async function writeEvidenceFile(
+  evidenceFile: string,
+  evidence: unknown,
+): Promise<void> {
+  try {
+    await Deno.writeTextFile(
+      evidenceFile,
+      JSON.stringify(evidence, null, 2) + "\n",
+    );
+  } catch {
+    throw new Error("evidence_write_failed");
+  }
+}
+
+async function writeFailureEvidence(error: unknown): Promise<void> {
+  const evidenceFile = Deno.env.get("EVIDENCE_FILE")?.trim();
+  if (!evidenceFile) {
+    return;
+  }
+
+  const evidence = {
+    metadata: {
+      project_ref: projectRef,
+      workflow_run_id: Deno.env.get("GITHUB_RUN_ID")?.trim() || "unavailable",
+      head_sha: Deno.env.get("GITHUB_SHA")?.trim() || "unavailable",
+      function_tree: functionTree,
+      secrets_printed: false,
+      migrations_executed: false,
+    },
+    summary: {
+      result: "ERROR",
+      passed: 0,
+      failed: 0,
+    },
+    diagnostic: {
+      failed_stage: currentStage,
+      error_code: sanitizeError(error),
+    },
+  };
+
+  try {
+    await Deno.writeTextFile(
+      evidenceFile,
+      JSON.stringify(evidence, null, 2) + "\n",
+    );
+  } catch {
+    // The console remains sanitized even when evidence cannot be written.
+  }
+}
 
 function requiredEnv(name: string): string {
   const value = Deno.env.get(name)?.trim();
@@ -153,7 +245,7 @@ async function readSnapshot(databaseUrl: string): Promise<Snapshot> {
     "  'approval_batches', (select count(*)::integer from public.approval_batches),",
     "  'notification_events', (select count(*)::integer from public.notification_events),",
     "  'intake_notifications', (select count(*)::integer from public.notification_events where event_type = 'provider_intake.received'),",
-    "  'converted_intakes', (select count(*)::integer from public.payment_intake where created_payment_request_id is not null or provider_id is not null),",
+    "  'converted_intakes', (select count(*)::integer from public.payment_intake where status = 'converted' or created_payment_request_id is not null),",
     "  'duplicate_public_folios', (select count(*)::integer from (select public_folio from public.payment_intake group by public_folio having count(*) > 1) d),",
     "  'duplicate_idempotency_keys', (select count(*)::integer from (select intake_link_id, idempotency_key from public.payment_intake group by intake_link_id, idempotency_key having count(*) > 1) d),",
     "  'duplicate_storage_paths', (select count(*)::integer from (select storage_path from public.payment_intake_files group by storage_path having count(*) > 1) d),",
@@ -190,7 +282,13 @@ async function readSnapshot(databaseUrl: string): Promise<Snapshot> {
     throw new Error("read_only_postcheck_failed");
   }
   const raw = new TextDecoder().decode(output.stdout).trim();
-  return parseSnapshot(JSON.parse(raw));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("invalid_snapshot");
+  }
+  return parseSnapshot(parsed);
 }
 
 function buildPayload(runId: string, suffix: string): Record<string, unknown> {
@@ -264,11 +362,16 @@ async function callFunction(
   const headers = new Headers(init.headers);
   headers.set("Origin", allowedOrigin);
   headers.set("X-Intake-Token", token);
-  const response = await fetch(baseUrl + "/" + route, {
-    ...init,
-    headers,
-    signal: AbortSignal.timeout(180_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(baseUrl + "/" + route, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(180_000),
+    });
+  } catch {
+    throw new Error("network_request_failed");
+  }
   return await observeResponse(response);
 }
 
@@ -298,8 +401,11 @@ async function main(): Promise<void> {
   const headSha = requiredEnv("GITHUB_SHA");
 
   const checks: Check[] = [];
+
+  currentStage = "initial_snapshot";
   const initial = await readSnapshot(databaseUrl);
 
+  currentStage = "link_info";
   const linkInfo = await callFunction("link-info", qaToken, { method: "GET" });
   addCheck(
     checks,
@@ -312,6 +418,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "under_limit_request";
   const underFile = new File(
     [new Uint8Array(expectedMaxFileBytes)],
     "qa-under-total-limit.bin",
@@ -341,6 +448,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "over_limit_request";
   const overBytes = Math.floor(12.5 * 1024 * 1024);
   const overFile = new File(
     [new Uint8Array(overBytes)],
@@ -371,6 +479,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "qa07_post_snapshot";
   const afterQa07 = await readSnapshot(databaseUrl);
   const persistenceFields: Array<keyof Snapshot> = [
     "payment_intake",
@@ -392,6 +501,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "safe_xml_request";
   const safeXml = new File(
     ['<?xml version="1.0" encoding="UTF-8"?><cfdi Version="4.0"/>'],
     "qa-safe.xml",
@@ -426,6 +536,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "safe_xml_post_snapshot";
   const afterSafe = await readSnapshot(databaseUrl);
   addCheck(
     checks,
@@ -441,6 +552,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "dtd_request";
   const unsafeXml = new File(
     [
       '<?xml version="1.0"?><!DOCTYPE cfdi [<!ENTITY external SYSTEM "https://example.invalid/value">]><cfdi>&external;</cfdi>',
@@ -478,6 +590,7 @@ async function main(): Promise<void> {
     },
   );
 
+  currentStage = "final_snapshot";
   const final = await readSnapshot(databaseUrl);
   addCheck(
     checks,
@@ -602,10 +715,8 @@ async function main(): Promise<void> {
     checks,
   };
 
-  await Deno.writeTextFile(
-    evidenceFile,
-    JSON.stringify(evidence, null, 2) + "\n",
-  );
+  currentStage = "write_final_evidence";
+  await writeEvidenceFile(evidenceFile, evidence);
   console.log(
     "Focal retest completed: " + passed + " PASS / " + failed + " FAIL.",
   );
@@ -617,7 +728,8 @@ async function main(): Promise<void> {
 
 try {
   await main();
-} catch {
-  console.error("Focal retest stopped with a sanitized execution error.");
+} catch (error) {
+  await writeFailureEvidence(error);
+  console.error("Focal retest stopped at sanitized stage: " + currentStage);
   Deno.exit(1);
 }
