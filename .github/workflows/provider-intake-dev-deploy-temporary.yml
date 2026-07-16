@@ -95,8 +95,7 @@ jobs:
           fi
 
           changed_files="$(git diff --name-only "${BASE_COMMIT}" "${GITHUB_SHA}" | sort)"
-          changed_count="$(printf '%s
-' "${changed_files}" | sed '/^$/d' | wc -l)"
+          changed_count="$(printf '%s\n' "${changed_files}" | sed '/^$/d' | wc -l)"
 
           if [[ "${changed_count}" -ne 2 ]]; then
             echo "::error::Only the temporary workflow and authorization marker may be added after the approved head."
