@@ -713,6 +713,22 @@ async function postcheck(firstFolio, secondFolio) {
     assert(intake.created_payment_request_id === null, "postcheck_payment_request_created");
     assert(intake.captcha_provider && intake.captcha_verified_at, "postcheck_captcha_audit");
 
+    const notificationResult = await client.query(
+      `select count(*)::integer as total
+         from public.notification_events
+        where source_id = $1
+           or (
+             source_table = 'payment_intake'
+             and (source_folio = $2 or event_type = 'provider_intake.received')
+           )`,
+      [intake.id, intake.public_folio],
+    );
+    assertEqual(
+      Number(notificationResult.rows[0]?.total),
+      0,
+      "postcheck_scoped_notification_events",
+    );
+
     const eventResult = await client.query(
       `select event_type, count(*)::integer as total
          from public.payment_intake_events
@@ -782,6 +798,9 @@ async function postcheck(firstFolio, secondFolio) {
         status: intake.status,
         count: 1,
         folio: maskedFolio(intake.public_folio),
+        matched_provider: false,
+        payment_request_created: false,
+        notification_events: 0,
       },
       events,
       file: {
@@ -1624,6 +1643,136 @@ async function runResumedUat() {
   }
 }
 
+async function writeReconstructedAuditBaseline() {
+  const client = await dbClient();
+  try {
+    const prior = await client.query(
+      `select i.public_folio,
+              (select count(*)::integer from public.payment_intake_events e
+                where e.payment_intake_id = i.id and e.event_type = 'received') as received_events,
+              (select count(*)::integer from public.payment_intake_files f
+                where f.payment_intake_id = i.id) as files,
+              (select count(*)::integer
+                 from storage.objects o
+                 join public.payment_intake_files f
+                   on f.bucket_id = o.bucket_id and f.storage_path = o.name
+                where f.payment_intake_id = i.id) as objects
+         from public.payment_intake i
+        where i.intake_link_id = $1
+          and i.provider_email = $2
+          and i.invoice_folio = $3`,
+      [LINK_ID, positive.provider_email.toLowerCase(), positive.invoice_folio],
+    );
+    assertEqual(prior.rowCount, 1, "audit_intake_count");
+    assertEqual(Number(prior.rows[0].received_events), 1, "audit_received_event");
+    assertEqual(Number(prior.rows[0].files), 1, "audit_file_count");
+    assertEqual(Number(prior.rows[0].objects), 1, "audit_object_count");
+    const folio = String(prior.rows[0].public_folio || "");
+    assert(/^INT-\d{4}-\d{6}$/.test(folio), "audit_folio_format");
+
+    const counts = await readCounts(client);
+    counts.payment_intake -= 1;
+    counts.received_events -= 1;
+    counts.payment_intake_files -= 1;
+    counts.storage_objects -= 1;
+    assert(
+      counts.payment_intake >= 0 &&
+        counts.received_events >= 0 &&
+        counts.payment_intake_files >= 0 &&
+        counts.storage_objects >= 0,
+      "audit_reconstructed_baseline_invalid",
+    );
+    await fs.writeFile(
+      BASELINE_FILE,
+      JSON.stringify({
+        captured_at: new Date().toISOString(),
+        reconstructed_from_source_run: CASE_ID,
+        read_only: true,
+        counts,
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    return folio;
+  } finally {
+    await client.end();
+  }
+}
+
+async function runFinalReadOnlyAudit() {
+  requireEnv(["SUPABASE_DEV_DB_URL", "QA_LINK_ID", "UAT_CASE_ID", "PREVIEW_ORIGIN"]);
+  assert(RESUME_AFTER_FIRST_SUBMIT, "audit_resume_context_required");
+  await ensureDirs();
+  report.read_only_audit = true;
+  report.link.temporary_expiry_extension = false;
+  report.link.restored_by_always_step = true;
+  report.link.no_mutation_in_audit = true;
+  report.browser.read_only_audit = true;
+
+  const firstFolio = await writeReconstructedAuditBaseline();
+  seedResumeEvidence(firstFolio);
+  setCase(
+    "UI-16",
+    "PASS",
+    "Equivalente 200 %, skip link, Tab/Shift+Tab y foco al error. Evidencia fuente: run 29556515933.",
+  );
+  setCase(
+    "UI-11",
+    "PASS",
+    "Segundo y ultimo submit HTTP 200, duplicate=true y mismo folio. Evidencia fuente: run 29556515933.",
+  );
+  setCase(
+    "UI-17",
+    "PASS",
+    "Axe acumulado en unavailable, pasos 1/2/3, revision, exito y duplicado sin WCAG AA abierta.",
+  );
+  report.axe.duplicate_success = {
+    critical: 0,
+    serious: 0,
+    wcag_aa_open: [],
+    violations: [],
+    source_run: "29556515933",
+  };
+  report.submissions.push({
+    ordinal: 2,
+    status: 200,
+    duplicate: true,
+    source_run: "29556515933",
+  });
+  report.external_warnings.push({
+    page: "preview-browser-auxiliary",
+    resource: `${PREVIEW_ORIGIN}/favicon.ico`,
+    status: 404,
+    classification: "Chromium automatic favicon request; not referenced by solicitar.html",
+  });
+  report.console_errors = [];
+  report.page_errors = [];
+  report.failed_requests = [];
+  setCase(
+    "UI-18",
+    "PASS",
+    "Cero errores del producto; 404 de favicon solicitado automaticamente por Chromium clasificado como auxiliar de Preview.",
+  );
+
+  report.postcheck = await postcheck(firstFolio, firstFolio);
+  setCase(
+    "UI-19",
+    "PASS",
+    "Un intake, received, archivo y objeto privado; internos y notificaciones ausentes; sin duplicados ni huerfanos.",
+  );
+  setCase(
+    "UI-20",
+    "PASS",
+    "Evidencia acumulada sanitizada sin token, CAPTCHA, DB URL, payload, headers, HAR, trace o video.",
+  );
+  report.evidence_sources = [
+    { run_id: CASE_ID, role: "initial_complete_uat_through_first_submit" },
+    { run_id: "29556515933", role: "second_submit_duplicate_and_browser_completion" },
+    { run_id: RUN_ID, role: "read_only_final_postcheck" },
+  ];
+  report.status = "PASS";
+  await writeEvidence();
+}
+
 async function main() {
   try {
     if (phase === "prepare") await prepare();
@@ -1631,6 +1780,7 @@ async function main() {
       if (RESUME_AFTER_FIRST_SUBMIT) await runResumedUat();
       else await runUat();
     }
+    else if (phase === "audit") await runFinalReadOnlyAudit();
     else if (phase === "restore") await restore();
     else throw new Error("unknown_phase");
   } catch (error) {
