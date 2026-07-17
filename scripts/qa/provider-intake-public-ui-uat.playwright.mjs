@@ -117,7 +117,11 @@ async function writeFixtures() {
 }
 
 async function dbClient() {
-  const client = new Client({ connectionString: DB_URL, ssl: { rejectUnauthorized: false } });
+  const connection = new URL(DB_URL);
+  connection.searchParams.delete("sslmode");
+  connection.searchParams.delete("ssl");
+  connection.searchParams.delete("uselibpqcompat");
+  const client = new Client({ connectionString: connection.toString(), ssl: { rejectUnauthorized: false } });
   await client.connect();
   return client;
 }
