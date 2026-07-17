@@ -22,10 +22,10 @@
     </div>
   </header>
 
-  <div class="dev-banner" role="note">
+  <aside class="dev-banner" aria-label="Aviso del ambiente de pruebas">
     <span aria-hidden="true">●</span>
     No ingreses información real o productiva durante las pruebas.
-  </div>
+  </aside>
 
   <main id="contenido" tabindex="-1">
     <section id="boot-view" class="status-shell" aria-labelledby="boot-title">
@@ -140,11 +140,12 @@
                 <button id="limits-help-button" class="text-button" type="button" aria-expanded="false" aria-controls="limits-help">¿Qué incluye el límite total?</button>
                 <p id="limits-help" hidden>El cálculo incluye archivos, datos del formulario, CAPTCHA y metadatos técnicos del envío.</p>
               </div>
-              <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-controls="file-input" aria-describedby="dropzone-help file-global-error">
+              <div id="dropzone" class="dropzone" role="group" aria-labelledby="dropzone-title" aria-describedby="dropzone-help file-global-error">
                 <div class="dropzone__icon" aria-hidden="true">↑</div>
-                <strong>Arrastra tus documentos aquí</strong>
+                <strong id="dropzone-title">Arrastra tus documentos aquí</strong>
                 <span>o selecciónalos desde tu dispositivo</span>
-                <button id="choose-files-button" class="button button--secondary" type="button">Seleccionar archivos</button>
+                <button id="choose-files-button" class="button button--secondary" type="button" aria-controls="file-input">Seleccionar archivos</button>
+                <label class="sr-only" for="file-input">Seleccionar documentos para adjuntar</label>
                 <input id="file-input" class="sr-only" type="file" multiple accept=".pdf,.xml,.jpg,.jpeg,.png,.webp,application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp" tabindex="-1">
               </div>
               <p id="dropzone-help" class="help-copy">No se generan vistas previas ni enlaces temporales.</p>
@@ -179,7 +180,7 @@
           </div>
         </form>
 
-        <aside class="summary-aside" aria-labelledby="summary-title">
+        <section class="summary-aside" aria-labelledby="summary-title">
           <details id="mobile-summary" class="mobile-summary"><summary>Ver resumen de la solicitud</summary><div id="mobile-summary-content"></div></details>
           <div class="summary-card desktop-summary">
             <p class="eyebrow">Tu solicitud</p>
@@ -187,7 +188,7 @@
             <dl id="summary-list"><div><dt>Empresa receptora</dt><dd id="summary-company">—</dd></div><div><dt>Proveedor</dt><dd id="summary-provider">Sin capturar</dd></div><div><dt>Monto</dt><dd id="summary-amount">Sin capturar</dd></div><div><dt>Documentos</dt><dd id="summary-files">0 archivos</dd></div></dl>
             <div class="summary-privacy"><span aria-hidden="true">🔒</span><p>Tu enlace y la información capturada no se guardan en este dispositivo.</p></div>
           </div>
-        </aside>
+        </section>
       </div>
     </section>
 

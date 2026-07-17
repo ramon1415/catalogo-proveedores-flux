@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   IdempotencyController,
   IntakeStateMachine,
@@ -18,6 +19,9 @@ import {
 } from "../../solicitar-core.js";
 
 const validToken = "A".repeat(32);
+const portalHtml = fs.readFileSync(new URL("../../solicitar.html", import.meta.url), "utf8");
+const portalJs = fs.readFileSync(new URL("../../solicitar.js", import.meta.url), "utf8");
+const portalCss = fs.readFileSync(new URL("../../solicitar.css", import.meta.url), "utf8");
 const basePayload = {
   provider_name: "Proveedor de Prueba",
   provider_email: "qa@example.test",
@@ -118,6 +122,44 @@ test("ARCHIVOS: presupuesto total conservador incluye overhead", () => {
   const result = fitsTotalBudget(basePayload, files, ["support"], 12, { safetyBytes:256*1024, baseBytes:16*1024, perFileBytes:4*1024 });
   assert.equal(result.fits, false);
   assert.ok(estimateMultipartBytes(basePayload, files, ["support"]) > files[0].size);
+});
+
+test("ACCESIBILIDAD DOCUMENTOS: file-input tiene label explícito", () => {
+  assert.match(portalHtml, /<label[^>]*for="file-input"[^>]*>\s*Seleccionar documentos para adjuntar\s*<\/label>/);
+});
+test("ACCESIBILIDAD DOCUMENTOS: dropzone no es botón ni entra al tab order", () => {
+  const tag = portalHtml.match(/<div id="dropzone"[^>]*>/)?.[0] || "";
+  assert.doesNotMatch(tag, /role="button"/);
+  assert.doesNotMatch(tag, /tabindex=/);
+  assert.match(tag, /role="group"/);
+});
+test("ACCESIBILIDAD DOCUMENTOS: no hay ancestro interactivo para el botón selector", () => {
+  const tag = portalHtml.match(/<div id="dropzone"[^>]*>/)?.[0] || "";
+  assert.doesNotMatch(tag, /role="button"|tabindex="0"/);
+  assert.match(portalHtml, /<button id="choose-files-button"[^>]*>/);
+});
+test("ACCESIBILIDAD DOCUMENTOS: botón visible controla file-input", () => {
+  const tag = portalHtml.match(/<button id="choose-files-button"[^>]*>/)?.[0] || "";
+  assert.match(tag, /aria-controls="file-input"/);
+});
+test("ACCESIBILIDAD DOCUMENTOS: dropzone conserva drag and drop", () => {
+  for (const eventName of ["dragover", "dragleave", "drop"]) {
+    assert.match(portalJs, new RegExp(`dropzone\\.addEventListener\\("${eventName}"`));
+  }
+});
+test("ACCESIBILIDAD DOCUMENTOS: botón conserva el flujo de selección", () => {
+  assert.match(portalJs, /byId\("choose-files-button"\)\.addEventListener\("click", \(\) => byId\("file-input"\)\.click\(\)\)/);
+  assert.doesNotMatch(portalJs, /dropzone\.addEventListener\("(click|keydown)"/);
+});
+test("ACCESIBILIDAD DOCUMENTOS: IDs HTML sin duplicados", () => {
+  const ids = [...portalHtml.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+});
+test("ACCESIBILIDAD DOCUMENTOS: landmarks y affordance son semánticos", () => {
+  assert.match(portalHtml, /<aside class="dev-banner" aria-label="Aviso del ambiente de pruebas">/);
+  assert.match(portalHtml, /<section class="summary-aside" aria-labelledby="summary-title">/);
+  assert.match(portalHtml, /id="dropzone-title"/);
+  assert.doesNotMatch(portalCss, /\.dropzone:hover|\.dropzone\{[^}]*cursor:pointer/);
 });
 
 test("ERRORES: JSON 400 inválido", () => assert.equal(mapPublicResponse(400,"application/json",{ error:"invalid_request" }).code, "invalid_request"));

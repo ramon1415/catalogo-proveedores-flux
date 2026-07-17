@@ -327,7 +327,7 @@ async function addFiles(files) {
   const result = await validateFileBatch(combined, linkInfo);
   if (!result.valid) {
     byId("file-global-error").textContent = result.errors.join(" ");
-    byId("dropzone").focus();
+    byId("choose-files-button").focus();
     return;
   }
   selectedFiles = result.files.map((file, index) => ({
@@ -585,11 +585,9 @@ function bindEvents() {
   });
   form.addEventListener("change", () => { markMaterialChange(); if (currentStep === 4) updateSubmitReadiness(); });
   byId("retry-link-button").addEventListener("click", validateLink);
-  byId("choose-files-button").addEventListener("click", (event) => { event.stopPropagation(); byId("file-input").click(); });
+  byId("choose-files-button").addEventListener("click", () => byId("file-input").click());
   byId("file-input").addEventListener("change", (event) => { addFiles([...event.target.files]); event.target.value = ""; });
   const dropzone = byId("dropzone");
-  dropzone.addEventListener("click", () => byId("file-input").click());
-  dropzone.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); byId("file-input").click(); } });
   dropzone.addEventListener("dragover", (event) => { event.preventDefault(); dropzone.classList.add("is-dragging"); });
   dropzone.addEventListener("dragleave", () => dropzone.classList.remove("is-dragging"));
   dropzone.addEventListener("drop", (event) => { event.preventDefault(); dropzone.classList.remove("is-dragging"); addFiles([...event.dataTransfer.files]); });

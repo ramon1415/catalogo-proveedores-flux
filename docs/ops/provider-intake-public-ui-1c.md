@@ -154,6 +154,19 @@ La página usa landmarks, skip link, encabezados, `form`, `fieldset`, `legend`, 
 
 La UI es mobile-first, sin tablas ni scroll horizontal. En móvil usa una columna, botones amplios y resumen desplegable; en escritorio muestra formulario y resumen sticky. Los anchos objetivo son 320, 390, 768, 1024, 1366 y 1440 px, con zoom al 200% dentro del gate visual.
 
+### Diagnóstico Axe focal y corrección
+
+El run cloud focal `29554185343`, sin CAPTCHA ni submit, confirmó:
+
+- `label` (`critical`) sobre `#file-input`: el control no tenía nombre accesible.
+- `nested-interactive` (`serious`) sobre `#dropzone`: el contenedor con `role="button"` contenía el botón nativo `#choose-files-button`.
+- `region` (`moderate`) sobre `.dev-banner`: el aviso quedaba fuera de landmarks.
+- `landmark-complementary-is-top-level` (`moderate`) sobre `aside.summary-aside`: el landmark complementario estaba anidado dentro de `main`.
+
+La corrección asigna un `<label>` real al input, conserva `#choose-files-button` como único activador de selección, convierte la zona de arrastre en un grupo no interactivo, mantiene exclusivamente sus eventos drag/drop y traslada el foco de errores al botón visible. El banner DEV pasa a ser un `aside` de nivel superior y el resumen interno pasa a `section`. No se silenciaron reglas ni se excluyeron nodos de Axe.
+
+El diagnóstico extendió temporalmente el mismo enlace QA por tres horas porque estaba expirado y restauró `expires_at` y `updated_at` en el step `if: always()`. El token permaneció protegido, Turnstile no se cargó, hubo cero requests `/submit` y los deltas de intakes, archivos y objetos fueron cero.
+
 ## UAT y evidencia
 
 Antes de autorización CORS, el QA visual puede usar páginas sin token, token inválido y estados simulados locales, sin submit. No se deben capturar URLs con hash ni datos reales.
