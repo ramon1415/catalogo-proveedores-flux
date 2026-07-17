@@ -27,7 +27,10 @@ jobs:
       MERGE_COMMIT: 05986aca63f2d98635cbb9b928cd0cebac29315a
       EXPECTED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
       EXPECTED_FUNCTION_ID: 73713978-4fca-4426-8462-29f1c4a98ded
-      EXPECTED_FUNCTION_VERSION: "18"
+      AUTHORIZED_DEPLOYMENT_VERSION: "18"
+      EXPECTED_FUNCTION_VERSION: "19"
+      EXPECTED_FUNCTION_UPDATED_AT: "1784163315799"
+      EXPECTED_BUNDLE_SHA256: 55fd4ee961f361f97a55ce2c47c312502771bf1036890e1da7131c24bf68a38f
       CANONICAL_ORIGIN: https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app
       PREVIEW_ORIGIN: https://catalogo-proveedores-flux-git-feature-ramon-69af24-quantta-team.vercel.app
       CANONICAL_PRIVACY_URL: https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/provider-intake-privacy-dev.html

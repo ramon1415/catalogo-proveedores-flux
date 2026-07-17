@@ -13,10 +13,21 @@ const PREVIEW_ORIGIN = process.env.PREVIEW_ORIGIN;
 const CANONICAL_PRIVACY_URL = process.env.CANONICAL_PRIVACY_URL;
 const EXPECTED_FUNCTION_ID = process.env.EXPECTED_FUNCTION_ID;
 const EXPECTED_FUNCTION_VERSION = Number(process.env.EXPECTED_FUNCTION_VERSION);
+const AUTHORIZED_DEPLOYMENT_VERSION = Number(
+  process.env.AUTHORIZED_DEPLOYMENT_VERSION,
+);
+const EXPECTED_FUNCTION_UPDATED_AT = Number(
+  process.env.EXPECTED_FUNCTION_UPDATED_AT,
+);
+const EXPECTED_BUNDLE_SHA256 = process.env.EXPECTED_BUNDLE_SHA256;
 const EXPECTED_BACKEND_TREE = process.env.EXPECTED_BACKEND_TREE;
 const OUTPUT_DIR = process.env.POSTMERGE_OUTPUT_DIR;
 const BEFORE_FILE = path.join(OUTPUT_DIR, "before.json");
 const FINAL_FILE = path.join(OUTPUT_DIR, "postmerge_results_sanitized.json");
+const SOURCE_COMPARISON_FILE = path.join(
+  OUTPUT_DIR,
+  "runtime-source-comparison.json",
+);
 
 function assert(condition, code) {
   if (!condition) throw new Error(code);
@@ -202,18 +213,40 @@ function assertRuntime(runtime) {
   assert(runtime.status === "ACTIVE", "function_not_active");
   assert(runtime.version === EXPECTED_FUNCTION_VERSION, "function_version_changed");
   assert(runtime.verify_jwt === false, "function_verify_jwt_changed");
+  assert(
+    runtime.updated_at === EXPECTED_FUNCTION_UPDATED_AT,
+    "function_deployment_timestamp_changed",
+  );
+  assert(
+    runtime.ezbr_sha256 === EXPECTED_BUNDLE_SHA256,
+    "function_bundle_hash_changed",
+  );
 }
 
 async function snapshot() {
-  const [secrets, runtime, canonicalPreflight, previewPreflight, linkInfo, browser] =
-    await Promise.all([
-      secretState(),
-      runtimeState(),
-      preflight(CANONICAL_ORIGIN),
-      preflight(PREVIEW_ORIGIN),
-      neutralLinkInfo(),
-      noTokenBrowser(),
-    ]);
+  const [
+    secrets,
+    runtime,
+    canonicalPreflight,
+    previewPreflight,
+    linkInfo,
+    browser,
+    sourceComparisonRaw,
+  ] = await Promise.all([
+    secretState(),
+    runtimeState(),
+    preflight(CANONICAL_ORIGIN),
+    preflight(PREVIEW_ORIGIN),
+    neutralLinkInfo(),
+    noTokenBrowser(),
+    fs.readFile(SOURCE_COMPARISON_FILE, "utf8"),
+  ]);
+  const sourceComparison = JSON.parse(sourceComparisonRaw);
+  assert(sourceComparison.runtime_source_match, "runtime_source_mismatch");
+  assert(
+    sourceComparison.approved_backend_tree === EXPECTED_BACKEND_TREE,
+    "runtime_source_tree_mismatch",
+  );
   return {
     generated_at: new Date().toISOString(),
     environment: "DEV",
@@ -228,6 +261,18 @@ async function snapshot() {
       neutral_link_info: linkInfo,
     },
     browser_no_token: browser,
+    runtime_integrity: {
+      authorized_deployment_reported_version: AUTHORIZED_DEPLOYMENT_VERSION,
+      current_management_api_version: runtime.version,
+      deployment_timestamp_unchanged:
+        runtime.updated_at === EXPECTED_FUNCTION_UPDATED_AT,
+      bundle_hash_match: runtime.ezbr_sha256 === EXPECTED_BUNDLE_SHA256,
+      deployed_source_matches_approved_tree:
+        sourceComparison.runtime_source_match,
+      approved_backend_tree: EXPECTED_BACKEND_TREE,
+      classification:
+        "platform_version_metadata_changed_without_runtime_source_or_deployment_timestamp_change",
+    },
     security: {
       submit_requests: 0,
       sql_executed: false,
