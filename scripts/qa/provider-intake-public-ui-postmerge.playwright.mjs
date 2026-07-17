@@ -30,6 +30,34 @@ function normalizeDigest(value) {
   return String(value || "").toLowerCase().replace(/^sha256:/, "");
 }
 
+function secretMatch(entry, expectedValue) {
+  if (!entry) return { matches: false, field: null };
+  const expectedDigest = sha256(expectedValue);
+  for (const [field, value] of Object.entries(entry)) {
+    if (field === "name" || typeof value !== "string") continue;
+    if (
+      normalizeDigest(value) === expectedDigest ||
+      sha256(value) === expectedDigest
+    ) {
+      return { matches: true, field };
+    }
+  }
+  return { matches: false, field: null };
+}
+
+function secretDescriptor(entry) {
+  if (!entry) return null;
+  return {
+    keys: Object.keys(entry).sort(),
+    fingerprint_fields: Object.entries(entry)
+      .filter(
+        ([field, value]) =>
+          typeof value === "string" && /(digest|hash|value)/i.test(field),
+      )
+      .map(([field, value]) => ({ field, length: value.length })),
+  };
+}
+
 async function managementFetch(route) {
   const response = await fetch(`https://api.supabase.com${route}`, {
     headers: {
@@ -45,14 +73,21 @@ async function managementFetch(route) {
 async function secretState() {
   const secrets = await managementFetch(`/v1/projects/${PROJECT_REF}/secrets`);
   assert(Array.isArray(secrets), "secret_list_invalid");
-  const byName = new Map(secrets.map((entry) => [entry.name, normalizeDigest(entry.digest)]));
-  const corsDigest = byName.get("INTAKE_ALLOWED_ORIGINS") || "";
-  const privacyDigest = byName.get("INTAKE_PRIVACY_NOTICE_URL") || "";
+  const byName = new Map(secrets.map((entry) => [entry.name, entry]));
+  const corsEntry = byName.get("INTAKE_ALLOWED_ORIGINS");
+  const privacyEntry = byName.get("INTAKE_PRIVACY_NOTICE_URL");
+  const corsMatch = secretMatch(corsEntry, CANONICAL_ORIGIN);
+  const privacyMatch = secretMatch(privacyEntry, CANONICAL_PRIVACY_URL);
   return {
-    cors_present: Boolean(corsDigest),
-    cors_match: corsDigest === sha256(CANONICAL_ORIGIN),
-    privacy_present: Boolean(privacyDigest),
-    privacy_match: privacyDigest === sha256(CANONICAL_PRIVACY_URL),
+    response_entry_keys: [...new Set(secrets.flatMap((entry) => Object.keys(entry)))].sort(),
+    cors_present: Boolean(corsEntry),
+    cors_match: corsMatch.matches,
+    cors_match_field: corsMatch.field,
+    cors_descriptor: secretDescriptor(corsEntry),
+    privacy_present: Boolean(privacyEntry),
+    privacy_match: privacyMatch.matches,
+    privacy_match_field: privacyMatch.field,
+    privacy_descriptor: secretDescriptor(privacyEntry),
     captcha_expected_hostname_absent: !byName.has("CAPTCHA_EXPECTED_HOSTNAME"),
     captcha_expected_action_absent: !byName.has("CAPTCHA_EXPECTED_ACTION"),
   };
@@ -68,6 +103,12 @@ async function runtimeState() {
     status: fn.status,
     version: Number(fn.version),
     verify_jwt: Boolean(fn.verify_jwt),
+    created_at: fn.created_at || null,
+    updated_at: fn.updated_at || null,
+    ezbr_sha256: fn.ezbr_sha256 || null,
+    entrypoint_path: fn.entrypoint_path || null,
+    import_map_path: fn.import_map_path || null,
+    metadata_keys: Object.keys(fn).sort(),
   };
 }
 
