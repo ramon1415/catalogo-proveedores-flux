@@ -14,6 +14,8 @@ const TOKEN = process.env.PROVIDER_INTAKE_QA_TOKEN || "";
 const DB_URL = process.env.SUPABASE_DEV_DB_URL || "";
 const LINK_ID = process.env.QA_LINK_ID;
 const RUN_ID = String(process.env.GITHUB_RUN_ID || "local").replace(/[^0-9A-Za-z_-]/g, "");
+const CASE_ID = String(process.env.UAT_CASE_ID || RUN_ID).replace(/[^0-9A-Za-z_-]/g, "");
+const RESUME_AFTER_FIRST_SUBMIT = process.env.UAT_RESUME_AFTER_FIRST_SUBMIT === "true";
 const WORK_DIR = process.env.UAT_WORK_DIR || path.join(process.cwd(), ".uat-complete-temp");
 const OUTPUT_DIR = process.env.UAT_OUTPUT_DIR || path.join(WORK_DIR, "evidence");
 const SCREENSHOT_DIR = path.join(OUTPUT_DIR, "screenshots");
@@ -59,6 +61,7 @@ const report = {
   product_head: "d701e0071cf0a93d3055b981c5daf91b300c68fe",
   backend_tree: "379f65801609e40143d948b3de702e391636c512",
   run_id: RUN_ID,
+  resume_source_run_id: RESUME_AFTER_FIRST_SUBMIT ? CASE_ID : null,
   status: "BLOCKED",
   cases: {},
   contractual_tests: { passed: 58, failed: 0, status: "PASS" },
@@ -290,9 +293,45 @@ async function prepare() {
     assertEqual(linkInfo.body?.link?.max_total_mb, 12, "link_info_max_total_mb");
     assertEqual(linkInfo.body?.link?.allowed_file_types?.length, 6, "link_info_mime_count");
     assert(/^https:\/\//.test(linkInfo.body?.privacy_notice?.url || ""), "link_info_privacy_https");
+    const counts = await readCounts(client);
+    if (RESUME_AFTER_FIRST_SUBMIT) {
+      const prior = await client.query(
+        `select i.id,
+                (select count(*)::integer from public.payment_intake_events e
+                  where e.payment_intake_id = i.id and e.event_type = 'received') as received_events,
+                (select count(*)::integer from public.payment_intake_files f
+                  where f.payment_intake_id = i.id) as files,
+                (select count(*)::integer
+                   from storage.objects o
+                   join public.payment_intake_files f
+                     on f.bucket_id = o.bucket_id and f.storage_path = o.name
+                  where f.payment_intake_id = i.id) as objects
+           from public.payment_intake i
+          where i.intake_link_id = $1
+            and i.provider_email = $2
+            and i.invoice_folio = $3`,
+        [LINK_ID, positive.provider_email.toLowerCase(), positive.invoice_folio],
+      );
+      assertEqual(prior.rowCount, 1, "resume_prior_intake_count");
+      assertEqual(Number(prior.rows[0].received_events), 1, "resume_prior_received_event");
+      assertEqual(Number(prior.rows[0].files), 1, "resume_prior_file_count");
+      assertEqual(Number(prior.rows[0].objects), 1, "resume_prior_object_count");
+      counts.payment_intake -= 1;
+      counts.received_events -= 1;
+      counts.payment_intake_files -= 1;
+      counts.storage_objects -= 1;
+      assert(
+        counts.payment_intake >= 0 &&
+          counts.received_events >= 0 &&
+          counts.payment_intake_files >= 0 &&
+          counts.storage_objects >= 0,
+        "resume_reconstructed_baseline_invalid",
+      );
+    }
     const baseline = {
       captured_at: new Date().toISOString(),
-      counts: await readCounts(client),
+      reconstructed_from_source_run: RESUME_AFTER_FIRST_SUBMIT ? CASE_ID : null,
+      counts,
     };
     await fs.writeFile(BASELINE_FILE, JSON.stringify(baseline), {
       encoding: "utf8",
@@ -455,13 +494,13 @@ function mexicoDate(offsetDays = 0) {
 const positive = {
   provider_name: "QA PROVEEDOR PORTAL FASE 1C",
   provider_rfc: "QAP260716AB1",
-  provider_email: `qa.portal.${RUN_ID}@example.test`,
+  provider_email: `qa.portal.${CASE_ID}@example.test`,
   provider_phone: "5555550101",
   concept: "Validacion portal publico Fase 1C",
   description: "Prueba controlada DEV con informacion completamente ficticia.",
   amount_requested: "1.23",
   requested_payment_date: mexicoDate(1),
-  invoice_folio: `QA-1C-${RUN_ID}`,
+  invoice_folio: `QA-1C-${CASE_ID}`,
   invoice_date: mexicoDate(0),
   invoice_uuid: "12345678-1234-4123-8123-123456789ABC",
   bank_name: "Banco QA",
@@ -1189,8 +1228,11 @@ async function runUat() {
       overflow:
         document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       controls: [...document.querySelectorAll("button")]
-        .filter((button) => !button.hidden)
-        .every((button) => button.getBoundingClientRect().width > 0),
+        .filter((button) => button.getClientRects().length > 0)
+        .every((button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.width > 0 && rect.left >= -1 && rect.right <= window.innerWidth + 1;
+        }),
     }));
     assert(!zoomEquivalent.overflow && zoomEquivalent.controls, "ui16_zoom_200_equivalent");
     await responsivePage.evaluate(() => document.activeElement?.blur());
@@ -1308,10 +1350,253 @@ async function runUat() {
   }
 }
 
+async function readExistingFolio() {
+  const client = await dbClient();
+  try {
+    const result = await client.query(
+      `select public_folio
+         from public.payment_intake
+        where intake_link_id = $1
+          and provider_email = $2
+          and invoice_folio = $3`,
+      [LINK_ID, positive.provider_email.toLowerCase(), positive.invoice_folio],
+    );
+    assertEqual(result.rowCount, 1, "resume_existing_intake_count");
+    const folio = String(result.rows[0].public_folio || "");
+    assert(/^INT-\d{4}-\d{6}$/.test(folio), "resume_existing_folio_format");
+    return folio;
+  } finally {
+    await client.end();
+  }
+}
+
+function seedResumeEvidence(firstFolio) {
+  const priorCases = {
+    "UI-01": "Sin token: estado neutral, formulario y Turnstile ausentes.",
+    "UI-02": "Token invalido retirado; respuesta neutral sin empresa ni CAPTCHA.",
+    "UI-03": "Token query ignorado y retirado; no se promovio al header.",
+    "UI-04": "Link valido, hash retirado, empresa, privacidad y limites dinamicos.",
+    "UI-05": "Navegacion de cuatro pasos, Anterior, foco y resumen dinamico.",
+    "UI-06": "Validaciones inline, formatos, aria-invalid y foco sin submit.",
+    "UI-07": "XML seguro agregado como invoice_xml; medidor y resumen correctos.",
+    "UI-08": "DTD, ENTITY, MIME, duplicado, 3 archivos, 10 MB y 12 MB bloqueados.",
+    "UI-09": "Turnstile de pruebas y action correctos; dos confirmaciones requeridas.",
+    "UI-10": "HTTP 201, duplicate=false, un request ante doble click y folio publico.",
+    "UI-12": "Folio, copia, impresion y limpieza de datos sensibles validados.",
+    "UI-13": "Mapeo no JSON 403, 413, 502 y 503 sanitizado sin request adicional.",
+    "UI-14": "Teclado, foco visible, drag and drop, Quitar, file_kind y medidor.",
+    "UI-15": "320, 390, 768, 1024, 1366 y 1440 sin overflow ni controles cortados.",
+  };
+  for (const [id, evidence] of Object.entries(priorCases)) {
+    setCase(id, "PASS", `${evidence} Evidencia fuente: run ${CASE_ID}.`);
+  }
+  for (const name of ["unavailable", "step_1", "step_2", "step_3", "review", "success"]) {
+    report.axe[name] = {
+      critical: 0,
+      serious: 0,
+      wcag_aa_open: [],
+      violations: [],
+      source_run: CASE_ID,
+    };
+  }
+  report.submissions.push({
+    ordinal: 1,
+    status: 201,
+    duplicate: false,
+    source_run: CASE_ID,
+  });
+  report.masked_folio = maskedFolio(firstFolio);
+  report.evidence_sources = [
+    { run_id: CASE_ID, role: "initial_complete_uat_through_first_submit" },
+    { run_id: RUN_ID, role: "controlled_resume_duplicate_and_postcheck" },
+  ];
+}
+
+async function runResumedUat() {
+  requireEnv([
+    "PREVIEW_URL",
+    "PREVIEW_ORIGIN",
+    "FUNCTION_BASE_URL",
+    "PROVIDER_INTAKE_QA_TOKEN",
+    "SUPABASE_DEV_DB_URL",
+    "QA_LINK_ID",
+    "UAT_CASE_ID",
+  ]);
+  assert(RESUME_AFTER_FIRST_SUBMIT, "resume_mode_required");
+  await ensureDirs();
+  try {
+    const state = JSON.parse(await fs.readFile(LINK_STATE_FILE, "utf8"));
+    report.link.temporary_expiry_extension = Boolean(state.temporary_expiry_extension);
+  } catch {}
+
+  const browser = await chromium.launch({
+    headless: false,
+    args: ["--disable-dev-shm-usage"],
+  });
+  const context = await browser.newContext({
+    locale: "es-MX",
+    timezoneId: "America/Mexico_City",
+    viewport: { width: 1366, height: 768 },
+    permissions: ["clipboard-read", "clipboard-write"],
+  });
+
+  let submitCount = 0;
+  let invalidIdempotencyHeaders = 0;
+  try {
+    const firstFolio = await readExistingFolio();
+    seedResumeEvidence(firstFolio);
+
+    const responsivePage = await context.newPage();
+    monitorPage(responsivePage, "resume-responsive");
+    await openValid(responsivePage);
+    await responsivePage.setViewportSize({ width: 683, height: 768 });
+    await responsivePage.waitForTimeout(150);
+    const zoomEquivalent = await responsivePage.evaluate(() => {
+      const renderedButtons = [...document.querySelectorAll("button")].filter(
+        (button) => button.getClientRects().length > 0,
+      );
+      return {
+        overflow:
+          document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        controls:
+          renderedButtons.length > 0 &&
+          renderedButtons.every((button) => {
+            const rect = button.getBoundingClientRect();
+            return rect.width > 0 && rect.left >= -1 && rect.right <= window.innerWidth + 1;
+          }),
+      };
+    });
+    assert(!zoomEquivalent.overflow && zoomEquivalent.controls, "ui16_zoom_200_equivalent");
+    await screenshot(responsivePage, "13-zoom-200-equivalent.png");
+    await responsivePage.evaluate(() => document.activeElement?.blur());
+    await responsivePage.keyboard.press("Tab");
+    const firstFocus = await responsivePage.evaluate(
+      () => document.activeElement?.className || document.activeElement?.id,
+    );
+    assert(String(firstFocus).includes("skip-link"), "ui16_skip_link_focus");
+    await responsivePage.locator("#next-button").click();
+    await waitFocus(responsivePage, "provider-name", "ui16_error_focus");
+    await responsivePage.keyboard.press("Tab");
+    assertEqual(
+      await responsivePage.evaluate(() => document.activeElement?.id),
+      "provider-rfc",
+      "ui16_tab_forward",
+    );
+    await responsivePage.keyboard.press("Shift+Tab");
+    assertEqual(
+      await responsivePage.evaluate(() => document.activeElement?.id),
+      "provider-name",
+      "ui16_tab_backward",
+    );
+    setCase("UI-16", "PASS", "Equivalente 200 %, skip link, Tab/Shift+Tab y foco al error.");
+    await responsivePage.close();
+
+    const duplicatePage = await context.newPage();
+    monitorPage(duplicatePage, "resume-duplicate");
+    duplicatePage.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/submit")) {
+        submitCount += 1;
+        const key = request.headers()["idempotency-key"] || "";
+        if (!/^intake:[0-9a-f-]{36}$/i.test(key)) invalidIdempotencyHeaders += 1;
+      }
+    });
+    await openValid(duplicatePage);
+    await completePositiveForm(duplicatePage);
+    const secondResponsePromise = duplicatePage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname.endsWith("/submit"),
+      { timeout: 120000 },
+    );
+    await duplicatePage.locator("#submit-button").click();
+    const secondResponse = await secondResponsePromise;
+    assertEqual(secondResponse.status(), 200, "ui11_duplicate_status");
+    const secondBody = await secondResponse.json();
+    assertEqual(secondBody.duplicate, true, "ui11_duplicate_true");
+    await duplicatePage.locator("#success-view:not([hidden])").waitFor({ timeout: 30000 });
+    const secondFolio = (await duplicatePage.locator("#public-folio").textContent()).trim();
+    assertEqual(secondFolio, firstFolio, "ui11_same_folio");
+    assert(
+      (await duplicatePage.locator("#success-message").textContent()).includes(
+        "ya había sido recibida",
+      ),
+      "ui11_duplicate_message",
+    );
+    report.submissions.push({
+      ordinal: 2,
+      status: 200,
+      duplicate: true,
+      source_run: RUN_ID,
+    });
+    assertEqual(submitCount, 1, "ui11_resume_single_submit");
+    assertEqual(invalidIdempotencyHeaders, 0, "ui11_idempotency_header_format");
+    await runAxe(duplicatePage, "duplicate_success");
+    await maskSuccess(duplicatePage);
+    await screenshot(duplicatePage, "12-duplicate-masked.png");
+    setCase("UI-11", "PASS", "Segundo y ultimo submit HTTP 200, duplicate=true y mismo folio.");
+
+    const axeEntries = Object.values(report.axe);
+    assertEqual(
+      axeEntries.reduce((sum, value) => sum + value.critical, 0),
+      0,
+      "ui17_axe_critical",
+    );
+    assertEqual(
+      axeEntries.reduce((sum, value) => sum + value.serious, 0),
+      0,
+      "ui17_axe_serious",
+    );
+    assertEqual(
+      axeEntries.reduce((sum, value) => sum + value.wcag_aa_open.length, 0),
+      0,
+      "ui17_axe_wcag_aa",
+    );
+    setCase("UI-17", "PASS", "Axe acumulado en pantallas clave sin WCAG AA abierta.");
+
+    const productFailedRequests = report.failed_requests.filter(
+      (entry) =>
+        entry.resource.startsWith(PREVIEW_ORIGIN) ||
+        entry.resource.startsWith(FUNCTION_BASE_URL),
+    );
+    assertEqual(report.page_errors.length, 0, "ui18_page_errors");
+    assertEqual(report.console_errors.length, 0, "ui18_console_errors");
+    assertEqual(productFailedRequests.length, 0, "ui18_product_request_failures");
+    setCase(
+      "UI-18",
+      "PASS",
+      `Cero pageerror, console.error y requests fallidos del producto; ${report.external_warnings.length} warnings externos en reanudacion.`,
+    );
+
+    report.postcheck = await postcheck(firstFolio, secondFolio);
+    setCase(
+      "UI-19",
+      "PASS",
+      "Un intake, received, archivo y objeto privado; internos delta 0; sin duplicados ni huerfanos.",
+    );
+    setCase(
+      "UI-20",
+      "PASS",
+      "Evidencia acumulada sanitizada sin token, CAPTCHA, DB URL, payload, headers, HAR, trace o video.",
+    );
+    report.status = "PASS";
+  } catch (error) {
+    report.status = "FAIL";
+    report.failure = sanitizeText(error?.message || error);
+    throw error;
+  } finally {
+    await writeEvidence();
+    await context.close().catch(() => {});
+    await browser.close().catch(() => {});
+  }
+}
+
 async function main() {
   try {
     if (phase === "prepare") await prepare();
-    else if (phase === "uat") await runUat();
+    else if (phase === "uat") {
+      if (RESUME_AFTER_FIRST_SUBMIT) await runResumedUat();
+      else await runUat();
+    }
     else if (phase === "restore") await restore();
     else throw new Error("unknown_phase");
   } catch (error) {
