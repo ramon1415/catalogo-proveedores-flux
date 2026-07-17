@@ -493,7 +493,7 @@ async function fillStep2(page) {
 
 async function waitForTurnstileWidget(page) {
   await page.locator("#turnstile-widget iframe").first().waitFor({
-    state: "visible",
+    state: "attached",
     timeout: 45000,
   });
   const config = await page.evaluate(async () => {
