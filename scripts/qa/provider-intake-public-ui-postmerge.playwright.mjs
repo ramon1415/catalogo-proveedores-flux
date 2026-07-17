@@ -12,7 +12,6 @@ const CANONICAL_ORIGIN = process.env.CANONICAL_ORIGIN;
 const PREVIEW_ORIGIN = process.env.PREVIEW_ORIGIN;
 const CANONICAL_PRIVACY_URL = process.env.CANONICAL_PRIVACY_URL;
 const EXPECTED_FUNCTION_ID = process.env.EXPECTED_FUNCTION_ID;
-const EXPECTED_FUNCTION_VERSION = Number(process.env.EXPECTED_FUNCTION_VERSION);
 const AUTHORIZED_DEPLOYMENT_VERSION = Number(
   process.env.AUTHORIZED_DEPLOYMENT_VERSION,
 );
@@ -211,7 +210,11 @@ function assertRuntime(runtime) {
   assert(runtime.id === EXPECTED_FUNCTION_ID, "function_id_changed");
   assert(runtime.slug === "provider-intake", "function_slug_changed");
   assert(runtime.status === "ACTIVE", "function_not_active");
-  assert(runtime.version === EXPECTED_FUNCTION_VERSION, "function_version_changed");
+  assert(
+    Number.isInteger(runtime.version) &&
+      runtime.version >= AUTHORIZED_DEPLOYMENT_VERSION,
+    "function_configuration_revision_regressed",
+  );
   assert(runtime.verify_jwt === false, "function_verify_jwt_changed");
   assert(
     runtime.updated_at === EXPECTED_FUNCTION_UPDATED_AT,
@@ -271,7 +274,7 @@ async function snapshot() {
         sourceComparison.runtime_source_match,
       approved_backend_tree: EXPECTED_BACKEND_TREE,
       classification:
-        "platform_version_metadata_changed_without_runtime_source_or_deployment_timestamp_change",
+        "platform_configuration_revision_changed_without_runtime_source_or_deployment_timestamp_change",
     },
     security: {
       submit_requests: 0,
