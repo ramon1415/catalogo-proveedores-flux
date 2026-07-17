@@ -24,18 +24,18 @@ jobs:
     environment: DEV
     env:
       AUTHORIZED_BASE_HEAD: e0911fe9fa578859c7ddb9102ef3c2878246b603
+      AUTHORIZED_CORRECTION_HEAD: 24fb77957a6ceb5e30883f7b13c4736b5b492175
       AUTHORIZED_BASELINE: 05986aca63f2d98635cbb9b928cd0cebac29315a
       AUTHORIZED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
-      AUTHORIZED_SHA256: 31475745645667e2ffe54f7f763690c17212ec2e6c4c0da0bcf1a861af85552b
+      AUTHORIZED_SHA256: bfd5deaaa349a36e7a8681943559aa41938aad6393b28acd54162843f2b65067
       AUTHORIZED_BRANCH: feature/ramon-provider-intake-triage-ui
       AUTHORIZED_PROJECT_REF: scsirgbuqjcwoaxfacth
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
-      VERCEL_TOKEN: ${{ secrets.CODEX_GATE1_VERCEL_TOKEN }}
 
     steps:
-      - name: Checkout temporary authorization commit
+      - name: Checkout resume authorization commit
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -45,28 +45,38 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = "$AUTHORIZED_BRANCH"
+          test "$(git rev-parse HEAD^)" = "$AUTHORIZED_CORRECTION_HEAD"
           test "$(git merge-base "$AUTHORIZED_BASE_HEAD" HEAD)" = "$AUTHORIZED_BASE_HEAD"
           git merge-base --is-ancestor "$AUTHORIZED_BASELINE" HEAD
-          expected_temporary_files="$(
+          expected_resume_files="$(
             printf '%s\n' \
               '.github/workflows/provider-intake-triage-dev-apply-temporary.yml' \
-              'ops/provider-intake/apply-029-triage-dev.authorization.json'
+              'docs/ops/provider-intake-triage-1d.md' \
+              'ops/provider-intake/apply-029-triage/00_README.md' \
+              'ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql' \
+              'ops/provider-intake/apply-029-triage/02_BACKUP_DEV.sql' \
+              'ops/provider-intake/apply-029-triage/04_POSTCHECK_READ_ONLY.sql' \
+              'ops/provider-intake/apply-029-triage-dev.authorization.json' |
+              sort
           )"
-          actual_temporary_files="$(git diff --name-only "$AUTHORIZED_BASE_HEAD..HEAD" | sort)"
-          test "$actual_temporary_files" = "$expected_temporary_files"
+          actual_resume_files="$(git diff --name-only "$AUTHORIZED_CORRECTION_HEAD..HEAD" | sort)"
+          test "$actual_resume_files" = "$expected_resume_files"
           test "$(git rev-parse "$AUTHORIZED_BASE_HEAD:supabase/functions/provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
           test "$SUPABASE_DEV_PROJECT_REF" = "$AUTHORIZED_PROJECT_REF"
           test -n "$SUPABASE_DEV_DB_URL"
           test -n "$SUPABASE_ACCESS_TOKEN"
-          test -n "$VERCEL_TOKEN"
 
           marker="ops/provider-intake/apply-029-triage-dev.authorization.json"
-          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-1"
+          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-1-resume"
           test "$(jq -r '.authorized_base_head' "$marker")" = "$AUTHORIZED_BASE_HEAD"
+          test "$(jq -r '.correction_commit' "$marker")" = "$AUTHORIZED_CORRECTION_HEAD"
+          test "$(jq -r '.failed_run' "$marker")" = "29600671386"
           test "$(jq -r '.branch' "$marker")" = "$AUTHORIZED_BRANCH"
           test "$(jq -r '.supabase_project_ref' "$marker")" = "$AUTHORIZED_PROJECT_REF"
           test "$(jq -r '.migration_sha256' "$marker")" = "$AUTHORIZED_SHA256"
           test "$(jq -r '.allow_intake_mutations' "$marker")" = "false"
+          test "$(jq -r '.reuse_existing_backups' "$marker")" = "true"
+          test "$(jq -r '.require_transactional_dry_run' "$marker")" = "true"
 
           migration="supabase/migrations/029_provider_intake_triage.sql"
           load="ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql"
@@ -78,92 +88,13 @@ jobs:
           {
             echo "branch=$GITHUB_REF_NAME"
             echo "authorized_base_head=$AUTHORIZED_BASE_HEAD"
-            echo "temporary_commit=$GITHUB_SHA"
+            echo "correction_commit=$AUTHORIZED_CORRECTION_HEAD"
+            echo "resume_commit=$GITHUB_SHA"
+            echo "failed_run=29600671386"
             echo "supabase_project_ref=$AUTHORIZED_PROJECT_REF"
             echo "migration_sha256=$AUTHORIZED_SHA256"
             echo "migration_load_identical=true"
           } > gate1-evidence/identity.txt
-
-      - name: Configure Vercel secret in Preview and Development only
-        shell: bash
-        run: |
-          set -euo pipefail
-          keys_file="$(mktemp)"
-          trap 'rm -f "$keys_file"' EXIT
-          curl --fail --silent --show-error \
-            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-            "https://api.supabase.com/v1/projects/$AUTHORIZED_PROJECT_REF/api-keys?reveal=true" \
-            > "$keys_file"
-
-          service_role_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$keys_file")"
-          test -n "$service_role_key"
-          echo "::add-mask::$service_role_key"
-          rm -f "$keys_file"
-
-          npx --yes vercel@56.2.1 link \
-            --yes \
-            --project catalogo-proveedores-flux \
-            --scope quantta-team \
-            --token "$VERCEL_TOKEN" \
-            --no-color
-
-          npx --yes vercel@56.2.1 env ls production \
-            --scope quantta-team \
-            --token "$VERCEL_TOKEN" \
-            --no-color > gate1-evidence/vercel-production-before.txt
-          if grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-production-before.txt; then
-            echo "Unexpected Production variable; stopping without changing environments." >&2
-            exit 1
-          fi
-
-          printf '%s' "$service_role_key" |
-            npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY preview \
-              --force \
-              --sensitive \
-              --yes \
-              --non-interactive \
-              --scope quantta-team \
-              --token "$VERCEL_TOKEN" \
-              --no-color
-          printf '%s' "$service_role_key" |
-            npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY development \
-              --force \
-              --yes \
-              --non-interactive \
-              --scope quantta-team \
-              --token "$VERCEL_TOKEN" \
-              --no-color
-
-          npx --yes vercel@56.2.1 env ls preview \
-            --scope quantta-team \
-            --token "$VERCEL_TOKEN" \
-            --no-color > gate1-evidence/vercel-preview.txt
-          npx --yes vercel@56.2.1 env ls development \
-            --scope quantta-team \
-            --token "$VERCEL_TOKEN" \
-            --no-color > gate1-evidence/vercel-development.txt
-          npx --yes vercel@56.2.1 env ls production \
-            --scope quantta-team \
-            --token "$VERCEL_TOKEN" \
-            --no-color > gate1-evidence/vercel-production-after.txt
-
-          grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-preview.txt
-          grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-development.txt
-          grep -q 'FLUX_SUPABASE_URL' gate1-evidence/vercel-preview.txt
-          grep -q 'FLUX_SUPABASE_ANON_KEY' gate1-evidence/vercel-preview.txt
-          if grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-production-after.txt; then
-            echo "Production scope changed unexpectedly." >&2
-            exit 1
-          fi
-
-          {
-            echo "FLUX_SUPABASE_SERVICE_ROLE_KEY"
-            echo "configured=true"
-            echo "scope=Preview,Development"
-            echo "production=false"
-            echo "FLUX_SUPABASE_URL_preview_present=true"
-            echo "FLUX_SUPABASE_ANON_KEY_preview_present=true"
-          } > gate1-evidence/vercel-secret-scope.txt
 
       - name: Capture sanitized baseline through read-only APIs
         shell: bash
@@ -276,13 +207,55 @@ jobs:
             -f ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql \
             > gate1-evidence/01-precheck.txt
 
-      - name: Create authorized DEV backup
+      - name: Reconcile and harden existing DEV backups
         shell: bash
         run: |
           set -euo pipefail
           psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
             -f ops/provider-intake/apply-029-triage/02_BACKUP_DEV.sql \
             > gate1-evidence/02-backup.txt
+
+      - name: Compile the corrected LOAD in a transactional dry-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_file="ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql"
+          dry_run_file="$RUNNER_TEMP/03_LOAD_029_DRY_RUN.sql"
+          SOURCE_FILE="$source_file" DRY_RUN_FILE="$dry_run_file" python3 - <<'PY'
+          import os
+
+          source_path = os.environ["SOURCE_FILE"]
+          target_path = os.environ["DRY_RUN_FILE"]
+          with open(source_path, "rb") as handle:
+              source = handle.read()
+
+          if source.endswith(b"commit;\n"):
+              derived = source[:-len(b"commit;\n")] + b"rollback;\n"
+          elif source.endswith(b"commit;\r\n"):
+              derived = source[:-len(b"commit;\r\n")] + b"rollback;\r\n"
+          else:
+              raise RuntimeError("LOAD does not end with the expected COMMIT")
+
+          if derived.count(b"rollback;") != source.count(b"rollback;") + 1:
+              raise RuntimeError("Dry-run derivation changed more than the final COMMIT")
+
+          with open(target_path, "wb") as handle:
+              handle.write(derived)
+          PY
+
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f "$dry_run_file" \
+            > gate1-evidence/03-dry-run.txt
+          grep -q '^ROLLBACK$' gate1-evidence/03-dry-run.txt
+          rm -f "$dry_run_file"
+
+      - name: Confirm complete rollback after dry-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql \
+            > gate1-evidence/01-precheck-after-dry-run.txt
 
       - name: Apply exact migration 029 once
         shell: bash

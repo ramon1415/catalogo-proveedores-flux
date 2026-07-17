@@ -37,7 +37,11 @@ provider_intakes.html / provider_intakes.js
        └─ firma solo ese objeto por 120 segundos
 ```
 
-La migration preparada es `029_provider_intake_triage.sql`. No modifica migrations históricas. Agrega cuatro RPCs públicas para `authenticated`, tres helpers internos sin grant al cliente, el tipo de evento `internal_note` y dos índices.
+La migration corregida es `029_provider_intake_triage.sql`. No modifica
+migrations históricas. Agrega cuatro RPCs públicas para `authenticated`, tres
+helpers internos sin grant al cliente, el tipo de evento `internal_note` y dos
+índices. Migration y LOAD exacto comparten el SHA-256 vigente
+`bfd5deaaa349a36e7a8681943559aa41938aad6393b28acd54162843f2b65067`.
 
 ## Lista, filtros y paginación
 
@@ -174,18 +178,39 @@ La suite no se conecta a DEV y no inserta o modifica datos.
 
 ## Rollout DEV
 
-Punto de detención actual: migration preparada pero no aplicada.
+Punto de reanudación actual: el run `29600671386` confirmó baseline y creó las
+tres copias de backup, pero el LOAD falló dentro de su transacción antes de
+`COMMIT`. La causa fue una asignación PL/pgSQL que combinaba un `%rowtype` y un
+escalar en el mismo `INTO`; el código versionado ahora mantiene ambos targets
+separados.
 
-Cuando exista autorización explícita:
+Backups que deben conservarse hasta un cleanup posterior a Gate 2:
 
-1. Confirmar que DEV sigue en baseline compatible y que `029` no existe.
-2. Configurar `FLUX_SUPABASE_SERVICE_ROLE_KEY` solo como variable server-side de Preview/Development.
-3. Ejecutar `ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql`.
-4. Ejecutar `02_BACKUP_DEV.sql` y verificar sus conteos.
-5. Aplicar exactamente `03_LOAD_029_EXACT.sql` en una sola transacción.
-6. Ejecutar `04_POSTCHECK_READ_ONLY.sql`.
-7. Re-desplegar el Preview si la variable se añadió después del build.
-8. Ejecutar UAT por rol y empresa sobre intakes QA existentes, sin convertirlos.
+| Copia | Filas esperadas |
+| --- | ---: |
+| `_backup_029_payment_intake` | 13 |
+| `_backup_029_payment_intake_files` | 6 |
+| `_backup_029_payment_intake_events` | 20 |
+
+La reanudación autorizada:
+
+1. Confirma que DEV sigue en baseline compatible y que no quedó ningún objeto
+   parcial de `029`.
+2. Confirma que las tres copias existen, conservan `13 / 6 / 20` filas y son
+   idénticas fila por fila a las tablas activas.
+3. Ejecuta `02_BACKUP_DEV.sql` por su ruta de reanudación: no crea copias,
+   revoca privilegios de aplicación, habilita RLS y exige cero policies.
+4. Genera solo en el runner una copia del LOAD cuyo `COMMIT` final se sustituye
+   por `ROLLBACK`.
+5. Ejecuta el dry-run con `ON_ERROR_STOP=1` y comprueba otra vez que no quedaron
+   funciones, índices o cambios de constraint.
+6. Aplica exactamente `03_LOAD_029_EXACT.sql` una sola vez.
+7. Ejecuta `04_POSTCHECK_READ_ONLY.sql` y confirma funciones, firmas, grants,
+   RLS, backups y conteos.
+8. Re-despliega Preview y ejecuta UAT de solo lectura por rol y empresa.
+
+`FLUX_SUPABASE_SERVICE_ROLE_KEY` ya está configurada solo en
+Preview/Development y no debe copiarse a Production.
 
 No usar `db push` ni `migration repair` para este paquete.
 
@@ -197,7 +222,9 @@ La UI puede retirarse revirtiendo sus archivos y la entrada de navegación. La f
 
 ## Riesgos y mitigaciones
 
-- **Migration aún no aplicada:** el Preview puede validar layout y 403, pero las operaciones de datos devolverán RPC ausente hasta el rollout DEV.
+- **Migration aún no aplicada:** el Preview puede validar layout y 403, pero las operaciones de datos devolverán RPC ausente hasta completar la reanudación.
+- **Backups de incidente:** son copias de una sola ejecución; un conjunto parcial
+  detiene el rollout. No se eliminan, recrean ni restauran automáticamente.
 - **Variable server-side faltante:** documentos muestran un error sanitizado y no degradan a URL pública.
 - **Modelo global de `admin`:** se conserva el comportamiento vigente de `flux_sysadmin_roles()`. Cambiarlo requiere una decisión transversal separada.
 - **Búsqueda parcial a gran escala:** usa paginación server-side; si el volumen crece significativamente, evaluar índices trigram en una fase posterior.

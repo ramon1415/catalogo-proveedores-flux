@@ -1,13 +1,17 @@
 {
-  "gate": "phase-1d-gate-1",
+  "gate": "phase-1d-gate-1-resume",
   "authorized_by": "Ramon",
   "authorized_base_head": "e0911fe9fa578859c7ddb9102ef3c2878246b603",
+  "correction_commit": "24fb77957a6ceb5e30883f7b13c4736b5b492175",
+  "failed_run": "29600671386",
   "branch": "feature/ramon-provider-intake-triage-ui",
   "supabase_project_ref": "scsirgbuqjcwoaxfacth",
   "migration": "supabase/migrations/029_provider_intake_triage.sql",
   "load": "ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql",
-  "migration_sha256": "31475745645667e2ffe54f7f763690c17212ec2e6c4c0da0bcf1a861af85552b",
+  "migration_sha256": "bfd5deaaa349a36e7a8681943559aa41938aad6393b28acd54162843f2b65067",
   "allow_intake_mutations": false,
   "allow_production": false,
+  "reuse_existing_backups": true,
+  "require_transactional_dry_run": true,
   "run_once": true
 }
