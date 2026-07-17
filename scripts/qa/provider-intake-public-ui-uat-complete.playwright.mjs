@@ -492,10 +492,13 @@ async function fillStep2(page) {
 }
 
 async function waitForTurnstileWidget(page) {
-  await page.locator("#turnstile-widget iframe").first().waitFor({
-    state: "attached",
+  await page.waitForFunction(() => {
+    const script = document.querySelector('script[data-intake-turnstile="true"]');
+    return Boolean(script && window.turnstile);
+  }, null, {
     timeout: 45000,
   });
+  assertEqual(await page.locator("#captcha-error").textContent(), "", "turnstile_load_error");
   const config = await page.evaluate(async () => {
     const module = await import("./solicitar-config.js");
     return {
