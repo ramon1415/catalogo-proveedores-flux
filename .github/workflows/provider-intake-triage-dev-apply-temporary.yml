@@ -1,0 +1,419 @@
+name: Provider intake triage DEV Gate 1 (temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-intake-triage-dev-029
+  cancel-in-progress: false
+
+jobs:
+  gate1:
+    name: Apply migration 029 once in DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+    env:
+      AUTHORIZED_BASE_HEAD: e0911fe9fa578859c7ddb9102ef3c2878246b603
+      AUTHORIZED_BASELINE: 05986aca63f2d98635cbb9b928cd0cebac29315a
+      AUTHORIZED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
+      AUTHORIZED_SHA256: 31475745645667e2ffe54f7f763690c17212ec2e6c4c0da0bcf1a861af85552b
+      AUTHORIZED_BRANCH: feature/ramon-provider-intake-triage-ui
+      AUTHORIZED_PROJECT_REF: scsirgbuqjcwoaxfacth
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      VERCEL_TOKEN: ${{ secrets.CODEX_GATE1_VERCEL_TOKEN }}
+
+    steps:
+      - name: Checkout temporary authorization commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate identity, marker, and authorized files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$AUTHORIZED_BRANCH"
+          test "$(git rev-parse HEAD^)" = "$AUTHORIZED_BASE_HEAD"
+          git merge-base --is-ancestor "$AUTHORIZED_BASELINE" HEAD
+          test "$(git rev-parse "$AUTHORIZED_BASE_HEAD:provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
+          test "$SUPABASE_DEV_PROJECT_REF" = "$AUTHORIZED_PROJECT_REF"
+          test -n "$SUPABASE_DEV_DB_URL"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$VERCEL_TOKEN"
+
+          marker="ops/provider-intake/apply-029-triage-dev.authorization.json"
+          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-1"
+          test "$(jq -r '.authorized_base_head' "$marker")" = "$AUTHORIZED_BASE_HEAD"
+          test "$(jq -r '.branch' "$marker")" = "$AUTHORIZED_BRANCH"
+          test "$(jq -r '.supabase_project_ref' "$marker")" = "$AUTHORIZED_PROJECT_REF"
+          test "$(jq -r '.migration_sha256' "$marker")" = "$AUTHORIZED_SHA256"
+          test "$(jq -r '.allow_intake_mutations' "$marker")" = "false"
+
+          migration="supabase/migrations/029_provider_intake_triage.sql"
+          load="ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql"
+          test "$(sha256sum "$migration" | cut -d' ' -f1)" = "$AUTHORIZED_SHA256"
+          test "$(sha256sum "$load" | cut -d' ' -f1)" = "$AUTHORIZED_SHA256"
+          cmp --silent "$migration" "$load"
+
+          mkdir -p gate1-evidence
+          {
+            echo "branch=$GITHUB_REF_NAME"
+            echo "authorized_base_head=$AUTHORIZED_BASE_HEAD"
+            echo "temporary_commit=$GITHUB_SHA"
+            echo "supabase_project_ref=$AUTHORIZED_PROJECT_REF"
+            echo "migration_sha256=$AUTHORIZED_SHA256"
+            echo "migration_load_identical=true"
+          } > gate1-evidence/identity.txt
+
+      - name: Configure Vercel secret in Preview and Development only
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys_file="$(mktemp)"
+          trap 'rm -f "$keys_file"' EXIT
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$AUTHORIZED_PROJECT_REF/api-keys?reveal=true" \
+            > "$keys_file"
+
+          service_role_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$keys_file")"
+          test -n "$service_role_key"
+          echo "::add-mask::$service_role_key"
+          rm -f "$keys_file"
+
+          npx --yes vercel@56.2.1 link \
+            --yes \
+            --project catalogo-proveedores-flux \
+            --scope quantta-team \
+            --token "$VERCEL_TOKEN" \
+            --no-color
+
+          npx --yes vercel@56.2.1 env ls production \
+            --scope quantta-team \
+            --token "$VERCEL_TOKEN" \
+            --no-color > gate1-evidence/vercel-production-before.txt
+          if grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-production-before.txt; then
+            echo "Unexpected Production variable; stopping without changing environments." >&2
+            exit 1
+          fi
+
+          printf '%s' "$service_role_key" |
+            npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY preview \
+              --force \
+              --sensitive \
+              --scope quantta-team \
+              --token "$VERCEL_TOKEN" \
+              --no-color
+          printf '%s' "$service_role_key" |
+            npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY development \
+              --force \
+              --sensitive \
+              --scope quantta-team \
+              --token "$VERCEL_TOKEN" \
+              --no-color
+
+          npx --yes vercel@56.2.1 env ls preview \
+            --scope quantta-team \
+            --token "$VERCEL_TOKEN" \
+            --no-color > gate1-evidence/vercel-preview.txt
+          npx --yes vercel@56.2.1 env ls development \
+            --scope quantta-team \
+            --token "$VERCEL_TOKEN" \
+            --no-color > gate1-evidence/vercel-development.txt
+          npx --yes vercel@56.2.1 env ls production \
+            --scope quantta-team \
+            --token "$VERCEL_TOKEN" \
+            --no-color > gate1-evidence/vercel-production-after.txt
+
+          grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-preview.txt
+          grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-development.txt
+          grep -q 'FLUX_SUPABASE_URL' gate1-evidence/vercel-preview.txt
+          grep -q 'FLUX_SUPABASE_ANON_KEY' gate1-evidence/vercel-preview.txt
+          grep -q 'FLUX_SUPABASE_URL' gate1-evidence/vercel-development.txt
+          grep -q 'FLUX_SUPABASE_ANON_KEY' gate1-evidence/vercel-development.txt
+          if grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-production-after.txt; then
+            echo "Production scope changed unexpectedly." >&2
+            exit 1
+          fi
+
+          {
+            echo "FLUX_SUPABASE_SERVICE_ROLE_KEY"
+            echo "configured=true"
+            echo "scope=Preview,Development"
+            echo "production=false"
+            echo "FLUX_SUPABASE_URL_present=true"
+            echo "FLUX_SUPABASE_ANON_KEY_present=true"
+          } > gate1-evidence/vercel-secret-scope.txt
+
+      - name: Capture sanitized baseline through read-only APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys_file="$(mktemp)"
+          trap 'rm -f "$keys_file"' EXIT
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$AUTHORIZED_PROJECT_REF/api-keys?reveal=true" \
+            > "$keys_file"
+          service_role_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$keys_file")"
+          test -n "$service_role_key"
+          echo "::add-mask::$service_role_key"
+          rm -f "$keys_file"
+
+          SUPABASE_URL="https://${AUTHORIZED_PROJECT_REF}.supabase.co" \
+          SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+          EVIDENCE_FILE="gate1-evidence/baseline-counts.json" \
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from collections import deque
+          from datetime import datetime, timezone
+
+          base = os.environ["SUPABASE_URL"]
+          key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          output = os.environ["EVIDENCE_FILE"]
+          tables = [
+              "payment_intake",
+              "payment_intake_events",
+              "payment_intake_files",
+              "payment_requests",
+              "proveedores",
+              "approval_batches",
+              "notification_events",
+          ]
+
+          counts = {}
+          for table in tables:
+              request = urllib.request.Request(
+                  f"{base}/rest/v1/{table}?select=id",
+                  method="HEAD",
+                  headers={
+                      "apikey": key,
+                      "Authorization": f"Bearer {key}",
+                      "Prefer": "count=exact",
+                      "Range": "0-0",
+                      "Range-Unit": "items",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  content_range = response.headers.get("Content-Range", "")
+              if "/" not in content_range:
+                  raise RuntimeError(f"Missing exact count for {table}")
+              counts[table] = int(content_range.rsplit("/", 1)[1])
+
+          object_count = 0
+          queue = deque([""])
+          while queue:
+              prefix = queue.popleft()
+              offset = 0
+              while True:
+                  payload = json.dumps({
+                      "prefix": prefix,
+                      "limit": 1000,
+                      "offset": offset,
+                      "sortBy": {"column": "name", "order": "asc"},
+                  }).encode("utf-8")
+                  request = urllib.request.Request(
+                      f"{base}/storage/v1/object/list/intake-uploads",
+                      data=payload,
+                      method="POST",
+                      headers={
+                          "apikey": key,
+                          "Authorization": f"Bearer {key}",
+                          "Content-Type": "application/json",
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      entries = json.load(response)
+                  for entry in entries:
+                      if entry.get("id"):
+                          object_count += 1
+                      else:
+                          name = entry.get("name")
+                          if name:
+                              queue.append(f"{prefix}/{name}".strip("/"))
+                  if len(entries) < 1000:
+                      break
+                  offset += len(entries)
+
+          counts["storage.objects:intake-uploads"] = object_count
+          evidence = {
+              "captured_at": datetime.now(timezone.utc).isoformat(),
+              "project_ref": os.environ.get("AUTHORIZED_PROJECT_REF", "scsirgbuqjcwoaxfacth"),
+              "counts": counts,
+          }
+          with open(output, "w", encoding="utf-8") as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+
+      - name: Run authorized read-only precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql \
+            > gate1-evidence/01-precheck.txt
+
+      - name: Create authorized DEV backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-029-triage/02_BACKUP_DEV.sql \
+            > gate1-evidence/02-backup.txt
+
+      - name: Apply exact migration 029 once
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql \
+            > gate1-evidence/03-load.txt
+
+      - name: Run authorized read-only postcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-029-triage/04_POSTCHECK_READ_ONLY.sql \
+            > gate1-evidence/04-postcheck.txt
+
+      - name: Capture sanitized post-counts and assert zero business deltas
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys_file="$(mktemp)"
+          trap 'rm -f "$keys_file"' EXIT
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$AUTHORIZED_PROJECT_REF/api-keys?reveal=true" \
+            > "$keys_file"
+          service_role_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$keys_file")"
+          test -n "$service_role_key"
+          echo "::add-mask::$service_role_key"
+          rm -f "$keys_file"
+
+          SUPABASE_URL="https://${AUTHORIZED_PROJECT_REF}.supabase.co" \
+          SUPABASE_SERVICE_ROLE_KEY="$service_role_key" \
+          BASELINE_FILE="gate1-evidence/baseline-counts.json" \
+          EVIDENCE_FILE="gate1-evidence/post-counts.json" \
+          DELTA_FILE="gate1-evidence/business-deltas.csv" \
+          python3 - <<'PY'
+          import csv
+          import json
+          import os
+          import urllib.request
+          from collections import deque
+          from datetime import datetime, timezone
+
+          base = os.environ["SUPABASE_URL"]
+          key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          tables = [
+              "payment_intake",
+              "payment_intake_events",
+              "payment_intake_files",
+              "payment_requests",
+              "proveedores",
+              "approval_batches",
+              "notification_events",
+          ]
+
+          counts = {}
+          for table in tables:
+              request = urllib.request.Request(
+                  f"{base}/rest/v1/{table}?select=id",
+                  method="HEAD",
+                  headers={
+                      "apikey": key,
+                      "Authorization": f"Bearer {key}",
+                      "Prefer": "count=exact",
+                      "Range": "0-0",
+                      "Range-Unit": "items",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  content_range = response.headers.get("Content-Range", "")
+              if "/" not in content_range:
+                  raise RuntimeError(f"Missing exact count for {table}")
+              counts[table] = int(content_range.rsplit("/", 1)[1])
+
+          object_count = 0
+          queue = deque([""])
+          while queue:
+              prefix = queue.popleft()
+              offset = 0
+              while True:
+                  payload = json.dumps({
+                      "prefix": prefix,
+                      "limit": 1000,
+                      "offset": offset,
+                      "sortBy": {"column": "name", "order": "asc"},
+                  }).encode("utf-8")
+                  request = urllib.request.Request(
+                      f"{base}/storage/v1/object/list/intake-uploads",
+                      data=payload,
+                      method="POST",
+                      headers={
+                          "apikey": key,
+                          "Authorization": f"Bearer {key}",
+                          "Content-Type": "application/json",
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      entries = json.load(response)
+                  for entry in entries:
+                      if entry.get("id"):
+                          object_count += 1
+                      else:
+                          name = entry.get("name")
+                          if name:
+                              queue.append(f"{prefix}/{name}".strip("/"))
+                  if len(entries) < 1000:
+                      break
+                  offset += len(entries)
+
+          counts["storage.objects:intake-uploads"] = object_count
+          post = {
+              "captured_at": datetime.now(timezone.utc).isoformat(),
+              "project_ref": "scsirgbuqjcwoaxfacth",
+              "counts": counts,
+          }
+          with open(os.environ["EVIDENCE_FILE"], "w", encoding="utf-8") as handle:
+              json.dump(post, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+
+          with open(os.environ["BASELINE_FILE"], encoding="utf-8") as handle:
+              baseline = json.load(handle)["counts"]
+
+          failures = []
+          with open(os.environ["DELTA_FILE"], "w", newline="", encoding="utf-8") as handle:
+              writer = csv.writer(handle)
+              writer.writerow(["entity", "baseline", "post", "delta", "status"])
+              for entity in sorted(baseline):
+                  delta = counts[entity] - baseline[entity]
+                  status = "PASS" if delta == 0 else "FAIL"
+                  writer.writerow([entity, baseline[entity], counts[entity], delta, status])
+                  if delta != 0:
+                      failures.append(entity)
+
+          if failures:
+              raise RuntimeError("Non-zero business deltas: " + ", ".join(failures))
+          PY
+
+      - name: Upload sanitized Gate 1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-intake-triage-gate1-sanitized
+          path: gate1-evidence/
+          if-no-files-found: error
+          retention-days: 7
+
