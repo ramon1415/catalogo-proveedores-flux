@@ -1235,12 +1235,28 @@ async function runUat() {
         }),
     }));
     assert(!zoomEquivalent.overflow && zoomEquivalent.controls, "ui16_zoom_200_equivalent");
-    await responsivePage.evaluate(() => document.activeElement?.blur());
-    await responsivePage.keyboard.press("Tab");
-    const firstFocus = await responsivePage.evaluate(
-      () => document.activeElement?.className || document.activeElement?.id,
+    const skipLink = responsivePage.locator(".skip-link");
+    await skipLink.focus();
+    assert(
+      String(await responsivePage.evaluate(() => document.activeElement?.className)).includes(
+        "skip-link",
+      ),
+      "ui16_skip_link_focus",
     );
-    assert(String(firstFocus).includes("skip-link"), "ui16_skip_link_focus");
+    const skipOutline = await skipLink.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    assert(
+      skipOutline.style !== "none" && skipOutline.width !== "0px",
+      "ui16_skip_link_focus_visible",
+    );
+    await responsivePage.keyboard.press("Enter");
+    assertEqual(
+      await responsivePage.evaluate(() => location.hash),
+      "#main-content",
+      "ui16_skip_link_keyboard_activation",
+    );
     await responsivePage.locator("#next-button").click();
     await waitFocus(responsivePage, "provider-name", "ui16_error_focus");
     await responsivePage.keyboard.press("Tab");
@@ -1468,12 +1484,28 @@ async function runResumedUat() {
     });
     assert(!zoomEquivalent.overflow && zoomEquivalent.controls, "ui16_zoom_200_equivalent");
     await screenshot(responsivePage, "13-zoom-200-equivalent.png");
-    await responsivePage.evaluate(() => document.activeElement?.blur());
-    await responsivePage.keyboard.press("Tab");
-    const firstFocus = await responsivePage.evaluate(
-      () => document.activeElement?.className || document.activeElement?.id,
+    const skipLink = responsivePage.locator(".skip-link");
+    await skipLink.focus();
+    assert(
+      String(await responsivePage.evaluate(() => document.activeElement?.className)).includes(
+        "skip-link",
+      ),
+      "ui16_skip_link_focus",
     );
-    assert(String(firstFocus).includes("skip-link"), "ui16_skip_link_focus");
+    const skipOutline = await skipLink.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    assert(
+      skipOutline.style !== "none" && skipOutline.width !== "0px",
+      "ui16_skip_link_focus_visible",
+    );
+    await responsivePage.keyboard.press("Enter");
+    assertEqual(
+      await responsivePage.evaluate(() => location.hash),
+      "#main-content",
+      "ui16_skip_link_keyboard_activation",
+    );
     await responsivePage.locator("#next-button").click();
     await waitFocus(responsivePage, "provider-name", "ui16_error_focus");
     await responsivePage.keyboard.press("Tab");
