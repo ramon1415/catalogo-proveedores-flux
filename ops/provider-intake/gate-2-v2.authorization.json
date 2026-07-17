@@ -1,0 +1,13 @@
+{
+  "gate": "phase-1d-gate-2-v2",
+  "authorized_root_head": "31eecde3c2cee2ca78020e53c3ee06ea97b2d940",
+  "branch": "feature/ramon-provider-intake-triage-ui",
+  "supabase_project_ref": "scsirgbuqjcwoaxfacth",
+  "persistent_qa_principals": 2,
+  "mutated_fixture_limit": 2,
+  "require_independent_cleanup": true,
+  "allow_provider_or_payment_request_creation": false,
+  "allow_notifications": false,
+  "allow_production": false,
+  "uat_script_sha256": "ce4e85e841acbf99453f5fb2e7743af58afe46334d21ee905b041ba09cd31b63"
+}

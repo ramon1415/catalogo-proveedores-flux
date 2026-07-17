@@ -1,0 +1,293 @@
+name: Provider intake triage DEV Gate 2 v2 (temporary)
+
+on:
+  push:
+    branches:
+      - feature/ramon-provider-intake-triage-ui
+    paths:
+      - .github/workflows/provider-intake-triage-gate2v2-temporary.yml
+      - ops/provider-intake/gate-2-v2.authorization.json
+      - scripts/qa/provider-intake-triage-gate2v2-uat.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-intake-triage-dev-gate-2-v2
+  cancel-in-progress: false
+
+jobs:
+  gate2v2:
+    name: Authenticated mutation UAT and independent IAM cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: DEV
+    env:
+      AUTHORIZED_ROOT_HEAD: 31eecde3c2cee2ca78020e53c3ee06ea97b2d940
+      AUTHORIZED_BASELINE: 05986aca63f2d98635cbb9b928cd0cebac29315a
+      AUTHORIZED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
+      AUTHORIZED_BRANCH: feature/ramon-provider-intake-triage-ui
+      AUTHORIZED_PROJECT_REF: scsirgbuqjcwoaxfacth
+      AUTHORIZED_MIGRATION_SHA256: effc70e602c55ba6b291ad5e904848bd9190389b08c6dbc9186ee28eeab87aeb
+      PREVIEW_URL: https://catalogo-proveedores-flux-git-feature-ramon-0f84ce-quantta-team.vercel.app
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+
+    steps:
+      - name: Checkout Gate 2 v2 authorization
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate immutable scope and authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="ops/provider-intake/gate-2-v2.authorization.json"
+          script="scripts/qa/provider-intake-triage-gate2v2-uat.mjs"
+
+          test "$GITHUB_REF_NAME" = "$AUTHORIZED_BRANCH"
+          test "$SUPABASE_DEV_PROJECT_REF" = "$AUTHORIZED_PROJECT_REF"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_DEV_DB_URL"
+          git merge-base --is-ancestor "$AUTHORIZED_BASELINE" HEAD
+          git merge-base --is-ancestor "$AUTHORIZED_ROOT_HEAD" HEAD
+          test "$(git rev-parse "HEAD:supabase/functions/provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
+
+          expected_files="$(
+            printf '%s\n' \
+              '.github/workflows/provider-intake-triage-gate2v2-temporary.yml' \
+              'ops/provider-intake/gate-2-v2.authorization.json' \
+              'scripts/qa/provider-intake-triage-gate2v2-uat.mjs' |
+              sort
+          )"
+          actual_files="$(git diff --name-only "$AUTHORIZED_ROOT_HEAD..HEAD" | sort)"
+          test "$actual_files" = "$expected_files"
+
+          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-2-v2"
+          test "$(jq -r '.authorized_root_head' "$marker")" = "$AUTHORIZED_ROOT_HEAD"
+          test "$(jq -r '.branch' "$marker")" = "$AUTHORIZED_BRANCH"
+          test "$(jq -r '.supabase_project_ref' "$marker")" = "$AUTHORIZED_PROJECT_REF"
+          test "$(jq -r '.persistent_qa_principals' "$marker")" = "2"
+          test "$(jq -r '.mutated_fixture_limit' "$marker")" = "2"
+          test "$(jq -r '.require_independent_cleanup' "$marker")" = "true"
+          test "$(jq -r '.allow_provider_or_payment_request_creation' "$marker")" = "false"
+          test "$(jq -r '.allow_notifications' "$marker")" = "false"
+          test "$(jq -r '.allow_production' "$marker")" = "false"
+          test "$(jq -r '.uat_script_sha256' "$marker")" = "$(sha256sum "$script" | cut -d' ' -f1)"
+
+          test "$(sha256sum supabase/migrations/030_provider_intake_action_fingerprint.sql | cut -d' ' -f1)" \
+            = "$AUTHORIZED_MIGRATION_SHA256"
+          test "$(sha256sum ops/provider-intake/apply-030-action-fingerprint/03_LOAD_030_EXACT.sql | cut -d' ' -f1)" \
+            = "$AUTHORIZED_MIGRATION_SHA256"
+          test "$(sha256sum supabase/migrations/029_provider_intake_triage.sql | cut -d' ' -f1)" \
+            = "57ab35263fa0a6dfa53aeef1fc1b1fa76fcede2f5d0413e05cea1642f42438eb"
+          git diff --check "$AUTHORIZED_BASELINE..HEAD"
+
+      - name: Validate code and scan secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/qa/provider-intake-triage-gate2v2-uat.mjs
+          files="$(git diff --name-only "$AUTHORIZED_ROOT_HEAD..HEAD")"
+          if printf '%s\n' "$files" | xargs grep -nE \
+            '(eyJ[A-Za-z0-9_-]{20,}|sbp_[A-Za-z0-9]{16,}|-----BEGIN (RSA )?PRIVATE KEY-----|Bearer[[:space:]]+[A-Za-z0-9._-]{20,})'
+          then
+            echo "Sensitive-looking value found." >&2
+            exit 1
+          fi
+
+      - name: Confirm Migration 030 and pre-UAT zero delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gate2v2-evidence
+          psql -X -qAt -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
+            -f ops/provider-intake/apply-030-action-fingerprint/04_POSTCHECK_READ_ONLY.sql \
+            > gate2v2-evidence/migration030_pre_uat_sanitized.json
+          jq -e '
+            .helper == "PASS"
+            and .rpc_replacements == 2
+            and .material_conflict == "PASS"
+            and .pre_uat_business_delta == 0
+          ' gate2v2-evidence/migration030_pre_uat_sanitized.json >/dev/null
+
+      - name: Obtain DEV API keys only inside runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys_file="$RUNNER_TEMP/supabase-api-keys.json"
+          trap 'rm -f "$keys_file"' EXIT
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$AUTHORIZED_PROJECT_REF/api-keys?reveal=true" \
+            > "$keys_file"
+          service_role_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$keys_file")"
+          anon_key="$(jq -er '.[] | select(.name == "anon") | .api_key' "$keys_file")"
+          test -n "$service_role_key"
+          test -n "$anon_key"
+          echo "::add-mask::$service_role_key"
+          echo "::add-mask::$anon_key"
+          {
+            echo "SUPABASE_URL=https://${AUTHORIZED_PROJECT_REF}.supabase.co"
+            echo "SUPABASE_DEV_SERVICE_ROLE_KEY=$service_role_key"
+            echo "SUPABASE_DEV_ANON_KEY=$anon_key"
+          } >> "$GITHUB_ENV"
+          unset service_role_key anon_key
+          rm -f "$keys_file"
+
+      - name: Confirm current Vercel Preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --location --output /dev/null \
+            --write-out '%{http_code}' "$PREVIEW_URL/provider_intakes.html")"
+          test "$status" = "200"
+
+      - name: Install isolated browser runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/gate2v2-node"
+          mkdir -p "$runtime"
+          cd "$runtime"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.61.1 axe-core@4.10.3 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          echo "NODE_PATH=$runtime/node_modules" >> "$GITHUB_ENV"
+
+      - name: Run authenticated Gate 2 v2
+        id: uat
+        continue-on-error: true
+        shell: bash
+        env:
+          UAT_OUTPUT_DIR: gate2v2-evidence
+          UAT_MANIFEST: ${{ runner.temp }}/gate2v2-identities.json
+        run: |
+          set -uo pipefail
+          node scripts/qa/provider-intake-triage-gate2v2-uat.mjs
+
+      - name: Enforce independent cleanup
+        id: cleanup
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          UAT_OUTPUT_DIR: gate2v2-evidence
+          UAT_MANIFEST: ${{ runner.temp }}/gate2v2-identities.json
+        run: |
+          set -uo pipefail
+          node scripts/qa/provider-intake-triage-gate2v2-uat.mjs --cleanup-only
+
+      - name: Verify zero active sessions and privileges
+        id: iam
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          UAT_MANIFEST: ${{ runner.temp }}/gate2v2-identities.json
+        run: |
+          set -uo pipefail
+          test -f "$UAT_MANIFEST"
+          auth_ids="$(jq -er '[.identities[].auth_user_id] | join(",")' "$UAT_MANIFEST")"
+          test -n "$auth_ids"
+          psql -X -qAt -v ON_ERROR_STOP=1 \
+            --set=auth_ids="$auth_ids" \
+            "$SUPABASE_DEV_DB_URL" \
+            > gate2v2-evidence/iam_at_rest_sanitized.json <<'SQL'
+          begin transaction read only;
+          with ids as (
+            select unnest(string_to_array(:'auth_ids', ',')::uuid[]) as auth_user_id
+          ),
+          qa_profiles as (
+            select p.id
+            from public.profiles p
+            join ids on ids.auth_user_id = p.auth_user_id
+          )
+          select jsonb_pretty(jsonb_build_object(
+            'persistent_auth_users', (
+              select count(*) from auth.users u join ids on ids.auth_user_id = u.id
+            ),
+            'blocked_auth_users', (
+              select count(*)
+              from auth.users u
+              join ids on ids.auth_user_id = u.id
+              where u.banned_until > now()
+            ),
+            'persistent_profiles', (select count(*) from qa_profiles),
+            'inactive_profiles', (
+              select count(*)
+              from public.profiles p
+              join qa_profiles qp on qp.id = p.id
+              where not p.active
+            ),
+            'active_roles', (
+              select count(*)
+              from public.user_roles ur
+              join qa_profiles qp on qp.id = ur.profile_id
+            ),
+            'active_memberships', (
+              select count(*)
+              from public.profile_company_memberships pcm
+              join qa_profiles qp on qp.id = pcm.profile_id
+              where pcm.active
+            ),
+            'sessions', (
+              select count(*)
+              from auth.sessions s
+              join ids on ids.auth_user_id = s.user_id
+            ),
+            'active_refresh_tokens', (
+              select count(*)
+              from auth.refresh_tokens rt
+              join ids on ids.auth_user_id::text = rt.user_id::text
+              where not rt.revoked
+            ),
+            'record_identifiers_emitted', false
+          ));
+          commit;
+          SQL
+
+          jq -e '
+            .persistent_auth_users == 2
+            and .blocked_auth_users == 2
+            and .persistent_profiles == 2
+            and .inactive_profiles == 2
+            and .active_roles == 0
+            and .active_memberships == 0
+            and .sessions == 0
+            and .active_refresh_tokens == 0
+            and .record_identifiers_emitted == false
+          ' gate2v2-evidence/iam_at_rest_sanitized.json >/dev/null
+
+      - name: Upload sanitized Gate 2 v2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-intake-triage-gate2v2-${{ github.run_id }}
+          path: gate2v2-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce PASS and safe stop
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="gate2v2-evidence/gate2_v2_results_sanitized.json"
+          test -f "$result"
+          test "${{ steps.uat.outcome }}" = "success"
+          test "${{ steps.cleanup.outcome }}" = "success"
+          test "${{ steps.iam.outcome }}" = "success"
+          test "$(jq -r '.status' "$result")" = "PASS"
+          test "$(jq -r '.migration_030' "$result")" = "PASS"
+          test "$(jq -r '.fixtures.selected' "$result")" = "2"
+          test "$(jq -r '.events.new_events' "$result")" = "7"
+          test "$(jq -r '.cleanup.complete' "$result")" = "true"
+          test "$(jq -r '.cleanup.sessions_invalidated' "$result")" = "true"
+          test "$(jq -r '.cleanup.effective_privileges' "$result")" = "0"
+          test "$(jq -r '.core_effects.notification_events_delta' "$result")" = "0"
+          test "$(jq -r '.core_effects.storage_delta' "$result")" = "0"
+          test "$(jq -r '.privacy.contains_uuid_email_password_token_action_id_full_fingerprint_payload_rfc_bank_storage_path' "$result")" = "false"
