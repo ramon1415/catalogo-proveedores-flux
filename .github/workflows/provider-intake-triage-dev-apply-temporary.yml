@@ -120,13 +120,16 @@ jobs:
             npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY preview \
               --force \
               --sensitive \
+              --yes \
+              --non-interactive \
               --scope quantta-team \
               --token "$VERCEL_TOKEN" \
               --no-color
           printf '%s' "$service_role_key" |
             npx --yes vercel@56.2.1 env add FLUX_SUPABASE_SERVICE_ROLE_KEY development \
               --force \
-              --sensitive \
+              --yes \
+              --non-interactive \
               --scope quantta-team \
               --token "$VERCEL_TOKEN" \
               --no-color
