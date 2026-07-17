@@ -14,6 +14,7 @@ const client = read("provider_intakes.js")
 const styles = read("provider_intakes.css")
 const config = read("config.js")
 const apiSource = read("api/provider-intake-file-url.js")
+const postcheck = read("ops/provider-intake/apply-029-triage/04_POSTCHECK_READ_ONLY.sql")
 const require = createRequire(import.meta.url)
 const fileUrlHandler = require(path.join(root, "api/provider-intake-file-url.js"))
 
@@ -24,6 +25,14 @@ const IDS = Object.freeze({
   intake: "44444444-4444-4444-8444-444444444444",
   file: "55555555-5555-4555-8555-555555555555",
 })
+
+const functionDefinition = (functionName) => {
+  const match = migration.match(
+    new RegExp(`create function public\\.${functionName}\\([\\s\\S]*?\\n\\$\\$;`, "i"),
+  )
+  assert.ok(match, `missing function definition for ${functionName}`)
+  return match[0]
+}
 
 test("migration exposes only the four authenticated triage RPCs", () => {
   for (const functionName of [
@@ -39,6 +48,59 @@ test("migration exposes only the four authenticated triage RPCs", () => {
   assert.match(migration, /set search_path = public, pg_temp/gi)
   assert.match(migration, /from public, anon, authenticated, service_role;/i)
   assert.doesNotMatch(migration, /grant execute[\s\S]{0,180}\bto anon\b/i)
+})
+
+test("mask helper is pure invoker while the other six functions retain definer privileges", () => {
+  const privilegedFunctions = [
+    "provider_intake_actor_context",
+    "provider_intake_assert_company_access",
+    "list_provider_intakes",
+    "get_provider_intake_detail",
+    "transition_provider_intake",
+    "add_provider_intake_note",
+  ]
+  const allFunctions = [...privilegedFunctions, "provider_intake_mask_value"]
+
+  const maskDefinition = functionDefinition("provider_intake_mask_value")
+  assert.match(maskDefinition, /language sql\s+immutable\s+security invoker\s+set search_path = public, pg_temp/i)
+  assert.doesNotMatch(maskDefinition, /security definer/i)
+
+  for (const functionName of privilegedFunctions) {
+    assert.match(functionDefinition(functionName), /security definer\s+set search_path = public, pg_temp/i)
+  }
+  for (const functionName of allFunctions) {
+    assert.match(functionDefinition(functionName), /set search_path = public, pg_temp/i)
+  }
+
+  assert.match(
+    migration,
+    /v_privileged_internal_functions text\[\] := array\[\s*'provider_intake_actor_context',\s*'provider_intake_assert_company_access'\s*\]::text\[\];/i,
+  )
+  assert.match(
+    migration,
+    /v_pure_internal_functions text\[\] := array\[\s*'provider_intake_mask_value'\s*\]::text\[\];/i,
+  )
+  assert.match(
+    migration,
+    /v_all_functions :=\s*v_public_functions\s*\|\| v_privileged_internal_functions\s*\|\| v_pure_internal_functions;/i,
+  )
+  assert.match(
+    migration,
+    /p\.proname = any \(v_pure_internal_functions\)[\s\S]*?p\.prosecdef[\s\S]*?p\.provolatile <> 'i'[\s\S]*?l\.lanname <> 'sql'/i,
+  )
+})
+
+test("migration and operational postcheck keep PUBLIC and application grants closed", () => {
+  for (const sql of [migration, postcheck]) {
+    assert.match(sql, /privilege\.grantee = 0[\s\S]*?privilege\.privilege_type = 'EXECUTE'/i)
+    assert.match(sql, /has_function_privilege\('anon', p\.oid, 'EXECUTE'\)/i)
+    assert.match(sql, /has_function_privilege\('authenticated', p\.oid, 'EXECUTE'\)/i)
+    assert.match(sql, /has_function_privilege\('service_role', p\.oid, 'EXECUTE'\)/i)
+    assert.match(
+      sql,
+      /v_privileged_internal_functions \|\| v_pure_internal_functions/i,
+    )
+  }
 })
 
 test("transition allowlist excludes conversion and enforces comments, concurrency, and idempotency", () => {

@@ -4,60 +4,75 @@ do $postcheck$
 declare
   v_function_count bigint;
   v_public_function_count bigint;
-  v_internal_function_count bigint;
+  v_privileged_internal_function_count bigint;
+  v_pure_internal_function_count bigint;
   v_index_count bigint;
   v_backup_count bigint;
   v_policy_count bigint;
   v_intake_mismatch bigint;
   v_files_mismatch bigint;
   v_events_mismatch bigint;
+  v_public_functions text[] := array[
+    'list_provider_intakes',
+    'get_provider_intake_detail',
+    'transition_provider_intake',
+    'add_provider_intake_note'
+  ]::text[];
+  v_privileged_internal_functions text[] := array[
+    'provider_intake_actor_context',
+    'provider_intake_assert_company_access'
+  ]::text[];
+  v_pure_internal_functions text[] := array[
+    'provider_intake_mask_value'
+  ]::text[];
+  v_all_functions text[];
 begin
+  v_all_functions :=
+    v_public_functions
+    || v_privileged_internal_functions
+    || v_pure_internal_functions;
+
   select count(*)
     into v_function_count
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and p.proname in (
-      'provider_intake_actor_context',
-      'provider_intake_assert_company_access',
-      'provider_intake_mask_value',
-      'list_provider_intakes',
-      'get_provider_intake_detail',
-      'transition_provider_intake',
-      'add_provider_intake_note'
-    );
+    and p.proname = any (v_all_functions);
 
   select count(*)
     into v_public_function_count
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and p.proname in (
-      'list_provider_intakes',
-      'get_provider_intake_detail',
-      'transition_provider_intake',
-      'add_provider_intake_note'
-    );
+    and p.proname = any (v_public_functions);
 
   select count(*)
-    into v_internal_function_count
+    into v_privileged_internal_function_count
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and p.proname in (
-      'provider_intake_actor_context',
-      'provider_intake_assert_company_access',
-      'provider_intake_mask_value'
-    );
+    and p.proname = any (v_privileged_internal_functions);
 
-  if (v_function_count, v_public_function_count, v_internal_function_count)
-    is distinct from (7::bigint, 4::bigint, 3::bigint)
+  select count(*)
+    into v_pure_internal_function_count
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname = any (v_pure_internal_functions);
+
+  if (
+    v_function_count,
+    v_public_function_count,
+    v_privileged_internal_function_count,
+    v_pure_internal_function_count
+  ) is distinct from (7::bigint, 4::bigint, 2::bigint, 1::bigint)
   then
     raise exception
-      '029_postcheck_function_count: total %, public %, internal %',
+      '029_postcheck_function_count: total %, public %, privileged %, pure %',
       v_function_count,
       v_public_function_count,
-      v_internal_function_count;
+      v_privileged_internal_function_count,
+      v_pure_internal_function_count;
   end if;
 
   if exists (
@@ -65,26 +80,14 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname in (
-        'provider_intake_actor_context',
-        'provider_intake_assert_company_access',
-        'provider_intake_mask_value',
-        'list_provider_intakes',
-        'get_provider_intake_detail',
-        'transition_provider_intake',
-        'add_provider_intake_note'
-      )
-      and (
-        not p.prosecdef
-        or not exists (
-          select 1
-          from unnest(coalesce(p.proconfig, array[]::text[])) setting
-          where setting = 'search_path=public, pg_temp'
-        )
-        or has_function_privilege('anon', p.oid, 'EXECUTE')
+      and p.proname = any (v_all_functions)
+      and not exists (
+        select 1
+        from unnest(coalesce(p.proconfig, array[]::text[])) setting
+        where setting = 'search_path=public, pg_temp'
       )
   ) then
-    raise exception '029_postcheck_function_security';
+    raise exception '029_postcheck_function_search_path';
   end if;
 
   if exists (
@@ -92,13 +95,48 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname in (
-        'list_provider_intakes',
-        'get_provider_intake_detail',
-        'transition_provider_intake',
-        'add_provider_intake_note'
+      and p.proname = any (
+        v_public_functions || v_privileged_internal_functions
       )
-      and not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      and not p.prosecdef
+  ) then
+    raise exception '029_postcheck_privileged_function_security';
+  end if;
+
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    join pg_language l on l.oid = p.prolang
+    where n.nspname = 'public'
+      and p.proname = any (v_pure_internal_functions)
+      and (
+        p.prosecdef
+        or p.provolatile <> 'i'
+        or l.lanname <> 'sql'
+      )
+  ) then
+    raise exception '029_postcheck_pure_function_security';
+  end if;
+
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = any (v_public_functions)
+      and (
+        has_function_privilege('anon', p.oid, 'EXECUTE')
+        or not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        or exists (
+          select 1
+          from aclexplode(
+            coalesce(p.proacl, acldefault('f', p.proowner))
+          ) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        )
+      )
   ) then
     raise exception '029_postcheck_public_rpc_grants';
   end if;
@@ -108,14 +146,21 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname in (
-        'provider_intake_actor_context',
-        'provider_intake_assert_company_access',
-        'provider_intake_mask_value'
+      and p.proname = any (
+        v_privileged_internal_functions || v_pure_internal_functions
       )
       and (
-        has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        has_function_privilege('anon', p.oid, 'EXECUTE')
+        or has_function_privilege('authenticated', p.oid, 'EXECUTE')
         or has_function_privilege('service_role', p.oid, 'EXECUTE')
+        or exists (
+          select 1
+          from aclexplode(
+            coalesce(p.proacl, acldefault('f', p.proowner))
+          ) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        )
       )
   ) then
     raise exception '029_postcheck_internal_helper_grants';
@@ -333,13 +378,24 @@ select
   p.proname,
   pg_get_function_identity_arguments(p.oid) as identity_arguments,
   pg_get_function_result(p.oid) as return_type,
+  l.lanname as language_name,
   p.prosecdef as security_definer,
   p.provolatile,
   p.proconfig,
   has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
-  has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute
+  has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+  has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute,
+  exists (
+    select 1
+    from aclexplode(
+      coalesce(p.proacl, acldefault('f', p.proowner))
+    ) privilege
+    where privilege.grantee = 0
+      and privilege.privilege_type = 'EXECUTE'
+  ) as public_execute
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
+join pg_language l on l.oid = p.prolang
 where n.nspname = 'public'
   and p.proname in (
     'provider_intake_actor_context',

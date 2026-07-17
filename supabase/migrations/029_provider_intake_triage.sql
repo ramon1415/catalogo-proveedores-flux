@@ -176,6 +176,7 @@ create function public.provider_intake_mask_value(p_value text)
 returns text
 language sql
 immutable
+security invoker
 set search_path = public, pg_temp
 as $$
   select case
@@ -811,18 +812,26 @@ declare
     'transition_provider_intake',
     'add_provider_intake_note'
   ]::text[];
-  v_internal_functions text[] := array[
+  v_privileged_internal_functions text[] := array[
     'provider_intake_actor_context',
-    'provider_intake_assert_company_access',
+    'provider_intake_assert_company_access'
+  ]::text[];
+  v_pure_internal_functions text[] := array[
     'provider_intake_mask_value'
   ]::text[];
+  v_all_functions text[];
 begin
+  v_all_functions :=
+    v_public_functions
+    || v_privileged_internal_functions
+    || v_pure_internal_functions;
+
   if (
     select count(*)
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname = any (v_public_functions || v_internal_functions)
+      and p.proname = any (v_all_functions)
   ) <> 7 then
     raise exception '029_postcheck: expected triage functions are missing';
   end if;
@@ -832,17 +841,43 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname = any (v_public_functions || v_internal_functions)
-      and (
-        not p.prosecdef
-        or not exists (
-          select 1
-          from unnest(coalesce(p.proconfig, array[]::text[])) setting
-          where setting = 'search_path=public, pg_temp'
-        )
+      and p.proname = any (v_all_functions)
+      and not exists (
+        select 1
+        from unnest(coalesce(p.proconfig, array[]::text[])) setting
+        where setting = 'search_path=public, pg_temp'
       )
   ) then
-    raise exception '029_postcheck: SECURITY DEFINER or fixed search_path is missing';
+    raise exception '029_postcheck: fixed search_path is missing';
+  end if;
+
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = any (
+        v_public_functions || v_privileged_internal_functions
+      )
+      and not p.prosecdef
+  ) then
+    raise exception '029_postcheck: a privileged function is not SECURITY DEFINER';
+  end if;
+
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    join pg_language l on l.oid = p.prolang
+    where n.nspname = 'public'
+      and p.proname = any (v_pure_internal_functions)
+      and (
+        p.prosecdef
+        or p.provolatile <> 'i'
+        or l.lanname <> 'sql'
+      )
+  ) then
+    raise exception '029_postcheck: pure mask helper privilege or language is unsafe';
   end if;
 
   if exists (
@@ -854,6 +889,14 @@ begin
       and (
         has_function_privilege('anon', p.oid, 'EXECUTE')
         or not has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        or exists (
+          select 1
+          from aclexplode(
+            coalesce(p.proacl, acldefault('f', p.proowner))
+          ) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        )
       )
   ) then
     raise exception '029_postcheck: public RPC grants are unsafe';
@@ -864,10 +907,21 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proname = any (v_internal_functions)
+      and p.proname = any (
+        v_privileged_internal_functions || v_pure_internal_functions
+      )
       and (
         has_function_privilege('anon', p.oid, 'EXECUTE')
         or has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        or has_function_privilege('service_role', p.oid, 'EXECUTE')
+        or exists (
+          select 1
+          from aclexplode(
+            coalesce(p.proacl, acldefault('f', p.proowner))
+          ) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        )
       )
   ) then
     raise exception '029_postcheck: an internal helper is directly executable';

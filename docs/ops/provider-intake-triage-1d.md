@@ -41,7 +41,7 @@ La migration corregida es `029_provider_intake_triage.sql`. No modifica
 migrations históricas. Agrega cuatro RPCs públicas para `authenticated`, tres
 helpers internos sin grant al cliente, el tipo de evento `internal_note` y dos
 índices. Migration y LOAD exacto comparten el SHA-256 vigente
-`bfd5deaaa349a36e7a8681943559aa41938aad6393b28acd54162843f2b65067`.
+`57ab35263fa0a6dfa53aeef1fc1b1fa76fcede2f5d0413e05cea1642f42438eb`.
 
 ## Lista, filtros y paginación
 
@@ -136,7 +136,19 @@ Las políticas creadas en migration 025 continúan vigentes:
 - `payment_intake_files_select_finance_company`;
 - `payment_intake_events_select_finance_company`.
 
-`anon` no tiene grants sobre tablas ni RPCs. Los RPCs de triage vuelven a validar perfil, rol y empresa dentro de funciones `SECURITY DEFINER` con `search_path = public, pg_temp`. Los helpers internos no son ejecutables por `anon`, `authenticated` o `service_role`.
+`anon` no tiene grants sobre tablas ni RPCs. Los RPCs de triage vuelven a
+validar perfil, rol y empresa dentro de funciones `SECURITY DEFINER`. Los
+helpers de autorización `provider_intake_actor_context` y
+`provider_intake_assert_company_access` también son `SECURITY DEFINER`. En
+cambio, `provider_intake_mask_value` es una función pura `SQL`, `IMMUTABLE` y
+`SECURITY INVOKER`: transforma únicamente su argumento y no necesita privilegios
+del propietario. Esta separación evita elevar innecesariamente una
+transformación de texto.
+
+Las siete funciones fijan `search_path = public, pg_temp`. Los tres helpers
+internos carecen de ejecución directa para `PUBLIC`, `anon`, `authenticated` y
+`service_role`; los cuatro RPCs públicos conceden ejecución solo a
+`authenticated`.
 
 ## Accesibilidad
 
@@ -162,6 +174,9 @@ El gate visual debe validar lista, filtros, vacío, error 403, detalle, acción 
 `scripts/qa/provider-intake-triage-contract.test.mjs` cubre:
 
 - grants y RPCs;
+- matriz de seis funciones `SECURITY DEFINER` y un helper puro
+  `SECURITY INVOKER`;
+- `search_path` fijo en las siete funciones y grants cerrados a `PUBLIC`;
 - allowlist de transiciones;
 - bloqueo de conversión;
 - comentario, concurrencia e idempotencia;
@@ -181,8 +196,13 @@ La suite no se conecta a DEV y no inserta o modifica datos.
 Punto de reanudación actual: el run `29600671386` confirmó baseline y creó las
 tres copias de backup, pero el LOAD falló dentro de su transacción antes de
 `COMMIT`. La causa fue una asignación PL/pgSQL que combinaba un `%rowtype` y un
-escalar en el mismo `INTO`; el código versionado ahora mantiene ambos targets
-separados.
+escalar en el mismo `INTO`; el código versionado mantiene ambos targets
+separados. El dry-run `29602695086` reutilizó y endureció los backups, pero su
+guard final agrupó las siete funciones y exigió `SECURITY DEFINER`
+indiscriminadamente. La nueva ejecución comprueba explícitamente el rollback de
+esa transacción antes de continuar. El guard corregido exige seis funciones
+privilegiadas `SECURITY DEFINER` y una función pura de máscara `SECURITY
+INVOKER`, sin reducir ninguna validación de grants o `search_path`.
 
 Backups que deben conservarse hasta un cleanup posterior a Gate 2:
 
@@ -203,7 +223,8 @@ La reanudación autorizada:
 4. Genera solo en el runner una copia del LOAD cuyo `COMMIT` final se sustituye
    por `ROLLBACK`.
 5. Ejecuta el dry-run con `ON_ERROR_STOP=1` y comprueba otra vez que no quedaron
-   funciones, índices o cambios de constraint.
+   funciones, índices o cambios de constraint. Esa comprobación se ejecuta
+   siempre, incluso cuando el dry-run falla.
 6. Aplica exactamente `03_LOAD_029_EXACT.sql` una sola vez.
 7. Ejecuta `04_POSTCHECK_READ_ONLY.sql` y confirma funciones, firmas, grants,
    RLS, backups y conteos.
