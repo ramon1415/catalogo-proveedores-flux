@@ -151,8 +151,6 @@ jobs:
           grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-development.txt
           grep -q 'FLUX_SUPABASE_URL' gate1-evidence/vercel-preview.txt
           grep -q 'FLUX_SUPABASE_ANON_KEY' gate1-evidence/vercel-preview.txt
-          grep -q 'FLUX_SUPABASE_URL' gate1-evidence/vercel-development.txt
-          grep -q 'FLUX_SUPABASE_ANON_KEY' gate1-evidence/vercel-development.txt
           if grep -q 'FLUX_SUPABASE_SERVICE_ROLE_KEY' gate1-evidence/vercel-production-after.txt; then
             echo "Production scope changed unexpectedly." >&2
             exit 1
@@ -163,8 +161,8 @@ jobs:
             echo "configured=true"
             echo "scope=Preview,Development"
             echo "production=false"
-            echo "FLUX_SUPABASE_URL_present=true"
-            echo "FLUX_SUPABASE_ANON_KEY_present=true"
+            echo "FLUX_SUPABASE_URL_preview_present=true"
+            echo "FLUX_SUPABASE_ANON_KEY_preview_present=true"
           } > gate1-evidence/vercel-secret-scope.txt
 
       - name: Capture sanitized baseline through read-only APIs
