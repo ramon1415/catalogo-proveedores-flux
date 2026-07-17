@@ -173,9 +173,6 @@ async function snapshot() {
       neutralLinkInfo(),
       noTokenBrowser(),
     ]);
-  assertRuntime(runtime);
-  assert(secrets.captcha_expected_hostname_absent, "captcha_hostname_present");
-  assert(secrets.captcha_expected_action_absent, "captcha_action_present");
   return {
     generated_at: new Date().toISOString(),
     environment: "DEV",
@@ -205,8 +202,11 @@ async function inspect() {
   const result = await snapshot();
   await fs.writeFile(BEFORE_FILE, `${JSON.stringify(result, null, 2)}\n`, "utf8");
   console.log(
-    `inspect | runtime=${result.runtime.status}-v${result.runtime.version} cors_match=${result.secrets.cors_match} privacy_match=${result.secrets.privacy_match} captcha_expected_absent=${result.secrets.captcha_expected_hostname_absent && result.secrets.captcha_expected_action_absent}`,
+    `inspect | runtime=${result.runtime.status}-v${result.runtime.version} verify_jwt=${result.runtime.verify_jwt} function_id_match=${result.runtime.id === EXPECTED_FUNCTION_ID} cors_match=${result.secrets.cors_match} privacy_match=${result.secrets.privacy_match} captcha_expected_absent=${result.secrets.captcha_expected_hostname_absent && result.secrets.captcha_expected_action_absent}`,
   );
+  assertRuntime(result.runtime);
+  assert(result.secrets.captcha_expected_hostname_absent, "captcha_hostname_present");
+  assert(result.secrets.captcha_expected_action_absent, "captcha_action_present");
 }
 
 async function verify() {
@@ -214,6 +214,9 @@ async function verify() {
   let result = null;
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     result = await snapshot();
+    assertRuntime(result.runtime);
+    assert(result.secrets.captcha_expected_hostname_absent, "captcha_hostname_present");
+    assert(result.secrets.captcha_expected_action_absent, "captcha_action_present");
     const ready =
       result.secrets.cors_match &&
       result.secrets.privacy_match &&
