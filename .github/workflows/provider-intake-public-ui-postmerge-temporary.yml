@@ -110,6 +110,91 @@ jobs:
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
 
+      - name: Compare deployed source with approved backend tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          download_root="$POSTMERGE_WORK_DIR/downloaded"
+          mkdir -p "$download_root/supabase"
+          cp supabase/config.toml "$download_root/supabase/config.toml"
+          (
+            cd "$download_root"
+            supabase functions download provider-intake \
+              --project-ref "$PROJECT_REF" \
+              --use-api >/dev/null
+          )
+
+          LOCAL_FUNCTION_DIR="$GITHUB_WORKSPACE/supabase/functions/provider-intake" \
+          REMOTE_FUNCTION_DIR="$download_root/supabase/functions/provider-intake" \
+          node <<'NODE'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+
+          const localRoot = process.env.LOCAL_FUNCTION_DIR;
+          const remoteRoot = process.env.REMOTE_FUNCTION_DIR;
+          const outputDir = process.env.POSTMERGE_OUTPUT_DIR;
+          const required = [
+            "captcha.ts",
+            "cors.ts",
+            "crypto.ts",
+            "files.ts",
+            "handler.ts",
+            "index.ts",
+            "repository.ts",
+            "responses.ts",
+            "types.ts",
+            "validation.ts",
+          ];
+
+          function files(root) {
+            const result = [];
+            const visit = (directory) => {
+              for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+                const absolute = path.join(directory, entry.name);
+                if (entry.isDirectory()) visit(absolute);
+                else if (entry.isFile()) result.push(path.relative(root, absolute).replaceAll("\\", "/"));
+              }
+            };
+            visit(root);
+            return result.sort();
+          }
+
+          function digest(file) {
+            return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+          }
+
+          const remoteFiles = files(remoteRoot);
+          const compared = remoteFiles.map((relative) => {
+            const local = path.join(localRoot, relative);
+            const remote = path.join(remoteRoot, relative);
+            return {
+              path: relative,
+              local_exists: fs.existsSync(local),
+              matches: fs.existsSync(local) && digest(local) === digest(remote),
+            };
+          });
+          const requiredPresent = required.every((relative) => remoteFiles.includes(relative));
+          const exact = requiredPresent && compared.every((entry) => entry.local_exists && entry.matches);
+          const result = {
+            runtime_source_match: exact,
+            approved_backend_tree: process.env.EXPECTED_BACKEND_TREE,
+            required_runtime_files_present: requiredPresent,
+            downloaded_file_count: remoteFiles.length,
+            compared,
+          };
+          fs.mkdirSync(outputDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(outputDir, "runtime-source-comparison.json"),
+            `${JSON.stringify(result, null, 2)}\n`,
+            "utf8",
+          );
+          if (!exact) throw new Error("runtime_source_mismatch");
+          console.log(
+            `runtime_source | match=true downloaded_files=${remoteFiles.length} backend_tree=${process.env.EXPECTED_BACKEND_TREE}`,
+          );
+          NODE
+
       - name: Install pinned browser dependency
         shell: bash
         run: |
