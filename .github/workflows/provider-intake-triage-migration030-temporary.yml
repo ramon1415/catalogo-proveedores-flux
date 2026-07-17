@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 25
     environment: DEV
     env:
-      AUTHORIZED_ROOT_HEAD: 30adb591e29e406c445dc6e70759ed1339a27f7c
+      AUTHORIZED_ROOT_HEAD: 4d99951c442a6e73016f54686dd1b7bfe936d623
       AUTHORIZED_BASELINE: 05986aca63f2d98635cbb9b928cd0cebac29315a
       AUTHORIZED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
       AUTHORIZED_BRANCH: feature/ramon-provider-intake-triage-ui
@@ -87,8 +87,8 @@ jobs:
           set -euo pipefail
           node --check scripts/qa/provider-intake-action-fingerprint.test.mjs
           node --test scripts/qa/*.test.mjs | tee node-tests.txt
-          grep -q '# tests 86' node-tests.txt
-          grep -q '# pass 86' node-tests.txt
+          grep -q '# tests 87' node-tests.txt
+          grep -q '# pass 87' node-tests.txt
           grep -q '# fail 0' node-tests.txt
 
       - name: Parse PostgreSQL files
