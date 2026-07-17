@@ -126,7 +126,13 @@ No se guardan payload, datos bancarios, tokens, rutas, archivos o URLs firmadas 
 
 Cada escritura exige `expected_status` y `expected_updated_at`. Una versión distinta retorna `provider_intake_conflict`; la UI muestra: “Esta solicitud fue actualizada por otro usuario. Recarga el detalle.”
 
-El índice único por `payment_intake_id + action_id` hace idempotentes los reintentos y evita eventos duplicados.
+El índice único por `payment_intake_id + action_id` evita eventos duplicados.
+Migration 030 agrega idempotencia material: cada transición y nota nueva guarda
+una huella SHA-256 server-side del actor, operación, intake, estado/timestamp
+esperado, destino y nota normalizada. Un replay exacto es idempotente; reutilizar
+el mismo `action_id` con actor, operación o material distinto falla cerrado. Los
+eventos legacy sin huella tampoco se presumen equivalentes y nunca se
+reescriben.
 
 ## RLS y grants
 
@@ -234,6 +240,22 @@ La reanudación autorizada:
 Preview/Development y no debe copiarse a Production.
 
 No usar `db push` ni `migration repair` para este paquete.
+
+## Migration 030 y principales QA
+
+`030_provider_intake_action_fingerprint.sql` reemplaza únicamente
+`transition_provider_intake` y `add_provider_intake_note`, conserva sus firmas,
+retornos, grants, `SECURITY DEFINER`, `search_path`, reglas de empresa,
+allowlist, comentarios y concurrencia optimista, y agrega un helper interno sin
+grants de aplicación. La migration y
+`ops/provider-intake/apply-030-action-fingerprint/03_LOAD_030_EXACT.sql` son
+byte-identical.
+
+Gate 2 usa dos principales de auditoría permanentes solo en DEV:
+`QA_TRIAGE_FINANCE_1` y `QA_TRIAGE_FINANCE_2`. Al terminar conservan usuario
+Auth bloqueado y perfil inactivo para sostener las referencias del ledger, pero
+quedan sin sesiones, roles, memberships ni acceso efectivo. El ciclo operativo
+está en `provider-intake-triage-qa-audit-principals.md`.
 
 ## Rollback
 
