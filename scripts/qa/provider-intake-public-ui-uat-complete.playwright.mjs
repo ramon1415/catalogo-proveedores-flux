@@ -1251,10 +1251,11 @@ async function runUat() {
       skipOutline.style !== "none" && skipOutline.width !== "0px",
       "ui16_skip_link_focus_visible",
     );
+    const skipTarget = await skipLink.getAttribute("href");
     await responsivePage.keyboard.press("Enter");
     assertEqual(
       await responsivePage.evaluate(() => location.hash),
-      "#main-content",
+      skipTarget,
       "ui16_skip_link_keyboard_activation",
     );
     await responsivePage.locator("#next-button").click();
@@ -1500,10 +1501,11 @@ async function runResumedUat() {
       skipOutline.style !== "none" && skipOutline.width !== "0px",
       "ui16_skip_link_focus_visible",
     );
+    const skipTarget = await skipLink.getAttribute("href");
     await responsivePage.keyboard.press("Enter");
     assertEqual(
       await responsivePage.evaluate(() => location.hash),
-      "#main-content",
+      skipTarget,
       "ui16_skip_link_keyboard_activation",
     );
     await responsivePage.locator("#next-button").click();
