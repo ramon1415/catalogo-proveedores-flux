@@ -239,6 +239,7 @@ try {
     { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=income", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "provider-intakes", section: "Operacion", file: "provider_intakes.html", href: "./provider_intakes.html", icon: "T", label: "Solicitudes de proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN], sensitive: true },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approval-batches", section: "General", file: "approval_batches.html", href: "./approval_batches.html", icon: "C", label: "Cortes semanales", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
@@ -272,6 +273,7 @@ try {
       return list.some((role) => roleState.roles.includes(normalizeRole(role)))
     },
     isAdminFinance: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN].includes(roleState.group),
+    canTriageProviderIntakes: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN].includes(roleState.group),
     canApprove: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canCreateProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION].includes(roleState.group),
@@ -341,7 +343,7 @@ try {
   }
 
   function fallbackFirstPaintModules() {
-    return modules.filter((item) => !item.hidden)
+    return modules.filter((item) => !item.hidden && !item.sensitive)
   }
 
   function firstPaintModules() {
@@ -635,6 +637,7 @@ try {
       return
     }
     if (isCurrentPageAllowed()) return
+    if (pageName === "provider_intakes.html") return
     if (pageName !== "solicitudes.html") window.location.replace("./solicitudes.html")
   }
 

@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Solicitudes de proveedores · Flux Operadora</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./ux2_shared.css">
+  <link rel="stylesheet" href="./provider_intakes.css?v=20260717-phase-1d">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Saltar al contenido</a>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true">FL</div>
+          <div>
+            <div class="brand-title">Flux Operadora</div>
+            <div class="brand-subtitle">Finanzas</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Menú principal" data-flux-nav-mode="static"></nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesión activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <main class="content" id="mainContent" tabindex="-1">
+      <header class="topbar">
+        <div class="topbar-kicker">Triage interno</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+          <div class="avatar" aria-hidden="true">FL</div>
+        </div>
+      </header>
+
+      <section class="page intake-page" id="triageWorkspace" hidden>
+        <div class="page-header intake-page-header">
+          <div>
+            <p class="eyebrow">Portal de proveedores · Fase 1D</p>
+            <h1>Solicitudes de proveedores</h1>
+            <p>Revisa información declarada, documentos privados y el historial antes de cualquier conversión.</p>
+          </div>
+          <button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button>
+        </div>
+
+        <section class="triage-kpis" aria-label="Resumen de solicitudes">
+          <button class="triage-kpi active" type="button" data-kpi-status="" aria-pressed="true">
+            <span>Total</span><strong id="countTotal">—</strong>
+          </button>
+          <button class="triage-kpi" type="button" data-kpi-status="received" aria-pressed="false">
+            <span>Recibidas</span><strong id="countReceived">—</strong>
+          </button>
+          <button class="triage-kpi" type="button" data-kpi-status="in_review" aria-pressed="false">
+            <span>En revisión</span><strong id="countReview">—</strong>
+          </button>
+          <button class="triage-kpi" type="button" data-kpi-status="needs_correction" aria-pressed="false">
+            <span>Requieren corrección</span><strong id="countCorrection">—</strong>
+          </button>
+          <button class="triage-kpi" type="button" data-kpi-status="rejected" aria-pressed="false">
+            <span>Rechazadas</span><strong id="countRejected">—</strong>
+          </button>
+        </section>
+
+        <form class="triage-filters" id="filterForm" aria-label="Filtros de solicitudes">
+          <label>
+            <span>Folio</span>
+            <input id="folioFilter" type="search" autocomplete="off" placeholder="INT-2026-000001">
+          </label>
+          <label>
+            <span>Proveedor</span>
+            <input id="providerFilter" type="search" autocomplete="off" placeholder="Nombre declarado">
+          </label>
+          <label>
+            <span>Empresa</span>
+            <select id="companyFilter">
+              <option value="">Todas las permitidas</option>
+            </select>
+          </label>
+          <label>
+            <span>Estado</span>
+            <select id="statusFilter" multiple size="2" aria-describedby="statusFilterHint">
+              <option value="received" selected>Recibida</option>
+              <option value="in_review" selected>En revisión</option>
+              <option value="needs_correction">Requiere corrección</option>
+              <option value="rejected">Rechazada</option>
+              <option value="converted">Convertida</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+            <small id="statusFilterHint">Usa Ctrl o Cmd para elegir varios.</small>
+          </label>
+          <label>
+            <span>Desde</span>
+            <input id="dateFromFilter" type="date">
+          </label>
+          <label>
+            <span>Hasta</span>
+            <input id="dateToFilter" type="date">
+          </label>
+          <label>
+            <span>Documentos</span>
+            <select id="filesFilter">
+              <option value="">Con o sin archivos</option>
+              <option value="true">Con archivos</option>
+              <option value="false">Sin archivos</option>
+            </select>
+          </label>
+          <label>
+            <span>Recepción</span>
+            <select id="sortFilter">
+              <option value="desc">Más recientes primero</option>
+              <option value="asc">Más antiguas primero</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button class="secondary-btn" id="clearFiltersBtn" type="button">Limpiar</button>
+          </div>
+        </form>
+
+        <div class="results-summary" id="resultsSummary" role="status" aria-live="polite">Preparando bandeja…</div>
+
+        <section class="table-card triage-table-card" aria-labelledby="intakeTableCaption">
+          <div class="table-wrapper">
+            <table class="triage-table">
+              <caption id="intakeTableCaption">Solicitudes públicas disponibles para triage interno</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Folio</th>
+                  <th scope="col">Recepción</th>
+                  <th scope="col">Empresa</th>
+                  <th scope="col">Proveedor declarado</th>
+                  <th scope="col">Concepto</th>
+                  <th scope="col" class="numeric">Monto</th>
+                  <th scope="col">Archivos</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col">Antigüedad</th>
+                  <th scope="col"><span class="sr-only">Acción</span></th>
+                </tr>
+              </thead>
+              <tbody id="intakeTableBody">
+                <tr><td colspan="10" class="table-message">Cargando solicitudes…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <nav class="pagination" aria-label="Paginación de solicitudes">
+          <button class="secondary-btn" id="previousPageBtn" type="button">Anterior</button>
+          <span id="pageStatus">Página 1</span>
+          <button class="secondary-btn" id="nextPageBtn" type="button">Siguiente</button>
+        </nav>
+      </section>
+
+      <section class="access-state" id="accessState" role="status">
+        <div class="access-state-card">
+          <span class="access-state-icon" aria-hidden="true">T</span>
+          <h1 id="accessStateTitle">Validando acceso</h1>
+          <p id="accessStateMessage">Confirmando sesión, rol y empresas permitidas.</p>
+          <a class="primary-btn access-home-link" href="./dashboard.html" id="accessHomeLink" hidden>Volver al dashboard</a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="intake-dialog" id="detailDialog" aria-labelledby="detailTitle">
+    <div class="dialog-shell">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">Detalle de solicitud</p>
+          <h2 id="detailTitle">Solicitud</h2>
+          <p id="detailSubtitle">Información declarada por el proveedor</p>
+        </div>
+        <button class="icon-btn" id="closeDetailBtn" type="button" aria-label="Cerrar detalle">✕</button>
+      </header>
+      <div class="dialog-scroll" id="detailContent" aria-live="polite"></div>
+      <footer class="dialog-footer">
+        <p class="phase-two-note">Conversión a solicitud interna disponible en Fase 2.</p>
+        <div class="detail-actions" id="detailActions"></div>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog class="action-dialog" id="actionDialog" aria-labelledby="actionTitle">
+    <form class="dialog-shell action-shell" id="actionForm">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">Acción de triage</p>
+          <h2 id="actionTitle">Actualizar solicitud</h2>
+          <p id="actionDescription"></p>
+        </div>
+        <button class="icon-btn" id="closeActionBtn" type="button" aria-label="Cerrar acción">✕</button>
+      </header>
+      <div class="action-body">
+        <label for="actionNotes">Comentario <span id="actionRequiredLabel"></span></label>
+        <textarea id="actionNotes" rows="5" maxlength="2000" aria-describedby="actionNotesHint actionError"></textarea>
+        <div class="field-meta">
+          <small id="actionNotesHint">No incluyas datos bancarios, tokens ni información sensible innecesaria.</small>
+          <small id="actionCounter">0 / 2000</small>
+        </div>
+        <p class="field-error" id="actionError" role="alert"></p>
+      </div>
+      <footer class="dialog-footer action-footer">
+        <button class="secondary-btn" id="cancelActionBtn" type="button">Cancelar</button>
+        <button class="primary-btn" id="confirmActionBtn" type="submit">Confirmar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260717-provider-intake-triage"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./provider_intakes.js?v=20260717-phase-1d"></script>
+</body>
+</html>
