@@ -24,10 +24,11 @@ jobs:
     environment: DEV
     env:
       AUTHORIZED_BASE_HEAD: e0911fe9fa578859c7ddb9102ef3c2878246b603
-      AUTHORIZED_CORRECTION_HEAD: 24fb77957a6ceb5e30883f7b13c4736b5b492175
+      AUTHORIZED_PRIOR_GATE_HEAD: 4d549123588a489afc5e22d65295ac4b5a21609a
+      AUTHORIZED_IMPLEMENTATION_HEAD: 8b3e08ca816f36d0368cf4c2b696bd1ed864a890
       AUTHORIZED_BASELINE: 05986aca63f2d98635cbb9b928cd0cebac29315a
       AUTHORIZED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
-      AUTHORIZED_SHA256: bfd5deaaa349a36e7a8681943559aa41938aad6393b28acd54162843f2b65067
+      AUTHORIZED_SHA256: 57ab35263fa0a6dfa53aeef1fc1b1fa76fcede2f5d0413e05cea1642f42438eb
       AUTHORIZED_BRANCH: feature/ramon-provider-intake-triage-ui
       AUTHORIZED_PROJECT_REF: scsirgbuqjcwoaxfacth
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
@@ -45,32 +46,30 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = "$AUTHORIZED_BRANCH"
-          test "$(git rev-parse HEAD^)" = "$AUTHORIZED_CORRECTION_HEAD"
+          test "$(git rev-parse HEAD^)" = "$AUTHORIZED_IMPLEMENTATION_HEAD"
           test "$(git merge-base "$AUTHORIZED_BASE_HEAD" HEAD)" = "$AUTHORIZED_BASE_HEAD"
+          test "$(git merge-base "$AUTHORIZED_PRIOR_GATE_HEAD" HEAD)" = "$AUTHORIZED_PRIOR_GATE_HEAD"
           git merge-base --is-ancestor "$AUTHORIZED_BASELINE" HEAD
           expected_resume_files="$(
             printf '%s\n' \
               '.github/workflows/provider-intake-triage-dev-apply-temporary.yml' \
-              'docs/ops/provider-intake-triage-1d.md' \
-              'ops/provider-intake/apply-029-triage/00_README.md' \
-              'ops/provider-intake/apply-029-triage/01_PRECHECK_READ_ONLY.sql' \
-              'ops/provider-intake/apply-029-triage/02_BACKUP_DEV.sql' \
-              'ops/provider-intake/apply-029-triage/04_POSTCHECK_READ_ONLY.sql' \
               'ops/provider-intake/apply-029-triage-dev.authorization.json' |
               sort
           )"
-          actual_resume_files="$(git diff --name-only "$AUTHORIZED_CORRECTION_HEAD..HEAD" | sort)"
+          actual_resume_files="$(git diff --name-only "$AUTHORIZED_IMPLEMENTATION_HEAD..HEAD" | sort)"
           test "$actual_resume_files" = "$expected_resume_files"
-          test "$(git rev-parse "$AUTHORIZED_BASE_HEAD:supabase/functions/provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
+          test "$(git rev-parse "HEAD:supabase/functions/provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
           test "$SUPABASE_DEV_PROJECT_REF" = "$AUTHORIZED_PROJECT_REF"
           test -n "$SUPABASE_DEV_DB_URL"
           test -n "$SUPABASE_ACCESS_TOKEN"
 
           marker="ops/provider-intake/apply-029-triage-dev.authorization.json"
-          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-1-resume"
+          test "$(jq -r '.gate' "$marker")" = "phase-1d-gate-1-minimum-privilege"
           test "$(jq -r '.authorized_base_head' "$marker")" = "$AUTHORIZED_BASE_HEAD"
-          test "$(jq -r '.correction_commit' "$marker")" = "$AUTHORIZED_CORRECTION_HEAD"
-          test "$(jq -r '.failed_run' "$marker")" = "29600671386"
+          test "$(jq -r '.prior_gate_head' "$marker")" = "$AUTHORIZED_PRIOR_GATE_HEAD"
+          test "$(jq -r '.implementation_commit' "$marker")" = "$AUTHORIZED_IMPLEMENTATION_HEAD"
+          test "$(jq -r '.failed_run' "$marker")" = "29602695086"
+          test "$(jq -r '.first_failed_run' "$marker")" = "29600671386"
           test "$(jq -r '.branch' "$marker")" = "$AUTHORIZED_BRANCH"
           test "$(jq -r '.supabase_project_ref' "$marker")" = "$AUTHORIZED_PROJECT_REF"
           test "$(jq -r '.migration_sha256' "$marker")" = "$AUTHORIZED_SHA256"
@@ -88,9 +87,11 @@ jobs:
           {
             echo "branch=$GITHUB_REF_NAME"
             echo "authorized_base_head=$AUTHORIZED_BASE_HEAD"
-            echo "correction_commit=$AUTHORIZED_CORRECTION_HEAD"
-            echo "resume_commit=$GITHUB_SHA"
-            echo "failed_run=29600671386"
+            echo "prior_gate_head=$AUTHORIZED_PRIOR_GATE_HEAD"
+            echo "implementation_commit=$AUTHORIZED_IMPLEMENTATION_HEAD"
+            echo "authorization_commit=$GITHUB_SHA"
+            echo "failed_run=29602695086"
+            echo "first_failed_run=29600671386"
             echo "supabase_project_ref=$AUTHORIZED_PROJECT_REF"
             echo "migration_sha256=$AUTHORIZED_SHA256"
             echo "migration_load_identical=true"
@@ -189,6 +190,24 @@ jobs:
                   offset += len(entries)
 
           counts["storage.objects:intake-uploads"] = object_count
+          expected = {
+              "payment_intake": 13,
+              "payment_intake_events": 20,
+              "payment_intake_files": 6,
+              "payment_requests": 73,
+              "proveedores": 22,
+              "approval_batches": 8,
+              "notification_events": 322,
+              "storage.objects:intake-uploads": 6,
+          }
+          if counts != expected:
+              changed = sorted(
+                  name for name, value in counts.items()
+                  if expected.get(name) != value
+              )
+              raise RuntimeError(
+                  "Baseline counts differ for: " + ", ".join(changed)
+              )
           evidence = {
               "captured_at": datetime.now(timezone.utc).isoformat(),
               "project_ref": os.environ.get("AUTHORIZED_PROJECT_REF", "scsirgbuqjcwoaxfacth"),
@@ -216,11 +235,14 @@ jobs:
             > gate1-evidence/02-backup.txt
 
       - name: Compile the corrected LOAD in a transactional dry-run
+        id: dry_run
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           source_file="ops/provider-intake/apply-029-triage/03_LOAD_029_EXACT.sql"
           dry_run_file="$RUNNER_TEMP/03_LOAD_029_DRY_RUN.sql"
+          trap 'rm -f "$dry_run_file"' EXIT
           SOURCE_FILE="$source_file" DRY_RUN_FILE="$dry_run_file" python3 - <<'PY'
           import os
 
@@ -245,11 +267,12 @@ jobs:
 
           psql -X -v ON_ERROR_STOP=1 "$SUPABASE_DEV_DB_URL" \
             -f "$dry_run_file" \
-            > gate1-evidence/03-dry-run.txt
+            > gate1-evidence/03-dry-run.txt 2>&1
           grep -q '^ROLLBACK$' gate1-evidence/03-dry-run.txt
-          rm -f "$dry_run_file"
 
       - name: Confirm complete rollback after dry-run
+        id: post_rollback
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -258,6 +281,8 @@ jobs:
             > gate1-evidence/01-precheck-after-dry-run.txt
 
       - name: Apply exact migration 029 once
+        id: load
+        if: steps.dry_run.outcome == 'success' && steps.post_rollback.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -266,6 +291,8 @@ jobs:
             > gate1-evidence/03-load.txt
 
       - name: Run authorized read-only postcheck
+        id: postcheck
+        if: steps.load.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -274,6 +301,8 @@ jobs:
             > gate1-evidence/04-postcheck.txt
 
       - name: Capture sanitized post-counts and assert zero business deltas
+        id: post_counts
+        if: steps.postcheck.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -403,3 +432,14 @@ jobs:
           path: gate1-evidence/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Enforce successful Gate 1 outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.dry_run.outcome }}" = "success"
+          test "${{ steps.post_rollback.outcome }}" = "success"
+          test "${{ steps.load.outcome }}" = "success"
+          test "${{ steps.postcheck.outcome }}" = "success"
+          test "${{ steps.post_counts.outcome }}" = "success"
