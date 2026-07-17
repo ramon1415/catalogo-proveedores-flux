@@ -14,6 +14,9 @@ const migrationPath = "supabase/migrations/030_provider_intake_action_fingerprin
 const loadPath = "ops/provider-intake/apply-030-action-fingerprint/03_LOAD_030_EXACT.sql"
 const migration029Path = "supabase/migrations/029_provider_intake_triage.sql"
 const migration = read(migrationPath)
+const postcheck = read(
+  "ops/provider-intake/apply-030-action-fingerprint/04_POSTCHECK_READ_ONLY.sql",
+)
 
 const functionDefinition = (name) => {
   const pattern = new RegExp(
@@ -222,6 +225,10 @@ test("RPC signatures, grants, SECURITY DEFINER, and search path are preserved", 
     )
   }
   assert.doesNotMatch(migration, /grant execute[\s\S]{0,180}\bto anon\b/i)
+})
+
+test("operational postcheck never wraps an aggregate in EXISTS", () => {
+  assert.doesNotMatch(postcheck, /exists\s*\(\s*select\s+count\s*\(/i)
 })
 
 test("Migration 030 has no business-table or ledger-destructive operations", () => {
