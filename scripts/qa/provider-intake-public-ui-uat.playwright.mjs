@@ -52,6 +52,7 @@ const report = {
   masked_folio: "",
   axe: {},
   console_errors: [],
+  external_warnings: [],
   page_errors: [],
   failed_requests: [],
   postcheck: null,
@@ -271,7 +272,12 @@ async function restore() {
 function monitorPage(page, label) {
   page.on("console", (message) => {
     if (message.type() === "error") {
-      report.console_errors.push({ page: label, message: sanitizeText(message.text()) });
+      const text = sanitizeText(message.text());
+      if (/vercel\.live/i.test(text) || (["invalid", "query"].includes(label) && /status of 404/i.test(text))) {
+        report.external_warnings.push({ page: label, message: text });
+      } else {
+        report.console_errors.push({ page: label, message: text });
+      }
     }
   });
   page.on("pageerror", (error) => {
@@ -572,6 +578,7 @@ ${postcheck}
 - HAR, trace y video: no generados.
 - Capturas: ${report.screenshots.length}.
 - Errores de consola: ${report.console_errors.length}.
+- Advertencias externas/esperadas: ${report.external_warnings.length}.
 - Page errors: ${report.page_errors.length}.
 
 ## Dictamen
@@ -610,15 +617,19 @@ async function runUat() {
     setCase("UI-01", "PASS", "HTTP 200, estado neutral, formulario y Turnstile ausentes.");
 
     const fakeToken = "A".repeat(40);
-    await safeGoto(unavailablePage, `${PREVIEW_URL}#token=${fakeToken}`);
-    await unavailablePage.waitForFunction(() => location.hash === "");
-    await unavailablePage.locator("#unavailable-view:not([hidden])").waitFor();
-    assert(await unavailablePage.locator("#portal-view").isHidden(), "ui02_form_hidden");
+    const invalidPage = await context.newPage();
+    monitorPage(invalidPage, "invalid");
+    await safeGoto(invalidPage, `${PREVIEW_URL}#token=${fakeToken}`);
+    await invalidPage.waitForFunction(() => location.hash === "");
+    await invalidPage.locator("#unavailable-view:not([hidden])").waitFor();
+    assert(await invalidPage.locator("#portal-view").isHidden(), "ui02_form_hidden");
     setCase("UI-02", "PASS", "Fragmento ficticio retirado; respuesta neutral sin empresa ni CAPTCHA.");
 
-    await safeGoto(unavailablePage, `${PREVIEW_URL}?token=${fakeToken}`);
-    await unavailablePage.waitForFunction(() => !location.search.includes("token"));
-    await unavailablePage.locator("#unavailable-view:not([hidden])").waitFor();
+    const queryPage = await context.newPage();
+    monitorPage(queryPage, "query");
+    await safeGoto(queryPage, `${PREVIEW_URL}?token=${fakeToken}`);
+    await queryPage.waitForFunction(() => !location.search.includes("token"));
+    await queryPage.locator("#unavailable-view:not([hidden])").waitFor();
     setCase("UI-03", "PASS", "Token query ignorado y retirado; no se promovió al header.");
 
     const page = await context.newPage();
@@ -833,7 +844,7 @@ async function runUat() {
     assertEqual(report.page_errors.length, 0, "ui15_page_errors");
     assertEqual(report.console_errors.length, 0, "ui15_console_errors");
     assertEqual(productFailedRequests.length, 0, "ui15_product_request_failures");
-    setCase("UI-15", "PASS", "Cero pageerror, console.error y requests fallidos del producto.");
+    setCase("UI-15", "PASS", `Cero pageerror, console.error y requests fallidos del producto; ${report.external_warnings.length} advertencias externas/esperadas documentadas.`);
 
     report.postcheck = await postcheck(firstFolio, secondFolio);
     setCase("UI-19", "PASS", "Un intake, un received, un archivo y un objeto privado; efectos internos delta 0.");
