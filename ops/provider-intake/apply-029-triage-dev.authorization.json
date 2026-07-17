@@ -1,6 +1,6 @@
 {
   "gate": "phase-1d-gate-1b-authenticated-uat",
-  "mode": "bootstrap",
+  "mode": "authenticated-uat",
   "authorized_by": "Ramon",
   "authorized_root_head": "af12ee67fb823c737598d4f551cfb44a4b26c6c4",
   "branch": "feature/ramon-provider-intake-triage-ui",
@@ -20,7 +20,7 @@
   "allow_production": false,
   "require_total_iam_cleanup": true,
   "require_secret_cleanup": true,
-  "bootstrap_run_id": null,
-  "encrypted_artifact_deleted": false,
-  "temporary_secret_configured": false
+  "bootstrap_run_id": "29607522771",
+  "encrypted_artifact_deleted": true,
+  "temporary_secret_configured": true
 }
