@@ -184,6 +184,29 @@ Después de “CORS DEV listo”:
 
 El token QA no se solicita por chat, no se imprime y no se incluye en screenshots. Si el archivo protegido no está disponible, Ramón debe construir manualmente la URL localmente. Si el link expiró, se detiene el UAT y se propone extender ese mismo link mediante autorización separada.
 
+### Resultado UAT cloud final
+
+El UAT automatizado quedó aprobado mediante evidencia acumulada de los runs `29556062028`, `29556515933` y el audit final read-only `29556706455`:
+
+- UI-01 a UI-20: PASS.
+- contratos: 58/58 PASS.
+- Turnstile: site key oficial de pruebas y action `provider_intake_submit` validados.
+- primer submit: HTTP 201 y `duplicate=false`.
+- segundo y último submit: HTTP 200, `duplicate=true` y mismo folio público.
+- límite de UAT: exactamente dos submits positivos; no se ejecutó un tercero.
+- Axe acumulado en unavailable, pasos 1/2/3, revisión, éxito y éxito duplicado: cero `critical`, cero `serious` y cero hallazgos WCAG AA abiertos.
+- responsive: 320, 390, 768, 1024, 1366 y 1440 px sin overflow ni controles cortados.
+- teclado y zoom equivalente 200 %: PASS.
+- errores del producto y `pageerror`: cero.
+- postcheck acumulado: `payment_intake +1`, evento `received +1`, metadata de archivo `+1` y objeto privado `+1`.
+- `payment_requests`, proveedores, batches y `notification_events`: delta cero.
+- duplicados y huérfanos absolutos: cero.
+- archivo XML en `intake-uploads`, `file_kind=invoice_xml`, metadata/tamaño coincidentes, bucket privado y cuarentena `pending`.
+
+Chromium solicitó automáticamente `/favicon.ico`, aunque `solicitar.html` no referencia ese recurso. Vercel respondió 404; se clasificó como advertencia auxiliar del Preview y no como error del producto.
+
+El mismo link QA se extendió temporalmente cuando fue necesario y quedó restaurado en todos los runners con mutación controlada. El audit final no modificó el link. El secret temporal `PROVIDER_INTAKE_QA_TOKEN` fue eliminado del Environment DEV. La evidencia conserva únicamente el folio enmascarado.
+
 ## Rollout DEV y gate postmerge
 
 1. Mantener el PR en Draft.
