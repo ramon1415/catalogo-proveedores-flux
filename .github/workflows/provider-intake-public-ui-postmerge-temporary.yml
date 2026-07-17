@@ -1,0 +1,164 @@
+name: Temporary DEV provider portal postmerge closure
+
+on:
+  push:
+    branches:
+      - feature/ramon-provider-public-portal-ui
+    paths:
+      - ops/provider-intake/public-ui-postmerge.authorization.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-intake-public-ui-dev-postmerge
+  cancel-in-progress: false
+
+jobs:
+  close:
+    name: Canonical DEV smoke and CORS cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: DEV
+    env:
+      AUTHORIZATION_FILE: ops/provider-intake/public-ui-postmerge.authorization.json
+      MERGE_COMMIT: 05986aca63f2d98635cbb9b928cd0cebac29315a
+      EXPECTED_BACKEND_TREE: 379f65801609e40143d948b3de702e391636c512
+      EXPECTED_FUNCTION_ID: 73713978-4fca-4426-8462-29f1c4a98ded
+      EXPECTED_FUNCTION_VERSION: "18"
+      CANONICAL_ORIGIN: https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app
+      PREVIEW_ORIGIN: https://catalogo-proveedores-flux-git-feature-ramon-69af24-quantta-team.vercel.app
+      CANONICAL_PRIVACY_URL: https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/provider-intake-privacy-dev.html
+      FUNCTION_BASE_URL: https://scsirgbuqjcwoaxfacth.functions.supabase.co/provider-intake
+      PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout preserved branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize runner-only evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "POSTMERGE_WORK_DIR=$RUNNER_TEMP/provider-intake-public-ui-postmerge" >> "$GITHUB_ENV"
+          echo "POSTMERGE_OUTPUT_DIR=$RUNNER_TEMP/provider-intake-public-ui-postmerge/evidence" >> "$GITHUB_ENV"
+
+      - name: Validate authorization and immutable scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/ramon-provider-public-portal-ui"
+          test "$PROJECT_REF" = "scsirgbuqjcwoaxfacth"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          git merge-base --is-ancestor "$MERGE_COMMIT" HEAD
+
+          node <<'NODE'
+          const fs = require("fs");
+          const marker = JSON.parse(fs.readFileSync(process.env.AUTHORIZATION_FILE, "utf8"));
+          const expected = {
+            confirm: "CLOSE_PROVIDER_PUBLIC_UI_PHASE_1C_DEV_ONLY",
+            project_ref: "scsirgbuqjcwoaxfacth",
+            pr: 256,
+            merge_commit: "05986aca63f2d98635cbb9b928cd0cebac29315a",
+            expected_backend_tree: "379f65801609e40143d948b3de702e391636c512",
+            canonical_origin: "https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app",
+            preview_origin: "https://catalogo-proveedores-flux-git-feature-ramon-69af24-quantta-team.vercel.app",
+            submit_allowed: false,
+            sql_allowed: false,
+            function_deploy_allowed: false,
+          };
+          if (JSON.stringify(marker) !== JSON.stringify(expected)) {
+            throw new Error("authorization_marker_mismatch");
+          }
+          NODE
+
+          mapfile -t changed < <(git diff --name-only "$MERGE_COMMIT"..HEAD | sort)
+          expected_changed=(
+            ".github/workflows/provider-intake-public-ui-postmerge-temporary.yml"
+            "ops/provider-intake/public-ui-postmerge.authorization.json"
+            "scripts/qa/provider-intake-public-ui-postmerge.playwright.mjs"
+          )
+          test "${changed[*]}" = "${expected_changed[*]}"
+          test "$(git ls-tree HEAD supabase/functions/provider-intake | awk '{print $3}')" = "$EXPECTED_BACKEND_TREE"
+          test -z "${PROVIDER_INTAKE_QA_TOKEN:-}"
+          test -z "${SUPABASE_DEV_DB_URL:-}"
+
+      - name: Smoke canonical HTTP pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            "/"
+            "/solicitar.html"
+            "/provider-intake-privacy-dev.html"
+            "/proveedores.html"
+            "/solicitudes.html"
+            "/approval_batches.html"
+            "/layouts.html"
+          )
+          for path in "${paths[@]}"; do
+            status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' "${CANONICAL_ORIGIN}${path}")"
+            test "$status" = "200"
+            printf 'http_smoke | path=%s status=%s\n' "$path" "$status"
+          done
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+
+      - name: Install pinned browser dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$POSTMERGE_WORK_DIR" "$POSTMERGE_OUTPUT_DIR"
+          npm install --prefix "$POSTMERGE_WORK_DIR" --no-audit --no-fund playwright@1.55.0
+          cp scripts/qa/provider-intake-public-ui-postmerge.playwright.mjs "$POSTMERGE_WORK_DIR/postmerge.mjs"
+          "$POSTMERGE_WORK_DIR/node_modules/.bin/playwright" install --with-deps chromium
+
+      - name: Inspect runtime and current secret digests
+        id: inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$POSTMERGE_WORK_DIR/postmerge.mjs" inspect
+          {
+            echo "cors_match=$(node -e "const x=require(process.env.POSTMERGE_OUTPUT_DIR+'/before.json');process.stdout.write(String(x.secrets.cors_match))")"
+            echo "privacy_match=$(node -e "const x=require(process.env.POSTMERGE_OUTPUT_DIR+'/before.json');process.stdout.write(String(x.secrets.privacy_match))")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set canonical privacy URL when digest differs
+        if: steps.inspect.outputs.privacy_match != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set \
+            "INTAKE_PRIVACY_NOTICE_URL=$CANONICAL_PRIVACY_URL" \
+            --project-ref "$PROJECT_REF" >/dev/null
+          echo "privacy_secret | canonicalized=true"
+
+      - name: Limit intake CORS to canonical DEV origin
+        if: steps.inspect.outputs.cors_match != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase secrets set \
+            "INTAKE_ALLOWED_ORIGINS=$CANONICAL_ORIGIN" \
+            --project-ref "$PROJECT_REF" >/dev/null
+          echo "cors_secret | canonicalized=true"
+
+      - name: Verify canonical runtime after secret update
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$POSTMERGE_WORK_DIR/postmerge.mjs" verify
+
+      - name: Upload sanitized closure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-intake-public-ui-postmerge
+          path: ${{ runner.temp }}/provider-intake-public-ui-postmerge/evidence
+          if-no-files-found: error
+          retention-days: 3
