@@ -7,7 +7,7 @@
   "supabase_project_ref": "scsirgbuqjcwoaxfacth",
   "preview_url": "https://catalogo-proveedores-flux-jpg38ay89-quantta-team.vercel.app",
   "public_key_sha256": "b64c6d87267bf6321702dda3a33facc65a75ac288ef32294246592efd0b1f0bd",
-  "uat_script_sha256": "5116845a023a3a759116ce9bbbfa666d092d43e4eab0a2f2ea71a09ab621b4b6",
+  "uat_script_sha256": "7ea45edfffca40f7b30f1c9e37ddad44f2100a88b9ac74ec1371e5b261ec1cfa",
   "temporary_secret": "SUPABASE_DEV_SERVICE_ROLE_KEY",
   "temporary_aliases": [
     "QA_FINANCE_A",
@@ -21,6 +21,8 @@
   "require_total_iam_cleanup": true,
   "require_secret_cleanup": true,
   "bootstrap_run_id": "29607522771",
+  "prior_uat_run_id": "29607903269",
+  "retry_reason": "wait-for-rendered-detail",
   "encrypted_artifact_deleted": true,
   "temporary_secret_configured": true
 }

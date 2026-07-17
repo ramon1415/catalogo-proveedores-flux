@@ -598,6 +598,7 @@ async function runBrowserChecks(data, identities) {
     ), null, { timeout: 30_000 })
     await financePage.locator("#intakeTableBody .view-intake-btn").first().click()
     await financePage.locator("#detailDialog").waitFor({ state: "visible", timeout: 30_000 })
+    await financePage.locator("#detailContent .detail-grid").waitFor({ state: "visible", timeout: 30_000 })
     gateAssert(
       (await financePage.locator("#detailContent").innerText()).length > 50,
       "browser_detail_empty",
