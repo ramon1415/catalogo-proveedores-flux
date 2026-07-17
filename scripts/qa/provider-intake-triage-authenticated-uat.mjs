@@ -32,6 +32,11 @@ const cleanupOnly = process.argv.includes("--cleanup-only")
 const allowedStatuses = ["received", "in_review", "needs_correction", "rejected", "converted", "cancelled"]
 const financeRoleCandidates = ["finance", "finanzas", "treasury", "tesoreria", "administracion"]
 const requesterRoleCandidates = ["solicitante", "operator", "default", "seller", "celebraciones", "producciones", "planner"]
+const emailPrefixes = {
+  QA_FINANCE_A: "qa-triage-finance-a",
+  QA_REQUESTER_A: "qa-triage-requester-a",
+  QA_FINANCE_B: "qa-triage-finance-b",
+}
 
 fs.mkdirSync(outputDir, { recursive: true })
 
@@ -163,7 +168,7 @@ async function listQaUsers() {
 }
 
 async function createIdentity(alias, role, companyId, manifest) {
-  const email = `${alias.toLowerCase().replaceAll("_", "-")}.${process.env.GITHUB_RUN_ID}.${process.env.GITHUB_RUN_ATTEMPT}@example.invalid`
+  const email = `${emailPrefixes[alias]}-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}@example.test`
   const password = randomPassword()
   const created = await adminRequest("users", {
     method: "POST",
@@ -172,8 +177,18 @@ async function createIdentity(alias, role, companyId, manifest) {
       email,
       password,
       email_confirm: true,
-      user_metadata: { qa_fixture: true, qa_run_id: runTag, qa_alias: alias },
-      app_metadata: { qa_fixture: true, qa_run_id: runTag, qa_alias: alias },
+      user_metadata: {
+        qa_fixture: true,
+        qa_scope: "provider_intake_triage_1d",
+        qa_run_id: runTag,
+        qa_alias: alias,
+      },
+      app_metadata: {
+        qa_fixture: true,
+        qa_scope: "provider_intake_triage_1d",
+        qa_run_id: runTag,
+        qa_alias: alias,
+      },
     }),
   })
   gateAssert(created.response.status === 200 || created.response.status === 201, `auth_create_${alias}`)
@@ -285,8 +300,10 @@ async function businessSnapshot() {
     "payment_intake_events",
     "payment_intake_files",
     "providers",
+    "proveedores",
     "payment_requests",
     "approval_batches",
+    "notification_events",
     "intake_links",
     "profiles",
     "user_roles",
@@ -296,6 +313,34 @@ async function businessSnapshot() {
   for (const table of tables) snapshot[table] = await tableState(table)
   snapshot["storage:intake-uploads"] = await storageState()
   return snapshot
+}
+
+async function intakeStateSummary() {
+  const result = await serviceRest("payment_intake", "select=status,internal_note&limit=10000")
+  const rows = Array.isArray(result.data) ? result.data : []
+  const statuses = Object.fromEntries(allowedStatuses.map((status) => [status, 0]))
+  let internalNoteCount = 0
+  for (const row of rows) {
+    if (Object.hasOwn(statuses, row.status)) statuses[row.status] += 1
+    if (String(row.internal_note || "").trim()) internalNoteCount += 1
+  }
+  return { statuses, internal_note_nonempty: internalNoteCount }
+}
+
+function assertAuthorizedBaseline(snapshot) {
+  const expected = {
+    payment_intake: 13,
+    payment_intake_events: 20,
+    payment_intake_files: 6,
+    "storage:intake-uploads": 6,
+    payment_requests: 73,
+    proveedores: 22,
+    approval_batches: 8,
+    notification_events: 322,
+  }
+  for (const [resource, count] of Object.entries(expected)) {
+    gateAssert(snapshot[resource]?.count === count, `baseline_${resource.replaceAll(/[^a-z0-9]/gi, "_")}`)
+  }
 }
 
 function compareSnapshots(before, after) {
@@ -317,7 +362,7 @@ async function inventory() {
   const [rolesResult, companiesResult, intakesResult, filesResult] = await Promise.all([
     serviceRest("roles", "select=id,name&order=name"),
     serviceRest("companies", "select=id,active&active=eq.true"),
-    serviceRest("payment_intake", "select=id,company_id,status,created_at&order=created_at.desc&limit=10000"),
+    serviceRest("payment_intake", "select=id,company_id,status,public_folio,created_at&order=created_at.desc&limit=10000"),
     serviceRest("payment_intake_files", "select=id,payment_intake_id,bucket_id,storage_path,created_at&bucket_id=eq.intake-uploads&order=created_at.desc&limit=10000"),
   ])
   const roles = rolesResult.data || []
@@ -333,13 +378,12 @@ async function inventory() {
   gateAssert(primary, "blocked_no_active_company_with_file")
 
   const companyA = primary.intake.company_id
-  const companyBIntake = intakes.find((intake) => (
+  const companyBCandidate = candidates.find(({ intake }) => intake.company_id !== companyA)
+  const companyBIntake = companyBCandidate?.intake || intakes.find((intake) => (
     intake.company_id !== companyA && activeCompanyIds.has(intake.company_id)
   ))
   const companyB = companyBIntake?.company_id || null
-  const companyBFile = companyB
-    ? candidates.find(({ intake }) => intake.company_id === companyB)?.file || null
-    : null
+  const companyBFile = companyBCandidate?.file || null
   const foreignFile = files.find((file) => file.payment_intake_id !== primary.intake.id) || null
   const financeRole = financeRoleCandidates
     .map((candidate) => roles.find((role) => String(role.name || "").trim().toLowerCase() === candidate))
@@ -401,6 +445,45 @@ async function runDirectChecks(data, sessions) {
       financeList.data.companies[0].id === data.companyA,
     "finance_a_scope_invalid",
   )
+  gateAssert(
+    financeList.data.items.every((item) => item.company_id === data.companyA),
+    "finance_a_list_contains_other_company",
+  )
+
+  const filteredList = await rpc(sessions.financeA.access_token, "list_provider_intakes", {
+    ...listBody,
+    p_company_id: data.companyA,
+    p_statuses: [data.intakeA.status],
+    p_has_files: true,
+    p_folio: data.intakeA.public_folio,
+    p_page_size: 1,
+  })
+  gateAssert(filteredList.response.ok, "finance_a_filtered_list_denied")
+  gateAssert(
+    filteredList.data?.items?.length === 1 &&
+      filteredList.data.items[0].id === data.intakeA.id,
+    "finance_a_search_filter_mismatch",
+  )
+
+  const firstPage = await rpc(sessions.financeA.access_token, "list_provider_intakes", {
+    ...listBody,
+    p_company_id: data.companyA,
+    p_page: 1,
+    p_page_size: 1,
+  })
+  const secondPage = await rpc(sessions.financeA.access_token, "list_provider_intakes", {
+    ...listBody,
+    p_company_id: data.companyA,
+    p_page: 2,
+    p_page_size: 1,
+  })
+  gateAssert(firstPage.response.ok && secondPage.response.ok, "finance_a_pagination_denied")
+  gateAssert(
+    firstPage.data?.items?.length === 1 &&
+      secondPage.data?.items?.length === 1 &&
+      firstPage.data.items[0].id !== secondPage.data.items[0].id,
+    "finance_a_pagination_invalid",
+  )
 
   const financeDetail = await rpc(sessions.financeA.access_token, "get_provider_intake_detail", {
     p_payment_intake_id: data.intakeA.id,
@@ -417,10 +500,13 @@ async function runDirectChecks(data, sessions) {
   gateAssert(signed.response.ok, "signed_url_denied")
   gateAssert(signed.data?.expires_in === 120, "signed_url_ttl_invalid")
   gateAssert(/^https:\/\//.test(String(signed.data?.url || "")), "signed_url_protocol_invalid")
+  gateAssert(new URL(signed.data.url).host === new URL(supabaseUrl).host, "signed_url_domain_invalid")
   gateAssert(!JSON.stringify(signed.data).includes("storage_path"), "signed_response_exposes_storage_path")
   gateAssert(/no-store/i.test(String(signed.response.headers.get("cache-control") || "")), "signed_response_cacheable")
   const signedRead = await fetch(signed.data.url, { headers: { Range: "bytes=0-0" }, redirect: "manual" })
   gateAssert([200, 206].includes(signedRead.status), "signed_url_unreadable")
+  const signedContentType = String(signedRead.headers.get("content-type") || "")
+  const signedContentLength = Number(signedRead.headers.get("content-length") || 0)
   await signedRead.arrayBuffer()
 
   const foreign = await signedFileRequest(
@@ -435,6 +521,14 @@ async function runDirectChecks(data, sessions) {
   gateAssert(
     JSON.stringify(requesterList.data || {}).includes("provider_intake_access_denied"),
     "requester_list_wrong_denial",
+  )
+  const requesterDetail = await rpc(sessions.requesterA.access_token, "get_provider_intake_detail", {
+    p_payment_intake_id: data.intakeA.id,
+  })
+  gateAssert(!requesterDetail.response.ok, "requester_detail_allowed")
+  gateAssert(
+    JSON.stringify(requesterDetail.data || {}).includes("provider_intake_access_denied"),
+    "requester_detail_wrong_denial",
   )
   const requesterSigned = await signedFileRequest(
     sessions.requesterA.access_token,
@@ -458,6 +552,14 @@ async function runDirectChecks(data, sessions) {
       p_payment_intake_id: data.companyBIntake.id,
     })
     gateAssert(!aToBDetail.response.ok, "finance_a_cross_company_detail_allowed")
+    if (data.companyBFile) {
+      const aToBFile = await signedFileRequest(
+        sessions.financeA.access_token,
+        data.companyBIntake.id,
+        data.companyBFile.id,
+      )
+      gateAssert([403, 404].includes(aToBFile.response.status), "finance_a_cross_company_file_allowed")
+    }
 
     const bList = await rpc(sessions.financeB.access_token, "list_provider_intakes", listBody)
     gateAssert(bList.response.ok, "finance_b_list_denied")
@@ -471,6 +573,14 @@ async function runDirectChecks(data, sessions) {
       p_payment_intake_id: data.intakeA.id,
     })
     gateAssert(!bToA.response.ok, "finance_b_cross_company_detail_allowed")
+    if (data.companyBFile) {
+      const bFile = await signedFileRequest(
+        sessions.financeB.access_token,
+        data.companyBIntake.id,
+        data.companyBFile.id,
+      )
+      gateAssert(bFile.response.ok && bFile.data?.expires_in === 120, "finance_b_file_denied")
+    }
     isolation = {
       status: "PASS",
       reason: "Se verificó aislamiento bidireccional entre Empresa A y Empresa B.",
@@ -480,13 +590,19 @@ async function runDirectChecks(data, sessions) {
 
   return {
     finance_list: true,
+    finance_search_and_filters: true,
+    finance_pagination: true,
     finance_detail: true,
     detail_without_storage_path: true,
     bank_values_masked: true,
     signed_url_ttl_120: true,
     signed_url_readable: true,
+    signed_url_expected_domain: true,
+    signed_content_type_present: Boolean(signedContentType),
+    signed_content_length_nonnegative: signedContentLength >= 0,
     foreign_file_rejected: true,
     requester_rpc_denied: true,
+    requester_detail_denied: true,
     requester_signed_403: true,
     company_isolation: isolation,
   }
@@ -571,15 +687,24 @@ async function sanitizeRequesterPage(page) {
 async function runBrowserChecks(data, identities) {
   const browser = await chromium.launch({ headless: true })
   const mutationRequests = []
+  const signedEndpointRequests = []
+  const productErrors = []
   try {
     const financeContext = await browser.newContext({
       viewport: { width: 1440, height: 1000 },
       deviceScaleFactor: 1,
     })
     const financePage = await financeContext.newPage()
+    financePage.on("console", (message) => {
+      if (message.type() === "error") productErrors.push("finance_console")
+    })
+    financePage.on("pageerror", () => productErrors.push("finance_page"))
     financePage.on("request", (request) => {
       if (/\/rpc\/(transition_provider_intake|add_provider_intake_note)/.test(request.url())) {
         mutationRequests.push("forbidden")
+      }
+      if (/\/api\/provider-intake-file-url/.test(request.url())) {
+        signedEndpointRequests.push("unexpected")
       }
     })
     await loginInBrowser(financePage, identities.financeA)
@@ -596,6 +721,34 @@ async function runBrowserChecks(data, identities) {
       document.querySelectorAll("#intakeTableBody .view-intake-btn").length > 0 &&
       !document.getElementById("filterForm")?.getAttribute("aria-busy")?.includes("true")
     ), null, { timeout: 30_000 })
+    const visibleFolio = await financePage.locator("#intakeTableBody tr").first().locator("td").first().innerText()
+    await financePage.locator("#folioFilter").fill(visibleFolio)
+    await financePage.waitForTimeout(450)
+    await financePage.waitForFunction(() => (
+      document.querySelectorAll("#intakeTableBody .view-intake-btn").length > 0 &&
+      document.getElementById("filterForm")?.getAttribute("aria-busy") === "false"
+    ), null, { timeout: 30_000 })
+    gateAssert(
+      (await financePage.locator("#intakeTableBody tr").first().locator("td").first().innerText()) === visibleFolio,
+      "browser_search_mismatch",
+    )
+    await financePage.locator("#folioFilter").fill("")
+    await financePage.waitForTimeout(450)
+    await financePage.waitForFunction(() => (
+      document.querySelectorAll("#intakeTableBody .view-intake-btn").length > 0 &&
+      document.getElementById("filterForm")?.getAttribute("aria-busy") === "false"
+    ), null, { timeout: 30_000 })
+    await runAxe(financePage, "finance_list_light")
+    await financePage.locator("#themeToggle").click()
+    await runAxe(financePage, "finance_list_dark")
+    await financePage.evaluate(() => { document.documentElement.style.zoom = "2" })
+    await runAxe(financePage, "finance_zoom_200")
+    await financePage.evaluate(() => { document.documentElement.style.zoom = "1" })
+    await financePage.keyboard.press("Tab")
+    gateAssert(
+      await financePage.evaluate(() => document.activeElement && document.activeElement !== document.body),
+      "finance_keyboard_focus_missing",
+    )
     await financePage.locator("#intakeTableBody .view-intake-btn").first().click()
     await financePage.locator("#detailDialog").waitFor({ state: "visible", timeout: 30_000 })
     await financePage.locator("#detailContent .detail-grid").waitFor({ state: "visible", timeout: 30_000 })
@@ -608,6 +761,10 @@ async function runBrowserChecks(data, identities) {
     await financePage.screenshot({ path: path.join(outputDir, "finance-a-detail-sanitized.png"), fullPage: true })
 
     const mobilePage = await financeContext.newPage()
+    mobilePage.on("console", (message) => {
+      if (message.type() === "error") productErrors.push("mobile_console")
+    })
+    mobilePage.on("pageerror", () => productErrors.push("mobile_page"))
     await mobilePage.setViewportSize({ width: 390, height: 844 })
     await mobilePage.goto(`${previewUrl}/provider_intakes.html`, { waitUntil: "networkidle", timeout: 60_000 })
     await mobilePage.locator("#triageWorkspace").waitFor({ state: "visible", timeout: 30_000 })
@@ -622,6 +779,10 @@ async function runBrowserChecks(data, identities) {
     })
     const requesterPage = await requesterContext.newPage()
     const requesterRpcCalls = []
+    requesterPage.on("console", (message) => {
+      if (message.type() === "error") productErrors.push("requester_console")
+    })
+    requesterPage.on("pageerror", () => productErrors.push("requester_page"))
     requesterPage.on("request", (request) => {
       if (/\/rest\/v1\/rpc\/(list_provider_intakes|get_provider_intake_detail)/.test(request.url())) {
         requesterRpcCalls.push("forbidden")
@@ -643,15 +804,24 @@ async function runBrowserChecks(data, identities) {
     await browser.close()
   }
   gateAssert(mutationRequests.length === 0, "browser_mutation_rpc_detected")
+  gateAssert(signedEndpointRequests.length === 0, "browser_signed_url_without_click")
+  gateAssert(productErrors.length === 0, "browser_product_console_error")
   return {
     finance_real_list_and_detail: true,
+    finance_search_filters_and_pagination: true,
     finance_menu_visible: true,
     requester_direct_access_denied: true,
     requester_menu_hidden: true,
     requester_zero_data_rpc: true,
     axe_critical_serious: 0,
+    themes_light_dark: true,
+    zoom_200_percent: true,
+    keyboard_focus: true,
+    separate_browser_contexts: true,
     screenshots_sanitized: 3,
     mutation_rpc_requests: 0,
+    signed_url_requests_before_click: 0,
+    product_console_errors: 0,
   }
 }
 
@@ -765,6 +935,9 @@ function writeEvidence(result) {
     `- Archivo ajeno rechazado = ${Boolean(result.direct_checks?.foreign_file_rejected)}`,
     `- Requester rechazado con 403 en archivo = ${Boolean(result.direct_checks?.requester_signed_403)}`,
     `- Deltas de negocio: ${result.deltas?.all_equal ? "cero" : "DETECTADOS"}`,
+    `- Estados sin cambio: ${Boolean(result.intake_state_unchanged)}`,
+    `- Internal notes sin cambio: ${Boolean(result.internal_note_unchanged)}`,
+    `- RPCs de mutación observados: ${result.browser_checks?.mutation_rpc_requests ?? "NO EJECUTADO"}`,
     `- Limpieza IAM completa: ${Boolean(result.cleanup?.complete)}`,
     `- Sesiones invalidadas: ${Boolean(result.cleanup?.sessions_invalidated)}`,
     "",
@@ -806,6 +979,10 @@ const result = {
   browser_checks: null,
   baseline_counts: null,
   post_counts: null,
+  baseline_intake_state: null,
+  post_intake_state: null,
+  intake_state_unchanged: false,
+  internal_note_unchanged: false,
   deltas: null,
   cleanup: { complete: false },
   privacy: {
@@ -817,6 +994,7 @@ const result = {
 const manifest = { run_tag: runTag, identities: [] }
 writeManifest(manifest)
 let baseline = null
+let baselineIntakeState = null
 let data = null
 let sessions = {}
 let testFailure = null
@@ -824,7 +1002,10 @@ let testFailure = null
 try {
   process.stdout.write('{"phase":"preflight","status":"started"}\n')
   baseline = await businessSnapshot()
+  assertAuthorizedBaseline(baseline)
   result.baseline_counts = publicCounts(baseline)
+  baselineIntakeState = await intakeStateSummary()
+  result.baseline_intake_state = baselineIntakeState
   data = await inventory()
   result.inventory = data.sanitized
 
@@ -870,9 +1051,18 @@ try {
 
   try {
     const post = await businessSnapshot()
+    const postIntakeState = await intakeStateSummary()
     result.post_counts = publicCounts(post)
+    result.post_intake_state = postIntakeState
+    result.intake_state_unchanged = Boolean(
+      baselineIntakeState && digest(baselineIntakeState.statuses) === digest(postIntakeState.statuses),
+    )
+    result.internal_note_unchanged = Boolean(
+      baselineIntakeState &&
+        baselineIntakeState.internal_note_nonempty === postIntakeState.internal_note_nonempty,
+    )
     result.deltas = baseline ? compareSnapshots(baseline, post) : { all_equal: false, resources: {} }
-    if (!result.deltas.all_equal) {
+    if (!result.deltas.all_equal || !result.intake_state_unchanged || !result.internal_note_unchanged) {
       result.status = "FAIL"
       result.failure_code ||= "business_delta_detected"
     }
