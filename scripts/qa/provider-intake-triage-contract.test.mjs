@@ -65,6 +65,25 @@ test("detail contract masks bank values and excludes private storage paths", () 
   assert.doesNotMatch(detailSql, /'intake_link_id'/)
 })
 
+test("detail row assignment keeps the rowtype target separate from the company scalar", () => {
+  const detailStart = migration.indexOf("create function public.get_provider_intake_detail")
+  const transitionStart = migration.indexOf("create function public.transition_provider_intake")
+  const detailSql = migration.slice(detailStart, transitionStart)
+  assert.doesNotMatch(
+    detailSql,
+    /select\s+pi\s*,\s*c\.name\s+into\s+v_intake\s*,\s*v_company_name/i,
+  )
+  assert.match(detailSql, /select\s+pi\.\*\s+into\s+v_intake[\s\S]*where pi\.id = p_payment_intake_id;/i)
+  assert.match(
+    detailSql,
+    /v_company_name\s*:=\s*\(\s*select c\.name\s+from public\.companies c\s+where c\.id = v_intake\.company_id\s*\);/i,
+  )
+  assert.match(
+    detailSql,
+    /v_company_name\s*:=[\s\S]*perform public\.provider_intake_assert_company_access\(v_intake\.company_id\);/i,
+  )
+})
+
 test("migration contains no forbidden domain mutations or destructive table operations", () => {
   assert.doesNotMatch(migration, /\b(delete|truncate)\s+(from\s+)?public\.(payment_intake|payment_requests|proveedores|approval_batches)\b/i)
   assert.doesNotMatch(migration, /\bdrop\s+table\b/i)

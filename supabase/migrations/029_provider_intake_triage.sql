@@ -375,8 +375,8 @@ begin
 
   perform public.provider_intake_actor_context();
 
-  select pi, c.name
-    into v_intake, v_company_name
+  select pi.*
+    into v_intake
   from public.payment_intake pi
   join public.companies c on c.id = pi.company_id
   where pi.id = p_payment_intake_id;
@@ -384,6 +384,12 @@ begin
   if not found then
     raise exception 'provider_intake_not_found';
   end if;
+
+  v_company_name := (
+    select c.name
+    from public.companies c
+    where c.id = v_intake.company_id
+  );
 
   perform public.provider_intake_assert_company_access(v_intake.company_id);
 
