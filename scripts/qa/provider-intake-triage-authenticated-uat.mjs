@@ -316,15 +316,19 @@ async function businessSnapshot() {
 }
 
 async function intakeStateSummary() {
-  const result = await serviceRest("payment_intake", "select=status,internal_note&limit=10000")
-  const rows = Array.isArray(result.data) ? result.data : []
+  const [intakesResult, notesResult] = await Promise.all([
+    serviceRest("payment_intake", "select=status&limit=10000"),
+    serviceRest("payment_intake_events", "select=id&event_type=eq.internal_note&limit=10000"),
+  ])
+  const rows = Array.isArray(intakesResult.data) ? intakesResult.data : []
   const statuses = Object.fromEntries(allowedStatuses.map((status) => [status, 0]))
-  let internalNoteCount = 0
   for (const row of rows) {
     if (Object.hasOwn(statuses, row.status)) statuses[row.status] += 1
-    if (String(row.internal_note || "").trim()) internalNoteCount += 1
   }
-  return { statuses, internal_note_nonempty: internalNoteCount }
+  return {
+    statuses,
+    internal_note_events: Array.isArray(notesResult.data) ? notesResult.data.length : 0,
+  }
 }
 
 function assertAuthorizedBaseline(snapshot) {
@@ -1059,7 +1063,7 @@ try {
     )
     result.internal_note_unchanged = Boolean(
       baselineIntakeState &&
-        baselineIntakeState.internal_note_nonempty === postIntakeState.internal_note_nonempty,
+        baselineIntakeState.internal_note_events === postIntakeState.internal_note_events,
     )
     result.deltas = baseline ? compareSnapshots(baseline, post) : { all_equal: false, resources: {} }
     if (!result.deltas.all_equal || !result.intake_state_unchanged || !result.internal_note_unchanged) {
