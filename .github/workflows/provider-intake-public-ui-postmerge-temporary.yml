@@ -5,7 +5,9 @@ on:
     branches:
       - feature/ramon-provider-public-portal-ui
     paths:
+      - .github/workflows/provider-intake-public-ui-postmerge-temporary.yml
       - ops/provider-intake/public-ui-postmerge.authorization.json
+      - scripts/qa/provider-intake-public-ui-postmerge.playwright.mjs
 
 permissions:
   contents: read
