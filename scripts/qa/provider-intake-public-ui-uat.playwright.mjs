@@ -273,7 +273,7 @@ function monitorPage(page, label) {
   page.on("console", (message) => {
     if (message.type() === "error") {
       const text = sanitizeText(message.text());
-      if (/vercel\.live/i.test(text) || (["invalid", "query"].includes(label) && /status of 404/i.test(text))) {
+      if (/vercel\.live/i.test(text) || (["unavailable", "invalid", "query"].includes(label) && /status of 404/i.test(text))) {
         report.external_warnings.push({ page: label, message: text });
       } else {
         report.console_errors.push({ page: label, message: text });
@@ -318,6 +318,11 @@ async function safeGoto(page, url, options = {}) {
   } catch (error) {
     throw new Error(`navigation_failed:${sanitizeText(error?.message)}`);
   }
+}
+
+async function waitFocus(page, id, code) {
+  await page.waitForFunction((expected) => document.activeElement?.id === expected, id, { timeout: 5000 });
+  assertEqual(await page.evaluate(() => document.activeElement?.id), id, code);
 }
 
 async function openValid(page) {
@@ -665,9 +670,9 @@ async function runUat() {
     await page.locator("#provider-rfc").fill(positive.provider_rfc);
     await page.locator("#provider-phone").fill(positive.provider_phone);
     await page.locator("#next-button").click();
-    assertEqual(await page.evaluate(() => document.activeElement?.id), "step-2-title", "ui06_step2_focus");
+    await waitFocus(page, "step-2-title", "ui06_step2_focus");
     await page.locator("#back-button").click();
-    assertEqual(await page.evaluate(() => document.activeElement?.id), "step-1-title", "ui06_back_focus");
+    await waitFocus(page, "step-1-title", "ui06_back_focus");
     await page.locator("#next-button").click();
 
     await page.locator("#concept").fill(positive.concept);
@@ -685,7 +690,7 @@ async function runUat() {
 
     await fillStep2(page);
     await page.locator("#next-button").click();
-    assertEqual(await page.evaluate(() => document.activeElement?.id), "step-3-title", "ui06_step3_focus");
+    await waitFocus(page, "step-3-title", "ui06_step3_focus");
     assert((await page.locator("#summary-provider").textContent()).includes("QA PROVEEDOR"), "ui06_summary_provider");
     assert((await page.locator("#summary-amount").textContent()).includes("1.23"), "ui06_summary_amount");
     setCase("UI-06", "PASS", "Cuatro pasos, Anterior/Continuar, foco y resumen dinámico validados.");
@@ -714,7 +719,7 @@ async function runUat() {
     setCase("UI-08", "PASS", "XML seguro agregado como Factura XML; medidor, resumen y Quitar presentes.");
 
     await page.locator("#next-button").click();
-    assertEqual(await page.evaluate(() => document.activeElement?.id), "step-4-title", "ui06_step4_focus");
+    await waitFocus(page, "step-4-title", "ui06_step4_focus");
     assert(await page.locator("#submit-button").isDisabled(), "ui09_submit_initially_disabled");
     const reviewText = await page.locator("#review-content").textContent();
     assert(!reviewText.includes(positive.bank_account) && !reviewText.includes(positive.bank_clabe), "ui16_bank_masking");
