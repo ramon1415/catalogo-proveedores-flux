@@ -6,6 +6,7 @@ on:
       - feature/ramon-provider-public-portal-ui
     paths:
       - ops/provider-intake/public-ui-uat-complete.authorization.json
+      - scripts/qa/provider-intake-public-ui-uat-complete.playwright.mjs
 
 permissions:
   contents: read

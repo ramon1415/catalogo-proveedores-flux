@@ -550,6 +550,34 @@ async function expectFileRejection(page, files, pattern, code) {
   await waitFocus(page, "choose-files-button", `${code}_focus`);
 }
 
+async function expectTotalBudgetRejection(page, files) {
+  await page.evaluate(() => {
+    document.querySelector("#file-global-error").textContent = "";
+  });
+  await page.locator("#file-input").setInputFiles(files);
+  await page.locator(".file-row").nth(1).waitFor({ state: "visible", timeout: 30000 });
+  assertEqual(await page.locator(".file-row").count(), 2, "ui08_total_budget_files_selected");
+  assertEqual(
+    await page.locator(".usage-track").getAttribute("aria-valuenow"),
+    "100",
+    "ui08_total_budget_meter",
+  );
+
+  await page.locator("#next-button").click();
+  await page.locator("#file-global-error").waitFor({ state: "visible", timeout: 30000 });
+  const message = await page.locator("#file-global-error").textContent();
+  assert(
+    /límite permitido de 12 MB/i.test(message || ""),
+    `ui08_total_budget:${sanitizeText(message)}`,
+  );
+  assert(await page.locator("#step-3-title").isVisible(), "ui08_total_budget_left_step3");
+
+  while (await page.locator(".remove-file").count()) {
+    await page.locator(".remove-file").first().click();
+  }
+  assertEqual(await page.locator(".file-row").count(), 0, "ui08_total_budget_files_removed");
+}
+
 async function keyboardAddSafeXml(page) {
   const button = page.locator("#choose-files-button");
   await button.focus();
@@ -1028,12 +1056,7 @@ async function runUat() {
       /10 MB/i,
       "ui08_max_individual",
     );
-    await expectFileRejection(
-      page,
-      [FIXTURES.totalPdfA, FIXTURES.totalPdfB],
-      /límite total|tamaño total/i,
-      "ui08_total_budget",
-    );
+    await expectTotalBudgetRejection(page, [FIXTURES.totalPdfA, FIXTURES.totalPdfB]);
     assertEqual(submitCount, 0, "ui08_submit_absent");
     setCase("UI-08", "PASS", "DTD, ENTITY, MIME, duplicado, 3 archivos, 10 MB y 12 MB bloqueados.");
 
