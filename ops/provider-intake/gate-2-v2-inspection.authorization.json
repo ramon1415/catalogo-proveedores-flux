@@ -1,9 +1,0 @@
-{
-  "gate": "phase-1d-gate-2-v2-read-only-inspection",
-  "authorized_root_head": "31655bc66b38ea94159c35c6c79bed053af00ba3",
-  "branch": "feature/ramon-provider-intake-triage-ui",
-  "supabase_project_ref": "scsirgbuqjcwoaxfacth",
-  "allow_database_writes": false,
-  "emit_record_identifiers": false,
-  "inspection_sha256": "7150b5f72d13762aec130eaf67664a5dc0144308afc00d7c59f5092bd395ba87"
-}
