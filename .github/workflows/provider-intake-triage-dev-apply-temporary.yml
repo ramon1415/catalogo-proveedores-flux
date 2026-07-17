@@ -54,7 +54,7 @@ jobs:
           )"
           actual_temporary_files="$(git diff --name-only "$AUTHORIZED_BASE_HEAD..HEAD" | sort)"
           test "$actual_temporary_files" = "$expected_temporary_files"
-          test "$(git rev-parse "$AUTHORIZED_BASE_HEAD:provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
+          test "$(git rev-parse "$AUTHORIZED_BASE_HEAD:supabase/functions/provider-intake")" = "$AUTHORIZED_BACKEND_TREE"
           test "$SUPABASE_DEV_PROJECT_REF" = "$AUTHORIZED_PROJECT_REF"
           test -n "$SUPABASE_DEV_DB_URL"
           test -n "$SUPABASE_ACCESS_TOKEN"
