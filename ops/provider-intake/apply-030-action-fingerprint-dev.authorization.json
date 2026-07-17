@@ -1,0 +1,12 @@
+{
+  "gate": "phase-1d-migration-030-one-time-dev",
+  "authorized_root_head": "30adb591e29e406c445dc6e70759ed1339a27f7c",
+  "branch": "feature/ramon-provider-intake-triage-ui",
+  "supabase_project_ref": "scsirgbuqjcwoaxfacth",
+  "migration_sha256": "effc70e602c55ba6b291ad5e904848bd9190389b08c6dbc9186ee28eeab87aeb",
+  "require_rollback_dry_run": true,
+  "allow_load_once": true,
+  "allow_migration_029": false,
+  "allow_db_push_or_repair": false,
+  "allow_business_data_mutations": false
+}
