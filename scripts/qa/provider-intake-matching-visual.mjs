@@ -314,6 +314,25 @@ try {
   await runAxe(desktop, "linked")
   await capture(desktop, "03-linked.png")
 
+  const dangerAction = desktop.locator(".current-match-actions .danger-action").filter({ hasText: "Retirar vínculo" })
+  const terminalDangerAction = desktop.locator(".detail-actions .danger-action").first()
+  assert.equal(await dangerAction.count(), 1)
+  assert.equal(await terminalDangerAction.count(), 1)
+  const dangerContrast = {
+    clear: {
+      dark: await inspectDangerAction(desktop, dangerAction, "dark"),
+      light: await inspectDangerAction(desktop, dangerAction, "light"),
+    },
+    terminal: {
+      dark: await inspectDangerAction(desktop, terminalDangerAction, "dark"),
+      light: await inspectDangerAction(desktop, terminalDangerAction, "light"),
+    },
+  }
+  process.stdout.write(`CONTRAST ${JSON.stringify(dangerContrast)}\n`)
+  assertDangerActionContrast(dangerContrast.clear)
+  assertDangerActionContrast(dangerContrast.terminal)
+  await desktop.evaluate(() => { document.documentElement.dataset.theme = "dark" })
+
   const changeButton = desktop.getByRole("button", { name: "Cambiar vínculo" })
   await changeButton.click()
   const providerSearch = desktop.locator("#providerMatchSearch")
@@ -409,6 +428,7 @@ try {
     },
     viewports: [390, 768, 1366],
     themes: ["dark", "light"],
+    dangerContrast,
     states: ["candidates", "comparison", "confirmation", "linked", "replace-dialog", "conflict", "terminal", "mobile", "tablet", "zoom-200", "requester-denied"],
   })}\n`)
 } finally {
@@ -449,6 +469,146 @@ async function assertNoViewportOverflow(page, { allowDocumentOverflow = false } 
   }))
   if (!allowDocumentOverflow) assert.ok(geometry.documentWidth <= geometry.viewport + 1, JSON.stringify(geometry))
   assert.ok(geometry.dialogWidth <= geometry.viewport + 1, JSON.stringify(geometry))
+}
+
+async function inspectDangerAction(page, button, theme) {
+  await page.evaluate((nextTheme) => {
+    document.documentElement.dataset.theme = nextTheme
+  }, theme)
+
+  const states = {}
+  await button.evaluate((node) => node.blur())
+  states.default = await dangerStyle(button)
+
+  await button.hover()
+  states.hover = await dangerStyle(button)
+
+  await button.evaluate((node) => node.blur())
+  for (let index = 0; index < 40; index += 1) {
+    await page.keyboard.press("Tab")
+    if (await button.evaluate((node) => document.activeElement === node)) break
+  }
+  assert.equal(await button.evaluate((node) => document.activeElement === node), true)
+  states.focusVisible = await dangerStyle(button)
+  assert.equal(states.focusVisible.focusVisible, true)
+
+  const box = await button.boundingBox()
+  assert.ok(box)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  states.active = await dangerStyle(button)
+  await page.mouse.move(0, 0)
+  await page.mouse.up()
+
+  await button.evaluate((node) => { node.disabled = true })
+  states.disabled = await dangerStyle(button)
+  await button.evaluate((node) => { node.disabled = false })
+  return states
+}
+
+async function dangerStyle(button) {
+  const raw = await button.evaluate((node) => {
+    const parse = (value) => {
+      const match = String(value).match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/)
+      if (match) return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])]
+      const srgb = String(value).match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/)
+      return srgb ? [Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255, srgb[4] === undefined ? 1 : Number(srgb[4])] : [0, 0, 0, 0]
+    }
+    const composite = (front, back) => {
+      const alpha = front[3] + back[3] * (1 - front[3])
+      if (!alpha) return [0, 0, 0, 0]
+      return [
+        (front[0] * front[3] + back[0] * back[3] * (1 - front[3])) / alpha,
+        (front[1] * front[3] + back[1] * back[3] * (1 - front[3])) / alpha,
+        (front[2] * front[3] + back[2] * back[3] * (1 - front[3])) / alpha,
+        alpha,
+      ]
+    }
+    let effective = [0, 0, 0, 0]
+    for (let current = node; current; current = current.parentElement) {
+      effective = composite(effective, parse(getComputedStyle(current).backgroundColor))
+      if (effective[3] >= 0.999) break
+    }
+    if (effective[3] < 0.999) effective = composite(effective, [255, 255, 255, 1])
+    const style = getComputedStyle(node)
+    return {
+      color: style.color,
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderTopColor,
+      outlineColor: style.outlineColor,
+      outlineWidth: style.outlineWidth,
+      opacity: Number(style.opacity),
+      focusVisible: node.matches(":focus-visible"),
+      effectiveBackground: effective,
+    }
+  })
+  const background = raw.effectiveBackground
+  return {
+    color: raw.color,
+    backgroundColor: raw.backgroundColor,
+    effectiveBackground: rgbaLabel(background),
+    borderColor: raw.borderColor,
+    outlineColor: raw.outlineColor,
+    outlineWidth: raw.outlineWidth,
+    opacity: raw.opacity,
+    focusVisible: raw.focusVisible,
+    textContrast: contrastWithOpacity(raw.color, background, raw.opacity),
+    borderContrast: contrastWithOpacity(raw.borderColor, background, raw.opacity),
+    outlineContrast: contrastWithOpacity(raw.outlineColor, background, raw.opacity),
+  }
+}
+
+function assertDangerActionContrast(contrast) {
+  for (const [theme, states] of Object.entries(contrast)) {
+    for (const state of ["default", "hover", "focusVisible", "active"]) {
+      assert.ok(states[state].textContrast >= 4.5, `${theme}/${state} text: ${JSON.stringify(states[state])}`)
+      assert.ok(states[state].borderContrast >= 3, `${theme}/${state} border: ${JSON.stringify(states[state])}`)
+    }
+    assert.ok(states.focusVisible.outlineContrast >= 3, `${theme}/focus outline: ${JSON.stringify(states.focusVisible)}`)
+  }
+}
+
+function contrastWithOpacity(cssColor, background, opacity) {
+  const foreground = parseCssColor(cssColor)
+  foreground[3] *= opacity
+  const rendered = compositeColor(foreground, background)
+  return Number(contrastRatio(rendered, background).toFixed(2))
+}
+
+function parseCssColor(value) {
+  const match = String(value).match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/)
+  if (match) return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])]
+  const srgb = String(value).match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)/)
+  assert.ok(srgb, `Unsupported computed color: ${value}`)
+  return [Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255, srgb[4] === undefined ? 1 : Number(srgb[4])]
+}
+
+function compositeColor(front, back) {
+  const alpha = front[3] + back[3] * (1 - front[3])
+  return [
+    (front[0] * front[3] + back[0] * back[3] * (1 - front[3])) / alpha,
+    (front[1] * front[3] + back[1] * back[3] * (1 - front[3])) / alpha,
+    (front[2] * front[3] + back[2] * back[3] * (1 - front[3])) / alpha,
+    alpha,
+  ]
+}
+
+function contrastRatio(first, second) {
+  const high = Math.max(relativeLuminance(first), relativeLuminance(second))
+  const low = Math.min(relativeLuminance(first), relativeLuminance(second))
+  return (high + 0.05) / (low + 0.05)
+}
+
+function relativeLuminance(color) {
+  const channels = color.slice(0, 3).map((value) => {
+    const normalized = value / 255
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+  })
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+}
+
+function rgbaLabel(color) {
+  return `rgba(${color.slice(0, 3).map((value) => Math.round(value)).join(", ")}, ${Number(color[3].toFixed(3))})`
 }
 
 async function expectMasked(page) {
