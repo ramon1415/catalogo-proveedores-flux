@@ -15,8 +15,9 @@ const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "flux-matching-visual-")
 const ids = Object.freeze({
   intake: "33333333-3333-4333-8333-333333333333",
   company: "11111111-1111-4111-8111-111111111111",
-  provider: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-  inactive: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  providerA: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  providerB: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  inactive: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 })
 
 const listFixture = {
@@ -24,15 +25,15 @@ const listFixture = {
   total: 1,
   page: 1,
   page_size: 25,
-  companies: [{ id: ids.company, name: "Flux Operadora" }],
+  companies: [{ id: ids.company, name: "COMPANY_A" }],
   items: [{
     id: ids.intake,
-    public_folio: "INT-2026-000051",
+    public_folio: "QA_MATCH_RETRY_MAIN",
     company_id: ids.company,
-    company_name: "Flux Operadora",
+    company_name: "COMPANY_A",
     status: "in_review",
-    provider_name: "Servicios Horizonte",
-    concept: "Producción técnica",
+    provider_name: "QA_DECLARED_PROVIDER",
+    concept: "QA Gate 2 retry",
     amount_requested: 128450.5,
     currency: "MXN",
     created_at: "2026-07-17T15:30:00.000Z",
@@ -44,25 +45,25 @@ const listFixture = {
 const detailFixture = {
   intake: {
     ...listFixture.items[0],
-    provider_rfc: "SHO260101AB1",
-    provider_email: "contacto@horizonte.example",
-    provider_phone: "+52 55 0000 0000",
-    description: "Audio e iluminación.",
+    provider_rfc: "QAA010101AA1",
+    provider_email: "qa-intake@example.invalid",
+    provider_phone: "+52 55 0000 0001",
+    description: "Fixture sintético aislado.",
     requested_payment_date: "2026-07-24",
     invoice_folio: "F-1051",
     invoice_uuid: "5AD73A63-9290-4D7C-876A-3957C6E57B20",
     invoice_date: "2026-07-17",
-    bank_name: "Banco de ejemplo",
+    bank_name: "BANCO_QA",
     bank_account_masked: "••••••2468",
     bank_clabe_masked: "••••••••••••••9012",
-    beneficiary_name: "Servicios Horizonte",
+    beneficiary_name: "QA_BENEFICIARY",
   },
   files: [],
   events: [{
     id: "77777777-7777-4777-8777-777777777777",
     event_type: "status_changed",
     actor_type: "finance",
-    actor_name: "QA Finanzas",
+    actor_name: "QA_TRIAGE_FINANCE_1",
     from_status: "received",
     to_status: "in_review",
     notes: "Revisión iniciada.",
@@ -79,12 +80,12 @@ const candidateFixture = {
   duplicate_rfc_count: 1,
   candidates: [
     {
-      proveedor_id: ids.provider,
-      alias: "HORIZONTE",
-      legal_name: "Servicios Horizonte, S.A. de C.V.",
-      rfc: "SHO260101AB1",
+      proveedor_id: ids.providerA,
+      alias: "QA_MATCH_PROVIDER_A",
+      legal_name: "QA_MATCH_PROVIDER_A",
+      rfc: "QAA010101AA1",
       payment_method: "Transferencia bancaria",
-      bank: "Banco de ejemplo",
+      bank: "BANCO_QA",
       account_masked: "••••••2468",
       clabe_masked: "••••••••••••••9012",
       active: true,
@@ -95,20 +96,36 @@ const candidateFixture = {
       differences: ["Razón social distinta"],
     },
     {
-      proveedor_id: ids.inactive,
-      alias: "HORIZONTE LEGACY",
-      legal_name: "Servicios Horizonte Legacy",
-      rfc: "SHO260101AB1",
+      proveedor_id: ids.providerB,
+      alias: "QA_MATCH_PROVIDER_B",
+      legal_name: "QA_MATCH_PROVIDER_B",
+      rfc: "QAB010101AA2",
       payment_method: "Transferencia bancaria",
-      bank: "Banco de ejemplo",
+      bank: "BANCO_QA",
+      account_masked: "••••••1357",
+      clabe_masked: "••••••••••••••1357",
+      active: true,
+      selectable: true,
+      score: 85,
+      confidence: "high",
+      reasons: ["Alias QA"],
+      differences: ["RFC distinto"],
+    },
+    {
+      proveedor_id: ids.inactive,
+      alias: "QA_MATCH_PROVIDER_INACTIVE",
+      legal_name: "QA_MATCH_PROVIDER_INACTIVE",
+      rfc: "QAI010101AA3",
+      payment_method: "Transferencia bancaria",
+      bank: "BANCO_QA",
       account_masked: "••••••7777",
       clabe_masked: "••••••••••••••7777",
       active: false,
       selectable: false,
       score: 70,
       confidence: "high",
-      reasons: ["RFC exacto"],
-      differences: ["CLABE distinta"],
+      reasons: ["Señal exacta sintética"],
+      differences: ["Proveedor inactivo"],
     },
   ],
   history: [],
@@ -119,17 +136,17 @@ const comparisonFixture = {
   status: "in_review",
   updated_at: detailFixture.intake.updated_at,
   eligible: true,
-  proveedor_id: ids.provider,
-  provider_alias: "HORIZONTE",
+  proveedor_id: ids.providerA,
+  provider_alias: "QA_MATCH_PROVIDER_A",
   provider_active: true,
   rows: [
-    { field: "Razón social", declared: "Servicios Horizonte", master: "Servicios Horizonte, S.A. de C.V.", result: "different" },
-    { field: "RFC", declared: "SHO260101AB1", master: "SHO260101AB1", result: "match" },
-    { field: "Banco", declared: "Banco de ejemplo", master: "Banco de ejemplo", result: "match" },
+    { field: "Razón social", declared: "QA_DECLARED_PROVIDER", master: "QA_MATCH_PROVIDER_A", result: "different" },
+    { field: "RFC", declared: "QAA010101AA1", master: "QAA010101AA1", result: "match" },
+    { field: "Banco", declared: "BANCO_QA", master: "BANCO_QA", result: "match" },
     { field: "Cuenta", declared: "••••••2468", master: "••••••2468", result: "match" },
     { field: "CLABE", declared: "••••••••••••••9012", master: "••••••••••••••9012", result: "match" },
-    { field: "Beneficiario", declared: "Servicios Horizonte", master: "Servicios Horizonte SA", result: "different" },
-    { field: "Correo", declared: "contacto@horizonte.example", master: "pagos@horizonte.example", result: "different" },
+    { field: "Beneficiario", declared: "QA_BENEFICIARY", master: "QA_MATCH_PROVIDER_A", result: "different" },
+    { field: "Correo", declared: "qa-intake@example.invalid", master: "qa-provider@example.invalid", result: "different" },
     { field: "Teléfono", declared: "+52 55 0000 0000", master: null, result: "not_reported" },
   ],
 }
@@ -152,7 +169,32 @@ const mockScript = `
       baseMatch.status = "rejected";
       baseMatch.eligible = false;
     }
+    const providers = {
+      "${ids.providerA}": {
+        proveedor_id: "${ids.providerA}",
+        alias: "QA_MATCH_PROVIDER_A",
+        legal_name: "QA_MATCH_PROVIDER_A",
+        rfc: "QAA010101AA1",
+        payment_method: "Transferencia bancaria",
+        bank: "BANCO_QA",
+        account_masked: "••••••2468",
+        clabe_masked: "••••••••••••••9012",
+        active: true,
+      },
+      "${ids.providerB}": {
+        proveedor_id: "${ids.providerB}",
+        alias: "QA_MATCH_PROVIDER_B",
+        legal_name: "QA_MATCH_PROVIDER_B",
+        rfc: "QAB010101AA2",
+        payment_method: "Transferencia bancaria",
+        bank: "BANCO_QA",
+        account_masked: "••••••1357",
+        clabe_masked: "••••••••••••••1357",
+        active: true,
+      },
+    };
     window.__qaConflict = false;
+    window.__qaMutationCount = 0;
     window.__qaRpcCalls = [];
     window.__qaMatch = baseMatch;
     function builder(table) {
@@ -175,42 +217,48 @@ const mockScript = `
         signOut: async () => ({ error: null }),
       },
       from: builder,
-      rpc: async (name) => {
+      rpc: async (name, args = {}) => {
         window.__qaRpcCalls.push(name);
         if (name === "list_provider_intakes") return { data: list, error: null };
         if (name === "get_provider_intake_detail") return { data: detail, error: null };
         if (name === "find_provider_intake_candidates") return { data: window.__qaMatch, error: null };
-        if (name === "get_provider_intake_match_comparison") return { data: comparison, error: null };
+        if (name === "get_provider_intake_match_comparison") {
+          const provider = providers[args.p_proveedor_id] || providers["${ids.providerA}"];
+          return {
+            data: {
+              ...comparison,
+              proveedor_id: provider.proveedor_id,
+              provider_alias: provider.alias,
+              rows: comparison.rows.map((row) => (
+                row.field === "Razón social" ? { ...row, master: provider.alias } : row
+              )),
+            },
+            error: null,
+          };
+        }
         if (name === "set_provider_intake_match") {
           if (window.__qaConflict) return { data: null, error: { message: "provider_intake_conflict" } };
-          detail.intake.updated_at = "2026-07-18T15:00:00.000Z";
+          window.__qaMutationCount += 1;
+          const previous = window.__qaMatch.current_match;
+          const next = args.p_proveedor_id ? providers[args.p_proveedor_id] : null;
+          detail.intake.updated_at = "2026-07-18T15:0" + window.__qaMutationCount + ":00.000Z";
           window.__qaMatch = {
             ...window.__qaMatch,
             updated_at: detail.intake.updated_at,
-            current_match: {
-              proveedor_id: "${ids.provider}",
-              alias: "HORIZONTE",
-              legal_name: "Servicios Horizonte, S.A. de C.V.",
-              rfc: "SHO260101AB1",
-              payment_method: "Transferencia bancaria",
-              bank: "Banco de ejemplo",
-              account_masked: "••••••2468",
-              clabe_masked: "••••••••••••••9012",
-              active: true,
-            },
+            current_match: next,
             history: [{
               event_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-              action_kind: "match_set",
-              previous_provider: null,
-              new_provider: "HORIZONTE",
+              action_kind: previous ? (next ? "match_replace" : "match_clear") : "match_set",
+              previous_provider: previous?.alias || null,
+              new_provider: next?.alias || null,
               match_confidence: "high",
-              reason_code: "candidate_selected",
-              reason: null,
+              reason_code: args.p_reason_code,
+              reason: args.p_reason,
               actor_type: "finance",
               created_at: detail.intake.updated_at,
             }],
           };
-          return { data: { matched_proveedor_id: "${ids.provider}", idempotent: false }, error: null };
+          return { data: { matched_proveedor_id: next?.proveedor_id || null, idempotent: false }, error: null };
         }
         return { data: {}, error: null };
       },
@@ -247,11 +295,11 @@ const server = http.createServer((request, response) => {
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
 const { port } = server.address()
 const baseUrl = `http://127.0.0.1:${port}/provider_intakes.html`
-const browser = await chromium.launch({ channel: "chrome", headless: true })
+const browser = await chromium.launch({ headless: true })
 let screens = 0
 
 try {
-  const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const desktop = await browser.newPage({ viewport: { width: 1366, height: 1000 } })
   await openFirstDetail(desktop, baseUrl)
   await expectMasked(desktop)
   await runAxe(desktop, "candidates")
@@ -266,6 +314,36 @@ try {
   await runAxe(desktop, "linked")
   await capture(desktop, "03-linked.png")
 
+  const changeButton = desktop.getByRole("button", { name: "Cambiar vínculo" })
+  await changeButton.click()
+  const providerSearch = desktop.locator("#providerMatchSearch")
+  assert.equal(await providerSearch.evaluate((node) => document.activeElement === node), true)
+  await providerSearch.fill("QA_MATCH_PROVIDER_B")
+  await providerSearch.press("Enter")
+  await providerSearch.waitFor({ state: "visible" })
+  const candidateCardB = desktop.locator(".candidate-card").filter({ hasText: "QA_MATCH_PROVIDER_B" })
+  assert.equal(await candidateCardB.count(), 1)
+  const selectProviderB = candidateCardB.getByRole("button", { name: "Seleccionar para cambio" })
+  await selectProviderB.click()
+  await waitForOpenDialog(desktop)
+  await assertReplaceDialog(desktop)
+  await runAxe(desktop, "replace dialog")
+  await capture(desktop, "04-replace-dialog.png")
+
+  await desktop.keyboard.press("Shift+Tab")
+  assert.equal(await desktop.locator("#matchDialog").evaluate((dialog) => dialog.contains(document.activeElement)), true)
+  await desktop.keyboard.press("Escape")
+  await desktop.waitForFunction(() => !document.querySelector("#matchDialog")?.open)
+  assert.equal(await selectProviderB.evaluate((node) => document.activeElement === node), true)
+
+  await selectProviderB.click()
+  await waitForOpenDialog(desktop)
+  await desktop.locator("#matchReason").fill("QA Gate 2 Retry: reemplazo controlado del proveedor sintético.")
+  assert.equal(await desktop.locator("#matchReasonCounter").textContent(), "62 / 500")
+  assert.equal(await desktop.evaluate(() => window.__qaMutationCount), 1)
+  await desktop.keyboard.press("Escape")
+  await desktop.waitForFunction(() => !document.querySelector("#matchDialog")?.open)
+
   const conflict = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await openFirstDetail(conflict, baseUrl)
   await conflict.getByRole("button", { name: "Comparar" }).first().click()
@@ -273,26 +351,41 @@ try {
   await conflict.getByRole("button", { name: "Confirmar vínculo" }).click()
   await conflict.getByText("Esta solicitud fue actualizada por otro usuario. Recarga el detalle.").waitFor()
   await runAxe(conflict, "conflict")
-  await capture(conflict, "04-conflict.png")
+  await capture(conflict, "05-conflict.png")
 
   const terminal = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await openFirstDetail(terminal, `${baseUrl}?state=terminal`, "Revisión requerida")
   await terminal.getByText("Revisión requerida", { exact: true }).waitFor()
   assert.equal(await terminal.getByRole("button", { name: "Confirmar vínculo" }).count(), 0)
   await runAxe(terminal, "terminal readonly")
-  await capture(terminal, "05-terminal-readonly.png")
+  await capture(terminal, "06-terminal-readonly.png")
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await openFirstDetail(mobile, baseUrl)
   await runAxe(mobile, "mobile candidates")
-  await capture(mobile, "06-mobile-candidates.png")
+  await assertNoViewportOverflow(mobile)
+  await capture(mobile, "07-mobile-candidates.png")
+
+  const tablet = await browser.newPage({ viewport: { width: 768, height: 1024 } })
+  await openFirstDetail(tablet, baseUrl)
+  await assertNoViewportOverflow(tablet)
+  await runAxe(tablet, "tablet candidates")
+  await capture(tablet, "08-tablet-candidates.png")
+
+  const light = await browser.newPage({ viewport: { width: 1366, height: 900 } })
+  await light.addInitScript(() => localStorage.setItem("flux-theme", "light"))
+  await openFirstDetail(light, baseUrl)
+  assert.equal(await light.locator("html").getAttribute("data-theme"), "light")
+  await runAxe(light, "light theme")
+  await capture(light, "09-light-theme.png")
 
   const zoom = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await openFirstDetail(zoom, baseUrl)
   await zoom.evaluate(() => { document.documentElement.style.zoom = "2" })
   assert.equal(await zoom.getByRole("button", { name: "Buscar coincidencias" }).isVisible(), true)
+  await assertNoViewportOverflow(zoom, { allowDocumentOverflow: true })
   await runAxe(zoom, "zoom 200")
-  await capture(zoom, "07-zoom-200.png")
+  await capture(zoom, "10-zoom-200.png")
 
   const denied = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   await denied.goto(`${baseUrl}?role=requester`, { waitUntil: "networkidle" })
@@ -305,7 +398,18 @@ try {
     screens,
     axe: "zero critical/serious",
     masked: true,
-    states: ["candidates", "comparison", "confirmation", "linked", "conflict", "terminal", "mobile", "zoom-200", "requester-denied"],
+    replacePreflight: {
+      changeFocusesSearch: true,
+      exactProviderCard: "QA_MATCH_PROVIDER_B",
+      dialogOpen: true,
+      escape: true,
+      focusReturn: true,
+      reasonValidatedWithoutReplaceSubmit: true,
+      mockedMutationCount: await desktop.evaluate(() => window.__qaMutationCount),
+    },
+    viewports: [390, 768, 1366],
+    themes: ["dark", "light"],
+    states: ["candidates", "comparison", "confirmation", "linked", "replace-dialog", "conflict", "terminal", "mobile", "tablet", "zoom-200", "requester-denied"],
   })}\n`)
 } finally {
   await browser.close()
@@ -315,8 +419,36 @@ try {
 async function openFirstDetail(page, url, expectedState = "Candidatos encontrados") {
   await page.goto(url, { waitUntil: "networkidle" })
   await page.locator("#triageWorkspace").waitFor({ state: "visible" })
-  await page.getByRole("button", { name: /Ver detalle de INT-2026-000051/ }).click()
+  await page.getByRole("button", { name: /Ver detalle de QA_MATCH_RETRY_MAIN/ }).click()
   await page.getByText(expectedState, { exact: true }).waitFor()
+}
+
+async function waitForOpenDialog(page) {
+  await page.waitForFunction(() => document.querySelector("#matchDialog")?.open === true)
+  await page.locator("#matchTitle").waitFor({ state: "visible" })
+  await page.locator("#matchReasonCode").waitFor({ state: "visible" })
+  await page.locator("#matchReason").waitFor({ state: "visible" })
+  await page.locator("#confirmMatchBtn").waitFor({ state: "visible" })
+}
+
+async function assertReplaceDialog(page) {
+  assert.equal(await page.locator("#matchDialog").evaluate((dialog) => dialog.open), true)
+  assert.equal(await page.locator("#matchTitle").textContent(), "Comparar proveedor")
+  assert.match(await page.locator("#matchDescription").textContent(), /Revisa los datos declarados/)
+  assert.equal(await page.locator("#confirmMatchBtn").textContent(), "Confirmar cambio")
+  assert.match(await page.locator("#matchReasonRequired").textContent(), /obligatoria/)
+  await page.locator("#comparisonContent .comparison-summary strong").getByText("QA_MATCH_PROVIDER_B", { exact: true }).waitFor()
+  await page.getByText("QA_MATCH_PROVIDER_A", { exact: true }).first().waitFor()
+}
+
+async function assertNoViewportOverflow(page, { allowDocumentOverflow = false } = {}) {
+  const geometry = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    dialogWidth: document.querySelector("#detailDialog")?.getBoundingClientRect().width || 0,
+  }))
+  if (!allowDocumentOverflow) assert.ok(geometry.documentWidth <= geometry.viewport + 1, JSON.stringify(geometry))
+  assert.ok(geometry.dialogWidth <= geometry.viewport + 1, JSON.stringify(geometry))
 }
 
 async function expectMasked(page) {

@@ -88,6 +88,23 @@ test("matching layout covers focus, mobile, zoom-safe overflow, and reduced moti
   assert.match(client, /dom\.matchDialog\.showModal\(\)/)
 })
 
+test("replace flow focuses search before an exact candidate action opens the dialog", () => {
+  assert.match(
+    client,
+    /Cambiar vínculo[\s\S]*?document\.getElementById\("providerMatchSearch"\)\?\.focus\(\)/,
+  )
+  assert.match(
+    client,
+    /current \? "Seleccionar para cambio" : "Seleccionar proveedor"/,
+  )
+  assert.match(
+    client,
+    /select\.addEventListener\("click", \(\) => openMatchComparison\(candidate\.proveedor_id, select\)\)/,
+  )
+  assert.match(client, /const kind = currentId \? "replace" : "set"/)
+  assert.match(client, /dom\.matchDialog\.showModal\(\)/)
+})
+
 test("provider master deep link is forced into read-only mode", () => {
   assert.match(client, /proveedores\.html\?provider_id=.*&mode=readonly/)
   assert.match(providerClient, /providerReadOnlyMode/)
@@ -95,4 +112,3 @@ test("provider master deep link is forced into read-only mode", () => {
   assert.match(providerClient, /if \(providerReadOnlyMode\) return/)
   assert.match(providerClient, /canManageProviders\(\) && !providerReadOnlyMode/)
 })
-
