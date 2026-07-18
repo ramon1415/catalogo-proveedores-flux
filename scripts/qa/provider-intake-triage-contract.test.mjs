@@ -198,12 +198,118 @@ test("signed URL server function keeps privileged credentials server-side and us
   assert.doesNotMatch(html, /service_role/i)
 })
 
+test("non-POST requests return a safe 405 response without upstream calls", { concurrency: false }, async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  configureFileUrlEnvironment()
+  global.fetch = async (...args) => {
+    calls.push(args)
+    return jsonResponse({}, 500)
+  }
+
+  try {
+    const response = responseRecorder()
+    await fileUrlHandler({ method: "GET", headers: {} }, response)
+    assert.equal(response.statusCode, 405)
+    assert.deepEqual(response.payload, { error: "method_not_allowed" })
+    assert.equal(response.headers.Allow, "POST")
+    assertSafeJsonHeaders(response)
+    assert.equal(calls.length, 0)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test("valid IDs without Authorization return 401 without upstream calls", { concurrency: false }, async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  configureFileUrlEnvironment()
+  global.fetch = async (...args) => {
+    calls.push(args)
+    return jsonResponse({}, 500)
+  }
+
+  try {
+    const response = responseRecorder()
+    await fileUrlHandler(requestFor(IDS.intake, IDS.file, ""), response)
+    assert.equal(response.statusCode, 401)
+    assert.deepEqual(response.payload, { error: "auth_required" })
+    assertSafeJsonHeaders(response)
+    assert.equal(calls.length, 0)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test("malformed Authorization returns 401 without upstream calls", { concurrency: false }, async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  configureFileUrlEnvironment()
+  global.fetch = async (...args) => {
+    calls.push(args)
+    return jsonResponse({}, 500)
+  }
+
+  try {
+    const response = responseRecorder()
+    await fileUrlHandler(requestFor(IDS.intake, IDS.file, "Bearer malformed token"), response)
+    assert.equal(response.statusCode, 401)
+    assert.deepEqual(response.payload, { error: "auth_required" })
+    assertSafeJsonHeaders(response)
+    assert.equal(calls.length, 0)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test("invalid IDs return 400 before a syntactically valid Bearer is used", { concurrency: false }, async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  configureFileUrlEnvironment()
+  global.fetch = async (...args) => {
+    calls.push(args)
+    return jsonResponse({}, 500)
+  }
+
+  try {
+    const response = responseRecorder()
+    await fileUrlHandler(requestFor("invalid-intake-id", IDS.file), response)
+    assert.equal(response.statusCode, 400)
+    assert.deepEqual(response.payload, { error: "invalid_request" })
+    assertSafeJsonHeaders(response)
+    assert.equal(calls.length, 0)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test("invalid Bearer returns 401 after only the Auth user lookup", { concurrency: false }, async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  configureFileUrlEnvironment()
+  global.fetch = async (url) => {
+    calls.push(String(url))
+    return jsonResponse({ error: "invalid_token" }, 401)
+  }
+
+  try {
+    const response = responseRecorder()
+    await fileUrlHandler(requestFor(IDS.intake, IDS.file, "Bearer invalid.token"), response)
+    assert.equal(response.statusCode, 401)
+    assert.deepEqual(response.payload, { error: "auth_required" })
+    assertSafeJsonHeaders(response)
+    assert.equal(calls.length, 1)
+    assert.match(calls[0], /\/auth\/v1\/user$/)
+    assert.equal(calls.some((url) => /\/rest\/v1\/|\/storage\/v1\//.test(url)), false)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
 test("authorized finance member receives one 120-second signed URL", { concurrency: false }, async () => {
   const originalFetch = global.fetch
   const calls = []
-  process.env.FLUX_SUPABASE_URL = "https://project.supabase.co"
-  process.env.FLUX_SUPABASE_ANON_KEY = "anon-key"
-  process.env.FLUX_SUPABASE_SERVICE_ROLE_KEY = "service-key"
+  configureFileUrlEnvironment()
   global.fetch = async (url, options) => {
     calls.push({ url: String(url), options })
     if (String(url).includes("/auth/v1/user")) return jsonResponse({ id: IDS.user })
@@ -240,9 +346,7 @@ test("authorized finance member receives one 120-second signed URL", { concurren
 test("requester role is rejected before any intake or file lookup", { concurrency: false }, async () => {
   const originalFetch = global.fetch
   const calls = []
-  process.env.FLUX_SUPABASE_URL = "https://project.supabase.co"
-  process.env.FLUX_SUPABASE_ANON_KEY = "anon-key"
-  process.env.FLUX_SUPABASE_SERVICE_ROLE_KEY = "service-key"
+  configureFileUrlEnvironment()
   global.fetch = async (url) => {
     calls.push(String(url))
     if (String(url).includes("/auth/v1/user")) return jsonResponse({ id: IDS.user })
@@ -266,9 +370,7 @@ test("requester role is rejected before any intake or file lookup", { concurrenc
 test("file from another intake is rejected and never signed", { concurrency: false }, async () => {
   const originalFetch = global.fetch
   const calls = []
-  process.env.FLUX_SUPABASE_URL = "https://project.supabase.co"
-  process.env.FLUX_SUPABASE_ANON_KEY = "anon-key"
-  process.env.FLUX_SUPABASE_SERVICE_ROLE_KEY = "service-key"
+  configureFileUrlEnvironment()
   global.fetch = async (url) => {
     calls.push(String(url))
     if (String(url).includes("/auth/v1/user")) return jsonResponse({ id: IDS.user })
@@ -291,12 +393,24 @@ test("file from another intake is rejected and never signed", { concurrency: fal
   }
 })
 
-function requestFor(intakeId, fileId) {
+function requestFor(intakeId, fileId, authorization = "Bearer valid.user.token") {
   return {
     method: "POST",
-    headers: { authorization: "Bearer valid.user.token" },
+    headers: authorization ? { authorization } : {},
     body: { payment_intake_id: intakeId, file_id: fileId },
   }
+}
+
+function configureFileUrlEnvironment() {
+  process.env.FLUX_SUPABASE_URL = "https://project.supabase.co"
+  process.env.FLUX_SUPABASE_ANON_KEY = "anon-key"
+  process.env.FLUX_SUPABASE_SERVICE_ROLE_KEY = "service-key"
+}
+
+function assertSafeJsonHeaders(response) {
+  assert.equal(response.headers["Cache-Control"], "no-store, max-age=0")
+  assert.equal(response.headers["Content-Type"], "application/json; charset=utf-8")
+  assert.equal(response.headers["Referrer-Policy"], "no-referrer")
 }
 
 function responseRecorder() {

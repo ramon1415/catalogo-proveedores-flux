@@ -83,9 +83,14 @@ module.exports = async function providerIntakeFileUrl(request, response) {
   const body = requestBody(request)
   const intakeId = String(body?.payment_intake_id || "")
   const fileId = String(body?.file_id || "")
-  const accessToken = bearerToken(request)
-  if (!UUID_PATTERN.test(intakeId) || !UUID_PATTERN.test(fileId) || !accessToken) {
+  if (!UUID_PATTERN.test(intakeId) || !UUID_PATTERN.test(fileId)) {
     sendJson(response, 400, { error: "invalid_request" })
+    return
+  }
+
+  const accessToken = bearerToken(request)
+  if (!accessToken) {
+    sendJson(response, 401, { error: "auth_required" })
     return
   }
 
