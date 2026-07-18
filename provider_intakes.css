@@ -467,6 +467,13 @@ textarea:focus-visible {
   .triage-filters { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
 }
 
+@media (max-width: 800px) {
+  .comparison-table { min-width: 0; table-layout: fixed; }
+  .comparison-table th,
+  .comparison-table td { padding: 8px 7px; }
+  .comparison-result { white-space: normal; }
+}
+
 @media (max-width: 760px) {
   .sidebar { position: relative; display: block; width: 100%; min-height: auto; padding: 10px 12px; }
   .sidebar > div:first-child { min-width: 0; }
@@ -520,6 +527,14 @@ textarea:focus-visible {
   .candidate-card-header,
   .comparison-summary { align-items: flex-start; flex-direction: column; }
   .confidence-badge { white-space: normal; }
+}
+
+@media (max-width: 360px) {
+  .comparison-table { width: calc(100% - 2px); }
+  .comparison-table th,
+  .comparison-table td {
+    padding-inline: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

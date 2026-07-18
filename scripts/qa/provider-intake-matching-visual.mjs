@@ -411,15 +411,16 @@ try {
     const page = await browser.newPage({ viewport: { width: testCase.width, height: testCase.height } })
     await page.addInitScript((theme) => localStorage.setItem("flux-theme", theme), testCase.theme)
     const { trigger } = await openReplaceDialogForReflow(page, baseUrl)
-    await runAxe(page, `reflow ${testCase.name}`)
-    await assertBidirectionalContentAccessible(page)
     const metrics = await inspectReflowMetrics(page)
+    process.stdout.write(`REFLOW_CASE ${JSON.stringify({ ...testCase, ...metrics })}\n`)
     assertReflowMetrics(metrics, testCase.name)
     assert.equal(metrics.cssZoom.documentElement, "1")
     assert.equal(metrics.cssZoom.body, "1")
     assert.equal(metrics.essentialActions.confirmVisible, true)
     assert.equal(metrics.essentialActions.confirmWithinViewport, true)
     assert.equal(metrics.essentialActions.verticalContentScrollable, true)
+    await runAxe(page, `reflow ${testCase.name}`)
+    await assertBidirectionalContentAccessible(page)
     reflowMetrics.push({ ...testCase, ...metrics })
     await page.keyboard.press("Escape")
     await page.waitForFunction(() => !document.querySelector("#matchDialog")?.open)
@@ -521,6 +522,11 @@ async function inspectReflowMetrics(page) {
     const dialog = document.querySelector("#matchDialog")
     const shell = dialog?.querySelector(".match-shell")
     const scrollRegion = dialog?.querySelector(".dialog-scroll")
+    const tableRegion = dialog?.querySelector(".comparison-table-wrap")
+    const comparisonTable = tableRegion?.querySelector(".comparison-table")
+    const comparisonCells = comparisonTable
+      ? Array.from(comparisonTable.querySelectorAll("th, td"))
+      : []
     const confirm = document.querySelector("#confirmMatchBtn")
     const documentElement = document.documentElement
     const body = document.body
@@ -579,6 +585,29 @@ async function inspectReflowMetrics(page) {
           )
         ),
       },
+      comparisonTable: tableRegion ? {
+        clientWidth: tableRegion.clientWidth,
+        scrollWidth: tableRegion.scrollWidth,
+        horizontalOverflow: tableRegion.scrollWidth > tableRegion.clientWidth + 2,
+        tableClientWidth: comparisonTable?.clientWidth ?? 0,
+        tableScrollWidth: comparisonTable?.scrollWidth ?? 0,
+        tableRectWidth: comparisonTable?.getBoundingClientRect().width ?? 0,
+        widestCell: comparisonCells.reduce(
+          (widest, cell) => {
+            const candidate = {
+              text: cell.textContent?.trim() ?? "",
+              clientWidth: cell.clientWidth,
+              scrollWidth: cell.scrollWidth,
+              rectWidth: cell.getBoundingClientRect().width,
+            }
+            return candidate.scrollWidth - candidate.clientWidth >
+              widest.scrollWidth - widest.clientWidth
+              ? candidate
+              : widest
+          },
+          { text: "", clientWidth: 0, scrollWidth: 0, rectWidth: 0 },
+        ),
+      } : null,
     }
   })
 }
