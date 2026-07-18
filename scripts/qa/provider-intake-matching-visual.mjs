@@ -297,6 +297,7 @@ const { port } = server.address()
 const baseUrl = `http://127.0.0.1:${port}/provider_intakes.html`
 const browser = await chromium.launch({ headless: true })
 let screens = 0
+const reflowMetrics = []
 
 try {
   const desktop = await browser.newPage({ viewport: { width: 1366, height: 1000 } })
@@ -398,13 +399,34 @@ try {
   await runAxe(light, "light theme")
   await capture(light, "09-light-theme.png")
 
-  const zoom = await browser.newPage({ viewport: { width: 1280, height: 900 } })
-  await openFirstDetail(zoom, baseUrl)
-  await zoom.evaluate(() => { document.documentElement.style.zoom = "2" })
-  assert.equal(await zoom.getByRole("button", { name: "Buscar coincidencias" }).isVisible(), true)
-  await assertNoViewportOverflow(zoom, { allowDocumentOverflow: true })
-  await runAxe(zoom, "zoom 200")
-  await capture(zoom, "10-zoom-200.png")
+  const reflowCases = [
+    { name: "desktop-1280", width: 1280, height: 900, theme: "dark" },
+    { name: "zoom-200-equivalent-640", width: 640, height: 900, theme: "dark" },
+    { name: "zoom-200-short-640", width: 640, height: 450, theme: "light" },
+    { name: "tablet-768", width: 768, height: 1024, theme: "dark" },
+    { name: "mobile-390", width: 390, height: 844, theme: "light" },
+    { name: "reflow-320", width: 320, height: 640, theme: "dark" },
+  ]
+  for (const testCase of reflowCases) {
+    const page = await browser.newPage({ viewport: { width: testCase.width, height: testCase.height } })
+    await page.addInitScript((theme) => localStorage.setItem("flux-theme", theme), testCase.theme)
+    const { trigger } = await openReplaceDialogForReflow(page, baseUrl)
+    await runAxe(page, `reflow ${testCase.name}`)
+    await assertBidirectionalContentAccessible(page)
+    const metrics = await inspectReflowMetrics(page)
+    assertReflowMetrics(metrics, testCase.name)
+    assert.equal(metrics.cssZoom.documentElement, "1")
+    assert.equal(metrics.cssZoom.body, "1")
+    assert.equal(metrics.essentialActions.confirmVisible, true)
+    assert.equal(metrics.essentialActions.confirmWithinViewport, true)
+    assert.equal(metrics.essentialActions.verticalContentScrollable, true)
+    reflowMetrics.push({ ...testCase, ...metrics })
+    await page.keyboard.press("Escape")
+    await page.waitForFunction(() => !document.querySelector("#matchDialog")?.open)
+    assert.equal(await trigger.evaluate((node) => document.activeElement === node), true)
+    await page.close()
+  }
+  process.stdout.write(`REFLOW ${JSON.stringify(reflowMetrics)}\n`)
 
   const denied = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   await denied.goto(`${baseUrl}?role=requester`, { waitUntil: "networkidle" })
@@ -426,10 +448,11 @@ try {
       reasonValidatedWithoutReplaceSubmit: true,
       mockedMutationCount: await desktop.evaluate(() => window.__qaMutationCount),
     },
-    viewports: [390, 768, 1366],
+    viewports: [320, 390, 640, 768, 1280, 1366],
     themes: ["dark", "light"],
     dangerContrast,
-    states: ["candidates", "comparison", "confirmation", "linked", "replace-dialog", "conflict", "terminal", "mobile", "tablet", "zoom-200", "requester-denied"],
+    reflow: reflowMetrics,
+    states: ["candidates", "comparison", "confirmation", "linked", "replace-dialog", "conflict", "terminal", "mobile", "tablet", "reflow", "requester-denied"],
   })}\n`)
 } finally {
   await browser.close()
@@ -469,6 +492,131 @@ async function assertNoViewportOverflow(page, { allowDocumentOverflow = false } 
   }))
   if (!allowDocumentOverflow) assert.ok(geometry.documentWidth <= geometry.viewport + 1, JSON.stringify(geometry))
   assert.ok(geometry.dialogWidth <= geometry.viewport + 1, JSON.stringify(geometry))
+}
+
+async function openReplaceDialogForReflow(page, url) {
+  await openFirstDetail(page, url)
+  await page.getByRole("button", { name: "Comparar" }).first().click()
+  await waitForOpenDialog(page)
+  await page.getByRole("button", { name: "Confirmar vínculo" }).click()
+  await page.getByText("Vinculado", { exact: true }).waitFor()
+
+  await page.getByRole("button", { name: "Cambiar vínculo" }).click()
+  const search = page.locator("#providerMatchSearch")
+  assert.equal(await search.evaluate((node) => document.activeElement === node), true)
+  await search.fill("QA_MATCH_PROVIDER_B")
+  await search.press("Enter")
+  const card = page.locator(".candidate-card").filter({ hasText: "QA_MATCH_PROVIDER_B" })
+  assert.equal(await card.count(), 1)
+  const trigger = card.getByRole("button", { name: "Seleccionar para cambio" })
+  await trigger.click()
+  await waitForOpenDialog(page)
+  await assertReplaceDialog(page)
+  return { trigger }
+}
+
+async function inspectReflowMetrics(page) {
+  await page.locator("#confirmMatchBtn").scrollIntoViewIfNeeded()
+  return page.evaluate(() => {
+    const dialog = document.querySelector("#matchDialog")
+    const shell = dialog?.querySelector(".match-shell")
+    const scrollRegion = dialog?.querySelector(".dialog-scroll")
+    const confirm = document.querySelector("#confirmMatchBtn")
+    const documentElement = document.documentElement
+    const body = document.body
+    const dialogRect = dialog?.getBoundingClientRect()
+    const shellRect = shell?.getBoundingClientRect()
+    const confirmRect = confirm?.getBoundingClientRect()
+    const scrollStyle = scrollRegion ? getComputedStyle(scrollRegion) : null
+    const normalizeZoom = (node) => {
+      const value = Number.parseFloat(getComputedStyle(node).zoom)
+      return Number.isFinite(value) ? String(value) : "1"
+    }
+
+    return {
+      viewportWidth: documentElement.clientWidth,
+      viewportHeight: documentElement.clientHeight,
+      visualViewportWidth: window.visualViewport?.width ?? null,
+      visualViewportHeight: window.visualViewport?.height ?? null,
+      documentScrollWidth: documentElement.scrollWidth,
+      documentScrollHeight: documentElement.scrollHeight,
+      bodyScrollWidth: body.scrollWidth,
+      bodyScrollHeight: body.scrollHeight,
+      cssZoom: {
+        documentElement: normalizeZoom(documentElement),
+        body: normalizeZoom(body),
+      },
+      dialog: dialogRect ? {
+        left: dialogRect.left,
+        right: dialogRect.right,
+        width: dialogRect.width,
+        top: dialogRect.top,
+        bottom: dialogRect.bottom,
+        height: dialogRect.height,
+      } : null,
+      shell: shellRect ? {
+        left: shellRect.left,
+        right: shellRect.right,
+        width: shellRect.width,
+        top: shellRect.top,
+        bottom: shellRect.bottom,
+        height: shellRect.height,
+      } : null,
+      essentialActions: {
+        confirmVisible: Boolean(confirm && !confirm.hidden && confirmRect?.width && confirmRect?.height),
+        confirmWithinViewport: Boolean(
+          confirmRect &&
+          confirmRect.left >= -2 &&
+          confirmRect.right <= documentElement.clientWidth + 2 &&
+          confirmRect.top >= -2 &&
+          confirmRect.bottom <= documentElement.clientHeight + 2
+        ),
+        verticalContentScrollable: Boolean(
+          scrollRegion &&
+          (
+            scrollRegion.scrollHeight <= scrollRegion.clientHeight + 2 ||
+            ["auto", "scroll"].includes(scrollStyle?.overflowY)
+          )
+        ),
+      },
+    }
+  })
+}
+
+function assertReflowMetrics(metrics, label) {
+  assert.ok(metrics.dialog, `${label}: missing dialog metrics`)
+  assert.ok(metrics.shell, `${label}: missing shell metrics`)
+  assert.ok(metrics.documentScrollWidth <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.bodyScrollWidth <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.dialog.left >= -2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.dialog.right <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.dialog.width <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.shell.left >= -2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.shell.right <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+  assert.ok(metrics.shell.width <= metrics.viewportWidth + 2, `${label}: ${JSON.stringify(metrics)}`)
+}
+
+async function assertBidirectionalContentAccessible(page) {
+  const table = page.getByRole("table", {
+    name: "Comparación entre datos declarados y proveedor maestro",
+  })
+  assert.equal(await table.count(), 1)
+  const wrapper = page.locator(".comparison-table-wrap")
+  const overflow = await wrapper.evaluate((node) => node.scrollWidth > node.clientWidth + 2)
+  if (!overflow) return
+
+  await page.locator("#closeMatchBtn").focus()
+  let keyboardFocused = false
+  for (let index = 0; index < 12; index += 1) {
+    await page.keyboard.press("Tab")
+    keyboardFocused = await wrapper.evaluate((node) => document.activeElement === node)
+    if (keyboardFocused) break
+  }
+  assert.equal(keyboardFocused, true, "comparison table scroll region is not keyboard reachable")
+  const before = await wrapper.evaluate((node) => node.scrollLeft)
+  for (let index = 0; index < 8; index += 1) await page.keyboard.press("ArrowRight")
+  const after = await wrapper.evaluate((node) => node.scrollLeft)
+  assert.ok(after > before, "comparison table scroll region does not respond to keyboard scrolling")
 }
 
 async function inspectDangerAction(page, button, theme) {
