@@ -6,7 +6,7 @@
   <title>Solicitudes de proveedores · Flux Operadora</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./ux2_shared.css">
-  <link rel="stylesheet" href="./provider_intakes.css?v=20260717-phase-1d">
+  <link rel="stylesheet" href="./provider_intakes.css?v=20260718-phase-2a">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Saltar al contenido</a>
@@ -42,7 +42,7 @@
       <section class="page intake-page" id="triageWorkspace" hidden>
         <div class="page-header intake-page-header">
           <div>
-            <p class="eyebrow">Portal de proveedores · Fase 1D</p>
+            <p class="eyebrow">Portal de proveedores · Fase 2A</p>
             <h1>Solicitudes de proveedores</h1>
             <p>Revisa información declarada, documentos privados y el historial antes de cualquier conversión.</p>
           </div>
@@ -179,7 +179,7 @@
       </header>
       <div class="dialog-scroll" id="detailContent" aria-live="polite"></div>
       <footer class="dialog-footer">
-        <p class="phase-two-note">Conversión a solicitud interna disponible en Fase 2.</p>
+        <p class="phase-two-note">Conversión disponible en Fase 2B.</p>
         <div class="detail-actions" id="detailActions"></div>
       </footer>
     </div>
@@ -211,11 +211,50 @@
     </form>
   </dialog>
 
+  <dialog class="match-dialog" id="matchDialog" aria-labelledby="matchTitle">
+    <form class="dialog-shell match-shell" id="matchForm">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">Proveedor maestro</p>
+          <h2 id="matchTitle">Comparar proveedor</h2>
+          <p id="matchDescription">Revisa todas las diferencias antes de confirmar.</p>
+        </div>
+        <button class="icon-btn" id="closeMatchBtn" type="button" aria-label="Cerrar comparación">✕</button>
+      </header>
+      <div class="dialog-scroll match-dialog-content">
+        <div id="comparisonContent" aria-live="polite"></div>
+        <fieldset class="match-reason-fields" id="matchReasonFields">
+          <legend>Confirmación auditada</legend>
+          <label for="matchReasonCode">Motivo</label>
+          <select id="matchReasonCode" aria-describedby="matchReasonHint matchError">
+            <option value="candidate_selected">Candidato validado</option>
+            <option value="manual_search">Búsqueda manual validada</option>
+            <option value="duplicate_resolution">Duplicado revisado</option>
+            <option value="match_corrected">Corrección de vínculo</option>
+            <option value="no_longer_matches">El vínculo ya no corresponde</option>
+            <option value="other">Otro motivo</option>
+          </select>
+          <label for="matchReason">Razón <span id="matchReasonRequired"></span></label>
+          <textarea id="matchReason" rows="3" maxlength="500" aria-describedby="matchReasonHint matchError"></textarea>
+          <div class="field-meta">
+            <small id="matchReasonHint">No incluyas RFC, cuentas, CLABE, correos, teléfonos ni otros datos sensibles.</small>
+            <small id="matchReasonCounter">0 / 500</small>
+          </div>
+          <p class="field-error" id="matchError" role="alert"></p>
+        </fieldset>
+      </div>
+      <footer class="dialog-footer action-footer">
+        <button class="secondary-btn" id="cancelMatchBtn" type="button">Cancelar</button>
+        <button class="primary-btn" id="confirmMatchBtn" type="submit">Confirmar vínculo</button>
+      </footer>
+    </form>
+  </dialog>
+
   <div id="toastStack" class="toast-stack-v2" aria-live="polite" aria-atomic="false"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260717-provider-intake-triage"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./provider_intakes.js?v=20260717-phase-1d"></script>
+  <script src="./provider_intakes.js?v=20260718-phase-2a"></script>
 </body>
 </html>
