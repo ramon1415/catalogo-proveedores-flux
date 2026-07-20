@@ -5,12 +5,23 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
+  EXPECTED_EXPIRED_LINK_POST_STATE,
+  EXPECTED_EXPIRED_LINK_PRE_STATE,
   assertSanitizedProviderEvidence,
+  assertExpiredLinkNormalizationTransition,
   assertMutableAuthorization,
   buildLiveProviderTargets,
+  classifyExpiredLinkState,
+  classifyExpiredLinkStateFromDatabaseFilter,
+  normalizationProtectedSnapshot,
   runCapabilityAudit,
   runNoWriteMocked,
   sanitizedProviderAlignment,
+  validateExpiredLinkNormalizationEvidence,
+  validateNormalizationApplyResult,
+  validateNormalizationDryRunResult,
+  validateNormalizationMutation,
+  validateNormalizationOptimisticSnapshot,
 } from "./provider-intake-matching-gate2-uat.mjs"
 import {
   assertLiveProviderLocatorInputs,
@@ -27,6 +38,7 @@ const bytes = (relative) => fs.readFileSync(path.join(root, relative))
 const migrationPath = "supabase/migrations/031_provider_intake_matching.sql"
 const loadPath = "ops/provider-intake/apply-031-matching/03_LOAD_031_EXACT.sql"
 const migration = read(migrationPath)
+const runner = read("scripts/qa/provider-intake-matching-gate2-uat.mjs")
 
 const functionDefinition = (name) => {
   const pattern = new RegExp(
@@ -173,6 +185,7 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
+  assert.equal(Object.keys(audit.capabilities).length, 27)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -182,6 +195,152 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
     /MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED/,
   )
 })
+
+const normalizationRows = () => [
+  {
+    id: "link-revoked",
+    company_id: "company-authorized",
+    label: "Historical revoked",
+    token_hash: "a".repeat(64),
+    token_prefix: "revoked-prefix",
+    status: "revoked",
+    expires_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-02T00:00:00.000Z",
+    created_by: "creator-internal",
+  },
+  {
+    id: "link-active-expired",
+    company_id: "company-authorized",
+    label: "Historical expired active",
+    token_hash: "b".repeat(64),
+    token_prefix: "expired-prefix",
+    status: "active",
+    expires_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-02T00:00:00.000Z",
+    created_by: "creator-internal",
+  },
+]
+
+const normalizationInput = (rows = normalizationRows(), expected = EXPECTED_EXPIRED_LINK_PRE_STATE) =>
+  classifyExpiredLinkState(rows, {
+    companyId: "company-authorized",
+    databaseNow: "2026-07-20T12:00:00.000Z",
+    expected,
+  })
+
+const validDryRun = () => ({
+  status: "PASS",
+  rowCount: 1,
+  inTransactionStatus: "expired",
+  rolledBack: true,
+  realStatus: "active",
+  writes: 0,
+  businessDelta: 0,
+  protectedFieldsInvariant: true,
+  databaseTimeAuthoritative: true,
+  optimisticGuard: true,
+})
+
+const appliedRow = (candidate) => ({
+  ...structuredClone(candidate),
+  status: "expired",
+  updated_at: "2026-07-20T12:01:00.000Z",
+})
+
+test("expired-link normalization classifies the authorized pre and post states", () => {
+  const before = normalizationInput()
+  assert.deepEqual(before.classification, EXPECTED_EXPIRED_LINK_PRE_STATE)
+  const databaseFiltered = classifyExpiredLinkStateFromDatabaseFilter(
+    normalizationRows(),
+    [normalizationRows()[1]],
+  )
+  assert.deepEqual(databaseFiltered.classification, EXPECTED_EXPIRED_LINK_PRE_STATE)
+  assert.equal(databaseFiltered.databaseTimeAuthoritative, true)
+  const afterRows = normalizationRows()
+  afterRows[1] = appliedRow(afterRows[1])
+  const after = normalizationInput(afterRows, EXPECTED_EXPIRED_LINK_POST_STATE)
+  assert.deepEqual(after.classification, EXPECTED_EXPIRED_LINK_POST_STATE)
+  assert.equal(after.candidate, null)
+})
+
+test("normalization SQL is parameterized guarded timed and rollback-capable", () => {
+  assert.match(runner, /where id = \$1::uuid/)
+  assert.match(runner, /company_id = \$2::uuid/)
+  assert.match(runner, /expires_at = \$3::timestamptz/)
+  assert.match(runner, /updated_at = \$4::timestamptz/)
+  assert.match(runner, /expires_at < current_timestamp/)
+  assert.match(runner, /expires_at: "lt\.now"/)
+  assert.match(runner, /set local statement_timeout = '15s'/)
+  assert.match(runner, /await client\.query\("rollback"\)/)
+  assert.doesNotMatch(runner, /update public\.intake_links[\s\S]*?\$\{candidate\./)
+})
+
+test("normalization protects every non-status non-updated field", () => {
+  const candidate = normalizationInput().candidate
+  const after = appliedRow(candidate)
+  assert.deepEqual(normalizationProtectedSnapshot(after), normalizationProtectedSnapshot(candidate))
+  assert.equal(validateNormalizationMutation(candidate, after), true)
+})
+
+const negativeNormalizationCases = [
+  ["no active expired", () => {
+    const rows = normalizationRows(); rows[1].status = "expired"; return normalizationInput(rows)
+  }],
+  ["active valid exists", () => {
+    const rows = normalizationRows(); rows[0].status = "active"; rows[0].expires_at = "2027-01-01T00:00:00.000Z"; return normalizationInput(rows)
+  }],
+  ["two active expired links", () => {
+    const rows = normalizationRows(); rows[0].status = "active"; return normalizationInput(rows)
+  }],
+  ["candidate belongs to another company", () => {
+    const rows = normalizationRows(); rows[1].company_id = "other-company"; return normalizationInput(rows)
+  }],
+  ["expires_at is null", () => {
+    const rows = normalizationRows(); rows[1].expires_at = null; return normalizationInput(rows)
+  }],
+  ["expires_at is not expired", () => {
+    const rows = normalizationRows(); rows[1].expires_at = "2027-01-01T00:00:00.000Z"; return normalizationInput(rows)
+  }],
+  ["status changed before apply", () => {
+    const expected = normalizationInput().candidate; const actual = { ...expected, status: "expired" }; return validateNormalizationOptimisticSnapshot(expected, actual)
+  }],
+  ["updated_at changed before apply", () => {
+    const expected = normalizationInput().candidate; const actual = { ...expected, updated_at: "2026-07-20T12:02:00.000Z" }; return validateNormalizationOptimisticSnapshot(expected, actual)
+  }],
+  ["expires_at changed before apply", () => {
+    const expected = normalizationInput().candidate; const actual = { ...expected, expires_at: "2026-01-03T00:00:00.000Z" }; return validateNormalizationOptimisticSnapshot(expected, actual)
+  }],
+  ["update rowcount zero", () => validateNormalizationDryRunResult({ ...validDryRun(), rowCount: 0 }, normalizationInput().candidate)],
+  ["update rowcount greater than one", () => validateNormalizationDryRunResult({ ...validDryRun(), rowCount: 2 }, normalizationInput().candidate)],
+  ["postcheck remains active", () => validateNormalizationDryRunResult({ ...validDryRun(), inTransactionStatus: "active" }, normalizationInput().candidate)],
+  ["protected field changed", () => {
+    const candidate = normalizationInput().candidate; return validateNormalizationApplyResult({ status: "expired", rowCount: 1, row: { ...appliedRow(candidate), label: "changed" }, protectedFieldsInvariant: true }, candidate)
+  }],
+  ["business delta is nonzero", () => validateNormalizationDryRunResult({ ...validDryRun(), businessDelta: 1 }, normalizationInput().candidate)],
+  ["dry-run omitted rollback", () => validateNormalizationDryRunResult({ ...validDryRun(), rolledBack: false }, normalizationInput().candidate)],
+  ["token_hash changed", () => {
+    const candidate = normalizationInput().candidate; return validateNormalizationMutation(candidate, { ...appliedRow(candidate), token_hash: "c".repeat(64) })
+  }],
+  ["token_prefix changed", () => {
+    const candidate = normalizationInput().candidate; return validateNormalizationMutation(candidate, { ...appliedRow(candidate), token_prefix: "changed-prefix" })
+  }],
+  ["revoked used instead of expired", () => {
+    const candidate = normalizationInput().candidate; return validateNormalizationApplyResult({ status: "revoked", rowCount: 1, row: { ...appliedRow(candidate), status: "revoked" }, protectedFieldsInvariant: true }, candidate)
+  }],
+  ["expired link reactivation", () => assertExpiredLinkNormalizationTransition("expired", "active")],
+  ["evidence exports internal link material", () => {
+    const candidate = normalizationInput().candidate; return validateExpiredLinkNormalizationEvidence({ leaked: candidate.id }, candidate)
+  }],
+]
+
+for (const [name, operation] of negativeNormalizationCases) {
+  test(`normalization fails closed: ${name}`, () => {
+    assert.throws(operation, (error) => {
+      assert.match(error.code, /^EXPIRED_LINK_/)
+      return true
+    })
+  })
+}
 
 const providerRows = (aliases = ["Proveedor sintético alfa", "Proveedor sintético beta"]) =>
   aliases.map((alias, index) => ({
@@ -305,13 +464,20 @@ test("updated capability audit certifies alias separation without network or wri
   }
 })
 
-test("no-write mocked recertifies MAIN RACE and 15 cleanup cases without alias leakage", async () => {
+test("no-write mocked recertifies normalization MAIN RACE and 20 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
   assert.equal(result.main.status, "PASS")
   assert.equal(result.race.status, "PASS")
   assert.equal(result.cleanup_matrix.status, "PASS")
-  assert.equal(result.cleanup_matrix.total, 15)
+  assert.equal(result.cleanup_matrix.total, 20)
+  assert.equal(result.expired_link_normalization.dry_run, "PASS")
+  assert.equal(result.expired_link_normalization.apply, "expired")
+  assert.deepEqual(result.link_inventory, {
+    historical_expired: 1,
+    qa_revoked: 1,
+    active: 0,
+  })
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)

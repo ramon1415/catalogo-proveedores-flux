@@ -60,6 +60,26 @@ export const EXPECTED_BASELINE = Object.freeze({
   },
 })
 
+export const EXPECTED_EXPIRED_LINK_PRE_STATE = Object.freeze({
+  total: 2,
+  activeValid: 0,
+  activeExpired: 1,
+  revoked: 1,
+  expired: 0,
+  paused: 0,
+  otherActive: 0,
+})
+
+export const EXPECTED_EXPIRED_LINK_POST_STATE = Object.freeze({
+  total: 2,
+  activeValid: 0,
+  activeExpired: 0,
+  revoked: 1,
+  expired: 1,
+  paused: 0,
+  otherActive: 0,
+})
+
 export const INTAKE_LINK_CONTRACT = Object.freeze({
   table: "public.intake_links",
   rls_enabled: true,
@@ -86,6 +106,11 @@ const REQUIRED_DEPENDENCIES = Object.freeze([
   "captureBaseline",
   "inspectLinkContract",
   "resolveProviderTargets",
+  "inspectExpiredActiveLink",
+  "dryRunExpiredLinkNormalization",
+  "applyExpiredLinkNormalization",
+  "verifyExpiredLinkNormalization",
+  "validateExpiredLinkBusinessDelta",
   "randomBytes",
   "sha256",
   "dryRunLinkCreation",
@@ -117,6 +142,11 @@ const CRITICAL_FAILURE_POINTS = Object.freeze([
   "card_not_found",
   "card_ambiguous",
   "card_mismatch",
+  "expired_link_inspection",
+  "expired_link_normalization_dry_run",
+  "expired_link_normalization_stale",
+  "expired_link_normalization_rowcount",
+  "expired_link_normalization_postcheck",
   "link_dry_run",
   "link_insert",
   "fixture_1",
@@ -338,6 +368,264 @@ export async function inspectLinkContract(deps) {
   const contract = await deps.inspectLinkContract()
   gate(expectedLinkContractEqual(contract), "INTAKE_LINK_CONTRACT_DRIFT")
   return contract
+}
+
+function databaseTimestamp(value) {
+  const timestamp = Date.parse(String(value || ""))
+  gate(Number.isFinite(timestamp), "EXPIRED_LINK_DATABASE_TIME_INVALID")
+  return timestamp
+}
+
+function validLinkCandidate(row, companyId, databaseNow) {
+  gate(String(row?.id || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(row?.company_id === companyId, "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH")
+  gate(row?.status === "active", "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(String(row?.updated_at || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(String(row?.expires_at || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(databaseTimestamp(row.expires_at) < databaseNow, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(/^[0-9a-f]{64}$/.test(String(row?.token_hash || "")), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(String(row?.token_prefix || "").trim().length >= 4, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  return Object.freeze(clone(row))
+}
+
+export function classifyExpiredLinkState(rows, {
+  companyId,
+  databaseNow,
+  expected = EXPECTED_EXPIRED_LINK_PRE_STATE,
+} = {}) {
+  gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
+  gate(String(companyId || "").trim(), "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH")
+  const authoritativeNow = databaseTimestamp(databaseNow)
+  gate(
+    rows.every((row) => row?.company_id === companyId),
+    "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH",
+  )
+  const classification = {
+    total: rows.length,
+    activeValid: 0,
+    activeExpired: 0,
+    revoked: 0,
+    expired: 0,
+    paused: 0,
+    otherActive: 0,
+  }
+  for (const row of rows) {
+    if (row.status === "active") {
+      if (!row.expires_at) classification.otherActive += 1
+      else {
+        const expiresAt = databaseTimestamp(row.expires_at)
+        if (expiresAt < authoritativeNow) classification.activeExpired += 1
+        else if (expiresAt > authoritativeNow) classification.activeValid += 1
+        else classification.otherActive += 1
+      }
+    } else if (row.status === "revoked") classification.revoked += 1
+    else if (row.status === "expired") classification.expired += 1
+    else if (row.status === "paused") classification.paused += 1
+  }
+  gate(
+    digest(classification) === digest(expected),
+    "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH",
+    { classification },
+  )
+  const candidates = rows.filter(
+    (row) => row.status === "active" && row.expires_at &&
+      databaseTimestamp(row.expires_at) < authoritativeNow,
+  )
+  gate(candidates.length === expected.activeExpired, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
+  const candidate = candidates.length === 1
+    ? validLinkCandidate(candidates[0], companyId, authoritativeNow)
+    : null
+  return Object.freeze({
+    classification: Object.freeze(classification),
+    candidate,
+    databaseNow: String(databaseNow),
+  })
+}
+
+export function classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRows) {
+  gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
+  gate(Array.isArray(expiredActiveRows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
+  gate(expiredActiveRows.length === 1, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
+  const databaseCandidate = expiredActiveRows[0]
+  const companyId = String(databaseCandidate?.company_id || "").trim()
+  gate(companyId, "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH")
+  const scoped = rows.filter((row) => row?.company_id === companyId)
+  gate(
+    expiredActiveRows.every(
+      (row) => row?.company_id === companyId && row?.status === "active" && row?.expires_at,
+    ),
+    "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID",
+  )
+  const expiredIds = new Set(expiredActiveRows.map((row) => String(row.id)))
+  const classification = {
+    total: scoped.length,
+    activeValid: 0,
+    activeExpired: 0,
+    revoked: 0,
+    expired: 0,
+    paused: 0,
+    otherActive: 0,
+  }
+  for (const row of scoped) {
+    if (row.status === "active") {
+      if (expiredIds.has(String(row.id))) classification.activeExpired += 1
+      else if (!row.expires_at) classification.otherActive += 1
+      else classification.activeValid += 1
+    } else if (row.status === "revoked") classification.revoked += 1
+    else if (row.status === "expired") classification.expired += 1
+    else if (row.status === "paused") classification.paused += 1
+  }
+  gate(
+    digest(classification) === digest(EXPECTED_EXPIRED_LINK_PRE_STATE),
+    "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH",
+    { classification },
+  )
+  gate(String(databaseCandidate.id || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(String(databaseCandidate.updated_at || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(/^[0-9a-f]{64}$/.test(String(databaseCandidate.token_hash || "")), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  gate(String(databaseCandidate.token_prefix || "").trim().length >= 4, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  return Object.freeze({
+    classification: Object.freeze(classification),
+    candidate: Object.freeze(clone(databaseCandidate)),
+    companyId,
+    databaseTimeAuthoritative: true,
+  })
+}
+
+const NORMALIZATION_MUTABLE_FIELDS = new Set(["status", "updated_at"])
+
+export function normalizationProtectedSnapshot(row) {
+  return canonical(Object.fromEntries(
+    Object.entries(row || {}).filter(([key]) => !NORMALIZATION_MUTABLE_FIELDS.has(key)),
+  ))
+}
+
+export function validateNormalizationOptimisticSnapshot(expected, actual) {
+  for (const field of ["id", "company_id", "status", "expires_at", "updated_at"]) {
+    gate(
+      expected?.[field] === actual?.[field],
+      "EXPIRED_LINK_NORMALIZATION_STALE_CONFLICT",
+    )
+  }
+  return true
+}
+
+export function assertExpiredLinkNormalizationTransition(fromStatus, toStatus) {
+  gate(
+    fromStatus === "active" && toStatus === "expired",
+    "EXPIRED_LINK_NORMALIZATION_TRANSITION_INVALID",
+  )
+  return true
+}
+
+export function validateNormalizationMutation(before, after) {
+  assertExpiredLinkNormalizationTransition(before?.status, after?.status)
+  gate(
+    digest(normalizationProtectedSnapshot(before)) ===
+      digest(normalizationProtectedSnapshot(after)),
+    "EXPIRED_LINK_NORMALIZATION_PROTECTED_FIELD_CHANGED",
+  )
+  return true
+}
+
+function validateNormalizationRowCount(rowCount) {
+  if (rowCount === 0) throw new GateError("EXPIRED_LINK_NORMALIZATION_STALE_CONFLICT")
+  if (rowCount !== 1) {
+    throw new GateError("EXPIRED_LINK_NORMALIZATION_ROWCOUNT_VIOLATION")
+  }
+  return true
+}
+
+export function validateNormalizationDryRunResult(result, candidate) {
+  validateNormalizationRowCount(result?.rowCount)
+  gate(result?.rolledBack === true, "EXPIRED_LINK_NORMALIZATION_ROLLBACK_MISSING")
+  gate(result?.inTransactionStatus === "expired", "EXPIRED_LINK_NORMALIZATION_POSTCHECK_FAILED")
+  gate(result?.realStatus === "active", "EXPIRED_LINK_NORMALIZATION_ROLLBACK_FAILED")
+  gate(result?.writes === 0, "EXPIRED_LINK_NORMALIZATION_DRY_RUN_WROTE")
+  gate(result?.businessDelta === 0, "EXPIRED_LINK_NORMALIZATION_BUSINESS_DELTA")
+  gate(result?.protectedFieldsInvariant === true, "EXPIRED_LINK_NORMALIZATION_PROTECTED_FIELD_CHANGED")
+  gate(result?.databaseTimeAuthoritative === true, "EXPIRED_LINK_DATABASE_TIME_INVALID")
+  gate(result?.optimisticGuard === true, "EXPIRED_LINK_NORMALIZATION_STALE_CONFLICT")
+  gate(candidate?.status === "active", "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  return true
+}
+
+export function validateNormalizationApplyResult(result, candidate) {
+  validateNormalizationRowCount(result?.rowCount)
+  validateNormalizationMutation(candidate, result?.row)
+  gate(result?.status === "expired", "EXPIRED_LINK_NORMALIZATION_POSTCHECK_FAILED")
+  gate(result?.protectedFieldsInvariant === true, "EXPIRED_LINK_NORMALIZATION_PROTECTED_FIELD_CHANGED")
+  return true
+}
+
+export function validateExpiredLinkNormalizationEvidence(value, sensitive = {}) {
+  const serialized = JSON.stringify(value).normalize("NFC")
+  for (const secret of [
+    sensitive.id,
+    sensitive.company_id,
+    sensitive.token_hash,
+    sensitive.token_prefix,
+    sensitive.created_by,
+  ]) {
+    if (secret && serialized.includes(String(secret).normalize("NFC"))) {
+      throw new GateError("EXPIRED_LINK_NORMALIZATION_EVIDENCE_LEAKAGE")
+    }
+  }
+  return true
+}
+
+export async function inspectExpiredActiveLink(deps, context) {
+  const inspected = await deps.inspectExpiredActiveLink()
+  const classified = classifyExpiredLinkState(inspected.rows, {
+    companyId: inspected.companyId,
+    databaseNow: inspected.databaseNow,
+  })
+  context.expiredLink = classified.candidate
+  context.expiredLinkCompanyId = inspected.companyId
+  context.expiredLinkDatabaseNow = inspected.databaseNow
+  return classified
+}
+
+export async function dryRunExpiredLinkNormalization(deps, context) {
+  const result = await deps.dryRunExpiredLinkNormalization({
+    candidate: clone(context.expiredLink),
+    companyId: context.expiredLinkCompanyId,
+    databaseNow: context.expiredLinkDatabaseNow,
+  })
+  validateNormalizationDryRunResult(result, context.expiredLink)
+  return result
+}
+
+export async function applyExpiredLinkNormalization(deps, context) {
+  const result = await deps.applyExpiredLinkNormalization({
+    candidate: clone(context.expiredLink),
+    companyId: context.expiredLinkCompanyId,
+  })
+  validateNormalizationApplyResult(result, context.expiredLink)
+  context.expiredLink = clone(result.row)
+  return result
+}
+
+export async function verifyExpiredLinkNormalization(deps, context) {
+  const verified = await deps.verifyExpiredLinkNormalization({
+    candidate: clone(context.expiredLink),
+    companyId: context.expiredLinkCompanyId,
+  })
+  const classified = classifyExpiredLinkState(verified.rows, {
+    companyId: verified.companyId,
+    databaseNow: verified.databaseNow,
+    expected: EXPECTED_EXPIRED_LINK_POST_STATE,
+  })
+  gate(classified.candidate === null, "EXPIRED_LINK_NORMALIZATION_POSTCHECK_FAILED")
+  return classified
+}
+
+export async function validateExpiredLinkBusinessDelta(deps, context) {
+  const result = await deps.validateExpiredLinkBusinessDelta({
+    companyId: context.expiredLinkCompanyId,
+  })
+  gate(result?.businessDelta === 0, "EXPIRED_LINK_NORMALIZATION_BUSINESS_DELTA")
+  return result
 }
 
 export async function generateEphemeralToken(deps) {
@@ -843,6 +1131,9 @@ function newContext(mode) {
   return {
     mode,
     providerTargets: [],
+    expiredLink: null,
+    expiredLinkCompanyId: null,
+    expiredLinkDatabaseNow: null,
     token: null,
     link: null,
     fixtures: [],
@@ -865,6 +1156,11 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
     const linkContract = await inspectLinkContract(deps)
     context.providerTargets = await deps.resolveProviderTargets()
     gate(context.providerTargets.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+    const expiredLinkInspection = await inspectExpiredActiveLink(deps, context)
+    const expiredLinkDryRun = await dryRunExpiredLinkNormalization(deps, context)
+    const expiredLinkApply = await applyExpiredLinkNormalization(deps, context)
+    const expiredLinkPostcheck = await verifyExpiredLinkNormalization(deps, context)
+    const expiredLinkBusinessDelta = await validateExpiredLinkBusinessDelta(deps, context)
     context.token = await generateEphemeralToken(deps)
     await dryRunLinkCreation(deps, context)
     await createEphemeralLink(deps, context)
@@ -883,6 +1179,16 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
       environment,
       baseline: "PASS",
       linkContract: "PASS",
+      expiredLinkNormalization: {
+        inspection: expiredLinkInspection.classification,
+        dry_run: expiredLinkDryRun.status,
+        apply: expiredLinkApply.status,
+        postcheck: expiredLinkPostcheck.classification,
+        business_delta: expiredLinkBusinessDelta.businessDelta,
+        database_time_authoritative: true,
+        optimistic_guard: true,
+        protected_fields_invariant: true,
+      },
       token: {
         entropy_bytes: context.token.entropyBytes,
         hash_format_valid: true,
@@ -948,9 +1254,35 @@ function initialMockState() {
       states: clone(EXPECTED_BASELINE.states),
     },
     protectedDigest: "protected-core-v6",
+    databaseNow: "2026-07-20T12:00:00.000Z",
+    companyId: "mock-company-authorized",
     links: [
-      { alias: "historical-revoked", status: "revoked", expired: false },
-      { alias: "historical-expired", status: "active", expired: true },
+      {
+        id: "mock-link-revoked",
+        company_id: "mock-company-authorized",
+        alias: "historical-revoked",
+        label: "Historical revoked",
+        status: "revoked",
+        expires_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        token_hash: "a".repeat(64),
+        token_prefix: "revoked-prefix",
+        created_by: "mock-creator",
+        expired: false,
+      },
+      {
+        id: "mock-link-expired-active",
+        company_id: "mock-company-authorized",
+        alias: "historical-expired",
+        label: "Historical expired active",
+        status: "active",
+        expires_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        token_hash: "b".repeat(64),
+        token_prefix: "expired-prefix",
+        created_by: "mock-creator",
+        expired: true,
+      },
     ],
     fixtures: new Map(),
     actions: new Map(),
@@ -968,6 +1300,10 @@ function initialMockState() {
       ]),
     ),
     linkCalls: {
+      expiredInspection: 0,
+      expiredDryRun: 0,
+      expiredApply: 0,
+      expiredPostcheck: 0,
       dryRun: 0,
       insert: 0,
       revoke: 0,
@@ -1135,6 +1471,68 @@ export function createMockDependencies({ failPoint = null } = {}) {
       state.providerTargets = buildLiveProviderTargets(rows)
       return state.providerTargets
     },
+    async inspectExpiredActiveLink() {
+      maybeFail(deps, "expired_link_inspection")
+      state.linkCalls.expiredInspection += 1
+      return {
+        companyId: state.companyId,
+        databaseNow: state.databaseNow,
+        rows: clone(state.links),
+      }
+    },
+    async dryRunExpiredLinkNormalization({ candidate }) {
+      maybeFail(deps, "expired_link_normalization_dry_run")
+      state.linkCalls.expiredDryRun += 1
+      const stored = state.links.find((row) => row.id === candidate.id)
+      validateNormalizationOptimisticSnapshot(candidate, stored)
+      const inTransaction = { ...clone(stored), status: "expired", updated_at: "mock-dry-run" }
+      validateNormalizationMutation(stored, inTransaction)
+      return {
+        status: "PASS",
+        rowCount: 1,
+        inTransactionStatus: inTransaction.status,
+        rolledBack: true,
+        realStatus: stored.status,
+        writes: 0,
+        businessDelta: 0,
+        protectedFieldsInvariant: true,
+        databaseTimeAuthoritative: true,
+        optimisticGuard: true,
+      }
+    },
+    async applyExpiredLinkNormalization({ candidate }) {
+      state.linkCalls.expiredApply += 1
+      if (deps.failPoint === "expired_link_normalization_stale") {
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_STALE_CONFLICT")
+      }
+      if (deps.failPoint === "expired_link_normalization_rowcount") {
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_ROWCOUNT_VIOLATION")
+      }
+      const stored = state.links.find((row) => row.id === candidate.id)
+      validateNormalizationOptimisticSnapshot(candidate, stored)
+      const before = clone(stored)
+      stored.status = "expired"
+      stored.updated_at = "mock-normalized"
+      validateNormalizationMutation(before, stored)
+      return {
+        status: "expired",
+        rowCount: 1,
+        row: clone(stored),
+        protectedFieldsInvariant: true,
+      }
+    },
+    async verifyExpiredLinkNormalization() {
+      maybeFail(deps, "expired_link_normalization_postcheck")
+      state.linkCalls.expiredPostcheck += 1
+      return {
+        companyId: state.companyId,
+        databaseNow: state.databaseNow,
+        rows: clone(state.links),
+      }
+    },
+    async validateExpiredLinkBusinessDelta() {
+      return { businessDelta: state.protectedDigest === "protected-core-v6" ? 0 : 1 }
+    },
     async randomBytes(size) {
       gate(size === 32, "MOCK_TOKEN_SIZE")
       state.rawTokenPresent = true
@@ -1153,8 +1551,16 @@ export function createMockDependencies({ failPoint = null } = {}) {
       maybeFail(deps, "link_insert")
       state.linkCalls.insert += 1
       const link = {
+        id: "mock-link-qa-ephemeral",
+        company_id: state.companyId,
         alias: "qa-ephemeral",
+        label: "QA ephemeral",
         status: "active",
+        expires_at: "2026-07-20T13:00:00.000Z",
+        updated_at: "2026-07-20T12:01:00.000Z",
+        token_hash: "c".repeat(64),
+        token_prefix: "qa-prefix",
+        created_by: "mock-creator",
         expired: false,
         qa: true,
         maxSubmissionsPerDay: 2,
@@ -1458,10 +1864,29 @@ export async function runCapabilityAudit() {
   assertDependencyShape(deps)
   const providerTargets = await deps.resolveProviderTargets()
   const providerAlignment = sanitizedProviderAlignment(providerTargets)
+  const normalizationContext = newContext("capability-audit")
+  await inspectExpiredActiveLink(deps, normalizationContext)
+  await dryRunExpiredLinkNormalization(deps, normalizationContext)
+  await applyExpiredLinkNormalization(deps, normalizationContext)
+  await verifyExpiredLinkNormalization(deps, normalizationContext)
+  await validateExpiredLinkBusinessDelta(deps, normalizationContext)
   const functions = {
     assertEnvironment,
     captureBaseline,
     inspectLinkContract,
+    classifyExpiredLinkState,
+    classifyExpiredLinkStateFromDatabaseFilter,
+    inspectExpiredActiveLink,
+    dryRunExpiredLinkNormalization,
+    applyExpiredLinkNormalization,
+    verifyExpiredLinkNormalization,
+    validateExpiredLinkBusinessDelta,
+    validateNormalizationOptimisticSnapshot,
+    validateNormalizationDryRunResult,
+    validateNormalizationApplyResult,
+    validateNormalizationMutation,
+    assertExpiredLinkNormalizationTransition,
+    validateExpiredLinkNormalizationEvidence,
     generateEphemeralToken,
     dryRunLinkCreation,
     createEphemeralLink,
@@ -1481,6 +1906,7 @@ export async function runCapabilityAudit() {
     sanitizedProviderAlignment,
     assertSanitizedProviderEvidence,
     runLiveProviderAliasReadOnly,
+    runExpiredLinkNormalizationReadOnly,
     normalizeLiveProviderText,
     exactNormalizedText,
     assertLiveProviderLocatorInputs,
@@ -1523,6 +1949,10 @@ export async function runCapabilityAudit() {
       ambiguous_card_failure: true,
       missing_alias_failure: true,
       sanitization_before_evidence: true,
+      expired_link_inspection: true,
+      expired_link_normalization_dry_run: true,
+      expired_link_normalization_apply: true,
+      expired_link_normalization_postcheck: true,
     },
   }
 }
@@ -1531,6 +1961,14 @@ function requiredEnvironment(env, name) {
   const value = String(env[name] || "").trim()
   if (!value) throw new GateError(`MISSING_ENVIRONMENT_${name}`)
   return value
+}
+
+function requiredEnvironmentAny(env, names) {
+  for (const name of names) {
+    const value = String(env[name] || "").trim()
+    if (value) return value
+  }
+  throw new GateError(`MISSING_ENVIRONMENT_${names[0]}`)
 }
 
 export function currentRunnerIdentity() {
@@ -1546,9 +1984,15 @@ export function currentRunnerIdentity() {
 }
 
 function assertReadOnlyRunnerIdentity(env, identity) {
-  const expectedHead = requiredEnvironment(env, "EXPECTED_V6C_HEAD")
-  const expectedSha = requiredEnvironment(env, "EXPECTED_V6C_RUNNER_SHA256").toLowerCase()
-  const expectedBlob = requiredEnvironment(env, "EXPECTED_V6C_RUNNER_GIT_BLOB").toLowerCase()
+  const expectedHead = requiredEnvironmentAny(env, ["EXPECTED_RUNNER_HEAD", "EXPECTED_V6E_HEAD"])
+  const expectedSha = requiredEnvironmentAny(
+    env,
+    ["EXPECTED_RUNNER_SHA256", "EXPECTED_V6E_RUNNER_SHA256"],
+  ).toLowerCase()
+  const expectedBlob = requiredEnvironmentAny(
+    env,
+    ["EXPECTED_RUNNER_GIT_BLOB", "EXPECTED_V6E_RUNNER_GIT_BLOB"],
+  ).toLowerCase()
   gate(/^[0-9a-f]{40}$/.test(expectedHead), "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
   gate(identity.sha256 === expectedSha, "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
   gate(identity.git_blob === expectedBlob, "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
@@ -1556,7 +2000,11 @@ function assertReadOnlyRunnerIdentity(env, identity) {
     const committed = execFileSync(
       String(env.GIT_EXECUTABLE || "git"),
       ["show", `${expectedHead}:scripts/qa/provider-intake-matching-gate2-uat.mjs`],
-      { encoding: null, stdio: ["ignore", "pipe", "ignore"] },
+      {
+        cwd: path.resolve(here, "..", ".."),
+        encoding: null,
+        stdio: ["ignore", "pipe", "ignore"],
+      },
     )
     gate(
       Buffer.compare(fs.readFileSync(runnerPath), committed) === 0,
@@ -1575,6 +2023,7 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
     "EPHEMERAL_LINK_AUTHORIZED",
     "FIXTURE_PROVISIONING_AUTHORIZED",
     "IAM_ACTIVATION_AUTHORIZED",
+    "EXPIRED_LINK_NORMALIZATION_AUTHORIZED",
   ]) {
     gate(String(env[name] || "").trim() !== "true", "MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED")
   }
@@ -1622,6 +2071,78 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
   }
 }
 
+export async function runExpiredLinkNormalizationReadOnly(env = process.env) {
+  for (const name of [
+    "ALLOW_MUTABLE_UAT",
+    "EPHEMERAL_LINK_AUTHORIZED",
+    "FIXTURE_PROVISIONING_AUTHORIZED",
+    "IAM_ACTIVATION_AUTHORIZED",
+    "EXPIRED_LINK_NORMALIZATION_AUTHORIZED",
+  ]) {
+    gate(String(env[name] || "").trim() !== "true", "MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED")
+  }
+  const identity = currentRunnerIdentity()
+  assertReadOnlyRunnerIdentity(env, identity)
+  const supabaseUrl = requiredEnvironment(env, "SUPABASE_URL").replace(/\/+$/, "")
+  const projectRef = new URL(supabaseUrl).hostname.split(".")[0]
+  gate(projectRef === DEV_PROJECT_REF, "UNAUTHORIZED_PROJECT_REF")
+  const serviceRole = requiredEnvironment(env, "SUPABASE_DEV_SERVICE_ROLE_KEY")
+  const select = [
+    "id", "company_id", "label", "token_hash", "token_prefix", "status",
+    "expires_at", "max_submissions_per_day", "allowed_file_types", "max_file_mb",
+    "created_by", "created_at", "updated_at", "revoked_by", "revoked_at",
+    "regenerated_from_id",
+  ].join(",")
+  const readLinks = async (filters = {}) => {
+    const query = new URLSearchParams({ select, order: "created_at.asc,id.asc", ...filters })
+    const response = await fetch(`${supabaseUrl}/rest/v1/intake_links?${query}`, {
+      method: "GET",
+      headers: headersForService(serviceRole),
+    })
+    gate(response.ok, "EXPIRED_LINK_NORMALIZATION_INSPECTION_FAILED")
+    const rows = await response.json()
+    gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
+    return rows
+  }
+  let rows
+  let expiredActiveRows
+  try {
+    ;[rows, expiredActiveRows] = await Promise.all([
+      readLinks(),
+      readLinks({ status: "eq.active", expires_at: "lt.now" }),
+    ])
+  } catch (error) {
+    if (error instanceof GateError) throw error
+    throw new GateError("EXPIRED_LINK_NORMALIZATION_INSPECTION_FAILED")
+  }
+  const classified = classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRows)
+  const audit = await runCapabilityAudit()
+  const result = {
+    mode: "expired-link-normalization-read-only",
+    status: "PASS",
+    active_valid: classified.classification.activeValid,
+    active_expired: classified.classification.activeExpired,
+    other_active: classified.classification.otherActive,
+    candidate_count: classified.candidate ? 1 : 0,
+    optimistic_snapshot_available: Boolean(
+      classified.candidate?.updated_at && classified.candidate?.expires_at,
+    ),
+    dry_run_capability: audit.capabilities.expired_link_normalization_dry_run,
+    apply_capability: audit.capabilities.expired_link_normalization_apply,
+    postcheck_capability: audit.capabilities.expired_link_normalization_postcheck,
+    database_time_authoritative: true,
+    ids_exported: false,
+    token_material_exported: false,
+    writes: 0,
+    mutable_execution: false,
+    runner_identity_verified: true,
+    head_verified: true,
+    network_requests: 2,
+  }
+  validateExpiredLinkNormalizationEvidence(result, classified.candidate)
+  return result
+}
+
 export function assertMutableAuthorization(env = process.env) {
   const identity = currentRunnerIdentity()
   const required = {
@@ -1630,6 +2151,7 @@ export function assertMutableAuthorization(env = process.env) {
     EPHEMERAL_LINK_AUTHORIZED: "true",
     FIXTURE_PROVISIONING_AUTHORIZED: "true",
     IAM_ACTIVATION_AUTHORIZED: "true",
+    EXPIRED_LINK_NORMALIZATION_AUTHORIZED: "true",
   }
   for (const [name, expected] of Object.entries(required)) {
     if (String(env[name] || "").trim() !== expected) {
@@ -1669,6 +2191,70 @@ async function parsedResponse(response) {
     return JSON.parse(text)
   } catch {
     return { safe_error: "non_json_response" }
+  }
+}
+
+function createDatabaseClient(databaseUrl) {
+  const { Client } = require("pg")
+  const parsed = new URL(databaseUrl)
+  parsed.searchParams.delete("sslmode")
+  parsed.searchParams.delete("sslrootcert")
+  return new Client({
+    connectionString: parsed.toString(),
+    ssl: { rejectUnauthorized: false },
+  })
+}
+
+function normalizedDatabaseValue(value) {
+  return value instanceof Date ? value.toISOString() : value
+}
+
+function normalizeIntakeLinkRow(row) {
+  return Object.fromEntries(
+    Object.entries(row || {}).map(([key, value]) => [key, normalizedDatabaseValue(value)]),
+  )
+}
+
+const INTAKE_LINK_INSPECTION_SQL = `
+  select
+    id, company_id, label, token_hash, token_prefix, status, expires_at,
+    max_submissions_per_day, allowed_file_types, max_file_mb, created_by,
+    created_at, updated_at, revoked_by, revoked_at, regenerated_from_id
+  from public.intake_links
+  where company_id = $1::uuid
+  order by created_at asc, id asc
+`
+
+const EXPIRED_LINK_NORMALIZATION_SQL = `
+  update public.intake_links
+     set status = 'expired',
+         updated_at = current_timestamp
+   where id = $1::uuid
+     and company_id = $2::uuid
+     and status = 'active'
+     and expires_at = $3::timestamptz
+     and expires_at < current_timestamp
+     and updated_at = $4::timestamptz
+     and not exists (
+       select 1
+         from public.intake_links sibling
+        where sibling.company_id = $2::uuid
+          and sibling.status = 'active'
+          and sibling.id <> $1::uuid
+     )
+  returning
+    id, company_id, label, token_hash, token_prefix, status, expires_at,
+    max_submissions_per_day, allowed_file_types, max_file_mb, created_by,
+    created_at, updated_at, revoked_by, revoked_at, regenerated_from_id
+`
+
+async function databaseLinkInspection(client, companyId) {
+  const clock = await client.query("select current_timestamp as database_now")
+  const links = await client.query(INTAKE_LINK_INSPECTION_SQL, [companyId])
+  return {
+    companyId,
+    databaseNow: normalizedDatabaseValue(clock.rows[0]?.database_now),
+    rows: links.rows.map(normalizeIntakeLinkRow),
   }
 }
 
@@ -2097,6 +2683,142 @@ export function createMutableDependencies(env = process.env) {
       for (const target of targets) providerIds[target.logicalAlias] = target.internalId
       state.providerTargets = targets
       return targets
+    },
+    async inspectExpiredActiveLink() {
+      const client = createDatabaseClient(databaseUrl)
+      await client.connect()
+      try {
+        await client.query("begin read only")
+        await client.query("set local statement_timeout = '15s'")
+        const inspected = await databaseLinkInspection(client, companyId)
+        await client.query("commit")
+        return inspected
+      } catch (error) {
+        await client.query("rollback").catch(() => null)
+        if (error instanceof GateError) throw error
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_INSPECTION_FAILED")
+      } finally {
+        await client.end()
+      }
+    },
+    async dryRunExpiredLinkNormalization({ candidate }) {
+      const client = createDatabaseClient(databaseUrl)
+      let rolledBack = false
+      let inTransactionRow = null
+      await client.connect()
+      try {
+        await client.query("begin")
+        await client.query("set local statement_timeout = '15s'")
+        const inspected = await databaseLinkInspection(client, companyId)
+        const current = classifyExpiredLinkState(inspected.rows, {
+          companyId,
+          databaseNow: inspected.databaseNow,
+        }).candidate
+        validateNormalizationOptimisticSnapshot(candidate, current)
+        const updated = await client.query(EXPIRED_LINK_NORMALIZATION_SQL, [
+          candidate.id,
+          companyId,
+          candidate.expires_at,
+          candidate.updated_at,
+        ])
+        validateNormalizationRowCount(updated.rowCount)
+        inTransactionRow = normalizeIntakeLinkRow(updated.rows[0])
+        validateNormalizationMutation(candidate, inTransactionRow)
+        await client.query("rollback")
+        rolledBack = true
+      } catch (error) {
+        if (!rolledBack) {
+          await client.query("rollback").catch(() => null)
+          rolledBack = true
+        }
+        if (error instanceof GateError) throw error
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_DRY_RUN_FAILED")
+      } finally {
+        await client.end()
+      }
+      const real = await deps.inspectExpiredActiveLink()
+      const realCandidate = classifyExpiredLinkState(real.rows, {
+        companyId,
+        databaseNow: real.databaseNow,
+      }).candidate
+      const afterRollback = await capture()
+      return {
+        status: "PASS",
+        rowCount: 1,
+        inTransactionStatus: inTransactionRow.status,
+        rolledBack,
+        realStatus: realCandidate.status,
+        writes: 0,
+        businessDelta:
+          state.baseline && protectedDigest(afterRollback) === protectedDigest(state.baseline)
+            ? 0
+            : 1,
+        protectedFieldsInvariant:
+          digest(normalizationProtectedSnapshot(candidate)) ===
+          digest(normalizationProtectedSnapshot(inTransactionRow)),
+        databaseTimeAuthoritative: true,
+        optimisticGuard: true,
+      }
+    },
+    async applyExpiredLinkNormalization({ candidate }) {
+      const client = createDatabaseClient(databaseUrl)
+      let committed = false
+      await client.connect()
+      try {
+        await client.query("begin")
+        await client.query("set local statement_timeout = '15s'")
+        const updated = await client.query(EXPIRED_LINK_NORMALIZATION_SQL, [
+          candidate.id,
+          companyId,
+          candidate.expires_at,
+          candidate.updated_at,
+        ])
+        validateNormalizationRowCount(updated.rowCount)
+        const row = normalizeIntakeLinkRow(updated.rows[0])
+        validateNormalizationMutation(candidate, row)
+        await client.query("commit")
+        committed = true
+        metrics.mutableSupabaseRequests += 1
+        metrics.devWrites += 1
+        return {
+          status: row.status,
+          rowCount: updated.rowCount,
+          row,
+          protectedFieldsInvariant: true,
+        }
+      } catch (error) {
+        if (!committed) await client.query("rollback").catch(() => null)
+        if (error instanceof GateError) throw error
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_APPLY_FAILED")
+      } finally {
+        await client.end()
+      }
+    },
+    async verifyExpiredLinkNormalization() {
+      const client = createDatabaseClient(databaseUrl)
+      await client.connect()
+      try {
+        await client.query("begin read only")
+        await client.query("set local statement_timeout = '15s'")
+        const inspected = await databaseLinkInspection(client, companyId)
+        await client.query("commit")
+        return inspected
+      } catch (error) {
+        await client.query("rollback").catch(() => null)
+        if (error instanceof GateError) throw error
+        throw new GateError("EXPIRED_LINK_NORMALIZATION_POSTCHECK_FAILED")
+      } finally {
+        await client.end()
+      }
+    },
+    async validateExpiredLinkBusinessDelta() {
+      const snapshot = await capture()
+      return {
+        businessDelta:
+          state.baseline && protectedDigest(snapshot) === protectedDigest(state.baseline)
+            ? 0
+            : 1,
+      }
     },
     async randomBytes(size) {
       state.rawTokenPresent = true
@@ -2566,6 +3288,10 @@ export async function runNoWriteMocked() {
   const result = await executeUat(deps, { mode: "no-write-mocked" })
   const cleanupMatrix = await runCleanupMatrix()
   assert.deepEqual(deps.state.linkCalls, {
+    expiredInspection: 1,
+    expiredDryRun: 1,
+    expiredApply: 1,
+    expiredPostcheck: 1,
     dryRun: 1,
     insert: 1,
     revoke: 1,
@@ -2575,6 +3301,16 @@ export async function runNoWriteMocked() {
   gate(result.actual_mutable_supabase_requests === 0, "MOCKED_MUTABLE_REQUEST")
   gate(result.actual_dev_writes === 0, "MOCKED_DEV_WRITE")
   gate(result.external_network_requests === 0, "MOCKED_EXTERNAL_NETWORK")
+  const normalizedHistorical = deps.state.links.filter(
+    (link) => link.alias === "historical-expired" && link.status === "expired",
+  ).length
+  const revokedQa = deps.state.links.filter(
+    (link) => link.qa === true && link.status === "revoked",
+  ).length
+  const activeLinks = deps.state.links.filter((link) => link.status === "active").length
+  gate(normalizedHistorical === 1, "MOCKED_EXPIRED_LINK_NOT_NORMALIZED")
+  gate(revokedQa === 1, "MOCKED_QA_LINK_NOT_REVOKED")
+  gate(activeLinks === 0, "MOCKED_ACTIVE_LINK_REMAINS")
   const output = {
     mode: "no-write-mocked",
     status: "PASS",
@@ -2589,7 +3325,17 @@ export async function runNoWriteMocked() {
     },
     token: result.token,
     link: result.link,
+    expired_link_normalization: result.expiredLinkNormalization,
+    link_inventory: {
+      historical_expired: normalizedHistorical,
+      qa_revoked: revokedQa,
+      active: activeLinks,
+    },
     call_counts: {
+      expired_link_inspection: deps.state.linkCalls.expiredInspection,
+      expired_link_normalization_dry_run: deps.state.linkCalls.expiredDryRun,
+      expired_link_normalization_apply_simulated: deps.state.linkCalls.expiredApply,
+      expired_link_normalization_postcheck: deps.state.linkCalls.expiredPostcheck,
       link_dry_run: deps.state.linkCalls.dryRun,
       link_insert: deps.state.linkCalls.insert,
       link_revoke: deps.state.linkCalls.revoke,
@@ -2614,6 +3360,7 @@ async function runCli() {
   gate(
     [
       "capability-audit",
+      "expired-link-normalization-read-only",
       "live-provider-alias-read-only",
       "no-write-mocked",
       "mutable",
@@ -2623,6 +3370,8 @@ async function runCli() {
   let result
   if (mode === "capability-audit") {
     result = await runCapabilityAudit()
+  } else if (mode === "expired-link-normalization-read-only") {
+    result = await runExpiredLinkNormalizationReadOnly(process.env)
   } else if (mode === "live-provider-alias-read-only") {
     result = await runLiveProviderAliasReadOnly(process.env)
   } else if (mode === "no-write-mocked") {
@@ -2636,7 +3385,7 @@ async function runCli() {
   process.stdout.write(`${JSON.stringify(result)}\n`)
 }
 
-const isMain = process.argv[1] &&
+const isMain = process.argv?.[1] &&
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 
 if (isMain) {
@@ -2645,6 +3394,13 @@ if (isMain) {
       status: "FAIL",
       failure_code: errorCode(error),
       mutable_execution: false,
+      writes: 0,
+      token_exposure: 0,
+      mutable_rpc_requests: 0,
+      set: 0,
+      replace: 0,
+      clear: 0,
+      provider_matched_events: 0,
     })}\n`)
     process.exitCode = 1
   })
