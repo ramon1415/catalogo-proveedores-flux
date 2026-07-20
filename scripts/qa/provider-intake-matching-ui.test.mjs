@@ -11,6 +11,8 @@ const html = read("provider_intakes.html")
 const client = read("provider_intakes.js")
 const styles = read("provider_intakes.css")
 const providerClient = read("proveedores.js")
+const matchingFlow = read("scripts/qa/provider-intake-matching-flow.mjs")
+const matchingVisual = read("scripts/qa/provider-intake-matching-visual.mjs")
 
 test("matching client uses only the three controlled RPCs", () => {
   assert.match(client, /\.rpc\("find_provider_intake_candidates"/)
@@ -103,6 +105,26 @@ test("replace flow focuses search before an exact candidate action opens the dia
   )
   assert.match(client, /const kind = currentId \? "replace" : "set"/)
   assert.match(client, /dom\.matchDialog\.showModal\(\)/)
+})
+
+test("one shared helper owns the tested replace-dialog sequence", () => {
+  assert.match(matchingFlow, /export async function openProviderReplaceDialog/)
+  assert.match(matchingFlow, /name: "Cambiar vínculo", exact: true/)
+  assert.match(matchingFlow, /document\.activeElement\?\.id === "providerMatchSearch"/)
+  assert.match(matchingFlow, /\.candidate-card \.candidate-card-header strong/)
+  assert.match(matchingFlow, /name: "Seleccionar para cambio"/)
+  assert.match(matchingFlow, /document\.querySelector\("#matchDialog"\)\?\.open === true/)
+  assert.match(matchingFlow, /await reasonCode\.inputValue\(\), "match_corrected"/)
+  assert.match(matchingFlow, /"Confirmar cambio"/)
+  assert.doesNotMatch(matchingFlow, /waitForTimeout|setTimeout|\.nth\(/)
+  assert.match(
+    matchingVisual,
+    /import \{ openProviderReplaceDialog \} from "\.\/provider-intake-matching-flow\.mjs"/,
+  )
+  assert.ok(
+    (matchingVisual.match(/openProviderReplaceDialog\(/g) || []).length >= 3,
+    "visual preflight must use the shared helper for initial, reopen, and reflow coverage",
+  )
 })
 
 test("provider master deep link is forced into read-only mode", () => {

@@ -5,6 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
+import { openProviderReplaceDialog } from "./provider-intake-matching-flow.mjs"
 
 const require = createRequire(import.meta.url)
 const { chromium } = require("playwright")
@@ -334,18 +335,10 @@ try {
   assertDangerActionContrast(dangerContrast.terminal)
   await desktop.evaluate(() => { document.documentElement.dataset.theme = "dark" })
 
-  const changeButton = desktop.getByRole("button", { name: "Cambiar vínculo" })
-  await changeButton.click()
-  const providerSearch = desktop.locator("#providerMatchSearch")
-  assert.equal(await providerSearch.evaluate((node) => document.activeElement === node), true)
-  await providerSearch.fill("QA_MATCH_PROVIDER_B")
-  await providerSearch.press("Enter")
-  await providerSearch.waitFor({ state: "visible" })
-  const candidateCardB = desktop.locator(".candidate-card").filter({ hasText: "QA_MATCH_PROVIDER_B" })
-  assert.equal(await candidateCardB.count(), 1)
-  const selectProviderB = candidateCardB.getByRole("button", { name: "Seleccionar para cambio" })
-  await selectProviderB.click()
-  await waitForOpenDialog(desktop)
+  const replaceDialog = await openProviderReplaceDialog(desktop, {
+    providerAlias: "QA_MATCH_PROVIDER_B",
+  })
+  const selectProviderB = replaceDialog.trigger
   await assertReplaceDialog(desktop)
   await runAxe(desktop, "replace dialog")
   await capture(desktop, "04-replace-dialog.png")
@@ -356,9 +349,11 @@ try {
   await desktop.waitForFunction(() => !document.querySelector("#matchDialog")?.open)
   assert.equal(await selectProviderB.evaluate((node) => document.activeElement === node), true)
 
-  await selectProviderB.click()
-  await waitForOpenDialog(desktop)
-  await desktop.locator("#matchReason").fill("QA Gate 2 Retry: reemplazo controlado del proveedor sintético.")
+  const reopenedReplaceDialog = await openProviderReplaceDialog(desktop, {
+    providerAlias: "QA_MATCH_PROVIDER_B",
+  })
+  assert.equal(await reopenedReplaceDialog.trigger.count(), 1)
+  await reopenedReplaceDialog.reason.fill("QA Gate 2 Retry: reemplazo controlado del proveedor sintético.")
   assert.equal(await desktop.locator("#matchReasonCounter").textContent(), "62 / 500")
   assert.equal(await desktop.evaluate(() => window.__qaMutationCount), 1)
   await desktop.keyboard.press("Escape")
@@ -502,16 +497,9 @@ async function openReplaceDialogForReflow(page, url) {
   await page.getByRole("button", { name: "Confirmar vínculo" }).click()
   await page.getByText("Vinculado", { exact: true }).waitFor()
 
-  await page.getByRole("button", { name: "Cambiar vínculo" }).click()
-  const search = page.locator("#providerMatchSearch")
-  assert.equal(await search.evaluate((node) => document.activeElement === node), true)
-  await search.fill("QA_MATCH_PROVIDER_B")
-  await search.press("Enter")
-  const card = page.locator(".candidate-card").filter({ hasText: "QA_MATCH_PROVIDER_B" })
-  assert.equal(await card.count(), 1)
-  const trigger = card.getByRole("button", { name: "Seleccionar para cambio" })
-  await trigger.click()
-  await waitForOpenDialog(page)
+  const { trigger } = await openProviderReplaceDialog(page, {
+    providerAlias: "QA_MATCH_PROVIDER_B",
+  })
   await assertReplaceDialog(page)
   return { trigger }
 }
