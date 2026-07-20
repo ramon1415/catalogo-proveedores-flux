@@ -5,9 +5,19 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
+  assertSanitizedProviderEvidence,
   assertMutableAuthorization,
+  buildLiveProviderTargets,
   runCapabilityAudit,
+  runNoWriteMocked,
+  sanitizedProviderAlignment,
 } from "./provider-intake-matching-gate2-uat.mjs"
+import {
+  assertLiveProviderLocatorInputs,
+  classifyProviderCardHeadings,
+  exactNormalizedText,
+  normalizeLiveProviderText,
+} from "./provider-intake-matching-flow.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -171,4 +181,146 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
     () => assertMutableAuthorization({}),
     /MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED/,
   )
+})
+
+const providerRows = (aliases = ["Proveedor sintético alfa", "Proveedor sintético beta"]) =>
+  aliases.map((alias, index) => ({
+    id: `00000000-0000-4000-8000-00000000000${index + 1}`,
+    alias,
+    nombre_completo: `QA fixture ${index + 1}`,
+    email: `qa-provider-${index + 1}@example.invalid`,
+    activo: true,
+  }))
+
+test("provider target model separates logical internal and live visual identities", () => {
+  const targets = buildLiveProviderTargets(providerRows())
+  assert.equal(targets.length, 2)
+  assert.equal(targets[0].logicalAlias, "QA_MATCH_PROVIDER_A")
+  assert.equal(targets[1].logicalAlias, "QA_MATCH_PROVIDER_B")
+  assert.notEqual(targets[0].logicalAlias, targets[0].liveDisplayAlias)
+  assert.equal(targets[1].uiSearchText, targets[1].liveDisplayAlias)
+  assert.equal(targets[1].expectedCardHeading, targets[1].liveDisplayAlias)
+  assert.notEqual(targets[0].internalId, targets[1].internalId)
+  assert.deepEqual(sanitizedProviderAlignment(targets), {
+    status: "PASS",
+    eligible_targets: 2,
+    logical_aliases: ["QA_MATCH_PROVIDER_A", "QA_MATCH_PROVIDER_B"],
+    live_aliases_present: true,
+    live_aliases_distinct: true,
+    logical_alias_used_as_live_locator: false,
+    provider_ids_exported: false,
+    live_aliases_exported: false,
+    writes: 0,
+  })
+})
+
+test("provider target resolution rejects missing empty duplicate and logical live aliases", () => {
+  assert.throws(
+    () => buildLiveProviderTargets(providerRows().slice(0, 1)),
+    /LIVE_PROVIDER_ALIAS_UNRESOLVED/,
+  )
+  assert.throws(
+    () => buildLiveProviderTargets(providerRows(["", "Proveedor sintético beta"])),
+    /LIVE_PROVIDER_ALIAS_UNRESOLVED/,
+  )
+  assert.throws(
+    () => buildLiveProviderTargets(providerRows(["Proveedor sintético", "Proveedor sintético"])),
+    /LIVE_PROVIDER_ALIAS_AMBIGUOUS/,
+  )
+  assert.throws(
+    () => buildLiveProviderTargets(providerRows(["QA_MATCH_PROVIDER_A", "Proveedor sintético"])),
+    /LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR/,
+  )
+})
+
+test("live alias normalization handles Unicode whitespace and regex metacharacters safely", () => {
+  assert.equal(
+    normalizeLiveProviderText("  Proveedor\tSinte\u0301tico   Beta  "),
+    "Proveedor Sintético Beta",
+  )
+  const exact = exactNormalizedText("Proveedor [QA] + (Beta)?")
+  assert.equal(exact.test("Proveedor [QA] + (Beta)?"), true)
+  assert.equal(exact.test("Proveedor QA + Beta"), false)
+})
+
+test("logical aliases can never be passed as live search or heading text", () => {
+  assert.throws(
+    () => assertLiveProviderLocatorInputs({
+      sanitizedTargetAlias: "QA_MATCH_PROVIDER_B",
+      searchText: "QA_MATCH_PROVIDER_B",
+      expectedCardHeading: "QA_MATCH_PROVIDER_B",
+    }),
+    /LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR/,
+  )
+})
+
+test("exact-card validation fails closed for missing ambiguous and mismatched cards", () => {
+  assert.throws(
+    () => classifyProviderCardHeadings([], "Proveedor sintético beta"),
+    /LIVE_PROVIDER_CARD_NOT_FOUND/,
+  )
+  assert.throws(
+    () => classifyProviderCardHeadings(
+      ["Proveedor sintético beta", "Proveedor sintético beta"],
+      "Proveedor sintético beta",
+    ),
+    /LIVE_PROVIDER_ALIAS_AMBIGUOUS/,
+  )
+  assert.throws(
+    () => classifyProviderCardHeadings(
+      ["Proveedor sintético alfa"],
+      "Proveedor sintético beta",
+    ),
+    /LIVE_PROVIDER_CARD_MISMATCH/,
+  )
+})
+
+test("provider evidence and exported errors reject live aliases and internal IDs", () => {
+  const targets = buildLiveProviderTargets(providerRows())
+  for (const leaked of [targets[0].liveDisplayAlias, targets[1].internalId]) {
+    assert.throws(
+      () => assertSanitizedProviderEvidence({ leaked }, targets),
+      (error) =>
+        error.code === "LIVE_PROVIDER_EVIDENCE_LEAKAGE" &&
+        !error.message.includes(leaked),
+    )
+  }
+})
+
+test("updated capability audit certifies alias separation without network or writes", async () => {
+  const audit = await runCapabilityAudit()
+  assert.equal(audit.network_requests, 0)
+  assert.equal(audit.writes, 0)
+  for (const capability of [
+    "live_provider_alias_resolution",
+    "logical_visual_identity_separation",
+    "live_alias_not_logged",
+    "logical_alias_not_used_as_live_locator",
+    "exact_card_validation",
+    "ambiguous_card_failure",
+    "missing_alias_failure",
+    "sanitization_before_evidence",
+  ]) {
+    assert.equal(audit.capabilities[capability], true)
+  }
+})
+
+test("no-write mocked recertifies MAIN RACE and 15 cleanup cases without alias leakage", async () => {
+  const result = await runNoWriteMocked()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.main.status, "PASS")
+  assert.equal(result.race.status, "PASS")
+  assert.equal(result.cleanup_matrix.status, "PASS")
+  assert.equal(result.cleanup_matrix.total, 15)
+  assert.equal(result.actual_mutable_supabase_requests, 0)
+  assert.equal(result.actual_dev_writes, 0)
+  const serialized = JSON.stringify(result)
+  for (const forbidden of [
+    "Proveedor sintético alfa",
+    "Proveedor sintético beta",
+    "00000000-0000-4000-8000-000000000001",
+    "00000000-0000-4000-8000-000000000002",
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(forbidden))
+  }
 })

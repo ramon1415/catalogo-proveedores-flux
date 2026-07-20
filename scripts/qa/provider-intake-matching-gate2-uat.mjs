@@ -2,9 +2,16 @@ import assert from "node:assert/strict"
 import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+import { execFileSync } from "node:child_process"
 import { createRequire } from "node:module"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { openProviderReplaceDialog } from "./provider-intake-matching-flow.mjs"
+import {
+  assertLiveProviderLocatorInputs,
+  classifyProviderCardHeadings,
+  exactNormalizedText,
+  normalizeLiveProviderText,
+  openProviderReplaceDialog,
+} from "./provider-intake-matching-flow.mjs"
 
 const require = createRequire(import.meta.url)
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -22,6 +29,10 @@ export const PRINCIPAL_ALIASES = Object.freeze([
 export const PROVIDER_ALIASES = Object.freeze([
   "QA_MATCH_PROVIDER_A",
   "QA_MATCH_PROVIDER_B",
+])
+const MOCK_LIVE_PROVIDER_ALIASES = Object.freeze([
+  "Proveedor sintético alfa",
+  "Proveedor sintético beta",
 ])
 export const EXPECTED_BASELINE = Object.freeze({
   payment_intake: 13,
@@ -74,6 +85,7 @@ const REQUIRED_DEPENDENCIES = Object.freeze([
   "assertEnvironment",
   "captureBaseline",
   "inspectLinkContract",
+  "resolveProviderTargets",
   "randomBytes",
   "sha256",
   "dryRunLinkCreation",
@@ -101,6 +113,10 @@ const REQUIRED_DEPENDENCIES = Object.freeze([
 ])
 
 const CRITICAL_FAILURE_POINTS = Object.freeze([
+  "alias_resolution",
+  "card_not_found",
+  "card_ambiguous",
+  "card_mismatch",
   "link_dry_run",
   "link_insert",
   "fixture_1",
@@ -134,6 +150,88 @@ function errorCode(error) {
 
 function clone(value) {
   return structuredClone(value)
+}
+
+const SYNTHETIC_PROVIDER_PATTERN = /(?:qa|test|demo|fixture)/iu
+
+export function isSyntheticProviderRow(row) {
+  return [row?.alias, row?.nombre_completo, row?.email]
+    .some((value) => SYNTHETIC_PROVIDER_PATTERN.test(String(value || "")))
+}
+
+export function buildLiveProviderTargets(rows, {
+  logicalAliases = PROVIDER_ALIASES,
+} = {}) {
+  gate(Array.isArray(rows), "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  gate(
+    Array.isArray(logicalAliases) && logicalAliases.length === 2,
+    "LIVE_PROVIDER_ALIAS_UNRESOLVED",
+  )
+  const eligible = rows.filter(
+    (row) => row?.activo !== false && isSyntheticProviderRow(row),
+  )
+  gate(eligible.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const ordered = eligible.slice().sort((left, right) =>
+    String(left.id || "").localeCompare(String(right.id || ""), "en"))
+  gate(
+    ordered.every((row) => String(row.id || "").trim()),
+    "LIVE_PROVIDER_ALIAS_UNRESOLVED",
+  )
+  gate(ordered[0].id !== ordered[1].id, "LIVE_PROVIDER_ALIAS_AMBIGUOUS")
+
+  const targets = ordered.map((row, index) => {
+    const logicalAlias = String(logicalAliases[index] || "").trim()
+    const liveDisplayAlias = normalizeLiveProviderText(row.alias)
+    gate(logicalAlias, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+    gate(liveDisplayAlias, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+    gate(
+      normalizeLiveProviderText(logicalAlias) !== liveDisplayAlias,
+      "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
+    )
+    return Object.freeze({
+      logicalAlias,
+      internalId: String(row.id),
+      liveDisplayAlias,
+      uiSearchText: liveDisplayAlias,
+      expectedCardHeading: liveDisplayAlias,
+    })
+  })
+  gate(
+    targets[0].liveDisplayAlias !== targets[1].liveDisplayAlias,
+    "LIVE_PROVIDER_ALIAS_AMBIGUOUS",
+  )
+  return Object.freeze(targets)
+}
+
+export function assertSanitizedProviderEvidence(value, targets) {
+  const serialized = JSON.stringify(value).normalize("NFC")
+  for (const target of targets || []) {
+    for (const secret of [target?.internalId, target?.liveDisplayAlias]) {
+      if (secret && serialized.includes(String(secret).normalize("NFC"))) {
+        throw new GateError("LIVE_PROVIDER_EVIDENCE_LEAKAGE")
+      }
+    }
+  }
+  return true
+}
+
+export function sanitizedProviderAlignment(targets) {
+  gate(Array.isArray(targets) && targets.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const result = {
+    status: "PASS",
+    eligible_targets: 2,
+    logical_aliases: [...PROVIDER_ALIASES],
+    live_aliases_present: targets.every((target) => Boolean(target.liveDisplayAlias)),
+    live_aliases_distinct:
+      targets[0].liveDisplayAlias !== targets[1].liveDisplayAlias,
+    logical_alias_used_as_live_locator: targets.some((target) =>
+      normalizeLiveProviderText(target.logicalAlias) === target.uiSearchText),
+    provider_ids_exported: false,
+    live_aliases_exported: false,
+    writes: 0,
+  }
+  assertSanitizedProviderEvidence(result, targets)
+  return result
 }
 
 function canonical(value) {
@@ -380,6 +478,10 @@ export async function transitionFixturesToReview(deps, context) {
 export async function runMainMatrix(deps, context) {
   const alias = FIXTURE_ALIASES[0]
   const actor = PRINCIPAL_ALIASES[0]
+  const providerB = context.providerTargets.find(
+    (target) => target.logicalAlias === PROVIDER_ALIASES[1],
+  )
+  gate(providerB, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
   const initialEvents = await deps.listFixtureEvents(alias)
   let fixture = await deps.getFixture(alias)
   gate(fixture.status === "in_review" && fixture.match === null, "MAIN_INITIAL_STATE")
@@ -419,7 +521,10 @@ export async function runMainMatrix(deps, context) {
     fixtureAlias: alias,
   })
   const dialog = await openProviderReplaceDialog(page, {
-    providerAlias: PROVIDER_ALIASES[1],
+    sanitizedTargetAlias: providerB.logicalAlias,
+    searchText: providerB.uiSearchText,
+    expectedCardHeading: providerB.expectedCardHeading,
+    timeout: deps.kind === "mock" ? 1_000 : 30_000,
   })
   await dialog.reason.fill("QA V6: reemplazo controlado del proveedor sintético.")
   const replaceBody = matchRequest({
@@ -737,6 +842,7 @@ export async function cleanupAll(deps, context) {
 function newContext(mode) {
   return {
     mode,
+    providerTargets: [],
     token: null,
     link: null,
     fixtures: [],
@@ -757,6 +863,8 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
     const environment = await assertEnvironment(deps)
     const baseline = await captureBaseline(deps)
     const linkContract = await inspectLinkContract(deps)
+    context.providerTargets = await deps.resolveProviderTargets()
+    gate(context.providerTargets.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
     context.token = await generateEphemeralToken(deps)
     await dryRunLinkCreation(deps, context)
     await createEphemeralLink(deps, context)
@@ -878,6 +986,7 @@ function initialMockState() {
     action: 0,
     browser: null,
     pages: [],
+    providerTargets: [],
   }
 }
 
@@ -916,6 +1025,32 @@ function mockIamAtRest(state) {
 }
 
 async function createMockReplacePage(deps) {
+  const providerB = deps.state.providerTargets.find(
+    (target) => target.logicalAlias === PROVIDER_ALIASES[1],
+  )
+  gate(providerB, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const escapeHtml = (value) => String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+  const alternateHeading = "Proveedor sintético distinto"
+  const cardHeadings = deps.failPoint === "card_not_found"
+    ? []
+    : deps.failPoint === "card_ambiguous"
+      ? [providerB.liveDisplayAlias, providerB.liveDisplayAlias]
+      : deps.failPoint === "card_mismatch"
+        ? [alternateHeading]
+        : [providerB.liveDisplayAlias]
+  const cards = cardHeadings.map((heading) => `
+    <article class="candidate-card">
+      <header class="candidate-card-header"><strong>${escapeHtml(heading)}</strong></header>
+      <button class="select-provider">Seleccionar para cambio</button>
+    </article>
+  `).join("")
+  const comparisonHeading = deps.failPoint === "card_mismatch"
+    ? alternateHeading
+    : providerB.liveDisplayAlias
   const { chromium } = require("playwright")
   if (!deps.state.browser) deps.state.browser = await chromium.launch({ headless: true })
   const page = await deps.state.browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -928,16 +1063,13 @@ async function createMockReplacePage(deps) {
         <button id="change">Cambiar vínculo</button>
         <section id="chooser" hidden>
           <input id="providerMatchSearch" />
-          <article class="candidate-card">
-            <header class="candidate-card-header"><strong>QA_MATCH_PROVIDER_B</strong></header>
-            <button id="select">Seleccionar para cambio</button>
-          </article>
+          ${cards}
         </section>
         <dialog id="matchDialog" aria-labelledby="matchTitle">
           <h2 id="matchTitle">Comparar proveedor</h2>
           <p id="matchDescription">Revisa los datos declarados y maestros antes de confirmar.</p>
           <section id="comparisonContent">
-            <p class="comparison-summary"><strong>QA_MATCH_PROVIDER_B</strong></p>
+            <p class="comparison-summary"><strong>${escapeHtml(comparisonHeading)}</strong></p>
           </section>
           <label>Motivo <select id="matchReasonCode"><option value="match_corrected">Corrección</option></select></label>
           <label>Razón <textarea id="matchReason"></textarea></label>
@@ -948,7 +1080,7 @@ async function createMockReplacePage(deps) {
           const change = document.getElementById("change")
           const chooser = document.getElementById("chooser")
           const search = document.getElementById("providerMatchSearch")
-          const select = document.getElementById("select")
+          const selects = document.querySelectorAll(".select-provider")
           const dialog = document.getElementById("matchDialog")
           change.addEventListener("click", () => {
             chooser.hidden = false
@@ -957,8 +1089,8 @@ async function createMockReplacePage(deps) {
           search.addEventListener("keydown", (event) => {
             if (event.key === "Enter") event.preventDefault()
           })
-          select.addEventListener("click", () => dialog.showModal())
-          dialog.addEventListener("close", () => select.focus())
+          selects.forEach((select) => select.addEventListener("click", () => dialog.showModal()))
+          dialog.addEventListener("close", () => selects[0]?.focus())
         </script>
       </body>
     </html>
@@ -990,6 +1122,18 @@ export function createMockDependencies({ failPoint = null } = {}) {
     },
     async inspectLinkContract() {
       return clone(INTAKE_LINK_CONTRACT)
+    },
+    async resolveProviderTargets() {
+      maybeFail(deps, "alias_resolution")
+      const rows = MOCK_LIVE_PROVIDER_ALIASES.map((alias, index) => ({
+        id: `00000000-0000-4000-8000-00000000000${index + 1}`,
+        alias,
+        nombre_completo: `QA fixture ${index + 1}`,
+        email: `qa-provider-${index + 1}@example.invalid`,
+        activo: true,
+      }))
+      state.providerTargets = buildLiveProviderTargets(rows)
+      return state.providerTargets
     },
     async randomBytes(size) {
       gate(size === 32, "MOCK_TOKEN_SIZE")
@@ -1207,6 +1351,15 @@ export function createMockDependencies({ failPoint = null } = {}) {
       return createMockReplacePage(deps)
     },
     async submitReplaceFromPage({ dialog, request }) {
+      const providerB = state.providerTargets.find(
+        (target) => target.logicalAlias === PROVIDER_ALIASES[1],
+      )
+      gate(dialog.sanitizedTargetAlias === PROVIDER_ALIASES[1], "MOCK_LOGICAL_ALIAS")
+      gate(
+        normalizeLiveProviderText(await dialog.providerSearch.inputValue()) ===
+          providerB.uiSearchText,
+        "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
+      )
       gate((await dialog.reason.inputValue()).length >= 10, "MOCK_REPLACE_REASON")
       return deps.setProviderIntakeMatch(request)
     },
@@ -1303,6 +1456,8 @@ export async function runCleanupMatrix() {
 export async function runCapabilityAudit() {
   const deps = createMockDependencies()
   assertDependencyShape(deps)
+  const providerTargets = await deps.resolveProviderTargets()
+  const providerAlignment = sanitizedProviderAlignment(providerTargets)
   const functions = {
     assertEnvironment,
     captureBaseline,
@@ -1322,6 +1477,14 @@ export async function runCapabilityAudit() {
     validateEventMetadata,
     validateFinalDelta,
     cleanupAll,
+    buildLiveProviderTargets,
+    sanitizedProviderAlignment,
+    assertSanitizedProviderEvidence,
+    runLiveProviderAliasReadOnly,
+    normalizeLiveProviderText,
+    exactNormalizedText,
+    assertLiveProviderLocatorInputs,
+    classifyProviderCardHeadings,
   }
   for (const [name, implementation] of Object.entries(functions)) {
     gate(typeof implementation === "function", `CAPABILITY_FUNCTION_MISSING_${name}`)
@@ -1329,10 +1492,13 @@ export async function runCapabilityAudit() {
   gate(typeof openProviderReplaceDialog === "function", "CAPABILITY_REPLACE_HELPER_MISSING")
   gate(typeof createMutableDependencies === "function", "CAPABILITY_MUTABLE_ADAPTER_MISSING")
   gate(typeof assertMutableAuthorization === "function", "CAPABILITY_MUTABLE_GATE_MISSING")
+  gate(providerAlignment.logical_alias_used_as_live_locator === false, "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR")
+  gate(providerAlignment.live_aliases_exported === false, "LIVE_PROVIDER_EVIDENCE_LEAKAGE")
   return {
     mode: "capability-audit",
     status: "PASS",
     network_requests: 0,
+    writes: 0,
     capabilities: {
       link_provisioning: true,
       fixture_provisioning: true,
@@ -1349,6 +1515,14 @@ export async function runCapabilityAudit() {
       metadata_validation: true,
       delta_validation: true,
       mutable_authorization_gate: true,
+      live_provider_alias_resolution: true,
+      logical_visual_identity_separation: true,
+      live_alias_not_logged: true,
+      logical_alias_not_used_as_live_locator: true,
+      exact_card_validation: true,
+      ambiguous_card_failure: true,
+      missing_alias_failure: true,
+      sanitization_before_evidence: true,
     },
   }
 }
@@ -1361,11 +1535,90 @@ function requiredEnvironment(env, name) {
 
 export function currentRunnerIdentity() {
   const bytes = fs.readFileSync(runnerPath)
+  const blobHeader = Buffer.from(`blob ${bytes.byteLength}\0`)
   return {
     logical_name: "provider-intake-matching-gate2-uat.mjs",
     sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    git_blob: crypto.createHash("sha1").update(blobHeader).update(bytes).digest("hex"),
     size_bytes: bytes.byteLength,
     helper_import: "./provider-intake-matching-flow.mjs",
+  }
+}
+
+function assertReadOnlyRunnerIdentity(env, identity) {
+  const expectedHead = requiredEnvironment(env, "EXPECTED_V6C_HEAD")
+  const expectedSha = requiredEnvironment(env, "EXPECTED_V6C_RUNNER_SHA256").toLowerCase()
+  const expectedBlob = requiredEnvironment(env, "EXPECTED_V6C_RUNNER_GIT_BLOB").toLowerCase()
+  gate(/^[0-9a-f]{40}$/.test(expectedHead), "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
+  gate(identity.sha256 === expectedSha, "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
+  gate(identity.git_blob === expectedBlob, "READ_ONLY_RUNNER_IDENTITY_MISMATCH")
+  try {
+    const committed = execFileSync(
+      String(env.GIT_EXECUTABLE || "git"),
+      ["show", `${expectedHead}:scripts/qa/provider-intake-matching-gate2-uat.mjs`],
+      { encoding: null, stdio: ["ignore", "pipe", "ignore"] },
+    )
+    gate(
+      Buffer.compare(fs.readFileSync(runnerPath), committed) === 0,
+      "READ_ONLY_RUNNER_IDENTITY_MISMATCH",
+    )
+  } catch (error) {
+    if (error instanceof GateError) throw error
+    throw new GateError("READ_ONLY_RUNNER_IDENTITY_MISMATCH")
+  }
+  return { head: expectedHead, sha256: expectedSha, gitBlob: expectedBlob }
+}
+
+export async function runLiveProviderAliasReadOnly(env = process.env) {
+  for (const name of [
+    "ALLOW_MUTABLE_UAT",
+    "EPHEMERAL_LINK_AUTHORIZED",
+    "FIXTURE_PROVISIONING_AUTHORIZED",
+    "IAM_ACTIVATION_AUTHORIZED",
+  ]) {
+    gate(String(env[name] || "").trim() !== "true", "MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED")
+  }
+
+  const identity = currentRunnerIdentity()
+  assertReadOnlyRunnerIdentity(env, identity)
+  const supabaseUrl = requiredEnvironment(env, "SUPABASE_URL").replace(/\/+$/, "")
+  const serviceRole = requiredEnvironment(env, "SUPABASE_DEV_SERVICE_ROLE_KEY")
+  const projectRef = new URL(supabaseUrl).hostname.split(".")[0]
+  gate(projectRef === DEV_PROJECT_REF, "UNAUTHORIZED_PROJECT_REF")
+
+  const query = new URLSearchParams({
+    select: "id,alias,nombre_completo,email,activo",
+    order: "id.asc",
+    limit: "10000",
+  })
+  let rows
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/proveedores?${query}`, {
+      method: "GET",
+      headers: headersForService(serviceRole),
+    })
+    gate(response.ok, "LIVE_PROVIDER_ALIAS_READ_ONLY_QUERY_FAILED")
+    rows = await response.json()
+  } catch (error) {
+    if (error instanceof GateError) throw error
+    throw new GateError("LIVE_PROVIDER_ALIAS_READ_ONLY_QUERY_FAILED")
+  }
+
+  const targets = buildLiveProviderTargets(rows)
+  for (const target of targets) {
+    assertLiveProviderLocatorInputs({
+      sanitizedTargetAlias: target.logicalAlias,
+      searchText: target.uiSearchText,
+      expectedCardHeading: target.expectedCardHeading,
+    })
+  }
+  return {
+    mode: "live-provider-alias-read-only",
+    ...sanitizedProviderAlignment(targets),
+    runner_identity_verified: true,
+    head_verified: true,
+    network_requests: 1,
+    mutable_execution: false,
   }
 }
 
@@ -1427,10 +1680,7 @@ export function createMutableDependencies(env = process.env) {
   const previewUrl = requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
   const companyId = requiredEnvironment(env, "QA_COMPANY_ID")
   const linkCreatedBy = requiredEnvironment(env, "QA_LINK_CREATED_BY")
-  const providerIds = {
-    [PROVIDER_ALIASES[0]]: requiredEnvironment(env, "QA_PROVIDER_A_ID"),
-    [PROVIDER_ALIASES[1]]: requiredEnvironment(env, "QA_PROVIDER_B_ID"),
-  }
+  const providerIds = {}
   const state = {
     browser: null,
     pages: [],
@@ -1440,6 +1690,7 @@ export function createMutableDependencies(env = process.env) {
     link: null,
     rawTokenPresent: false,
     baseline: null,
+    providerTargets: [],
     iamTouched: false,
     action: 0,
   }
@@ -1832,6 +2083,20 @@ export function createMutableDependencies(env = process.env) {
     },
     async inspectLinkContract() {
       return clone(INTAKE_LINK_CONTRACT)
+    },
+    async resolveProviderTargets() {
+      const rows = await serviceRest(
+        "proveedores",
+        new URLSearchParams({
+          select: "id,alias,nombre_completo,email,activo",
+          order: "id.asc",
+          limit: "10000",
+        }).toString(),
+      )
+      const targets = buildLiveProviderTargets(rows)
+      for (const target of targets) providerIds[target.logicalAlias] = target.internalId
+      state.providerTargets = targets
+      return targets
     },
     async randomBytes(size) {
       state.rawTokenPresent = true
@@ -2310,10 +2575,11 @@ export async function runNoWriteMocked() {
   gate(result.actual_mutable_supabase_requests === 0, "MOCKED_MUTABLE_REQUEST")
   gate(result.actual_dev_writes === 0, "MOCKED_DEV_WRITE")
   gate(result.external_network_requests === 0, "MOCKED_EXTERNAL_NETWORK")
-  return {
+  const output = {
     mode: "no-write-mocked",
     status: "PASS",
     capability_audit: audit.status,
+    provider_alias_alignment: sanitizedProviderAlignment(deps.state.providerTargets),
     main: result.main,
     race: result.race,
     cleanup_matrix: {
@@ -2338,18 +2604,27 @@ export async function runNoWriteMocked() {
     actual_dev_writes: 0,
     external_network_requests: 0,
   }
+  assertSanitizedProviderEvidence(output, deps.state.providerTargets)
+  return output
 }
 
 async function runCli() {
   const modeArgument = process.argv.find((argument) => argument.startsWith("--mode="))
   const mode = String(modeArgument || "").slice("--mode=".length)
   gate(
-    ["capability-audit", "no-write-mocked", "mutable"].includes(mode),
+    [
+      "capability-audit",
+      "live-provider-alias-read-only",
+      "no-write-mocked",
+      "mutable",
+    ].includes(mode),
     "INVALID_MODE",
   )
   let result
   if (mode === "capability-audit") {
     result = await runCapabilityAudit()
+  } else if (mode === "live-provider-alias-read-only") {
+    result = await runLiveProviderAliasReadOnly(process.env)
   } else if (mode === "no-write-mocked") {
     result = await runNoWriteMocked()
   } else {
