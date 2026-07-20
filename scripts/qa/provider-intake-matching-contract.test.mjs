@@ -4,6 +4,10 @@ import fs from "node:fs"
 import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
+import {
+  assertMutableAuthorization,
+  runCapabilityAudit,
+} from "./provider-intake-matching-gate2-uat.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -153,4 +157,18 @@ test("migration cannot create or mutate providers, requests, batches, layouts, o
 
 test("public provider intake Edge Function remains outside Migration 031", () => {
   assert.doesNotMatch(migration, /supabase\/functions\/provider-intake|edge function/i)
+})
+
+test("permanent Gate 2 runner connects every mutable capability behind the explicit gate", async () => {
+  const audit = await runCapabilityAudit()
+  assert.equal(audit.status, "PASS")
+  assert.equal(audit.network_requests, 0)
+  assert.deepEqual(
+    Object.values(audit.capabilities),
+    Object.values(audit.capabilities).map(() => true),
+  )
+  assert.throws(
+    () => assertMutableAuthorization({}),
+    /MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED/,
+  )
 })
