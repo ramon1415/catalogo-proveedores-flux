@@ -76,6 +76,151 @@ async function liveAction(operation, code) {
   }
 }
 
+export async function openProviderSetDialog(page, {
+  sanitizedTargetAlias,
+  searchText,
+  expectedCardHeading,
+  timeout = 30_000,
+} = {}) {
+  if (!page) fail("LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const target = assertLiveProviderLocatorInputs({
+    sanitizedTargetAlias,
+    searchText,
+    expectedCardHeading,
+  })
+  await page.locator(".provider-match-section").waitFor({ state: "visible", timeout })
+  const providerSearch = page.locator("#providerMatchSearch")
+  await providerSearch.waitFor({ state: "visible", timeout })
+  await liveAction(async () => {
+    await providerSearch.fill(target.search)
+    await providerSearch.press("Enter")
+  }, "LIVE_PROVIDER_CARD_NOT_FOUND")
+  await liveAction(
+    () => page.waitForFunction(
+      () => Array.from(
+        document.querySelectorAll(".candidate-card .candidate-card-header strong"),
+      ).some((node) => node.getClientRects().length > 0),
+      null,
+      { timeout },
+    ),
+    "LIVE_PROVIDER_CARD_NOT_FOUND",
+  )
+  const headerSelector = ".candidate-card .candidate-card-header strong"
+  const headings = await liveAction(
+    () => page.locator(headerSelector).evaluateAll((nodes) =>
+      nodes
+        .filter((node) => node.getClientRects().length > 0)
+        .map((node) => node.textContent || "")),
+    "LIVE_PROVIDER_CARD_NOT_FOUND",
+  )
+  const exact = classifyProviderCardHeadings(
+    headings.filter((heading) => normalizeLiveProviderText(heading) === target.heading),
+    target.heading,
+  )
+  const exactHeading = page
+    .locator(headerSelector)
+    .filter({ hasText: exactNormalizedText(exact) })
+    .filter({ visible: true })
+  if (await liveAction(() => exactHeading.count(), "LIVE_PROVIDER_CARD_NOT_FOUND") !== 1) {
+    fail("LIVE_PROVIDER_ALIAS_AMBIGUOUS")
+  }
+  const candidateCard = exactHeading.locator(
+    "xpath=ancestor::article[contains(concat(' ', normalize-space(@class), ' '), ' candidate-card ')]",
+  )
+  const trigger = candidateCard.getByRole("button", {
+    name: "Seleccionar proveedor",
+    exact: true,
+  })
+  if (await liveAction(() => trigger.count(), "LIVE_PROVIDER_CARD_NOT_FOUND") !== 1) {
+    fail("LIVE_PROVIDER_CARD_NOT_FOUND")
+  }
+  await liveAction(() => trigger.click(), "LIVE_PROVIDER_CARD_NOT_FOUND")
+  const dialog = page.locator("#matchDialog")
+  await liveAction(
+    () => page.waitForFunction(
+      () => document.querySelector("#matchDialog")?.open === true,
+      null,
+      { timeout },
+    ),
+    "LIVE_PROVIDER_CARD_MISMATCH",
+  )
+  const title = page.locator("#matchTitle")
+  const reasonCode = page.locator("#matchReasonCode")
+  const reason = page.locator("#matchReason")
+  const confirmButton = page.locator("#confirmMatchBtn")
+  for (const control of [title, reasonCode, reason, confirmButton]) {
+    await control.waitFor({ state: "visible", timeout })
+  }
+  if ((await title.textContent())?.trim() !== "Comparar proveedor") {
+    fail("LIVE_PROVIDER_CARD_MISMATCH")
+  }
+  if ((await confirmButton.textContent())?.trim() !== "Confirmar vínculo") {
+    fail("LIVE_PROVIDER_CARD_MISMATCH")
+  }
+  assert.equal(await reasonCode.inputValue(), "candidate_selected")
+  const comparisonHeadings = await liveAction(
+    () => page.locator("#comparisonContent .comparison-summary strong").allTextContents(),
+    "LIVE_PROVIDER_CARD_MISMATCH",
+  )
+  classifyProviderCardHeadings(comparisonHeadings, target.heading)
+  return {
+    operation: "set",
+    sanitizedTargetAlias: target.logical,
+    providerSearch,
+    candidateCard,
+    trigger,
+    dialog,
+    title,
+    reasonCode,
+    reason,
+    confirmButton,
+  }
+}
+
+export async function openProviderClearDialog(page, { timeout = 30_000 } = {}) {
+  if (!page) fail("LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  await page.getByText("Vinculado", { exact: true }).waitFor({ state: "visible", timeout })
+  const trigger = page.getByRole("button", { name: "Retirar vínculo", exact: true })
+  if (await trigger.count() !== 1) fail("LIVE_PROVIDER_CARD_NOT_FOUND")
+  await liveAction(() => trigger.click(), "LIVE_PROVIDER_CARD_NOT_FOUND")
+  await liveAction(
+    () => page.waitForFunction(
+      () => document.querySelector("#matchDialog")?.open === true,
+      null,
+      { timeout },
+    ),
+    "LIVE_PROVIDER_CARD_MISMATCH",
+  )
+  const dialog = page.locator("#matchDialog")
+  const title = page.locator("#matchTitle")
+  const reasonCode = page.locator("#matchReasonCode")
+  const reason = page.locator("#matchReason")
+  const confirmButton = page.locator("#confirmMatchBtn")
+  for (const control of [title, reasonCode, reason, confirmButton]) {
+    await control.waitFor({ state: "visible", timeout })
+  }
+  if ((await title.textContent())?.trim() !== "Retirar vínculo") {
+    fail("LIVE_PROVIDER_CARD_MISMATCH")
+  }
+  if ((await confirmButton.textContent())?.trim() !== "Retirar vínculo") {
+    fail("LIVE_PROVIDER_CARD_MISMATCH")
+  }
+  assert.equal(await reasonCode.inputValue(), "no_longer_matches")
+  if (!/obligatoria/.test((await page.locator("#matchReasonRequired").textContent()) || "")) {
+    fail("LIVE_PROVIDER_CARD_MISMATCH")
+  }
+  return {
+    operation: "clear",
+    sanitizedTargetAlias: null,
+    trigger,
+    dialog,
+    title,
+    reasonCode,
+    reason,
+    confirmButton,
+  }
+}
+
 export async function openProviderReplaceDialog(page, {
   providerAlias: legacyVisualFixtureAlias,
   sanitizedTargetAlias,

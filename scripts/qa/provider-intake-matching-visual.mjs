@@ -5,10 +5,15 @@ import os from "node:os"
 import path from "node:path"
 import { createRequire } from "node:module"
 import { fileURLToPath } from "node:url"
+import {
+  auditAccessibilityPage,
+  loadLocalAxeSource,
+} from "./provider-intake-matching-accessibility.mjs"
 import { openProviderReplaceDialog } from "./provider-intake-matching-flow.mjs"
 
 const require = createRequire(import.meta.url)
 const { chromium } = require("playwright")
+const localAxe = loadLocalAxeSource()
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
 const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "flux-matching-visual-"))
@@ -788,21 +793,21 @@ async function capture(page, name) {
 }
 
 async function runAxe(page, label) {
-  await page.addScriptTag({ url: "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.3/axe.min.js" })
-  const violations = await page.evaluate(async () => {
-    const result = await window.axe.run(document, {
-      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] },
-    })
-    return result.violations
-      .filter((violation) => ["critical", "serious"].includes(violation.impact))
-      .map((violation) => ({
-        id: violation.id,
-        impact: violation.impact,
-        nodes: violation.nodes.length,
-        targets: violation.nodes.slice(0, 5).map((node) => node.target),
-      }))
+  const stateAlias = `visual_${String(label)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")}`
+  const evidence = await auditAccessibilityPage(page, {
+    stateAlias,
+    environment: "VISUAL_LOCAL",
+    evidenceMode: "SANITIZED",
+    authorizedOrigin: page.url(),
+    localAxe,
   })
-  assert.deepEqual(violations, [], `${label}: ${JSON.stringify(violations)}`)
+  assert.equal(evidence.critical, 0, label)
+  assert.equal(evidence.serious, 0, label)
 }
 
 function mimeType(filePath) {

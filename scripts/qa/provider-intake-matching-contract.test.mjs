@@ -7,12 +7,14 @@ import { fileURLToPath } from "node:url"
 import {
   EXPECTED_EXPIRED_LINK_POST_STATE,
   EXPECTED_EXPIRED_LINK_PRE_STATE,
+  MUTABLE_ACCESSIBILITY_HOOKS,
   assertSanitizedProviderEvidence,
   assertExpiredLinkNormalizationTransition,
   assertMutableAuthorization,
   buildLiveProviderTargets,
   classifyExpiredLinkState,
   classifyExpiredLinkStateFromDatabaseFilter,
+  classifyNoWriteBrowserRequest,
   normalizationProtectedSnapshot,
   runCapabilityAudit,
   runNoWriteMocked,
@@ -29,6 +31,19 @@ import {
   exactNormalizedText,
   normalizeLiveProviderText,
 } from "./provider-intake-matching-flow.mjs"
+import {
+  ACCESSIBILITY_STATE_ALIASES,
+  AXE_CORE_VERSION,
+  assertSanitizedAccessibilityEvidence,
+  auditAccessibilityPage,
+  createAccessibilityHookRecorder,
+  createAccessibilityStateManifest,
+  createLocalAxeSource,
+  injectLocalAxe,
+  runAccessibilityStateManifest,
+  sanitizedAxeSourceIdentity,
+  validateAccessibilityStateManifest,
+} from "./provider-intake-matching-accessibility.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -185,7 +200,7 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 27)
+  assert.equal(Object.keys(audit.capabilities).length, 36)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -464,13 +479,17 @@ test("updated capability audit certifies alias separation without network or wri
   }
 })
 
-test("no-write mocked recertifies normalization MAIN RACE and 20 cleanup cases without leakage", async () => {
+test("no-write mocked recertifies normalization MAIN RACE accessibility and 26 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
   assert.equal(result.main.status, "PASS")
   assert.equal(result.race.status, "PASS")
   assert.equal(result.cleanup_matrix.status, "PASS")
-  assert.equal(result.cleanup_matrix.total, 20)
+  assert.equal(result.cleanup_matrix.total, 26)
+  assert.equal(result.accessibility.states_required, 9)
+  assert.equal(result.accessibility.states_audited, 9)
+  assert.equal(result.accessibility.critical, 0)
+  assert.equal(result.accessibility.serious, 0)
   assert.equal(result.expired_link_normalization.dry_run, "PASS")
   assert.equal(result.expired_link_normalization.apply, "expired")
   assert.deepEqual(result.link_inventory, {
@@ -489,4 +508,255 @@ test("no-write mocked recertifies normalization MAIN RACE and 20 cleanup cases w
   ]) {
     assert.doesNotMatch(serialized, new RegExp(forbidden))
   }
+})
+
+const validAccessibilityEvidence = (state = ACCESSIBILITY_STATE_ALIASES[0]) => ({
+  state,
+  axe_version: AXE_CORE_VERSION,
+  critical: 0,
+  serious: 0,
+  moderate: 0,
+  minor: 0,
+  incomplete: 0,
+  rule_ids: [],
+  nodes_total: 0,
+  sanitized: true,
+})
+
+const localAxeFixture = () => createLocalAxeSource({
+  source: `/* axe local fixture */${"x".repeat(1_100)}`,
+  version: AXE_CORE_VERSION,
+  sourcePath: "C:/isolated/node_modules/axe-core/axe.min.js",
+})
+
+test("Axe source identity is local pinned hashed and never exports source", () => {
+  const localAxe = localAxeFixture()
+  const identity = sanitizedAxeSourceIdentity(localAxe)
+  assert.equal(identity.version, "4.10.3")
+  assert.equal(identity.source_type, "local_dependency")
+  assert.equal(identity.network_downloads, 0)
+  assert.equal(identity.source_exported, false)
+  assert.match(identity.sha256, /^[0-9a-f]{64}$/)
+  assert.equal(Object.keys(localAxe).includes("source"), false)
+})
+
+test("local Axe injection uses script content and confirms pinned browser version", async () => {
+  const localAxe = localAxeFixture()
+  let version = null
+  let injections = 0
+  const page = {
+    async evaluate() { return version },
+    async addScriptTag({ content }) {
+      assert.equal(content, localAxe.source)
+      injections += 1
+      version = AXE_CORE_VERSION
+    },
+  }
+  assert.equal(await injectLocalAxe(page, localAxe), AXE_CORE_VERSION)
+  assert.equal(injections, 1)
+})
+
+test("accessibility manifest requires the exact ordered nine-state contract", () => {
+  const handlers = Object.fromEntries(ACCESSIBILITY_STATE_ALIASES.map((state) => [state, {
+    prepare: async () => state,
+    ready: async () => true,
+    cleanup: async () => true,
+  }]))
+  const manifest = createAccessibilityStateManifest(handlers)
+  assert.equal(validateAccessibilityStateManifest(manifest), true)
+  assert.deepEqual(manifest.map((entry) => entry.stateAlias), ACCESSIBILITY_STATE_ALIASES)
+})
+
+test("accessibility manifest fails closed when one required state is absent", () => {
+  const handlers = Object.fromEntries(ACCESSIBILITY_STATE_ALIASES.slice(0, -1).map((state) => [state, {
+    prepare: async () => state,
+    ready: async () => true,
+    cleanup: async () => true,
+  }]))
+  assert.throws(() => createAccessibilityStateManifest(handlers), /LIVE_ACCESSIBILITY_STATE_MISSING/)
+})
+
+test("mutable accessibility hooks preserve MAIN RACE terminal ordering", () => {
+  assert.deepEqual(
+    [...MUTABLE_ACCESSIBILITY_HOOKS.main, ...MUTABLE_ACCESSIBILITY_HOOKS.race, ...MUTABLE_ACCESSIBILITY_HOOKS.terminal],
+    ACCESSIBILITY_STATE_ALIASES,
+  )
+  assert.equal(MUTABLE_ACCESSIBILITY_HOOKS.main.length, 7)
+  assert.deepEqual(MUTABLE_ACCESSIBILITY_HOOKS.race, ["race_conflict"])
+  assert.deepEqual(MUTABLE_ACCESSIBILITY_HOOKS.terminal, ["terminal_rejected"])
+})
+
+test("accessibility recorder accepts all nine sanitized states exactly once", () => {
+  const recorder = createAccessibilityHookRecorder()
+  for (const state of ACCESSIBILITY_STATE_ALIASES) recorder.record(state, validAccessibilityEvidence(state))
+  assert.equal(recorder.assertComplete(), true)
+  assert.deepEqual(recorder.sanitizedSummary(), {
+    status: "PASS",
+    states_required: 9,
+    states_audited: 9,
+    state_aliases: ACCESSIBILITY_STATE_ALIASES,
+    critical: 0,
+    serious: 0,
+    moderate: 0,
+    minor: 0,
+    incomplete: 0,
+    sanitized: true,
+  })
+})
+
+test("accessibility recorder rejects duplicate state evidence", () => {
+  const recorder = createAccessibilityHookRecorder()
+  recorder.record(ACCESSIBILITY_STATE_ALIASES[0], validAccessibilityEvidence())
+  assert.throws(
+    () => recorder.record(ACCESSIBILITY_STATE_ALIASES[0], validAccessibilityEvidence()),
+    /LIVE_ACCESSIBILITY_STATE_DUPLICATE/,
+  )
+})
+
+test("accessibility evidence rejects HTML and selector payloads", () => {
+  assert.throws(
+    () => assertSanitizedAccessibilityEvidence({ ...validAccessibilityEvidence(), html: "<main>secret</main>" }),
+    /LIVE_ACCESSIBILITY_EVIDENCE_UNSANITIZED/,
+  )
+})
+
+test("accessibility evidence rejects UUID and live-alias leakage", () => {
+  assert.throws(
+    () => assertSanitizedAccessibilityEvidence(
+      validAccessibilityEvidence(),
+      [JSON.stringify(validAccessibilityEvidence())],
+    ),
+    /LIVE_ACCESSIBILITY_EVIDENCE_UNSANITIZED/,
+  )
+  assert.throws(
+    () => assertSanitizedAccessibilityEvidence({
+      ...validAccessibilityEvidence(),
+      state: "11111111-1111-4111-8111-111111111111",
+    }),
+    /LIVE_ACCESSIBILITY_EVIDENCE_UNSANITIZED/,
+  )
+})
+
+const fakeAccessibilityPage = ({ critical = 0, serious = 0, axePresent = true } = {}) => {
+  let version = axePresent ? AXE_CORE_VERSION : null
+  return {
+    url: () => "https://preview.example.test/provider_intakes",
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+    async addScriptTag() { version = AXE_CORE_VERSION },
+    async evaluate(_callback, tags) {
+      if (Array.isArray(tags)) {
+        return {
+          critical,
+          serious,
+          moderate: 0,
+          minor: 0,
+          incomplete: 0,
+          rule_ids: critical || serious ? ["color-contrast"] : [],
+          nodes_total: critical + serious,
+        }
+      }
+      const source = String(_callback)
+      if (source.includes("requestAnimationFrame")) return true
+      return version
+    },
+  }
+}
+
+test("critical accessibility violations fail closed", async () => {
+  await assert.rejects(
+    auditAccessibilityPage(fakeAccessibilityPage({ critical: 1 }), {
+      stateAlias: ACCESSIBILITY_STATE_ALIASES[0],
+      environment: "LIVE_PREVIEW_NO_WRITE",
+      evidenceMode: "SANITIZED",
+      authorizedOrigin: "https://preview.example.test",
+      localAxe: localAxeFixture(),
+    }),
+    /LIVE_ACCESSIBILITY_VIOLATION/,
+  )
+})
+
+test("serious accessibility violations fail closed", async () => {
+  await assert.rejects(
+    auditAccessibilityPage(fakeAccessibilityPage({ serious: 1 }), {
+      stateAlias: ACCESSIBILITY_STATE_ALIASES[0],
+      environment: "LIVE_PREVIEW_NO_WRITE",
+      evidenceMode: "SANITIZED",
+      authorizedOrigin: "https://preview.example.test",
+      localAxe: localAxeFixture(),
+    }),
+    /LIVE_ACCESSIBILITY_VIOLATION/,
+  )
+})
+
+test("accessibility audit rejects an unauthorized page origin", async () => {
+  await assert.rejects(
+    auditAccessibilityPage(fakeAccessibilityPage(), {
+      stateAlias: ACCESSIBILITY_STATE_ALIASES[0],
+      environment: "LIVE_PREVIEW_NO_WRITE",
+      evidenceMode: "SANITIZED",
+      authorizedOrigin: "https://different.example.test",
+      localAxe: localAxeFixture(),
+    }),
+    /LIVE_ACCESSIBILITY_PREVIEW_ORIGIN_MISMATCH/,
+  )
+})
+
+test("state manifest always cleans the prepared state after an audit failure", async () => {
+  const cleaned = []
+  const handlers = Object.fromEntries(ACCESSIBILITY_STATE_ALIASES.map((state) => [state, {
+    prepare: async () => state,
+    ready: async () => true,
+    cleanup: async () => cleaned.push(state),
+  }]))
+  await assert.rejects(
+    runAccessibilityStateManifest(createAccessibilityStateManifest(handlers), async () => {
+      throw new Error("AUDIT_STOP")
+    }),
+    /AUDIT_STOP/,
+  )
+  assert.deepEqual(cleaned, [ACCESSIBILITY_STATE_ALIASES[0]])
+})
+
+test("Preview GET and HEAD assets are the only allowed real network class", () => {
+  for (const method of ["GET", "HEAD"]) {
+    assert.equal(classifyNoWriteBrowserRequest({
+      url: "https://preview.example.test/assets/app.js",
+      method,
+      previewUrl: "https://preview.example.test/provider_intakes",
+    }), "ALLOW_PREVIEW_ASSET")
+  }
+})
+
+test("Supabase browser library is fulfilled only from the in-memory mock", () => {
+  assert.equal(classifyNoWriteBrowserRequest({
+    url: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+    method: "GET",
+    previewUrl: "https://preview.example.test/provider_intakes",
+  }), "FULFILL_MEMORY_SUPABASE_CLIENT")
+})
+
+test("every mutable browser verb is blocked in Preview no-write", () => {
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal(classifyNoWriteBrowserRequest({
+      url: "https://preview.example.test/rest/v1/payment_intake",
+      method,
+      previewUrl: "https://preview.example.test/provider_intakes",
+    }), "BLOCK_MUTABLE")
+  }
+})
+
+test("all non-Preview external reads are blocked", () => {
+  assert.equal(classifyNoWriteBrowserRequest({
+    url: "https://example.invalid/tracker.js",
+    method: "GET",
+    previewUrl: "https://preview.example.test/provider_intakes",
+  }), "BLOCK_EXTERNAL")
+})
+
+test("visual harness uses the shared local Axe helper without CDN injection", () => {
+  const visual = read("scripts/qa/provider-intake-matching-visual.mjs")
+  assert.match(visual, /loadLocalAxeSource/)
+  assert.match(visual, /auditAccessibilityPage/)
+  assert.doesNotMatch(visual, /cdnjs\.cloudflare\.com\/ajax\/libs\/axe-core|addScriptTag\(\{\s*url:/)
 })

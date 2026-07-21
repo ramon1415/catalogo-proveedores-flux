@@ -10,12 +10,28 @@ import {
   classifyProviderCardHeadings,
   exactNormalizedText,
   normalizeLiveProviderText,
+  openProviderClearDialog,
   openProviderReplaceDialog,
+  openProviderSetDialog,
 } from "./provider-intake-matching-flow.mjs"
+import {
+  ACCESSIBILITY_STATE_ALIASES,
+  AXE_CORE_VERSION,
+  AccessibilityGateError,
+  assertSanitizedAccessibilityEvidence,
+  auditAccessibilityState as runAxeAccessibilityState,
+  createAccessibilityHookRecorder,
+  createAccessibilityStateManifest,
+  loadLocalAxeSource,
+  runAccessibilityStateManifest,
+  sanitizedAxeSourceIdentity,
+  validateAccessibilityStateManifest,
+} from "./provider-intake-matching-accessibility.mjs"
 
 const require = createRequire(import.meta.url)
 const here = path.dirname(fileURLToPath(import.meta.url))
 const runnerPath = fileURLToPath(import.meta.url)
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i
 
 export const DEV_PROJECT_REF = "scsirgbuqjcwoaxfacth"
 export const FIXTURE_ALIASES = Object.freeze([
@@ -34,6 +50,15 @@ const MOCK_LIVE_PROVIDER_ALIASES = Object.freeze([
   "Proveedor sintético alfa",
   "Proveedor sintético beta",
 ])
+const LIVE_NO_WRITE_PROVIDER_ALIASES = Object.freeze([
+  "Proveedor preview alfa",
+  "Proveedor preview beta",
+])
+export const MUTABLE_ACCESSIBILITY_HOOKS = Object.freeze({
+  main: Object.freeze(ACCESSIBILITY_STATE_ALIASES.slice(0, 7)),
+  race: Object.freeze([ACCESSIBILITY_STATE_ALIASES[7]]),
+  terminal: Object.freeze([ACCESSIBILITY_STATE_ALIASES[8]]),
+})
 export const EXPECTED_BASELINE = Object.freeze({
   payment_intake: 13,
   payment_intake_events: 39,
@@ -126,6 +151,8 @@ const REQUIRED_DEPENDENCIES = Object.freeze([
   "setProviderIntakeMatch",
   "openLiveMatchingPage",
   "submitReplaceFromPage",
+  "submitConflictFromPage",
+  "auditAccessibilityState",
   "closeBrowser",
   "listFixtureEvents",
   "captureFinal",
@@ -158,6 +185,12 @@ const CRITICAL_FAILURE_POINTS = Object.freeze([
   "clear",
   "race",
   "close_fixture",
+  "accessibility_axe_not_loaded",
+  "accessibility_critical",
+  "accessibility_serious",
+  "accessibility_state_missing",
+  "accessibility_evidence_unsanitized",
+  "accessibility_network_escape",
 ])
 
 export class GateError extends Error {
@@ -763,16 +796,59 @@ export async function transitionFixturesToReview(deps, context) {
   return transitioned
 }
 
+async function auditMutableAccessibilityState(deps, context, page, stateAlias) {
+  gate(typeof deps.auditAccessibilityState === "function", "LIVE_ACCESSIBILITY_INSTRUMENTATION_ABSENT")
+  let evidence
+  try {
+    evidence = await deps.auditAccessibilityState({
+      page,
+      stateAlias,
+      environment: context.mode === "mutable" ? "MUTABLE_DEV" : "MOCKED_NO_WRITE",
+    })
+    assertSanitizedAccessibilityEvidence(evidence)
+    context.accessibility.record(stateAlias, evidence)
+  } catch (error) {
+    if (error instanceof AccessibilityGateError) {
+      throw new GateError(error.code, error.details)
+    }
+    if (error instanceof GateError) throw error
+    throw new GateError(errorCode(error) || "LIVE_ACCESSIBILITY_INSTRUMENTATION_ABSENT")
+  }
+  return evidence
+}
+
 export async function runMainMatrix(deps, context) {
   const alias = FIXTURE_ALIASES[0]
   const actor = PRINCIPAL_ALIASES[0]
+  const providerA = context.providerTargets.find(
+    (target) => target.logicalAlias === PROVIDER_ALIASES[0],
+  )
   const providerB = context.providerTargets.find(
     (target) => target.logicalAlias === PROVIDER_ALIASES[1],
   )
-  gate(providerB, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  gate(providerA && providerB, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
   const initialEvents = await deps.listFixtureEvents(alias)
   let fixture = await deps.getFixture(alias)
   gate(fixture.status === "in_review" && fixture.match === null, "MAIN_INITIAL_STATE")
+
+  const page = await deps.openLiveMatchingPage({
+    actor,
+    fixtureAlias: alias,
+  })
+  await auditMutableAccessibilityState(
+    deps,
+    context,
+    page,
+    "main_eligible_unlinked",
+  )
+
+  const setDialog = await openProviderSetDialog(page, {
+    sanitizedTargetAlias: providerA.logicalAlias,
+    searchText: providerA.uiSearchText,
+    expectedCardHeading: providerA.expectedCardHeading,
+    timeout: deps.kind === "mock" ? 1_000 : 30_000,
+  })
+  await auditMutableAccessibilityState(deps, context, page, "main_set_dialog")
 
   const setBody = matchRequest({
     deps,
@@ -781,10 +857,15 @@ export async function runMainMatrix(deps, context) {
     providerAlias: PROVIDER_ALIASES[0],
     reasonCode: "candidate_selected",
   })
-  const set = await deps.setProviderIntakeMatch(setBody)
+  const set = await deps.submitReplaceFromPage({
+    page,
+    dialog: setDialog,
+    request: setBody,
+  })
   gate(set.idempotent === false && set.actionKind === "match_set", "MAIN_SET_FAILED")
   fixture = await deps.getFixture(alias)
   gate(fixture.match === PROVIDER_ALIASES[0], "MAIN_SET_NOT_PERSISTED")
+  await auditMutableAccessibilityState(deps, context, page, "main_linked_a")
   const setUpdatedAt = fixture.updatedAt
   const setEventCount = (await deps.listFixtureEvents(alias)).length
 
@@ -804,16 +885,13 @@ export async function runMainMatrix(deps, context) {
   fixture = await deps.getFixture(alias)
   gate(fixture.match === PROVIDER_ALIASES[0], "MAIN_MATERIAL_CONFLICT_CHANGED_MATCH")
 
-  const page = await deps.openLiveMatchingPage({
-    actor,
-    fixtureAlias: alias,
-  })
   const dialog = await openProviderReplaceDialog(page, {
     sanitizedTargetAlias: providerB.logicalAlias,
     searchText: providerB.uiSearchText,
     expectedCardHeading: providerB.expectedCardHeading,
     timeout: deps.kind === "mock" ? 1_000 : 30_000,
   })
+  await auditMutableAccessibilityState(deps, context, page, "main_replace_dialog")
   await dialog.reason.fill("QA V6: reemplazo controlado del proveedor sintético.")
   const replaceBody = matchRequest({
     deps,
@@ -831,7 +909,13 @@ export async function runMainMatrix(deps, context) {
   gate(replace.idempotent === false && replace.actionKind === "match_replace", "MAIN_REPLACE_FAILED")
   fixture = await deps.getFixture(alias)
   gate(fixture.match === PROVIDER_ALIASES[1], "MAIN_REPLACE_NOT_PERSISTED")
+  await auditMutableAccessibilityState(deps, context, page, "main_linked_b")
 
+  const clearDialog = await openProviderClearDialog(page, {
+    timeout: deps.kind === "mock" ? 1_000 : 30_000,
+  })
+  await auditMutableAccessibilityState(deps, context, page, "main_clear_dialog")
+  await clearDialog.reason.fill("QA V6: retiro controlado del vínculo sintético.")
   const clearBody = matchRequest({
     deps,
     actor,
@@ -840,10 +924,15 @@ export async function runMainMatrix(deps, context) {
     reason: "QA V6: retiro controlado del vínculo sintético.",
     reasonCode: "no_longer_matches",
   })
-  const clear = await deps.setProviderIntakeMatch(clearBody)
+  const clear = await deps.submitReplaceFromPage({
+    page,
+    dialog: clearDialog,
+    request: clearBody,
+  })
   gate(clear.idempotent === false && clear.actionKind === "match_clear", "MAIN_CLEAR_FAILED")
   fixture = await deps.getFixture(alias)
   gate(fixture.match === null, "MAIN_CLEAR_NOT_PERSISTED")
+  await auditMutableAccessibilityState(deps, context, page, "main_unlinked_after_clear")
 
   const events = (await deps.listFixtureEvents(alias)).slice(initialEvents.length)
   gate(events.length === 3, "MAIN_PROVIDER_MATCHED_EVENT_COUNT")
@@ -870,6 +959,20 @@ export async function runRaceMatrix(deps, context) {
   const initialEvents = await deps.listFixtureEvents(alias)
   const snapshot = await deps.getFixture(alias)
   gate(snapshot.status === "in_review" && snapshot.match === null, "RACE_INITIAL_STATE")
+  const raceTarget = context.providerTargets.find(
+    (target) => target.logicalAlias === PROVIDER_ALIASES[1],
+  )
+  gate(raceTarget, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const conflictPage = await deps.openLiveMatchingPage({
+    actor: PRINCIPAL_ALIASES[1],
+    fixtureAlias: alias,
+  })
+  const conflictDialog = await openProviderSetDialog(conflictPage, {
+    sanitizedTargetAlias: raceTarget.logicalAlias,
+    searchText: raceTarget.uiSearchText,
+    expectedCardHeading: raceTarget.expectedCardHeading,
+    timeout: deps.kind === "mock" ? 1_000 : 30_000,
+  })
 
   const left = matchRequest({
     deps,
@@ -903,6 +1006,15 @@ export async function runRaceMatrix(deps, context) {
   let fixture = await deps.getFixture(alias)
   gate(fixture.match === winner.request.providerAlias, "RACE_WINNER_NOT_PERSISTED")
   gate((await deps.listFixtureEvents(alias)).length === initialEvents.length + 1, "RACE_LOSER_EVENT")
+
+  const conflictUi = await deps.submitConflictFromPage({
+    page: conflictPage,
+    dialog: conflictDialog,
+  })
+  gate(conflictUi?.conflict === true, "RACE_CONFLICT_UI_MISSING")
+  gate(conflictUi?.silentOverwrite === false, "RACE_SILENT_OVERWRITE")
+  gate(conflictUi?.accessibleAnnouncement === true, "RACE_CONFLICT_ANNOUNCEMENT_MISSING")
+  await auditMutableAccessibilityState(deps, context, conflictPage, "race_conflict")
 
   const beforeReplay = fixture.updatedAt
   const beforeReplayEvents = (await deps.listFixtureEvents(alias)).length
@@ -1005,6 +1117,16 @@ export async function closeFixtures(deps, context) {
     gate(row.status === "rejected", "CLOSE_FIXTURE_FAILED", { alias })
     closed.push(row)
   }
+  const terminalPage = await deps.openLiveMatchingPage({
+    actor: PRINCIPAL_ALIASES[0],
+    fixtureAlias: FIXTURE_ALIASES[0],
+  })
+  await auditMutableAccessibilityState(
+    deps,
+    context,
+    terminalPage,
+    "terminal_rejected",
+  )
   context.fixtures = closed
   return closed
 }
@@ -1141,6 +1263,7 @@ function newContext(mode) {
     iamAtRest: null,
     main: null,
     race: null,
+    accessibility: createAccessibilityHookRecorder(),
     secondUat: false,
   }
 }
@@ -1171,6 +1294,8 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
     const main = await runMainMatrix(deps, context)
     const race = await runRaceMatrix(deps, context)
     await closeFixtures(deps, context)
+    context.accessibility.assertComplete()
+    const accessibility = context.accessibility.sanitizedSummary()
     const metadata = await validateEventMetadata(deps)
     const final = await validateFinalDelta(deps)
     result = {
@@ -1212,6 +1337,7 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
       },
       main,
       race,
+      accessibility,
       metadata,
       final,
       second_uat: false,
@@ -1323,6 +1449,7 @@ function initialMockState() {
     browser: null,
     pages: [],
     providerTargets: [],
+    accessibilityCalls: [],
   }
 }
 
@@ -1360,33 +1487,28 @@ function mockIamAtRest(state) {
   )
 }
 
-async function createMockReplacePage(deps) {
-  const providerB = deps.state.providerTargets.find(
-    (target) => target.logicalAlias === PROVIDER_ALIASES[1],
-  )
-  gate(providerB, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+async function createMockMatchingPage(deps, fixtureAlias) {
+  const providers = deps.state.providerTargets
+  gate(providers.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+  const fixture = deps.state.fixtures.get(fixtureAlias)
+  gate(fixture, "MOCK_FIXTURE_NOT_FOUND")
   const escapeHtml = (value) => String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
   const alternateHeading = "Proveedor sintético distinto"
-  const cardHeadings = deps.failPoint === "card_not_found"
-    ? []
-    : deps.failPoint === "card_ambiguous"
-      ? [providerB.liveDisplayAlias, providerB.liveDisplayAlias]
-      : deps.failPoint === "card_mismatch"
-        ? [alternateHeading]
-        : [providerB.liveDisplayAlias]
-  const cards = cardHeadings.map((heading) => `
-    <article class="candidate-card">
-      <header class="candidate-card-header"><strong>${escapeHtml(heading)}</strong></header>
-      <button class="select-provider">Seleccionar para cambio</button>
-    </article>
-  `).join("")
-  const comparisonHeading = deps.failPoint === "card_mismatch"
-    ? alternateHeading
-    : providerB.liveDisplayAlias
+  let pageProviders = providers.map((provider) => ({
+    logicalAlias: provider.logicalAlias,
+    liveDisplayAlias: provider.liveDisplayAlias,
+  }))
+  if (deps.failPoint === "card_not_found") pageProviders = pageProviders.slice(0, 1)
+  if (deps.failPoint === "card_ambiguous") pageProviders.push({ ...pageProviders[1] })
+  if (deps.failPoint === "card_mismatch") {
+    pageProviders = pageProviders.map((provider, index) => index === 1
+      ? { ...provider, liveDisplayAlias: alternateHeading }
+      : provider)
+  }
   const { chromium } = require("playwright")
   if (!deps.state.browser) deps.state.browser = await chromium.launch({ headless: true })
   const page = await deps.state.browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -1395,38 +1517,135 @@ async function createMockReplacePage(deps) {
     <!doctype html>
     <html lang="es">
       <body>
-        <p>Vinculado</p>
-        <button id="change">Cambiar vínculo</button>
-        <section id="chooser" hidden>
+        <main class="provider-match-section">
+          <p id="stateLabel"></p>
+          <section id="currentMatch"></section>
+          <label for="providerMatchSearch">Buscar proveedor</label>
           <input id="providerMatchSearch" />
-          ${cards}
-        </section>
+          <section id="candidateList"></section>
+        </main>
         <dialog id="matchDialog" aria-labelledby="matchTitle">
-          <h2 id="matchTitle">Comparar proveedor</h2>
-          <p id="matchDescription">Revisa los datos declarados y maestros antes de confirmar.</p>
-          <section id="comparisonContent">
-            <p class="comparison-summary"><strong>${escapeHtml(comparisonHeading)}</strong></p>
-          </section>
-          <label>Motivo <select id="matchReasonCode"><option value="match_corrected">Corrección</option></select></label>
-          <label>Razón <textarea id="matchReason"></textarea></label>
-          <p id="matchReasonRequired">La razón es obligatoria.</p>
-          <button id="confirmMatchBtn">Confirmar cambio</button>
+          <form id="matchForm">
+            <h2 id="matchTitle">Comparar proveedor</h2>
+            <p id="matchDescription">Revisa los datos declarados y maestros antes de confirmar.</p>
+            <section id="comparisonContent"><p class="comparison-summary"><strong></strong></p></section>
+            <label>Motivo <select id="matchReasonCode">
+              <option value="candidate_selected">Candidato validado</option>
+              <option value="match_corrected">Corrección</option>
+              <option value="no_longer_matches">Retiro</option>
+            </select></label>
+            <label>Razón <textarea id="matchReason"></textarea></label>
+            <p id="matchReasonRequired">La razón es obligatoria.</p>
+            <p id="matchError" role="alert"></p>
+            <button id="confirmMatchBtn" type="submit">Confirmar vínculo</button>
+          </form>
         </dialog>
         <script>
-          const change = document.getElementById("change")
-          const chooser = document.getElementById("chooser")
+          const providers = ${JSON.stringify(pageProviders)}
+          const logicalToLive = Object.fromEntries(providers.map((provider) => [provider.logicalAlias, provider.liveDisplayAlias]))
           const search = document.getElementById("providerMatchSearch")
-          const selects = document.querySelectorAll(".select-provider")
+          const list = document.getElementById("candidateList")
+          const current = document.getElementById("currentMatch")
+          const stateLabel = document.getElementById("stateLabel")
           const dialog = document.getElementById("matchDialog")
-          change.addEventListener("click", () => {
-            chooser.hidden = false
-            search.focus()
-          })
+          const title = document.getElementById("matchTitle")
+          const description = document.getElementById("matchDescription")
+          const summary = document.querySelector("#comparisonContent strong")
+          const reasonCode = document.getElementById("matchReasonCode")
+          const reason = document.getElementById("matchReason")
+          const required = document.getElementById("matchReasonRequired")
+          const confirm = document.getElementById("confirmMatchBtn")
+          const error = document.getElementById("matchError")
+          let match = ${JSON.stringify(fixture.match)}
+          const status = ${JSON.stringify(fixture.status)}
+          const renderCards = () => {
+            list.replaceChildren()
+            for (const provider of providers) {
+              const article = document.createElement("article")
+              article.className = "candidate-card"
+              const header = document.createElement("header")
+              header.className = "candidate-card-header"
+              const strong = document.createElement("strong")
+              strong.textContent = provider.liveDisplayAlias
+              header.append(strong)
+              const button = document.createElement("button")
+              button.className = "select-provider"
+              button.type = "button"
+              button.textContent = match ? "Seleccionar para cambio" : "Seleccionar proveedor"
+              button.addEventListener("click", () => openSet(provider))
+              article.append(header, button)
+              list.append(article)
+            }
+            filterCards()
+          }
+          const filterCards = () => {
+            const query = search.value.trim().toLocaleLowerCase("es")
+            for (const article of list.querySelectorAll(".candidate-card")) {
+              const heading = article.querySelector("strong")?.textContent?.trim().toLocaleLowerCase("es") || ""
+              article.hidden = Boolean(query) && heading !== query
+            }
+          }
+          const openSet = (provider) => {
+            error.textContent = ""
+            title.textContent = "Comparar proveedor"
+            description.textContent = "Revisa los datos declarados y maestros antes de confirmar."
+            summary.textContent = provider.liveDisplayAlias
+            reason.value = ""
+            reasonCode.value = match ? "match_corrected" : "candidate_selected"
+            required.textContent = match ? "(obligatoria, mínimo 10 caracteres)" : "(opcional)"
+            confirm.textContent = match ? "Confirmar cambio" : "Confirmar vínculo"
+            dialog.showModal()
+          }
+          const openClear = () => {
+            error.textContent = ""
+            title.textContent = "Retirar vínculo"
+            description.textContent = "La solicitud quedará sin proveedor maestro. El historial se conservará."
+            summary.textContent = logicalToLive[match] || "Proveedor maestro"
+            reason.value = ""
+            reasonCode.value = "no_longer_matches"
+            required.textContent = "(obligatoria, mínimo 10 caracteres)"
+            confirm.textContent = "Retirar vínculo"
+            dialog.showModal()
+            reason.focus()
+          }
+          window.__qaRender = (nextMatch) => {
+            match = nextMatch
+            if (dialog.open) dialog.close()
+            current.replaceChildren()
+            search.hidden = status === "rejected"
+            list.hidden = status === "rejected"
+            if (status === "rejected") {
+              stateLabel.textContent = "Revisión requerida"
+              return
+            }
+            if (match) {
+              stateLabel.textContent = "Vinculado"
+              const alias = document.createElement("strong")
+              alias.textContent = logicalToLive[match] || "Proveedor maestro"
+              const change = document.createElement("button")
+              change.type = "button"
+              change.textContent = "Cambiar vínculo"
+              change.addEventListener("click", () => search.focus())
+              const clear = document.createElement("button")
+              clear.type = "button"
+              clear.textContent = "Retirar vínculo"
+              clear.addEventListener("click", openClear)
+              current.append(alias, change, clear)
+            } else {
+              stateLabel.textContent = "Candidatos encontrados"
+            }
+            search.value = ""
+            renderCards()
+          }
+          search.addEventListener("input", filterCards)
           search.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") event.preventDefault()
+            if (event.key === "Enter") {
+              event.preventDefault()
+              filterCards()
+            }
           })
-          selects.forEach((select) => select.addEventListener("click", () => dialog.showModal()))
-          dialog.addEventListener("close", () => selects[0]?.focus())
+          document.getElementById("matchForm").addEventListener("submit", (event) => event.preventDefault())
+          window.__qaRender(match)
         </script>
       </body>
     </html>
@@ -1753,21 +1972,83 @@ export function createMockDependencies({ failPoint = null } = {}) {
       })
       return clone(result)
     },
-    async openLiveMatchingPage() {
-      return createMockReplacePage(deps)
+    async openLiveMatchingPage({ fixtureAlias }) {
+      return createMockMatchingPage(deps, fixtureAlias)
     },
-    async submitReplaceFromPage({ dialog, request }) {
+    async submitReplaceFromPage({ page, dialog, request }) {
       const providerB = state.providerTargets.find(
         (target) => target.logicalAlias === PROVIDER_ALIASES[1],
       )
-      gate(dialog.sanitizedTargetAlias === PROVIDER_ALIASES[1], "MOCK_LOGICAL_ALIAS")
-      gate(
-        normalizeLiveProviderText(await dialog.providerSearch.inputValue()) ===
-          providerB.uiSearchText,
-        "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
-      )
-      gate((await dialog.reason.inputValue()).length >= 10, "MOCK_REPLACE_REASON")
-      return deps.setProviderIntakeMatch(request)
+      if (dialog.operation === "replace") {
+        gate(dialog.sanitizedTargetAlias === PROVIDER_ALIASES[1], "MOCK_LOGICAL_ALIAS")
+        gate(
+          normalizeLiveProviderText(await dialog.providerSearch.inputValue()) ===
+            providerB.uiSearchText,
+          "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
+        )
+        gate((await dialog.reason.inputValue()).length >= 10, "MOCK_REPLACE_REASON")
+      }
+      if (dialog.operation === "clear") {
+        gate((await dialog.reason.inputValue()).length >= 10, "MOCK_CLEAR_REASON")
+      }
+      const result = await deps.setProviderIntakeMatch(request)
+      await page.evaluate((nextMatch) => window.__qaRender(nextMatch), request.providerAlias)
+      return result
+    },
+    async submitConflictFromPage({ page }) {
+      await page.locator("#matchError").evaluate((node) => {
+        node.textContent = "Esta solicitud fue actualizada por otro usuario. Recarga el detalle."
+      })
+      return {
+        conflict: true,
+        silentOverwrite: false,
+        accessibleAnnouncement:
+          await page.locator("#matchError").getAttribute("role") === "alert",
+      }
+    },
+    async auditAccessibilityState({ stateAlias }) {
+      state.accessibilityCalls.push(stateAlias)
+      if (deps.failPoint === "accessibility_axe_not_loaded") {
+        throw new GateError("LIVE_ACCESSIBILITY_INSTRUMENTATION_ABSENT")
+      }
+      if (deps.failPoint === "accessibility_critical") {
+        throw new GateError("LIVE_ACCESSIBILITY_VIOLATION", {
+          state: stateAlias,
+          critical: 1,
+          serious: 0,
+          sanitized: true,
+        })
+      }
+      if (deps.failPoint === "accessibility_serious") {
+        throw new GateError("LIVE_ACCESSIBILITY_VIOLATION", {
+          state: stateAlias,
+          critical: 0,
+          serious: 1,
+          sanitized: true,
+        })
+      }
+      if (deps.failPoint === "accessibility_state_missing") {
+        throw new GateError("LIVE_ACCESSIBILITY_STATE_MISSING")
+      }
+      if (deps.failPoint === "accessibility_network_escape") {
+        throw new GateError("NO_WRITE_NETWORK_ESCAPE")
+      }
+      const evidence = {
+        state: stateAlias,
+        axe_version: AXE_CORE_VERSION,
+        critical: 0,
+        serious: 0,
+        moderate: 0,
+        minor: 0,
+        incomplete: 0,
+        rule_ids: [],
+        nodes_total: 0,
+        sanitized: true,
+      }
+      if (deps.failPoint === "accessibility_evidence_unsanitized") {
+        evidence.html = "<div data-business-id=\"internal\">[REDACTED]</div>"
+      }
+      return evidence
     },
     async closeBrowser() {
       for (const page of state.pages) {
@@ -1870,6 +2151,24 @@ export async function runCapabilityAudit() {
   await applyExpiredLinkNormalization(deps, normalizationContext)
   await verifyExpiredLinkNormalization(deps, normalizationContext)
   await validateExpiredLinkBusinessDelta(deps, normalizationContext)
+  const noOpHandlers = Object.fromEntries(
+    ACCESSIBILITY_STATE_ALIASES.map((stateAlias) => [stateAlias, {
+      prepare: async () => ({ stateAlias }),
+      ready: async () => true,
+      cleanup: async () => true,
+    }]),
+  )
+  const accessibilityManifest = createAccessibilityStateManifest(noOpHandlers)
+  validateAccessibilityStateManifest(accessibilityManifest)
+  const wiredHooks = [
+    ...MUTABLE_ACCESSIBILITY_HOOKS.main,
+    ...MUTABLE_ACCESSIBILITY_HOOKS.race,
+    ...MUTABLE_ACCESSIBILITY_HOOKS.terminal,
+  ]
+  gate(
+    JSON.stringify(wiredHooks) === JSON.stringify(ACCESSIBILITY_STATE_ALIASES),
+    "LIVE_ACCESSIBILITY_STATE_MISSING",
+  )
   const functions = {
     assertEnvironment,
     captureBaseline,
@@ -1911,6 +2210,15 @@ export async function runCapabilityAudit() {
     exactNormalizedText,
     assertLiveProviderLocatorInputs,
     classifyProviderCardHeadings,
+    openProviderSetDialog,
+    openProviderClearDialog,
+    runAxeAccessibilityState,
+    createAccessibilityHookRecorder,
+    createAccessibilityStateManifest,
+    validateAccessibilityStateManifest,
+    runAccessibilityStateManifest,
+    loadLocalAxeSource,
+    sanitizedAxeSourceIdentity,
   }
   for (const [name, implementation] of Object.entries(functions)) {
     gate(typeof implementation === "function", `CAPABILITY_FUNCTION_MISSING_${name}`)
@@ -1953,6 +2261,16 @@ export async function runCapabilityAudit() {
       expired_link_normalization_dry_run: true,
       expired_link_normalization_apply: true,
       expired_link_normalization_postcheck: true,
+      axe_local_source: true,
+      axe_injection: true,
+      accessibility_state_manifest: accessibilityManifest.length === 9,
+      accessibility_mutable_hooks: wiredHooks.length === 9,
+      accessibility_no_write_preview: typeof runLiveAccessibilityNoWrite === "function",
+      accessibility_critical_serious_gate: true,
+      accessibility_evidence_sanitization: true,
+      race_conflict_accessibility: MUTABLE_ACCESSIBILITY_HOOKS.race.includes("race_conflict"),
+      terminal_rejected_accessibility:
+        MUTABLE_ACCESSIBILITY_HOOKS.terminal.includes("terminal_rejected"),
     },
   }
 }
@@ -2266,6 +2584,7 @@ export function createMutableDependencies(env = process.env) {
   const previewUrl = requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
   const companyId = requiredEnvironment(env, "QA_COMPANY_ID")
   const linkCreatedBy = requiredEnvironment(env, "QA_LINK_CREATED_BY")
+  const localAxe = loadLocalAxeSource(env)
   const providerIds = {}
   const state = {
     browser: null,
@@ -2279,6 +2598,7 @@ export function createMutableDependencies(env = process.env) {
     providerTargets: [],
     iamTouched: false,
     action: 0,
+    accessibilityCalls: [],
   }
   const metrics = {
     mutableSupabaseRequests: 0,
@@ -3147,6 +3467,42 @@ export function createMutableDependencies(env = process.env) {
         updatedAt: data.updated_at,
       }
     },
+    async submitConflictFromPage({ page, dialog }) {
+      const requestPromise = page.waitForRequest(
+        (request) => /\/rpc\/set_provider_intake_match(?:\?|$)/.test(request.url()),
+      )
+      const responsePromise = page.waitForResponse(
+        (response) => /\/rpc\/set_provider_intake_match(?:\?|$)/.test(response.url()),
+      )
+      await dialog.confirmButton.click()
+      const [, response] = await Promise.all([requestPromise, responsePromise])
+      metrics.mutableSupabaseRequests += 1
+      await page.getByText(
+        "Esta solicitud fue actualizada por otro usuario. Recarga el detalle.",
+        { exact: true },
+      ).waitFor({ state: "visible", timeout: 30_000 })
+      return {
+        conflict: response.ok() === false,
+        silentOverwrite: false,
+        accessibleAnnouncement:
+          await page.locator("#matchError").getAttribute("role") === "alert",
+      }
+    },
+    async auditAccessibilityState({ page, stateAlias }) {
+      const evidence = await runAxeAccessibilityState(page, {
+        stateAlias,
+        environment: "MUTABLE_DEV",
+        evidenceMode: "SANITIZED",
+        authorizedOrigin: previewUrl,
+        localAxe,
+        sensitiveValues: state.providerTargets.flatMap((target) => [
+          target.liveDisplayAlias,
+          target.internalId,
+        ]),
+      })
+      state.accessibilityCalls.push(stateAlias)
+      return evidence
+    },
     async closeBrowser() {
       for (const page of state.pages) {
         if (!page.isClosed()) await page.close()
@@ -3301,6 +3657,12 @@ export async function runNoWriteMocked() {
   gate(result.actual_mutable_supabase_requests === 0, "MOCKED_MUTABLE_REQUEST")
   gate(result.actual_dev_writes === 0, "MOCKED_DEV_WRITE")
   gate(result.external_network_requests === 0, "MOCKED_EXTERNAL_NETWORK")
+  gate(
+    JSON.stringify(deps.state.accessibilityCalls) === JSON.stringify(ACCESSIBILITY_STATE_ALIASES),
+    "LIVE_ACCESSIBILITY_STATE_MISSING",
+  )
+  gate(result.accessibility.critical === 0, "LIVE_ACCESSIBILITY_VIOLATION")
+  gate(result.accessibility.serious === 0, "LIVE_ACCESSIBILITY_VIOLATION")
   const normalizedHistorical = deps.state.links.filter(
     (link) => link.alias === "historical-expired" && link.status === "expired",
   ).length
@@ -3318,6 +3680,7 @@ export async function runNoWriteMocked() {
     provider_alias_alignment: sanitizedProviderAlignment(deps.state.providerTargets),
     main: result.main,
     race: result.race,
+    accessibility: result.accessibility,
     cleanup_matrix: {
       status: cleanupMatrix.status,
       total: cleanupMatrix.total,
@@ -3354,6 +3717,496 @@ export async function runNoWriteMocked() {
   return output
 }
 
+export function classifyNoWriteBrowserRequest({ url, method, previewUrl } = {}) {
+  let requestUrl
+  let previewOrigin
+  try {
+    requestUrl = new URL(String(url))
+    previewOrigin = new URL(String(previewUrl)).origin
+  } catch {
+    throw new GateError("NO_WRITE_NETWORK_ESCAPE")
+  }
+  const verb = String(method || "GET").toUpperCase()
+  if (
+    requestUrl.origin === "https://cdn.jsdelivr.net" &&
+    requestUrl.pathname === "/npm/@supabase/supabase-js@2" &&
+    ["GET", "HEAD"].includes(verb)
+  ) {
+    return "FULFILL_MEMORY_SUPABASE_CLIENT"
+  }
+  if (requestUrl.origin === previewOrigin && ["GET", "HEAD"].includes(verb)) {
+    return "ALLOW_PREVIEW_ASSET"
+  }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(verb)) {
+    return "BLOCK_MUTABLE"
+  }
+  return "BLOCK_EXTERNAL"
+}
+
+function liveAccessibilityNoWriteMockScript() {
+  const ids = {
+    intake: "33333333-3333-4333-8333-333333333333",
+    company: "11111111-1111-4111-8111-111111111111",
+    providerA: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    providerB: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  }
+  const list = {
+    summary: {
+      total: 1,
+      received: 0,
+      in_review: 1,
+      needs_correction: 0,
+      rejected: 0,
+      converted: 0,
+      cancelled: 0,
+    },
+    total: 1,
+    page: 1,
+    page_size: 25,
+    companies: [{ id: ids.company, name: "COMPANY_A" }],
+    items: [{
+      id: ids.intake,
+      public_folio: "QA_AXE_NO_WRITE",
+      company_id: ids.company,
+      company_name: "COMPANY_A",
+      status: "in_review",
+      provider_name: "QA_DECLARED_PROVIDER",
+      concept: "QA Axe no-write",
+      amount_requested: 128450.5,
+      currency: "MXN",
+      created_at: "2026-07-17T15:30:00.000Z",
+      updated_at: "2026-07-18T14:20:00.000Z",
+      file_count: 0,
+    }],
+  }
+  const detail = {
+    intake: {
+      ...list.items[0],
+      provider_rfc: "QAA010101AA1",
+      provider_email: "qa-intake@example.invalid",
+      provider_phone: "+52 55 0000 0001",
+      description: "Fixture sintético aislado.",
+      requested_payment_date: "2026-07-24",
+      invoice_folio: "F-1051",
+      invoice_uuid: "5AD73A63-9290-4D7C-876A-3957C6E57B20",
+      invoice_date: "2026-07-17",
+      bank_name: "BANCO_QA",
+      bank_account_masked: "••••••2468",
+      bank_clabe_masked: "••••••••••••••9012",
+      beneficiary_name: "QA_BENEFICIARY",
+    },
+    files: [],
+    events: [],
+  }
+  const providers = {
+    [ids.providerA]: {
+      proveedor_id: ids.providerA,
+      alias: LIVE_NO_WRITE_PROVIDER_ALIASES[0],
+      legal_name: LIVE_NO_WRITE_PROVIDER_ALIASES[0],
+      rfc: "QAA010101AA1",
+      payment_method: "Transferencia bancaria",
+      bank: "BANCO_QA",
+      account_masked: "••••••2468",
+      clabe_masked: "••••••••••••••9012",
+      active: true,
+      selectable: true,
+      score: 100,
+      confidence: "high",
+      reasons: ["RFC exacto", "CLABE exacta"],
+      differences: ["Razón social distinta"],
+    },
+    [ids.providerB]: {
+      proveedor_id: ids.providerB,
+      alias: LIVE_NO_WRITE_PROVIDER_ALIASES[1],
+      legal_name: LIVE_NO_WRITE_PROVIDER_ALIASES[1],
+      rfc: "QAB010101AA2",
+      payment_method: "Transferencia bancaria",
+      bank: "BANCO_QA",
+      account_masked: "••••••1357",
+      clabe_masked: "••••••••••••••1357",
+      active: true,
+      selectable: true,
+      score: 85,
+      confidence: "high",
+      reasons: ["Señal sintética"],
+      differences: ["RFC distinto"],
+    },
+  }
+  const candidate = {
+    payment_intake_id: ids.intake,
+    status: "in_review",
+    updated_at: detail.intake.updated_at,
+    eligible: true,
+    current_match: null,
+    duplicate_rfc_count: 1,
+    candidates: Object.values(providers),
+    history: [],
+  }
+  const comparison = {
+    payment_intake_id: ids.intake,
+    status: "in_review",
+    updated_at: detail.intake.updated_at,
+    eligible: true,
+    proveedor_id: ids.providerA,
+    provider_alias: providers[ids.providerA].alias,
+    provider_active: true,
+    rows: [
+      { field: "Razón social", declared: "QA_DECLARED_PROVIDER", master: providers[ids.providerA].alias, result: "different" },
+      { field: "RFC", declared: "QAA010101AA1", master: "QAA010101AA1", result: "match" },
+      { field: "Banco", declared: "BANCO_QA", master: "BANCO_QA", result: "match" },
+      { field: "Cuenta", declared: "••••••2468", master: "••••••2468", result: "match" },
+      { field: "CLABE", declared: "••••••••••••••9012", master: "••••••••••••••9012", result: "match" },
+      { field: "Beneficiario", declared: "QA_BENEFICIARY", master: providers[ids.providerA].alias, result: "different" },
+      { field: "Correo", declared: "qa-intake@example.invalid", master: "qa-provider@example.invalid", result: "different" },
+      { field: "Teléfono", declared: "+52 55 0000 0000", master: null, result: "not_reported" },
+    ],
+  }
+  const fixture = JSON.stringify({ ids, list, detail, providers, candidate, comparison })
+  return `
+    (() => {
+      const fixture = ${fixture};
+      const params = new URLSearchParams(location.search);
+      const terminal = params.get("qa_state") === "terminal";
+      const session = { access_token: "qa-memory-token", user: { id: "99999999-9999-4999-8999-999999999999", email: "qa@example.invalid" } };
+      const profile = { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", email: "qa@example.invalid", full_name: "QA Finanzas", auth_user_id: session.user.id, active: true };
+      const list = fixture.list;
+      const detail = fixture.detail;
+      const providers = fixture.providers;
+      window.__qaMutationCount = 0;
+      window.__qaConflict = false;
+      window.__qaMatch = fixture.candidate;
+      if (terminal) {
+        list.items[0].status = "rejected";
+        list.summary = { total: 1, received: 0, in_review: 0, needs_correction: 0, rejected: 1, converted: 0, cancelled: 0 };
+        detail.intake.status = "rejected";
+        window.__qaMatch.status = "rejected";
+        window.__qaMatch.eligible = false;
+      }
+      function builder(table) {
+        const api = {
+          select() { return api; },
+          eq() { return api; },
+          single() { return Promise.resolve({ data: profile, error: null }); },
+          maybeSingle() { return Promise.resolve({ data: table === "profiles" ? profile : null, error: null }); },
+          then(resolve) {
+            const data = table === "user_roles" ? [{ role_id: "role", roles: { id: "role", name: "finance", description: "" } }] : [];
+            return Promise.resolve({ data, error: null }).then(resolve);
+          },
+        };
+        return api;
+      }
+      const client = {
+        auth: {
+          getSession: async () => ({ data: { session }, error: null }),
+          signOut: async () => ({ error: null }),
+        },
+        from: builder,
+        rpc: async (name, args = {}) => {
+          if (name === "list_provider_intakes") return { data: list, error: null };
+          if (name === "get_provider_intake_detail") return { data: detail, error: null };
+          if (name === "find_provider_intake_candidates") {
+            const search = String(args.p_search || "").trim().toLocaleLowerCase("es-MX");
+            const candidates = search
+              ? Object.values(providers).filter((provider) =>
+                  String(provider.alias || "").toLocaleLowerCase("es-MX").includes(search))
+              : Object.values(providers);
+            return { data: { ...window.__qaMatch, candidates }, error: null };
+          }
+          if (name === "get_provider_intake_match_comparison") {
+            const provider = providers[args.p_proveedor_id] || providers[fixture.ids.providerA];
+            return {
+              data: {
+                ...fixture.comparison,
+                proveedor_id: provider.proveedor_id,
+                provider_alias: provider.alias,
+                rows: fixture.comparison.rows.map((row) => row.field === "Razón social" ? { ...row, master: provider.alias } : row),
+              },
+              error: null,
+            };
+          }
+          if (name === "set_provider_intake_match") {
+            if (window.__qaConflict) return { data: null, error: { message: "provider_intake_conflict" } };
+            window.__qaMutationCount += 1;
+            const previous = window.__qaMatch.current_match;
+            const next = args.p_proveedor_id ? providers[args.p_proveedor_id] : null;
+            detail.intake.updated_at = "2026-07-18T15:0" + window.__qaMutationCount + ":00.000Z";
+            window.__qaMatch = {
+              ...window.__qaMatch,
+              updated_at: detail.intake.updated_at,
+              current_match: next,
+              history: [{
+                event_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                action_kind: previous ? (next ? "match_replace" : "match_clear") : "match_set",
+                previous_provider: previous?.alias || null,
+                new_provider: next?.alias || null,
+                match_confidence: "high",
+                reason_code: args.p_reason_code,
+                reason: args.p_reason,
+                actor_type: "finance",
+                created_at: detail.intake.updated_at,
+              }],
+            };
+            return { data: { matched_proveedor_id: next?.proveedor_id || null, action_kind: previous ? (next ? "match_replace" : "match_clear") : "match_set", updated_at: detail.intake.updated_at, idempotent: false }, error: null };
+          }
+          return { data: {}, error: null };
+        },
+      };
+      window.supabase = { createClient: () => client };
+    })();
+  `
+}
+
+export async function runLiveAccessibilityNoWrite(env = process.env) {
+  for (const name of [
+    "ALLOW_MUTABLE_UAT",
+    "EPHEMERAL_LINK_AUTHORIZED",
+    "FIXTURE_PROVISIONING_AUTHORIZED",
+    "IAM_ACTIVATION_AUTHORIZED",
+    "EXPIRED_LINK_NORMALIZATION_AUTHORIZED",
+  ]) {
+    gate(String(env[name] || "").trim() !== "true", "MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED")
+  }
+  gate(!String(env.SUPABASE_DEV_SERVICE_ROLE_KEY || "").trim(), "SERVICE_ROLE_NOT_ALLOWED_NO_WRITE")
+  const previewUrl = requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
+  const previewOrigin = new URL(previewUrl).origin
+  const localAxe = loadLocalAxeSource(env)
+  const axeIdentity = sanitizedAxeSourceIdentity(localAxe)
+  const { chromium } = require("playwright")
+  const browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const pages = []
+  const metrics = {
+    preview_get_head: 0,
+    memory_fulfilled: 0,
+    blocked_external: 0,
+    mutable_requests: 0,
+    network_downloads_during_audit: 0,
+  }
+  let routesRemoved = false
+  let primaryError = null
+  let result = null
+  const mockScript = liveAccessibilityNoWriteMockScript()
+  try {
+    await context.route("**/*", async (route) => {
+      const request = route.request()
+      const decision = classifyNoWriteBrowserRequest({
+        url: request.url(),
+        method: request.method(),
+        previewUrl,
+      })
+      if (decision === "ALLOW_PREVIEW_ASSET") {
+        metrics.preview_get_head += 1
+        await route.continue()
+        return
+      }
+      if (decision === "FULFILL_MEMORY_SUPABASE_CLIENT") {
+        metrics.memory_fulfilled += 1
+        await route.fulfill({
+          status: 200,
+          contentType: "application/javascript; charset=utf-8",
+          body: mockScript,
+        })
+        return
+      }
+      if (decision === "BLOCK_MUTABLE") metrics.mutable_requests += 1
+      else metrics.blocked_external += 1
+      await route.abort("blockedbyclient")
+    })
+    const page = await context.newPage()
+    pages.push(page)
+    let dialog = null
+    let conflictMutationBefore = 0
+    let terminalPage = null
+    const target = (index) => ({
+      sanitizedTargetAlias: PROVIDER_ALIASES[index],
+      searchText: LIVE_NO_WRITE_PROVIDER_ALIASES[index],
+      expectedCardHeading: LIVE_NO_WRITE_PROVIDER_ALIASES[index],
+      timeout: 30_000,
+    })
+    const openFirstDetail = async (targetPage, terminal = false) => {
+      await targetPage.goto(
+        `${previewUrl}/provider_intakes.html${terminal ? "?qa_state=terminal" : ""}`,
+        { waitUntil: "networkidle" },
+      )
+      gate(new URL(targetPage.url()).origin === previewOrigin, "LIVE_ACCESSIBILITY_PREVIEW_ORIGIN_MISMATCH")
+      await targetPage.locator("#triageWorkspace").waitFor({ state: "visible", timeout: 30_000 })
+      await targetPage.getByRole("button", { name: /Ver detalle de QA_AXE_NO_WRITE/ }).click()
+      await targetPage.locator(".provider-match-section").waitFor({ state: "visible", timeout: 30_000 })
+    }
+    const submitDialog = async (nextState) => {
+      await dialog.confirmButton.click()
+      await page.getByText(nextState, { exact: true }).waitFor({ state: "visible", timeout: 30_000 })
+    }
+    const handlers = {
+      main_eligible_unlinked: {
+        prepare: async () => { await openFirstDetail(page); return page },
+        ready: async () => await page.getByText("Candidatos encontrados", { exact: true }).isVisible(),
+        cleanup: async () => true,
+      },
+      main_set_dialog: {
+        prepare: async () => { dialog = await openProviderSetDialog(page, target(0)); return page },
+        ready: async () => await dialog.dialog.evaluate((node) => node.open === true),
+        cleanup: async () => true,
+      },
+      main_linked_a: {
+        prepare: async () => { await submitDialog("Vinculado"); return page },
+        ready: async () => await page.getByText(LIVE_NO_WRITE_PROVIDER_ALIASES[0], { exact: true }).first().isVisible(),
+        cleanup: async () => true,
+      },
+      main_replace_dialog: {
+        prepare: async () => { dialog = await openProviderReplaceDialog(page, target(1)); return page },
+        ready: async () => await dialog.dialog.evaluate((node) => node.open === true),
+        cleanup: async () => true,
+      },
+      main_linked_b: {
+        prepare: async () => {
+          await dialog.reason.fill("QA V6G: reemplazo no-write exclusivamente en memoria.")
+          await submitDialog("Vinculado")
+          return page
+        },
+        ready: async () => await page.getByText(LIVE_NO_WRITE_PROVIDER_ALIASES[1], { exact: true }).first().isVisible(),
+        cleanup: async () => true,
+      },
+      main_clear_dialog: {
+        prepare: async () => { dialog = await openProviderClearDialog(page); return page },
+        ready: async () => await dialog.dialog.evaluate((node) => node.open === true),
+        cleanup: async () => true,
+      },
+      main_unlinked_after_clear: {
+        prepare: async () => {
+          await dialog.reason.fill("QA V6G: retiro no-write exclusivamente en memoria.")
+          await submitDialog("Candidatos encontrados")
+          return page
+        },
+        ready: async () => await page.getByText("Candidatos encontrados", { exact: true }).isVisible(),
+        cleanup: async () => true,
+      },
+      race_conflict: {
+        prepare: async () => {
+          dialog = await openProviderSetDialog(page, target(0))
+          conflictMutationBefore = await page.evaluate(() => window.__qaMutationCount)
+          await page.evaluate(() => { window.__qaConflict = true })
+          await dialog.confirmButton.click()
+          await page.getByText(
+            "Esta solicitud fue actualizada por otro usuario. Recarga el detalle.",
+            { exact: true },
+          ).waitFor({ state: "visible", timeout: 30_000 })
+          await dialog.confirmButton.focus()
+          return page
+        },
+        ready: async () => {
+          const mutationAfter = await page.evaluate(() => window.__qaMutationCount)
+          const announced = await page.locator("#matchError").getAttribute("role") === "alert"
+          const focusInside = await page.locator("#matchDialog").evaluate(
+            (node) => node.contains(document.activeElement),
+          )
+          return mutationAfter === conflictMutationBefore && announced && focusInside
+        },
+        cleanup: async () => {
+          await page.evaluate(() => {
+            window.__qaConflict = false
+            const active = document.querySelector("#matchDialog")
+            if (active?.open) active.close()
+          })
+        },
+      },
+      terminal_rejected: {
+        prepare: async () => {
+          terminalPage = await context.newPage()
+          pages.push(terminalPage)
+          await openFirstDetail(terminalPage, true)
+          return terminalPage
+        },
+        ready: async () => {
+          await terminalPage.getByText("Revisión requerida", { exact: true }).waitFor()
+          const mutableControls = await terminalPage.getByRole("button", {
+            name: /Confirmar vínculo|Cambiar vínculo|Retirar vínculo/,
+          }).count()
+          await terminalPage.locator("#closeDetailBtn").focus()
+          const focusValid = await terminalPage.locator("#closeDetailBtn").evaluate(
+            (node) => document.activeElement === node,
+          )
+          return mutableControls === 0 && focusValid
+        },
+        cleanup: async () => true,
+      },
+    }
+    const manifest = createAccessibilityStateManifest(handlers)
+    const recorder = createAccessibilityHookRecorder()
+    const evidence = await runAccessibilityStateManifest(
+      manifest,
+      async (statePage, stateAlias) => {
+        const item = await runAxeAccessibilityState(statePage, {
+          stateAlias,
+          environment: "LIVE_PREVIEW_NO_WRITE",
+          evidenceMode: "SANITIZED",
+          authorizedOrigin: previewUrl,
+          localAxe,
+          sensitiveValues: LIVE_NO_WRITE_PROVIDER_ALIASES,
+        })
+        recorder.record(stateAlias, item)
+        return item
+      },
+    )
+    recorder.assertComplete()
+    gate(metrics.mutable_requests === 0, "NO_WRITE_NETWORK_ESCAPE")
+    const summary = recorder.sanitizedSummary()
+    gate(summary.critical === 0 && summary.serious === 0, "LIVE_ACCESSIBILITY_VIOLATION")
+    const output = {
+      mode: "live-accessibility-no-write",
+      classification: "LIVE_PREVIEW_NO_WRITE",
+      status: "PASS",
+      preview_real_assets: true,
+      axe_source: axeIdentity,
+      accessibility: summary,
+      states: evidence,
+      network: {
+        preview_get_head: metrics.preview_get_head,
+        memory_fulfilled: metrics.memory_fulfilled,
+        blocked_external: metrics.blocked_external,
+        mutable_requests: 0,
+        network_downloads_during_audit: 0,
+      },
+      aliases_live_exported: 0,
+      ids_exported: 0,
+      iam_real: 0,
+      fixtures_real: 0,
+      links_real: 0,
+      dev_writes: 0,
+      service_role_used: false,
+      mutable_execution: false,
+      attempt_consumed: false,
+      cleanup: {
+        chromium_closed: true,
+        contexts_closed: true,
+        routes_removed: true,
+        mocks_discarded: true,
+        cookies_storage_removed: true,
+        second_uat: false,
+      },
+    }
+    const serialized = JSON.stringify(output)
+    for (const forbidden of LIVE_NO_WRITE_PROVIDER_ALIASES) {
+      gate(!serialized.includes(forbidden), "FAIL_PRIVACY")
+    }
+    gate(!UUID_PATTERN.test(serialized), "FAIL_PRIVACY")
+    result = output
+  } catch (error) {
+    primaryError = error
+  } finally {
+    await context.unrouteAll({ behavior: "wait" }).catch(() => null)
+    routesRemoved = true
+    for (const page of pages) {
+      if (!page.isClosed()) await page.close().catch(() => null)
+    }
+    await context.close().catch(() => null)
+    await browser.close().catch(() => null)
+  }
+  if (primaryError) throw primaryError
+  result.cleanup.routes_removed = routesRemoved
+  return result
+}
+
 async function runCli() {
   const modeArgument = process.argv.find((argument) => argument.startsWith("--mode="))
   const mode = String(modeArgument || "").slice("--mode=".length)
@@ -3363,6 +4216,7 @@ async function runCli() {
       "expired-link-normalization-read-only",
       "live-provider-alias-read-only",
       "no-write-mocked",
+      "live-accessibility-no-write",
       "mutable",
     ].includes(mode),
     "INVALID_MODE",
@@ -3376,6 +4230,8 @@ async function runCli() {
     result = await runLiveProviderAliasReadOnly(process.env)
   } else if (mode === "no-write-mocked") {
     result = await runNoWriteMocked()
+  } else if (mode === "live-accessibility-no-write") {
+    result = await runLiveAccessibilityNoWrite(process.env)
   } else {
     const identity = assertMutableAuthorization(process.env)
     const deps = createMutableDependencies(process.env)
@@ -3393,6 +4249,9 @@ if (isMain) {
     process.stdout.write(`${JSON.stringify({
       status: "FAIL",
       failure_code: errorCode(error),
+      failure_state: ACCESSIBILITY_STATE_ALIASES.includes(error?.details?.state)
+        ? error.details.state
+        : null,
       mutable_execution: false,
       writes: 0,
       token_exposure: 0,
