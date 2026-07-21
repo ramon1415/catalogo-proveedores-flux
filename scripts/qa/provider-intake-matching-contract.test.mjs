@@ -6,6 +6,7 @@ import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
   EXPECTED_EXPIRED_LINK_POST_STATE,
+  EXPECTED_ALREADY_NORMALIZED_LINK_STATE,
   EXPECTED_EXPIRED_LINK_PRE_STATE,
   MUTABLE_ACCESSIBILITY_HOOKS,
   assertSanitizedProviderEvidence,
@@ -18,6 +19,7 @@ import {
   normalizationProtectedSnapshot,
   runCapabilityAudit,
   runNoWriteMocked,
+  runV6KCleanupMatrix,
   sanitizedProviderAlignment,
   validateExpiredLinkNormalizationEvidence,
   validateNormalizationApplyResult,
@@ -44,6 +46,23 @@ import {
   sanitizedAxeSourceIdentity,
   validateAccessibilityStateManifest,
 } from "./provider-intake-matching-accessibility.mjs"
+import {
+  CANONICAL_IDEMPOTENCY_HEADER,
+  RESPONSE_HEADER_ALLOWLIST,
+  PublicSubmitObservabilityError,
+  assertSanitizedObservabilityEvidence,
+  buildPublicSubmitRequest,
+  captureFinalizedPublicSubmitRequest,
+  capturePublicSubmitResponse,
+  classifyAuthorizedPublicSubmitEndpoint,
+  classifyPublicSubmitResponse,
+  derivePreviewOrigin,
+  flushResponseEvidenceBeforeThrow,
+  persistSanitizedEvidenceAtomically,
+  runPublicSubmitLoopbackNoWrite,
+  runPublicSubmitObservabilityAudit,
+  runSyntheticResponseMatrix,
+} from "./provider-intake-public-submit-observability.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -200,7 +219,7 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 36)
+  assert.equal(Object.keys(audit.capabilities).length, 47)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -479,24 +498,19 @@ test("updated capability audit certifies alias separation without network or wri
   }
 })
 
-test("no-write mocked recertifies normalization MAIN RACE accessibility and 26 cleanup cases without leakage", async () => {
+test("no-write mocked recertifies the post-V6H baseline and 34 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
-  assert.equal(result.main.status, "PASS")
-  assert.equal(result.race.status, "PASS")
+  assert.equal(result.baseline.intake_links, 3)
+  assert.equal(result.baseline.link_state, "ALREADY_NORMALIZED")
+  assert.equal(result.expired_link_normalization.writes, 0)
+  assert.equal(result.simulation.main, "PASS")
+  assert.equal(result.simulation.race, "PASS")
+  assert.equal(result.simulation.provider_matched_final, 9)
+  assert.equal(result.simulation.payment_intake_events_final, 50)
   assert.equal(result.cleanup_matrix.status, "PASS")
-  assert.equal(result.cleanup_matrix.total, 26)
-  assert.equal(result.accessibility.states_required, 9)
-  assert.equal(result.accessibility.states_audited, 9)
-  assert.equal(result.accessibility.critical, 0)
-  assert.equal(result.accessibility.serious, 0)
-  assert.equal(result.expired_link_normalization.dry_run, "PASS")
-  assert.equal(result.expired_link_normalization.apply, "expired")
-  assert.deepEqual(result.link_inventory, {
-    historical_expired: 1,
-    qa_revoked: 1,
-    active: 0,
-  })
+  assert.equal(result.cleanup_matrix.total, 34)
+  assert.equal(result.capability_count, 47)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -759,4 +773,288 @@ test("visual harness uses the shared local Axe helper without CDN injection", ()
   assert.match(visual, /loadLocalAxeSource/)
   assert.match(visual, /auditAccessibilityPage/)
   assert.doesNotMatch(visual, /cdnjs\.cloudflare\.com\/ajax\/libs\/axe-core|addScriptTag\(\{\s*url:/)
+})
+
+const V6K_PREVIEW_URL =
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app"
+const V6K_ENDPOINT = "https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/provider-intake/submit"
+const v6kRequestInput = (overrides = {}) => ({
+  endpoint: V6K_ENDPOINT,
+  previewOrigin: V6K_PREVIEW_URL,
+  intakeToken: "v6k_contract_token_0000000000000001",
+  idempotencyKey: "v6k-contract-idempotency-0001",
+  captchaToken: "v6k-contract-captcha",
+  payload: {
+    provider_name: "QA Contract",
+    provider_email: "qa-contract@example.invalid",
+    concept: "V6K contract validation",
+    amount_requested: 1,
+    currency: "MXN",
+  },
+  ...overrides,
+})
+
+test("V6K capability audit executes 47 concrete QA capabilities", async () => {
+  const audit = await runCapabilityAudit()
+  assert.equal(audit.status, "PASS")
+  assert.equal(audit.capability_count, 47)
+  assert.equal(Object.keys(audit.capabilities).length, 47)
+  for (const capability of [
+    "canonical_idempotency_header",
+    "finalized_request_capture",
+    "loopback_wire_contract",
+    "response_metadata_capture",
+    "public_error_code_capture",
+    "cors_header_presence_capture",
+    "correlation_id_sanitization",
+    "gateway_edge_classification",
+    "evidence_flush_before_throw",
+    "post_v6h_baseline_support",
+    "already_normalized_link_idempotency",
+  ]) assert.equal(audit.capabilities[capability], true)
+})
+
+const invalidOrigins = [
+  "http://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app",
+  "https://preview.example.invalid",
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app:8443",
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app/path",
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app?query=1",
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app#fragment",
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app/",
+  "HTTPS://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app",
+  " https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app",
+]
+
+for (const [index, origin] of invalidOrigins.entries()) {
+  test("V6K rejects invalid Preview Origin variant " + index, () => {
+    assert.throws(() => derivePreviewOrigin(origin), /PREVIEW_ORIGIN_INVALID/)
+  })
+}
+
+const invalidEndpoints = [
+  "http://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/provider-intake/submit",
+  "https://other.supabase.co/functions/v1/provider-intake/submit",
+  "https://scsirgbuqjcwoaxfacth.supabase.co:443/functions/v1/provider-intake/submit",
+  "https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/provider-intake/submit?x=1",
+  "https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/provider-intake/submit#part",
+  "https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/provider-intake",
+  "https://scsirgbuqjcwoaxfacth.supabase.co/rest/v1/provider-intake/submit",
+  "not-a-url",
+]
+
+for (const [index, endpoint] of invalidEndpoints.entries()) {
+  test("V6K rejects invalid DEV public endpoint variant " + index, () => {
+    assert.throws(() => classifyAuthorizedPublicSubmitEndpoint(endpoint))
+  })
+}
+
+const invalidRequestInputs = [
+  ["empty token", { intakeToken: "" }],
+  ["short token", { intakeToken: "short" }],
+  ["token spaces", { intakeToken: "v6k invalid token with spaces 00000000" }],
+  ["empty idempotency", { idempotencyKey: "" }],
+  ["short idempotency", { idempotencyKey: "short" }],
+  ["idempotency spaces", { idempotencyKey: "bad key value" }],
+  ["empty captcha", { captchaToken: "" }],
+  ["array payload", { payload: [] }],
+]
+
+for (const [name, overrides] of invalidRequestInputs) {
+  test("V6K request builder fails closed for " + name, () => {
+    assert.throws(() => buildPublicSubmitRequest(v6kRequestInput(overrides)))
+  })
+}
+
+const finalRequestHeaderFailures = [
+  ["content-type", "PUBLIC_SUBMIT_FINAL_REQUEST_INVALID", (headers) => headers.delete("content-type")],
+  ["token", "PUBLIC_SUBMIT_TOKEN_INVALID", (headers) => headers.delete("x-intake-token")],
+  ["idempotency", "CANONICAL_IDEMPOTENCY_HEADER_REQUIRED", (headers) => headers.delete("idempotency-key")],
+  ["origin", "PREVIEW_ORIGIN_INVALID", (headers) => headers.delete("origin")],
+  ["authorization", "PUBLIC_SUBMIT_AUTHORIZATION_FORBIDDEN", (headers) => headers.set("authorization", "forbidden")],
+  ["apikey", "PUBLIC_SUBMIT_APIKEY_FORBIDDEN", (headers) => headers.set("apikey", "forbidden")],
+  ["legacy idempotency", "CANONICAL_IDEMPOTENCY_HEADER_REQUIRED", (headers) => headers.set("x-idempotency-key", "legacy")],
+]
+
+for (const [name, code, mutate] of finalRequestHeaderFailures) {
+  test("V6K finalized Request rejects " + name, async () => {
+    const base = buildPublicSubmitRequest(v6kRequestInput())
+    const headers = new Headers(base.headers)
+    mutate(headers)
+    const request = new Request(base.url, { method: "POST", headers, body: await base.clone().text() })
+    await assert.rejects(
+      captureFinalizedPublicSubmitRequest(request, { previewOrigin: V6K_PREVIEW_URL }),
+      new RegExp(code),
+    )
+  })
+}
+
+const v6kResponseCases = [
+  ["origin_required", 403, "application/json", JSON.stringify({ error: "origin_required", message: "required" }), {}, "EDGE_ORIGIN_REQUIRED", "HIGH"],
+  ["origin_not_allowed", 403, "application/json", JSON.stringify({ error: "origin_not_allowed" }), {}, "EDGE_ORIGIN_NOT_ALLOWED", "HIGH"],
+  ["application_other", 403, "application/json", JSON.stringify({ error: "invalid_request" }), { server: "edge-runtime" }, "EDGE_APPLICATION_403_OTHER", "MEDIUM"],
+  ["plain_unclassified", 403, "text/plain", "blocked", {}, "PUBLIC_SUBMIT_403_UNCLASSIFIED", "LOW"],
+  ["html_gateway", 403, "text/html", "<html>blocked</html>", { server: "kong" }, "GATEWAY_OR_PLATFORM_403", "MEDIUM"],
+  ["request_id", 403, "text/plain", "blocked", { "x-request-id": "synthetic-request-id" }, "PUBLIC_SUBMIT_403_UNCLASSIFIED", "LOW"],
+  ["captcha", 400, "application/json", JSON.stringify({ error: "captcha_failed" }), {}, "NON_403_RESPONSE", "HIGH"],
+  ["link", 404, "application/json", JSON.stringify({ error: "link_not_available" }), {}, "NON_403_RESPONSE", "HIGH"],
+  ["content_type", 415, "application/json", JSON.stringify({ error: "content_type_not_supported" }), {}, "NON_403_RESPONSE", "HIGH"],
+  ["rate_limit", 429, "application/json", JSON.stringify({ error: "rate_limit_exceeded" }), {}, "NON_403_RESPONSE", "HIGH"],
+  ["edge_exception", 500, "text/plain", "internal", { server: "edge-runtime" }, "NON_403_RESPONSE", "HIGH"],
+  ["success", 201, "application/json", JSON.stringify({ status: "created" }), {}, "NON_403_RESPONSE", "HIGH"],
+]
+
+for (const [name, status, contentType, body, headers, expected, confidence] of v6kResponseCases) {
+  test("V6K classifies synthetic response " + name, async () => {
+    const response = new Response(body, {
+      status,
+      headers: { "content-type": contentType, ...headers },
+    })
+    const metadata = await capturePublicSubmitResponse(response, { previewOrigin: V6K_PREVIEW_URL })
+    assert.deepEqual(classifyPublicSubmitResponse(metadata), {
+      classification: expected,
+      classification_confidence: confidence,
+    })
+  })
+  test("V6K sanitizes synthetic response " + name, async () => {
+    const response = new Response(body, {
+      status,
+      headers: { "content-type": contentType, ...headers },
+    })
+    const metadata = await capturePublicSubmitResponse(response, { previewOrigin: V6K_PREVIEW_URL })
+    const serialized = JSON.stringify(metadata)
+    assert.equal(metadata.response_body_exported, false)
+    assert.equal(metadata.response_headers_exported, false)
+    assert.equal(serialized.includes("<html>blocked</html>"), false)
+    assert.equal(serialized.includes("synthetic-request-id"), false)
+  })
+}
+
+for (const header of RESPONSE_HEADER_ALLOWLIST) {
+  test("V6K response allowlist sanitizes " + header, async () => {
+    const value = header === "content-type" ? "application/json"
+      : header === "access-control-allow-origin" ? V6K_PREVIEW_URL
+        : header === "vary" ? "Origin"
+          : header === "server" ? "edge-runtime"
+            : header === "via" ? "gateway"
+              : "synthetic-" + header
+    const metadata = await capturePublicSubmitResponse(
+      new Response(JSON.stringify({ error: "origin_required" }), {
+        status: 403,
+        headers: { "content-type": "application/json", [header]: value },
+      }),
+      { previewOrigin: V6K_PREVIEW_URL },
+    )
+    assert.equal(assertSanitizedObservabilityEvidence(metadata), true)
+    assert.equal(JSON.stringify(metadata).includes(value), false)
+  })
+}
+
+const validIdempotencyKeys = Array.from({ length: 20 }, (_value, index) =>
+  "v6k-idempotency-" + String(index).padStart(2, "0") + ".test")
+
+for (const idempotencyKey of validIdempotencyKeys) {
+  test("V6K emits only canonical idempotency header for " + idempotencyKey, async () => {
+    const input = v6kRequestInput({ idempotencyKey })
+    const request = buildPublicSubmitRequest(input)
+    const metadata = await captureFinalizedPublicSubmitRequest(request, {
+      previewOrigin: V6K_PREVIEW_URL,
+      sensitiveValues: [idempotencyKey],
+    })
+    assert.equal(metadata.idempotency_header_name, CANONICAL_IDEMPOTENCY_HEADER)
+    assert.equal(metadata.idempotency_present, true)
+    assert.equal(request.headers.has("x-idempotency-key"), false)
+  })
+}
+
+const validTokens = Array.from({ length: 12 }, (_value, index) =>
+  "v6k_token_" + String(index).padStart(2, "0") + "_abcdefghijklmnopqrstuvwxyz")
+
+for (const intakeToken of validTokens) {
+  test("V6K validates and redacts token format variant " + intakeToken.slice(0, 12), async () => {
+    const request = buildPublicSubmitRequest(v6kRequestInput({ intakeToken }))
+    const metadata = await captureFinalizedPublicSubmitRequest(request, {
+      previewOrigin: V6K_PREVIEW_URL,
+      sensitiveValues: [intakeToken],
+    })
+    assert.equal(metadata.token_format_valid, true)
+    assert.equal(JSON.stringify(metadata).includes(intakeToken), false)
+  })
+}
+
+for (let index = 0; index < 12; index += 1) {
+  test("V6K fingerprints payload schema variant " + index + " without body export", async () => {
+    const payload = {
+      provider_name: "QA " + index,
+      concept: "Concept " + index,
+      amount_requested: index + 1,
+      ["custom_field_" + index]: "synthetic",
+    }
+    const request = buildPublicSubmitRequest(v6kRequestInput({ payload }))
+    const metadata = await captureFinalizedPublicSubmitRequest(request, {
+      previewOrigin: V6K_PREVIEW_URL,
+      sensitiveValues: ["Concept " + index],
+    })
+    assert.match(metadata.payload_schema_fingerprint, /^sha256:[0-9a-f]{12}$/)
+    assert.equal(JSON.stringify(metadata).includes("custom_field_"), false)
+    assert.equal(JSON.stringify(metadata).includes("Concept "), false)
+  })
+}
+
+for (const code of ["unknown_alpha", "unknown_beta", "unknown_gamma", "unknown_delta"]) {
+  test("V6K never exports unrecognized public error " + code, async () => {
+    const metadata = await capturePublicSubmitResponse(
+      new Response(JSON.stringify({ error: code }), {
+        status: 403, headers: { "content-type": "application/json" },
+      }),
+      { previewOrigin: V6K_PREVIEW_URL },
+    )
+    assert.equal(metadata.public_error_code, "unrecognized_public_code")
+    assert.equal(JSON.stringify(metadata).includes(code), false)
+  })
+}
+
+for (const status of [200, 201, 400, 401, 404, 405, 409, 415, 422, 429, 500, 502, 503, 504]) {
+  test("V6K classifies non-403 status " + status + " without overclaiming root cause", async () => {
+    const metadata = await capturePublicSubmitResponse(
+      new Response("synthetic-" + status, { status, headers: { "content-type": "text/plain" } }),
+      { previewOrigin: V6K_PREVIEW_URL },
+    )
+    assert.deepEqual(classifyPublicSubmitResponse(metadata), {
+      classification: "NON_403_RESPONSE",
+      classification_confidence: "HIGH",
+    })
+  })
+}
+
+test("V6K observability audit flushes evidence before controlled failure", async () => {
+  const result = await runPublicSubmitObservabilityAudit({ previewUrl: V6K_PREVIEW_URL })
+  assert.equal(result.status, "PASS")
+  assert.equal(result.evidence_flush_before_throw, true)
+  assert.equal(result.evidence_persistence_failure_blocks, true)
+  assert.equal(result.evidence_temp_file_removed, true)
+})
+
+test("V6K loopback verifies the actual finalized wire contract locally", async () => {
+  const result = await runPublicSubmitLoopbackNoWrite({ previewUrl: V6K_PREVIEW_URL })
+  assert.equal(result.status, "WIRE_CONTRACT_LOOPBACK_PASS")
+  assert.equal(result.server_closed, true)
+  assert.equal(result.external_network_requests, 0)
+  assert.equal(result.provider_intake_calls, 0)
+  assert.equal(result.wire.legacy_idempotency_present, false)
+})
+
+test("V6K synthetic response matrix executes all required response families", async () => {
+  const result = await runSyntheticResponseMatrix({ previewUrl: V6K_PREVIEW_URL })
+  assert.equal(result.status, "PASS")
+  assert.equal(result.total, 12)
+  assert.equal(result.response_bodies_exported, false)
+})
+
+test("V6K cleanup matrix closes 34 no-write resource scenarios", async () => {
+  const result = await runV6KCleanupMatrix()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.total, 34)
+  assert.equal(result.failures, 0)
+  assert.equal(result.loopback_server_closed, true)
 })

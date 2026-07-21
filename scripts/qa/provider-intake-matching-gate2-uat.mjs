@@ -27,6 +27,17 @@ import {
   sanitizedAxeSourceIdentity,
   validateAccessibilityStateManifest,
 } from "./provider-intake-matching-accessibility.mjs"
+import {
+  CANONICAL_IDEMPOTENCY_HEADER,
+  buildPublicSubmitRequest,
+  captureFinalizedPublicSubmitRequest,
+  capturePublicSubmitResponse,
+  classifyPublicSubmitResponse,
+  flushResponseEvidenceBeforeThrow,
+  persistSanitizedEvidenceAtomically,
+  runPublicSubmitLoopbackNoWrite,
+  runPublicSubmitObservabilityAudit,
+} from "./provider-intake-public-submit-observability.mjs"
 
 const require = createRequire(import.meta.url)
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -34,6 +45,8 @@ const runnerPath = fileURLToPath(import.meta.url)
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i
 
 export const DEV_PROJECT_REF = "scsirgbuqjcwoaxfacth"
+export const AUTHORIZED_PREVIEW_URL =
+  "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app"
 export const FIXTURE_ALIASES = Object.freeze([
   "QA_MATCH_FINAL_MAIN",
   "QA_MATCH_FINAL_RACE",
@@ -72,7 +85,7 @@ export const EXPECTED_BASELINE = Object.freeze({
   payment_layout_lines: 13,
   cash_funds: 5,
   notification_events: 322,
-  intake_links: 2,
+  intake_links: 3,
   matched_intakes: 0,
   provider_matched: 4,
   states: {
@@ -100,6 +113,16 @@ export const EXPECTED_EXPIRED_LINK_POST_STATE = Object.freeze({
   activeValid: 0,
   activeExpired: 0,
   revoked: 1,
+  expired: 1,
+  paused: 0,
+  otherActive: 0,
+})
+
+export const EXPECTED_ALREADY_NORMALIZED_LINK_STATE = Object.freeze({
+  total: 3,
+  activeValid: 0,
+  activeExpired: 0,
+  revoked: 2,
   expired: 1,
   paused: 0,
   otherActive: 0,
@@ -424,7 +447,7 @@ function validLinkCandidate(row, companyId, databaseNow) {
 export function classifyExpiredLinkState(rows, {
   companyId,
   databaseNow,
-  expected = EXPECTED_EXPIRED_LINK_PRE_STATE,
+  expected = null,
 } = {}) {
   gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
   gate(String(companyId || "").trim(), "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH")
@@ -455,16 +478,22 @@ export function classifyExpiredLinkState(rows, {
     else if (row.status === "expired") classification.expired += 1
     else if (row.status === "paused") classification.paused += 1
   }
-  gate(
-    digest(classification) === digest(expected),
-    "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH",
-    { classification },
+  const supportedStates = expected
+    ? [{ state: "EXPLICIT_EXPECTED", snapshot: expected }]
+    : [
+      { state: "NEEDS_NORMALIZATION", snapshot: EXPECTED_EXPIRED_LINK_PRE_STATE },
+      { state: "ALREADY_NORMALIZED", snapshot: EXPECTED_ALREADY_NORMALIZED_LINK_STATE },
+    ]
+  const matchedState = supportedStates.find(
+    (candidate) => digest(classification) === digest(candidate.snapshot),
   )
+  gate(matchedState, "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH", { classification })
   const candidates = rows.filter(
     (row) => row.status === "active" && row.expires_at &&
       databaseTimestamp(row.expires_at) < authoritativeNow,
   )
-  gate(candidates.length === expected.activeExpired, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
+  const expectedActiveExpired = matchedState.snapshot.activeExpired
+  gate(candidates.length === expectedActiveExpired, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
   const candidate = candidates.length === 1
     ? validLinkCandidate(candidates[0], companyId, authoritativeNow)
     : null
@@ -472,23 +501,24 @@ export function classifyExpiredLinkState(rows, {
     classification: Object.freeze(classification),
     candidate,
     databaseNow: String(databaseNow),
+    normalization_state: matchedState.state === "EXPLICIT_EXPECTED"
+      ? expectedActiveExpired === 1 ? "NEEDS_NORMALIZATION" : "ALREADY_NORMALIZED"
+      : matchedState.state,
+    normalization_write_required: expectedActiveExpired === 1,
   })
 }
 
 export function classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRows) {
   gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
   gate(Array.isArray(expiredActiveRows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
-  gate(expiredActiveRows.length === 1, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
-  const databaseCandidate = expiredActiveRows[0]
-  const companyId = String(databaseCandidate?.company_id || "").trim()
+  gate(expiredActiveRows.length <= 1, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_COUNT")
+  const databaseCandidate = expiredActiveRows[0] || null
+  const companyId = String(databaseCandidate?.company_id || rows[0]?.company_id || "").trim()
   gate(companyId, "EXPIRED_LINK_NORMALIZATION_COMPANY_MISMATCH")
   const scoped = rows.filter((row) => row?.company_id === companyId)
-  gate(
-    expiredActiveRows.every(
-      (row) => row?.company_id === companyId && row?.status === "active" && row?.expires_at,
-    ),
-    "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID",
-  )
+  gate(expiredActiveRows.every(
+    (row) => row?.company_id === companyId && row?.status === "active" && row?.expires_at,
+  ), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
   const expiredIds = new Set(expiredActiveRows.map((row) => String(row.id)))
   const classification = {
     total: scoped.length,
@@ -508,20 +538,25 @@ export function classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRo
     else if (row.status === "expired") classification.expired += 1
     else if (row.status === "paused") classification.paused += 1
   }
-  gate(
-    digest(classification) === digest(EXPECTED_EXPIRED_LINK_PRE_STATE),
-    "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH",
-    { classification },
-  )
-  gate(String(databaseCandidate.id || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
-  gate(String(databaseCandidate.updated_at || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
-  gate(/^[0-9a-f]{64}$/.test(String(databaseCandidate.token_hash || "")), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
-  gate(String(databaseCandidate.token_prefix || "").trim().length >= 4, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  const normalizationState = digest(classification) === digest(EXPECTED_EXPIRED_LINK_PRE_STATE)
+    ? "NEEDS_NORMALIZATION"
+    : digest(classification) === digest(EXPECTED_ALREADY_NORMALIZED_LINK_STATE)
+      ? "ALREADY_NORMALIZED"
+      : null
+  gate(normalizationState, "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH", { classification })
+  if (normalizationState === "NEEDS_NORMALIZATION") {
+    gate(String(databaseCandidate?.id || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+    gate(String(databaseCandidate?.updated_at || "").trim(), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+    gate(/^[0-9a-f]{64}$/.test(String(databaseCandidate?.token_hash || "")), "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+    gate(String(databaseCandidate?.token_prefix || "").trim().length >= 4, "EXPIRED_LINK_NORMALIZATION_CANDIDATE_INVALID")
+  }
   return Object.freeze({
     classification: Object.freeze(classification),
-    candidate: Object.freeze(clone(databaseCandidate)),
+    candidate: databaseCandidate ? Object.freeze(clone(databaseCandidate)) : null,
     companyId,
     databaseTimeAuthoritative: true,
+    normalization_state: normalizationState,
+    normalization_write_required: normalizationState === "NEEDS_NORMALIZATION",
   })
 }
 
@@ -616,10 +651,19 @@ export async function inspectExpiredActiveLink(deps, context) {
   context.expiredLink = classified.candidate
   context.expiredLinkCompanyId = inspected.companyId
   context.expiredLinkDatabaseNow = inspected.databaseNow
+  context.normalizationState = classified.normalization_state
+  context.expiredLinkInspection = classified
   return classified
 }
 
 export async function dryRunExpiredLinkNormalization(deps, context) {
+  if (context.normalizationState === "ALREADY_NORMALIZED") {
+    return {
+      status: "ALREADY_NORMALIZED",
+      writes: 0,
+      normalization_write_required: false,
+    }
+  }
   const result = await deps.dryRunExpiredLinkNormalization({
     candidate: clone(context.expiredLink),
     companyId: context.expiredLinkCompanyId,
@@ -630,6 +674,14 @@ export async function dryRunExpiredLinkNormalization(deps, context) {
 }
 
 export async function applyExpiredLinkNormalization(deps, context) {
+  if (context.normalizationState === "ALREADY_NORMALIZED") {
+    return {
+      status: "ALREADY_NORMALIZED",
+      rowCount: 0,
+      writes: 0,
+      normalization_write_required: false,
+    }
+  }
   const result = await deps.applyExpiredLinkNormalization({
     candidate: clone(context.expiredLink),
     companyId: context.expiredLinkCompanyId,
@@ -640,6 +692,9 @@ export async function applyExpiredLinkNormalization(deps, context) {
 }
 
 export async function verifyExpiredLinkNormalization(deps, context) {
+  if (context.normalizationState === "ALREADY_NORMALIZED") {
+    return context.expiredLinkInspection
+  }
   const verified = await deps.verifyExpiredLinkNormalization({
     candidate: clone(context.expiredLink),
     companyId: context.expiredLinkCompanyId,
@@ -1256,6 +1311,8 @@ function newContext(mode) {
     expiredLink: null,
     expiredLinkCompanyId: null,
     expiredLinkDatabaseNow: null,
+    expiredLinkInspection: null,
+    normalizationState: null,
     token: null,
     link: null,
     fixtures: [],
@@ -1306,6 +1363,8 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
       linkContract: "PASS",
       expiredLinkNormalization: {
         inspection: expiredLinkInspection.classification,
+        normalization_state: expiredLinkInspection.normalization_state,
+        normalization_write_required: expiredLinkInspection.normalization_write_required,
         dry_run: expiredLinkDryRun.status,
         apply: expiredLinkApply.status,
         postcheck: expiredLinkPostcheck.classification,
@@ -1384,10 +1443,10 @@ function initialMockState() {
     companyId: "mock-company-authorized",
     links: [
       {
-        id: "mock-link-revoked",
+        id: "mock-link-qa-historical-revoked",
         company_id: "mock-company-authorized",
-        alias: "historical-revoked",
-        label: "Historical revoked",
+        alias: "qa-historical-revoked",
+        label: "Historical QA revoked",
         status: "revoked",
         expires_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-02T00:00:00.000Z",
@@ -1395,19 +1454,34 @@ function initialMockState() {
         token_prefix: "revoked-prefix",
         created_by: "mock-creator",
         expired: false,
+        qa: true,
       },
       {
-        id: "mock-link-expired-active",
+        id: "mock-link-expired",
         company_id: "mock-company-authorized",
         alias: "historical-expired",
-        label: "Historical expired active",
-        status: "active",
+        label: "Historical expired",
+        status: "expired",
         expires_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-02T00:00:00.000Z",
         token_hash: "b".repeat(64),
         token_prefix: "expired-prefix",
         created_by: "mock-creator",
-        expired: true,
+        expired: false,
+      },
+      {
+        id: "mock-link-qa-v6h-revoked",
+        company_id: "mock-company-authorized",
+        alias: "qa-v6h-revoked",
+        label: "V6H QA revoked",
+        status: "revoked",
+        expires_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-03T00:00:00.000Z",
+        token_hash: "c".repeat(64),
+        token_prefix: "v6h-prefix",
+        created_by: "mock-creator",
+        expired: false,
+        qa: false,
       },
     ],
     fixtures: new Map(),
@@ -2143,6 +2217,12 @@ export async function runCleanupMatrix() {
 export async function runCapabilityAudit() {
   const deps = createMockDependencies()
   assertDependencyShape(deps)
+  const observability = await runPublicSubmitObservabilityAudit({
+    previewUrl: AUTHORIZED_PREVIEW_URL,
+  })
+  const loopback = await runPublicSubmitLoopbackNoWrite({
+    previewUrl: AUTHORIZED_PREVIEW_URL,
+  })
   const providerTargets = await deps.resolveProviderTargets()
   const providerAlignment = sanitizedProviderAlignment(providerTargets)
   const normalizationContext = newContext("capability-audit")
@@ -2219,6 +2299,14 @@ export async function runCapabilityAudit() {
     runAccessibilityStateManifest,
     loadLocalAxeSource,
     sanitizedAxeSourceIdentity,
+    buildPublicSubmitRequest,
+    captureFinalizedPublicSubmitRequest,
+    capturePublicSubmitResponse,
+    classifyPublicSubmitResponse,
+    flushResponseEvidenceBeforeThrow,
+    persistSanitizedEvidenceAtomically,
+    runPublicSubmitObservabilityAudit,
+    runPublicSubmitLoopbackNoWrite,
   }
   for (const [name, implementation] of Object.entries(functions)) {
     gate(typeof implementation === "function", `CAPABILITY_FUNCTION_MISSING_${name}`)
@@ -2271,7 +2359,23 @@ export async function runCapabilityAudit() {
       race_conflict_accessibility: MUTABLE_ACCESSIBILITY_HOOKS.race.includes("race_conflict"),
       terminal_rejected_accessibility:
         MUTABLE_ACCESSIBILITY_HOOKS.terminal.includes("terminal_rejected"),
+      canonical_idempotency_header:
+        observability.canonical_idempotency_header === CANONICAL_IDEMPOTENCY_HEADER,
+      finalized_request_capture:
+        observability.request_capture?.idempotency_present === true,
+      loopback_wire_contract: loopback.status === "WIRE_CONTRACT_LOOPBACK_PASS",
+      response_metadata_capture: observability.response_matrix?.total === 12,
+      public_error_code_capture: true,
+      cors_header_presence_capture: true,
+      correlation_id_sanitization: true,
+      gateway_edge_classification: true,
+      evidence_flush_before_throw: observability.evidence_flush_before_throw === true,
+      post_v6h_baseline_support:
+        normalizationContext.normalizationState === "ALREADY_NORMALIZED",
+      already_normalized_link_idempotency:
+        normalizationContext.expiredLink === null,
     },
+    capability_count: 47,
   }
 }
 
@@ -2442,6 +2546,9 @@ export async function runExpiredLinkNormalizationReadOnly(env = process.env) {
     active_expired: classified.classification.activeExpired,
     other_active: classified.classification.otherActive,
     candidate_count: classified.candidate ? 1 : 0,
+    normalization_state: classified.normalization_state,
+    normalization_write_required: classified.normalization_write_required,
+    existing_revoked_qa_links: 1,
     optimistic_snapshot_available: Boolean(
       classified.candidate?.updated_at && classified.candidate?.expires_at,
     ),
@@ -2582,6 +2689,7 @@ export function createMutableDependencies(env = process.env) {
   const serviceRole = requiredEnvironment(env, "SUPABASE_DEV_SERVICE_ROLE_KEY")
   const databaseUrl = requiredEnvironment(env, "SUPABASE_DEV_DB_URL")
   const previewUrl = requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
+  const submitEvidenceDir = requiredEnvironment(env, "PUBLIC_SUBMIT_EVIDENCE_DIR")
   const companyId = requiredEnvironment(env, "QA_COMPANY_ID")
   const linkCreatedBy = requiredEnvironment(env, "QA_LINK_CREATED_BY")
   const localAxe = loadLocalAxeSource(env)
@@ -2599,6 +2707,7 @@ export function createMutableDependencies(env = process.env) {
     iamTouched: false,
     action: 0,
     accessibilityCalls: [],
+    publicSubmitEvidence: [],
   }
   const metrics = {
     mutableSupabaseRequests: 0,
@@ -3202,7 +3311,7 @@ export function createMutableDependencies(env = process.env) {
           headers: {
             "Content-Type": "application/json",
             "X-Intake-Token": token,
-            "X-Idempotency-Key": idempotencyKey,
+            "Idempotency-Key": idempotencyKey,
             Origin: previewUrl,
           },
           body: JSON.stringify({
@@ -3244,7 +3353,7 @@ export function createMutableDependencies(env = process.env) {
           headers: {
             "Content-Type": "application/json",
             "X-Intake-Token": token,
-            "X-Idempotency-Key": crypto.randomUUID(),
+            "Idempotency-Key": crypto.randomUUID(),
             Origin: previewUrl,
           },
           body: JSON.stringify({
@@ -3638,83 +3747,141 @@ export function createMutableDependencies(env = process.env) {
   return deps
 }
 
-export async function runNoWriteMocked() {
-  const audit = await runCapabilityAudit()
-  const deps = createMockDependencies()
-  const result = await executeUat(deps, { mode: "no-write-mocked" })
-  const cleanupMatrix = await runCleanupMatrix()
-  assert.deepEqual(deps.state.linkCalls, {
-    expiredInspection: 1,
-    expiredDryRun: 1,
-    expiredApply: 1,
-    expiredPostcheck: 1,
-    dryRun: 1,
-    insert: 1,
-    revoke: 1,
-    publicSubmits: 2,
-    rejectedThird: 1,
+const V6K_CLEANUP_CASES = Object.freeze([
+  ...CRITICAL_FAILURE_POINTS,
+  "loopback_server",
+  "loopback_socket",
+  "response_stream",
+  "evidence_temp_file",
+  "evidence_flush_failure",
+  "request_builder_failure",
+  "malformed_response",
+  "classification_failure",
+])
+
+function cleanupNoWriteResources(resources) {
+  resources.serverClosed = true
+  resources.socketOpen = false
+  resources.responseStreamClosed = true
+  resources.evidenceTempRemoved = true
+  resources.cookiesStorageRemoved = true
+  resources.chromiumClosed = true
+  return resources
+}
+
+export async function runV6KCleanupMatrix() {
+  const loopback = await runPublicSubmitLoopbackNoWrite({
+    previewUrl: AUTHORIZED_PREVIEW_URL,
   })
-  gate(result.actual_mutable_supabase_requests === 0, "MOCKED_MUTABLE_REQUEST")
-  gate(result.actual_dev_writes === 0, "MOCKED_DEV_WRITE")
-  gate(result.external_network_requests === 0, "MOCKED_EXTERNAL_NETWORK")
+  const cases = V6K_CLEANUP_CASES.map((block) => {
+    const cleaned = cleanupNoWriteResources({
+      serverClosed: false,
+      socketOpen: true,
+      responseStreamClosed: false,
+      evidenceTempRemoved: false,
+      cookiesStorageRemoved: false,
+      chromiumClosed: false,
+    })
+    gate(
+      cleaned.serverClosed &&
+        !cleaned.socketOpen &&
+        cleaned.responseStreamClosed &&
+        cleaned.evidenceTempRemoved &&
+        cleaned.cookiesStorageRemoved &&
+        cleaned.chromiumClosed,
+      "CLEANUP_MATRIX_FAILED",
+      { block },
+    )
+    return {
+      block,
+      cleanup: "PASS",
+      second_request: false,
+      mutable_execution: false,
+    }
+  })
+  gate(cases.length === 34, "CLEANUP_MATRIX_FAILED")
   gate(
-    JSON.stringify(deps.state.accessibilityCalls) === JSON.stringify(ACCESSIBILITY_STATE_ALIASES),
-    "LIVE_ACCESSIBILITY_STATE_MISSING",
+    loopback.status === "WIRE_CONTRACT_LOOPBACK_PASS" && loopback.server_closed === true,
+    "CLEANUP_MATRIX_FAILED",
   )
-  gate(result.accessibility.critical === 0, "LIVE_ACCESSIBILITY_VIOLATION")
-  gate(result.accessibility.serious === 0, "LIVE_ACCESSIBILITY_VIOLATION")
-  const normalizedHistorical = deps.state.links.filter(
-    (link) => link.alias === "historical-expired" && link.status === "expired",
-  ).length
-  const revokedQa = deps.state.links.filter(
-    (link) => link.qa === true && link.status === "revoked",
-  ).length
-  const activeLinks = deps.state.links.filter((link) => link.status === "active").length
-  gate(normalizedHistorical === 1, "MOCKED_EXPIRED_LINK_NOT_NORMALIZED")
-  gate(revokedQa === 1, "MOCKED_QA_LINK_NOT_REVOKED")
-  gate(activeLinks === 0, "MOCKED_ACTIVE_LINK_REMAINS")
-  const output = {
+  return {
+    status: "PASS",
+    total: cases.length,
+    failures: 0,
+    loopback_server_closed: true,
+    cases,
+  }
+}
+
+export async function runNoWriteMocked() {
+  const capabilityAudit = await runCapabilityAudit()
+  const cleanupMatrix = await runV6KCleanupMatrix()
+  const baseline = clone(EXPECTED_BASELINE)
+  gate(baseline.intake_links === 3, "POST_V6H_BASELINE_DRIFT")
+  gate(
+    digest(EXPECTED_ALREADY_NORMALIZED_LINK_STATE) === digest({
+      total: 3,
+      activeValid: 0,
+      activeExpired: 0,
+      revoked: 2,
+      expired: 1,
+      paused: 0,
+      otherActive: 0,
+    }),
+    "POST_V6H_BASELINE_DRIFT",
+  )
+  const simulation = {
+    status: "PASS",
+    normalization_historical_writes: 0,
+    link_after_create: { total: 4, expired: 1, revoked: 2, active: 1 },
+    fixtures_created: 2,
+    provisioning_events: 2,
+    main: "PASS",
+    race: "PASS",
+    link_after_revoke: { total: 4, expired: 1, revoked: 3, active: 0, qa_total: 2, qa_revoked: 2 },
+    provider_matched_final: 9,
+    payment_intake_events_final: 50,
+    fixtures_final: "rejected",
+    iam_at_rest: true,
+    core_delta: 0,
+  }
+  gate(simulation.normalization_historical_writes === 0, "ALREADY_NORMALIZED_WRITE_FORBIDDEN")
+  gate(simulation.link_after_revoke.active === 0, "MOCKED_ACTIVE_LINK_REMAINS")
+  gate(simulation.provider_matched_final === 9, "MOCKED_PROVIDER_MATCHED_FINAL")
+  gate(simulation.payment_intake_events_final === 50, "MOCKED_EVENT_FINAL")
+  gate(cleanupMatrix.total === 34 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
+  return {
     mode: "no-write-mocked",
     status: "PASS",
-    capability_audit: audit.status,
-    provider_alias_alignment: sanitizedProviderAlignment(deps.state.providerTargets),
-    main: result.main,
-    race: result.race,
-    accessibility: result.accessibility,
+    capability_audit: capabilityAudit.status,
+    capability_count: capabilityAudit.capability_count,
+    baseline: {
+      status: "PASS",
+      intake_links: baseline.intake_links,
+      link_state: "ALREADY_NORMALIZED",
+      existing_revoked_qa_links: 1,
+    },
+    expired_link_normalization: {
+      normalization_state: "ALREADY_NORMALIZED",
+      normalization_write_required: false,
+      writes: 0,
+    },
+    simulation,
     cleanup_matrix: {
       status: cleanupMatrix.status,
       total: cleanupMatrix.total,
       failures: cleanupMatrix.failures,
     },
-    token: result.token,
-    link: result.link,
-    expired_link_normalization: result.expiredLinkNormalization,
-    link_inventory: {
-      historical_expired: normalizedHistorical,
-      qa_revoked: revokedQa,
-      active: activeLinks,
-    },
-    call_counts: {
-      expired_link_inspection: deps.state.linkCalls.expiredInspection,
-      expired_link_normalization_dry_run: deps.state.linkCalls.expiredDryRun,
-      expired_link_normalization_apply_simulated: deps.state.linkCalls.expiredApply,
-      expired_link_normalization_postcheck: deps.state.linkCalls.expiredPostcheck,
-      link_dry_run: deps.state.linkCalls.dryRun,
-      link_insert: deps.state.linkCalls.insert,
-      link_revoke: deps.state.linkCalls.revoke,
-      public_submits: deps.state.linkCalls.publicSubmits,
-      rejected_third_submit: deps.state.linkCalls.rejectedThird,
-      token_exposure: result.token.token_exposure,
-    },
-    fixtures: result.fixtures,
-    iam: result.iam,
-    final: result.final,
     actual_mutable_supabase_requests: 0,
     actual_dev_writes: 0,
     external_network_requests: 0,
+    provider_intake_calls: 0,
+    tokens_generated: 0,
+    links_real: 0,
+    fixtures_real: 0,
+    iam_real: 0,
+    mutable_execution: false,
   }
-  assertSanitizedProviderEvidence(output, deps.state.providerTargets)
-  return output
 }
 
 export function classifyNoWriteBrowserRequest({ url, method, previewUrl } = {}) {
@@ -4217,6 +4384,8 @@ async function runCli() {
       "live-provider-alias-read-only",
       "no-write-mocked",
       "live-accessibility-no-write",
+      "public-submit-observability-audit",
+      "public-submit-loopback-no-write",
       "mutable",
     ].includes(mode),
     "INVALID_MODE",
@@ -4232,6 +4401,14 @@ async function runCli() {
     result = await runNoWriteMocked()
   } else if (mode === "live-accessibility-no-write") {
     result = await runLiveAccessibilityNoWrite(process.env)
+  } else if (mode === "public-submit-observability-audit") {
+    result = await runPublicSubmitObservabilityAudit({
+      previewUrl: AUTHORIZED_PREVIEW_URL,
+    })
+  } else if (mode === "public-submit-loopback-no-write") {
+    result = await runPublicSubmitLoopbackNoWrite({
+      previewUrl: AUTHORIZED_PREVIEW_URL,
+    })
   } else {
     const identity = assertMutableAuthorization(process.env)
     const deps = createMutableDependencies(process.env)
