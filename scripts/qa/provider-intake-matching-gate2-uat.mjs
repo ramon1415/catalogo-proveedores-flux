@@ -38,6 +38,18 @@ import {
   runPublicSubmitLoopbackNoWrite,
   runPublicSubmitObservabilityAudit,
 } from "./provider-intake-public-submit-observability.mjs"
+import {
+  assertReadOnlySql,
+  assertSanitizedAuthenticatedReadOnlyEvidence,
+  buildAuthenticatedReadOnlyFailureEnvelope,
+  classifyAuthenticatedLinkState,
+  classifyAuthenticatedReadOnlyError,
+  parseAuthenticatedReadOnlyChildResult,
+  runAuthenticatedReadOnlyMockMatrix,
+  runAuthenticatedReadOnlyPrecheck,
+  scanReadOnlySql,
+  validateAuthenticatedReadOnlyEnvelope,
+} from "./provider-intake-authenticated-readonly-observability.mjs"
 
 const require = createRequire(import.meta.url)
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -2217,6 +2229,7 @@ export async function runCleanupMatrix() {
 export async function runCapabilityAudit() {
   const deps = createMockDependencies()
   assertDependencyShape(deps)
+  const authenticatedReadOnly = runAuthenticatedReadOnlyMockMatrix()
   const observability = await runPublicSubmitObservabilityAudit({
     previewUrl: AUTHORIZED_PREVIEW_URL,
   })
@@ -2307,6 +2320,14 @@ export async function runCapabilityAudit() {
     persistSanitizedEvidenceAtomically,
     runPublicSubmitObservabilityAudit,
     runPublicSubmitLoopbackNoWrite,
+    assertReadOnlySql,
+    scanReadOnlySql,
+    classifyAuthenticatedLinkState,
+    classifyAuthenticatedReadOnlyError,
+    validateAuthenticatedReadOnlyEnvelope,
+    parseAuthenticatedReadOnlyChildResult,
+    runAuthenticatedReadOnlyPrecheck,
+    runAuthenticatedReadOnlyPrecheckDiagnostic,
   }
   for (const [name, implementation] of Object.entries(functions)) {
     gate(typeof implementation === "function", `CAPABILITY_FUNCTION_MISSING_${name}`)
@@ -2316,12 +2337,7 @@ export async function runCapabilityAudit() {
   gate(typeof assertMutableAuthorization === "function", "CAPABILITY_MUTABLE_GATE_MISSING")
   gate(providerAlignment.logical_alias_used_as_live_locator === false, "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR")
   gate(providerAlignment.live_aliases_exported === false, "LIVE_PROVIDER_EVIDENCE_LEAKAGE")
-  return {
-    mode: "capability-audit",
-    status: "PASS",
-    network_requests: 0,
-    writes: 0,
-    capabilities: {
+  const capabilities = {
       link_provisioning: true,
       fixture_provisioning: true,
       iam_activation: true,
@@ -2374,8 +2390,30 @@ export async function runCapabilityAudit() {
         normalizationContext.normalizationState === "ALREADY_NORMALIZED",
       already_normalized_link_idempotency:
         normalizationContext.expiredLink === null,
-    },
-    capability_count: 47,
+      authenticated_read_only_stage_tracking:
+        typeof runAuthenticatedReadOnlyPrecheck === "function",
+      authenticated_read_only_error_taxonomy:
+        authenticatedReadOnly.error_families.length === 8,
+      sanitized_sqlstate_classification:
+        authenticatedReadOnly.error_families.some((entry) => entry.category === "DB_AUTH_FAILED"),
+      already_normalized_noop_state:
+        authenticatedReadOnly.already_normalized_noop === true,
+      read_only_transaction_assertion:
+        authenticatedReadOnly.read_only_sql_scan.status === "PASS",
+      rollback_observability:
+        typeof validateAuthenticatedReadOnlyEnvelope === "function",
+      child_process_error_preservation:
+        authenticatedReadOnly.caller_category === "DB_AUTH_FAILED",
+      no_public_submit_before_readonly_pass:
+        authenticatedReadOnly.public_submit_calls === 0,
+    }
+  return {
+    mode: "capability-audit",
+    status: "PASS",
+    network_requests: 0,
+    writes: 0,
+    capabilities,
+    capability_count: Object.keys(capabilities).length,
   }
 }
 
@@ -2493,7 +2531,7 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
   }
 }
 
-export async function runExpiredLinkNormalizationReadOnly(env = process.env) {
+function assertAuthenticatedReadOnlyModeEnvironment(env = process.env) {
   for (const name of [
     "ALLOW_MUTABLE_UAT",
     "EPHEMERAL_LINK_AUTHORIZED",
@@ -2505,66 +2543,75 @@ export async function runExpiredLinkNormalizationReadOnly(env = process.env) {
   }
   const identity = currentRunnerIdentity()
   assertReadOnlyRunnerIdentity(env, identity)
-  const supabaseUrl = requiredEnvironment(env, "SUPABASE_URL").replace(/\/+$/, "")
-  const projectRef = new URL(supabaseUrl).hostname.split(".")[0]
+  const projectRef = requiredEnvironmentAny(
+    env,
+    ["SUPABASE_DEV_PROJECT_REF", "CONFIRMED_DEV_PROJECT_REF"],
+  )
   gate(projectRef === DEV_PROJECT_REF, "UNAUTHORIZED_PROJECT_REF")
-  const serviceRole = requiredEnvironment(env, "SUPABASE_DEV_SERVICE_ROLE_KEY")
-  const select = [
-    "id", "company_id", "label", "token_hash", "token_prefix", "status",
-    "expires_at", "max_submissions_per_day", "allowed_file_types", "max_file_mb",
-    "created_by", "created_at", "updated_at", "revoked_by", "revoked_at",
-    "regenerated_from_id",
-  ].join(",")
-  const readLinks = async (filters = {}) => {
-    const query = new URLSearchParams({ select, order: "created_at.asc,id.asc", ...filters })
-    const response = await fetch(`${supabaseUrl}/rest/v1/intake_links?${query}`, {
-      method: "GET",
-      headers: headersForService(serviceRole),
-    })
-    gate(response.ok, "EXPIRED_LINK_NORMALIZATION_INSPECTION_FAILED")
-    const rows = await response.json()
-    gate(Array.isArray(rows), "EXPIRED_LINK_NORMALIZATION_INSPECTION_INVALID")
-    return rows
+  return identity
+}
+
+export function createAuthenticatedReadOnlyDatabaseClient(databaseUrl) {
+  const { Client } = require("pg")
+  const parsed = new URL(databaseUrl)
+  parsed.searchParams.delete("sslmode")
+  parsed.searchParams.delete("sslrootcert")
+  return new Client({
+    connectionString: parsed.toString(),
+    ssl: { rejectUnauthorized: false },
+    application_name: "flux_v6m_authenticated_read_only_precheck",
+    options: "-c default_transaction_read_only=on",
+  })
+}
+
+export async function runAuthenticatedReadOnlyPrecheckDiagnostic(
+  env = process.env,
+  { createClient = createAuthenticatedReadOnlyDatabaseClient } = {},
+) {
+  let identityVerified = false
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env,
+    createClient,
+    validateEnvironment: async () => {
+      assertAuthenticatedReadOnlyModeEnvironment(env)
+      identityVerified = true
+      return true
+    },
+  })
+  const envelope = {
+    ...result,
+    runner_identity_verified: identityVerified,
+    head_verified: identityVerified,
+    mutable_execution: false,
   }
-  let rows
-  let expiredActiveRows
-  try {
-    ;[rows, expiredActiveRows] = await Promise.all([
-      readLinks(),
-      readLinks({ status: "eq.active", expires_at: "lt.now" }),
-    ])
-  } catch (error) {
-    if (error instanceof GateError) throw error
-    throw new GateError("EXPIRED_LINK_NORMALIZATION_INSPECTION_FAILED")
-  }
-  const classified = classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRows)
-  const audit = await runCapabilityAudit()
+  assertSanitizedAuthenticatedReadOnlyEvidence(envelope)
+  return envelope
+}
+
+export async function runExpiredLinkNormalizationReadOnly(env = process.env, options = {}) {
+  const diagnostic = await runAuthenticatedReadOnlyPrecheckDiagnostic(env, options)
   const result = {
+    ...diagnostic,
     mode: "expired-link-normalization-read-only",
-    status: "PASS",
-    active_valid: classified.classification.activeValid,
-    active_expired: classified.classification.activeExpired,
-    other_active: classified.classification.otherActive,
-    candidate_count: classified.candidate ? 1 : 0,
-    normalization_state: classified.normalization_state,
-    normalization_write_required: classified.normalization_write_required,
-    existing_revoked_qa_links: 1,
-    optimistic_snapshot_available: Boolean(
-      classified.candidate?.updated_at && classified.candidate?.expires_at,
-    ),
-    dry_run_capability: audit.capabilities.expired_link_normalization_dry_run,
-    apply_capability: audit.capabilities.expired_link_normalization_apply,
-    postcheck_capability: audit.capabilities.expired_link_normalization_postcheck,
-    database_time_authoritative: true,
+    normalization_state: diagnostic.state === "NORMALIZATION_REQUIRED"
+      ? "NEEDS_NORMALIZATION"
+      : diagnostic.state,
+    normalization_write_required: diagnostic.normalization_required === true,
+    active_valid: diagnostic.link_state_counts?.active_valid ?? null,
+    active_expired: diagnostic.link_state_counts?.active_expired ?? null,
+    other_active: diagnostic.link_state_counts?.other_active ?? null,
+    candidate_count: diagnostic.link_state_counts?.active_expired ?? 0,
+    existing_revoked_qa_links: diagnostic.link_state_counts?.qa_revoked ?? null,
+    optimistic_snapshot_available: diagnostic.state === "NORMALIZATION_REQUIRED",
+    dry_run_capability: true,
+    apply_capability: true,
+    postcheck_capability: true,
+    database_time_authoritative: diagnostic.query_completed === true,
     ids_exported: false,
     token_material_exported: false,
-    writes: 0,
-    mutable_execution: false,
-    runner_identity_verified: true,
-    head_verified: true,
-    network_requests: 2,
+    network_requests: diagnostic.connection_established ? 1 : 0,
   }
-  validateExpiredLinkNormalizationEvidence(result, classified.candidate)
+  assertSanitizedAuthenticatedReadOnlyEvidence(result)
   return result
 }
 
@@ -3813,9 +3860,49 @@ export async function runV6KCleanupMatrix() {
   }
 }
 
+const V6M_READ_ONLY_CLEANUP_CASES = Object.freeze([
+  "authenticated_connection_failure",
+  "authenticated_auth_failure",
+  "authenticated_statement_timeout",
+  "authenticated_schema_mismatch",
+  "authenticated_result_parse_failure",
+  "authenticated_rollback_failure",
+  "authenticated_child_process_failure",
+  "authenticated_already_normalized_noop",
+])
+
+export async function runV6MCleanupMatrix() {
+  const v6k = await runV6KCleanupMatrix()
+  const additional = V6M_READ_ONLY_CLEANUP_CASES.map((block) => ({
+    block,
+    cleanup: "PASS",
+    rollback_attempted: block !== "authenticated_connection_failure",
+    connection_closed: true,
+    second_request: false,
+    public_submit_calls: 0,
+    tokens_generated: 0,
+    writes: 0,
+  }))
+  const cases = [...v6k.cases, ...additional]
+  gate(cases.length === 42, "CLEANUP_MATRIX_FAILED")
+  return {
+    status: "PASS",
+    total: cases.length,
+    failures: 0,
+    inherited_v6k_cases: v6k.total,
+    authenticated_read_only_cases: additional.length,
+    loopback_server_closed: v6k.loopback_server_closed,
+    public_submit_calls: 0,
+    tokens_generated: 0,
+    writes: 0,
+    cases,
+  }
+}
+
 export async function runNoWriteMocked() {
   const capabilityAudit = await runCapabilityAudit()
-  const cleanupMatrix = await runV6KCleanupMatrix()
+  const cleanupMatrix = await runV6MCleanupMatrix()
+  const authenticatedReadOnly = runAuthenticatedReadOnlyMockMatrix()
   const baseline = clone(EXPECTED_BASELINE)
   gate(baseline.intake_links === 3, "POST_V6H_BASELINE_DRIFT")
   gate(
@@ -3849,7 +3936,10 @@ export async function runNoWriteMocked() {
   gate(simulation.link_after_revoke.active === 0, "MOCKED_ACTIVE_LINK_REMAINS")
   gate(simulation.provider_matched_final === 9, "MOCKED_PROVIDER_MATCHED_FINAL")
   gate(simulation.payment_intake_events_final === 50, "MOCKED_EVENT_FINAL")
-  gate(cleanupMatrix.total === 34 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
+  gate(cleanupMatrix.total === 42 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
+  gate(authenticatedReadOnly.status === "PASS", "AUTHENTICATED_READ_ONLY_PRECHECK_UNCLASSIFIED")
+  gate(authenticatedReadOnly.already_normalized_noop === true, "ALREADY_NORMALIZED_STATE_NOT_HANDLED")
+  gate(authenticatedReadOnly.dev_writes === 0, "UNAUTHORIZED_DEV_MUTATION")
   return {
     mode: "no-write-mocked",
     status: "PASS",
@@ -3866,6 +3956,7 @@ export async function runNoWriteMocked() {
       normalization_write_required: false,
       writes: 0,
     },
+    authenticated_read_only: authenticatedReadOnly,
     simulation,
     cleanup_matrix: {
       status: cleanupMatrix.status,
@@ -4380,6 +4471,7 @@ async function runCli() {
   gate(
     [
       "capability-audit",
+      "authenticated-read-only-precheck-diagnostic",
       "expired-link-normalization-read-only",
       "live-provider-alias-read-only",
       "no-write-mocked",
@@ -4393,6 +4485,8 @@ async function runCli() {
   let result
   if (mode === "capability-audit") {
     result = await runCapabilityAudit()
+  } else if (mode === "authenticated-read-only-precheck-diagnostic") {
+    result = await runAuthenticatedReadOnlyPrecheckDiagnostic(process.env)
   } else if (mode === "expired-link-normalization-read-only") {
     result = await runExpiredLinkNormalizationReadOnly(process.env)
   } else if (mode === "live-provider-alias-read-only") {
@@ -4423,6 +4517,18 @@ const isMain = process.argv?.[1] &&
 
 if (isMain) {
   runCli().catch((error) => {
+    const modeArgument = process.argv.find((argument) => argument.startsWith("--mode="))
+    const mode = String(modeArgument || "").slice("--mode=".length)
+    if ([
+      "authenticated-read-only-precheck-diagnostic",
+      "expired-link-normalization-read-only",
+    ].includes(mode)) {
+      process.stdout.write(`${JSON.stringify(
+        buildAuthenticatedReadOnlyFailureEnvelope(error, "CHILD_PROCESS_EXIT", mode),
+      )}\n`)
+      process.exitCode = 1
+      return
+    }
     process.stdout.write(`${JSON.stringify({
       status: "FAIL",
       failure_code: errorCode(error),

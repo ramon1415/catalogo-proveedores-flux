@@ -20,6 +20,7 @@ import {
   runCapabilityAudit,
   runNoWriteMocked,
   runV6KCleanupMatrix,
+  runV6MCleanupMatrix,
   sanitizedProviderAlignment,
   validateExpiredLinkNormalizationEvidence,
   validateNormalizationApplyResult,
@@ -63,6 +64,18 @@ import {
   runPublicSubmitObservabilityAudit,
   runSyntheticResponseMatrix,
 } from "./provider-intake-public-submit-observability.mjs"
+import {
+  AuthenticatedReadOnlyObservabilityError,
+  assertReadOnlySql,
+  assertSanitizedAuthenticatedReadOnlyEvidence,
+  buildAuthenticatedReadOnlyFailureEnvelope,
+  classifyAuthenticatedLinkState,
+  classifyAuthenticatedReadOnlyError,
+  createAuthenticatedReadOnlyEnvelope,
+  parseAuthenticatedReadOnlyChildResult,
+  runAuthenticatedReadOnlyPrecheck,
+  validateAuthenticatedReadOnlyEnvelope,
+} from "./provider-intake-authenticated-readonly-observability.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -73,6 +86,7 @@ const migrationPath = "supabase/migrations/031_provider_intake_matching.sql"
 const loadPath = "ops/provider-intake/apply-031-matching/03_LOAD_031_EXACT.sql"
 const migration = read(migrationPath)
 const runner = read("scripts/qa/provider-intake-matching-gate2-uat.mjs")
+const authenticatedReadonly = read("scripts/qa/provider-intake-authenticated-readonly-observability.mjs")
 
 const functionDefinition = (name) => {
   const pattern = new RegExp(
@@ -219,7 +233,7 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 47)
+  assert.equal(Object.keys(audit.capabilities).length, 55)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -303,7 +317,9 @@ test("normalization SQL is parameterized guarded timed and rollback-capable", ()
   assert.match(runner, /expires_at = \$3::timestamptz/)
   assert.match(runner, /updated_at = \$4::timestamptz/)
   assert.match(runner, /expires_at < current_timestamp/)
-  assert.match(runner, /expires_at: "lt\.now"/)
+  assert.match(authenticatedReadonly, /begin transaction read only/)
+  assert.match(authenticatedReadonly, /show transaction_read_only/)
+  assert.match(authenticatedReadonly, /read_only_sql_scan/)
   assert.match(runner, /set local statement_timeout = '15s'/)
   assert.match(runner, /await client\.query\("rollback"\)/)
   assert.doesNotMatch(runner, /update public\.intake_links[\s\S]*?\$\{candidate\./)
@@ -498,7 +514,7 @@ test("updated capability audit certifies alias separation without network or wri
   }
 })
 
-test("no-write mocked recertifies the post-V6H baseline and 34 cleanup cases without leakage", async () => {
+test("no-write mocked recertifies the post-V6H baseline and 42 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
   assert.equal(result.baseline.intake_links, 3)
@@ -509,8 +525,8 @@ test("no-write mocked recertifies the post-V6H baseline and 34 cleanup cases wit
   assert.equal(result.simulation.provider_matched_final, 9)
   assert.equal(result.simulation.payment_intake_events_final, 50)
   assert.equal(result.cleanup_matrix.status, "PASS")
-  assert.equal(result.cleanup_matrix.total, 34)
-  assert.equal(result.capability_count, 47)
+  assert.equal(result.cleanup_matrix.total, 42)
+  assert.equal(result.capability_count, 55)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -794,11 +810,11 @@ const v6kRequestInput = (overrides = {}) => ({
   ...overrides,
 })
 
-test("V6K capability audit executes 47 concrete QA capabilities", async () => {
+test("V6M capability audit executes 55 concrete QA capabilities", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
-  assert.equal(audit.capability_count, 47)
-  assert.equal(Object.keys(audit.capabilities).length, 47)
+  assert.equal(audit.capability_count, 55)
+  assert.equal(Object.keys(audit.capabilities).length, 55)
   for (const capability of [
     "canonical_idempotency_header",
     "finalized_request_capture",
@@ -1057,4 +1073,319 @@ test("V6K cleanup matrix closes 34 no-write resource scenarios", async () => {
   assert.equal(result.total, 34)
   assert.equal(result.failures, 0)
   assert.equal(result.loopback_server_closed, true)
+})
+
+const readonlyError = (code, category = null) =>
+  new AuthenticatedReadOnlyObservabilityError(code, { category })
+
+const validBlockedReadonlyEnvelope = (category = "DB_AUTH_FAILED") =>
+  buildAuthenticatedReadOnlyFailureEnvelope(
+    readonlyError(category, category),
+    "DB_CONNECTION",
+  )
+
+const validPassReadonlyEnvelope = () => ({
+  ...createAuthenticatedReadOnlyEnvelope(),
+  status: "PASS",
+  result_code: "AUTHENTICATED_READ_ONLY_PRECHECK_VALIDATED",
+  state: "ALREADY_NORMALIZED",
+  last_completed_stage: "RESULT_SERIALIZATION",
+  credential_present: true,
+  connection_established: true,
+  transaction_started: true,
+  transaction_read_only: true,
+  query_completed: true,
+  rollback_completed: true,
+  fresh_baseline_completed: true,
+  fresh_baseline: {},
+})
+
+test("V6M classifies missing database secret without connection", async () => {
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: {},
+    createClient: () => assert.fail("client must not be created"),
+  })
+  assert.equal(result.status, "BLOCKED")
+  assert.equal(result.failure_category, "BLOCKED_SECRET_UNAVAILABLE")
+  assert.equal(result.connection_established, false)
+})
+
+test("V6M rejects an invalid database URL before client initialization", async () => {
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "not-a-database-url" },
+    createClient: () => assert.fail("client must not be created"),
+  })
+  assert.equal(result.failure_category, "DB_URL_INVALID")
+  assert.equal(result.failed_stage, "DB_URL_PARSE")
+})
+
+test("V6M classifies DNS failure", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "ENOTFOUND" }, "DB_CONNECTION").failure_category,
+    "DB_DNS_FAILED",
+  )
+})
+
+test("V6M classifies connection refused", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "ECONNREFUSED" }, "DB_CONNECTION").failure_category,
+    "DB_NETWORK_FAILED",
+  )
+})
+
+test("V6M classifies TLS failure", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError(
+      { code: "ERR_TLS_CERT_ALTNAME_INVALID" },
+      "DB_CONNECTION",
+    ).failure_category,
+    "DB_TLS_FAILED",
+  )
+})
+
+test("V6M classifies authentication failure", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "28P01" }, "DB_CONNECTION").failure_category,
+    "DB_AUTH_FAILED",
+  )
+})
+
+test("V6M classifies permission failure", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "42501" }, "INTAKE_LINKS_READ").failure_category,
+    "DB_PERMISSION_FAILED",
+  )
+})
+
+test("V6M classifies missing table", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "42P01" }, "SCHEMA_CONTRACT_INSPECTION").failure_category,
+    "SCHEMA_TABLE_MISSING",
+  )
+})
+
+test("V6M classifies missing column", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "42703" }, "SCHEMA_CONTRACT_INSPECTION").failure_category,
+    "SCHEMA_COLUMN_MISSING",
+  )
+})
+
+test("V6M classifies statement timeout", () => {
+  assert.equal(
+    classifyAuthenticatedReadOnlyError({ code: "57014" }, "INTAKE_LINKS_READ").failure_category,
+    "DB_STATEMENT_TIMEOUT",
+  )
+})
+
+test("V6M classifies nonzero child process exit", () => {
+  const result = parseAuthenticatedReadOnlyChildResult({ stdout: "", exitCode: 2 })
+  assert.equal(result.failure_category, "CHILD_PROCESS_EXIT_FAILED")
+  assert.equal(result.failed_stage, "CHILD_PROCESS_EXIT")
+})
+
+test("V6M classifies empty child stdout", () => {
+  const result = parseAuthenticatedReadOnlyChildResult({ stdout: "", exitCode: 0 })
+  assert.equal(result.failure_category, "RESULT_JSON_PARSE_FAILED")
+})
+
+test("V6M classifies truncated child JSON", () => {
+  const result = parseAuthenticatedReadOnlyChildResult({ stdout: '{"status":', exitCode: 0 })
+  assert.equal(result.failure_category, "RESULT_JSON_PARSE_FAILED")
+})
+
+test("V6M classifies invalid child JSON", () => {
+  const result = parseAuthenticatedReadOnlyChildResult({ stdout: "not-json", exitCode: 0 })
+  assert.equal(result.failure_category, "RESULT_JSON_PARSE_FAILED")
+})
+
+test("V6M rejects result missing required envelope fields", () => {
+  const envelope = validBlockedReadonlyEnvelope()
+  delete envelope.query_completed
+  assert.throws(() => validateAuthenticatedReadOnlyEnvelope(envelope), /RESULT_CONTRACT_INVALID/)
+})
+
+test("V6M rejects a started transaction without rollback", () => {
+  const envelope = validBlockedReadonlyEnvelope()
+  envelope.transaction_started = true
+  envelope.rollback_completed = false
+  assert.throws(() => validateAuthenticatedReadOnlyEnvelope(envelope), /RESULT_CONTRACT_INVALID/)
+})
+
+test("V6M rejects a PASS transaction that is not read-only", () => {
+  const envelope = validPassReadonlyEnvelope()
+  envelope.transaction_read_only = false
+  assert.throws(() => validateAuthenticatedReadOnlyEnvelope(envelope), /RESULT_CONTRACT_INVALID/)
+})
+
+test("V6M rejects SQL containing DML", () => {
+  assert.throws(
+    () => assertReadOnlySql("update public.intake_links set status='expired'"),
+    /READ_ONLY_ASSERTION_FAILED/,
+  )
+})
+
+test("V6M recognizes NORMALIZATION_REQUIRED", () => {
+  const result = classifyAuthenticatedLinkState([
+    { company_scope: "scope", label: "historical", status: "revoked", expires_at: null },
+    { company_scope: "scope", label: "active", status: "active", expires_at: "2026-07-20T00:00:00Z" },
+  ], "2026-07-21T00:00:00Z")
+  assert.equal(result.state, "NORMALIZATION_REQUIRED")
+  assert.equal(result.apply_required, true)
+})
+
+test("V6M recognizes ALREADY_NORMALIZED as PASS no-op", () => {
+  const result = classifyAuthenticatedLinkState([
+    { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
+    { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+  ], "2026-07-21T00:00:00Z")
+  assert.equal(result.state, "ALREADY_NORMALIZED")
+  assert.equal(result.normalization_required, false)
+  assert.equal(result.apply_required, false)
+})
+
+test("V6M completes the authenticated read-only path with explicit rollback", async () => {
+  const calls = []
+  const client = {
+    connected: false,
+    closed: false,
+    async connect() {
+      this.connected = true
+    },
+    async end() {
+      this.closed = true
+    },
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+      calls.push(normalized)
+      if (normalized === "show default_transaction_read_only") {
+        return { rows: [{ default_transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_read_only") {
+        return { rows: [{ transaction_read_only: "on" }] }
+      }
+      if (normalized.includes("select current_timestamp as database_now")) {
+        return { rows: [{ database_now: "2026-07-21T00:00:00Z" }] }
+      }
+      if (normalized.includes("from information_schema.columns")) {
+        return {
+          rows: ["company_id", "created_at", "expires_at", "label", "status"]
+            .map((column_name) => ({ column_name })),
+        }
+      }
+      if (normalized.includes("from public.intake_links") &&
+          normalized.includes("order by created_at asc")) {
+        return { rows: [
+          { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+          { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
+          { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+        ] }
+      }
+      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.startsWith("select count(*)::int")) {
+        let count = 0
+        if (normalized.includes("from public.intake_links")) {
+          if (!normalized.includes(" where ")) count = 3
+          else if (normalized.includes("status='expired'")) count = 1
+          else if (normalized.includes("status='revoked'")) count = 2
+          if (normalized.includes("label like 'qa v6b %'")) {
+            count = normalized.includes("status='active'") ? 0 : 1
+          }
+        }
+        return { rows: [{ count }] }
+      }
+      return { rows: [] }
+    },
+  }
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "postgresql://qa:secret@db.invalid/dev" },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "PASS")
+  assert.equal(result.state, "ALREADY_NORMALIZED")
+  assert.equal(result.transaction_read_only, true)
+  assert.equal(result.fresh_baseline_completed, true)
+  assert.equal(result.rollback_completed, true)
+  assert.equal(result.client_closed, true)
+  assert.equal(result.writes, 0)
+  assert.equal(calls.filter((sql) => sql === "rollback").length, 1)
+})
+
+test("V6M rejects zero recognizable links", () => {
+  assert.throws(
+    () => classifyAuthenticatedLinkState([], "2026-07-21T00:00:00Z"),
+    /LINK_STATE_CONTRACT_MISMATCH/,
+  )
+})
+
+test("V6M rejects two ambiguous historical expired links", () => {
+  assert.throws(
+    () => classifyAuthenticatedLinkState([
+      { company_scope: "scope", label: "one", status: "expired", expires_at: "2026-07-19T00:00:00Z" },
+      { company_scope: "scope", label: "two", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    ], "2026-07-21T00:00:00Z"),
+    /LINK_STATE_CONTRACT_MISMATCH/,
+  )
+})
+
+test("V6M blocks raw error leakage", () => {
+  assert.throws(
+    () => assertSanitizedAuthenticatedReadOnlyEvidence({ raw_error: "forbidden" }),
+    /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
+  )
+})
+
+test("V6M blocks database URL leakage", () => {
+  assert.throws(
+    () => assertSanitizedAuthenticatedReadOnlyEvidence({ database_url: "forbidden" }),
+    /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
+  )
+})
+
+test("V6M blocks stack leakage", () => {
+  assert.throws(
+    () => assertSanitizedAuthenticatedReadOnlyEvidence({ stack: "forbidden" }),
+    /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
+  )
+})
+
+test("V6M preserves allowlisted SQLSTATE", () => {
+  const result = classifyAuthenticatedReadOnlyError({ code: "28P01" }, "DB_CONNECTION")
+  assert.equal(result.sanitized_code, "28P01")
+  assert.equal(result.sqlstate_class, "28P01")
+})
+
+test("V6M suppresses non-allowlisted SQLSTATE", () => {
+  const result = classifyAuthenticatedReadOnlyError({ code: "99999" }, "DB_CONNECTION")
+  assert.equal(result.sanitized_code, null)
+  assert.equal(result.sqlstate_class, null)
+})
+
+test("V6M caller preserves a classified failure category", () => {
+  const envelope = validBlockedReadonlyEnvelope("DB_AUTH_FAILED")
+  const parsed = parseAuthenticatedReadOnlyChildResult({ stdout: JSON.stringify(envelope), exitCode: 0 })
+  assert.equal(parsed.failure_category, "DB_AUTH_FAILED")
+})
+
+test("V6M caller never collapses known flow to V6A_RUNNER_FAILED", () => {
+  const result = classifyAuthenticatedReadOnlyError(new Error("unclassified"), "CALLER_RESULT_PARSE")
+  assert.equal(result.failure_category, "RESULT_JSON_PARSE_FAILED")
+  assert.notEqual(result.failure_category, "V6A_RUNNER_FAILED")
+})
+
+test("V6M keeps public submit blocked before read-only PASS", async () => {
+  const result = await runAuthenticatedReadOnlyPrecheck({ env: {} })
+  assert.equal(result.provider_intake_calls, 0)
+  assert.equal(result.diagnostic_public_submit_attempts, 0)
+  assert.equal(result.diagnostic_call_consumed, false)
+  assert.equal(result.token_generated, false)
+})
+
+test("V6M cleanup matrix closes 42 no-write scenarios", async () => {
+  const result = await runV6MCleanupMatrix()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.total, 42)
+  assert.equal(result.failures, 0)
+  assert.equal(result.public_submit_calls, 0)
 })
