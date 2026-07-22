@@ -1,0 +1,208 @@
+name: Payment batch 032 DEV preflight temporary
+
+'on':
+  push:
+    branches:
+      - ops/ramon-payment-batch-032-dev
+    paths:
+      - .github/workflows/payment-batch-032-dev-temporary.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: payment-batch-032-dev
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Read-only preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: DEV
+    env:
+      PROJECT_REF: scsirgbuqjcwoaxfacth
+      EXPECTED_BASE_SHA: 5c674062ef54d2918855f782eff7c3c78dd864ee
+      EXPECTED_MIGRATION_SHA256: 2c1f42055e9dec010126adb37a312342b2827975d338ed70a28258c496ce3ef2
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - name: Checkout isolated ops branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate immutable DEV scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
+          test "$GITHUB_REF_NAME" = "ops/ramon-payment-batch-032-dev"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE_SHA"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/payment-batch-032-dev-temporary.yml"
+          test "$(sha256sum supabase/migrations/032_payment_batch_reconciliation.sql | cut -d' ' -f1)" = "$EXPECTED_MIGRATION_SHA256"
+          test -n "$SUPABASE_DEV_DB_URL"
+          test "$SUPABASE_DEV_PROJECT_REF" = "$PROJECT_REF"
+          case "$SUPABASE_DEV_DB_URL" in
+            *"$PROJECT_REF"*) ;;
+            *) echo "::error::DEV database URL does not identify the expected project."; exit 1 ;;
+          esac
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          echo "scope=DEV"
+          echo "project_ref=$PROJECT_REF"
+          echo "repository_base=$EXPECTED_BASE_SHA"
+          echo "migration_sha256=$EXPECTED_MIGRATION_SHA256"
+          echo "mode=read_only"
+
+      - name: Install PostgreSQL and Supabase clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y >/dev/null
+          sudo apt-get install -y postgresql-client >/dev/null
+          psql --version
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+
+      - name: Inspect DEV history, dependencies and partial state
+        shell: bash
+        env:
+          PGOPTIONS: "-c default_transaction_read_only=on"
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+          select 'database_read_only|' || current_setting('transaction_read_only');
+          select 'dependencies_missing|' || count(*)
+          from unnest(array[
+            'public.companies','public.company_bank_accounts','public.profiles','public.roles',
+            'public.user_roles','public.profile_company_memberships','public.payment_requests',
+            'public.proveedores','public.approval_batches','public.approval_batch_items',
+            'public.payment_request_extraordinary_authorizations','storage.buckets','storage.objects'
+          ]) item(name)
+          where to_regclass(item.name) is null;
+
+          select 'helpers_missing|' || count(*)
+          from unnest(array[
+            'public.current_profile_id()',
+            'public.current_user_has_role(text[])',
+            'public.flux_finance_roles()',
+            'public.flux_sysadmin_roles()',
+            'public.has_active_company_membership(uuid,uuid)',
+            'public.get_payment_request_execution_readiness(uuid)',
+            'extensions.digest(bytea,text)'
+          ]) item(signature)
+          where to_regprocedure(item.signature) is null;
+
+          select 'approval_material_column|' || exists(
+            select 1 from information_schema.columns
+            where table_schema='public' and table_name='payment_requests'
+              and column_name='approval_material_updated_at'
+          );
+
+          select 'company_bank_columns_missing|' || count(*)
+          from unnest(array['company_id','account_number','clabe','active','bank_name','currency']) item(name)
+          where not exists (
+            select 1 from information_schema.columns
+            where table_schema='public' and table_name='company_bank_accounts'
+              and column_name=item.name
+          );
+
+          select 'migration_031_functions_present|' || count(*)
+          from unnest(array[
+            'public.normalize_provider_match_text(text)',
+            'public.find_provider_intake_candidates(uuid,integer)'
+          ]) item(signature)
+          where to_regprocedure(item.signature) is not null;
+
+          select 'migration_032_tables_present|' || count(*)
+          from unnest(array[
+            'public.payment_matching_policy_versions','public.payable_snapshots',
+            'public.payment_ingestion_batches','public.payment_documents',
+            'public.payment_document_extractions','public.bank_payment_operations',
+            'public.payment_operation_documents','public.payment_allocation_plans',
+            'public.payment_allocation_items','public.payment_allocation_reservations',
+            'public.payment_allocation_movements','public.financial_command_receipts',
+            'public.financial_outbox_events','public.financial_outbox_delivery_attempts',
+            'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
+          ]) item(name)
+          where to_regclass(item.name) is not null;
+
+          select 'migration_032_functions_present|' || count(*)
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public'
+            and (p.proname like 'payment_reconciliation_%'
+              or p.proname in (
+                'get_payment_batch_context','create_payment_ingestion_batch',
+                'finalize_payment_ingestion_upload','submit_payment_document_extractions',
+                'list_payment_ingestion_batches','get_payment_ingestion_batch_detail',
+                'accept_payment_document_extraction','reject_payment_document_extraction',
+                'find_payment_allocation_candidates','propose_payment_allocations',
+                'reserve_payment_allocations','expire_payment_reservation',
+                'release_payment_reservation','cancel_payment_allocation_plan'
+              ));
+
+          select 'payment_batch_bucket_present|' || count(*)
+          from storage.buckets
+          where id='payment-batch-documents' or name='payment-batch-documents';
+
+          select 'payment_batch_storage_policies_present|' || count(*)
+          from pg_policies
+          where schemaname='storage' and tablename='objects'
+            and (
+              policyname in (
+                'Finance can upload payment batch documents',
+                'Finance can read payment batch documents'
+              )
+              or position('payment-batch-documents' in coalesce(qual,'') || ' ' || coalesce(with_check,'')) > 0
+            );
+
+          select 'active_bbva_company_accounts|' || count(*)
+          from public.company_bank_accounts
+          where active=true
+            and upper(regexp_replace(coalesce(bank_name,''),'[^A-Z0-9]','','g'))='BBVA'
+            and upper(coalesce(currency,'')) in ('MXN','USD','EUR');
+
+          select 'finance_or_sysadmin_active_profiles|' || count(distinct p.id)
+          from public.profiles p
+          join public.user_roles ur on ur.profile_id=p.id
+          join public.roles r on r.id=ur.role_id
+          where p.active=true
+            and lower(regexp_replace(coalesce(r.name,''),'[^a-z0-9]','','g')) in
+              ('finanzas','finance','tesoreria','sysadmin','superadmin','administrador');
+          SQL
+
+          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "select to_regclass('supabase_migrations.schema_migrations') is not null")"
+          echo "migration_history_present|$history_exists"
+          if [ "$history_exists" = "t" ]; then
+            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+            select 'migration_history|' || version || '|' || coalesce(name,'')
+            from supabase_migrations.schema_migrations
+            where version in ('029','030','031','032')
+            order by version;
+            SQL
+          fi
+
+          echo "storage_policy_inventory_begin"
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+          select policyname || '|' || cmd || '|' || array_to_string(roles,',') || '|' ||
+                 replace(coalesce(qual,''), E'\n', ' ') || '|' ||
+                 replace(coalesce(with_check,''), E'\n', ' ')
+          from pg_policies
+          where schemaname='storage' and tablename='objects'
+          order by policyname;
+          SQL
+          echo "storage_policy_inventory_end"
+
+      - name: Supabase CLI migration dry-run
+        shell: bash
+        env:
+          PGOPTIONS: "-c default_transaction_read_only=on"
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          supabase --version
+          supabase migration list --db-url "$SUPABASE_DEV_DB_URL"
+          supabase db push --db-url "$SUPABASE_DEV_DB_URL" --dry-run
