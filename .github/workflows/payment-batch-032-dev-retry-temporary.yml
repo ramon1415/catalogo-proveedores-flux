@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
           export PGOPTIONS='-c default_transaction_read_only=on'
           audit_file="${RUNNER_TEMP}/payment-batch-032-audit.tsv"
-          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt > "${audit_file}" <<'SQL'
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt <<'SQL' | tee "${audit_file}"
           BEGIN TRANSACTION READ ONLY;
           WITH expected(name) AS (VALUES
             ('payment_matching_policy_versions'), ('payable_snapshots'), ('payment_ingestion_batches'), ('payment_documents'),
@@ -181,7 +181,7 @@ jobs:
           SELECT 'index_definition|' || i.tablename || '|' || i.indexname || '|' || i.indexdef FROM pg_indexes i
           WHERE i.schemaname='public' AND i.tablename IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')
           ORDER BY i.tablename,i.indexname;
-          SELECT 'function_signature|' || p.proname || '|' || pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|security_definer=' || p.prosecdef || '|volatility=' || p.provolatile || '|body_md5=' || md5(replace(btrim(p.prosrc),chr(13),''))
+          SELECT 'function_signature|' || p.proname || '|' || pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|security_definer=' || p.prosecdef || '|volatility=' || p.provolatile::text || '|body_md5=' || md5(replace(btrim(p.prosrc),chr(13),''))
           FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
           WHERE n.nspname='public' AND p.proname IN ('payment_reconciliation_set_updated_at','payment_reconciliation_normalize_currency','payment_reconciliation_normalize_bank_name','payment_amount_to_minor','rotate_payment_matching_policy','payment_reconciliation_hash_text','payment_reconciliation_account_material','payment_reconciliation_account_hash','payment_reconciliation_account_last4','payment_reconciliation_redact_free_text','payment_reconciliation_payload_hash','payment_reconciliation_require_finance','payment_reconciliation_storage_path_allowed','payment_reconciliation_command_replay','payment_reconciliation_store_command','append_financial_outbox_event_internal','payment_reconciliation_protect_immutable','payment_reconciliation_protect_policy_version','create_payable_snapshot_internal','materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot','payment_operation_confirmed_minor','payable_snapshot_confirmed_minor','payment_operation_reserved_minor','payable_snapshot_reserved_minor','payment_reconciliation_snapshot_is_payable','payment_operation_fingerprint_v1','get_payment_batch_context','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan','payment_reconciliation_validate_document_scope','payment_reconciliation_validate_extraction_scope','payment_reconciliation_validate_operation_scope','payment_reconciliation_protect_operation_fact','payment_reconciliation_validate_plan_scope','payment_reconciliation_validate_item_scope','payment_reconciliation_validate_reservation_scope','payment_reconciliation_validate_movement_scope')
           ORDER BY p.proname,pg_get_function_identity_arguments(p.oid);
@@ -198,14 +198,13 @@ jobs:
           SELECT 'semantic|initial_monetary_policies|' || CASE WHEN count(*)=3 AND count(DISTINCT coalesce(to_jsonb(p)->>'currency_code',to_jsonb(p)->>'currency')) FILTER (WHERE coalesce(to_jsonb(p)->>'currency_code',to_jsonb(p)->>'currency') IN ('MXN','USD','EUR'))=3 THEN 'present' ELSE 'drifted' END FROM public.payment_matching_policy_versions p;
           SELECT 'semantic|normalize_mxp|' || CASE WHEN public.payment_reconciliation_normalize_currency('MXP')='MXN' THEN 'present' ELSE 'drifted' END;
           SELECT 'semantic|minor_units_mxn|' || CASE WHEN public.payment_amount_to_minor(1.23::numeric,'MXN')=123 THEN 'present' ELSE 'drifted' END;
-          SELECT 'semantic|payment_receipts_preserved|' || CASE WHEN to_regclass('public.payment_receipts') IS NOT NULL AND (SELECT count(*) FROM public.payment_receipts)=8 THEN 'present' ELSE 'drifted' END;          SELECT (to_regclass('supabase_migrations.schema_migrations') IS NOT NULL) AS history_relation_exists \gset
-          \if :history_relation_exists
-            SELECT 'history|032|' || CASE WHEN EXISTS (
-              SELECT 1 FROM supabase_migrations.schema_migrations WHERE version::text='032'
-            ) THEN 'present' ELSE 'absent' END;
-          \else
-            SELECT 'history|032|history_relation_absent';
-          \endif
+          SELECT 'semantic|payment_receipts_preserved|' || CASE WHEN to_regclass('public.payment_receipts') IS NOT NULL AND (SELECT count(*) FROM public.payment_receipts)=8 THEN 'present' ELSE 'drifted' END;
+          SELECT CASE
+            WHEN to_regclass('supabase_migrations.schema_migrations') IS NULL THEN
+              format('SELECT %L;', 'history|032|history_relation_absent')
+            ELSE
+              format('SELECT ''history|032|'' || CASE WHEN EXISTS (SELECT 1 FROM %I.%I WHERE version::text=''032'') THEN ''present'' ELSE ''absent'' END;', 'supabase_migrations', 'schema_migrations')
+          END \gexec
           SELECT 'legacy|payment_receipts|present_rows=' || CASE WHEN to_regclass('public.payment_receipts') IS NULL THEN 'table_missing' ELSE (SELECT count(*)::text FROM public.payment_receipts) END;
           COMMIT;
           SQL
