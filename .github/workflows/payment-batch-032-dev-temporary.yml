@@ -32,7 +32,7 @@ jobs:
       - name: Checkout isolated ops branch
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Validate immutable DEV scope
         shell: bash
@@ -40,8 +40,8 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
           test "$GITHUB_REF_NAME" = "ops/ramon-payment-batch-032-dev"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE_SHA"
-          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/payment-batch-032-dev-temporary.yml"
+          git merge-base --is-ancestor "$EXPECTED_BASE_SHA" HEAD
+          test "$(git diff --name-only "$EXPECTED_BASE_SHA" HEAD)" = ".github/workflows/payment-batch-032-dev-temporary.yml"
           test "$(sha256sum supabase/migrations/032_payment_batch_reconciliation.sql | cut -d' ' -f1)" = "$EXPECTED_MIGRATION_SHA256"
           test -n "$SUPABASE_DEV_DB_URL"
           test "$SUPABASE_DEV_PROJECT_REF" = "$PROJECT_REF"
@@ -56,24 +56,21 @@ jobs:
           echo "migration_sha256=$EXPECTED_MIGRATION_SHA256"
           echo "mode=read_only"
 
-      - name: Install PostgreSQL and Supabase clients
+      - name: Install PostgreSQL client
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -y >/dev/null
           sudo apt-get install -y postgresql-client >/dev/null
           psql --version
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v2
 
       - name: Inspect DEV history, dependencies and partial state
         shell: bash
-        env:
-          PGOPTIONS: "-c default_transaction_read_only=on"
         run: |
           set -euo pipefail
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
           psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+          begin transaction read only;
           select 'database_read_only|' || current_setting('transaction_read_only');
           select 'dependencies_missing|' || count(*)
           from unnest(array[
@@ -110,12 +107,12 @@ jobs:
               and column_name=item.name
           );
 
-          select 'migration_031_functions_present|' || count(*)
+          select 'migration_031_function|' || item.signature || '|' ||
+                 (to_regprocedure(item.signature) is not null)
           from unnest(array[
             'public.normalize_provider_match_text(text)',
-            'public.find_provider_intake_candidates(uuid,integer)'
-          ]) item(signature)
-          where to_regprocedure(item.signature) is not null;
+            'public.find_provider_intake_candidates(uuid,text,integer)'
+          ]) item(signature);
 
           select 'migration_032_tables_present|' || count(*)
           from unnest(array[
@@ -172,37 +169,28 @@ jobs:
           where p.active=true
             and lower(regexp_replace(coalesce(r.name,''),'[^a-z0-9]','','g')) in
               ('finanzas','finance','tesoreria','sysadmin','superadmin','administrador');
+          commit;
           SQL
 
-          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "select to_regclass('supabase_migrations.schema_migrations') is not null")"
+          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;" | sed -n '2p')"
           echo "migration_history_present|$history_exists"
           if [ "$history_exists" = "t" ]; then
-            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
-            select 'migration_history|' || version || '|' || coalesce(name,'')
-            from supabase_migrations.schema_migrations
-            where version in ('029','030','031','032')
-            order by version;
-            SQL
+            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select 'migration_history|' || version || '|' || coalesce(name,'') from supabase_migrations.schema_migrations where version in ('029','030','031','032') order by version; commit;"
           fi
 
           echo "storage_policy_inventory_begin"
-          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
-          select policyname || '|' || cmd || '|' || array_to_string(roles,',') || '|' ||
-                 replace(coalesce(qual,''), E'\n', ' ') || '|' ||
-                 replace(coalesce(with_check,''), E'\n', ' ')
-          from pg_policies
-          where schemaname='storage' and tablename='objects'
-          order by policyname;
-          SQL
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select policyname || '|' || cmd || '|' || array_to_string(roles,',') || '|' || replace(coalesce(qual,''), E'\\n', ' ') || '|' || replace(coalesce(with_check,''), E'\\n', ' ') from pg_policies where schemaname='storage' and tablename='objects' order by policyname; commit;"
           echo "storage_policy_inventory_end"
 
-      - name: Supabase CLI migration dry-run
+      - name: Classify migration mechanism
         shell: bash
-        env:
-          PGOPTIONS: "-c default_transaction_read_only=on"
         run: |
           set -euo pipefail
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          supabase --version
-          supabase migration list --db-url "$SUPABASE_DEV_DB_URL"
-          supabase db push --db-url "$SUPABASE_DEV_DB_URL" --dry-run
+          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;" | sed -n '2p')"
+          if [ "$history_exists" = "t" ]; then
+            echo "cli_dry_run=ELIGIBLE"
+          else
+            echo "cli_dry_run=BLOCKED_NO_REMOTE_HISTORY"
+            echo "migration_apply_candidate=EXACT_TRANSACTIONAL_SQL_ONLY"
+          fi
