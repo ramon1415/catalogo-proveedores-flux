@@ -16,6 +16,9 @@ jobs:
     name: Audit existing DEV state (read-only)
     runs-on: ubuntu-latest
     environment: DEV
+    env:
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
     steps:
       - name: Checkout operational branch
         uses: actions/checkout@v4
