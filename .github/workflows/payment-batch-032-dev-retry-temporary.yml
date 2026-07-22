@@ -68,30 +68,62 @@ jobs:
             SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname='public' AND c.relkind='r' AND c.relname=e.name AND c.relrowsecurity
           ) THEN 'present' ELSE 'drifted' END FROM expected e ORDER BY e.name;
-          WITH expected(name) AS (VALUES
-            ('payment_reconciliation_set_updated_at'), ('payment_reconciliation_normalize_currency'), ('payment_reconciliation_normalize_bank_name'),
-            ('payment_amount_to_minor'), ('rotate_payment_matching_policy'), ('payment_reconciliation_hash_text'),
-            ('payment_reconciliation_account_material'), ('payment_reconciliation_account_hash'), ('payment_reconciliation_account_last4'),
-            ('payment_reconciliation_redact_free_text'), ('payment_reconciliation_payload_hash'), ('payment_reconciliation_require_finance'),
-            ('payment_reconciliation_storage_path_allowed'), ('payment_reconciliation_command_replay'), ('payment_reconciliation_store_command'),
-            ('append_financial_outbox_event_internal'), ('payment_reconciliation_protect_immutable'), ('payment_reconciliation_protect_policy_version'),
-            ('create_payable_snapshot_internal'), ('materialize_closed_batch_payable_snapshots'), ('materialize_extraordinary_payable_snapshot'),
-            ('payment_operation_confirmed_minor'), ('payable_snapshot_confirmed_minor'), ('payment_operation_reserved_minor'),
-            ('payable_snapshot_reserved_minor'), ('payment_reconciliation_snapshot_is_payable'), ('payment_operation_fingerprint_v1'),
-            ('get_payment_batch_context'), ('create_payment_ingestion_batch'), ('finalize_payment_ingestion_upload'),
-            ('submit_payment_document_extractions'), ('list_payment_ingestion_batches'), ('get_payment_ingestion_batch_detail'),
-            ('accept_payment_document_extraction'), ('reject_payment_document_extraction'), ('find_payment_allocation_candidates'),
-            ('propose_payment_allocations'), ('reserve_payment_allocations'), ('expire_payment_reservation'),
-            ('release_payment_reservation'), ('cancel_payment_allocation_plan'), ('payment_reconciliation_validate_document_scope'),
-            ('payment_reconciliation_validate_extraction_scope'), ('payment_reconciliation_validate_operation_scope'),
-            ('payment_reconciliation_protect_operation_fact'), ('payment_reconciliation_validate_plan_scope'),
-            ('payment_reconciliation_validate_item_scope'), ('payment_reconciliation_validate_reservation_scope'),
-            ('payment_reconciliation_validate_movement_scope')
+          WITH expected(name, body_md5) AS (VALUES
+            ('payment_reconciliation_set_updated_at', 'fcac2f4baf38c48505d9f114ed5d638f'),
+            ('payment_reconciliation_normalize_currency', 'ceee1d0319ae3e7683a6549f7205d5eb'),
+            ('payment_reconciliation_normalize_bank_name', '4a5f359bdf5f02beb70c5afea4cca3b4'),
+            ('payment_amount_to_minor', '28d4bf60806328361c3a6d8b17360d0e'),
+            ('rotate_payment_matching_policy', '2a2de4403f37d2e4249458cf7c88112a'),
+            ('payment_reconciliation_hash_text', 'be083289c1511ae316a9d9e65ac2c1dd'),
+            ('payment_reconciliation_account_material', '37949ca4734439cbc91c6428a8d4b1d6'),
+            ('payment_reconciliation_account_hash', 'e4b216e7ee3c0e4f750a46a6e940b476'),
+            ('payment_reconciliation_account_last4', '0de79a286c0b52654b2ceb01ac3622d4'),
+            ('payment_reconciliation_redact_free_text', 'ed92f0bfac3c30bce554a32a9cf5a448'),
+            ('payment_reconciliation_payload_hash', '7cc0d22d84ea3fb539aa50f4be249d61'),
+            ('payment_reconciliation_require_finance', '039a769c439bc4fd87b14ed83e31f761'),
+            ('payment_reconciliation_storage_path_allowed', '19a4f10b44bb1a533eb045cffd0d31ac'),
+            ('payment_reconciliation_command_replay', '838c9fe847de8dcd6c3f9e7909fffb01'),
+            ('payment_reconciliation_store_command', '2384550cfb9ad45b8ee6cf6c1338ec8e'),
+            ('append_financial_outbox_event_internal', '91804d746c82a3388f3917f57ec36a7e'),
+            ('payment_reconciliation_protect_immutable', 'a6c4c9a3f9974f3893f146cf2aed8850'),
+            ('payment_reconciliation_protect_policy_version', '2df4188308949ec809fef4a83d76e2a5'),
+            ('create_payable_snapshot_internal', 'a3d9a9fa37f6edbad4a32f785809a222'),
+            ('materialize_closed_batch_payable_snapshots', '0203abf39cf66bc7ffb816e4bc6ec414'),
+            ('materialize_extraordinary_payable_snapshot', '20172b9935c0728f75a34a5da667f59d'),
+            ('payment_operation_confirmed_minor', '9218837383a2cd7754b71bd1d25fc024'),
+            ('payable_snapshot_confirmed_minor', 'c091b61b52920fcb47edf532a6e20d07'),
+            ('payment_operation_reserved_minor', 'c7feae49a8fad26950673d2e6733cdbe'),
+            ('payable_snapshot_reserved_minor', 'b7013d95cf908fddd1c532570b822187'),
+            ('payment_reconciliation_snapshot_is_payable', '8d91927193e6434a700283a3df6196cd'),
+            ('payment_operation_fingerprint_v1', '9e309484c324c1d04993d9407bab1405'),
+            ('get_payment_batch_context', '5f307e96e2692ee33882b4332e4ecd24'),
+            ('create_payment_ingestion_batch', '315e4db0c5da04c8716a089496cdb093'),
+            ('finalize_payment_ingestion_upload', '31a76a869988d4317dcd1a50a8959c27'),
+            ('submit_payment_document_extractions', '54a5d5b92ffa77a963c50c70a8026ceb'),
+            ('list_payment_ingestion_batches', '69af806767a925d8e2bc845a4a5b98b7'),
+            ('get_payment_ingestion_batch_detail', 'b28e6df6eb728dbd0f36b300e7606c84'),
+            ('accept_payment_document_extraction', '271778acbe35940b6b2065f2d06a1fe3'),
+            ('reject_payment_document_extraction', 'e11bdfb4bd510ec9727b7db659e156d7'),
+            ('find_payment_allocation_candidates', 'c741390a27ee08aec6f0ab7f37928553'),
+            ('propose_payment_allocations', '748ed8939bc4ed15c2ba4c94038ca89c'),
+            ('reserve_payment_allocations', 'cd1d2fafefe0ac11472582b4e640a6d2'),
+            ('expire_payment_reservation', '7b89731144248f4c17d7f082a39948e3'),
+            ('release_payment_reservation', '330b0c5b2f5c89827e499503643c8943'),
+            ('cancel_payment_allocation_plan', '1e2137ffe3cc63042b694ba63a54fb3a'),
+            ('payment_reconciliation_validate_document_scope', '50810ebae5d260885703f023f23dd8e9'),
+            ('payment_reconciliation_validate_extraction_scope', '336e3e14886b8b7f9a949261f09f9dbc'),
+            ('payment_reconciliation_validate_operation_scope', '143c97b4d2a00550468fbb5c5993961f'),
+            ('payment_reconciliation_protect_operation_fact', '9590d5b6247d8e6522d3e315a709e0af'),
+            ('payment_reconciliation_validate_plan_scope', '8d4e6eecf7c4367edbd8a4d7e040ff0c'),
+            ('payment_reconciliation_validate_item_scope', '1db5566787c2b9ee4da1e93b0ae408a5'),
+            ('payment_reconciliation_validate_reservation_scope', 'd40f21ba7c8b151d07c73dad8a3d1af6'),
+            ('payment_reconciliation_validate_movement_scope', '08c3e19cd57aaa1edffdbcb1499a56c9')
           )
-          SELECT 'function|' || e.name || '|' || CASE WHEN EXISTS (
-            SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-            WHERE n.nspname='public' AND p.proname=e.name
-          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          SELECT 'function|' || e.name || '|' || CASE
+            WHEN NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name) THEN 'missing'
+            WHEN (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name) <> 1 THEN 'drifted'
+            WHEN EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name AND md5(replace(btrim(p.prosrc), chr(13), ''))=e.body_md5) THEN 'present'
+            ELSE 'drifted' END FROM expected e ORDER BY e.name;
           WITH expected(name) AS (VALUES
             ('payment_ingestion_batches_set_updated_at'), ('payment_document_extractions_set_updated_at'),
             ('payment_allocation_plans_set_updated_at'), ('payable_snapshots_immutable'), ('payment_allocation_movements_immutable'),
@@ -138,19 +170,51 @@ jobs:
           SELECT 'storage_policy|' || e.name || '|' || CASE WHEN EXISTS (
             SELECT 1 FROM pg_policies p WHERE p.schemaname='storage' AND p.tablename='objects' AND p.policyname=e.name
           ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
-          SELECT 'history|032|' || CASE
-            WHEN to_regclass('supabase_migrations.schema_migrations') IS NULL THEN 'not_available'
-            WHEN EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE version::text='032') THEN 'present'
-            ELSE 'absent' END;
+          SELECT 'column|' || c.table_name || '|' || c.ordinal_position || '|' || c.column_name || '|' || c.data_type || '|' || c.is_nullable || '|' || coalesce(c.column_default,'')
+          FROM information_schema.columns c
+          WHERE c.table_schema='public' AND c.table_name IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')
+          ORDER BY c.table_name,c.ordinal_position;
+          SELECT 'constraint|' || rel.relname || '|' || con.conname || '|' || con.contype || '|' || pg_get_constraintdef(con.oid,true)
+          FROM pg_constraint con JOIN pg_class rel ON rel.oid=con.conrelid JOIN pg_namespace n ON n.oid=rel.relnamespace
+          WHERE n.nspname='public' AND rel.relname IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')
+          ORDER BY rel.relname,con.conname;
+          SELECT 'index_definition|' || i.tablename || '|' || i.indexname || '|' || i.indexdef FROM pg_indexes i
+          WHERE i.schemaname='public' AND i.tablename IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')
+          ORDER BY i.tablename,i.indexname;
+          SELECT 'function_signature|' || p.proname || '|' || pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|security_definer=' || p.prosecdef || '|volatility=' || p.provolatile || '|body_md5=' || md5(replace(btrim(p.prosrc),chr(13),''))
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN ('payment_reconciliation_set_updated_at','payment_reconciliation_normalize_currency','payment_reconciliation_normalize_bank_name','payment_amount_to_minor','rotate_payment_matching_policy','payment_reconciliation_hash_text','payment_reconciliation_account_material','payment_reconciliation_account_hash','payment_reconciliation_account_last4','payment_reconciliation_redact_free_text','payment_reconciliation_payload_hash','payment_reconciliation_require_finance','payment_reconciliation_storage_path_allowed','payment_reconciliation_command_replay','payment_reconciliation_store_command','append_financial_outbox_event_internal','payment_reconciliation_protect_immutable','payment_reconciliation_protect_policy_version','create_payable_snapshot_internal','materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot','payment_operation_confirmed_minor','payable_snapshot_confirmed_minor','payment_operation_reserved_minor','payable_snapshot_reserved_minor','payment_reconciliation_snapshot_is_payable','payment_operation_fingerprint_v1','get_payment_batch_context','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan','payment_reconciliation_validate_document_scope','payment_reconciliation_validate_extraction_scope','payment_reconciliation_validate_operation_scope','payment_reconciliation_protect_operation_fact','payment_reconciliation_validate_plan_scope','payment_reconciliation_validate_item_scope','payment_reconciliation_validate_reservation_scope','payment_reconciliation_validate_movement_scope')
+          ORDER BY p.proname,pg_get_function_identity_arguments(p.oid);
+          SELECT 'trigger_definition|' || c.relname || '|' || t.tgname || '|' || pg_get_triggerdef(t.oid,true)
+          FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgname IN ('payment_ingestion_batches_set_updated_at','payment_document_extractions_set_updated_at','payment_allocation_plans_set_updated_at','payable_snapshots_immutable','payment_allocation_movements_immutable','financial_command_receipts_immutable','financial_outbox_events_immutable','financial_break_glass_audit_immutable','materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot','payment_documents_validate_scope','payment_document_extractions_validate_scope','bank_payment_operations_validate_scope','bank_payment_operations_protect_fact','payment_allocation_plans_validate_scope','payment_allocation_items_validate_scope','payment_allocation_items_immutable','payment_allocation_reservations_validate_scope','payment_allocation_movements_validate_scope','payment_matching_policy_versions_immutable')
+          ORDER BY c.relname,t.tgname;
+          SELECT 'policy_definition|' || p.schemaname || '|' || p.tablename || '|' || p.policyname || '|' || p.cmd || '|' || coalesce(p.qual,'') || '|' || coalesce(p.with_check,'') FROM pg_policies p
+          WHERE (p.schemaname='public' AND p.tablename IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')) OR (p.schemaname='storage' AND p.tablename='objects' AND p.policyname IN ('Finance can upload payment batch documents','Finance can read payment batch documents'))
+          ORDER BY p.schemaname,p.tablename,p.policyname;
+          SELECT 'table_acl|' || c.relname || '|' || coalesce(array_to_string(c.relacl,','),'') FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND c.relname IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links') ORDER BY c.relname;
+          SELECT 'monetary_policy|' || (to_jsonb(p)-'created_by'-'updated_by')::text FROM public.payment_matching_policy_versions p ORDER BY coalesce(to_jsonb(p)->>'currency_code',to_jsonb(p)->>'currency'),to_jsonb(p)->>'version';
+          SELECT 'semantic|initial_monetary_policies|' || CASE WHEN count(*)=3 AND count(DISTINCT coalesce(to_jsonb(p)->>'currency_code',to_jsonb(p)->>'currency')) FILTER (WHERE coalesce(to_jsonb(p)->>'currency_code',to_jsonb(p)->>'currency') IN ('MXN','USD','EUR'))=3 THEN 'present' ELSE 'drifted' END FROM public.payment_matching_policy_versions p;
+          SELECT 'semantic|normalize_mxp|' || CASE WHEN public.payment_reconciliation_normalize_currency('MXP')='MXN' THEN 'present' ELSE 'drifted' END;
+          SELECT 'semantic|minor_units_mxn|' || CASE WHEN public.payment_amount_to_minor(1.23::numeric,'MXN')=123 THEN 'present' ELSE 'drifted' END;
+          SELECT 'semantic|payment_receipts_preserved|' || CASE WHEN to_regclass('public.payment_receipts') IS NOT NULL AND (SELECT count(*) FROM public.payment_receipts)=8 THEN 'present' ELSE 'drifted' END;          SELECT (to_regclass('supabase_migrations.schema_migrations') IS NOT NULL) AS history_relation_exists \gset
+          \if :history_relation_exists
+            SELECT 'history|032|' || CASE WHEN EXISTS (
+              SELECT 1 FROM supabase_migrations.schema_migrations WHERE version::text='032'
+            ) THEN 'present' ELSE 'absent' END;
+          \else
+            SELECT 'history|032|history_relation_absent';
+          \endif
           SELECT 'legacy|payment_receipts|present_rows=' || CASE WHEN to_regclass('public.payment_receipts') IS NULL THEN 'table_missing' ELSE (SELECT count(*)::text FROM public.payment_receipts) END;
           COMMIT;
           SQL
           sed -E 's/^/AUDIT: /' "${audit_file}"
-          missing_or_drifted=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy)\|.*\|(missing|drifted)$' "${audit_file}" || true)
-          present=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy)\|.*\|present$' "${audit_file}" || true)
-          expected_total=133
+          missing_or_drifted=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy|semantic)\|.*\|(missing|drifted)$' "${audit_file}" || true)
+          present=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy|semantic)\|.*\|present$' "${audit_file}" || true)
+          expected_total=138
           if [ "${present}" -eq 0 ]; then
-            state='clean'
+            state='unrelated_objects'
           elif [ "${present}" -eq "${expected_total}" ] && [ "${missing_or_drifted}" -eq 0 ]; then
             state='already_applied_exact'
           else
@@ -162,8 +226,8 @@ jobs:
             echo 'Fail closed: inventory does not match migration 032 contract.' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
-          if [ "${state}" = 'clean' ]; then
-            echo 'Fail closed: a clean state requires separate authorization; this workflow never applies migration 032.' >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${state}" = 'unrelated_objects' ]; then
+            echo 'Fail closed: unrelated objects require separate authorization; this workflow never applies migration 032.' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
