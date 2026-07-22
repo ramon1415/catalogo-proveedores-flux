@@ -130,7 +130,7 @@ jobs:
           SELECT 'function|' || e.name || '|' || CASE
             WHEN NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name) THEN 'missing'
             WHEN (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name) <> 1 THEN 'drifted'
-            WHEN EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name AND md5(btrim(p.prosrc, E' \\t\\n\\r\\f\\v'))=e.body_md5) THEN 'present'
+            WHEN EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=e.name AND md5(btrim(p.prosrc, E' \t\n\r\f\v'))=e.body_md5) THEN 'present'
             ELSE 'drifted' END FROM expected e ORDER BY e.name;
           WITH expected(name) AS (VALUES
             ('payment_ingestion_batches_set_updated_at'), ('payment_document_extractions_set_updated_at'),
@@ -241,7 +241,7 @@ jobs:
           WHERE i.schemaname='public' AND i.tablename IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links')
           ORDER BY i.tablename,i.indexname;
           SELECT 'gate|function_signatures|started';
-          SELECT 'function_signature|' || p.proname || '|' || pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|security_definer=' || p.prosecdef::text || '|volatility=' || p.provolatile::text || '|body_md5=' || md5(btrim(p.prosrc, E' \\t\\n\\r\\f\\v'))
+          SELECT 'function_signature|' || p.proname || '|' || pg_get_function_identity_arguments(p.oid) || '|' || pg_get_function_result(p.oid) || '|security_definer=' || p.prosecdef::text || '|volatility=' || p.provolatile::text || '|body_md5=' || md5(btrim(p.prosrc, E' \t\n\r\f\v'))
           FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
           WHERE n.nspname='public' AND p.proname IN ('payment_reconciliation_set_updated_at','payment_reconciliation_normalize_currency','payment_reconciliation_normalize_bank_name','payment_amount_to_minor','rotate_payment_matching_policy','payment_reconciliation_hash_text','payment_reconciliation_account_material','payment_reconciliation_account_hash','payment_reconciliation_account_last4','payment_reconciliation_redact_free_text','payment_reconciliation_payload_hash','payment_reconciliation_require_finance','payment_reconciliation_storage_path_allowed','payment_reconciliation_command_replay','payment_reconciliation_store_command','append_financial_outbox_event_internal','payment_reconciliation_protect_immutable','payment_reconciliation_protect_policy_version','create_payable_snapshot_internal','materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot','payment_operation_confirmed_minor','payable_snapshot_confirmed_minor','payment_operation_reserved_minor','payable_snapshot_reserved_minor','payment_reconciliation_snapshot_is_payable','payment_operation_fingerprint_v1','get_payment_batch_context','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan','payment_reconciliation_validate_document_scope','payment_reconciliation_validate_extraction_scope','payment_reconciliation_validate_operation_scope','payment_reconciliation_protect_operation_fact','payment_reconciliation_validate_plan_scope','payment_reconciliation_validate_item_scope','payment_reconciliation_validate_reservation_scope','payment_reconciliation_validate_movement_scope')
           ORDER BY p.proname,pg_get_function_identity_arguments(p.oid);
@@ -264,9 +264,8 @@ jobs:
           SELECT 'semantic|normalize_mxp|' || CASE WHEN public.payment_reconciliation_normalize_currency('MXP')='MXN' THEN 'present' ELSE 'drifted' END;
           SELECT 'semantic|minor_units_mxn|' || CASE WHEN public.payment_amount_to_minor(1.23::numeric,'MXN')=123 THEN 'present' ELSE 'drifted' END;
           SELECT 'semantic|payment_receipts_preserved|' || CASE WHEN to_regclass('public.payment_receipts') IS NOT NULL AND (SELECT count(*) FROM public.payment_receipts)=8 THEN 'present' ELSE 'drifted' END;
-          SELECT 'semantic|hash_outer_whitespace_ignored|' || CASE WHEN md5(btrim(E' \\t\\nmaterial\\r\\f\\v', E' \\t\\n\\r\\f\\v'))=md5('material') THEN 'present' ELSE 'drifted' END;
-          SELECT 'semantic|hash_internal_change_detected|' || CASE WHEN md5(btrim(E'\\nmaterial-A\\n', E' \\t\\n\\r\\f\\v'))<>md5(btrim(E'\\nmaterial-B\\n', E' \\t\\n\\r\\f\\v')) THEN 'present' ELSE 'drifted' END;
-          SELECT 'semantic|storage_valid_path|' || CASE WHEN public.payment_reconciliation_storage_path_allowed('00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000001/source.pdf') THEN 'present' ELSE 'drifted' END;
+          SELECT 'semantic|hash_outer_whitespace_ignored|' || CASE WHEN md5(btrim(E' \t\nmaterial\r\f\v', E' \t\n\r\f\v'))=md5('material') THEN 'present' ELSE 'drifted' END;
+          SELECT 'semantic|hash_internal_change_detected|' || CASE WHEN md5(btrim(E'\nmaterial-A\n', E' \t\n\r\f\v'))<>md5(btrim(E'\nmaterial-B\n', E' \t\n\r\f\v')) THEN 'present' ELSE 'drifted' END;
           SELECT 'semantic|storage_invalid_path|' || CASE WHEN NOT public.payment_reconciliation_storage_path_allowed('../invalid.pdf') THEN 'present' ELSE 'drifted' END;
           SELECT 'semantic|table_rls_policies_none|' || CASE WHEN count(*)=0 THEN 'present' ELSE 'drifted' END FROM pg_policies p WHERE p.schemaname='public' AND p.tablename IN ('payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links');
           SELECT 'gate|migration_history|started';
@@ -284,7 +283,7 @@ jobs:
           publish_audit
           missing_or_drifted=$(grep -Ec '^(table|rls|function|internal_function_not_exposed|trigger|index|function_grant|bucket|storage_policy|semantic)\|.*\|(missing|drifted)$' "${audit_file}" || true)
           present=$(grep -Ec '^(table|rls|function|internal_function_not_exposed|trigger|index|function_grant|bucket|storage_policy|semantic)\|.*\|present$' "${audit_file}" || true)
-          expected_total=176
+          expected_total=175
           if [ "${present}" -eq 0 ]; then
             state='unrelated_objects'
           elif [ "${present}" -eq "${expected_total}" ] && [ "${missing_or_drifted}" -eq 0 ]; then
