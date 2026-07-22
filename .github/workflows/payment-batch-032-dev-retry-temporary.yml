@@ -329,7 +329,7 @@ jobs:
           export PGOPTIONS='-c default_transaction_read_only=on'
           psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt <<'SQL'
           BEGIN TRANSACTION READ ONLY;
-          SELECT 'SMOKE: storage_path_guard=' || CASE WHEN has_function_privilege('authenticated', 'public.payment_reconciliation_storage_path_allowed(text)'::regprocedure, 'EXECUTE') THEN 'available' ELSE 'missing' END;
+          SELECT 'SMOKE: storage_path_guard=' || CASE WHEN has_function_privilege('authenticated', 'public.payment_reconciliation_storage_path_allowed(text,boolean)'::regprocedure, 'EXECUTE') THEN 'available' ELSE 'missing' END;
           SELECT 'SMOKE: batch_context_rpc=' || CASE WHEN has_function_privilege('authenticated', 'public.get_payment_batch_context()'::regprocedure, 'EXECUTE') THEN 'available' ELSE 'missing' END;
           COMMIT;
           SQL
