@@ -1,188 +1,197 @@
-﻿name: Apply payment batch 032 in DEV (controlled retry)
+name: Payment batch 032 DEV audit (temporary)
 
-'on':
-  workflow_dispatch:
+on:
   push:
     branches:
       - ops/ramon-payment-batch-032-dev-retry
     paths:
       - .github/workflows/payment-batch-032-dev-retry-temporary.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: payment-batch-032-dev-retry
-  cancel-in-progress: false
-
 jobs:
-  apply:
-    name: Exact migration 032 plus postcheck
+  audit-existing-state:
+    name: Audit existing DEV state (read-only)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     environment: DEV
-    env:
-      PROJECT_REF: scsirgbuqjcwoaxfacth
-      EXPECTED_BASE_SHA: 4b2d25cbb54d4cc6d9ff2c02453d6a232ce60738
-      EXPECTED_MIGRATION_SHA256: 913ef1a3fd352c4c72080060dcebf51d79b96d5f594d34bf3b539c42fbf03d31
-      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
-      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
-
     steps:
-      - name: Checkout isolated operational branch
+      - name: Checkout operational branch
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Verify immutable DEV scope and corrected SQL identity
+      - name: Validate runner scope
         shell: bash
         run: |
           set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "ops/ramon-payment-batch-032-dev-retry"
+          test "${SUPABASE_DEV_PROJECT_REF:?Missing DEV project ref}" = "scsirgbuqjcwoaxfacth"
+          test -n "${SUPABASE_DEV_DB_URL:?Missing DEV database URL}"
+          echo "Runner scope validated for the approved DEV project."
 
-          if [ -z "${SUPABASE_DEV_DB_URL+x}" ]; then
-            echo "::error::SUPABASE_DEV_DB_URL is not defined in workflow environment."
-            exit 1
-          fi
-
-          DB_URL_SCOPE=$(printf '%s' "$SUPABASE_DEV_DB_URL" | sed 's#^\\##')
-          PROJECT_REF_SCOPE=$(printf '%s' "$SUPABASE_DEV_PROJECT_REF" | sed 's#^\\##')
-
-          {
-            echo "## Scope diagnostics (sanitized)"
-            echo "- PROJECT_REF expected: \`$PROJECT_REF\`"
-            echo "- Project ref loaded: \`$PROJECT_REF_SCOPE\`"
-            echo "- DB URL length: ${#DB_URL_SCOPE}"
-            echo "- DB URL starts with escape char: $(case \"$DB_URL_SCOPE\" in \\\*) echo yes;; *) echo no;; esac)"
-            echo "- DB URL contains expected token: $(case \"$DB_URL_SCOPE\" in *\"$PROJECT_REF_SCOPE\"*) echo yes;; *) echo no;; esac)"
-            echo "- DB URL SHA-256: $(printf '%s' \"$DB_URL_SCOPE\" | sha256sum | cut -d' ' -f1)"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
-          test "$GITHUB_REF_NAME" = "ops/ramon-payment-batch-032-dev-retry"
-          git merge-base --is-ancestor "$EXPECTED_BASE_SHA" HEAD
-          test "$(git diff --name-only "$EXPECTED_BASE_SHA" HEAD)" = ".github/workflows/payment-batch-032-dev-retry-temporary.yml"
-          test "$(sha256sum supabase/migrations/032_payment_batch_reconciliation.sql | cut -d' ' -f1)" = "$EXPECTED_MIGRATION_SHA256"
-          test "$PROJECT_REF_SCOPE" = "$PROJECT_REF"
-          test -n "$DB_URL_SCOPE"
-          case "$DB_URL_SCOPE" in
-            *"$PROJECT_REF_SCOPE"*) ;;
-            *) echo "::error::Database URL does not identify the approved DEV project."; exit 1 ;;
-          esac
-          echo "::add-mask::$DB_URL_SCOPE"
       - name: Install PostgreSQL client
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -y >/dev/null
-          sudo apt-get install -y postgresql-client >/dev/null
-          psql --version
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends postgresql-client
 
-      - name: Precheck clean 032 state and preserve payment receipts baseline
-        id: precheck
+      - name: Audit migration 032 object inventory (read-only)
+        id: audit
         shell: bash
         run: |
           set -euo pipefail
-          echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          fail_precheck() {
-            local reason=$1
-            local detail=$2
-            echo "::error::Precheck failed: $reason. $detail"
-            echo "- PRECHECK_FAILURE: $reason => $detail" >> "$GITHUB_STEP_SUMMARY"
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          audit_file="${RUNNER_TEMP}/payment-batch-032-audit.tsv"
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt > "${audit_file}" <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          WITH expected(name) AS (VALUES
+            ('payment_matching_policy_versions'), ('payable_snapshots'), ('payment_ingestion_batches'), ('payment_documents'),
+            ('payment_document_extractions'), ('bank_payment_operations'), ('payment_operation_documents'), ('payment_allocation_plans'),
+            ('payment_allocation_items'), ('payment_allocation_reservations'), ('payment_allocation_movements'), ('financial_command_receipts'),
+            ('financial_outbox_events'), ('financial_outbox_delivery_attempts'), ('financial_break_glass_audit'), ('legacy_payment_receipt_links')
+          )
+          SELECT 'table|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='public' AND c.relkind='r' AND c.relname=e.name
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          WITH expected(name) AS (VALUES
+            ('payment_matching_policy_versions'), ('payable_snapshots'), ('payment_ingestion_batches'), ('payment_documents'),
+            ('payment_document_extractions'), ('bank_payment_operations'), ('payment_operation_documents'), ('payment_allocation_plans'),
+            ('payment_allocation_items'), ('payment_allocation_reservations'), ('payment_allocation_movements'), ('financial_command_receipts'),
+            ('financial_outbox_events'), ('financial_outbox_delivery_attempts'), ('financial_break_glass_audit'), ('legacy_payment_receipt_links')
+          )
+          SELECT 'rls|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='public' AND c.relkind='r' AND c.relname=e.name AND c.relrowsecurity
+          ) THEN 'present' ELSE 'drifted' END FROM expected e ORDER BY e.name;
+          WITH expected(name) AS (VALUES
+            ('payment_reconciliation_set_updated_at'), ('payment_reconciliation_normalize_currency'), ('payment_reconciliation_normalize_bank_name'),
+            ('payment_amount_to_minor'), ('rotate_payment_matching_policy'), ('payment_reconciliation_hash_text'),
+            ('payment_reconciliation_account_material'), ('payment_reconciliation_account_hash'), ('payment_reconciliation_account_last4'),
+            ('payment_reconciliation_redact_free_text'), ('payment_reconciliation_payload_hash'), ('payment_reconciliation_require_finance'),
+            ('payment_reconciliation_storage_path_allowed'), ('payment_reconciliation_command_replay'), ('payment_reconciliation_store_command'),
+            ('append_financial_outbox_event_internal'), ('payment_reconciliation_protect_immutable'), ('payment_reconciliation_protect_policy_version'),
+            ('create_payable_snapshot_internal'), ('materialize_closed_batch_payable_snapshots'), ('materialize_extraordinary_payable_snapshot'),
+            ('payment_operation_confirmed_minor'), ('payable_snapshot_confirmed_minor'), ('payment_operation_reserved_minor'),
+            ('payable_snapshot_reserved_minor'), ('payment_reconciliation_snapshot_is_payable'), ('payment_operation_fingerprint_v1'),
+            ('get_payment_batch_context'), ('create_payment_ingestion_batch'), ('finalize_payment_ingestion_upload'),
+            ('submit_payment_document_extractions'), ('list_payment_ingestion_batches'), ('get_payment_ingestion_batch_detail'),
+            ('accept_payment_document_extraction'), ('reject_payment_document_extraction'), ('find_payment_allocation_candidates'),
+            ('propose_payment_allocations'), ('reserve_payment_allocations'), ('expire_payment_reservation'),
+            ('release_payment_reservation'), ('cancel_payment_allocation_plan'), ('payment_reconciliation_validate_document_scope'),
+            ('payment_reconciliation_validate_extraction_scope'), ('payment_reconciliation_validate_operation_scope'),
+            ('payment_reconciliation_protect_operation_fact'), ('payment_reconciliation_validate_plan_scope'),
+            ('payment_reconciliation_validate_item_scope'), ('payment_reconciliation_validate_reservation_scope'),
+            ('payment_reconciliation_validate_movement_scope')
+          )
+          SELECT 'function|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='public' AND p.proname=e.name
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          WITH expected(name) AS (VALUES
+            ('payment_ingestion_batches_set_updated_at'), ('payment_document_extractions_set_updated_at'),
+            ('payment_allocation_plans_set_updated_at'), ('payable_snapshots_immutable'), ('payment_allocation_movements_immutable'),
+            ('financial_command_receipts_immutable'), ('financial_outbox_events_immutable'), ('financial_break_glass_audit_immutable'),
+            ('materialize_closed_batch_payable_snapshots'), ('materialize_extraordinary_payable_snapshot'),
+            ('payment_documents_validate_scope'), ('payment_document_extractions_validate_scope'), ('bank_payment_operations_validate_scope'),
+            ('bank_payment_operations_protect_fact'), ('payment_allocation_plans_validate_scope'), ('payment_allocation_items_validate_scope'),
+            ('payment_allocation_items_immutable'), ('payment_allocation_reservations_validate_scope'),
+            ('payment_allocation_movements_validate_scope'), ('payment_matching_policy_versions_immutable')
+          )
+          SELECT 'trigger|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_trigger t WHERE NOT t.tgisinternal AND t.tgname=e.name
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          WITH expected(name) AS (VALUES
+            ('payment_matching_policy_active_uidx'), ('payable_snapshots_company_idx'), ('payable_snapshots_request_latest_idx'),
+            ('payment_ingestion_batches_company_status_idx'), ('payment_document_extractions_batch_status_idx'),
+            ('bank_payment_operations_company_status_idx'), ('payment_allocation_plans_open_operation_uidx'),
+            ('payment_allocation_items_snapshot_idx'), ('payment_allocation_reservations_active_plan_uidx'),
+            ('payment_allocation_reservations_operation_idx'), ('payment_allocation_movements_operation_idx'),
+            ('payment_allocation_movements_snapshot_idx'), ('financial_outbox_events_aggregate_idx'), ('financial_outbox_events_occurred_idx')
+          )
+          SELECT 'index|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_indexes i WHERE i.schemaname='public' AND i.indexname=e.name
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          WITH expected(name) AS (VALUES
+            ('get_payment_batch_context'), ('payment_reconciliation_storage_path_allowed'), ('rotate_payment_matching_policy'),
+            ('create_payment_ingestion_batch'), ('finalize_payment_ingestion_upload'), ('submit_payment_document_extractions'),
+            ('list_payment_ingestion_batches'), ('get_payment_ingestion_batch_detail'), ('accept_payment_document_extraction'),
+            ('reject_payment_document_extraction'), ('find_payment_allocation_candidates'), ('propose_payment_allocations'),
+            ('reserve_payment_allocations'), ('expire_payment_reservation'), ('release_payment_reservation'), ('cancel_payment_allocation_plan')
+          )
+          SELECT 'function_grant|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='public' AND p.proname=e.name AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          SELECT 'bucket|payment-batch-documents|' || CASE
+            WHEN b.id IS NULL THEN 'missing'
+            WHEN b.public=false AND b.file_size_limit=26214400 AND b.allowed_mime_types=ARRAY['application/pdf'] THEN 'present'
+            ELSE 'drifted' END
+          FROM (SELECT 1) x LEFT JOIN storage.buckets b ON b.id='payment-batch-documents';
+          WITH expected(name) AS (VALUES
+            ('Finance can upload payment batch documents'), ('Finance can read payment batch documents')
+          )
+          SELECT 'storage_policy|' || e.name || '|' || CASE WHEN EXISTS (
+            SELECT 1 FROM pg_policies p WHERE p.schemaname='storage' AND p.tablename='objects' AND p.policyname=e.name
+          ) THEN 'present' ELSE 'missing' END FROM expected e ORDER BY e.name;
+          SELECT 'history|032|' || CASE
+            WHEN to_regclass('supabase_migrations.schema_migrations') IS NULL THEN 'not_available'
+            WHEN EXISTS (SELECT 1 FROM supabase_migrations.schema_migrations WHERE version::text='032') THEN 'present'
+            ELSE 'absent' END;
+          SELECT 'legacy|payment_receipts|present_rows=' || CASE WHEN to_regclass('public.payment_receipts') IS NULL THEN 'table_missing' ELSE (SELECT count(*)::text FROM public.payment_receipts) END;
+          COMMIT;
+          SQL
+          sed -E 's/^/AUDIT: /' "${audit_file}"
+          missing_or_drifted=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy)\|.*\|(missing|drifted)$' "${audit_file}" || true)
+          present=$(grep -Ec '^(table|rls|function|trigger|index|function_grant|bucket|storage_policy)\|.*\|present$' "${audit_file}" || true)
+          expected_total=133
+          if [ "${present}" -eq 0 ]; then
+            state='clean'
+          elif [ "${present}" -eq "${expected_total}" ] && [ "${missing_or_drifted}" -eq 0 ]; then
+            state='already_applied_exact'
+          else
+            state='partial_or_drifted'
+          fi
+          echo "state=${state}" >> "${GITHUB_OUTPUT}"
+          echo "Audit state: ${state}" >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${state}" = 'partial_or_drifted' ]; then
+            echo 'Fail closed: inventory does not match migration 032 contract.' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
-          }
-          query() {
-            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 -c "$1"
-          }
-          domain_tables="'payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links'"
-          tables_before="$(query "begin transaction read only; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ($domain_tables); commit;")"
-          functions_before="$(query "begin transaction read only; select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and (p.proname like 'payment_reconciliation_%' or p.proname in ('get_payment_batch_context','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan')); commit;")"
-          bucket_before="$(query "begin transaction read only; select count(*) from storage.buckets where id='payment-batch-documents' or name='payment-batch-documents'; commit;")"
-          policies_before="$(query "begin transaction read only; select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Finance can upload payment batch documents','Finance can read payment batch documents'); commit;")"
-          history_before="$(query "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;")"
-          receipts_before="$(query "begin transaction read only; select count(*) from public.payment_receipts; commit;")"
-          echo "precheck tables_before=$tables_before"
-          echo "precheck functions_before=$functions_before"
-          echo "precheck bucket_before=$bucket_before"
-          echo "precheck policies_before=$policies_before"
-          echo "precheck history_before=$history_before"
-          echo "precheck payment_receipts_before=$receipts_before"
+          fi
+          if [ "${state}" = 'clean' ]; then
+            echo 'Fail closed: a clean state requires separate authorization; this workflow never applies migration 032.' >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
 
-          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| - | - |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| tables_before | $tables_before |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| functions_before | $functions_before |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| bucket_before | $bucket_before |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| policies_before | $policies_before |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| history_before | $history_before |" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "$tables_before" != "0" ]; then
-            fail_precheck "tables_before" "expected 0, got $tables_before"
-          fi
-          if [ "$functions_before" != "0" ]; then
-            fail_precheck "functions_before" "expected 0, got $functions_before"
-          fi
-          if [ "$bucket_before" != "0" ]; then
-            fail_precheck "bucket_before" "expected 0, got $bucket_before"
-          fi
-          if [ "$policies_before" != "0" ]; then
-            fail_precheck "policies_before" "expected 0, got $policies_before"
-          fi
-          if [ "$history_before" != "f" ]; then
-            fail_precheck "history_before" "expected f, got $history_before"
-          fi
-          echo "payment_receipts_before=$receipts_before" >> "$GITHUB_OUTPUT"
-          {
-            echo "- Precheck: 032 tables/functions/bucket/policies absent"
-            echo "- CLI history: absent; exact transactional SQL route selected"
-            echo "- payment_receipts row count captured for equality postcheck"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Apply exact corrected migration in one database transaction
+      - name: Postcheck existing state (read-only)
+        if: steps.audit.outputs.state == 'already_applied_exact'
         shell: bash
-        env:
-          PGOPTIONS: "-c lock_timeout=5000 -c statement_timeout=90000"
         run: |
           set -euo pipefail
-          echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          sha256sum supabase/migrations/032_payment_batch_reconciliation.sql
-          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f supabase/migrations/032_payment_batch_reconciliation.sql
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SELECT 'POSTCHECK: payment_receipts_preserved=' || CASE WHEN to_regclass('public.payment_receipts') IS NULL THEN 'false' ELSE 'true' END;
+          SELECT 'POSTCHECK: financial_outbox_table=' || CASE WHEN to_regclass('public.financial_outbox_events') IS NULL THEN 'false' ELSE 'true' END;
+          SELECT 'POSTCHECK: private_document_bucket=' || CASE WHEN EXISTS (
+            SELECT 1 FROM storage.buckets WHERE id='payment-batch-documents' AND public=false
+          ) THEN 'true' ELSE 'false' END;
+          SELECT 'POSTCHECK: authenticated_rpc_grants=' || count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='public' AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+              AND p.proname IN ('get_payment_batch_context','payment_reconciliation_storage_path_allowed','rotate_payment_matching_policy','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan');
+          COMMIT;
+          SQL
 
-      - name: Postcheck schema, RLS, RPC grants, private storage and legacy preservation
+      - name: Safe contract smoke (read-only)
+        if: steps.audit.outputs.state == 'already_applied_exact'
         shell: bash
-        env:
-          RECEIPTS_BEFORE: ${{ steps.precheck.outputs.payment_receipts_before }}
         run: |
           set -euo pipefail
-          echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          query() {
-            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 -c "$1"
-          }
-          domain_tables="'payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches','payment_documents','payment_document_extractions','bank_payment_operations','payment_operation_documents','payment_allocation_plans','payment_allocation_items','payment_allocation_reservations','payment_allocation_movements','financial_command_receipts','financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit','legacy_payment_receipt_links'"
-          tables_after="$(query "begin transaction read only; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ($domain_tables); commit;")"
-          functions_after="$(query "begin transaction read only; select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and (p.proname like 'payment_reconciliation_%' or p.proname in ('get_payment_batch_context','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan')); commit;")"
-          triggers_after="$(query "begin transaction read only; select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where not t.tgisinternal and n.nspname='public' and c.relname in ($domain_tables); commit;")"
-          rls_after="$(query "begin transaction read only; select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ($domain_tables) and c.relrowsecurity; commit;")"
-          bucket_private="$(query "begin transaction read only; select public from storage.buckets where id='payment-batch-documents' and name='payment-batch-documents'; commit;")"
-          policies_after="$(query "begin transaction read only; select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Finance can upload payment batch documents','Finance can read payment batch documents'); commit;")"
-          authenticated_grants="$(query "begin transaction read only; select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('get_payment_batch_context','payment_reconciliation_storage_path_allowed','rotate_payment_matching_policy','create_payment_ingestion_batch','finalize_payment_ingestion_upload','submit_payment_document_extractions','list_payment_ingestion_batches','get_payment_ingestion_batch_detail','accept_payment_document_extraction','reject_payment_document_extraction','find_payment_allocation_candidates','propose_payment_allocations','reserve_payment_allocations','expire_payment_reservation','release_payment_reservation','cancel_payment_allocation_plan') and has_function_privilege('authenticated', p.oid, 'EXECUTE'); commit;")"
-          receipts_after="$(query "begin transaction read only; select count(*) from public.payment_receipts; commit;")"
-          history_after="$(query "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;")"
-          test "$tables_after" = "16"
-          test "$functions_after" = "49"
-          test "$triggers_after" = "20"
-          test "$rls_after" = "16"
-          test "$bucket_private" = "f"
-          test "$policies_after" = "2"
-          test "$authenticated_grants" = "16"
-          test "$receipts_after" = "$RECEIPTS_BEFORE"
-          test "$history_after" = "f"
-          {
-            echo "- Postcheck: 16 tables, 49 functions, 20 triggers and RLS on all 16 tables"
-            echo "- Storage: private \`payment-batch-documents\` bucket with two policies"
-            echo "- RPC: 16 authenticated grants"
-            echo "- payment_receipts: unchanged row count"
-            echo "- CLI history: still absent and untouched"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
-
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SELECT 'SMOKE: storage_path_guard=' || CASE WHEN has_function_privilege('authenticated', 'public.payment_reconciliation_storage_path_allowed(text)'::regprocedure, 'EXECUTE') THEN 'available' ELSE 'missing' END;
+          SELECT 'SMOKE: batch_context_rpc=' || CASE WHEN has_function_privilege('authenticated', 'public.get_payment_batch_context()'::regprocedure, 'EXECUTE') THEN 'available' ELSE 'missing' END;
+          COMMIT;
+          SQL
