@@ -253,6 +253,21 @@ test("payable snapshots are versioned, source-bound, and append-only", () => {
   assert.match(batchSnapshot, /decided_by[\s\S]*decided_at/i)
 })
 
+test("extraordinary snapshot validation avoids the reserved authorization alias", () => {
+  const materialize = functionDefinition("create_payable_snapshot_internal")
+  assert.doesNotMatch(
+    materialize,
+    /from\s+public\.payment_request_extraordinary_authorizations\s+authorization\b/i,
+    "PostgreSQL reserves authorization and cannot parse it as a relation alias",
+  )
+  assert.match(
+    materialize,
+    /from\s+public\.payment_request_extraordinary_authorizations\s+extraordinary_authorization\b/i,
+  )
+  assert.match(materialize, /extraordinary_authorization\.id\s*=\s*p_source_id/i)
+  assert.match(materialize, /p_materialized_by\s*=\s*extraordinary_authorization\.authorized_by/i)
+})
+
 test("every new table enables RLS and revokes direct browser privileges", () => {
   for (const table of domainTables) {
     assert.match(

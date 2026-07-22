@@ -1239,13 +1239,13 @@ begin
   elsif p_source_type = 'extraordinary_authorization' then
     if p_source_status is distinct from 'active' or not exists (
       select 1
-      from public.payment_request_extraordinary_authorizations authorization
-      where authorization.id = p_source_id
-        and authorization.payment_request_id = v_request.id
-        and authorization.status = 'active'
-        and authorization.authorized_by = p_authorized_by
-        and authorization.authorized_at is not distinct from p_authorized_at
-        and p_materialized_by = authorization.authorized_by
+      from public.payment_request_extraordinary_authorizations extraordinary_authorization
+      where extraordinary_authorization.id = p_source_id
+        and extraordinary_authorization.payment_request_id = v_request.id
+        and extraordinary_authorization.status = 'active'
+        and extraordinary_authorization.authorized_by = p_authorized_by
+        and extraordinary_authorization.authorized_at is not distinct from p_authorized_at
+        and p_materialized_by = extraordinary_authorization.authorized_by
     ) then
       raise exception 'invalid_extraordinary_snapshot_source';
     end if;
