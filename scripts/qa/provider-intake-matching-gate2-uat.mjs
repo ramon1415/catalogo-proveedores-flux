@@ -2400,6 +2400,29 @@ export async function runCapabilityAudit() {
         authenticatedReadOnly.already_normalized_noop === true,
       read_only_transaction_assertion:
         authenticatedReadOnly.read_only_sql_scan.status === "PASS",
+      session_read_only_bootstrap:
+        authenticatedReadOnly.last_completed_stage === "RESULT_SERIALIZATION" &&
+        authenticatedReadOnly.session_read_only_bootstrap_applied === true,
+      session_read_only_post_bootstrap_assertion:
+        authenticatedReadOnly.session_default_transaction_read_only === true,
+      explicit_begin_read_only:
+        authenticatedReadOnly.last_completed_stage === "RESULT_SERIALIZATION",
+      transaction_read_only_assertion:
+        authenticatedReadOnly.transaction_read_only === true &&
+        authenticatedReadOnly.transaction_started === true,
+      pre_business_query_order_guard:
+        authenticatedReadOnly.last_completed_stage === "RESULT_SERIALIZATION" &&
+        authenticatedReadOnly.transaction_started === true &&
+        authenticatedReadOnly.query_completed === true,
+      persistent_configuration_block:
+        authenticatedReadOnly.read_only_sql_scan?.forbidden === 0 &&
+        authenticatedReadOnly.session_configuration_applied === true &&
+        authenticatedReadOnly.session_config === 1,
+      fresh_baseline_after_transaction_assertion:
+        authenticatedReadOnly.fresh_baseline_completed === true &&
+        authenticatedReadOnly.transaction_started === true,
+      rollback_completion_gate:
+        authenticatedReadOnly.rollback_completed === true,
       rollback_observability:
         typeof validateAuthenticatedReadOnlyEnvelope === "function",
       child_process_error_preservation:
@@ -2559,8 +2582,7 @@ export function createAuthenticatedReadOnlyDatabaseClient(databaseUrl) {
   return new Client({
     connectionString: parsed.toString(),
     ssl: { rejectUnauthorized: false },
-    application_name: "flux_v6m_authenticated_read_only_precheck",
-    options: "-c default_transaction_read_only=on",
+    application_name: "flux_v6n_authenticated_read_only_precheck",
   })
 }
 
@@ -3863,11 +3885,17 @@ export async function runV6KCleanupMatrix() {
 const V6M_READ_ONLY_CLEANUP_CASES = Object.freeze([
   "authenticated_connection_failure",
   "authenticated_auth_failure",
+  "authenticated_session_read_only_bootstrap",
+  "authenticated_session_read_only_assertion",
+  "authenticated_transaction_assertion",
   "authenticated_statement_timeout",
+  "authenticated_pre_business_query_order_violation",
   "authenticated_schema_mismatch",
   "authenticated_result_parse_failure",
   "authenticated_rollback_failure",
   "authenticated_child_process_failure",
+  "authenticated_baseline_drift",
+  "authenticated_caller_parse_failure_after_business_query",
   "authenticated_already_normalized_noop",
 ])
 
@@ -3884,7 +3912,7 @@ export async function runV6MCleanupMatrix() {
     writes: 0,
   }))
   const cases = [...v6k.cases, ...additional]
-  gate(cases.length === 42, "CLEANUP_MATRIX_FAILED")
+  gate(cases.length === 48, "CLEANUP_MATRIX_FAILED")
   return {
     status: "PASS",
     total: cases.length,
@@ -3936,7 +3964,7 @@ export async function runNoWriteMocked() {
   gate(simulation.link_after_revoke.active === 0, "MOCKED_ACTIVE_LINK_REMAINS")
   gate(simulation.provider_matched_final === 9, "MOCKED_PROVIDER_MATCHED_FINAL")
   gate(simulation.payment_intake_events_final === 50, "MOCKED_EVENT_FINAL")
-  gate(cleanupMatrix.total === 42 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
+  gate(cleanupMatrix.total === 48 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
   gate(authenticatedReadOnly.status === "PASS", "AUTHENTICATED_READ_ONLY_PRECHECK_UNCLASSIFIED")
   gate(authenticatedReadOnly.already_normalized_noop === true, "ALREADY_NORMALIZED_STATE_NOT_HANDLED")
   gate(authenticatedReadOnly.dev_writes === 0, "UNAUTHORIZED_DEV_MUTATION")

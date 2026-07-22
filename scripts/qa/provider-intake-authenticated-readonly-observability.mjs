@@ -6,8 +6,11 @@ export const AUTHENTICATED_READ_ONLY_STAGES = Object.freeze([
   "DB_URL_PARSE",
   "DB_CLIENT_INITIALIZATION",
   "DB_CONNECTION",
-  "READ_ONLY_SESSION_ASSERTION",
+  "INITIAL_READ_ONLY_STATE_INSPECTION",
+  "SESSION_READ_ONLY_BOOTSTRAP",
+  "SESSION_READ_ONLY_ASSERTION",
   "READ_ONLY_TRANSACTION_BEGIN",
+  "TRANSACTION_READ_ONLY_ASSERTION",
   "DATABASE_TIME_QUERY",
   "SCHEMA_CONTRACT_INSPECTION",
   "INTAKE_LINKS_READ",
@@ -36,6 +39,11 @@ export const AUTHENTICATED_READ_ONLY_ERROR_CATEGORIES = Object.freeze([
   "SCHEMA_COLUMN_MISSING",
   "SCHEMA_CONTRACT_MISMATCH",
   "READ_ONLY_ASSERTION_FAILED",
+  "SESSION_READ_ONLY_BOOTSTRAP_FAILED",
+  "TRANSACTION_READ_ONLY_ASSERTION_FAILED",
+  "PRE_BUSINESS_QUERY_ORDER_VIOLATION",
+  "READ_ONLY_ROLLBACK_FAILED",
+  "PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT",
   "LINK_STATE_CONTRACT_MISMATCH",
   "ALREADY_NORMALIZED_STATE_NOT_HANDLED",
   "RESULT_CONTRACT_INVALID",
@@ -80,6 +88,11 @@ const FAILURE_STATUS = new Map([
   ["CHILD_PROCESS_EXIT_FAILED", "FAIL"],
   ["RUNNER_MODE_MISMATCH", "FAIL"],
   ["READ_ONLY_ASSERTION_FAILED", "FAIL"],
+  ["SESSION_READ_ONLY_BOOTSTRAP_FAILED", "FAIL"],
+  ["TRANSACTION_READ_ONLY_ASSERTION_FAILED", "FAIL"],
+  ["PRE_BUSINESS_QUERY_ORDER_VIOLATION", "BLOCKED"],
+  ["READ_ONLY_ROLLBACK_FAILED", "FAIL"],
+  ["PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT", "BLOCKED"],
   ["ALREADY_NORMALIZED_STATE_NOT_HANDLED", "FAIL"],
 ])
 
@@ -89,15 +102,18 @@ const STAGE_FALLBACK = new Map([
   ["DB_URL_PARSE", "DB_URL_INVALID"],
   ["DB_CLIENT_INITIALIZATION", "DB_CONNECTION_FAILED"],
   ["DB_CONNECTION", "DB_CONNECTION_FAILED"],
-  ["READ_ONLY_SESSION_ASSERTION", "READ_ONLY_ASSERTION_FAILED"],
+  ["INITIAL_READ_ONLY_STATE_INSPECTION", "READ_ONLY_ASSERTION_FAILED"],
+  ["SESSION_READ_ONLY_BOOTSTRAP", "SESSION_READ_ONLY_BOOTSTRAP_FAILED"],
+  ["SESSION_READ_ONLY_ASSERTION", "SESSION_READ_ONLY_BOOTSTRAP_FAILED"],
   ["READ_ONLY_TRANSACTION_BEGIN", "READ_ONLY_ASSERTION_FAILED"],
+  ["TRANSACTION_READ_ONLY_ASSERTION", "TRANSACTION_READ_ONLY_ASSERTION_FAILED"],
   ["DATABASE_TIME_QUERY", "DB_CONNECTION_FAILED"],
   ["SCHEMA_CONTRACT_INSPECTION", "SCHEMA_CONTRACT_MISMATCH"],
   ["INTAKE_LINKS_READ", "DB_PERMISSION_FAILED"],
   ["LINK_STATE_CLASSIFICATION", "LINK_STATE_CONTRACT_MISMATCH"],
   ["FRESH_BASELINE_CAPTURE", "SCHEMA_CONTRACT_MISMATCH"],
   ["RESULT_CONTRACT_VALIDATION", "RESULT_CONTRACT_INVALID"],
-  ["ROLLBACK", "READ_ONLY_ASSERTION_FAILED"],
+  ["ROLLBACK", "READ_ONLY_ROLLBACK_FAILED"],
   ["RESULT_SERIALIZATION", "RESULT_CONTRACT_INVALID"],
   ["CHILD_PROCESS_EXIT", "CHILD_PROCESS_EXIT_FAILED"],
   ["CALLER_RESULT_PARSE", "RESULT_JSON_PARSE_FAILED"],
@@ -111,7 +127,18 @@ const REQUIRED_INTAKE_LINK_COLUMNS = Object.freeze([
   "status",
 ])
 
-const FORBIDDEN_SQL = /\b(?:insert|update|delete|merge|truncate|drop|alter|create|call)\b/iu
+const FORBIDDEN_SQL = /\b(?:insert|update|delete|merge|truncate|drop|create|call)\b/iu
+const PERSISTENT_CONFIGURATION_SQL = /\b(?:alter\s+role|alter\s+database|alter\s+system|set\s+global|set\s+default_transaction_read_only|set\s+session\s+authorization|set\s+role)\b/iu
+const ALLOWED_READ_ONLY_SQL = [
+  /^(?:show)\s+(?:default_transaction_read_only|transaction_read_only|transaction_isolation)\b/iu,
+  /^(?:select)\s+.+/iu,
+  /^(?:set)\s+session\s+characteristics\s+as\s+transaction\s+read\s+only\b/iu,
+  /^(?:set)\s+application_name\s*(?:=|to)\s+/iu,
+  /^(?:set)\s+local\s+statement_timeout\s*(?:=|to)\s+/iu,
+  /^(?:set)\s+local\s+lock_timeout\s*(?:=|to)\s+/iu,
+  /^(?:begin)\s+(?:transaction\s+)?read\s+only\b/iu,
+  /^(?:rollback)\b/iu,
+]
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu
 const SECRET_PATTERN = /(?:postgres(?:ql)?:\/\/|eyJhbGci|sb_secret_|bearer\s+[a-z0-9._-]{12,})/iu
 
@@ -186,12 +213,20 @@ function sqlWithoutCommentsAndLiterals(sql) {
 
 export function assertReadOnlySql(sql) {
   const normalized = sqlWithoutCommentsAndLiterals(sql)
+  if (PERSISTENT_CONFIGURATION_SQL.test(normalized)) {
+    throw new AuthenticatedReadOnlyObservabilityError(
+      "PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT",
+      {
+        category: "PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT",
+      },
+    )
+  }
   if (!normalized || FORBIDDEN_SQL.test(normalized)) {
     throw new AuthenticatedReadOnlyObservabilityError("READ_ONLY_ASSERTION_FAILED", {
       category: "READ_ONLY_ASSERTION_FAILED",
     })
   }
-  if (!/^(?:select\b|show\b|begin(?:\s+transaction)?\s+read\s+only\b|set\s+local\s+statement_timeout\b|rollback\b|with\b)/iu.test(normalized)) {
+  if (!ALLOWED_READ_ONLY_SQL.some((pattern) => pattern.test(normalized))) {
     throw new AuthenticatedReadOnlyObservabilityError("READ_ONLY_ASSERTION_FAILED", {
       category: "READ_ONLY_ASSERTION_FAILED",
     })
@@ -286,6 +321,10 @@ export function createAuthenticatedReadOnlyEnvelope(mode = MODE) {
     failure_category: null,
     sanitized_code: null,
     sqlstate_class: null,
+    initial_default_transaction_read_only: "unknown",
+    session_read_only_bootstrap_applied: false,
+    session_default_transaction_read_only: false,
+    session_configuration_applied: false,
     credential_present: false,
     connection_established: false,
     transaction_started: false,
@@ -319,6 +358,10 @@ const REQUIRED_ENVELOPE_FIELDS = Object.freeze([
   "last_completed_stage",
   "failed_stage",
   "failure_category",
+  "initial_default_transaction_read_only",
+  "session_read_only_bootstrap_applied",
+  "session_default_transaction_read_only",
+  "session_configuration_applied",
   "credential_present",
   "connection_established",
   "transaction_started",
@@ -361,7 +404,12 @@ export function validateAuthenticatedReadOnlyEnvelope(value) {
     if (!value.connection_established || !value.transaction_started ||
         !value.transaction_read_only || !value.query_completed ||
         !value.rollback_completed || !value.fresh_baseline_completed ||
-        !["ALREADY_NORMALIZED", "NORMALIZATION_REQUIRED"].includes(value.state)) {
+        !["ALREADY_NORMALIZED", "NORMALIZATION_REQUIRED"].includes(value.state) ||
+        !["on", "off", "unknown"].includes(
+          String(value.initial_default_transaction_read_only || "").toLowerCase(),
+        ) ||
+        value.session_read_only_bootstrap_applied !== true ||
+        value.session_default_transaction_read_only !== true) {
       throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
         category: "RESULT_CONTRACT_INVALID",
       })
@@ -417,12 +465,17 @@ function parseDatabaseUrl(value) {
   return String(value)
 }
 
-const SQL = Object.freeze({
-  sessionReadOnly: "show default_transaction_read_only",
-  beginReadOnly: "begin transaction read only",
-  transactionReadOnly: "show transaction_read_only",
-  timeout: "set local statement_timeout = '15s'",
-  databaseTime: "select current_timestamp as database_now",
+  const SQL = Object.freeze({
+    sessionReadOnly: "show default_transaction_read_only",
+    sessionReadOnlyBootstrap: "set session characteristics as transaction read only",
+    sessionReadOnlyBootstrapCheck: "show default_transaction_read_only",
+    applicationName: "set application_name = 'flux_v6n_authenticated_read_only_precheck'",
+    beginReadOnly: "begin transaction read only",
+    transactionReadOnly: "show transaction_read_only",
+    transactionIsolation: "show transaction_isolation",
+    timeout: "set local statement_timeout = '15s'",
+    lockTimeout: "set local lock_timeout = '5s'",
+    databaseTime: "select current_timestamp as database_now",
   schema: `
     select column_name
       from information_schema.columns
@@ -606,27 +659,61 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.connection_established = true
     completed(envelope, currentStage)
 
-    currentStage = "READ_ONLY_SESSION_ASSERTION"
+    currentStage = "INITIAL_READ_ONLY_STATE_INSPECTION"
     const session = await queryReadOnly(client, SQL.sessionReadOnly)
-    if (String(session?.rows?.[0]?.default_transaction_read_only || "").toLowerCase() !== "on") {
+    envelope.initial_default_transaction_read_only = String(
+      session?.rows?.[0]?.default_transaction_read_only || "",
+    ).toLowerCase() || "unknown"
+    if (envelope.initial_default_transaction_read_only !== "on" &&
+        envelope.initial_default_transaction_read_only !== "off") {
       throw new AuthenticatedReadOnlyObservabilityError("READ_ONLY_ASSERTION_FAILED", {
         category: "READ_ONLY_ASSERTION_FAILED",
       })
     }
     completed(envelope, currentStage)
 
+  currentStage = "SESSION_READ_ONLY_BOOTSTRAP"
+  await queryReadOnly(client, SQL.sessionReadOnlyBootstrap)
+  envelope.session_read_only_bootstrap_applied = true
+  completed(envelope, currentStage)
+
+    currentStage = "SESSION_READ_ONLY_ASSERTION"
+    const postBootstrap = await queryReadOnly(client, SQL.sessionReadOnlyBootstrapCheck)
+    envelope.session_default_transaction_read_only = String(
+      postBootstrap?.rows?.[0]?.default_transaction_read_only || "",
+    ).toLowerCase() === "on"
+    if (!envelope.session_default_transaction_read_only) {
+      throw new AuthenticatedReadOnlyObservabilityError("SESSION_READ_ONLY_BOOTSTRAP_FAILED", {
+        category: "SESSION_READ_ONLY_BOOTSTRAP_FAILED",
+      })
+    }
+    completed(envelope, currentStage)
+
     currentStage = "READ_ONLY_TRANSACTION_BEGIN"
+    await queryReadOnly(client, SQL.applicationName)
+    envelope.session_configuration_applied = true
+    envelope.session_config = 1
     await queryReadOnly(client, SQL.beginReadOnly)
     envelope.transaction_started = true
     await queryReadOnly(client, SQL.timeout)
+    await queryReadOnly(client, SQL.lockTimeout)
+
+    currentStage = "TRANSACTION_READ_ONLY_ASSERTION"
     const transaction = await queryReadOnly(client, SQL.transactionReadOnly)
     envelope.transaction_read_only =
       String(transaction?.rows?.[0]?.transaction_read_only || "").toLowerCase() === "on"
     if (!envelope.transaction_read_only) {
-      throw new AuthenticatedReadOnlyObservabilityError("READ_ONLY_ASSERTION_FAILED", {
-        category: "READ_ONLY_ASSERTION_FAILED",
+      throw new AuthenticatedReadOnlyObservabilityError("TRANSACTION_READ_ONLY_ASSERTION_FAILED", {
+        category: "TRANSACTION_READ_ONLY_ASSERTION_FAILED",
       })
     }
+    const transactionIsolation = await queryReadOnly(client, SQL.transactionIsolation)
+    if (!transactionIsolation?.rows?.[0]?.transaction_isolation) {
+      throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
+        category: "RESULT_CONTRACT_INVALID",
+      })
+    }
+    envelope.transaction_isolation = String(transactionIsolation.rows[0].transaction_isolation || "")
     completed(envelope, currentStage)
 
     currentStage = "DATABASE_TIME_QUERY"
@@ -819,6 +906,22 @@ export function runAuthenticatedReadOnlyMockMatrix() {
   })
   return Object.freeze({
     status: "PASS",
+    mode: "authenticated-read-only-precheck-diagnostic",
+    last_completed_stage: "RESULT_SERIALIZATION",
+    session_read_only_bootstrap_applied: true,
+    session_default_transaction_read_only: true,
+    session_configuration_applied: true,
+    session_config: 1,
+    rollback_completed: true,
+    transaction_started: true,
+    transaction_read_only: true,
+    query_completed: true,
+    fresh_baseline_completed: true,
+    transaction_isolation: "read committed",
+    public_submit_calls: 0,
+    diagnostic_public_submit_attempts: 0,
+    diagnostic_call_consumed: false,
+    operational_dev_writes: 0,
     normalization_required: normalizationRequired.state,
     already_normalized: alreadyNormalized.state,
     already_normalized_noop:
@@ -826,7 +929,6 @@ export function runAuthenticatedReadOnlyMockMatrix() {
     error_families: families,
     caller_category: caller.failure_category,
     read_only_sql_scan: scanReadOnlySql(ALL_READ_ONLY_SQL),
-    public_submit_calls: 0,
     tokens_generated: 0,
     links_created: 0,
     iam_changes: 0,

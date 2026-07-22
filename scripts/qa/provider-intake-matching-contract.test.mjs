@@ -233,7 +233,7 @@ test("permanent Gate 2 runner connects every mutable capability behind the expli
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 55)
+  assert.equal(Object.keys(audit.capabilities).length, 63)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -514,7 +514,7 @@ test("updated capability audit certifies alias separation without network or wri
   }
 })
 
-test("no-write mocked recertifies the post-V6H baseline and 42 cleanup cases without leakage", async () => {
+test("V6N no-write mocked recertifies the post-V6H baseline and 48 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
   assert.equal(result.baseline.intake_links, 3)
@@ -525,8 +525,8 @@ test("no-write mocked recertifies the post-V6H baseline and 42 cleanup cases wit
   assert.equal(result.simulation.provider_matched_final, 9)
   assert.equal(result.simulation.payment_intake_events_final, 50)
   assert.equal(result.cleanup_matrix.status, "PASS")
-  assert.equal(result.cleanup_matrix.total, 42)
-  assert.equal(result.capability_count, 55)
+  assert.equal(result.cleanup_matrix.total, 48)
+  assert.equal(result.capability_count, 63)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -810,11 +810,11 @@ const v6kRequestInput = (overrides = {}) => ({
   ...overrides,
 })
 
-test("V6M capability audit executes 55 concrete QA capabilities", async () => {
+test("V6N capability audit executes 63 concrete QA capabilities", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
-  assert.equal(audit.capability_count, 55)
-  assert.equal(Object.keys(audit.capabilities).length, 55)
+  assert.equal(audit.capability_count, 63)
+  assert.equal(Object.keys(audit.capabilities).length, 63)
   for (const capability of [
     "canonical_idempotency_header",
     "finalized_request_capture",
@@ -1089,11 +1089,16 @@ const validPassReadonlyEnvelope = () => ({
   status: "PASS",
   result_code: "AUTHENTICATED_READ_ONLY_PRECHECK_VALIDATED",
   state: "ALREADY_NORMALIZED",
+  initial_default_transaction_read_only: "off",
   last_completed_stage: "RESULT_SERIALIZATION",
+  session_read_only_bootstrap_applied: true,
+  session_default_transaction_read_only: true,
+  session_configuration_applied: true,
+  transaction_read_only: true,
+  transaction_isolation: "read committed",
   credential_present: true,
   connection_established: true,
   transaction_started: true,
-  transaction_read_only: true,
   query_completed: true,
   rollback_completed: true,
   fresh_baseline_completed: true,
@@ -1225,7 +1230,302 @@ test("V6M rejects SQL containing DML", () => {
   )
 })
 
-test("V6M recognizes NORMALIZATION_REQUIRED", () => {
+test("V6N blocks ALTER ROLE/DATABASE/SYSTEM in SQL scan", () => {
+  assert.throws(
+    () => assertReadOnlySql("alter role test in database postgres"),
+    /PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT/,
+  )
+  assert.throws(
+    () => assertReadOnlySql("ALTER DATABASE foo SET statement_timeout='5s'"),
+    /PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT/,
+  )
+  assert.throws(
+    () => assertReadOnlySql("ALTER SYSTEM SET max_connections = 1"),
+    /PERSISTENT_READ_ONLY_CONFIGURATION_ATTEMPT/,
+  )
+})
+
+test("V6N permite transaccionalidad read only explícita y conserva orden de consultas", async () => {
+  const calls = []
+  const client = {
+    connected: false,
+    closed: false,
+    async connect() {
+      this.connected = true
+    },
+    async end() {
+      this.closed = true
+    },
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+      calls.push(normalized)
+      if (normalized === "show default_transaction_read_only") {
+        return calls.length === 1 ? { rows: [{ default_transaction_read_only: "off" }] }
+          : { rows: [{ default_transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_read_only") {
+        return { rows: [{ transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_isolation") {
+        return { rows: [{ transaction_isolation: "read committed" }] }
+      }
+      if (normalized.includes("select current_timestamp as database_now")) {
+        return { rows: [{ database_now: "2026-07-21T00:00:00Z" }] }
+      }
+      if (normalized.includes("from information_schema.columns")) {
+        return {
+          rows: ["company_id", "created_at", "expires_at", "label", "status"]
+            .map((column_name) => ({ column_name })),
+        }
+      }
+      if (normalized.includes("from public.intake_links") &&
+          normalized.includes("order by created_at asc")) {
+        return { rows: [
+          { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+          { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
+          { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+        ] }
+      }
+      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("from public.intake_links where status='active' and")) {
+          return { rows: [{ count: 0 }] }
+        }
+        if (normalized.includes("from public.intake_links where status='expired'")) {
+          return { rows: [{ count: 1 }] }
+        }
+        if (normalized.includes("from public.intake_links where status='revoked'")) {
+          return { rows: [{ count: 2 }] }
+        }
+        if (normalized.includes("from public.intake_links")) {
+          return { rows: [{ count: 3 }] }
+        }
+        return { rows: [{ count: 0 }] }
+      }
+      return { rows: [] }
+    },
+  }
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "postgresql://qa:secret@db.invalid/dev" },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "PASS")
+  assert.equal(result.initial_default_transaction_read_only, "off")
+  assert.equal(result.session_read_only_bootstrap_applied, true)
+  assert.equal(result.session_default_transaction_read_only, true)
+  assert.equal(result.transaction_started, true)
+  assert.equal(result.transaction_read_only, true)
+  const normalizedQuery = calls.map((statement) =>
+    /from public\.intake_links/.test(statement))
+  assert.equal(normalizedQuery.includes(true), true)
+  const idxBegin = calls.findIndex((statement) => statement === "begin transaction read only")
+  const idxReadOnly = calls.findIndex((statement) => statement === "show transaction_read_only")
+  const idxTimeout = calls.findIndex((statement) => statement === "set local statement_timeout = '15s'")
+  const idxLockTimeout = calls.findIndex((statement) => statement === "set local lock_timeout = '5s'")
+  const idxBootstrap = calls.findIndex((statement) => statement === "set session characteristics as transaction read only")
+  const idxBusiness = calls.findIndex((statement) => /from public\.intake_links/.test(statement))
+  assert.ok(idxBegin > -1)
+  assert.ok(idxTimeout > -1)
+  assert.ok(idxLockTimeout > -1)
+  assert.ok(idxReadOnly > idxBootstrap)
+  assert.ok(idxBegin < idxTimeout)
+  assert.ok(idxBegin < idxLockTimeout)
+  assert.ok(idxBusiness > idxReadOnly)
+  assert.ok(idxTimeout < idxBusiness)
+  assert.ok(idxLockTimeout < idxBusiness)
+  assert.equal(calls.filter((sql) => sql === "rollback").length, 1)
+})
+
+test("V6N falla si el bootstrap no deja la sesión en read only", async () => {
+  const client = {
+    connected: false,
+    closed: false,
+    async connect() {
+      this.connected = true
+    },
+    async end() {
+      this.closed = true
+    },
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+      if (normalized === "show default_transaction_read_only") {
+        return { rows: [{ default_transaction_read_only: "off" }] }
+      }
+      if (normalized === "set session characteristics as transaction read only") {
+        return {}
+      }
+      if (normalized.startsWith("set local")) return {}
+      if (normalized === "begin read only") {
+        return {}
+      }
+      if (normalized.startsWith("begin transaction read only")) {
+        return {}
+      }
+      if (normalized === "show transaction_read_only") {
+        return { rows: [{ transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_isolation") {
+        return { rows: [{ transaction_isolation: "read committed" }] }
+      }
+      if (normalized.startsWith("select")) return { rows: [{}] }
+      throw new AuthenticatedReadOnlyObservabilityError("READ_ONLY_ASSERTION_FAILED", {
+        category: "READ_ONLY_ASSERTION_FAILED",
+      })
+    },
+  }
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "postgresql://qa:secret@db.invalid/dev" },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "SESSION_READ_ONLY_BOOTSTRAP_FAILED")
+  assert.equal(result.failed_stage, "SESSION_READ_ONLY_ASSERTION")
+})
+
+test("V6N bloquea transacciones de negocio antes de aserción de transaction_read_only", async () => {
+  const calls = []
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "postgresql://qa:secret@db.invalid/dev" },
+    createClient: async () => ({
+      connected: false,
+      closed: false,
+      async connect() {
+        this.connected = true
+      },
+      async end() {
+        this.closed = true
+      },
+      async query(sql) {
+        const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+        calls.push(normalized)
+        if (normalized === "show default_transaction_read_only") {
+          return calls.length === 1 ? { rows: [{ default_transaction_read_only: "off" }] }
+            : { rows: [{ default_transaction_read_only: "on" }] }
+        }
+        if (normalized === "set session characteristics as transaction read only") {
+          return {}
+        }
+        if (normalized.startsWith("set local")) {
+          return {}
+        }
+        if (normalized === "show transaction_isolation") {
+          return { rows: [{ transaction_isolation: "read committed" }] }
+        }
+        if (normalized === "show transaction_read_only") {
+          return { rows: [{ transaction_read_only: "off" }] }
+        }
+        if (normalized.includes("from public.intake_links") &&
+            normalized.includes("order by created_at asc")) {
+          assert.fail("Consulta de negocio ejecutada antes de transaction_read_only=on")
+        }
+        if (normalized.startsWith("select count(*)::int")) {
+          if (normalized.includes("from public.intake_links where status='active' and")) {
+            return { rows: [{ count: 0 }] }
+          }
+          if (normalized.includes("from public.intake_links where status='expired'")) {
+            return { rows: [{ count: 1 }] }
+          }
+          if (normalized.includes("from public.intake_links where status='revoked'")) {
+            return { rows: [{ count: 2 }] }
+          }
+          if (normalized.includes("from public.intake_links")) {
+            return { rows: [{ count: 3 }] }
+          }
+        }
+        return { rows: [] }
+      },
+    }),
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "TRANSACTION_READ_ONLY_ASSERTION_FAILED")
+  assert.equal(result.failed_stage, "TRANSACTION_READ_ONLY_ASSERTION")
+})
+
+test("V6N falla con rollback fallido con categorÃ­a READ_ONLY_ROLLBACK_FAILED", async () => {
+  const calls = []
+  const client = {
+    connected: false,
+    closed: false,
+    async connect() {
+      this.connected = true
+    },
+    async end() {
+      this.closed = true
+    },
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+      calls.push(normalized)
+      if (normalized === "show default_transaction_read_only") {
+        return calls.length === 1 ? { rows: [{ default_transaction_read_only: "off" }] }
+          : { rows: [{ default_transaction_read_only: "on" }] }
+      }
+      if (normalized === "set session characteristics as transaction read only") {
+        return {}
+      }
+      if (normalized.startsWith("set local") || normalized === "set application_name = 'flux_v6n_authenticated_read_only_precheck'") {
+        return {}
+      }
+      if (normalized === "begin transaction read only") {
+        return {}
+      }
+      if (normalized === "show transaction_read_only") {
+        return { rows: [{ transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_isolation") {
+        return { rows: [{ transaction_isolation: "read committed" }] }
+      }
+      if (normalized.includes("select current_timestamp")) {
+        return { rows: [{ database_now: "2026-07-21T00:00:00Z" }] }
+      }
+      if (normalized.includes("from information_schema.columns")) {
+        return {
+          rows: ["company_id", "created_at", "expires_at", "label", "status"].map((column_name) => ({ column_name })),
+        }
+      }
+      if (normalized.includes("from public.intake_links") &&
+          normalized.includes("order by created_at asc")) {
+        return {
+          rows: [
+            { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+            { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
+            { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+          ],
+        }
+      }
+      if (normalized.includes("from auth.users au")) {
+        return { rows: [] }
+      }
+      if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("from public.intake_links where status='active' and")) {
+          return { rows: [{ count: 0 }] }
+        }
+        if (normalized.includes("from public.intake_links where status='expired'")) {
+          return { rows: [{ count: 1 }] }
+        }
+        if (normalized.includes("from public.intake_links where status='revoked'")) {
+          return { rows: [{ count: 2 }] }
+        }
+        if (normalized.includes("from public.intake_links")) {
+          return { rows: [{ count: 3 }] }
+        }
+        return { rows: [{ count: 0 }] }
+      }
+      if (normalized === "rollback") {
+        throw new Error("rollback unavailable")
+      }
+      return { rows: [] }
+    },
+  }
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: { SUPABASE_DEV_DB_URL: "postgresql://qa:secret@db.invalid/dev" },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "READ_ONLY_ROLLBACK_FAILED")
+  assert.equal(result.failed_stage, "ROLLBACK")
+})
+
+test("V6N recognizes NORMALIZATION_REQUIRED", () => {
   const result = classifyAuthenticatedLinkState([
     { company_scope: "scope", label: "historical", status: "revoked", expires_at: null },
     { company_scope: "scope", label: "active", status: "active", expires_at: "2026-07-20T00:00:00Z" },
@@ -1234,7 +1534,7 @@ test("V6M recognizes NORMALIZATION_REQUIRED", () => {
   assert.equal(result.apply_required, true)
 })
 
-test("V6M recognizes ALREADY_NORMALIZED as PASS no-op", () => {
+test("V6N recognizes ALREADY_NORMALIZED as PASS no-op", () => {
   const result = classifyAuthenticatedLinkState([
     { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
     { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
@@ -1245,7 +1545,7 @@ test("V6M recognizes ALREADY_NORMALIZED as PASS no-op", () => {
   assert.equal(result.apply_required, false)
 })
 
-test("V6M completes the authenticated read-only path with explicit rollback", async () => {
+test("V6N completes the authenticated read-only path with explicit rollback", async () => {
   const calls = []
   const client = {
     connected: false,
@@ -1261,6 +1561,9 @@ test("V6M completes the authenticated read-only path with explicit rollback", as
       calls.push(normalized)
       if (normalized === "show default_transaction_read_only") {
         return { rows: [{ default_transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_isolation") {
+        return { rows: [{ transaction_isolation: "read committed" }] }
       }
       if (normalized === "show transaction_read_only") {
         return { rows: [{ transaction_read_only: "on" }] }
@@ -1312,14 +1615,14 @@ test("V6M completes the authenticated read-only path with explicit rollback", as
   assert.equal(calls.filter((sql) => sql === "rollback").length, 1)
 })
 
-test("V6M rejects zero recognizable links", () => {
+test("V6N rejects zero recognizable links", () => {
   assert.throws(
     () => classifyAuthenticatedLinkState([], "2026-07-21T00:00:00Z"),
     /LINK_STATE_CONTRACT_MISMATCH/,
   )
 })
 
-test("V6M rejects two ambiguous historical expired links", () => {
+test("V6N rejects two ambiguous historical expired links", () => {
   assert.throws(
     () => classifyAuthenticatedLinkState([
       { company_scope: "scope", label: "one", status: "expired", expires_at: "2026-07-19T00:00:00Z" },
@@ -1329,52 +1632,52 @@ test("V6M rejects two ambiguous historical expired links", () => {
   )
 })
 
-test("V6M blocks raw error leakage", () => {
+test("V6N blocks raw error leakage", () => {
   assert.throws(
     () => assertSanitizedAuthenticatedReadOnlyEvidence({ raw_error: "forbidden" }),
     /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
   )
 })
 
-test("V6M blocks database URL leakage", () => {
+test("V6N blocks database URL leakage", () => {
   assert.throws(
     () => assertSanitizedAuthenticatedReadOnlyEvidence({ database_url: "forbidden" }),
     /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
   )
 })
 
-test("V6M blocks stack leakage", () => {
+test("V6N blocks stack leakage", () => {
   assert.throws(
     () => assertSanitizedAuthenticatedReadOnlyEvidence({ stack: "forbidden" }),
     /AUTHENTICATED_READ_ONLY_EVIDENCE_LEAKAGE/,
   )
 })
 
-test("V6M preserves allowlisted SQLSTATE", () => {
+test("V6N preserves allowlisted SQLSTATE", () => {
   const result = classifyAuthenticatedReadOnlyError({ code: "28P01" }, "DB_CONNECTION")
   assert.equal(result.sanitized_code, "28P01")
   assert.equal(result.sqlstate_class, "28P01")
 })
 
-test("V6M suppresses non-allowlisted SQLSTATE", () => {
+test("V6N suppresses non-allowlisted SQLSTATE", () => {
   const result = classifyAuthenticatedReadOnlyError({ code: "99999" }, "DB_CONNECTION")
   assert.equal(result.sanitized_code, null)
   assert.equal(result.sqlstate_class, null)
 })
 
-test("V6M caller preserves a classified failure category", () => {
+test("V6N caller preserves a classified failure category", () => {
   const envelope = validBlockedReadonlyEnvelope("DB_AUTH_FAILED")
   const parsed = parseAuthenticatedReadOnlyChildResult({ stdout: JSON.stringify(envelope), exitCode: 0 })
   assert.equal(parsed.failure_category, "DB_AUTH_FAILED")
 })
 
-test("V6M caller never collapses known flow to V6A_RUNNER_FAILED", () => {
+test("V6N caller never collapses known flow to V6A_RUNNER_FAILED", () => {
   const result = classifyAuthenticatedReadOnlyError(new Error("unclassified"), "CALLER_RESULT_PARSE")
   assert.equal(result.failure_category, "RESULT_JSON_PARSE_FAILED")
   assert.notEqual(result.failure_category, "V6A_RUNNER_FAILED")
 })
 
-test("V6M keeps public submit blocked before read-only PASS", async () => {
+test("V6N keeps public submit blocked before read-only PASS", async () => {
   const result = await runAuthenticatedReadOnlyPrecheck({ env: {} })
   assert.equal(result.provider_intake_calls, 0)
   assert.equal(result.diagnostic_public_submit_attempts, 0)
@@ -1382,10 +1685,10 @@ test("V6M keeps public submit blocked before read-only PASS", async () => {
   assert.equal(result.token_generated, false)
 })
 
-test("V6M cleanup matrix closes 42 no-write scenarios", async () => {
+test("V6N cleanup matrix closes 48 no-write scenarios", async () => {
   const result = await runV6MCleanupMatrix()
   assert.equal(result.status, "PASS")
-  assert.equal(result.total, 42)
+  assert.equal(result.total, 48)
   assert.equal(result.failures, 0)
   assert.equal(result.public_submit_calls, 0)
 })
