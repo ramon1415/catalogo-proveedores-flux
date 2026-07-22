@@ -1,6 +1,7 @@
 name: Apply payment batch 032 in DEV (controlled retry)
 
 'on':
+  workflow_dispatch:
   push:
     branches:
       - ops/ramon-payment-batch-032-dev-retry
