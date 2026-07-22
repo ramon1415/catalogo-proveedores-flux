@@ -1,4 +1,4 @@
-name: Apply payment batch 032 in DEV (controlled retry)
+﻿name: Apply payment batch 032 in DEV (controlled retry)
 
 'on':
   workflow_dispatch:
@@ -83,6 +83,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          fail_precheck() {
+            local reason=$1
+            local detail=$2
+            echo "::error::Precheck failed: $reason. $detail"
+            echo "- PRECHECK_FAILURE: $reason => $detail" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
           query() {
             psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 -c "$1"
           }
@@ -93,11 +100,36 @@ jobs:
           policies_before="$(query "begin transaction read only; select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Finance can upload payment batch documents','Finance can read payment batch documents'); commit;")"
           history_before="$(query "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;")"
           receipts_before="$(query "begin transaction read only; select count(*) from public.payment_receipts; commit;")"
-          test "$tables_before" = "0"
-          test "$functions_before" = "0"
-          test "$bucket_before" = "0"
-          test "$policies_before" = "0"
-          test "$history_before" = "f"
+          echo "precheck tables_before=$tables_before"
+          echo "precheck functions_before=$functions_before"
+          echo "precheck bucket_before=$bucket_before"
+          echo "precheck policies_before=$policies_before"
+          echo "precheck history_before=$history_before"
+          echo "precheck payment_receipts_before=$receipts_before"
+
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| - | - |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| tables_before | $tables_before |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| functions_before | $functions_before |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| bucket_before | $bucket_before |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| policies_before | $policies_before |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| history_before | $history_before |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$tables_before" != "0" ]; then
+            fail_precheck "tables_before" "expected 0, got $tables_before"
+          fi
+          if [ "$functions_before" != "0" ]; then
+            fail_precheck "functions_before" "expected 0, got $functions_before"
+          fi
+          if [ "$bucket_before" != "0" ]; then
+            fail_precheck "bucket_before" "expected 0, got $bucket_before"
+          fi
+          if [ "$policies_before" != "0" ]; then
+            fail_precheck "policies_before" "expected 0, got $policies_before"
+          fi
+          if [ "$history_before" != "f" ]; then
+            fail_precheck "history_before" "expected f, got $history_before"
+          fi
           echo "payment_receipts_before=$receipts_before" >> "$GITHUB_OUTPUT"
           {
             echo "- Precheck: 032 tables/functions/bucket/policies absent"
@@ -151,5 +183,6 @@ jobs:
             echo "- payment_receipts: unchanged row count"
             echo "- CLI history: still absent and untouched"
           } >> "$GITHUB_STEP_SUMMARY"
+
 
 
