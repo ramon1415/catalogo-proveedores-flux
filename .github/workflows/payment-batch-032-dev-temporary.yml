@@ -1,4 +1,4 @@
-name: Payment batch 032 DEV preflight temporary
+name: Payment batch 032 DEV apply temporary
 
 'on':
   push:
@@ -16,14 +16,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  preflight:
-    name: Read-only preflight
+  apply:
+    name: Exact transactional apply and postcheck
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: DEV
     env:
       PROJECT_REF: scsirgbuqjcwoaxfacth
       EXPECTED_BASE_SHA: 5c674062ef54d2918855f782eff7c3c78dd864ee
+      EXPECTED_PREFLIGHT_SHA: df2fc45a8fdbcdb03d27ca2d44d87a4e002f3761
       EXPECTED_MIGRATION_SHA256: 2c1f42055e9dec010126adb37a312342b2827975d338ed70a28258c496ce3ef2
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
@@ -41,20 +42,22 @@ jobs:
           test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
           test "$GITHUB_REF_NAME" = "ops/ramon-payment-batch-032-dev"
           git merge-base --is-ancestor "$EXPECTED_BASE_SHA" HEAD
+          git merge-base --is-ancestor "$EXPECTED_PREFLIGHT_SHA" HEAD
           test "$(git diff --name-only "$EXPECTED_BASE_SHA" HEAD)" = ".github/workflows/payment-batch-032-dev-temporary.yml"
           test "$(sha256sum supabase/migrations/032_payment_batch_reconciliation.sql | cut -d' ' -f1)" = "$EXPECTED_MIGRATION_SHA256"
           test -n "$SUPABASE_DEV_DB_URL"
           test "$SUPABASE_DEV_PROJECT_REF" = "$PROJECT_REF"
           case "$SUPABASE_DEV_DB_URL" in
             *"$PROJECT_REF"*) ;;
-            *) echo "::error::DEV database URL does not identify the expected project."; exit 1 ;;
+            *) echo "::error::Database URL is not the authorized DEV project."; exit 1 ;;
           esac
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
           echo "scope=DEV"
           echo "project_ref=$PROJECT_REF"
           echo "repository_base=$EXPECTED_BASE_SHA"
+          echo "preflight_head=$EXPECTED_PREFLIGHT_SHA"
           echo "migration_sha256=$EXPECTED_MIGRATION_SHA256"
-          echo "mode=read_only"
+          echo "mode=exact_transactional_sql"
 
       - name: Install PostgreSQL client
         shell: bash
@@ -64,14 +67,15 @@ jobs:
           sudo apt-get install -y postgresql-client >/dev/null
           psql --version
 
-      - name: Inspect DEV history, dependencies and partial state
+      - name: Atomic pre-apply gate
         shell: bash
         run: |
           set -euo pipefail
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+          preflight="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
           begin transaction read only;
           select 'database_read_only|' || current_setting('transaction_read_only');
+          select 'history_present|' || (to_regclass('supabase_migrations.schema_migrations') is not null);
           select 'dependencies_missing|' || count(*)
           from unnest(array[
             'public.companies','public.company_bank_accounts','public.profiles','public.roles',
@@ -80,7 +84,6 @@ jobs:
             'public.payment_request_extraordinary_authorizations','storage.buckets','storage.objects'
           ]) item(name)
           where to_regclass(item.name) is null;
-
           select 'helpers_missing|' || count(*)
           from unnest(array[
             'public.current_profile_id()',
@@ -92,29 +95,7 @@ jobs:
             'extensions.digest(bytea,text)'
           ]) item(signature)
           where to_regprocedure(item.signature) is null;
-
-          select 'approval_material_column|' || exists(
-            select 1 from information_schema.columns
-            where table_schema='public' and table_name='payment_requests'
-              and column_name='approval_material_updated_at'
-          );
-
-          select 'company_bank_columns_missing|' || count(*)
-          from unnest(array['company_id','account_number','clabe','active','bank_name','currency']) item(name)
-          where not exists (
-            select 1 from information_schema.columns
-            where table_schema='public' and table_name='company_bank_accounts'
-              and column_name=item.name
-          );
-
-          select 'migration_031_function|' || item.signature || '|' ||
-                 (to_regprocedure(item.signature) is not null)
-          from unnest(array[
-            'public.normalize_provider_match_text(text)',
-            'public.find_provider_intake_candidates(uuid,text,integer)'
-          ]) item(signature);
-
-          select 'migration_032_tables_present|' || count(*)
+          select 'tables_present|' || count(*)
           from unnest(array[
             'public.payment_matching_policy_versions','public.payable_snapshots',
             'public.payment_ingestion_batches','public.payment_documents',
@@ -126,71 +107,247 @@ jobs:
             'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
           ]) item(name)
           where to_regclass(item.name) is not null;
-
-          select 'migration_032_functions_present|' || count(*)
+          select 'functions_present|' || count(*)
           from pg_proc p join pg_namespace n on n.oid=p.pronamespace
           where n.nspname='public'
             and (p.proname like 'payment_reconciliation_%'
               or p.proname in (
-                'get_payment_batch_context','create_payment_ingestion_batch',
-                'finalize_payment_ingestion_upload','submit_payment_document_extractions',
-                'list_payment_ingestion_batches','get_payment_ingestion_batch_detail',
-                'accept_payment_document_extraction','reject_payment_document_extraction',
-                'find_payment_allocation_candidates','propose_payment_allocations',
-                'reserve_payment_allocations','expire_payment_reservation',
-                'release_payment_reservation','cancel_payment_allocation_plan'
+                'payment_amount_to_minor','append_financial_outbox_event_internal',
+                'rotate_payment_matching_policy','create_payable_snapshot_internal',
+                'materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot',
+                'payment_operation_confirmed_minor','payable_snapshot_confirmed_minor',
+                'payment_operation_reserved_minor','payable_snapshot_reserved_minor',
+                'payment_operation_fingerprint_v1','get_payment_batch_context',
+                'create_payment_ingestion_batch','finalize_payment_ingestion_upload',
+                'submit_payment_document_extractions','list_payment_ingestion_batches',
+                'get_payment_ingestion_batch_detail','accept_payment_document_extraction',
+                'reject_payment_document_extraction','find_payment_allocation_candidates',
+                'propose_payment_allocations','reserve_payment_allocations',
+                'expire_payment_reservation','release_payment_reservation',
+                'cancel_payment_allocation_plan'
               ));
-
-          select 'payment_batch_bucket_present|' || count(*)
-          from storage.buckets
+          select 'bucket_present|' || count(*) from storage.buckets
           where id='payment-batch-documents' or name='payment-batch-documents';
-
-          select 'payment_batch_storage_policies_present|' || count(*)
-          from pg_policies
+          select 'storage_policies_present|' || count(*) from pg_policies
           where schemaname='storage' and tablename='objects'
-            and (
-              policyname in (
-                'Finance can upload payment batch documents',
-                'Finance can read payment batch documents'
-              )
-              or position('payment-batch-documents' in coalesce(qual,'') || ' ' || coalesce(with_check,'')) > 0
-            );
-
-          select 'active_bbva_company_accounts|' || count(*)
-          from public.company_bank_accounts
-          where active=true
-            and upper(regexp_replace(coalesce(bank_name,''),'[^A-Z0-9]','','g'))='BBVA'
-            and upper(coalesce(currency,'')) in ('MXN','USD','EUR');
-
-          select 'finance_or_sysadmin_active_profiles|' || count(distinct p.id)
-          from public.profiles p
-          join public.user_roles ur on ur.profile_id=p.id
-          join public.roles r on r.id=ur.role_id
-          where p.active=true
-            and lower(regexp_replace(coalesce(r.name,''),'[^a-z0-9]','','g')) in
-              ('finanzas','finance','tesoreria','sysadmin','superadmin','administrador');
+            and (policyname in ('Finance can upload payment batch documents','Finance can read payment batch documents')
+              or position('payment-batch-documents' in coalesce(qual,'') || ' ' || coalesce(with_check,'')) > 0);
+          select 'business_state_digest|' || encode(extensions.digest(convert_to(concat_ws('|',
+            (select count(*)::text from public.companies),
+            (select count(*)::text from public.company_bank_accounts),
+            (select count(*)::text from public.profiles),
+            (select count(*)::text from public.roles),
+            (select count(*)::text from public.user_roles),
+            (select count(*)::text from public.profile_company_memberships),
+            (select count(*)::text from public.payment_requests),
+            (select count(*)::text from public.proveedores),
+            (select count(*)::text from public.approval_batches),
+            (select count(*)::text from public.approval_batch_items),
+            (select count(*)::text from public.payment_request_extraordinary_authorizations),
+            (select count(*)::text from public.payment_receipts)
+          ), 'UTF8'), 'sha256'), 'hex');
           commit;
           SQL
+          )"
+          grep -qx 'database_read_only|on' <<<"$preflight"
+          grep -qx 'history_present|false' <<<"$preflight"
+          grep -qx 'dependencies_missing|0' <<<"$preflight"
+          grep -qx 'helpers_missing|0' <<<"$preflight"
+          grep -qx 'tables_present|0' <<<"$preflight"
+          grep -qx 'functions_present|0' <<<"$preflight"
+          grep -qx 'bucket_present|0' <<<"$preflight"
+          grep -qx 'storage_policies_present|0' <<<"$preflight"
+          business_digest="$(sed -n 's/^business_state_digest|//p' <<<"$preflight")"
+          test "${#business_digest}" = 64
+          echo "BUSINESS_STATE_DIGEST=$business_digest" >> "$GITHUB_ENV"
+          echo "pre_apply_gate=PASS"
+          echo "migration_partial_state=0"
+          echo "business_state_fingerprint_recorded=true"
 
-          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;" | sed -n '2p')"
-          echo "migration_history_present|$history_exists"
-          if [ "$history_exists" = "t" ]; then
-            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select 'migration_history|' || version || '|' || coalesce(name,'') from supabase_migrations.schema_migrations where version in ('029','030','031','032') order by version; commit;"
-          fi
-
-          echo "storage_policy_inventory_begin"
-          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select policyname || '|' || cmd || '|' || array_to_string(roles,',') || '|' || replace(coalesce(qual,''), E'\\n', ' ') || '|' || replace(coalesce(with_check,''), E'\\n', ' ') from pg_policies where schemaname='storage' and tablename='objects' order by policyname; commit;"
-          echo "storage_policy_inventory_end"
-
-      - name: Classify migration mechanism
+      - name: Apply migration 032 exact SQL transaction
         shell: bash
         run: |
           set -euo pipefail
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          history_exists="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX -c "begin transaction read only; select to_regclass('supabase_migrations.schema_migrations') is not null; commit;" | sed -n '2p')"
-          if [ "$history_exists" = "t" ]; then
-            echo "cli_dry_run=ELIGIBLE"
-          else
-            echo "cli_dry_run=BLOCKED_NO_REMOTE_HISTORY"
-            echo "migration_apply_candidate=EXACT_TRANSACTIONAL_SQL_ONLY"
-          fi
+          rollback_check() {
+            echo "migration_apply=FAILED"
+            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL' || true
+          begin transaction read only;
+          select 'rollback_tables_present|' || count(*)
+          from unnest(array[
+            'public.payment_matching_policy_versions','public.payable_snapshots',
+            'public.payment_ingestion_batches','public.payment_documents',
+            'public.payment_document_extractions','public.bank_payment_operations',
+            'public.payment_operation_documents','public.payment_allocation_plans',
+            'public.payment_allocation_items','public.payment_allocation_reservations',
+            'public.payment_allocation_movements','public.financial_command_receipts',
+            'public.financial_outbox_events','public.financial_outbox_delivery_attempts',
+            'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
+          ]) item(name)
+          where to_regclass(item.name) is not null;
+          select 'rollback_bucket_present|' || count(*) from storage.buckets
+          where id='payment-batch-documents' or name='payment-batch-documents';
+          commit;
+          SQL
+          }
+          trap rollback_check ERR
+          test "$(sha256sum supabase/migrations/032_payment_batch_reconciliation.sql | cut -d' ' -f1)" = "$EXPECTED_MIGRATION_SHA256"
+          PGOPTIONS='-c lock_timeout=5000 -c statement_timeout=120000 -c idle_in_transaction_session_timeout=30000' \
+            psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 --echo-errors \
+              -f supabase/migrations/032_payment_batch_reconciliation.sql
+          trap - ERR
+          echo "migration_apply=PASS"
+          echo "transaction=COMMITTED"
+          echo "schema_history_modified=false"
+
+      - name: Postcheck objects, security and preserved state
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          postcheck="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -AtX <<'SQL'
+          begin transaction read only;
+          select 'tables|' || count(*)
+          from unnest(array[
+            'public.payment_matching_policy_versions','public.payable_snapshots',
+            'public.payment_ingestion_batches','public.payment_documents',
+            'public.payment_document_extractions','public.bank_payment_operations',
+            'public.payment_operation_documents','public.payment_allocation_plans',
+            'public.payment_allocation_items','public.payment_allocation_reservations',
+            'public.payment_allocation_movements','public.financial_command_receipts',
+            'public.financial_outbox_events','public.financial_outbox_delivery_attempts',
+            'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
+          ]) item(name)
+          where to_regclass(item.name) is not null;
+          select 'functions|' || count(*)
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public'
+            and (p.proname like 'payment_reconciliation_%'
+              or p.proname in (
+                'payment_amount_to_minor','append_financial_outbox_event_internal',
+                'rotate_payment_matching_policy','create_payable_snapshot_internal',
+                'materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot',
+                'payment_operation_confirmed_minor','payable_snapshot_confirmed_minor',
+                'payment_operation_reserved_minor','payable_snapshot_reserved_minor',
+                'payment_operation_fingerprint_v1','get_payment_batch_context',
+                'create_payment_ingestion_batch','finalize_payment_ingestion_upload',
+                'submit_payment_document_extractions','list_payment_ingestion_batches',
+                'get_payment_ingestion_batch_detail','accept_payment_document_extraction',
+                'reject_payment_document_extraction','find_payment_allocation_candidates',
+                'propose_payment_allocations','reserve_payment_allocations',
+                'expire_payment_reservation','release_payment_reservation',
+                'cancel_payment_allocation_plan'
+              ));
+          select 'triggers|' || count(*)
+          from pg_trigger t
+          where not t.tgisinternal and t.tgrelid in (
+            select to_regclass(item.name) from unnest(array[
+              'public.payment_matching_policy_versions','public.payable_snapshots',
+              'public.payment_ingestion_batches','public.payment_documents',
+              'public.payment_document_extractions','public.bank_payment_operations',
+              'public.payment_operation_documents','public.payment_allocation_plans',
+              'public.payment_allocation_items','public.payment_allocation_reservations',
+              'public.payment_allocation_movements','public.financial_command_receipts',
+              'public.financial_outbox_events','public.financial_outbox_delivery_attempts',
+              'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
+            ]) item(name)
+          );
+          select 'rls_tables|' || count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+          where n.nspname='public' and c.relname in (
+            'payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches',
+            'payment_documents','payment_document_extractions','bank_payment_operations',
+            'payment_operation_documents','payment_allocation_plans','payment_allocation_items',
+            'payment_allocation_reservations','payment_allocation_movements','financial_command_receipts',
+            'financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit',
+            'legacy_payment_receipt_links'
+          ) and c.relrowsecurity;
+          select 'bucket|' || count(*) from storage.buckets
+          where id='payment-batch-documents' and name='payment-batch-documents'
+            and "public"=false and file_size_limit=26214400
+            and allowed_mime_types=array['application/pdf']::text[];
+          select 'storage_policies|' || count(*) from pg_policies
+          where schemaname='storage' and tablename='objects'
+            and policyname in ('Finance can upload payment batch documents','Finance can read payment batch documents');
+          select 'seed_policies|' || count(*) from public.payment_matching_policy_versions
+          where active and currency in ('MXN','USD','EUR') and minor_unit_scale=2 and tolerance_minor=0;
+          select 'authenticated_execute_grants|' || count(*)
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) acl
+          join pg_roles grantee on grantee.oid=acl.grantee
+          where n.nspname='public' and grantee.rolname='authenticated' and acl.privilege_type='EXECUTE'
+            and (p.proname like 'payment_reconciliation_%'
+              or p.proname in (
+                'payment_amount_to_minor','append_financial_outbox_event_internal',
+                'rotate_payment_matching_policy','create_payable_snapshot_internal',
+                'materialize_closed_batch_payable_snapshots','materialize_extraordinary_payable_snapshot',
+                'payment_operation_confirmed_minor','payable_snapshot_confirmed_minor',
+                'payment_operation_reserved_minor','payable_snapshot_reserved_minor',
+                'payment_operation_fingerprint_v1','get_payment_batch_context',
+                'create_payment_ingestion_batch','finalize_payment_ingestion_upload',
+                'submit_payment_document_extractions','list_payment_ingestion_batches',
+                'get_payment_ingestion_batch_detail','accept_payment_document_extraction',
+                'reject_payment_document_extraction','find_payment_allocation_candidates',
+                'propose_payment_allocations','reserve_payment_allocations',
+                'expire_payment_reservation','release_payment_reservation',
+                'cancel_payment_allocation_plan'
+              ));
+          select 'direct_table_grants|' || count(*)
+          from information_schema.role_table_grants
+          where table_schema='public' and table_name in (
+            'payment_matching_policy_versions','payable_snapshots','payment_ingestion_batches',
+            'payment_documents','payment_document_extractions','bank_payment_operations',
+            'payment_operation_documents','payment_allocation_plans','payment_allocation_items',
+            'payment_allocation_reservations','payment_allocation_movements','financial_command_receipts',
+            'financial_outbox_events','financial_outbox_delivery_attempts','financial_break_glass_audit',
+            'legacy_payment_receipt_links'
+          ) and grantee in ('PUBLIC','anon','authenticated','service_role');
+          select 'confirmation_rpc_present|' || count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public' and p.proname in (
+            'confirm_payment_operation','confirm_payment_allocations','reverse_payment_operation'
+          );
+          select 'confirmation_contract_blocked|' || (
+            position('''can_confirm'', false' in pg_get_functiondef('public.get_payment_batch_context()'::regprocedure)) > 0
+            and position('''can_reverse'', false' in pg_get_functiondef('public.get_payment_batch_context()'::regprocedure)) > 0
+            and position('legacy_payment_receipts_cutover_required' in pg_get_functiondef('public.get_payment_batch_context()'::regprocedure)) > 0
+          );
+          select 'business_state_digest|' || encode(extensions.digest(convert_to(concat_ws('|',
+            (select count(*)::text from public.companies),
+            (select count(*)::text from public.company_bank_accounts),
+            (select count(*)::text from public.profiles),
+            (select count(*)::text from public.roles),
+            (select count(*)::text from public.user_roles),
+            (select count(*)::text from public.profile_company_memberships),
+            (select count(*)::text from public.payment_requests),
+            (select count(*)::text from public.proveedores),
+            (select count(*)::text from public.approval_batches),
+            (select count(*)::text from public.approval_batch_items),
+            (select count(*)::text from public.payment_request_extraordinary_authorizations),
+            (select count(*)::text from public.payment_receipts)
+          ), 'UTF8'), 'sha256'), 'hex');
+          select 'history_present|' || (to_regclass('supabase_migrations.schema_migrations') is not null);
+          commit;
+          SQL
+          )"
+          grep -qx 'tables|16' <<<"$postcheck"
+          grep -qx 'functions|49' <<<"$postcheck"
+          grep -qx 'triggers|20' <<<"$postcheck"
+          grep -qx 'rls_tables|16' <<<"$postcheck"
+          grep -qx 'bucket|1' <<<"$postcheck"
+          grep -qx 'storage_policies|2' <<<"$postcheck"
+          grep -qx 'seed_policies|3' <<<"$postcheck"
+          grep -qx 'authenticated_execute_grants|16' <<<"$postcheck"
+          grep -qx 'direct_table_grants|0' <<<"$postcheck"
+          grep -qx 'confirmation_rpc_present|0' <<<"$postcheck"
+          grep -qx 'confirmation_contract_blocked|true' <<<"$postcheck"
+          grep -qx 'history_present|false' <<<"$postcheck"
+          post_digest="$(sed -n 's/^business_state_digest|//p' <<<"$postcheck")"
+          test "$post_digest" = "$BUSINESS_STATE_DIGEST"
+          echo "postcheck=PASS"
+          echo "objects=16_tables_49_functions_20_triggers"
+          echo "security=16_rls_16_rpc_grants_2_storage_policies"
+          echo "storage=private_pdf_25mb"
+          echo "seed_policies=3"
+          echo "business_state_preserved=true"
+          echo "payment_receipts_rows_preserved=true"
+          echo "confirmation_blocked=true"
+          echo "schema_history_modified=false"
