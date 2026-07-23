@@ -84,6 +84,8 @@ const bytes = (relative) => fs.readFileSync(path.join(root, relative))
 
 const migrationPath = "supabase/migrations/031_provider_intake_matching.sql"
 const loadPath = "ops/provider-intake/apply-031-matching/03_LOAD_031_EXACT.sql"
+const AUTHORIZED_MIGRATION_031_SHA256 =
+  "c988bedccef3e1013d1eae768d90e152b64a9e6245bf826a1aa8116c5866a2b0"
 const migration = read(migrationPath)
 const runner = read("scripts/qa/provider-intake-matching-gate2-uat.mjs")
 const authenticatedReadonly = read("scripts/qa/provider-intake-authenticated-readonly-observability.mjs")
@@ -103,10 +105,13 @@ test("Migration 031 and its operational LOAD are byte-identical", () => {
 })
 
 test("Migration 031 has a stable SHA-256 recorded in the runbook", () => {
-  const digest = crypto.createHash("sha256").update(bytes(migrationPath)).digest("hex")
+  const migrationDigest =
+    crypto.createHash("sha256").update(bytes(migrationPath)).digest("hex")
+  const loadDigest = crypto.createHash("sha256").update(bytes(loadPath)).digest("hex")
   const readme = read("ops/provider-intake/apply-031-matching/00_README.md")
-  assert.match(digest, /^[0-9a-f]{64}$/)
-  assert.match(readme, new RegExp(digest))
+  assert.equal(migrationDigest, AUTHORIZED_MIGRATION_031_SHA256)
+  assert.equal(loadDigest, AUTHORIZED_MIGRATION_031_SHA256)
+  assert.match(readme, new RegExp(AUTHORIZED_MIGRATION_031_SHA256))
 })
 
 test("three authenticated matching RPCs use definer rights and a fixed search path", () => {
