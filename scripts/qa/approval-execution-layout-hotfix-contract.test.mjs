@@ -10,9 +10,12 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 
 const migration = read("supabase/migrations/033_separate_approval_material_from_payment_execution_data.sql")
 const migration034 = read("supabase/migrations/034_support_multiple_active_company_directors.sql")
+const migration035 = read("supabase/migrations/035_fix_provider_payment_method_enum_validation.sql")
 const precheck = read("scripts/qa/approval-execution-layout-hotfix-precheck.sql")
 const precheck034 = read("scripts/qa/approval-execution-layout-034-precheck.sql")
 const postcheck034 = read("scripts/qa/approval-execution-layout-034-postcheck.sql")
+const precheck035 = read("scripts/qa/provider-payment-method-035-precheck.sql")
+const postcheck035 = read("scripts/qa/provider-payment-method-035-postcheck.sql")
 const config = read("config.js")
 const configurationHtml = read("configuracion.html")
 const configurationClient = read("configuracion.js")
@@ -87,6 +90,7 @@ function sqlFunctionFrom(source, name) {
 
 const sqlFunction = (name) => sqlFunctionFrom(migration, name)
 const sqlFunction034 = (name) => sqlFunctionFrom(migration034, name)
+const sqlFunction035 = (name) => sqlFunctionFrom(migration035, name)
 
 function jsFunction(source, name) {
   const marker = new RegExp(`(?:async\\s+)?function\\s+${escapeRegex(name)}\\s*\\(`)
@@ -1127,6 +1131,60 @@ test("034 postcheck is read-only and verifies snapshot authorization and manifes
     "enforcement_settings_manifest",
   ]) {
     assert.match(postcheck034, new RegExp(manifest, "i"))
+  }
+})
+
+test("035 fixes only enum-to-text validation and keeps read-only external gates", () => {
+  const functionName = "save_provider_catalog_with_payment_execution_data"
+  const originalFunction = sqlFunction(functionName)
+  const fixedFunction = sqlFunction035(functionName)
+  const canonicalize = (source) => source
+    .replace(/\bcreate\s+or\s+replace\s+function\b/i, "create function")
+    .replace(/v_after\.metodo_pago::text/gi, "v_after.metodo_pago")
+    .replace(/\s+/g, " ")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    .trim()
+
+  assert.equal(canonicalize(fixedFunction), canonicalize(originalFunction))
+  assert.match(
+    fixedFunction,
+    /coalesce\s*\(\s*v_after\.metodo_pago::text\s*,\s*''\s*\)/i,
+  )
+  assert.doesNotMatch(
+    fixedFunction,
+    /coalesce\s*\(\s*v_after\.metodo_pago\s*,\s*''\s*\)/i,
+  )
+  assert.match(fixedFunction, /security\s+definer/i)
+  assert.match(fixedFunction, /set\s+search_path\s*=\s*public\s*,\s*pg_temp/i)
+  assert.equal(
+    (migration035.match(/\bcreate\s+or\s+replace\s+function\b/gi) || []).length,
+    1,
+  )
+  assert.doesNotMatch(
+    migration035,
+    /\b(?:delete\s+from|truncate|alter\s+table|drop\s+(?:table|schema|column|function|index))\b/i,
+  )
+
+  for (const gate of [precheck035, postcheck035]) {
+    assert.match(gate, /begin\s*;\s*set\s+transaction\s+read\s+only\s*;/i)
+    assert.match(gate, /rollback\s*;\s*$/i)
+    assert.doesNotMatch(
+      gate,
+      /^\s*(?:insert|update|delete|alter|create|drop|truncate|commit)\b/im,
+    )
+    for (const protectedCount of [
+      "payment_receipts_count",
+      "notification_events_count",
+      "delivery_attempts_count",
+      "approval_batches_count",
+      "approval_batch_items_count",
+      "payment_layouts_count",
+      "payment_layout_lines_count",
+      "enforcement_settings_count",
+    ]) {
+      assert.match(gate, new RegExp(protectedCount, "i"))
+    }
   }
 })
 

@@ -7,12 +7,14 @@
 - Rama: `hotfix/ramon-client-demo-approval-execution-layout`.
 - Migraciones forward-only:
   - `033_separate_approval_material_from_payment_execution_data.sql`, ya aplicada una sola vez en DEV;
-  - `034_support_multiple_active_company_directors.sql`, preparada y todavía no aplicada.
+  - `034_support_multiple_active_company_directors.sql`, ya aplicada una sola vez en DEV;
+  - `035_fix_provider_payment_method_enum_validation.sql`, preparada para corregir el defecto runtime detectado por la fixture.
 - SHA-256 aplicado de 033: `629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc`.
-- SHA-256 preparado de 034: `e4ffc2e4e0425b9325fcc37d10261c1b90f9e18bb7874f65cc9ced82476a33e8`.
+- SHA-256 aplicado de 034: `e4ffc2e4e0425b9325fcc37d10261c1b90f9e18bb7874f65cc9ced82476a33e8`.
+- SHA-256 preparado de 035: `5f18e641446f293cf444a2fd7e482cfc9d684efa82b17a908f6cdda8d961a3a7`.
 - SHA-256 anterior invalidado y prohibido para LOAD: `da310d7a8113a94b79dc2c3cfb7a42439047e61fd86df745473a0782b1019e21`.
 - Target autorizado para una fase posterior: Supabase DEV `scsirgbuqjcwoaxfacth`.
-- Estado de este documento: 033 aplicada y verificada en DEV; 034 pendiente de precheck, backup y aplicación única.
+- Estado de este documento: 033 y 034 aplicadas y verificadas en DEV; 035 pendiente de precheck, publicación, backup y aplicación única.
 
 `CLAUDE.md` no existe en la base registrada de `origin/dev`; por ello no fue posible leerlo. No se sustituyó por instrucciones inventadas.
 
@@ -100,6 +102,26 @@ La aplicación se detiene si cualquiera de estos pasos no termina en PASS:
 
 Después de 034 pueden coexistir varios Directores activos por empresa. Cada
 corte exige seleccionar exactamente uno y conserva ese `director_id`.
+
+## Gate para la corrección runtime 035
+
+La primera llamada real a
+`save_provider_catalog_with_payment_execution_data(uuid,jsonb)` con una sesión
+Finance QA confirmó que 033 intentaba evaluar
+`coalesce(v_after.metodo_pago, '')`. PostgreSQL resuelve la cadena vacía como
+`metodo_pago_enum` y aborta con `22P02`, aun cuando el payload contiene un enum
+válido. La llamada fallida no creó proveedor ni dejó datos parciales.
+
+035 conserva byte por byte el cuerpo funcional de la RPC salvo por el cast
+`v_after.metodo_pago::text` en esa validación. No modifica tablas, datos,
+grants ni otras funciones. Antes de cargarla una sola vez:
+
+1. Ejecutar `scripts/qa/provider-payment-method-035-precheck.sql`.
+2. Confirmar el SHA local/Git/LOAD `5f18e641446f293cf444a2fd7e482cfc9d684efa82b17a908f6cdda8d961a3a7`.
+3. Conservar backup privado de la definición y los conteos protegidos.
+4. Aplicar 035 exactamente una vez, sin `db push` ni `migration repair`.
+5. Ejecutar `scripts/qa/provider-payment-method-035-postcheck.sql`.
+6. Repetir la creación con la misma sesión Finance real; debe crear exactamente un proveedor sintético.
 
 ## UAT sintética posterior a la aplicación
 
@@ -253,10 +275,10 @@ En cada combinación confirmar:
 ## Verificación estática y de regresión
 
 - `node --check`: PASS en los cuatro JavaScript modificados.
-- Contrato focal: 20/20 PASS, incluidos 033, 034, pool multidirector, snapshot de decisión, precheck y postcheck read-only.
+- Contrato focal: 21/21 PASS, incluidos 033, 034, 035, pool multidirector, snapshot de decisión y gates read-only.
 - IDs únicos y `git diff --check`: PASS.
-- Parser PostgreSQL (`pglast`): PASS para migración 034, precheck 034 y postcheck 034.
-- Suite completa bajo `scripts/qa/`: 155/157 PASS.
+- Parser PostgreSQL (`pglast`): PASS para migraciones 034/035 y sus precheck/postcheck.
+- Suite completa bajo `scripts/qa/`: 157/159 PASS.
 - Los dos fallos restantes pertenecen a archivos byte-idénticos al SHA base `fc3d703baa6f8ab71134012d3f54756575005ee0`:
   - `PostgREST P0001 errors preserve actionable domain messages`;
   - `Migration 029 remains byte-identical to the applied contract`.
@@ -308,7 +330,8 @@ Requiere autorización separada después de la sesión y aceptación del cliente
 2. Ejecutar precheck y backup privado de PROD.
 3. Aplicar 033 sólo si no existe y validar su SHA/objetos.
 4. Aplicar 034 inmediatamente después, una sola vez.
-5. No copiar fixture ni usuarios QA.
-6. Configurar Directores humanos reales desde la interfaz; permitir varios activos y seleccionar uno por corte.
-7. Comparar manifests históricos, enforcement y `payment_receipts`.
-8. Ejecutar smoke con una solicitud controlada sin confirmar pago, crear receipt ni enviar al banco.
+5. Aplicar 035 inmediatamente después, una sola vez.
+6. No copiar fixture ni usuarios QA.
+7. Configurar Directores humanos reales desde la interfaz; permitir varios activos y seleccionar uno por corte.
+8. Comparar manifests históricos, enforcement y `payment_receipts`.
+9. Ejecutar smoke con una solicitud controlada sin confirmar pago, crear receipt ni enviar al banco.
