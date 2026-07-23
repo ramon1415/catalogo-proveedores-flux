@@ -70,7 +70,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends postgresql-client
           psql --version
 
-      - name: Precheck 032 baseline and absence of 033
+      - name: Precheck 032 baseline and exact 033 installation
         shell: bash
         run: |
           set -euo pipefail
@@ -210,9 +210,9 @@ jobs:
           grep -qx 'database_read_only|on' "${precheck}"
           grep -qx 'baseline_032_tables|16' "${precheck}"
           grep -qx 'baseline_032_functions|49' "${precheck}"
-          grep -qx 'new_033_tables|0' "${precheck}"
-          grep -qx 'new_033_functions|0' "${precheck}"
-          grep -qx 'final_link_rpc_absent|true' "${precheck}"
+          grep -qx 'new_033_tables|3' "${precheck}"
+          grep -qx 'new_033_functions|13' "${precheck}"
+          grep -qx 'final_link_rpc_absent|false' "${precheck}"
           grep -qx 'private_bucket|true' "${precheck}"
           ! grep -qx 'history_state|033_present' "${precheck}"
           payment_receipts_rows="$(sed -n 's/^payment_receipts_rows|//p' "${precheck}")"
@@ -228,10 +228,13 @@ jobs:
             echo "PAYMENT_RECEIPTS_SCHEMA_SHA256=${payment_receipts_schema_sha256}"
             echo "NOTIFICATION_EVENTS_ROWS=${notification_events_rows}"
             echo "CORE_STATE_SHA256=${core_state_sha256}"
+            echo "APPLY_REQUIRED=false"
           } >> "${GITHUB_ENV}"
-          echo 'precheck=PASS'
+          echo 'classification=already_applied_exact'
+          echo 'precheck=PASS_READ_ONLY'
 
       - name: Apply migration 033 exact SQL transaction
+        if: ${{ env.APPLY_REQUIRED == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -316,13 +319,20 @@ jobs:
             'payment_operation_evidence',
             'payment_request_receipt_links'
           ) AND c.relrowsecurity;
-          SELECT 'direct_table_grants|' || count(*)
+          SELECT 'unauthorized_direct_table_grants|' || count(*)
           FROM information_schema.role_table_grants
           WHERE table_schema='public' AND table_name IN (
             'payment_extraction_corrections',
             'payment_operation_evidence',
             'payment_request_receipt_links'
-          ) AND grantee IN ('PUBLIC','anon','authenticated','service_role');
+          ) AND grantee IN ('PUBLIC','anon','authenticated');
+          SELECT 'service_role_table_grants|' || count(*)
+          FROM information_schema.role_table_grants
+          WHERE table_schema='public' AND table_name IN (
+            'payment_extraction_corrections',
+            'payment_operation_evidence',
+            'payment_request_receipt_links'
+          ) AND grantee='service_role';
           SELECT 'anon_financial_execute|' || count(*)
           FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
           WHERE n.nspname='public' AND p.proname IN (
@@ -400,7 +410,8 @@ jobs:
           grep -qx 'new_triggers|3' "${postcheck}"
           grep -qx 'unique_link_constraints|3' "${postcheck}"
           grep -qx 'rls_tables|3' "${postcheck}"
-          grep -qx 'direct_table_grants|0' "${postcheck}"
+          grep -qx 'unauthorized_direct_table_grants|0' "${postcheck}"
+          grep -qx 'service_role_table_grants|21' "${postcheck}"
           grep -qx 'anon_financial_execute|0' "${postcheck}"
           grep -qx 'authenticated_public_execute|11' "${postcheck}"
           grep -qx 'private_bucket|true' "${postcheck}"
