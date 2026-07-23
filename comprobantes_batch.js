@@ -19,7 +19,7 @@
     evidenceAccess: "get_payment_operation_evidence_access",
     linkReceipt: "link_payment_receipt_to_request",
   })
-  const PDF_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+  const PDF_WORKER = "./vendor/pdfjs-worker-3.11.174.min.js?v=20260723-vendored"
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
@@ -426,8 +426,11 @@
     const pageNumber = Math.max(1, Number(state.operation?.page_number) || 1)
     const evidenceId = state.linkPreview?.evidence?.id || state.linkPreview?.link?.evidence_id
     if (evidenceId && state.linkPreview?.evidence?.status === "shareable") return openPersistedEvidence(evidenceId, false)
-    if (state.busy || !window.FluxSinglePagePdf
-      || sourceDocument.storage_bucket !== "payment-batch-documents"
+    if (state.busy) return
+    if (!window.FluxSinglePagePdf || !window.PDFLib) {
+      return toast("Runtime PDF no disponible", "Recarga la página. Si el problema continúa, informa a soporte antes de revisar el comprobante.", "danger")
+    }
+    if (sourceDocument.storage_bucket !== "payment-batch-documents"
       || !/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/source\.pdf$/i.test(sourceDocument.storage_path || "")) return
     const preview = window.open("about:blank", "_blank")
     if (!preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el comprobante.", "warning")

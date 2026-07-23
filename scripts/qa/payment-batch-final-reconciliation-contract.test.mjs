@@ -353,6 +353,21 @@ test("request evidence download revalidates the one-page PDF", () => {
   assert.match(requestsHtml, /payment_batch_single_page_pdf\.js/i);
 });
 
+test("critical PDF runtime is versioned locally for finance and request evidence", () => {
+  const pdfLib = readFileSync(join(root, "vendor", "pdf-lib-1.17.1.min.js"));
+  const pdfJs = readFileSync(join(root, "vendor", "pdfjs-3.11.174.min.js"));
+  const pdfWorker = readFileSync(join(root, "vendor", "pdfjs-worker-3.11.174.min.js"));
+
+  assert.ok(pdfLib.byteLength > 500_000);
+  assert.ok(pdfJs.byteLength > 300_000);
+  assert.ok(pdfWorker.byteLength > 1_000_000);
+  assert.match(html, /\.\/vendor\/pdfjs-3\.11\.174\.min\.js/);
+  assert.match(html, /\.\/vendor\/pdf-lib-1\.17\.1\.min\.js/);
+  assert.match(requestsHtml, /\.\/vendor\/pdf-lib-1\.17\.1\.min\.js/);
+  assert.match(client, /\.\/vendor\/pdfjs-worker-3\.11\.174\.min\.js/);
+  assert.doesNotMatch(`${html}\n${requestsHtml}\n${client}`, /cdn\.jsdelivr\.net\/npm\/(?:pdf-lib|pdfjs-dist)/);
+});
+
 test("provider external access remains disabled in this cut", () => {
   assert.match(requestEvidence, /(disabled|deshabilitad|no disponible)/i);
 });
