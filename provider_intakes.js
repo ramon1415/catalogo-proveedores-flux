@@ -18,6 +18,8 @@ const EVENT_LABELS = Object.freeze({
   file_uploaded: "Documento recibido",
   file_reviewed: "Documento revisado",
   provider_matched: "Proveedor relacionado",
+  conversion_draft_created: "Preparación de pago iniciada",
+  conversion_draft_updated: "Preparación de pago actualizada",
   converted: "Solicitud convertida",
 })
 
@@ -42,6 +44,38 @@ const COMPARISON_RESULT = Object.freeze({
   not_reported: "No informado",
 })
 
+const PAYMENT_DRAFT_STATE = Object.freeze({
+  NOT_STARTED: "Sin iniciar",
+  DRAFT_INCOMPLETE: "Borrador incompleto",
+  READY_PENDING_PROVIDER: "Preparada · pendiente de proveedor",
+  READY_FOR_CONVERSION: "Lista para conversión",
+  ALREADY_CONVERTED: "Solicitud de pago creada",
+  BLOCKED_INTAKE_STATUS: "Preparación no disponible",
+})
+
+const PAYMENT_DRAFT_FIELD_LABELS = Object.freeze({
+  cost_center_id: "Centro de costo",
+  budget_category_id: "Categoría o partida",
+  budget_month: "Mes presupuestal",
+  company_bank_account_id: "Cuenta origen",
+  payment_method: "Método de pago",
+  requested_by_profile_id: "Solicitante interno",
+  approver_profile_id: "Aprobador permitido",
+  final_amount: "Monto definitivo",
+  currency: "Moneda",
+  scheduled_payment_date: "Fecha programada",
+  internal_concept: "Concepto interno",
+  amount_change_reason: "Motivo de cambio de monto",
+})
+
+const PAYMENT_DRAFT_BLOCKER_LABELS = Object.freeze({
+  PAYMENT_REQUEST_ALREADY_CREATED: "La solicitud de pago definitiva ya fue creada.",
+  INTAKE_STATUS_NOT_IN_REVIEW: "El intake debe estar en revisión para editar la preparación.",
+  PROVIDER_REQUIRED_FOR_CONVERSION: "Falta vincular un proveedor maestro.",
+  PROVIDER_INACTIVE: "El proveedor vinculado está inactivo; selecciona uno activo.",
+  APPROVER_RULE_PENDING_CONVERSION: "La regla de aprobación se resolverá durante la conversión.",
+})
+
 const state = {
   page: 1,
   pageSize: 25,
@@ -58,6 +92,14 @@ const state = {
   matchSearch: "",
   matchAction: null,
   matchTrigger: null,
+  paymentDraftContext: null,
+  paymentDraftLoading: false,
+  paymentDraftTrigger: null,
+  paymentDraftDirty: false,
+  paymentDraftSnapshot: "",
+  paymentDraftActionId: null,
+  paymentDraftDiscarding: false,
+  paymentDraftReloadPending: false,
 }
 
 const dom = {}
@@ -108,6 +150,20 @@ function bindDom() {
     "matchReasonFields", "matchReasonCode", "matchReason", "matchReasonRequired",
     "matchReasonHint", "matchReasonCounter", "matchError", "closeMatchBtn",
     "cancelMatchBtn", "confirmMatchBtn",
+    "paymentDraftFooterState", "paymentDraftDialog", "paymentDraftForm",
+    "paymentDraftTitle", "paymentDraftSubtitle", "closePaymentDraftBtn",
+    "paymentDraftContent", "paymentDraftLoading", "paymentDraftWorkspace",
+    "paymentDraftSummary", "paymentDraftDocuments", "paymentDraftProviderTitle",
+    "paymentDraftProviderMessage", "paymentDraftCompany", "paymentDraftCostCenter",
+    "paymentDraftBudgetCategory", "paymentDraftBudgetMonth", "paymentDraftOriginAccountField",
+    "paymentDraftOriginAccount", "paymentDraftPaymentMethod", "paymentDraftFinalAmount",
+    "paymentDraftCurrency", "paymentDraftScheduledDate", "paymentDraftInternalConcept",
+    "paymentDraftInternalNotes", "paymentDraftAmountReasonField", "paymentDraftAmountReason",
+    "paymentDraftRequester", "paymentDraftApprover", "paymentDraftApproverHint",
+    "paymentDraftStateLabel", "paymentDraftProgressLabel", "paymentDraftProgress",
+    "paymentDraftMissingFields", "paymentDraftBlockers", "paymentDraftDiscardConfirm",
+    "keepEditingPaymentDraftBtn", "discardPaymentDraftBtn", "paymentDraftError",
+    "reloadPaymentDraftBtn", "paymentDraftSuccess", "cancelPaymentDraftBtn", "savePaymentDraftBtn",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -131,6 +187,18 @@ function bindEvents() {
   dom.detailDialog.addEventListener("close", restoreDetailFocus)
   dom.actionDialog.addEventListener("close", restoreActionFocus)
   dom.matchDialog.addEventListener("close", restoreMatchFocus)
+  dom.paymentDraftForm.addEventListener("submit", submitPaymentDraft)
+  dom.closePaymentDraftBtn.addEventListener("click", requestClosePaymentDraft)
+  dom.cancelPaymentDraftBtn.addEventListener("click", requestClosePaymentDraft)
+  dom.keepEditingPaymentDraftBtn.addEventListener("click", hidePaymentDraftDiscard)
+  dom.discardPaymentDraftBtn.addEventListener("click", discardAndClosePaymentDraft)
+  dom.paymentDraftDialog.addEventListener("cancel", handlePaymentDraftCancel)
+  dom.paymentDraftDialog.addEventListener("close", restorePaymentDraftFocus)
+  dom.paymentDraftForm.addEventListener("input", handlePaymentDraftInput)
+  dom.paymentDraftForm.addEventListener("change", handlePaymentDraftInput)
+  dom.paymentDraftCostCenter.addEventListener("change", updatePaymentDraftCategoryOptions)
+  dom.paymentDraftPaymentMethod.addEventListener("change", updatePaymentDraftOriginAccountState)
+  dom.reloadPaymentDraftBtn.addEventListener("click", reloadPaymentDraftModal)
 
   ;[dom.folioFilter, dom.providerFilter].forEach((input) => {
     input.addEventListener("input", () => {
@@ -402,6 +470,7 @@ async function openDetail(intakeId, trigger) {
   state.detailTrigger = trigger
   state.detail = null
   state.matchData = null
+  state.paymentDraftContext = null
   dom.detailTitle.textContent = "Cargando solicitud…"
   dom.detailSubtitle.textContent = "Consultando información autorizada"
   dom.detailContent.replaceChildren(element("div", "detail-loading", "Cargando detalle…"))
@@ -420,7 +489,7 @@ async function openDetail(intakeId, trigger) {
   }
 
   state.detail = data
-  await loadMatchState()
+  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
   renderDetail()
 }
 
@@ -469,6 +538,7 @@ function renderDetail() {
       ["Cuenta", intake.bank_account_masked, "sensitive-value"],
       ["CLABE", intake.bank_clabe_masked, "sensitive-value"],
     ]),
+    paymentDraftStatusSection(intake),
     providerMatchSection(intake),
     filesSection(state.detail.files || [], intake),
     eventsSection(state.detail.events || []),
@@ -476,6 +546,87 @@ function renderDetail() {
   content.append(grid)
   dom.detailContent.replaceChildren(content)
   renderDetailActions(intake)
+}
+
+async function loadPaymentDraftContext() {
+  const intakeId = state.detail?.intake?.id
+  if (!intakeId) return
+  state.paymentDraftLoading = true
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_payment_draft_context", {
+    p_payment_intake_id: intakeId,
+  })
+  state.paymentDraftLoading = false
+  state.paymentDraftContext = error ? { error: friendlyError(error) } : data
+}
+
+function paymentDraftStatusSection(intake) {
+  const section = element("section", "detail-section full payment-draft-status-section")
+  const context = state.paymentDraftContext
+  const heading = element("div", "payment-draft-status-heading")
+  heading.append(
+    element("div", "", ""),
+  )
+  heading.firstChild.append(
+    element("h3", "", "Preparación de solicitud de pago"),
+    element("p", "payment-draft-helper", "Borrador interno previo al matching y a la conversión definitiva."),
+  )
+  section.append(heading)
+
+  if (state.paymentDraftLoading) {
+    section.append(element("p", "empty-inline", "Consultando estado de preparación…"))
+    return section
+  }
+  if (!context || context.error) {
+    section.append(element("p", "match-error-inline", context?.error || "No fue posible consultar la preparación."))
+    return section
+  }
+
+  const derived = context.state?.derived_state || "NOT_STARTED"
+  const row = element("div", "payment-draft-status-row")
+  row.append(element(
+    "span",
+    `payment-draft-state-badge ${paymentDraftStateClass(derived)}`,
+    PAYMENT_DRAFT_STATE[derived] || derived,
+  ))
+  const message = paymentDraftStateMessage(derived, intake, context)
+  if (message) row.append(element("p", "payment-draft-state-message", message))
+  section.append(row)
+
+  const missing = context.state?.missing_fields || []
+  if (missing.length) {
+    section.append(element(
+      "p",
+      "payment-draft-helper",
+      `${missing.length} campo${missing.length === 1 ? "" : "s"} pendiente${missing.length === 1 ? "" : "s"}.`,
+    ))
+  }
+  return section
+}
+
+function paymentDraftStateClass(derived) {
+  return ({
+    NOT_STARTED: "not-started",
+    DRAFT_INCOMPLETE: "incomplete",
+    READY_PENDING_PROVIDER: "pending-provider",
+    READY_FOR_CONVERSION: "ready",
+    ALREADY_CONVERTED: "converted",
+    BLOCKED_INTAKE_STATUS: "blocked",
+  })[derived] || "blocked"
+}
+
+function paymentDraftStateMessage(derived, intake, context) {
+  if (derived === "READY_PENDING_PROVIDER") {
+    return context.state?.blockers?.includes("PROVIDER_INACTIVE")
+      ? "El proveedor vinculado está inactivo; selecciona uno activo para continuar."
+      : "Vincula o registra al proveedor maestro para completar la conversión."
+  }
+  if (derived === "READY_FOR_CONVERSION") return "Creación definitiva disponible en Fase 2B.2."
+  if (derived === "ALREADY_CONVERTED") return "No se permiten más cambios de preparación."
+  if (derived === "BLOCKED_INTAKE_STATUS") {
+    return `El estado ${STATUS[intake.status]?.label || intake.status} no permite preparar ni editar el borrador.`
+  }
+  if (derived === "DRAFT_INCOMPLETE") return "Continúa capturando la información interna pendiente."
+  return "Precarga los datos declarados y completa la información interna."
 }
 
 function detailSection(title, rows) {
@@ -938,7 +1089,7 @@ async function refreshOpenDetail() {
   }
   state.detail = data
   state.matchSearch = ""
-  await loadMatchState()
+  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
   renderDetail()
 }
 
@@ -948,6 +1099,484 @@ function closeMatchDialog() {
 
 function updateMatchReasonCounter() {
   dom.matchReasonCounter.textContent = `${dom.matchReason.value.length} / 500`
+}
+
+async function openPaymentDraft(trigger) {
+  state.paymentDraftTrigger = trigger
+  state.paymentDraftDirty = false
+  state.paymentDraftDiscarding = false
+  state.paymentDraftReloadPending = false
+  state.paymentDraftActionId = createUuid()
+  dom.paymentDraftDiscardConfirm.hidden = true
+  dom.paymentDraftError.textContent = ""
+  dom.paymentDraftSuccess.textContent = ""
+  dom.reloadPaymentDraftBtn.hidden = true
+  dom.paymentDraftLoading.hidden = false
+  dom.paymentDraftWorkspace.hidden = true
+  dom.savePaymentDraftBtn.disabled = true
+  dom.paymentDraftDialog.showModal()
+
+  await loadPaymentDraftContext()
+  dom.paymentDraftLoading.hidden = true
+  dom.paymentDraftWorkspace.hidden = false
+
+  if (!state.paymentDraftContext || state.paymentDraftContext.error) {
+    dom.paymentDraftError.textContent = state.paymentDraftContext?.error || "No fue posible cargar el contexto."
+    dom.reloadPaymentDraftBtn.hidden = false
+    return
+  }
+
+  populatePaymentDraftForm()
+  window.setTimeout(() => dom.paymentDraftCostCenter.focus(), 0)
+}
+
+async function reloadPaymentDraftModal() {
+  if (state.paymentDraftDirty && !state.paymentDraftDiscarding) {
+    state.paymentDraftReloadPending = true
+    dom.paymentDraftDiscardConfirm.hidden = false
+    dom.keepEditingPaymentDraftBtn.focus()
+    return
+  }
+  dom.paymentDraftError.textContent = ""
+  dom.paymentDraftSuccess.textContent = ""
+  dom.reloadPaymentDraftBtn.hidden = true
+  dom.paymentDraftLoading.hidden = false
+  dom.paymentDraftWorkspace.hidden = true
+  await loadPaymentDraftContext()
+  dom.paymentDraftLoading.hidden = true
+  dom.paymentDraftWorkspace.hidden = false
+  if (state.paymentDraftContext?.error) {
+    dom.paymentDraftError.textContent = state.paymentDraftContext.error
+    dom.reloadPaymentDraftBtn.hidden = false
+    return
+  }
+  state.paymentDraftActionId = createUuid()
+  populatePaymentDraftForm()
+}
+
+function populatePaymentDraftForm() {
+  const context = state.paymentDraftContext
+  const intake = context?.intake
+  if (!context || !intake) return
+  const draft = context.draft || {}
+  const defaults = context.defaults || {}
+
+  dom.paymentDraftTitle.textContent = context.draft
+    ? "Editar solicitud preparada"
+    : "Preparar solicitud de pago"
+  dom.paymentDraftSubtitle.textContent = `${intake.public_folio} · no crea payment_requests ni inicia aprobación.`
+  dom.paymentDraftCompany.value = intake.company_name || ""
+  renderPaymentDraftSummary(context)
+  renderPaymentDraftProvider(context)
+
+  replaceSelectOptions(
+    dom.paymentDraftCostCenter,
+    context.catalogs?.cost_centers || [],
+    (item) => item.id,
+    (item) => [item.code, item.name].filter(Boolean).join(" · "),
+    "Pendiente",
+  )
+  dom.paymentDraftCostCenter.value = draft.cost_center_id || ""
+
+  dom.paymentDraftBudgetMonth.value = dateToMonthValue(draft.budget_month)
+  dom.paymentDraftPaymentMethod.value = draft.payment_method || ""
+  replaceSelectOptions(
+    dom.paymentDraftOriginAccount,
+    context.catalogs?.origin_accounts || [],
+    (item) => item.id,
+    (item) => {
+      const identity = [item.name, item.bank_name].filter(Boolean).join(" · ")
+      return `${identity}${item.last4 ? ` · terminación ${item.last4}` : ""}`
+    },
+    "Pendiente",
+  )
+  dom.paymentDraftOriginAccount.value = draft.company_bank_account_id || ""
+  dom.paymentDraftFinalAmount.value = numericInputValue(draft.final_amount ?? defaults.final_amount)
+
+  replaceSelectOptions(
+    dom.paymentDraftCurrency,
+    (context.catalogs?.currencies || []).map((currency) => ({ currency })),
+    (item) => item.currency,
+    (item) => item.currency,
+    "Pendiente",
+  )
+  dom.paymentDraftCurrency.value = draft.currency || defaults.currency || ""
+  dom.paymentDraftScheduledDate.value = draft.scheduled_payment_date || defaults.scheduled_payment_date || ""
+  dom.paymentDraftInternalConcept.value = draft.internal_concept || defaults.internal_concept || ""
+  dom.paymentDraftInternalNotes.value = draft.internal_notes || ""
+  dom.paymentDraftAmountReason.value = draft.amount_change_reason || ""
+
+  replaceSelectOptions(
+    dom.paymentDraftRequester,
+    context.requester_options || [],
+    (item) => item.profile_id,
+    (item) => item.display_name,
+    "Pendiente",
+  )
+  dom.paymentDraftRequester.value = draft.requested_by_profile_id || defaults.requested_by_profile_id || ""
+
+  replaceSelectOptions(
+    dom.paymentDraftApprover,
+    context.approver_options || [],
+    (item) => item.profile_id,
+    (item) => item.option_label || item.display_name,
+    "Pendiente",
+    (option, item) => {
+      option.dataset.assignmentId = item.assignment_id || ""
+      option.dataset.source = item.source || ""
+    },
+  )
+  dom.paymentDraftApprover.value = draft.approver_profile_id || ""
+  if (draft.approver_profile_id && !dom.paymentDraftApprover.value) {
+    const option = optionElement(draft.approver_profile_id, "Aprobador guardado · requiere recarga de reglas")
+    option.dataset.assignmentId = draft.approver_assignment_id || ""
+    dom.paymentDraftApprover.append(option)
+    dom.paymentDraftApprover.value = draft.approver_profile_id
+  }
+
+  updatePaymentDraftCategoryOptions(draft.budget_category_id || "")
+  updatePaymentDraftOriginAccountState()
+  renderPaymentDraftReadiness(context.state || {})
+  dom.paymentDraftApproverHint.textContent = (context.approver_options || []).length
+    ? "Selecciona únicamente una opción autorizada por el servidor."
+    : "Guarda primero centro de costo, monto y solicitante para calcular opciones autorizadas."
+  dom.savePaymentDraftBtn.disabled = !context.can_save
+  dom.paymentDraftSnapshot = paymentDraftSnapshot()
+  state.paymentDraftDirty = false
+  state.paymentDraftDiscarding = false
+  dom.paymentDraftDiscardConfirm.hidden = true
+  updatePaymentDraftClientState()
+}
+
+function renderPaymentDraftSummary(context) {
+  const intake = context.intake
+  const rows = [
+    ["Empresa", intake.company_name],
+    ["Proveedor declarado", intake.provider_name],
+    ["Concepto", intake.concept],
+    ["Descripción", intake.description],
+    ["Monto declarado", formatMoney(intake.amount_requested, intake.currency)],
+    ["Fecha solicitada", formatDate(intake.requested_payment_date)],
+    ["Factura", [intake.invoice?.folio, formatDate(intake.invoice?.date)].filter(Boolean).join(" · ")],
+  ]
+  dom.paymentDraftSummary.replaceChildren()
+  rows.forEach(([label, value]) => {
+    const row = element("div", "payment-draft-summary-item")
+    row.append(element("dt", "", label), element("dd", "", displayValue(value)))
+    dom.paymentDraftSummary.append(row)
+  })
+
+  dom.paymentDraftDocuments.replaceChildren()
+  const documents = context.documents || []
+  if (!documents.length) {
+    dom.paymentDraftDocuments.append(element("li", "empty-inline", "Sin documentos informados."))
+    return
+  }
+  documents.forEach((documentItem) => {
+    dom.paymentDraftDocuments.append(element(
+      "li",
+      "",
+      `${documentItem.name} · ${FILE_KIND_LABELS[documentItem.file_kind] || "Documento"} · ${formatBytes(documentItem.size_bytes)} · ${quarantineLabel(documentItem.quarantine_status)}`,
+    ))
+  })
+}
+
+function renderPaymentDraftProvider(context) {
+  const provider = context.provider
+  if (!provider) {
+    dom.paymentDraftProviderTitle.textContent = "Proveedor maestro pendiente"
+    dom.paymentDraftProviderMessage.textContent = "Puedes guardar el borrador. El proveedor será obligatorio únicamente para la conversión futura."
+    return
+  }
+  dom.paymentDraftProviderTitle.textContent = provider.display_name || "Proveedor maestro vinculado"
+  dom.paymentDraftProviderMessage.textContent = provider.active
+    ? `Activo · ${displayValue(provider.bank)} · CLABE ${displayValue(provider.clabe_masked)} · cuenta ${displayValue(provider.account_masked)}`
+    : "Proveedor inactivo · no permite declarar el borrador listo para conversión."
+}
+
+function replaceSelectOptions(select, items, valueFor, labelFor, emptyLabel, decorate = null) {
+  select.replaceChildren(optionElement("", emptyLabel))
+  items.forEach((item) => {
+    const option = optionElement(valueFor(item), labelFor(item))
+    if (decorate) decorate(option, item)
+    select.append(option)
+  })
+}
+
+function updatePaymentDraftCategoryOptions(selectedValue = null) {
+  const context = state.paymentDraftContext
+  if (!context || context.error) return
+  const previous = selectedValue === null ? dom.paymentDraftBudgetCategory.value : selectedValue
+  const centerId = dom.paymentDraftCostCenter.value
+  const categories = (context.catalogs?.budget_categories || [])
+    .filter((item) => !centerId || item.cost_center_id === centerId)
+  replaceSelectOptions(
+    dom.paymentDraftBudgetCategory,
+    categories,
+    (item) => item.id,
+    (item) => [item.code, item.name].filter(Boolean).join(" · "),
+    "Pendiente",
+  )
+  if (categories.some((item) => item.id === previous)) {
+    dom.paymentDraftBudgetCategory.value = previous
+  }
+}
+
+function updatePaymentDraftOriginAccountState() {
+  const transfer = dom.paymentDraftPaymentMethod.value === "transfer"
+  dom.paymentDraftOriginAccountField.hidden = !transfer
+  dom.paymentDraftOriginAccount.disabled = !transfer
+  if (!transfer) dom.paymentDraftOriginAccount.value = ""
+  updatePaymentDraftClientState()
+}
+
+function handlePaymentDraftInput(event) {
+  if (event?.target === dom.paymentDraftCostCenter) updatePaymentDraftCategoryOptions()
+  if (event?.target === dom.paymentDraftPaymentMethod) updatePaymentDraftOriginAccountState()
+  dom.paymentDraftSuccess.textContent = ""
+  dom.paymentDraftError.textContent = ""
+  dom.reloadPaymentDraftBtn.hidden = true
+  state.paymentDraftDirty = paymentDraftSnapshot() !== state.paymentDraftSnapshot
+  if (state.paymentDraftDirty) state.paymentDraftActionId = createUuid()
+  updatePaymentDraftClientState()
+}
+
+function paymentDraftSnapshot() {
+  return JSON.stringify(readPaymentDraftForm())
+}
+
+function readPaymentDraftForm() {
+  const approverOption = dom.paymentDraftApprover.selectedOptions[0]
+  return {
+    cost_center_id: dom.paymentDraftCostCenter.value || null,
+    budget_category_id: dom.paymentDraftBudgetCategory.value || null,
+    budget_month: dom.paymentDraftBudgetMonth.value ? `${dom.paymentDraftBudgetMonth.value}-01` : null,
+    company_bank_account_id: dom.paymentDraftPaymentMethod.value === "transfer"
+      ? dom.paymentDraftOriginAccount.value || null
+      : null,
+    payment_method: dom.paymentDraftPaymentMethod.value || null,
+    requested_by_profile_id: dom.paymentDraftRequester.value || null,
+    approver_profile_id: dom.paymentDraftApprover.value || null,
+    approver_assignment_id: dom.paymentDraftApprover.value
+      ? approverOption?.dataset.assignmentId || null
+      : null,
+    final_amount: dom.paymentDraftFinalAmount.value.trim() || null,
+    currency: dom.paymentDraftCurrency.value || null,
+    scheduled_payment_date: dom.paymentDraftScheduledDate.value || null,
+    internal_concept: dom.paymentDraftInternalConcept.value.trim() || null,
+    internal_notes: dom.paymentDraftInternalNotes.value.trim() || null,
+    amount_change_reason: dom.paymentDraftAmountReason.value.trim() || null,
+  }
+}
+
+function updatePaymentDraftClientState() {
+  if (!state.paymentDraftContext || state.paymentDraftContext.error) return
+  const form = readPaymentDraftForm()
+  const declared = Number(state.paymentDraftContext.intake?.amount_requested)
+  const finalAmount = Number(form.final_amount)
+  const amountChanged = form.final_amount !== null
+    && Number.isFinite(finalAmount)
+    && finalAmount !== declared
+  dom.paymentDraftAmountReasonField.hidden = !amountChanged
+  if (!amountChanged && dom.paymentDraftAmountReason.value) dom.paymentDraftAmountReason.value = ""
+
+  const missing = localPaymentDraftMissingFields(form, amountChanged)
+  const total = 11
+  const completed = Math.max(0, total - missing.filter((field) => field !== "amount_change_reason").length)
+  dom.paymentDraftProgress.max = total
+  dom.paymentDraftProgress.value = completed
+  dom.paymentDraftProgressLabel.textContent = `${completed} de ${total} campos completos`
+  dom.paymentDraftProgress.textContent = `${completed} de ${total}`
+
+  if (state.paymentDraftDirty) {
+    renderStringList(dom.paymentDraftMissingFields, missing, PAYMENT_DRAFT_FIELD_LABELS, "Sin campos pendientes.")
+    dom.paymentDraftStateLabel.textContent = missing.length
+      ? "Cambios sin guardar · borrador incompleto"
+      : state.paymentDraftContext.provider?.active
+        ? "Cambios sin guardar · lista para conversión"
+        : "Cambios sin guardar · pendiente de proveedor"
+  }
+}
+
+function localPaymentDraftMissingFields(form, amountChanged) {
+  const fields = [
+    "cost_center_id", "budget_category_id", "budget_month", "payment_method",
+    "requested_by_profile_id", "approver_profile_id", "final_amount", "currency",
+    "scheduled_payment_date", "internal_concept",
+  ].filter((field) => !form[field])
+  if (form.payment_method === "transfer" && !form.company_bank_account_id) {
+    fields.push("company_bank_account_id")
+  }
+  if (amountChanged && !form.amount_change_reason) fields.push("amount_change_reason")
+  return fields
+}
+
+function renderPaymentDraftReadiness(readiness) {
+  const missing = readiness.missing_fields || []
+  const blockers = readiness.blockers || []
+  dom.paymentDraftStateLabel.textContent = PAYMENT_DRAFT_STATE[readiness.derived_state] || "Estado no disponible"
+  renderStringList(dom.paymentDraftMissingFields, missing, PAYMENT_DRAFT_FIELD_LABELS, "Sin campos pendientes.")
+  renderStringList(dom.paymentDraftBlockers, blockers, PAYMENT_DRAFT_BLOCKER_LABELS, "Sin bloqueos adicionales.")
+  const total = 11
+  const completed = Math.max(0, total - missing.filter((field) => field !== "amount_change_reason").length)
+  dom.paymentDraftProgress.max = total
+  dom.paymentDraftProgress.value = completed
+  dom.paymentDraftProgressLabel.textContent = `${completed} de ${total} campos completos`
+}
+
+function renderStringList(target, values, labels, emptyLabel) {
+  target.replaceChildren()
+  if (!values.length) {
+    target.append(element("li", "empty-inline", emptyLabel))
+    return
+  }
+  values.forEach((value) => target.append(element("li", "", labels[value] || value)))
+}
+
+function validatePaymentDraftForm(form) {
+  const amountRaw = form.final_amount
+  if (amountRaw !== null) {
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amountRaw) || Number(amountRaw) <= 0) {
+      return { field: dom.paymentDraftFinalAmount, message: "Captura un monto positivo con máximo dos decimales." }
+    }
+  }
+  const declared = Number(state.paymentDraftContext?.intake?.amount_requested)
+  if (amountRaw !== null && Number(amountRaw) !== declared && (form.amount_change_reason || "").length < 10) {
+    return { field: dom.paymentDraftAmountReason, message: "Explica el cambio de monto en al menos 10 caracteres." }
+  }
+  for (const [field, value, max] of [
+    [dom.paymentDraftInternalConcept, form.internal_concept, 500],
+    [dom.paymentDraftInternalNotes, form.internal_notes, 2000],
+    [dom.paymentDraftAmountReason, form.amount_change_reason, 1000],
+  ]) {
+    if (value && (value.length > max || /[\u0000-\u001F\u007F]/.test(value) || /<[^>]*>/.test(value))) {
+      return { field, message: "Retira etiquetas, caracteres de control o texto que exceda el límite." }
+    }
+  }
+  if (form.internal_concept && form.internal_concept.length < 3) {
+    return { field: dom.paymentDraftInternalConcept, message: "El concepto interno debe tener al menos 3 caracteres." }
+  }
+  return null
+}
+
+async function submitPaymentDraft(event) {
+  event.preventDefault()
+  const context = state.paymentDraftContext
+  if (!context?.can_save || dom.savePaymentDraftBtn.disabled) return
+  const form = readPaymentDraftForm()
+  const validation = validatePaymentDraftForm(form)
+  if (validation) {
+    dom.paymentDraftError.textContent = validation.message
+    validation.field.focus()
+    return
+  }
+
+  dom.paymentDraftError.textContent = ""
+  dom.paymentDraftSuccess.textContent = ""
+  dom.reloadPaymentDraftBtn.hidden = true
+  dom.savePaymentDraftBtn.disabled = true
+  const originalLabel = dom.savePaymentDraftBtn.textContent
+  dom.savePaymentDraftBtn.textContent = "Guardando…"
+  const actionId = state.paymentDraftActionId || createUuid()
+  state.paymentDraftActionId = actionId
+
+  const { error } = await supabaseClient.rpc("save_provider_intake_payment_draft", {
+    p_payment_intake_id: context.intake.id,
+    p_expected_intake_status: context.intake.status,
+    p_expected_intake_updated_at: context.intake.updated_at,
+    p_expected_draft_version: context.draft?.version ?? null,
+    p_cost_center_id: form.cost_center_id,
+    p_budget_category_id: form.budget_category_id,
+    p_budget_month: form.budget_month,
+    p_company_bank_account_id: form.company_bank_account_id,
+    p_payment_method: form.payment_method,
+    p_requested_by_profile_id: form.requested_by_profile_id,
+    p_approver_profile_id: form.approver_profile_id,
+    p_approver_assignment_id: form.approver_assignment_id,
+    p_final_amount: form.final_amount,
+    p_currency: form.currency,
+    p_scheduled_payment_date: form.scheduled_payment_date,
+    p_internal_concept: form.internal_concept,
+    p_internal_notes: form.internal_notes,
+    p_amount_change_reason: form.amount_change_reason,
+    p_action_id: actionId,
+  })
+
+  dom.savePaymentDraftBtn.textContent = originalLabel
+  dom.savePaymentDraftBtn.disabled = !context.can_save
+
+  if (error) {
+    dom.paymentDraftError.textContent = friendlyError(error)
+    if (String(error?.message || "").includes("conflict")) dom.reloadPaymentDraftBtn.hidden = false
+    return
+  }
+
+  state.paymentDraftDirty = false
+  state.paymentDraftDiscarding = true
+  state.paymentDraftSnapshot = paymentDraftSnapshot()
+  dom.paymentDraftSuccess.textContent = "Borrador guardado. No se creó una solicitud de pago."
+  showToast("Borrador guardado", "La preparación interna quedó actualizada sin convertir el intake.", "success")
+  await loadPaymentDraftContext()
+  state.paymentDraftActionId = createUuid()
+  populatePaymentDraftForm()
+  dom.paymentDraftSuccess.textContent = "Borrador guardado. No se creó una solicitud de pago."
+  renderDetail()
+}
+
+function requestClosePaymentDraft() {
+  if (state.paymentDraftDirty && !state.paymentDraftDiscarding) {
+    state.paymentDraftReloadPending = false
+    dom.paymentDraftDiscardConfirm.hidden = false
+    dom.keepEditingPaymentDraftBtn.focus()
+    return
+  }
+  dom.paymentDraftDialog.close()
+}
+
+function handlePaymentDraftCancel(event) {
+  if (!state.paymentDraftDirty || state.paymentDraftDiscarding) return
+  event.preventDefault()
+  dom.paymentDraftDiscardConfirm.hidden = false
+  dom.keepEditingPaymentDraftBtn.focus()
+}
+
+function hidePaymentDraftDiscard() {
+  state.paymentDraftReloadPending = false
+  dom.paymentDraftDiscardConfirm.hidden = true
+  dom.paymentDraftCostCenter.focus()
+}
+
+function discardAndClosePaymentDraft() {
+  state.paymentDraftDiscarding = true
+  state.paymentDraftDirty = false
+  if (state.paymentDraftReloadPending) {
+    state.paymentDraftReloadPending = false
+    state.paymentDraftDiscarding = false
+    reloadPaymentDraftModal()
+    return
+  }
+  dom.paymentDraftDialog.close()
+}
+
+function restorePaymentDraftFocus() {
+  const trigger = state.paymentDraftTrigger
+  state.paymentDraftTrigger = null
+  state.paymentDraftDirty = false
+  state.paymentDraftDiscarding = false
+  state.paymentDraftSnapshot = ""
+  state.paymentDraftActionId = null
+  state.paymentDraftReloadPending = false
+  if (trigger?.isConnected) trigger.focus()
+}
+
+function dateToMonthValue(value) {
+  return value ? String(value).slice(0, 7) : ""
+}
+
+function numericInputValue(value) {
+  if (value === null || value === undefined || value === "") return ""
+  const number = Number(value)
+  return Number.isFinite(number) ? String(number) : ""
 }
 
 function filesSection(files, intake) {
@@ -1005,6 +1634,19 @@ function eventsSection(events) {
 function renderDetailActions(intake) {
   dom.detailActions.replaceChildren()
   const actions = []
+  const draftContext = state.paymentDraftContext
+  const draftState = draftContext?.state?.derived_state
+  if (draftContext && !draftContext.error && draftContext.can_prepare) {
+    const label = draftState === "NOT_STARTED"
+      ? "Preparar solicitud de pago"
+      : draftState === "DRAFT_INCOMPLETE"
+        ? "Continuar preparación"
+        : "Revisar solicitud preparada"
+    const draftButton = element("button", "primary-btn", label)
+    draftButton.type = "button"
+    draftButton.addEventListener("click", () => openPaymentDraft(draftButton))
+    actions.push(draftButton)
+  }
   if (intake.status === "received") {
     actions.push(actionButton("Iniciar revisión", "transition", "in_review"))
   }
@@ -1018,6 +1660,18 @@ function renderDetailActions(intake) {
   }
   actions.push(actionButton("Agregar nota interna", "note", null))
   dom.detailActions.append(...actions)
+
+  dom.paymentDraftFooterState.textContent = draftState === "ALREADY_CONVERTED"
+    ? "Solicitud de pago creada."
+    : draftState === "READY_FOR_CONVERSION"
+      ? "Lista para conversión · creación definitiva disponible en Fase 2B.2."
+      : draftState === "READY_PENDING_PROVIDER"
+        ? "Preparada · pendiente de proveedor."
+        : draftState === "DRAFT_INCOMPLETE"
+          ? "Borrador incompleto."
+          : draftState === "NOT_STARTED"
+            ? "Preparación disponible sin crear una solicitud definitiva."
+            : `Preparación bloqueada mientras el intake está ${STATUS[intake.status]?.label?.toLowerCase() || intake.status}.`
 }
 
 function actionButton(label, kind, toStatus, danger = false) {
@@ -1135,6 +1789,7 @@ async function reloadOpenDetail() {
     return
   }
   state.detail = data
+  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
   renderDetail()
 }
 
@@ -1240,6 +1895,28 @@ const ERROR_MESSAGES = Object.freeze({
   provider_intake_match_converted: "La solicitud ya fue convertida y el vínculo es de solo lectura.",
   provider_intake_provider_not_found: "El proveedor maestro ya no está disponible.",
   provider_intake_provider_inactive: "El proveedor maestro está inactivo y no puede seleccionarse.",
+  provider_intake_conversion_draft_fields_required: "Faltan datos de control. Recarga la preparación.",
+  provider_intake_conversion_draft_status_invalid: "El intake ya no está en revisión; el borrador quedó en solo lectura.",
+  provider_intake_conversion_draft_already_converted: "La solicitud de pago definitiva ya fue creada.",
+  provider_intake_conversion_draft_intake_conflict: "El intake cambió mientras preparabas el borrador. Recarga antes de continuar.",
+  provider_intake_conversion_draft_conflict: "Otra persona actualizó el borrador. Recarga para revisar la versión vigente.",
+  provider_intake_conversion_draft_action_actor_conflict: "La acción pertenece a otra sesión. Recarga el borrador.",
+  provider_intake_conversion_draft_action_material_conflict: "La acción cambió después de iniciarse. Recarga el borrador.",
+  provider_intake_conversion_draft_cost_center_invalid: "El centro de costo no pertenece a la empresa o está inactivo.",
+  provider_intake_conversion_draft_budget_category_invalid: "La categoría no está autorizada para el centro de costo.",
+  provider_intake_conversion_draft_budget_month_invalid: "Selecciona el primer mes presupuestal válido.",
+  provider_intake_conversion_draft_origin_account_invalid: "La cuenta origen no pertenece a la empresa o está inactiva.",
+  provider_intake_conversion_draft_origin_account_not_allowed: "La cuenta origen solo aplica a transferencia.",
+  provider_intake_conversion_draft_payment_method_invalid: "Selecciona un método de pago permitido.",
+  provider_intake_conversion_draft_requester_invalid: "El solicitante no está autorizado.",
+  provider_intake_conversion_draft_requester_company_invalid: "El solicitante no tiene membresía activa en la empresa.",
+  provider_intake_conversion_draft_approver_invalid: "El aprobador ya no es una opción permitida. Recarga las reglas.",
+  provider_intake_conversion_draft_amount_invalid: "Captura un monto positivo con máximo dos decimales.",
+  provider_intake_conversion_draft_currency_invalid: "Selecciona una moneda válida.",
+  provider_intake_conversion_draft_concept_invalid: "El concepto interno debe tener entre 3 y 500 caracteres válidos.",
+  provider_intake_conversion_draft_notes_invalid: "Las observaciones contienen texto no permitido o exceden 2000 caracteres.",
+  provider_intake_conversion_draft_amount_reason_invalid: "El motivo debe tener entre 10 y 1000 caracteres válidos.",
+  provider_intake_conversion_draft_amount_reason_required: "Explica el cambio de monto en al menos 10 caracteres.",
   file_service_unavailable: "El servicio de documentos temporales aún no está configurado en este ambiente.",
   signed_url_unavailable: "No se pudo generar el enlace temporal. Inténtalo de nuevo.",
 })
@@ -1275,6 +1952,7 @@ function restoreDetailFocus() {
   state.detail = null
   state.matchData = null
   state.matchSearch = ""
+  state.paymentDraftContext = null
   if (trigger?.isConnected) trigger.focus()
 }
 
