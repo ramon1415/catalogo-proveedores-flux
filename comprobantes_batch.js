@@ -436,10 +436,13 @@
     if (!preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el comprobante.", "warning")
     preview.opener = null
     setBusy(true)
+    let receiptStage = "signed_url"
     try {
       const { data, error } = await client.storage.from(sourceDocument.storage_bucket).createSignedUrl(sourceDocument.storage_path, 120)
       if (error || !data?.signedUrl) throw error || new Error("source_pdf_url_unavailable")
+      receiptStage = "derive_page"
       const bytes = await window.FluxSinglePagePdf.deriveSinglePageFromUrl({ sourceUrl: data.signedUrl, pageNumber, pdfLib: window.PDFLib })
+      receiptStage = "validate_page"
       await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
       clearIndividualReceipt()
       const blobUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
@@ -452,7 +455,21 @@
       renderOperation()
     } catch (error) {
       preview.close()
-      toast("No se pudo aislar el comprobante", friendlyError(error), "danger")
+      const diagnostic = [receiptStage, error?.name, error?.code, error?.status]
+        .filter((value) => value !== undefined && value !== null && String(value).trim())
+        .map((value) => String(value).replace(/[^a-z0-9_.-]/gi, "").slice(0, 48))
+        .join(":")
+      console.warn("[Flux] No se pudo aislar el comprobante", {
+        stage: receiptStage,
+        name: error?.name || null,
+        code: error?.code || null,
+        status: error?.status || null,
+      })
+      toast(
+        "No se pudo aislar el comprobante",
+        `${friendlyError(error)}${diagnostic ? ` Código de soporte: ${diagnostic}.` : ""}`,
+        "danger",
+      )
     } finally { setBusy(false) }
   }
 
