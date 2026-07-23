@@ -28,6 +28,7 @@
   const state = {
     context: null, batches: [], selectedId: null, detail: null, operation: null,
     candidates: [], candidateOperationId: null, candidateSearchCompleted: false,
+    operationLinkStatuses: {},
     selectedRequestId: null, linkPreview: null, individualReceipt: null,
     duplicateBatch: null, summaryFilter: "", trigger: null, busy: false,
     detailRequest: 0, candidateRequest: 0, previewRequest: 0,
@@ -207,6 +208,7 @@
     state.operation = null
     state.candidates = []
     state.candidateOperationId = null
+    state.operationLinkStatuses = {}
     state.candidateRequest += 1
     if (dom.operationDialog.open) dom.operationDialog.close()
     renderBatchList()
@@ -215,8 +217,26 @@
     if (requestId !== state.detailRequest || state.selectedId !== batchId) return
     if (error) { dom.batchDetail.innerHTML = `<div class="receipt-batch-empty">${escapeHtml(friendlyError(error))}</div>`; return }
     state.detail = object(data)
+    const operationLinkStatuses = await loadOperationLinkStatuses(state.detail)
+    if (requestId !== state.detailRequest || state.selectedId !== batchId) return
+    state.operationLinkStatuses = operationLinkStatuses
     renderBatchDetail()
     refreshOpenOperationFromDetail()
+  }
+
+  async function loadOperationLinkStatuses(detail) {
+    const operations = batchOperations(detail).filter((operation) => operation.bank_operation_id)
+    const entries = await Promise.all(operations.map(async (operation) => {
+      const { data, error } = await client.rpc(RPC.linkPreview, {
+        p_operation_id: operation.bank_operation_id,
+      })
+      const preview = object(data)
+      return [
+        operation.bank_operation_id,
+        !error && object(preview.link).id ? "linked" : (operation.reconciliation_status || "unreconciled"),
+      ]
+    }))
+    return Object.fromEntries(entries)
   }
 
   function renderBatchDetail() {
@@ -362,11 +382,12 @@
     return `<div class="receipt-match-result exact"><strong>${message}</strong></div>${state.candidates.map((candidate) => `
       <label class="receipt-candidate${state.selectedRequestId === candidate.payment_request_id ? " selected" : ""}">
         <input type="radio" name="receiptCandidate" data-candidate-radio value="${escapeHtml(candidate.payment_request_id)}"${state.selectedRequestId === candidate.payment_request_id ? " checked" : ""}>
-        <span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")}</span></span>
+        <span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")}</span><span class="muted-line">Concepto: ${escapeHtml(candidate.concept || "Sin concepto")}</span></span>
         <span class="receipt-candidate-facts">
           <span><small>Solicitud</small><strong>${escapeHtml(formatMinor(candidate.amount_minor, candidate.currency))}</strong></span>
           <span><small>Comprobante</small><strong>${escapeHtml(formatMinor(amountMinor(operation), operation.currency))}</strong></span>
           <span><small>Moneda</small><strong>${escapeHtml(candidate.currency)}</strong></span>
+          <span><small>Coincidencia</small><strong>${candidate.account_match ? "Cuenta bancaria" : "Beneficiario"}</strong></span>
           <span><small>Estado</small><strong>Aprobada</strong></span>
         </span>
       </label>`).join("")}`
@@ -894,11 +915,11 @@
     renderOperation()
     refreshLinkPreview()
   }
-  function reconciliationStatus(item) { return item.reconciliation_status || "unreconciled" }
+  function reconciliationStatus(item) { return state.operationLinkStatuses[item.bank_operation_id] || item.reconciliation_status || "unreconciled" }
   function batchStatus(item) { return item.batch_status || item.status || "awaiting_upload" }
   function amountMinor(item) { const exact = safeMinorInteger(item.amount_minor); if (exact !== null) return exact; return parser.parseMoneyToMinor(item.amount) || 0 }
-  function statusLabel(status) { return ({ awaiting_upload:"Esperando carga",extracting:"Extrayendo",review_required:"Por revisar",accepted:"Aceptada",blocked:"Bloqueada",ready:"Listo",available:"Disponible",draft:"Borrador",reserved:"Reservado",active:"Activa",released:"Liberado",rejected:"Rechazado",cancelled:"Cancelado",expired:"Expirado",unreconciled:"Pendiente de conciliación",failed:"Con incidencia" })[status] || String(status || "Sin estado") }
-  function statusTone(status) { if (["accepted","ready","available"].includes(status)) return "success"; if (["failed","rejected"].includes(status)) return "danger"; if (["awaiting_upload","extracting","reserved","review_required","blocked"].includes(status)) return "warning"; if (status === "draft") return "violet"; return "neutral" }
+  function statusLabel(status) { return ({ awaiting_upload:"Esperando carga",extracting:"Extrayendo",review_required:"Por revisar",accepted:"Aceptada",blocked:"Bloqueada",ready:"Listo",available:"Disponible",linked:"Vinculado",draft:"Borrador",reserved:"Reservado",active:"Activa",released:"Liberado",rejected:"Rechazado",cancelled:"Cancelado",expired:"Expirado",unreconciled:"Pendiente de conciliación",failed:"Con incidencia" })[status] || String(status || "Sin estado") }
+  function statusTone(status) { if (["accepted","ready","available","linked"].includes(status)) return "success"; if (["failed","rejected"].includes(status)) return "danger"; if (["awaiting_upload","extracting","reserved","review_required","blocked"].includes(status)) return "warning"; if (status === "draft") return "violet"; return "neutral" }
   function issueLabel(value) { return ({ bank_not_identified:"Banco no identificado",operation_date_missing:"Fecha faltante",amount_missing_or_invalid:"Importe inválido",currency_missing_or_invalid:"Moneda inválida",bank_reference_missing:"Referencia faltante",bank_unique_folio_missing:"Folio único faltante",strong_bank_identity_missing:"Cuenta origen empresarial completa faltante",beneficiary_missing:"Beneficiario faltante",bank_status_not_operated:"Estado bancario distinto de Operado" })[value] || value }
   function metric(label, value) { return `<div class="receipt-batch-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>` }
   function operationCard(label, value) { return `<div class="receipt-operation-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>` }

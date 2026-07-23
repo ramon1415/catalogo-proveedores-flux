@@ -88,11 +88,11 @@
           <div><strong>${escapeHtml(link.request_number || "Solicitud pagada")}</strong><span>${escapeHtml(link.payment_date || "Sin fecha")} · referencia ${escapeHtml(link.reference_hint || "—")}</span></div>
           <div class="payment-request-reconciliation-actions">
             <button class="small-btn" type="button" data-request-evidence-action="view" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Ver comprobante</button>
-            <button class="small-btn" type="button" data-request-evidence-action="download" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Descargar comprobante</button>
+            <button class="small-btn" type="button" data-request-evidence-action="download" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Descargar para compartir</button>
           </div>
         </article>`
         : `<div class="receipt-match-result none"><strong>Esta solicitud todavía no tiene un comprobante individual vinculado.</strong></div>`}
-      <p class="payment-request-provider-block"><strong>Acceso externo deshabilitado:</strong> todavía no existe una relación verificada entre el usuario autenticado y el proveedor. No se expone el comprobante mediante correo, RFC ni enlaces compartidos.</p>
+      <p class="payment-request-provider-block"><strong>Compartición controlada:</strong> Finanzas puede descargar el PDF individual y compartirlo por el canal autorizado. Flux no genera enlaces públicos ni concede acceso por coincidencia de correo o RFC.</p>
     `
     detail.append(section)
   }
