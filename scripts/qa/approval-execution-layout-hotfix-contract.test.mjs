@@ -277,7 +277,7 @@ function inspectedFunctionTokens(source) {
     })
 }
 
-function functionDefinitionInspectionContract(source) {
+function functionDefinitionInspectionChunks(source) {
   const firstProcedure = "public.mark_payment_request_material_change()"
   const firstProcedureIndex = source.indexOf(`'${firstProcedure}'::regprocedure`)
   assert.ok(firstProcedureIndex > 0, "missing material-change precheck procedure")
@@ -295,9 +295,30 @@ function functionDefinitionInspectionContract(source) {
     const chunkEnd = procedures[index + 1]?.index ?? block.length
     return {
       regprocedure: entry[1],
-      tokens: inspectedFunctionTokens(block.slice(chunkStart, chunkEnd)),
+      source: block.slice(chunkStart, chunkEnd),
     }
   })
+}
+
+function functionDefinitionInspectionContract(source) {
+  return functionDefinitionInspectionChunks(source).map((chunk) => ({
+    regprocedure: chunk.regprocedure,
+    tokens: inspectedFunctionTokens(chunk.source),
+  }))
+}
+
+function assertExactStrposPredicate(source, haystack, needle, operator, context) {
+  const escapedNeedle = needle.replaceAll("'", "''")
+  const predicate = new RegExp(
+    `\\bstrpos\\s*\\(\\s*${escapeRegex(haystack)}\\s*,\\s*'${escapeRegex(escapedNeedle)}'\\s*\\)\\s*${escapeRegex(operator)}\\s*0\\b`,
+    "gi",
+  )
+  const matches = [...source.matchAll(predicate)]
+  assert.equal(
+    matches.length,
+    1,
+    `${context} must contain exactly one ${haystack}/${needle} ${operator} 0 predicate`,
+  )
 }
 
 test("migration 033 separates the exact material and request-execution fields", () => {
@@ -1087,6 +1108,41 @@ test("migration and standalone prechecks use valid PostgreSQL search syntax with
   assert.deepEqual(standaloneContract, expectedInspectionContract)
   assert.deepEqual(embeddedContract, expectedInspectionContract)
   assert.deepEqual(embeddedContract, standaloneContract)
+  for (const [name, sql] of [
+    ["migration 033 embedded precheck", migration],
+    ["standalone precheck", precheck],
+  ]) {
+    const chunks = functionDefinitionInspectionChunks(sql)
+    for (const procedure of expectedInspectionContract) {
+      const chunk = chunks.find(({ regprocedure }) => regprocedure === procedure.regprocedure)
+      assert.ok(chunk, `${name} is missing ${procedure.regprocedure}`)
+      for (const token of procedure.tokens) {
+        assertExactStrposPredicate(
+          chunk.source,
+          "lower(function_info.prosrc)",
+          token,
+          ">",
+          `${name} ${procedure.regprocedure}`,
+        )
+      }
+    }
+  }
+
+  for (const [haystack, needle] of [
+    ["v_provider_insert_guard.source", "approval_batch_require_finance"],
+    ["v_provider_insert_guard.source", "flux.provider_payment_execution_rpc"],
+    ["v_provider_insert_guard.source", "provider_payment_execution_data_invalid"],
+    ["v_director_candidates.source", "approval_batch_require_finance"],
+    ["v_director_candidates.source", "profile_company_memberships"],
+  ]) {
+    assertExactStrposPredicate(
+      migration,
+      haystack,
+      needle,
+      "=",
+      "migration 033 postcheck",
+    )
+  }
 
   const standaloneCorrections = sqlCallArguments(precheck, "strpos")
   const migrationCorrections = sqlCallArguments(migration, "strpos")

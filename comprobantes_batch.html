@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
   <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-static-nav">
-  <link rel="stylesheet" href="./comprobantes_batch.css?v=20260721-v1">
+  <link rel="stylesheet" href="./comprobantes_batch.css?v=20260723-guided-ux">
 </head>
 <body>
   <a class="receipt-batch-skip" href="#mainContent">Saltar al contenido</a>
@@ -32,11 +32,19 @@
 
       <section class="page receipt-batch-page" id="batchWorkspace" hidden>
         <div class="page-header">
-          <div><p class="receipt-batch-eyebrow">Comprobantes bancarios · BBVA PDF v1</p><h1>Comprobantes batch</h1><p>Ingesta, extracción por página y conciliación controlada contra solicitudes pagables.</p></div>
+          <div><p class="receipt-batch-eyebrow">Comprobantes bancarios · BBVA PDF v1</p><h1>Comprobantes batch</h1><p>Sube un lote, revisa cada operación y vincúlala con la solicitud aprobada correspondiente.</p></div>
           <div class="receipt-batch-toolbar"><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button><button class="primary-btn" id="newBatchBtn" type="button">Nuevo batch</button></div>
         </div>
 
-        <div class="notice-v2 warning" id="cutoverNotice"><span class="notice-icon">!</span><span><span class="notice-title">Confirmación financiera deshabilitada</span><span class="notice-sep">—</span><span class="notice-desc">El cutover de autoridad sigue pendiente. Puedes preparar, revisar, proponer y reservar sin escribir en la autoridad legacy.</span></span></div>
+        <div class="notice-v2 warning" id="cutoverNotice"><span class="notice-icon">!</span><span><span class="notice-title">Etapa disponible: revisión y reserva</span><span class="notice-sep">—</span><span class="notice-desc">Puedes cargar el PDF, revisar sus datos, encontrar solicitudes aprobadas y reservar importes. Conciliar y publicar la evidencia todavía no está habilitado.</span></span></div>
+
+        <section class="receipt-batch-flow-overview" aria-label="Flujo de comprobantes">
+          <div class="receipt-flow-step"><span>1</span><strong>Subir PDF</strong><small>Usa Nuevo batch</small></div>
+          <div class="receipt-flow-step"><span>2</span><strong>Revisar datos</strong><small>Compara contra el PDF</small></div>
+          <div class="receipt-flow-step"><span>3</span><strong>Vincular solicitud</strong><small>Asigna y reserva importe</small></div>
+          <div class="receipt-flow-step locked"><span>4</span><strong>Conciliar</strong><small>Confirmar y publicar evidencia</small></div>
+        </section>
+        <p class="receipt-batch-existing-note"><strong>¿Ya aparece un lote?</strong> Fue cargado anteriormente. Para iniciar otro usa <strong>Nuevo batch</strong>. Si subes exactamente el mismo PDF, Flux abrirá el lote original para evitar duplicados.</p>
 
         <section class="receipt-batch-kpis" aria-label="Resumen de batches">
           <button class="kpi info clickable active" type="button" data-summary-filter=""><span class="kpi-label">Total</span><span class="kpi-value" id="countTotal">—</span><span class="kpi-sub">Batches visibles</span></button>
@@ -59,7 +67,7 @@
 
   <dialog class="narrow" id="newBatchDialog" aria-labelledby="newBatchTitle">
     <form class="modal-content" id="newBatchForm">
-      <div class="modal-header"><div><h2 id="newBatchTitle">Nuevo batch BBVA</h2><p>Un comprobante por página. La extracción se prepara localmente y se envía a revisión interna.</p></div><button class="icon-btn" id="closeNewBatchBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-header"><div><h2 id="newBatchTitle">Subir lote de comprobantes</h2><p>Selecciona el PDF recibido del banco. Cada página se leerá como una operación y quedará pendiente de revisión.</p></div><button class="icon-btn" id="closeNewBatchBtn" type="button" aria-label="Cerrar">×</button></div>
       <div class="modal-scroll">
         <div class="fg cols-1">
           <label><span class="f-label">Empresa <span class="f-req">*</span></span><select class="f-ctrl" id="batchCompanyId" required><option value="">Selecciona…</option></select></label>
@@ -68,29 +76,63 @@
         <div class="receipt-batch-progress" id="uploadProgress" role="status" aria-live="polite" hidden><div class="progress-bar"><div class="progress-fill" id="uploadProgressFill"></div></div><span id="uploadProgressText">Preparando…</span></div>
         <p class="receipt-batch-error" id="uploadError" role="alert"></p>
       </div>
-      <div class="modal-actions"><button class="secondary-btn" id="cancelNewBatchBtn" type="button">Cancelar</button><button class="primary-btn" id="submitNewBatchBtn" type="submit">Ingerir y extraer</button></div>
+      <div class="modal-actions"><button class="secondary-btn" id="cancelNewBatchBtn" type="button">Cancelar</button><button class="primary-btn" id="submitNewBatchBtn" type="submit">Subir y revisar</button></div>
     </form>
+  </dialog>
+
+  <dialog class="narrow" id="duplicateBatchDialog" aria-labelledby="duplicateBatchTitle">
+    <div class="modal-content receipt-duplicate-modal">
+      <div class="modal-header">
+        <div>
+          <p class="receipt-batch-eyebrow">Carga protegida contra duplicados</p>
+          <h2 id="duplicateBatchTitle">Este archivo ya fue cargado</h2>
+          <p>Flux no creó otro lote ni volvió a procesar el PDF.</p>
+        </div>
+        <button class="icon-btn" id="closeDuplicateBatchBtn" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="modal-scroll">
+        <dl class="receipt-duplicate-summary">
+          <div><dt>Folio del lote existente</dt><dd id="duplicateBatchFolio">—</dd></div>
+          <div><dt>Estado actual</dt><dd id="duplicateBatchStatus">—</dd></div>
+        </dl>
+        <p class="receipt-duplicate-help">Puedes abrir el lote original para continuar desde su estado actual. Si deseas cargar otro lote, cierra este aviso y selecciona un PDF diferente.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="dismissDuplicateBatchBtn" type="button">Cerrar</button>
+        <button class="primary-btn" id="openDuplicateBatchBtn" type="button">Abrir lote existente</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="operationDialog" aria-labelledby="operationTitle">
     <div class="modal-content receipt-operation-modal">
       <div class="modal-header"><div><h2 id="operationTitle">Operación bancaria</h2><p id="operationSubtitle">Extracción y conciliación.</p></div><button class="icon-btn" id="closeOperationBtn" type="button" aria-label="Cerrar">×</button></div>
       <div class="modal-scroll" id="operationContent"></div>
-      <div class="modal-actions receipt-operation-actions">
-        <span class="receipt-batch-action-reason" id="operationActionReason"></span>
-        <button class="secondary-btn" id="openSourcePdfBtn" type="button">Abrir PDF fuente</button>
-        <label class="receipt-operation-reason"><span class="sr-only">Motivo de rechazo, liberación o cancelación</span><input class="f-ctrl" id="operationReasonInput" minlength="10" maxlength="500" placeholder="Motivo para rechazar, liberar o cancelar (mínimo 10 caracteres)"></label>
-        <button class="secondary-btn" id="acceptExtractionBtn" type="button">Aceptar extracción</button>
-        <button class="secondary-btn" id="rejectExtractionBtn" type="button">Rechazar extracción</button>
-        <button class="secondary-btn" id="findCandidatesBtn" type="button">Buscar candidatas</button>
-        <button class="primary-btn" id="proposePlanBtn" type="button">Proponer asignación</button>
-        <button class="primary-btn" id="reservePlanBtn" type="button">Reservar</button>
-        <button class="secondary-btn" id="releaseReservationBtn" type="button">Liberar reserva</button>
-        <button class="secondary-btn" id="expireReservationBtn" type="button">Expirar reserva</button>
-        <button class="secondary-btn" id="cancelPlanBtn" type="button">Cancelar plan</button>
-        <button class="primary-btn" id="confirmOperationBtn" type="button" disabled aria-describedby="confirmDisabledReason">Confirmar operación</button>
+      <div class="receipt-operation-footer">
+        <div class="receipt-operation-action-guide">
+          <span>Siguiente paso</span>
+          <strong id="operationActionReason">Abre el PDF y revisa los datos.</strong>
+        </div>
+        <div class="receipt-operation-primary-actions">
+          <button class="secondary-btn" id="openSourcePdfBtn" type="button">Ver PDF fuente</button>
+          <button class="primary-btn" id="acceptExtractionBtn" type="button">Datos correctos, continuar</button>
+          <button class="primary-btn" id="findCandidatesBtn" type="button">Buscar solicitud aprobada</button>
+          <button class="primary-btn" id="proposePlanBtn" type="button">Asignar importe</button>
+          <button class="primary-btn" id="reservePlanBtn" type="button">Reservar por 30 min</button>
+          <button class="primary-btn" id="confirmOperationBtn" type="button" hidden disabled aria-describedby="confirmDisabledReason">Conciliar y publicar evidencia</button>
+        </div>
+        <details class="receipt-operation-secondary" id="operationSecondaryActions">
+          <summary>Corregir o deshacer</summary>
+          <div class="receipt-operation-secondary-body">
+            <label class="receipt-operation-reason"><span class="sr-only">Motivo de rechazo, liberación o cancelación</span><input class="f-ctrl" id="operationReasonInput" minlength="10" maxlength="500" placeholder="Escribe el motivo (mínimo 10 caracteres)"></label>
+            <button class="secondary-btn" id="rejectExtractionBtn" type="button">Reportar datos incorrectos</button>
+            <button class="secondary-btn" id="releaseReservationBtn" type="button">Liberar reserva</button>
+            <button class="secondary-btn" id="expireReservationBtn" type="button">Cerrar reserva vencida</button>
+            <button class="secondary-btn" id="cancelPlanBtn" type="button">Cancelar asignación</button>
+          </div>
+        </details>
       </div>
-      <p class="receipt-batch-cutover-reason" id="confirmDisabledReason">Deshabilitado: requiere cutover explícito y contrato de confirmación por operación.</p>
+      <p class="receipt-batch-cutover-reason" id="confirmDisabledReason"><strong>¿Qué significa conciliar?</strong> Confirmar que esta operación pagó la solicitud y publicar el PDF como evidencia. Esta última acción aún no está habilitada; reservar no marca la solicitud como pagada. El cutover financiero se habilitará en un cambio separado.</p>
     </div>
   </dialog>
 
@@ -100,6 +142,6 @@
   <script src="./config.js?v=20260721-receipt-batches"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./payment_batch_parser.js?v=20260721-v1"></script>
-  <script src="./comprobantes_batch.js?v=20260721-v1"></script>
+  <script src="./comprobantes_batch.js?v=20260723-guided-ux"></script>
 </body>
 </html>
