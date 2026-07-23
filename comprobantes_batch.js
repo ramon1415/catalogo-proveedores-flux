@@ -490,12 +490,22 @@
     }
   }
 
+  function normalizeEvidenceIdentifier(value) {
+    const evidence = object(value)
+    const evidenceId = evidence.id ?? evidence.evidence_id
+    if (!evidenceId) throw new Error("payment_evidence_identifier_missing")
+    return evidence.id === evidenceId ? evidence : { ...evidence, id: evidenceId }
+  }
+
   async function persistIndividualReceipt(operationId) {
     const receipt = state.individualReceipt
     if (!receipt?.bytes || receipt.pageCount !== 1) throw new Error("single_page_receipt_required")
     let evidence = object(state.linkPreview?.evidence)
     if (evidence.status === "shareable") return evidence
-    if (!evidence.id) evidence = await rpcIdempotent("evidence.prepare", operationId, RPC.prepareEvidence, { p_operation_id: operationId })
+    if (evidence.evidence_id && !evidence.id) evidence = normalizeEvidenceIdentifier(evidence)
+    if (!evidence.id) evidence = normalizeEvidenceIdentifier(
+      await rpcIdempotent("evidence.prepare", operationId, RPC.prepareEvidence, { p_operation_id: operationId }),
+    )
     if (evidence.status === "pending_upload") {
       const blob = new Blob([receipt.bytes], { type: "application/pdf" })
       let evidenceBytes = receipt.bytes
@@ -511,19 +521,23 @@
         evidenceBytes = existingBytes
         evidenceSha256 = await sha256Hex(existingBytes)
       }
-      evidence = await rpcIdempotent("evidence.finalize", evidence.id, RPC.finalizeEvidence, {
-        p_evidence_id: evidence.id,
-        p_derived_sha256: evidenceSha256,
-        p_file_size_bytes: evidenceBytes.byteLength,
-        p_page_count: 1,
-      })
+      evidence = normalizeEvidenceIdentifier(
+        await rpcIdempotent("evidence.finalize", evidence.id, RPC.finalizeEvidence, {
+          p_evidence_id: evidence.id,
+          p_derived_sha256: evidenceSha256,
+          p_file_size_bytes: evidenceBytes.byteLength,
+          p_page_count: 1,
+        }),
+      )
     }
-    if (evidence.status === "pending_review") evidence = await rpcIdempotent("evidence.review", evidence.id, RPC.reviewEvidence, {
-      p_evidence_id: evidence.id,
-      p_shareable: true,
-      p_single_operation_attested: true,
-      p_reason: "Datos y comprobante individual revisados por Finanzas",
-    })
+    if (evidence.status === "pending_review") evidence = normalizeEvidenceIdentifier(
+      await rpcIdempotent("evidence.review", evidence.id, RPC.reviewEvidence, {
+        p_evidence_id: evidence.id,
+        p_shareable: true,
+        p_single_operation_attested: true,
+        p_reason: "Datos y comprobante individual revisados por Finanzas",
+      }),
+    )
     if (evidence.status !== "shareable") throw new Error("shareable_single_page_evidence_required")
     return evidence
   }
@@ -910,6 +924,7 @@
       invalid_pdf_page_count: "El PDF no tiene páginas válidas o supera el límite autorizado.",
       secure_id_unavailable: "El navegador no puede generar una clave idempotente segura.",
       source_pdf_url_unavailable: "No se pudo generar el acceso temporal al PDF fuente.",
+      payment_evidence_identifier_missing: "El servidor no devolvió un identificador válido para la evidencia.",
       stale_payment_extraction: "La extracción cambió en otra sesión; se actualizaron los datos.",
       payment_reservation_not_active: "La reserva ya no está activa; se actualizaron los datos.",
       payment_reservation_not_expired: "La reserva todavía no venció según el reloj del servidor.",

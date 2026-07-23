@@ -364,10 +364,43 @@ test("evidence retry adopts an existing validated object after an upload timeout
   assert.match(client, /upsert:\s*false/i);
 });
 
-test("034 keeps evidence tables private while making Storage policies RLS-safe", () => {
-  assert.match(
-    storagePolicyFix,
-    /function\s+public\.payment_receipt_evidence_storage_path_allowed[\s\S]*security\s+definer/i,
+  test("the evidence contract accepts evidence_id responses", () => {
+    assert.match(
+      client,
+      /const evidenceId = evidence\.id \?\? evidence\.evidence_id/,
+    );
+    assert.match(
+      client,
+      /normalizeEvidenceIdentifier\(\s*await rpcIdempotent\("evidence\.prepare"/,
+    );
+  });
+
+  test("the evidence contract remains compatible with id responses", () => {
+    assert.match(
+      client,
+      /return evidence\.id === evidenceId \? evidence : \{ \.\.\.evidence, id: evidenceId \}/,
+    );
+    assert.match(
+      client,
+      /normalizeEvidenceIdentifier\(\s*await rpcIdempotent\("evidence\.(finalize|review)"/,
+    );
+  });
+
+  test("the evidence contract fails closed when both identifiers are absent", () => {
+    assert.match(
+      client,
+      /if \(!evidenceId\) throw new Error\("payment_evidence_identifier_missing"\)/,
+    );
+    assert.match(
+      client,
+      /payment_evidence_identifier_missing:\s*"El servidor no devolvió un identificador válido para la evidencia\."/,
+    );
+  });
+
+  test("034 keeps evidence tables private while making Storage policies RLS-safe", () => {
+    assert.match(
+      storagePolicyFix,
+      /function\s+public\.payment_receipt_evidence_storage_path_allowed[\s\S]*security\s+definer/i,
   );
   assert.match(
     storagePolicyFix,
@@ -378,10 +411,59 @@ test("034 keeps evidence tables private while making Storage policies RLS-safe",
     /create policy payment_receipt_evidence_finance_insert[\s\S]*payment_receipt_evidence_storage_path_allowed\(name,\s*true\)/i,
   );
   assert.doesNotMatch(
-    storagePolicyFix,
-    /grant\s+select\s+on\s+(?:table\s+)?public\.payment_operation_evidence\s+to\s+authenticated/i,
-  );
-});
+      storagePolicyFix,
+      /grant\s+select\s+on\s+(?:table\s+)?public\.payment_operation_evidence\s+to\s+authenticated/i,
+    );
+  });
+
+  test("034 authorizes only guarded Finance evidence uploads", () => {
+    assert.match(
+      storagePolicyFix,
+      /security\s+definer[\s\S]*set\s+search_path\s*=\s*public,\s*pg_temp/i,
+    );
+    assert.match(
+      storagePolicyFix,
+      /current_user_has_role\(public\.flux_finance_roles\(\)\)/i,
+    );
+    assert.match(
+      storagePolicyFix,
+      /evidence\.status\s*=\s*'pending_upload'[\s\S]*evidence\.created_by\s*=\s*public\.current_profile_id\(\)/i,
+    );
+    assert.match(
+      storagePolicyFix,
+      /payment_receipt_evidence_storage_path_allowed\(name,\s*true\)/i,
+    );
+  });
+
+  test("034 blocks anon and keeps sensitive evidence grants closed", () => {
+    assert.match(
+      storagePolicyFix,
+      /revoke\s+all\s+on\s+function\s+public\.payment_receipt_evidence_storage_path_allowed\(text,boolean\)[\s\S]*from\s+public,\s*anon/i,
+    );
+    assert.doesNotMatch(
+      storagePolicyFix,
+      /grant\s+execute\s+on\s+function\s+public\.payment_receipt_evidence_storage_path_allowed\(text,boolean\)[\s\S]{0,120}\bto\s+anon\b/i,
+    );
+    assert.doesNotMatch(
+      storagePolicyFix,
+      /grant\s+select\s+on\s+(?:table\s+)?public\.payment_operation_evidence\s+to\s+authenticated/i,
+    );
+  });
+
+  test("033 permits only the reviewed pending_upload to shareable lifecycle", () => {
+    assert.match(
+      migration,
+      /old\.status\s*=\s*'pending_upload'\s+and\s+new\.status\s*=\s*'pending_review'/i,
+    );
+    assert.match(
+      migration,
+      /old\.status\s*=\s*'pending_review'[\s\S]*new\.status\s+in\s*\(\s*'shareable',\s*'not_shareable'\s*\)/i,
+    );
+    assert.match(
+      migration,
+      /new\.status\s*=\s*'shareable'\s+and\s+not\s+new\.single_operation_attested/i,
+    );
+  });
 
 test("critical PDF runtime is versioned locally for finance and request evidence", () => {
   const pdfLib = readFileSync(join(root, "pdf-lib-1.17.1.min.js"));
