@@ -62,9 +62,15 @@
     .batch-selection-count{color:var(--text-3);font-size:11px}
     .batch-progress{grid-column:1/-1;color:var(--accent-text);font-size:11px;font-weight:700}
     .batch-action-help{width:100%;font-size:10.5px;color:var(--text-3);text-align:right}
-    .director-current-panel{padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover)}
-    .director-current-panel span{display:block;color:var(--text-3);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.45px}
-    .director-current-panel strong{display:block;margin-top:4px;color:var(--text-1);font-size:13px}
+    .director-pool{display:grid;gap:8px;min-width:0}
+    .director-pool-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    .director-pool-head strong{color:var(--text-1);font-size:12px}
+    .director-active-list{display:grid;gap:8px;min-width:0}
+    .director-active-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px 12px;align-items:center;padding:11px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg-hover);min-width:0}
+    .director-active-card strong{display:block;color:var(--text-1);font-size:12.5px;overflow-wrap:anywhere}
+    .director-active-card small{display:block;margin-top:3px;color:var(--text-3);font-size:10.5px;line-height:1.45;overflow-wrap:anywhere}
+    .director-active-card .small-btn{grid-column:2;grid-row:1/span 2}
+    .director-active-empty{padding:12px;border:1px dashed var(--border-strong);border-radius:9px;color:var(--text-3);font-size:11px}
     .director-status-line{margin-top:6px;color:var(--text-3);font-size:11px;line-height:1.45}
     .batch-status-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:11.5px}
     .batch-status-banner strong{display:block;color:var(--text-1);margin-bottom:2px}
@@ -107,7 +113,7 @@
     .batch-ineligible-section{background:color-mix(in srgb,#d97706 3%,var(--bg-surface))}
     .batch-ineligible-section .batch-section-head>div{display:grid;gap:3px}
     @media(max-width:980px){.batch-workspace{grid-template-columns:1fr;grid-template-rows:minmax(170px,28vh) minmax(0,1fr)}.batch-list-panel{border-right:0;border-bottom:1px solid var(--border)}.batch-metrics{grid-template-columns:repeat(2,1fr)}.batch-metric:nth-child(2){border-right:0}.batch-decision-bar{grid-template-columns:1fr}.batch-decision-actions{justify-content:flex-start}.modal-grid{grid-template-columns:1fr}.modal-grid .full{grid-column:auto}}
-    @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content{height:auto;overflow:visible}.page{height:auto;display:block;overflow:visible}.topbar{padding:0 14px}.batch-workspace{display:block;min-height:0;overflow:visible}.batch-list-panel{max-height:none}.batch-list{max-height:260px;overflow:auto}.batch-detail{overflow:visible}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}.batch-bulk-bar{position:static;grid-template-columns:1fr 1fr}.batch-select-all,.batch-selection-count{grid-column:1/-1}.batch-bulk-bar button{width:100%}.batch-action-help{text-align:left}.batch-decision-bar{position:static}.batch-decision-actions{display:grid;grid-template-columns:1fr}.batch-decision-actions button{width:100%}.batch-status-banner{flex-direction:column}.batch-table-scroll{max-height:400px}}
+    @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content{height:auto;overflow:visible}.page{height:auto;display:block;overflow:visible}.topbar{padding:0 14px}.batch-workspace{display:block;min-height:0;overflow:visible}.batch-list-panel{max-height:none}.batch-list{max-height:260px;overflow:auto}.batch-detail{overflow:visible}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}.batch-bulk-bar{position:static;grid-template-columns:1fr 1fr}.batch-select-all,.batch-selection-count{grid-column:1/-1}.batch-bulk-bar button{width:100%}.batch-action-help{text-align:left}.batch-decision-bar{position:static}.batch-decision-actions{display:grid;grid-template-columns:1fr}.batch-decision-actions button{width:100%}.batch-status-banner{flex-direction:column}.batch-table-scroll{max-height:400px}.director-active-card{grid-template-columns:1fr}.director-active-card .small-btn{grid-column:1;grid-row:auto;width:100%}}
   </style>
 </head>
 <body>
@@ -130,7 +136,7 @@
       <section class="page">
         <div class="page-header">
           <div><h1>Cortes semanales</h1><p id="pageContext">Finanzas</p></div>
-          <div class="batch-toolbar"><button class="secondary-btn" id="directorConfigBtn" type="button">Configurar director</button><button class="primary-btn" id="createBatchBtn" type="button">Crear corte</button><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button></div>
+          <div class="batch-toolbar"><button class="secondary-btn" id="directorConfigBtn" type="button">Configurar directores</button><button class="primary-btn" id="createBatchBtn" type="button">Crear corte</button><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button></div>
         </div>
         <div class="batch-toolbar" style="margin-bottom:10px">
           <div class="batch-tabs" id="viewTabs"><button class="batch-tab active" type="button" data-view="finance">Finanzas</button><button class="batch-tab" type="button" data-view="director">Direccion</button></div>
@@ -156,21 +162,20 @@
 
   <dialog id="directorDialog">
     <form id="directorForm" class="modal-content">
-      <div class="modal-header"><div><h2>Director por empresa</h2><p>Autorizador final de cortes.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="directorDialog">&times;</button></div>
+      <div class="modal-header"><div><h2>Directores activos para futuros cortes</h2><p>Cada corte conserva un solo Director responsable.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="directorDialog">&times;</button></div>
       <div class="modal-scroll">
         <div class="modal-grid">
           <label class="full">Empresa<select class="batch-field" id="directorCompanyId" required></select></label>
-          <div class="full director-current-panel" aria-live="polite">
-            <span>Director actual</span>
-            <strong id="directorCurrentName">Selecciona una empresa.</strong>
-            <div class="director-status-line" id="directorCurrentStatus">Sin empresa seleccionada.</div>
+          <div class="full director-pool" aria-live="polite">
+            <div class="director-pool-head"><strong>Directores activos</strong><span class="badge info" id="directorActiveCount">0</span></div>
+            <div class="director-active-list" id="directorActiveList"><div class="director-active-empty">Selecciona una empresa.</div></div>
           </div>
-          <label class="full">Nuevo Director<select class="batch-field" id="directorProfileId" aria-describedby="directorCandidateStatus directorFormHelp" required></select></label>
+          <label class="full">Agregar Director<select class="batch-field" id="directorProfileId" aria-describedby="directorCandidateStatus directorFormHelp" required></select></label>
           <div class="full director-status-line" id="directorCandidateStatus">Selecciona una empresa para consultar candidatos.</div>
-          <div class="full batch-list-meta" id="directorFormHelp">Solo se muestran perfiles activos con rol Dirección.</div>
+          <div class="full batch-list-meta" id="directorFormHelp">Solo se muestran perfiles activos con rol Dirección y membresía activa.</div>
         </div>
       </div>
-      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="directorDialog">Cancelar</button><button class="primary-btn" id="saveDirectorBtn" type="submit">Guardar Director</button></div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="directorDialog">Cerrar</button><button class="primary-btn" id="saveDirectorBtn" type="submit">Agregar Director</button></div>
     </form>
   </dialog>
 

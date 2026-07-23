@@ -114,6 +114,7 @@
         const mount = document.getElementById("dialogMount");
         const reopenButton = document.getElementById("reopenDialogBtn");
         let dialog = null;
+        let completionDialog = null;
 
         const incompleteRows = [
           ["SOL-QA-002", "Empresa Demo Norte", "Proveedor Ejemplo 02", "$8,420.00 MXN", "Cuenta bancaria de empresa"],
@@ -315,6 +316,32 @@
           addQaTools(dialog.querySelector("#newLayoutForm"));
         }
 
+        function populateCompletionDialog() {
+          completionDialog.querySelector("#layoutCompletionSummary").innerHTML =
+            "<strong>SOL-QA-002</strong><span>Proveedor Ejemplo 02 · $8,420.00 MXN</span><small>Datos sintéticos de QA</small>";
+          completionDialog.querySelector("#layoutCompletionImpact").textContent =
+            "Estos son datos operativos de ejecución. Al guardarlos se conserva la autorización vigente de Dirección.";
+          completionDialog.querySelector("#layoutCompletionReference").value = "40002";
+          completionDialog.querySelector("#layoutCompletionConcept").value =
+            "Pago sintético para validación de reflow";
+          completionDialog.querySelector("#layoutCompletionDate").value = "2026-07-24";
+          completionDialog.querySelector("#layoutCompletionBankAccount").insertAdjacentHTML(
+            "beforeend",
+            '<option value="qa-account" selected>Cuenta QA •••• 0001</option>'
+          );
+        }
+
+        function openQaDialog(kind) {
+          if (dialog.open) dialog.close();
+          if (completionDialog.open) completionDialog.close();
+          if (kind === "completion") {
+            completionDialog.showModal();
+            return completionDialog;
+          }
+          dialog.showModal();
+          return dialog;
+        }
+
         function bindHarnessEvents() {
           dialog.querySelectorAll("[data-qa-theme]").forEach((button) => {
             button.addEventListener("click", () => setTheme(button.dataset.qaTheme));
@@ -327,8 +354,11 @@
           dialog.addEventListener("close", () => reopenButton.classList.remove("hidden"));
           reopenButton.addEventListener("click", () => {
             reopenButton.classList.add("hidden");
-            dialog.showModal();
+            openQaDialog("new-layout");
           });
+          completionDialog.querySelector("#layoutCompletionForm").addEventListener("submit", (event) => event.preventDefault());
+          completionDialog.querySelector("#closeLayoutCompletionBtn").addEventListener("click", () => completionDialog.close());
+          completionDialog.querySelector("#cancelLayoutCompletionBtn").addEventListener("click", () => completionDialog.close());
         }
 
         async function loadProductionDialog() {
@@ -339,6 +369,8 @@
             const source = new DOMParser().parseFromString(await response.text(), "text/html");
             const productionDialog = source.querySelector("#newLayoutDialog");
             if (!productionDialog) throw new Error("No se encontró #newLayoutDialog");
+            const productionCompletionDialog = source.querySelector("#layoutCompletionDialog");
+            if (!productionCompletionDialog) throw new Error("No se encontró #layoutCompletionDialog");
 
             const productionStyle = Array.from(source.querySelectorAll("style"))
               .find((style) => style.textContent.includes("#newLayoutDialog"));
@@ -350,11 +382,21 @@
             }
 
             dialog = document.importNode(productionDialog, true);
+            completionDialog = document.importNode(productionCompletionDialog, true);
             mount.appendChild(dialog);
+            mount.appendChild(completionDialog);
             populateDialog();
+            populateCompletionDialog();
             bindHarnessEvents();
+            window.__approvalLayoutQa = {
+              dialogs: {
+                newLayout: dialog,
+                completion: completionDialog
+              },
+              open: openQaDialog
+            };
             status.textContent = "Diálogo real cargado desde layouts.html; no se inicializó la aplicación.";
-            dialog.showModal();
+            openQaDialog("new-layout");
             setTheme("dark");
             await scanAxe();
           } catch (error) {

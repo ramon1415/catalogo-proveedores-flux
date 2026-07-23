@@ -48,7 +48,7 @@ function cacheDom() {
     "batchDetail", "pageContext", "createBatchDialog", "createBatchForm", "createCompanyId",
     "createDirectorId", "createPeriodStart", "createPeriodEnd", "createLabel", "createNotes",
     "directorDialog", "directorForm", "directorCompanyId", "directorProfileId",
-    "directorCurrentName", "directorCurrentStatus", "directorCandidateStatus", "directorFormHelp",
+    "directorActiveCount", "directorActiveList", "directorCandidateStatus", "directorFormHelp",
     "saveDirectorBtn", "rebatchDialog",
     "rebatchForm", "rebatchNote", "rebatchOriginalReason", "rebatchTargetBatch", "confirmActionDialog",
     "confirmActionTitle", "confirmActionBody", "confirmActionCloseBtn", "confirmActionCancelBtn",
@@ -90,7 +90,8 @@ function bindEvents() {
   dom.createBatchBtn?.addEventListener("click", openCreateDialog)
   dom.directorConfigBtn?.addEventListener("click", openDirectorDialog)
   dom.createBatchForm?.addEventListener("submit", createBatch)
-  dom.directorForm?.addEventListener("submit", saveDirector)
+  dom.directorForm?.addEventListener("submit", addDirector)
+  dom.directorActiveList?.addEventListener("click", removeDirector)
   dom.rebatchForm?.addEventListener("submit", releaseRejectedItem)
   dom.confirmActionConfirmBtn?.addEventListener("click", () => closeConfirmation(true))
   dom.confirmActionCancelBtn?.addEventListener("click", () => closeConfirmation(false))
@@ -824,7 +825,7 @@ async function openDirectorDialog() {
   dom.directorDialog.showModal()
 }
 
-async function saveDirector(event) {
+async function addDirector(event) {
   event.preventDefault()
   const companyId = dom.directorCompanyId.value
   const directorProfileId = dom.directorProfileId.value
@@ -835,12 +836,16 @@ async function saveDirector(event) {
   const submit = dom.directorForm.querySelector('[type="submit"]')
   submit.disabled = true
   try {
-    const { error } = await supabaseClient.rpc("set_company_director_for_future_batches", {
+    const { data, error } = await supabaseClient.rpc("add_company_director_for_future_batches", {
       p_company_id: companyId,
       p_director_profile_id: directorProfileId,
     })
     if (error) throw error
-    showToast("Director actualizado", "Los cortes futuros usarán al Director seleccionado; los cortes históricos permanecen intactos.", "success")
+    showToast(
+      data?.changed ? "Director agregado" : "Director ya activo",
+      "El pool de futuros cortes se actualizó sin reemplazar a otros Directores ni modificar cortes existentes.",
+      "success"
+    )
     await loadDirectors()
     await loadDirectorCandidates(companyId)
     syncDirectorForm()
@@ -848,6 +853,42 @@ async function saveDirector(event) {
     showToast("No se pudo guardar", friendlyError(error), "error")
   } finally {
     syncDirectorCandidateStatus()
+  }
+}
+
+async function removeDirector(event) {
+  const button = event.target.closest("[data-remove-director-id]")
+  if (!button || button.disabled) return
+  const companyId = dom.directorCompanyId.value
+  const directorProfileId = button.dataset.removeDirectorId
+  const directorName = button.dataset.removeDirectorName || "este Director"
+  if (!companyId || !directorProfileId) return
+
+  const confirmed = await showConfirmation({
+    title: "Quitar Director",
+    bodyHtml: `<div class="confirm-summary"><p>Quitarás a <strong>${escapeHtml(directorName)}</strong> del pool para cortes futuros.</p><div class="confirm-warning">Los cortes existentes conservan al Director asignado y no se modifican.</div></div>`,
+    confirmLabel: "Quitar",
+  })
+  if (!confirmed) return
+
+  button.disabled = true
+  try {
+    const { data, error } = await supabaseClient.rpc("remove_company_director_for_future_batches", {
+      p_company_id: companyId,
+      p_director_profile_id: directorProfileId,
+    })
+    if (error) throw error
+    showToast(
+      data?.changed ? "Director quitado" : "Director ya inactivo",
+      "Los cortes existentes y sus decisiones permanecen intactos.",
+      "success"
+    )
+    await loadDirectors()
+    await loadDirectorCandidates(companyId)
+    syncDirectorForm()
+  } catch (error) {
+    showToast("No se pudo quitar", friendlyError(error), "error")
+    button.disabled = false
   }
 }
 
@@ -908,8 +949,9 @@ function fillCompanyOptions() {
 function fillProfileOptions() {
   if (!dom.directorProfileId) return
   const selected = dom.directorProfileId.value
-  dom.directorProfileId.innerHTML = `<option value="">Selecciona...</option>${state.directorCandidates.map((profile) => `<option value="${escapeHtml(profile.profile_id)}">${escapeHtml(profile.name || profile.email || profile.profile_id)}</option>`).join("")}`
-  if (state.directorCandidates.some((profile) => profile.profile_id === selected)) {
+  const available = state.directorCandidates.filter((profile) => profile.assigned_active !== true)
+  dom.directorProfileId.innerHTML = `<option value="">Selecciona...</option>${available.map((profile) => `<option value="${escapeHtml(profile.profile_id)}">${escapeHtml(profile.name || profile.email || profile.profile_id)}</option>`).join("")}`
+  if (available.some((profile) => profile.profile_id === selected)) {
     dom.directorProfileId.value = selected
   }
 }
@@ -929,68 +971,60 @@ function fillCreateDirectors() {
 function syncDirectorForm() {
   const companyId = dom.directorCompanyId?.value || ""
   const activeRows = state.directors.filter((row) => row.company_id === companyId && row.active)
-  const current = activeRows[0] || null
+  const availableCandidates = state.directorCandidates.filter((profile) => profile.assigned_active !== true)
   fillProfileOptions()
 
   if (!companyId) {
-    dom.directorCurrentName.textContent = "Selecciona una empresa."
-    dom.directorCurrentStatus.textContent = "Sin empresa seleccionada."
+    dom.directorActiveCount.textContent = "0"
+    dom.directorActiveList.innerHTML = '<div class="director-active-empty">Selecciona una empresa.</div>'
     dom.directorCandidateStatus.textContent = "Selecciona una empresa para consultar candidatos."
-    dom.directorFormHelp.textContent = "Solo se muestran perfiles activos con rol Dirección."
+    dom.directorFormHelp.textContent = "Solo se muestran perfiles activos con rol Dirección y membresía activa."
     dom.directorProfileId.value = ""
     dom.directorProfileId.disabled = true
     dom.saveDirectorBtn.disabled = true
     return
   }
 
-  if (activeRows.length > 1) {
-    dom.directorCurrentName.textContent = "Configuración incompatible"
-    dom.directorCurrentStatus.textContent = "Hay más de un Director activo para esta empresa. Corrige la duplicidad antes de guardar."
-    dom.directorProfileId.value = ""
-    dom.directorProfileId.disabled = true
-    dom.saveDirectorBtn.disabled = true
-    dom.directorFormHelp.textContent = "No se elegirá un Director arbitrariamente."
-    syncDirectorCandidateStatus()
-    return
-  }
+  dom.directorActiveCount.textContent = String(activeRows.length)
+  dom.directorActiveList.innerHTML = activeRows.length
+    ? activeRows.map((row) => {
+      const eligible = row.director_profile_active !== false
+        && row.director_role_valid !== false
+        && row.director_membership_active !== false
+      const status = [
+        `Perfil: ${row.director_profile_active === false ? "inactivo" : "activo"}`,
+        `Rol: ${row.director_role_valid === false ? "inválido" : "Dirección"}`,
+        `Membresía: ${row.director_membership_active === false ? "inactiva" : "activa"}`,
+      ].join(" · ")
+      const warning = eligible
+        ? ""
+        : '<small class="batch-cell-note">No es elegible para cortes nuevos hasta corregir su perfil, rol o membresía.</small>'
+      return `<div class="director-active-card"><div><strong>${escapeHtml(row.director_name || row.director_email || "Perfil sin nombre")}</strong><small>${escapeHtml(status)}</small>${warning}</div><button class="small-btn danger" type="button" data-remove-director-id="${escapeHtml(row.director_profile_id)}" data-remove-director-name="${escapeHtml(row.director_name || row.director_email || "Director")}" ${activeRows.length <= 1 ? "disabled" : ""}>Quitar</button></div>`
+    }).join("")
+    : '<div class="director-active-empty">No hay Directores activos para futuros cortes.</div>'
 
-  if (!current) {
-    dom.directorCurrentName.textContent = "Sin Director activo"
-    dom.directorCurrentStatus.textContent = "Selecciona un perfil elegible para los cortes futuros."
-  } else {
-    dom.directorCurrentName.textContent = current.director_name || current.director_email || "Perfil sin nombre"
-    dom.directorCurrentStatus.textContent = current.director_profile_active === false
-      ? "Inactivo: conserva historial, pero dejó de ser elegible."
-      : current.director_role_valid === false
-        ? "Rol inválido: el perfil ya no tiene rol Dirección."
-        : current.director_membership_active === false
-          ? "Sin membresía activa en esta empresa: dejó de ser elegible."
-          : "Activo, con rol Dirección y membresía válida."
-  }
-
-  dom.directorProfileId.disabled = !state.directorCandidates.length
-  if (current && state.directorCandidates.some((profile) => profile.profile_id === current.director_profile_id)) {
-    dom.directorProfileId.value = current.director_profile_id
-  } else if (!state.directorCandidates.some((profile) => profile.profile_id === dom.directorProfileId.value)) {
+  dom.directorProfileId.disabled = !availableCandidates.length
+  if (!availableCandidates.some((profile) => profile.profile_id === dom.directorProfileId.value)) {
     dom.directorProfileId.value = ""
   }
   dom.directorFormHelp.textContent = state.directorCandidates.length
-    ? "Selecciona el Director que se usará únicamente en cortes futuros."
-    : "No hay perfiles activos con rol Dirección disponibles."
+    ? "Agregar un Director no reemplaza a los existentes. Quitar solo afecta cortes futuros."
+    : "No hay perfiles activos con rol Dirección y membresía activa disponibles."
   syncDirectorCandidateStatus()
 }
 
 function syncDirectorCandidateStatus() {
   if (!dom.directorCandidateStatus || !dom.saveDirectorBtn) return
-  const selected = state.directorCandidates.find((profile) => profile.profile_id === dom.directorProfileId?.value)
+  const available = state.directorCandidates.filter((profile) => profile.assigned_active !== true)
+  const selected = available.find((profile) => profile.profile_id === dom.directorProfileId?.value)
   if (!selected) {
-    dom.directorCandidateStatus.textContent = state.directorCandidates.length
+    dom.directorCandidateStatus.textContent = available.length
       ? "Selecciona un perfil para continuar."
-      : "No hay perfiles activos con rol Dirección disponibles."
+      : "No hay Directores elegibles pendientes de agregar."
     dom.saveDirectorBtn.disabled = true
     return
   }
-  dom.directorCandidateStatus.textContent = `Activo · Rol válido: ${asArray(selected.roles).join(", ") || "Dirección"}.`
+  dom.directorCandidateStatus.textContent = `Perfil activo · Rol: ${asArray(selected.roles).join(", ") || "Dirección"} · Membresía activa.`
   dom.saveDirectorBtn.disabled = false
 }
 
@@ -1100,6 +1134,8 @@ function friendlyError(error) {
     finance_role_required: "Se requiere rol de Finanzas.",
     batch_director_required: "Solo el director asignado puede decidir este corte.",
     company_director_required: "Configura un director activo para la empresa.",
+    company_director_selection_required: "Selecciona exactamente un Director responsable para el corte.",
+    company_director_not_active_or_ineligible: "El Director debe estar activo en el pool, con perfil, rol y membresía vigentes.",
     select_company_director: "Selecciona uno de los directores activos.",
     batch_requires_items: "Agrega al menos una solicitud al corte.",
     payment_request_not_batch_eligible: "La solicitud ya no es elegible para este corte.",
@@ -1108,6 +1144,7 @@ function friendlyError(error) {
     director_role_required: "El perfil seleccionado no tiene un rol activo de Direccion.",
     director_profile_not_found_or_inactive: "El perfil seleccionado está inactivo o ya no existe.",
     director_company_membership_required: "El Director necesita una membresía activa en la empresa.",
+    last_active_company_director_required: "No puedes quitar al último Director activo de la empresa.",
     director_self_assignment_not_allowed: "Quien configura el Director no puede asignarse a sí mismo.",
     company_active_director_conflict: "La empresa tiene más de un Director activo. Corrige la duplicidad antes de guardar.",
     rebatch_release_note_required: "La nota de reingreso es obligatoria.",

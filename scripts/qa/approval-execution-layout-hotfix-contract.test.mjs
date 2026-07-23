@@ -9,7 +9,10 @@ const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 
 const migration = read("supabase/migrations/033_separate_approval_material_from_payment_execution_data.sql")
+const migration034 = read("supabase/migrations/034_support_multiple_active_company_directors.sql")
 const precheck = read("scripts/qa/approval-execution-layout-hotfix-precheck.sql")
+const precheck034 = read("scripts/qa/approval-execution-layout-034-precheck.sql")
+const postcheck034 = read("scripts/qa/approval-execution-layout-034-postcheck.sql")
 const config = read("config.js")
 const configurationHtml = read("configuracion.html")
 const configurationClient = read("configuracion.js")
@@ -67,20 +70,23 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-function sqlFunction(name) {
+function sqlFunctionFrom(source, name) {
   const marker = new RegExp(
     `create(?:\\s+or\\s+replace)?\\s+function\\s+public\\.${escapeRegex(name)}\\s*\\(`,
     "i",
   )
-  const match = marker.exec(migration)
+  const match = marker.exec(source)
   assert.ok(match, `missing SQL function public.${name}`)
-  const tail = migration.slice(match.index)
+  const tail = source.slice(match.index)
   const bodyStart = tail.search(/\bas\s+\$\$/i)
   assert.notEqual(bodyStart, -1, `missing dollar-quoted body for public.${name}`)
   const end = tail.indexOf("\n$$;", bodyStart)
   assert.notEqual(end, -1, `unterminated SQL function public.${name}`)
   return tail.slice(0, end + 4)
 }
+
+const sqlFunction = (name) => sqlFunctionFrom(migration, name)
+const sqlFunction034 = (name) => sqlFunctionFrom(migration034, name)
 
 function jsFunction(source, name) {
   const marker = new RegExp(`(?:async\\s+)?function\\s+${escapeRegex(name)}\\s*\\(`)
@@ -752,48 +758,78 @@ test("layout classifier keeps stale material changes critical and fresh closed a
   assert.match(classifier, /when m\.classification = 'direction_reapproval_required' then 'direction_reapproval_required'/)
 })
 
-test("future-Director RPC is atomic, role/profile checked, unique, and enforcement-neutral", () => {
-  const director = sqlFunction("set_company_director_for_future_batches")
-  assert.match(director, /security\s+definer/i)
-  assert.match(director, /approval_batch_require_finance\s*\(\s*\)/i)
-  assert.match(
-    director,
-    /p_director_profile_id\s*=\s*v_actor[\s\S]{0,100}director_self_assignment_not_allowed/i,
+test("034 manages a multiple-Director pool atomically without touching batch snapshots", () => {
+  const add = sqlFunction034("add_company_director_for_future_batches")
+  const remove = sqlFunction034("remove_company_director_for_future_batches")
+  for (const directorRpc of [add, remove]) {
+    assert.match(directorRpc, /security\s+definer/i)
+    assert.match(directorRpc, /approval_batch_require_finance\s*\(\s*\)/i)
+    assert.match(directorRpc, /pg_advisory_xact_lock/i)
+    assert.match(directorRpc, /for\s+update/i)
+    assert.match(directorRpc, /insert\s+into\s+public\.activity_log/i)
+    assert.doesNotMatch(directorRpc, /approval_batch_company_settings/i)
+    assert.doesNotMatch(directorRpc, /\b(?:update|insert\s+into|delete\s+from)\s+public\.approval_batches/i)
+    assert.doesNotMatch(directorRpc, /regular_payments_require_closed_batch|enforcement_started_at/i)
+  }
+  assert.match(add, /from\s+public\.profiles[\s\S]{0,120}profile\.active/i)
+  assert.match(add, /from\s+public\.user_roles[\s\S]{0,100}join\s+public\.roles/i)
+  assert.match(add, /approval_batch_direction_roles\s*\(\s*\)/i)
+  assert.match(add, /from\s+public\.profile_company_memberships[\s\S]{0,260}membership\.active/i)
+  assert.match(add, /insert\s+into\s+public\.company_directors/i)
+  assert.doesNotMatch(
+    add,
+    /director_profile_id\s*<>\s*p_director_profile_id|director_profile_id\s*!=\s*p_director_profile_id/i,
   )
-  assert.match(director, /pg_advisory_xact_lock/i)
-  assert.match(director, /from\s+public\.companies[\s\S]{0,160}company\.active[\s\S]{0,80}for\s+update/i)
-  assert.match(director, /from\s+public\.profiles[\s\S]{0,120}profile\.active/i)
-  assert.match(director, /from\s+public\.user_roles[\s\S]{0,100}join\s+public\.roles/i)
-  assert.match(director, /approval_batch_direction_roles\s*\(\s*\)/i)
+  assert.match(remove, /last_active_company_director_required/i)
+  assert.match(remove, /already_inactive_or_not_assigned/i)
   assert.match(
-    director,
-    /from\s+public\.profile_company_memberships[\s\S]{0,180}profile_id\s*=\s*p_director_profile_id[\s\S]{0,120}company_id\s*=\s*p_company_id[\s\S]{0,80}membership\.active/i,
+    remove,
+    /where\s+director_assignment\.id\s*=\s*v_assignment_id[\s\S]{0,100}director_assignment\.active/i,
   )
-  assert.match(director, /director_company_membership_required/i)
-  assert.match(
-    director,
-    /update\s+public\.company_directors[\s\S]{0,180}set\s+active\s*=\s*false/i,
-  )
-  assert.match(director, /insert\s+into\s+public\.company_directors/i)
-  assert.match(director, /insert\s+into\s+public\.activity_log/i)
-  assert.doesNotMatch(director, /approval_batch_company_settings/i)
-  assert.doesNotMatch(director, /approval_batches/i)
-  assert.doesNotMatch(director, /regular_payments_require_closed_batch|enforcement_started_at/i)
 
   assert.match(
-    migration,
-    /create\s+unique\s+index\s+company_directors_one_active_per_company_uidx\s+on\s+public\.company_directors\s*\(\s*company_id\s*\)\s+where\s+active\s*;/i,
+    migration034,
+    /drop\s+index\s+public\.company_directors_one_active_per_company_uidx\s*;/i,
+  )
+  assert.doesNotMatch(
+    migration034,
+    /drop\s+index\s+(?:if\s+exists\s+)?public\.company_directors_active_uidx/i,
   )
   assert.match(
-    migration,
-    /from\s+public\.company_directors[\s\S]{0,180}where\s+director_assignment\.active[\s\S]{0,120}group\s+by\s+director_assignment\.company_id[\s\S]{0,80}having\s+count\(\*\)\s*>\s*1/i,
+    migration034,
+    /revoke\s+all\s+on\s+function\s+public\.set_company_director_for_future_batches[\s\S]{0,180}drop\s+function\s+public\.set_company_director_for_future_batches/i,
   )
 })
 
-test("Director modal uses the isolated RPC and contains no legacy enforcement controls", () => {
+test("034 preserves one Director per batch and decision rights after future-pool removal", () => {
+  const createBatch = sqlFunction034("create_approval_batch")
+  const directionActor = sqlFunction034("approval_batch_require_active_direction")
+  const listBatches = sqlFunction034("list_director_approval_batches")
+  const approve = sqlFunction034("approve_entire_batch")
+  const decide = sqlFunction034("decide_approval_batch_items")
+
+  assert.match(createBatch, /p_director_id\s+is\s+null[\s\S]{0,80}company_director_selection_required/i)
+  assert.match(createBatch, /director_assignment\.active/i)
+  assert.match(createBatch, /director_profile\.active/i)
+  assert.match(createBatch, /approval_batch_direction_roles\s*\(\s*\)/i)
+  assert.match(createBatch, /profile_company_memberships[\s\S]{0,220}membership\.active/i)
+  assert.match(createBatch, /director_id[\s\S]{0,180}p_director_id/i)
+
+  assert.match(directionActor, /from\s+public\.profiles[\s\S]{0,120}profile\.active/i)
+  assert.match(directionActor, /current_user_has_role[\s\S]{0,120}approval_batch_direction_roles/i)
+  assert.doesNotMatch(directionActor, /company_directors/i)
+
+  for (const decisionFunction of [listBatches, approve, decide]) {
+    assert.match(decisionFunction, /approval_batch_require_active_direction\s*\(\s*\)/i)
+    assert.doesNotMatch(decisionFunction, /company_directors/i)
+  }
+  assert.match(approve, /v_batch\.director_id\s*<>\s*v_actor/i)
+  assert.match(decide, /v_batch\.director_id\s*<>\s*v_actor/i)
+})
+
+test("Director modal uses add/remove RPCs and contains no replacement or enforcement controls", () => {
   const combined = `${batchesHtml}\n${batchesClient}`
   for (const forbidden of [
-    "directorActive",
     "batchEnforcementEnabled",
     "batchEnforcementHelp",
     "set_company_batch_configuration",
@@ -802,34 +838,32 @@ test("Director modal uses the isolated RPC and contains no legacy enforcement co
     "Compatibilidad legacy",
     "Corte cerrado obligatorio",
     "Pagos regulares",
+    "set_company_director_for_future_batches",
   ]) {
     assert.equal(combined.includes(forbidden), false, `legacy Director UI remains: ${forbidden}`)
   }
 
   for (const id of [
     "directorCompanyId",
-    "directorCurrentName",
-    "directorCurrentStatus",
+    "directorActiveCount",
+    "directorActiveList",
     "directorProfileId",
     "directorCandidateStatus",
     "saveDirectorBtn",
   ]) {
     assert.match(batchesHtml, new RegExp(`\\bid=["']${id}["']`, "i"), `missing #${id}`)
   }
-  assert.match(batchesHtml, />Guardar Director</i)
-  assert.match(batchesClient, /\.rpc\s*\(\s*["']set_company_director_for_future_batches["']/i)
+  assert.match(batchesHtml, /Directores activos para futuros cortes/i)
+  assert.match(batchesHtml, />Agregar Director</i)
+  assert.match(batchesClient, />Quitar</i)
+  assert.match(batchesClient, /\.rpc\s*\(\s*["']add_company_director_for_future_batches["']/i)
+  assert.match(batchesClient, /\.rpc\s*\(\s*["']remove_company_director_for_future_batches["']/i)
   assert.match(batchesClient, /\bp_company_id\s*:\s*companyId/i)
   assert.match(batchesClient, /\bp_director_profile_id\s*:\s*directorProfileId/i)
-  assert.match(batchesClient, /No hay perfiles activos con rol Dirección disponibles\./i)
-  assert.match(
-    batchesClient,
-    /current[\s\S]{0,120}directorCandidates\.some[\s\S]{0,160}directorProfileId\.value\s*=\s*current\.director_profile_id/i,
-  )
+  assert.match(batchesClient, /No hay Directores elegibles pendientes de agregar\./i)
+  assert.match(batchesClient, /activeRows\.length\s*<=\s*1\s*\?\s*["']disabled["']/i)
+  assert.match(batchesClient, /Agregar un Director no reemplaza a los existentes/i)
   assert.doesNotMatch(batchesClient, /directorCandidates\s*\[\s*0\s*\]/i)
-  assert.doesNotMatch(
-    jsFunction(batchesClient, "saveDirector"),
-    /finally\s*\{[\s\S]{0,100}(?:submit|saveDirectorBtn)\.disabled\s*=\s*false/i,
-  )
 })
 
 test("inactive profiles remain historical, are excluded from memberships, and cannot reuse role cache", () => {
@@ -951,12 +985,14 @@ test("layout dialog scroll is container-scoped, resettable, and responsive", () 
   assert.doesNotMatch(scroll, /window\.scroll|scrollIntoView/i)
 
   const css = compact(layoutsHtml)
-  assert.match(css, /#newLayoutDialog \.modal-content\{[^}]*max-height:[^}]*min-height:0/i)
-  assert.match(css, /#newLayoutDialog \.modal-header,#newLayoutDialog \.modal-actions\{[^}]*flex:0 0 auto/i)
-  assert.match(css, /#newLayoutDialog \.modal-scroll\{[^}]*min-height:0[^}]*overflow:auto/i)
-  assert.match(css, /#newLayoutDialog \.modal-scroll>\*\{[^}]*flex:0 0 auto/i)
+  assert.match(css, /#newLayoutDialog \.modal-content,#layoutCompletionDialog \.modal-content\{[^}]*max-height:[^}]*min-width:0[^}]*min-height:0/i)
+  assert.match(css, /#newLayoutDialog \.modal-header,#newLayoutDialog \.modal-actions,[^}]*\{[^}]*flex:0 0 auto[^}]*min-width:0/i)
+  assert.match(css, /#newLayoutDialog \.modal-scroll,#layoutCompletionDialog \.modal-scroll\{[^}]*min-width:0[^}]*min-height:0[^}]*overflow:auto/i)
+  assert.match(css, /#newLayoutDialog \.modal-scroll>\*,#layoutCompletionDialog \.modal-scroll>\*\{[^}]*flex:0 0 auto[^}]*min-width:0/i)
   assert.match(css, /\.layout-preview-list\{[^}]*max-height:[^}]*min-height:0[^}]*overflow:auto/i)
   assert.match(css, /@media\s*\(\s*max-width\s*:\s*760px\s*\)/i)
+  assert.match(css, /@media\s*\(\s*max-width\s*:\s*360px\s*\)/i)
+  assert.match(css, /\.layout-preview-summary,\.layout-preview-row,\.layout-completion-summary\{grid-template-columns:minmax\(0,1fr\)/i)
   assert.match(layoutsHtml, /<dialog\s+id=["']newLayoutDialog["'][^>]*aria-labelledby=["']newLayoutDialogTitle["']/i)
   assert.match(layoutsHtml, /<h2\s+id=["']newLayoutDialogTitle["']/i)
   assert.match(layoutsHtml, /id=["']closeNewLayoutModalBtn["'][^>]*aria-label=["']Cerrar diálogo["']/i)
@@ -1049,6 +1085,49 @@ test("read-only precheck is independently executable and drift-aware", () => {
   assert.match(precheck, /function definitions drift from the expected 022\/023 baseline/i)
   assert.match(precheck, /stale_closed_direction_requests/i)
   assert.match(precheck, /AMBIGUOUS_UNTIL_AUDITED/i)
+})
+
+test("034 precheck is read-only, project-specific, and preserves critical manifests", () => {
+  assert.match(precheck034, /begin\s*;\s*set\s+transaction\s+read\s+only\s*;/i)
+  assert.match(precheck034, /rollback\s*;\s*$/i)
+  assert.doesNotMatch(
+    precheck034,
+    /^\s*(?:insert|update|delete|alter|create|drop|truncate|commit)\b/im,
+  )
+  assert.match(precheck034, /scsirgbuqjcwoaxfacth/i)
+  assert.match(precheck034, /629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc/i)
+  assert.match(precheck034, /company_directors_one_active_per_company_uidx/i)
+  assert.match(precheck034, /company_directors_active_uidx/i)
+  assert.match(precheck034, /approval_batches_manifest/i)
+  assert.match(precheck034, /approval_batch_items_manifest/i)
+  assert.match(precheck034, /payment_receipts_manifest/i)
+  assert.match(precheck034, /enforcement_settings_manifest/i)
+  assert.match(precheck034, /active_ramon_count/i)
+  assert.match(precheck034, /active_denise_count/i)
+})
+
+test("034 postcheck is read-only and verifies snapshot authorization and manifests", () => {
+  assert.match(postcheck034, /begin\s*;\s*set\s+transaction\s+read\s+only\s*;/i)
+  assert.match(postcheck034, /rollback\s*;\s*$/i)
+  assert.doesNotMatch(
+    postcheck034,
+    /^\s*(?:insert|update|delete|alter|create|drop|truncate|commit)\b/im,
+  )
+  assert.match(postcheck034, /one_active_index_removed/i)
+  assert.match(postcheck034, /active_pair_index_present/i)
+  assert.match(postcheck034, /add_rpc_present/i)
+  assert.match(postcheck034, /remove_rpc_present/i)
+  assert.match(postcheck034, /replacement_rpc_removed/i)
+  assert.match(postcheck034, /approval_batch_require_active_direction/i)
+  assert.match(postcheck034, /position\('company_directors' in v_function_source\)\s*>\s*0/i)
+  for (const manifest of [
+    "approval_batches_manifest",
+    "approval_batch_items_manifest",
+    "payment_receipts_manifest",
+    "enforcement_settings_manifest",
+  ]) {
+    assert.match(postcheck034, new RegExp(manifest, "i"))
+  }
 })
 
 test("migration and standalone prechecks use valid PostgreSQL search syntax with semantic parity", () => {

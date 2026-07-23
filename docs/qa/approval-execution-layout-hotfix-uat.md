@@ -3,13 +3,16 @@
 ## Control de cambio
 
 - Repositorio: `ramon1415/catalogo-proveedores-flux`.
-- Base exacta: `origin/dev` en `4b2d25cbb54d4cc6d9ff2c02453d6a232ce60738`.
+- Base exacta: `origin/dev` en `fc3d703baa6f8ab71134012d3f54756575005ee0`.
 - Rama: `hotfix/ramon-client-demo-approval-execution-layout`.
-- Migración forward-only: `033_separate_approval_material_from_payment_execution_data.sql`.
-- SHA-256 vigente de la migración preparada: `629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc`.
+- Migraciones forward-only:
+  - `033_separate_approval_material_from_payment_execution_data.sql`, ya aplicada una sola vez en DEV;
+  - `034_support_multiple_active_company_directors.sql`, preparada y todavía no aplicada.
+- SHA-256 aplicado de 033: `629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc`.
+- SHA-256 preparado de 034: `e4ffc2e4e0425b9325fcc37d10261c1b90f9e18bb7874f65cc9ced82476a33e8`.
 - SHA-256 anterior invalidado y prohibido para LOAD: `da310d7a8113a94b79dc2c3cfb7a42439047e61fd86df745473a0782b1019e21`.
 - Target autorizado para una fase posterior: Supabase DEV `scsirgbuqjcwoaxfacth`.
-- Estado de este documento: revisión de código y preparación de pruebas; sin aplicación en DEV.
+- Estado de este documento: 033 aplicada y verificada en DEV; 034 pendiente de precheck, backup y aplicación única.
 
 `CLAUDE.md` no existe en la base registrada de `origin/dev`; por ello no fue posible leerlo. No se sustituyó por instrucciones inventadas.
 
@@ -74,27 +77,29 @@ No se consultaron ni modificaron filas reales durante este diagnóstico. La evid
 
 Cambiar la identidad del proveedor nunca se considera un cambio operativo.
 
-## Gate previo a cualquier aplicación DEV
+## Gate previo a la aplicación única de 034 en DEV
 
 La aplicación se detiene si cualquiera de estos pasos no termina en PASS:
 
 1. Confirmar que el proyecto destino es exactamente `scsirgbuqjcwoaxfacth`.
-2. Confirmar que la migración 033 todavía no figura aplicada y que no existe drift en los objetos que reemplaza.
-3. Ejecutar de forma independiente `scripts/qa/approval-execution-layout-hotfix-precheck.sql`, que abre una transacción `READ ONLY` y termina en `ROLLBACK`:
-   - objetos y columnas requeridos presentes;
-   - triggers de materialidad presentes, habilitados, con timing/eventos/columnas exactos y sin drift;
-   - funciones 022/023 con la forma esperada;
-   - migración 033 todavía no aplicada;
-   - cero empresas con más de un Director activo;
-   - roles Supabase requeridos presentes.
-4. Registrar, sin corregirlos, el conteo de casos históricos stale. Se reportan como ambiguos hasta contar con evidencia auditada suficiente.
+2. Confirmar que 033 está aplicada y que su SHA local continúa siendo el aceptado.
+3. Ejecutar `scripts/qa/approval-execution-layout-034-precheck.sql`, que abre una transacción `READ ONLY` y termina en `ROLLBACK`:
+   - índice temporal de un solo Director presente;
+   - índice único por pareja empresa+Director presente;
+   - Ramón único activo actual en Operadora;
+   - Denise inactiva;
+   - cero parejas activas duplicadas;
+   - snapshots históricos con `director_id`;
+   - manifests de batches, items, enforcement y receipts.
+4. Guardar privadamente el resultado y los manifests del precheck, sin datos bancarios.
 5. Obtener backup lógico de los objetos y datos de control afectados.
 6. Comparar el SHA-256 del archivo local, del blob Git versionado y del archivo que se cargará; los tres deben ser idénticos.
 7. Contar con revisión expresa de Ramón sobre PR, diff, pruebas, precheck y backup.
 8. Cargar el archivo exacto una sola vez, sin `db push` y sin `migration repair`.
-9. Ejecutar postcheck y detenerse ante el primer error; no reintentar.
+9. Ejecutar `scripts/qa/approval-execution-layout-034-postcheck.sql`, comparar los manifests con el backup y detenerse ante el primer error; no reintentar.
 
-La migración aborta en lugar de elegir arbitrariamente un Director cuando detecta duplicidad activa.
+Después de 034 pueden coexistir varios Directores activos por empresa. Cada
+corte exige seleccionar exactamente uno y conserva ese `director_id`.
 
 ## UAT sintética posterior a la aplicación
 
@@ -157,19 +162,19 @@ Desde solicitudes nuevas aprobadas, repetir individualmente para:
 
 Confirmar que `approval_material_updated_at` avanza y que la clasificación es `direction_reapproval_required`.
 
-### Caso C — Director por empresa
+### Caso C — múltiples Directores por empresa
 
-1. Registrar el valor actual de `regular_payments_require_closed_batch`.
-2. Abrir el modal y confirmar que muestra Empresa, Director actual, Nuevo Director, estado y `Guardar Director`.
-3. Confirmar que no existe checkbox de configuración activa ni de enforcement.
-4. Seleccionar un sustituto activo, con rol Dirección y membresía activa en la empresa.
-5. Guardar y confirmar:
-   - una sola asignación activa en la empresa;
-   - la anterior queda inactiva solo para futuros cortes;
-   - ningún `approval_batches.director_id` histórico cambia;
-   - `regular_payments_require_closed_batch` conserva exactamente su valor anterior;
-   - queda auditado actor y timestamp.
-6. Confirmar que, sin candidatos elegibles, Guardar está bloqueado y aparece: `No hay perfiles activos con rol Dirección disponibles.`
+1. Registrar los manifests de batches, items y enforcement.
+2. Abrir `Directores activos para futuros cortes`.
+3. Agregar Director A y luego Director B.
+4. Confirmar dos asignaciones activas simultáneas; agregar B no desactiva A.
+5. Abrir Crear corte y confirmar que aparecen A y B.
+6. Crear un corte asignado exclusivamente a A.
+7. Confirmar que B no puede decidirlo y A sí.
+8. Quitar B y reactivarlo, conservando A activo.
+9. Confirmar que el corte de A, sus items y decisiones no cambian.
+10. Confirmar que no se puede quitar al último Director activo.
+11. Confirmar que enforcement y `payment_receipts` conservan sus manifests.
 
 ### Caso D — perfiles
 
@@ -218,11 +223,11 @@ Validar el modal en tema claro y oscuro:
 
 | Viewport | Zoom |
 | --- | --- |
-| 1440×900 | 100 %, 125 %, 200 % |
-| 1366×768 | 100 %, 125 %, 200 % |
-| 1024×768 | 100 %, 125 %, 200 % |
-| 768×1024 | 100 %, 125 %, 200 % |
-| 390×844 | 100 %, 125 %, 200 % |
+| 1920×1080 | 100 %, 150 %, 200 % |
+| 1440×900 | 100 %, 150 %, 200 % |
+| 768×1024 | 100 %, 150 %, 200 % |
+| 412×915 | 100 %, 150 %, 200 % |
+| 390×844 | 100 %, 150 %, 200 % |
 
 En cada combinación confirmar:
 
@@ -239,19 +244,20 @@ En cada combinación confirmar:
 
 - Harness aislado que carga el diálogo y estilos reales de `layouts.html`, sin iniciar Supabase ni la aplicación.
 - Fixture visual: una solicitud lista y 14 incompletas.
-- Diez combinaciones ejecutadas a 100 %: cinco viewports por tema claro/oscuro.
-- Resultado: 10/10 contenidas y centradas, sin overflow horizontal, con header/footer alcanzables, scroll principal e interno, y botón `Crear layout con 1 pago` habilitado.
-- Axe 4.10.3: `critical=0`, `serious=0` y cero violaciones en las diez combinaciones.
-- Zoom 125 % y 200 %, Escape y recorrido completo de teclado quedan como verificación manual obligatoria en UAT; el controlador local utilizado no expuso un control de zoom verificable.
+- Treinta combinaciones automatizadas: cinco resoluciones, tres equivalencias de zoom y dos temas.
+- Se validan el diálogo Nuevo layout y el diálogo Completar datos en cada combinación.
+- Resultado: 30/30 sin overflow horizontal, recorte, botones fuera del viewport ni superposición de header/footer.
+- La equivalencia obligatoria de 390×844 al 200 % usa viewport CSS 195×422 y pasa.
+- Axe 4.10.3: `critical=0`, `serious=0`.
 
 ## Verificación estática y de regresión
 
 - `node --check`: PASS en los cuatro JavaScript modificados.
-- Contrato nuevo: 17/17 PASS, incluidas ejecuciones aisladas de los adaptadores que enrutan por RPC los INSERT/UPDATE completos del catálogo y el editor operativo de Solicitudes, además de la regresión semántica para la sintaxis PostgreSQL de los prechecks.
+- Contrato focal: 20/20 PASS, incluidos 033, 034, pool multidirector, snapshot de decisión, precheck y postcheck read-only.
 - IDs únicos y `git diff --check`: PASS.
-- Parser PostgreSQL (`pglast`): PASS; migración 033 con 52 statements y precheck read-only con 6 statements.
-- Suite completa bajo `scripts/qa/`: 153/155 PASS.
-- Los dos fallos restantes se reprodujeron sin cambios en un worktree limpio del SHA base `4b2d25cbb54d4cc6d9ff2c02453d6a232ce60738`:
+- Parser PostgreSQL (`pglast`): PASS para migración 034, precheck 034 y postcheck 034.
+- Suite completa bajo `scripts/qa/`: 155/157 PASS.
+- Los dos fallos restantes pertenecen a archivos byte-idénticos al SHA base `fc3d703baa6f8ab71134012d3f54756575005ee0`:
   - `PostgREST P0001 errors preserve actionable domain messages`;
   - `Migration 029 remains byte-identical to the applied contract`.
 - Esos dos defectos de baseline están fuera de los archivos y del alcance autorizado para este hotfix.
@@ -264,18 +270,18 @@ En cada combinación confirmar:
 4. Mostrar el mensaje de autorización conservada y la solicitud en Listas para layout.
 5. Mostrar que otras solicitudes incompletas no bloquean la lista.
 6. Crear el layout con una solicitud.
-7. Mostrar el modal simplificado de Director y sustituirlo en una empresa QA.
-8. Mostrar que el corte histórico conserva al Director anterior y que enforcement no cambió.
+7. Mostrar Director A y Director B activos simultáneamente en una empresa QA.
+8. Crear un corte para A, comprobar que B no puede decidirlo y mostrar que quitar B no altera el corte.
 9. Mostrar estado Activo/Inactivo separado del rol.
 10. Terminar antes de confirmar el pago.
 
 ## Riesgos y límites conocidos antes de DEV
 
 - P0: ninguno identificado en revisión estática.
-- P1: cualquier duplicidad activa de Director hace fallar el precheck; requiere corrección de datos separada y autorizada, no incluida.
+- P1: ninguno después del PASS visual 30/30; la aplicación y UAT siguen siendo gates obligatorios.
 - P2: los casos históricos stale no se reconcilian automáticamente. Algunos pueden seguir requiriendo análisis por falta de historial demostrable.
 - P2: la prueba end-to-end, evidencia de timestamps y postcheck sobre datos sintéticos quedan pendientes hasta aplicar en DEV con la fixture autorizada.
-- P2: zoom 125 %/200 %, Escape y recorrido de teclado requieren la verificación manual indicada en la matriz; la matriz local a 100 % y Axe sí quedó ejecutada.
+- P2: Escape y recorrido completo de teclado se reconfirman en UAT; reflow y axe ya tienen cobertura automatizada.
 - P2: la suite heredada conserva dos fallos reproducibles en el SHA base, documentados arriba; el hotfix no los modifica.
 - P3: `pending.html` se reutiliza como pantalla neutral para el perfil inactivo y su contenido se adapta después de resolver el perfil.
 
@@ -293,3 +299,16 @@ Este hotfix no autoriza ni realiza:
 - confirmaciones de pago;
 - escrituras en `payment_receipts`;
 - reconciliación masiva de solicitudes históricas.
+
+## Runbook futuro de PROD — no ejecutar en este hotfix
+
+Requiere autorización separada después de la sesión y aceptación del cliente:
+
+1. Abrir un release independiente `dev → main`.
+2. Ejecutar precheck y backup privado de PROD.
+3. Aplicar 033 sólo si no existe y validar su SHA/objetos.
+4. Aplicar 034 inmediatamente después, una sola vez.
+5. No copiar fixture ni usuarios QA.
+6. Configurar Directores humanos reales desde la interfaz; permitir varios activos y seleccionar uno por corte.
+7. Comparar manifests históricos, enforcement y `payment_receipts`.
+8. Ejecutar smoke con una solicitud controlada sin confirmar pago, crear receipt ni enviar al banco.
