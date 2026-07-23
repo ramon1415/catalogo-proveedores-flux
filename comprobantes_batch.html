@@ -80,6 +80,30 @@
     </form>
   </dialog>
 
+  <dialog class="narrow" id="duplicateBatchDialog" aria-labelledby="duplicateBatchTitle">
+    <div class="modal-content receipt-duplicate-modal">
+      <div class="modal-header">
+        <div>
+          <p class="receipt-batch-eyebrow">Carga protegida contra duplicados</p>
+          <h2 id="duplicateBatchTitle">Este archivo ya fue cargado</h2>
+          <p>Flux no creó otro lote ni volvió a procesar el PDF.</p>
+        </div>
+        <button class="icon-btn" id="closeDuplicateBatchBtn" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="modal-scroll">
+        <dl class="receipt-duplicate-summary">
+          <div><dt>Folio del lote existente</dt><dd id="duplicateBatchFolio">—</dd></div>
+          <div><dt>Estado actual</dt><dd id="duplicateBatchStatus">—</dd></div>
+        </dl>
+        <p class="receipt-duplicate-help">Puedes abrir el lote original para continuar desde su estado actual. Si deseas cargar otro lote, cierra este aviso y selecciona un PDF diferente.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="dismissDuplicateBatchBtn" type="button">Cerrar</button>
+        <button class="primary-btn" id="openDuplicateBatchBtn" type="button">Abrir lote existente</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="operationDialog" aria-labelledby="operationTitle">
     <div class="modal-content receipt-operation-modal">
       <div class="modal-header"><div><h2 id="operationTitle">Operación bancaria</h2><p id="operationSubtitle">Extracción y conciliación.</p></div><button class="icon-btn" id="closeOperationBtn" type="button" aria-label="Cerrar">×</button></div>
@@ -108,7 +132,7 @@
           </div>
         </details>
       </div>
-      <p class="receipt-batch-cutover-reason" id="confirmDisabledReason"><strong>¿Qué significa conciliar?</strong> Confirmar que esta operación pagó la solicitud y publicar el PDF como evidencia. Esta última acción aún no está habilitada; reservar no marca la solicitud como pagada.</p>
+      <p class="receipt-batch-cutover-reason" id="confirmDisabledReason"><strong>¿Qué significa conciliar?</strong> Confirmar que esta operación pagó la solicitud y publicar el PDF como evidencia. Esta última acción aún no está habilitada; reservar no marca la solicitud como pagada. El cutover financiero se habilitará en un cambio separado.</p>
     </div>
   </dialog>
 

@@ -21,7 +21,7 @@
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
-  const state = { context: null, batches: [], selectedId: null, detail: null, operation: null, candidates: [], candidateOperationId: null, summaryFilter: "", trigger: null, busy: false, detailRequest: 0, candidateRequest: 0 }
+  const state = { context: null, batches: [], selectedId: null, detail: null, operation: null, candidates: [], candidateOperationId: null, duplicateBatch: null, summaryFilter: "", trigger: null, busy: false, detailRequest: 0, candidateRequest: 0 }
   const dom = {}
 
   document.addEventListener("DOMContentLoaded", init)
@@ -54,7 +54,7 @@
   }
 
   function bindDom() {
-    ;["userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle","accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn","batchSearch","batchStatusFilter","batchList","batchDetail","countTotal","countProcessing","countReview","countCompleted","countFailed","newBatchDialog","newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId","batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill","uploadProgressText","uploadError","submitNewBatchBtn","operationDialog","operationTitle","operationSubtitle","operationContent","closeOperationBtn","openSourcePdfBtn","acceptExtractionBtn","rejectExtractionBtn","findCandidatesBtn","proposePlanBtn","reservePlanBtn","expireReservationBtn","releaseReservationBtn","cancelPlanBtn","confirmOperationBtn","operationActionReason","operationReasonInput","operationSecondaryActions"].forEach((id) => { dom[id] = document.getElementById(id) })
+    ;["userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle","accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn","batchSearch","batchStatusFilter","batchList","batchDetail","countTotal","countProcessing","countReview","countCompleted","countFailed","newBatchDialog","newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId","batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill","uploadProgressText","uploadError","submitNewBatchBtn","duplicateBatchDialog","closeDuplicateBatchBtn","dismissDuplicateBatchBtn","openDuplicateBatchBtn","duplicateBatchFolio","duplicateBatchStatus","operationDialog","operationTitle","operationSubtitle","operationContent","closeOperationBtn","openSourcePdfBtn","acceptExtractionBtn","rejectExtractionBtn","findCandidatesBtn","proposePlanBtn","reservePlanBtn","expireReservationBtn","releaseReservationBtn","cancelPlanBtn","confirmOperationBtn","operationActionReason","operationReasonInput","operationSecondaryActions"].forEach((id) => { dom[id] = document.getElementById(id) })
   }
 
   function bindEvents() {
@@ -66,6 +66,9 @@
     dom.cancelNewBatchBtn.addEventListener("click", closeNewBatch)
     dom.newBatchForm.addEventListener("submit", submitBatch)
     dom.batchPdfFile.addEventListener("change", validateSelectedFile)
+    dom.closeDuplicateBatchBtn.addEventListener("click", closeDuplicateBatch)
+    dom.dismissDuplicateBatchBtn.addEventListener("click", closeDuplicateBatch)
+    dom.openDuplicateBatchBtn.addEventListener("click", openDuplicateBatch)
     dom.batchSearch.addEventListener("input", renderBatchList)
     dom.batchStatusFilter.addEventListener("change", renderBatchList)
     dom.batchList.addEventListener("click", (event) => { const button = event.target.closest("[data-batch-id]"); if (button) openBatch(button.dataset.batchId) })
@@ -243,7 +246,7 @@
     dom.proposePlanBtn.hidden = !bankOperationId || openPlan || !candidateReady
     dom.proposePlanBtn.disabled = !can("can_propose") || state.busy
     dom.reservePlanBtn.hidden = !plan.id || plan.status !== "draft" || !planItems.length
-    dom.reservePlanBtn.disabled = !can("can_reserve") || state.busy
+    dom.reservePlanBtn.disabled = !can("can_reserve") || !planItems.length || state.busy
     dom.expireReservationBtn.hidden = !expirableReservation
     dom.expireReservationBtn.disabled = !can("can_reserve") || state.busy
     dom.releaseReservationBtn.hidden = !activeReservation
@@ -259,8 +262,6 @@
     dom.confirmOperationBtn.disabled = true
     dom.operationSecondaryActions.hidden = [dom.rejectExtractionBtn, dom.releaseReservationBtn, dom.expireReservationBtn, dom.cancelPlanBtn].every((button) => button.hidden)
     dom.operationActionReason.textContent = nextActionReason(operation, plan, candidateReady, activeReservation)
-  }
-
   }
 
   function nextActionReason(operation, plan, candidateReady, activeReservation) {
@@ -449,6 +450,20 @@
 
   function openNewBatch() { dom.newBatchForm.reset(); dom.uploadError.textContent = ""; dom.uploadProgress.hidden = true; dom.newBatchDialog.showModal(); dom.batchCompanyId.focus() }
   function closeNewBatch() { if (!state.busy) dom.newBatchDialog.close() }
+  function closeDuplicateBatch() { state.duplicateBatch = null; dom.duplicateBatchDialog.close() }
+  async function openDuplicateBatch() {
+    const batchId = state.duplicateBatch?.id
+    if (!batchId) return
+    state.duplicateBatch = null
+    dom.duplicateBatchDialog.close()
+    await openBatch(batchId)
+  }
+  function showDuplicateBatch(batch) {
+    state.duplicateBatch = batch
+    dom.duplicateBatchFolio.textContent = batch.folio
+    dom.duplicateBatchStatus.textContent = statusLabel(batch.status)
+    dom.duplicateBatchDialog.showModal()
+  }
   function validateSelectedFile() { const error = validateFile(dom.batchPdfFile.files[0]); dom.uploadError.textContent = error || ""; dom.batchPdfHint.textContent = error || (dom.batchPdfFile.files[0] ? `${formatBytes(dom.batchPdfFile.files[0].size)} · listo para procesar` : "Solo PDF. El límite y bucket los autoriza el servidor.") }
 
   async function submitBatch(event) {
@@ -496,18 +511,18 @@
       if (!batchId || !documentId || !bucketId || !storagePath) throw new Error("upload_contract_incomplete")
       const resumeExtraction = created?.duplicate && created?.status === "extracting"
       if (created?.duplicate && !["awaiting_upload","extracting"].includes(created?.status)) {
-        setProgress(100, "El PDF ya existe; se abrió el batch original sin duplicarlo.")
-        state.selectedId = batchId
-        toast("Batch ya registrado", "Se reutilizó la ingesta existente por su huella SHA-256.", "success")
-        await loadBatches()
-        dom.newBatchDialog.close()
+        await surfaceDuplicateBatch(created, batchId)
+        return
+      }
+      if (created?.duplicate) {
+        await surfaceDuplicateBatch(created, batchId)
         return
       }
       if (!resumeExtraction) {
         setProgress(50, "Subiendo al bucket privado autorizado…")
         const bucket = client.storage.from(bucketId)
         const upload = await bucket.upload(storagePath, file, { contentType: "application/pdf", upsert: false })
-        if (upload.error && !(created?.duplicate && /exist|duplicate|409/i.test(`${upload.error.statusCode || ""} ${upload.error.message || ""}`))) throw upload.error
+        if (upload.error) throw upload.error
         setProgress(68, "Finalizando documento…")
         const { error: finalizeError } = await client.rpc(RPC.finalizeBatch, {
           p_batch_id: batchId,
@@ -549,6 +564,18 @@
       pages.push({ pageNumber, items: content.items })
     }
     return parser.parseBbvaDocument(pages, { fileName })
+  }
+
+  async function surfaceDuplicateBatch(created, batchId) {
+    setProgress(100, "Este archivo ya fue cargado. No se creó otro lote.")
+    await loadBatches()
+    const existing = state.batches.find((batch) => batch.id === batchId) || {}
+    dom.newBatchDialog.close()
+    showDuplicateBatch({
+      id: batchId,
+      folio: existing.batch_number || existing.public_folio || created?.batch_number || created?.public_folio || shortId(batchId),
+      status: existing.batch_status || existing.status || created?.status || "awaiting_upload",
+    })
   }
 
   function validateFile(file) {
@@ -640,6 +667,7 @@
     if (/permission|42501|row-level|not authorized/i.test(detail)) return "No tienes permisos para esta operación."
     return message || code || detail
   }
+
   function toast(title, desc, variant) { if (typeof Components !== "undefined" && Components.showToast) return Components.showToast({ title, desc, variant }); const node = document.createElement("div"); node.className = `toast-v2 ${variant}`; node.textContent = `${title}: ${desc}`; document.getElementById("toastStack").append(node); setTimeout(() => node.remove(), 5000) }
   function escapeHtml(value) { return String(value == null ? "" : value).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;") }
 })()
