@@ -37,13 +37,13 @@
           <div class="receipt-batch-toolbar"><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button><button class="primary-btn" id="newBatchBtn" type="button">Nuevo batch</button></div>
         </div>
 
-        <div class="notice-v2 warning" id="cutoverNotice"><span class="notice-icon">!</span><span><span class="notice-title">Etapa disponible: revisión y reserva</span><span class="notice-sep">—</span><span class="notice-desc">Puedes cargar el PDF, revisar sus datos, encontrar solicitudes aprobadas y reservar importes. Conciliar y publicar la evidencia todavía no está habilitado.</span></span></div>
+        <div class="notice-v2 warning" id="cutoverNotice"><span class="notice-icon">!</span><span><span class="notice-title">Vinculación 1:1 protegida</span><span class="notice-sep">—</span><span class="notice-desc">Cada comprobante se vincula con una sola solicitud aprobada. El importe y la moneda se leen del PDF y nunca se capturan durante la vinculación.</span></span></div>
 
         <section class="receipt-batch-flow-overview" aria-label="Flujo de comprobantes">
-          <div class="receipt-flow-step"><span>1</span><strong>Subir PDF</strong><small>Usa Nuevo batch</small></div>
-          <div class="receipt-flow-step"><span>2</span><strong>Revisar datos</strong><small>Compara contra el PDF</small></div>
-          <div class="receipt-flow-step"><span>3</span><strong>Vincular solicitud</strong><small>Asigna y reserva importe</small></div>
-          <div class="receipt-flow-step locked"><span>4</span><strong>Conciliar</strong><small>Confirmar y publicar evidencia</small></div>
+          <div class="receipt-flow-step"><span>1</span><strong>Revisar comprobante</strong><small>Abre una sola página</small></div>
+          <div class="receipt-flow-step"><span>2</span><strong>Buscar solicitud aprobada</strong><small>Consulta sin modificar datos</small></div>
+          <div class="receipt-flow-step"><span>3</span><strong>Confirmar coincidencia</strong><small>Importe y moneda exactos</small></div>
+          <div class="receipt-flow-step"><span>4</span><strong>Comprobante vinculado</strong><small>Solicitud marcada como pagada</small></div>
         </section>
         <p class="receipt-batch-existing-note"><strong>¿Ya aparece un lote?</strong> Fue cargado anteriormente. Para iniciar otro usa <strong>Nuevo batch</strong>. Si subes exactamente el mismo PDF, Flux abrirá el lote original para evitar duplicados.</p>
 
@@ -107,34 +107,63 @@
 
   <dialog id="operationDialog" aria-labelledby="operationTitle">
     <div class="modal-content receipt-operation-modal">
-      <div class="modal-header"><div><h2 id="operationTitle">Operación bancaria</h2><p id="operationSubtitle">Extracción y conciliación.</p></div><button class="icon-btn" id="closeOperationBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-header"><div><h2 id="operationTitle">Comprobante bancario</h2><p id="operationSubtitle">Revisión y vinculación 1:1.</p></div><button class="icon-btn" id="closeOperationBtn" type="button" aria-label="Cerrar">×</button></div>
       <div class="modal-scroll" id="operationContent"></div>
       <div class="receipt-operation-footer">
         <div class="receipt-operation-action-guide">
           <span>Siguiente paso</span>
-          <strong id="operationActionReason">Abre el PDF y revisa los datos.</strong>
+          <strong id="operationActionReason">Abre el comprobante individual y revisa los datos.</strong>
         </div>
         <div class="receipt-operation-primary-actions">
-          <button class="secondary-btn" id="openSourcePdfBtn" type="button">Ver PDF fuente</button>
+          <button class="secondary-btn" id="openReceiptPdfBtn" type="button">Ver comprobante</button>
           <button class="primary-btn" id="acceptExtractionBtn" type="button">Datos correctos, continuar</button>
           <button class="primary-btn" id="findCandidatesBtn" type="button">Buscar solicitud aprobada</button>
-          <button class="primary-btn" id="proposePlanBtn" type="button">Asignar importe</button>
-          <button class="primary-btn" id="reservePlanBtn" type="button">Reservar por 30 min</button>
-          <button class="primary-btn" id="confirmOperationBtn" type="button" hidden disabled aria-describedby="confirmDisabledReason">Conciliar y publicar evidencia</button>
+          <button class="primary-btn" id="confirmOperationBtn" type="button" hidden disabled>Vincular comprobante y marcar solicitud como pagada</button>
         </div>
         <details class="receipt-operation-secondary" id="operationSecondaryActions">
-          <summary>Corregir o deshacer</summary>
+          <summary>¿Los datos leídos son incorrectos?</summary>
           <div class="receipt-operation-secondary-body">
-            <label class="receipt-operation-reason"><span class="sr-only">Motivo de rechazo, liberación o cancelación</span><input class="f-ctrl" id="operationReasonInput" minlength="10" maxlength="500" placeholder="Escribe el motivo (mínimo 10 caracteres)"></label>
-            <button class="secondary-btn" id="rejectExtractionBtn" type="button">Reportar datos incorrectos</button>
-            <button class="secondary-btn" id="releaseReservationBtn" type="button">Liberar reserva</button>
-            <button class="secondary-btn" id="expireReservationBtn" type="button">Cerrar reserva vencida</button>
-            <button class="secondary-btn" id="cancelPlanBtn" type="button">Cancelar asignación</button>
+            <p>La corrección es un flujo separado, queda auditada y debe revisarse nuevamente antes de buscar una solicitud.</p>
+            <button class="secondary-btn" id="openCorrectionBtn" type="button">Corregir datos leídos</button>
           </div>
         </details>
       </div>
-      <p class="receipt-batch-cutover-reason" id="confirmDisabledReason"><strong>¿Qué significa conciliar?</strong> Confirmar que esta operación pagó la solicitud y publicar el PDF como evidencia. Esta última acción aún no está habilitada; reservar no marca la solicitud como pagada. El cutover financiero se habilitará en un cambio separado.</p>
     </div>
+  </dialog>
+
+  <dialog class="narrow" id="extractionCorrectionDialog" aria-labelledby="extractionCorrectionTitle">
+    <form class="modal-content" id="extractionCorrectionForm">
+      <div class="modal-header"><div><h2 id="extractionCorrectionTitle">Corregir datos leídos</h2><p>Solo utiliza este formulario cuando la lectura del PDF sea incorrecta. La corrección quedará auditada y deberá aceptarse nuevamente.</p></div><button class="icon-btn" id="closeCorrectionBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll">
+        <div class="fg cols-2 receipt-correction-grid">
+          <label><span class="f-label">Fecha de pago</span><input class="f-ctrl" id="correctionDate" type="date" required></label>
+          <label><span class="f-label">Importe leído</span><input class="f-ctrl" id="correctionAmount" type="text" inputmode="decimal" required></label>
+          <label><span class="f-label">Moneda</span><input class="f-ctrl" id="correctionCurrency" type="text" maxlength="3" required></label>
+          <label><span class="f-label">Referencia bancaria</span><input class="f-ctrl" id="correctionReference" type="text" maxlength="120" required></label>
+          <label class="span-2"><span class="f-label">Beneficiario</span><input class="f-ctrl" id="correctionBeneficiary" type="text" maxlength="180" required></label>
+          <label class="span-2"><span class="f-label">Concepto</span><input class="f-ctrl" id="correctionConcept" type="text" maxlength="500"></label>
+          <label class="span-2"><span class="f-label">Motivo de la corrección</span><textarea class="f-ctrl" id="correctionReason" minlength="10" maxlength="500" required></textarea></label>
+        </div>
+        <p class="receipt-section-help">El importe corregido será canónico únicamente después de una nueva revisión humana. Nunca podrá editarse durante el matching.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn danger-outline" id="markReceiptUnusableBtn" type="button">No es un comprobante individual</button>
+        <button class="secondary-btn" id="cancelCorrectionBtn" type="button">Cancelar</button>
+        <button class="primary-btn" type="submit">Guardar corrección</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="narrow" id="linkConfirmationDialog" aria-labelledby="linkConfirmationTitle">
+    <form class="modal-content" id="linkConfirmationForm">
+      <div class="modal-header"><div><h2 id="linkConfirmationTitle">Confirmar coincidencia</h2><p>Esta acción vinculará un comprobante individual con una sola solicitud.</p></div><button class="icon-btn" id="closeLinkConfirmationBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll">
+        <p class="receipt-link-confirmation-copy" id="linkConfirmationCopy"></p>
+        <dl class="receipt-link-confirmation-grid" id="linkConfirmationSummary"></dl>
+        <label class="payment-final-attestation"><input id="linkConfirmationCheck" type="checkbox"><span>Confirmo que revisé el comprobante individual, la solicitud, el importe y la moneda.</span></label>
+      </div>
+      <div class="modal-actions"><button class="secondary-btn" id="cancelLinkConfirmationBtn" type="button">Cancelar</button><button class="primary-btn" id="submitLinkConfirmationBtn" type="submit" disabled>Vincular y marcar como pagada</button></div>
+    </form>
   </dialog>
 
   <div class="toast-stack-v2" id="toastStack" aria-live="polite"></div>
@@ -144,7 +173,7 @@
   <script src="./config.js?v=20260721-receipt-batches"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./payment_batch_parser.js?v=20260721-v1"></script>
-  <script src="./comprobantes_batch.js?v=20260723-guided-ux"></script>
-  <script src="./payment_batch_final_reconciliation.js?v=20260723-v1"></script>
+  <script src="./payment_batch_single_page_pdf.js?v=20260723-one-to-one"></script>
+  <script src="./comprobantes_batch.js?v=20260723-one-to-one"></script>
 </body>
 </html>

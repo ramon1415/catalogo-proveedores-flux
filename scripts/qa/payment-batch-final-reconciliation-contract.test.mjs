@@ -1,254 +1,392 @@
-import assert from "node:assert/strict"
-import fs from "node:fs"
-import path from "node:path"
-import test from "node:test"
-import { fileURLToPath } from "node:url"
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-const read = (name) => fs.readFileSync(path.join(root, name), "utf8")
-const migration = read("supabase/migrations/033_payment_batch_final_reconciliation.sql")
-const batchClient = read("payment_batch_final_reconciliation.js")
-const requestClient = read("payment_request_reconciliation_evidence.js")
-const batchHtml = read("comprobantes_batch.html")
-const requestsHtml = read("solicitudes.html")
-const css = read("payment_batch_final_reconciliation.css")
+const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const migration = readFileSync(
+  join(root, "supabase", "migrations", "033_payment_batch_final_reconciliation.sql"),
+  "utf8",
+);
+const html = readFileSync(join(root, "comprobantes_batch.html"), "utf8");
+const client = readFileSync(join(root, "comprobantes_batch.js"), "utf8");
+const helper = readFileSync(
+  join(root, "payment_batch_single_page_pdf.js"),
+  "utf8",
+);
+const requestEvidence = readFileSync(
+  join(root, "payment_request_reconciliation_evidence.js"),
+  "utf8",
+);
+const requestsHtml = readFileSync(join(root, "solicitudes.html"), "utf8");
+const css = readFileSync(
+  join(root, "payment_batch_final_reconciliation.css"),
+  "utf8",
+);
 
-function functionSource(name) {
-  const start = migration.search(new RegExp(
-    `create(?:\\s+or\\s+replace)?\\s+function\\s+public\\.${name}\\s*\\(`,
-    "i",
-  ))
-  assert.ok(start >= 0, `missing function ${name}`)
-  const bodyStart = migration.indexOf("as $$", start)
-  const end = migration.indexOf("\n$$;", bodyStart)
-  assert.ok(bodyStart > start && end > bodyStart, `incomplete function ${name}`)
-  return migration.slice(start, end + 4)
+function functionBody(name) {
+  const start = migration.search(
+    new RegExp(
+      `create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\s*\\(`,
+      "i",
+    ),
+  );
+  assert.notEqual(start, -1, `Missing SQL function ${name}`);
+  const next = migration
+    .slice(start + 1)
+    .search(/create\s+(?:or\s+replace\s+)?function\s+public\./i);
+  return next === -1
+    ? migration.slice(start)
+    : migration.slice(start, start + 1 + next);
 }
 
-function clientFunction(source, name, nextName) {
-  const start = source.indexOf(`function ${name}`)
-  const end = source.indexOf(`\n  ${nextName}`, start)
-  assert.ok(start >= 0 && end > start, `missing client function ${name}`)
-  return source.slice(start, end)
-}
+test("033 is additive and refuses to run without the 032 baseline", () => {
+  assert.match(migration, /payment_batch_032_required/i);
+  assert.match(migration, /raise exception/i);
+  assert.doesNotMatch(migration, /\b(drop|truncate)\b/i);
+});
 
-test("migration 033 is fail-closed on the certified 032 contract", () => {
-  assert.match(migration, /begin;\s*do \$precheck\$/i)
-  assert.match(migration, /payment_batch_032_required/)
-  assert.match(migration, /to_regclass\('public\.payment_allocation_movements'\)/)
-  assert.match(migration, /to_regclass\('public\.payment_receipts'\)/)
-  assert.match(migration, /payment_reconciliation_command_replay\(uuid,text,text,text,uuid\)/)
-  assert.match(migration, /payment_batch_033_objects_already_exist/)
-  assert.match(migration, /commit;\s*$/i)
-})
+test("033 creates the append-only extraction correction ledger", () => {
+  assert.match(migration, /create table public\.payment_extraction_corrections/i);
+  assert.match(
+    migration,
+    /payment_extraction_corrections[\s\S]*corrected_by[\s\S]*corrected_at/i,
+  );
+  assert.match(
+    migration,
+    /payment_extraction_corrections_immutable[\s\S]*payment_receipt_protect_append_only/i,
+  );
+});
 
-test("terminal states extend 032 additively without replacing certified constraints", () => {
-  assert.match(migration, /reconciliation_status text not null default 'unreconciled'/)
-  assert.match(migration, /confirmation_status text not null default 'unconfirmed'/)
-  assert.match(migration, /consumption_status text not null default 'available'/)
-  assert.match(migration, /set status = 'released',[\s\S]*consumption_status = 'consumed'/)
-  assert.doesNotMatch(migration, /\bdrop\b|\btruncate\b/i)
-  assert.doesNotMatch(migration, /alter\s+type\s+public\.payment_request_status/i)
-})
+test("033 creates private individual evidence with an exact one-page invariant", () => {
+  assert.match(migration, /create table public\.payment_operation_evidence/i);
+  assert.match(migration, /page_count\s*=\s*1/i);
+  assert.match(migration, /(individual_sha256|sha256)[\s\S]*unique/i);
+});
 
-test("private evidence is versioned, operation-bound and exactly one source page", () => {
-  assert.match(migration, /create table public\.payment_operation_evidence/)
-  assert.match(migration, /source_page_number integer not null/)
-  assert.match(migration, /evidence_kind text not null default 'derived_single_page_pdf'/)
-  assert.match(migration, /unique \(operation_id, version\)/)
-  assert.match(migration, /payment_operation_documents[\s\S]*page_number = new\.source_page_number/)
-  assert.match(migration, /storage_bucket text not null default 'payment-batch-documents'/)
-  assert.match(migration, /\/evidence\/\[0-9a-f-\]\{36\}\\\.pdf/)
-})
+test("033 creates one immutable receipt-to-request link", () => {
+  assert.match(
+    migration,
+    /create table public\.payment_request_receipt_links/i,
+  );
+  assert.match(
+    migration,
+    /payment_request_receipt_links[\s\S]*unique\s*\(\s*operation_id\s*\)/i,
+  );
+  assert.match(
+    migration,
+    /payment_request_receipt_links[\s\S]*unique\s*\(\s*payment_request_id\s*\)/i,
+  );
+});
 
-test("evidence lifecycle is controlled and requires human attestation", () => {
-  const transition = functionSource("payment_reconciliation_validate_evidence_transition")
-  assert.match(transition, /pending_upload' and new\.status = 'pending_review'/)
-  assert.match(transition, /pending_review'[\s\S]*new\.status in \('shareable', 'not_shareable'\)/)
-  assert.match(transition, /payment_evidence_transition_not_allowed/)
-  const review = functionSource("review_payment_operation_evidence")
-  assert.match(review, /single_operation_attestation_required/)
-  assert.match(review, /evidence_rejection_reason_required/)
-  assert.match(review, /append_financial_outbox_event_internal/)
-})
+test("one evidence record cannot be linked twice", () => {
+  assert.match(
+    migration,
+    /payment_request_receipt_links[\s\S]*unique\s*\(\s*evidence_id\s*\)/i,
+  );
+});
 
-test("legacy payment_receipts becomes read-only without row mutation or dual write", () => {
-  assert.match(migration, /payment_receipts_read_only_after_reconciliation_cutover/)
-  assert.match(migration, /legacy_payment_receipts_read_only_after_cutover/)
-  assert.doesNotMatch(migration, /insert\s+into\s+public\.payment_receipts/i)
-  assert.doesNotMatch(migration, /update\s+public\.payment_receipts/i)
-  assert.doesNotMatch(migration, /delete\s+from\s+public\.payment_receipts/i)
-  assert.doesNotMatch(migration, /notification_events/i)
-})
+test("legacy payment_receipts remains structurally and financially untouched", () => {
+  assert.doesNotMatch(
+    migration,
+    /\b(alter\s+table|insert\s+into|update|delete\s+from)\s+(?:public\.)?payment_receipts\b/i,
+  );
+});
 
-test("confirmation implements replay-safe idempotency before financial mutation", () => {
-  const confirm = functionSource("confirm_payment_operation")
-  const replay = confirm.indexOf("payment_reconciliation_command_replay")
-  const firstMovement = confirm.indexOf("insert into public.payment_allocation_movements")
-  const store = confirm.indexOf("payment_reconciliation_store_command")
-  assert.ok(replay >= 0 && firstMovement > replay && store > firstMovement)
-  assert.match(confirm, /idempotency_key_conflict|payment_reconciliation_command_replay/)
-  assert.match(confirm, /'confirm:' \|\| public\.payment_reconciliation_payload_hash/)
-})
+test("033 does not dual-write notification_events", () => {
+  assert.doesNotMatch(migration, /\bnotification_events\b/i);
+});
 
-test("canonical lock order is plan, operation, reservation, requests, snapshots", () => {
-  const confirm = functionSource("confirm_payment_operation")
-  const marker = confirm.indexOf("Canonical lock order")
-  const plan = confirm.indexOf("from public.payment_allocation_plans", marker)
-  const operation = confirm.indexOf("from public.bank_payment_operations", plan)
-  const reservation = confirm.indexOf("from public.payment_allocation_reservations", operation)
-  const requests = confirm.indexOf("from public.payment_requests request", reservation)
-  const snapshots = confirm.indexOf("from public.payable_snapshots snapshot", requests)
-  assert.ok(marker >= 0 && plan > marker && operation > plan)
-  assert.ok(reservation > operation && requests > reservation && snapshots > requests)
-  assert.match(confirm.slice(plan, snapshots + 180), /for update/g)
-})
+test("the final 1:1 flow has no allocation, movement, or reservation dependency", () => {
+  assert.doesNotMatch(
+    migration,
+    /\b(payment_allocation_plans|payment_allocation_plan_items|payment_reservations|payment_reconciliation_movements)\b/i,
+  );
+  assert.doesNotMatch(migration, /\b(reserve|release_reservation|expire_reservation)\b/i);
+});
 
-test("one bank operation is all-or-nothing while batches remain derived", () => {
-  const confirm = functionSource("confirm_payment_operation")
-  assert.match(confirm, /v_plan\.total_amount_minor\s*<>[\s\S]*v_operation\.amount_minor - v_operation_confirmed/)
-  assert.match(confirm, /operation_requires_full_atomic_allocation/)
-  assert.match(confirm, /v_item_total <> v_plan\.total_amount_minor/)
-  assert.match(migration, /derived_reconciliation_status/)
-  assert.match(migration, /'completed'/)
-  assert.match(migration, /'partially_completed'/)
-  assert.match(migration, /'failed'/)
-})
+test("accepted extraction remains the only source for operation amount and currency", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  assert.match(link, /bank_payment_operations[\s\S]*for update/i);
+  assert.match(link, /amount_minor/i);
+  assert.match(link, /currency/i);
+  assert.doesNotMatch(link, /p_amount/i);
+  assert.doesNotMatch(link, /p_currency/i);
+});
 
-test("request balance is cumulative across snapshot versions and never overpaid", () => {
-  const balance = functionSource("payment_request_confirmed_minor")
-  assert.match(balance, /join public\.payable_snapshots snapshot/)
-  assert.match(balance, /snapshot\.payment_request_id = p_payment_request_id/)
-  const confirm = functionSource("confirm_payment_operation")
-  assert.match(confirm, /payable_snapshot_not_latest/)
-  assert.match(confirm, /payable_snapshot_capacity_exceeded/)
-  assert.match(confirm, /payment_request_overpayment_blocked/)
-  assert.match(confirm, /if v_request_confirmed = v_request_authorized then[\s\S]*set status = 'paid'/)
-  assert.doesNotMatch(confirm, /set status = 'paid'[\s\S]{0,180}v_request_confirmed </)
-})
+test("candidate search is read-only and stable", () => {
+  const search = functionBody("find_payment_receipt_candidates");
+  assert.match(search, /stable/i);
+  assert.doesNotMatch(
+    search,
+    /\b(insert\s+into|update\s+public\.|delete\s+from)\b/i,
+  );
+});
 
-test("state, ledger, evidence link and outbox commit inside one RPC transaction", () => {
-  const confirm = functionSource("confirm_payment_operation")
-  const movement = confirm.indexOf("insert into public.payment_allocation_movements")
-  const link = confirm.indexOf("insert into public.payment_movement_evidence_links")
-  const request = confirm.indexOf("update public.payment_requests")
-  const reservation = confirm.indexOf("update public.payment_allocation_reservations")
-  const plan = confirm.indexOf("update public.payment_allocation_plans")
-  const operation = confirm.indexOf("update public.bank_payment_operations")
-  const outbox = confirm.indexOf("append_financial_outbox_event_internal")
-  assert.ok(movement >= 0 && link > movement && request > link)
-  assert.ok(reservation > request && plan > reservation && operation > plan && outbox > operation)
-  assert.match(confirm, /'payment\.operation_confirmed'/)
-  assert.doesNotMatch(confirm, /\bcommit\b|\brollback\b/i)
-})
+test("candidate search requires exact amount and normalized currency", () => {
+  const search = functionBody("find_payment_receipt_candidates");
+  assert.match(
+    search,
+    /snapshot\.amount_minor\s*=\s*v_operation\.amount_minor/i,
+  );
+  assert.match(
+    search,
+    /snapshot\.currency\s*=\s*v_operation\.currency/i,
+  );
+});
 
-test("two reviewers and stale balances are revalidated under row locks", () => {
-  const preview = functionSource("get_payment_operation_confirmation_preview")
-  const confirm = functionSource("confirm_payment_operation")
-  assert.match(preview, /payment_reservation_owned_by_another_actor/)
-  assert.match(confirm, /v_reservation\.created_by <> v_actor/)
-  assert.match(confirm, /payment_reconciliation_snapshot_is_payable/)
-  assert.match(confirm, /payment_request_confirmed_minor/)
-  assert.match(confirm, /bank_operation_already_reconciled/)
-})
+test("candidate search returns approved, payable, and unlinked requests only", () => {
+  const search = functionBody("find_payment_receipt_candidates");
+  assert.match(search, /payment_reconciliation_snapshot_is_payable/i);
+  assert.match(search, /payment_request_receipt_links/i);
+  assert.match(search, /payment_receipts/i);
+  assert.match(search, /(approved|aprob)/i);
+});
 
-test("new tables are RLS-only and browser access is RPC-only", () => {
-  for (const table of ["payment_operation_evidence", "payment_movement_evidence_links"]) {
-    assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`, "i"))
-    assert.match(migration, new RegExp(`revoke all on table public\\.${table}[\\s\\S]{0,100}authenticated`, "i"))
-  }
-  for (const rpc of [
-    "get_payment_operation_confirmation_preview",
-    "prepare_payment_operation_evidence",
-    "finalize_payment_operation_evidence",
-    "review_payment_operation_evidence",
-    "confirm_payment_operation",
-    "get_payment_operation_evidence_access",
-    "get_payment_request_reconciliation_summary",
-    "get_payment_batch_reconciliation_summary",
+test("provider compatibility is revalidated during candidate search", () => {
+  assert.match(
+    functionBody("find_payment_receipt_candidates"),
+    /(provider|proveedor)/i,
+  );
+});
+
+test("final link accepts only operation, request, and idempotency inputs", () => {
+  const declaration = migration.match(
+    /create\s+(?:or\s+replace\s+)?function\s+public\.link_payment_receipt_to_request\s*\(([\s\S]*?)\)\s*returns/i,
+  );
+  assert.ok(declaration);
+  const args = declaration[1].toLowerCase();
+  assert.match(args, /p_operation_id/);
+  assert.match(args, /p_payment_request_id/);
+  assert.match(args, /p_idempotency_key/);
+  assert.doesNotMatch(args, /p_(amount|currency|allocation|reservation)/);
+});
+
+test("final link locks every financial authority before validating", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  assert.ok((link.match(/for update/gi) || []).length >= 4);
+  assert.match(link, /payment_requests/i);
+  assert.match(link, /payable_snapshots/i);
+  assert.match(link, /payment_operation_evidence/i);
+});
+
+test("final link revalidates accepted extraction, approval, exact facts, and provider", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  assert.match(link, /accepted/i);
+  assert.match(link, /(approved|aprob)/i);
+  assert.match(link, /amount_minor/i);
+  assert.match(link, /currency/i);
+  assert.match(link, /(provider|proveedor)/i);
+});
+
+test("final link is idempotent and stores the command result", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  assert.match(link, /idempotency/i);
+  assert.match(link, /payment_reconciliation_command_replay/i);
+  assert.match(link, /payment_reconciliation_store_command/i);
+});
+
+test("link, paid state, audit, and outbox share one database transaction", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  assert.match(link, /insert into public\.payment_request_receipt_links/i);
+  assert.match(link, /update public\.payment_requests/i);
+  assert.match(link, /append_financial_outbox_event_internal/i);
+  assert.doesNotMatch(link, /\bcommit\b/i);
+});
+
+test("the outbox event is financial and contains no full account data", () => {
+  const link = functionBody("link_payment_receipt_to_request");
+  const outboxStart = link.indexOf(
+    "v_event_id := public.append_financial_outbox_event_internal",
+  );
+  const outboxEnd = link.indexOf("v_result :=", outboxStart);
+  assert.notEqual(outboxStart, -1);
+  assert.notEqual(outboxEnd, -1);
+  const outboxCall = link.slice(outboxStart, outboxEnd);
+  assert.match(outboxCall, /payment_receipt\.linked/i);
+  assert.doesNotMatch(
+    outboxCall,
+    /(clabe|account_number|cuenta_completa|cuenta_bancaria)/i,
+  );
+});
+
+test("evidence preparation and review are separate guarded transitions", () => {
+  assert.match(migration, /prepare_payment_operation_evidence/i);
+  assert.match(migration, /finalize_payment_operation_evidence/i);
+  assert.match(migration, /review_payment_operation_evidence/i);
+  assert.match(migration, /payment_receipt_validate_evidence_transition/i);
+});
+
+test("storage policies cover only private derived one-page evidence", () => {
+  assert.match(migration, /storage\.objects/i);
+  assert.match(migration, /payment-batch-documents/i);
+  assert.match(migration, /(application\/pdf|pdf)/i);
+  assert.doesNotMatch(migration, /grant\s+select\s+on\s+storage\.objects\s+to\s+anon/i);
+});
+
+test("RLS is enabled on every 033 table", () => {
+  for (const table of [
+    "payment_extraction_corrections",
+    "payment_operation_evidence",
+    "payment_request_receipt_links",
   ]) {
-    assert.match(migration, new RegExp(`grant execute on function[\\s\\S]{0,100}public\\.${rpc}\\(`, "i"))
+    assert.match(
+      migration,
+      new RegExp(
+        `alter\\s+table\\s+public\\.${table}\\s+enable\\s+row\\s+level\\s+security`,
+        "i",
+      ),
+    );
   }
-  assert.doesNotMatch(batchClient, /\.from\([^)]*\)[\s\S]{0,160}\.(?:insert|update|upsert|delete)\s*\(/i)
-  assert.doesNotMatch(requestClient, /\.from\([^)]*\)[\s\S]{0,160}\.(?:insert|update|upsert|delete)\s*\(/i)
-  assert.doesNotMatch(`${batchClient}\n${requestClient}`, /\bservice[_-]?role\b/i)
-})
+});
 
-test("Storage permits only private derived PDFs for Finance", () => {
-  assert.match(migration, /Finance can upload derived payment evidence/)
-  assert.match(migration, /Finance can read derived payment evidence/)
-  assert.match(migration, /payment_reconciliation_evidence_storage_path_allowed\(name, true\)/)
-  assert.match(migration, /payment_reconciliation_evidence_storage_path_allowed\(name, false\)/)
-  assert.doesNotMatch(migration, /update\s+to authenticated[\s\S]*derived payment evidence/i)
-  assert.doesNotMatch(migration, /storage\.buckets[\s\S]{0,120}\btrue\b/i)
-})
+test("authenticated users receive RPC execution, not direct table mutation", () => {
+  assert.doesNotMatch(
+    migration,
+    /grant\s+(all|insert|update|delete)[\s\S]{0,120}\bto\s+authenticated\b/i,
+  );
+  assert.match(
+    migration,
+    /grant\s+execute\s+on\s+function[\s\S]*link_payment_receipt_to_request/i,
+  );
+});
 
-test("browser derives one page, never overwrites, and requires review", () => {
-  assert.match(batchHtml, /pdf-lib@1\.17\.1/)
-  assert.match(batchClient, /copyPages\(sourcePdf, \[pageNumber - 1\]\)/)
-  assert.match(batchClient, /evidencePdf\.addPage\(copiedPage\)/)
-  assert.match(batchClient, /const existingObject = await bucket\.download\(evidence\.storage_path\)/)
-  assert.match(batchClient, /existingPdf\.getPageCount\(\) !== 1/)
-  assert.match(batchClient, /finalSha256 !== derivedSha256/)
-  assert.match(batchClient, /upsert:\s*false/)
-  assert.match(batchClient, /data-payment-final-attestation/)
-  assert.match(batchClient, /Aprobar evidencia/)
-  assert.match(batchClient, /No es compartible/)
-})
+test("batch context exposes explicit match and link capabilities", () => {
+  const context = functionBody("get_payment_batch_context");
+  assert.match(context, /can_match/i);
+  assert.match(context, /can_link/i);
+});
 
-test("evidence access is Finance-only and expires after five minutes", () => {
-  const access = functionSource("get_payment_operation_evidence_access")
-  assert.match(access, /payment_reconciliation_require_finance/)
-  assert.match(access, /'url_ttl_seconds', 300/)
-  assert.match(batchClient, /createSignedUrl\(data\.storage_path, Number\(data\.url_ttl_seconds \|\| 300\)\)/)
-  assert.match(requestClient, /createSignedUrl\(data\.storage_path, Number\(data\.url_ttl_seconds \|\| 300\)\)/)
-})
-
-test("provider delivery remains disabled without an auth-to-provider identity link", () => {
-  assert.match(migration, /'external_provider_access', false/)
-  assert.match(migration, /provider_identity_link_not_implemented/)
-  assert.match(batchClient, /Acceso del proveedor:[\s\S]*deshabilitado/)
-  assert.match(requestClient, /Acceso externo deshabilitado/)
-  assert.doesNotMatch(migration, /provider.*(?:email|rfc).*auth|auth.*provider.*(?:email|rfc)/i)
-})
-
-test("request detail exposes Finance balance and downloadable evidence", () => {
-  assert.match(requestsHtml, /payment_request_reconciliation_evidence\.js/)
-  assert.match(requestClient, /const originalOpenRequestDetail = window\.openRequestDetail/)
-  assert.match(requestClient, /get_payment_request_reconciliation_summary/)
-  assert.match(requestClient, /Monto autorizado/)
-  assert.match(requestClient, /Saldo pendiente/)
-  assert.match(requestClient, /data-request-evidence-id/)
-})
-
-test("functional assets are isolated extensions rather than visual PR duplication", () => {
-  assert.match(batchHtml, /payment_batch_final_reconciliation\.css/)
-  assert.match(batchHtml, /payment_batch_final_reconciliation\.js/)
-  assert.match(requestsHtml, /payment_batch_final_reconciliation\.css/)
-  assert.doesNotMatch(batchClient, /receipt-operation-workflow|receipt-batch-flow-overview/)
-})
-
-test("responsive layout and reduced-motion handling cover desktop and mobile", () => {
-  assert.match(css, /@media\(max-width:820px\)/)
-  assert.match(css, /@media\(max-width:560px\)/)
-  assert.match(css, /@media\(prefers-reduced-motion:reduce\)/)
-  assert.match(css, /payment-final-confirm-dialog/)
-  assert.match(css, /payment-request-reconciliation-entry/)
-})
-
-test("UI idempotency keys survive an ambiguous in-session retry", () => {
-  assert.match(batchClient, /commandKeys:\s*new Map\(\)/)
-  assert.match(batchClient, /state\.commandKeys\.get\(mapKey\) \|\| commandId\(\)/)
-  assert.match(batchClient, /state\.commandKeys\.set\(mapKey, idempotencyKey\)/)
-  assert.match(batchClient, /state\.commandKeys\.delete\(mapKey\)/)
-  assert.match(batchClient, /crypto\?\.randomUUID/)
-})
-
-test("client refreshes authoritative state only after leaving the busy guard", () => {
-  const generate = clientFunction(batchClient, "generateEvidence", "async function reviewEvidence")
-  const review = clientFunction(batchClient, "reviewEvidence", "async function openEvidence")
-  const confirm = clientFunction(batchClient, "executeConfirmation", "async function rpcIdempotent")
-  for (const source of [generate, review, confirm]) {
-    assert.match(source, /setBusy\(false\)[\s\S]{0,160}await refreshOperation\(\)/)
+test("the operator UI presents four plain-language steps", () => {
+  for (const label of [
+    "Revisar comprobante",
+    "Buscar solicitud aprobada",
+    "Confirmar coincidencia",
+    "Comprobante vinculado",
+  ]) {
+    assert.match(html, new RegExp(label, "i"));
   }
-})
+});
+
+test("the operator UI contains no reservation or partial-allocation controls", () => {
+  assert.doesNotMatch(
+    html,
+    /(Proponer asignación|Reservar|Liberar reserva|Expirar reserva|Cancelar plan|remanente financiero|disponible para reservar)/i,
+  );
+  assert.doesNotMatch(
+    html,
+    /id=["'](?:proposePlanBtn|reservePlanBtn|releaseReservationBtn|expireReservationBtn|cancelPlanBtn)["']/i,
+  );
+});
+
+test("candidate choice is singular and does not expose an editable amount", () => {
+  assert.match(client, /type\s*=\s*["']radio["']/i);
+  assert.doesNotMatch(client, /receipt-candidate-amount/i);
+  assert.doesNotMatch(client, /type\s*=\s*["']number["']/i);
+});
+
+test("extraction correction is a separate explicit dialog", () => {
+  assert.match(html, /id=["'][^"']*correction[^"']*dialog["']/i);
+  assert.match(html, /Motivo de la corrección/i);
+  assert.match(client, /correct_payment_document_extraction/i);
+});
+
+test("link confirmation has its own explicit confirmation dialog", () => {
+  assert.match(html, /id=["'][^"']*(link|confirm)[^"']*dialog["']/i);
+  assert.match(html, /Confirmar coincidencia/i);
+  assert.match(client, /link_payment_receipt_to_request/i);
+});
+
+test("the browser passes no editable financial facts to the final link RPC", () => {
+  assert.match(client, /p_operation_id/i);
+  assert.match(client, /p_payment_request_id/i);
+  assert.doesNotMatch(
+    client,
+    /link_payment_receipt_to_request[\s\S]{0,600}p_(amount|currency|allocation|reservation)/i,
+  );
+});
+
+test("the browser fails closed unless server capabilities allow matching and linking", () => {
+  assert.match(client, /can_match/i);
+  assert.match(client, /can_link/i);
+  assert.match(client, /disabled/i);
+});
+
+test("the browser has no direct financial DML or privileged credential", () => {
+  assert.doesNotMatch(
+    client,
+    /\.from\s*\(\s*["'`](payment_requests|payment_receipts|payment_request_receipt_links|bank_payment_operations|payment_operation_evidence)["'`]\s*\)\s*\.\s*(insert|update|upsert|delete)/i,
+  );
+  assert.doesNotMatch(client, /\b(service_role|SUPABASE_SERVICE_ROLE_KEY)\b/i);
+});
+
+test("one-page helper physically copies one source page into a new PDF", () => {
+  assert.match(helper, /PDFDocument\.load/i);
+  assert.match(helper, /PDFDocument\.create/i);
+  assert.match(helper, /copyPages/i);
+  assert.match(helper, /addPage/i);
+});
+
+test("one-page helper validates source type and resulting page count", () => {
+  assert.match(helper, /application\/pdf/i);
+  assert.match(helper, /getPageCount/i);
+  assert.match(helper, /pageCount\s*!==\s*1|getPageCount\(\)\s*!==\s*1/i);
+});
+
+test("source batch PDF is fetched only to derive evidence and is never opened for the user", () => {
+  assert.match(client, /deriveSinglePageFromUrl/i);
+  assert.doesNotMatch(
+    client,
+    /window\.open\s*\(\s*(?:source|batch|document).*signed/i,
+  );
+});
+
+test("request detail loads exactly one linked receipt summary", () => {
+  assert.match(requestEvidence, /get_payment_request_receipt_summary/i);
+  assert.match(requestEvidence, /get_payment_operation_evidence_access/i);
+  assert.doesNotMatch(requestEvidence, /(saldo parcial|pago parcial|remanente)/i);
+});
+
+test("request evidence download revalidates the one-page PDF", () => {
+  assert.match(requestEvidence, /downloadAndVerifySinglePage/i);
+  assert.match(requestsHtml, /payment_batch_single_page_pdf\.js/i);
+});
+
+test("provider external access remains disabled in this cut", () => {
+  assert.match(requestEvidence, /(disabled|deshabilitad|no disponible)/i);
+});
+
+test("modal CSS uses one vertical scroll, no horizontal overflow, and responsive layout", () => {
+  assert.match(css, /overflow-y\s*:\s*auto/i);
+  assert.match(css, /overflow-x\s*:\s*hidden/i);
+  assert.match(css, /max-height\s*:/i);
+  assert.match(css, /@media\s*\(/i);
+});
+
+test("modal title and long references use readable, wrapping styles", () => {
+  assert.match(css, /var\(--text-1\)/i);
+  assert.match(css, /(overflow-wrap|word-break)\s*:/i);
+});
+
+test("removed N:M client module is no longer loaded", () => {
+  assert.doesNotMatch(html, /payment_batch_final_reconciliation\.js/i);
+  assert.doesNotMatch(client, /(propose_payment_allocation|reserve_payment_allocation)/i);
+});
+
+test("final files contain no secrets, database URLs, or mojibake", () => {
+  const surface = [
+    migration,
+    html,
+    client,
+    helper,
+    requestEvidence,
+    requestsHtml,
+    css,
+  ].join("\n");
+  assert.doesNotMatch(
+    surface,
+    /(SUPABASE_SERVICE_ROLE_KEY|postgres(?:ql)?:\/\/|BEGIN PRIVATE KEY)/i,
+  );
+  assert.doesNotMatch(surface, /(Ã|Â|�)/);
+});

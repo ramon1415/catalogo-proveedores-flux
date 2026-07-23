@@ -1,13 +1,13 @@
-;(function paymentRequestReconciliationEvidence() {
+;(function paymentRequestReceiptEvidence() {
   "use strict"
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const originalOpenRequestDetail = window.openRequestDetail
   if (!client || typeof originalOpenRequestDetail !== "function") return
 
-  window.openRequestDetail = async function openRequestDetailWithEvidence(paymentRequestId) {
+  window.openRequestDetail = async function openRequestDetailWithReceipt(paymentRequestId) {
     await originalOpenRequestDetail(paymentRequestId)
-    await renderReconciliation(paymentRequestId)
+    await renderReceipt(paymentRequestId)
   }
 
   document.addEventListener("click", async (event) => {
@@ -15,74 +15,86 @@
     if (!button) return
     button.disabled = true
     try {
-      const { data, error } = await client.rpc("get_payment_operation_evidence_access", {
-        p_evidence_id: button.dataset.requestEvidenceId,
-      })
-      if (error) throw error
-      const signed = await client.storage
-        .from(data.storage_bucket)
-        .createSignedUrl(data.storage_path, Number(data.url_ttl_seconds || 300))
-      if (signed.error || !signed.data?.signedUrl) throw signed.error || new Error("evidence_url_unavailable")
-      window.open(signed.data.signedUrl, "_blank", "noopener,noreferrer")
+      await accessEvidence(
+        button.dataset.requestEvidenceId,
+        button.dataset.requestEvidenceAction === "download",
+      )
     } catch (error) {
-      toast("No se pudo abrir la evidencia", error?.message || "Intenta de nuevo.", "danger")
+      toast("No se pudo abrir el comprobante", error?.message || "Intenta de nuevo.", "danger")
     } finally {
       button.disabled = false
     }
   })
 
-  async function renderReconciliation(paymentRequestId) {
+  async function accessEvidence(evidenceId, download) {
+    const preview = download ? null : window.open("about:blank", "_blank")
+    if (!download && !preview) throw new Error("popup_blocked")
+    if (preview) preview.opener = null
+    try {
+      const { data, error } = await client.rpc("get_payment_operation_evidence_access", {
+        p_evidence_id: evidenceId,
+      })
+      if (error) throw error
+      const signed = await client.storage
+        .from(data.storage_bucket)
+        .createSignedUrl(data.storage_path, Number(data.url_ttl_seconds || 300))
+      if (signed.error || !signed.data?.signedUrl) {
+        throw signed.error || new Error("evidence_url_unavailable")
+      }
+      if (!download) {
+        preview.location.replace(signed.data.signedUrl)
+        return
+      }
+      const bytes = await window.FluxSinglePagePdf.downloadAndVerifySinglePage(
+        signed.data.signedUrl,
+        { pdfLib: window.PDFLib },
+      )
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      const anchor = document.createElement("a")
+      anchor.href = url
+      anchor.download = `comprobante-${String(evidenceId).slice(-8)}.pdf`
+      anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      preview?.close()
+      throw error
+    }
+  }
+
+  async function renderReceipt(paymentRequestId) {
     const detail = document.getElementById("detailContent")
     if (!detail) return
     detail.querySelector(".payment-request-reconciliation")?.remove()
-    const { data, error } = await client.rpc("get_payment_request_reconciliation_summary", {
+    const { data, error } = await client.rpc("get_payment_request_receipt_summary", {
       p_payment_request_id: paymentRequestId,
     })
     if (error) return
 
-    const entries = Array.isArray(data.entries) ? data.entries : []
+    const link = data?.link && typeof data.link === "object" ? data.link : null
     const section = document.createElement("section")
     section.className = "payment-request-reconciliation"
     section.innerHTML = `
       <div class="payment-request-reconciliation-header">
-        <div><h3>Pagos conciliados y evidencia</h3><p>Vista interna de Finanzas. Los importes provienen del ledger de conciliación.</p></div>
-        <span class="payment-final-status ${data.reconciliation_state === "paid" ? "success" : data.reconciliation_state === "partially_paid" ? "warning" : "neutral"}">${escapeHtml(stateLabel(data.reconciliation_state))}</span>
+        <div><h3>Comprobante de pago</h3><p>Vista interna de Finanzas. El importe proviene del comprobante bancario vinculado.</p></div>
+        <span class="payment-final-status ${link ? "success" : "neutral"}">${link ? "Pagada" : "Sin comprobante"}</span>
       </div>
       <div class="payment-request-reconciliation-grid">
-        <div><span>Monto autorizado</span><strong>${formatMinor(data.authorized_minor, data.currency)}</strong></div>
-        <div><span>Conciliado</span><strong>${formatMinor(data.confirmed_minor, data.currency)}</strong></div>
-        <div><span>Saldo pendiente</span><strong>${formatMinor(data.balance_minor, data.currency)}</strong></div>
+        <div><span>Importe aprobado</span><strong>${formatMinor(data.authorized_minor, data.currency)}</strong></div>
+        <div><span>Importe pagado</span><strong>${formatMinor(link?.amount_minor || 0, data.currency)}</strong></div>
+        <div><span>Estado</span><strong>${link ? "Pagada" : "Pendiente de comprobante"}</strong></div>
       </div>
-      <div class="payment-request-reconciliation-list">
-        ${entries.length ? entries.map(renderEntry).join("") : `<div class="payment-final-guard"><strong>Sin pagos conciliados</strong><span>La solicitud todavía no tiene movimientos confirmados en el ledger.</span></div>`}
-      </div>
-      <p class="payment-request-provider-block"><strong>Acceso externo deshabilitado:</strong> todavía no existe una relación confiable entre el usuario autenticado y el proveedor. No se exponen comprobantes por correo, RFC ni URL compartida.</p>
+      ${link ? `
+        <article class="payment-request-reconciliation-entry">
+          <div><strong>${escapeHtml(link.request_number || "Solicitud pagada")}</strong><span>${escapeHtml(link.payment_date || "Sin fecha")} · referencia ${escapeHtml(link.reference_hint || "—")}</span></div>
+          <div class="payment-request-reconciliation-actions">
+            <button class="small-btn" type="button" data-request-evidence-action="view" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Ver comprobante</button>
+            <button class="small-btn" type="button" data-request-evidence-action="download" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Descargar comprobante</button>
+          </div>
+        </article>`
+        : `<div class="receipt-match-result none"><strong>Esta solicitud todavía no tiene un comprobante individual vinculado.</strong></div>`}
+      <p class="payment-request-provider-block"><strong>Acceso externo deshabilitado:</strong> todavía no existe una relación verificada entre el usuario autenticado y el proveedor. No se expone el comprobante mediante correo, RFC ni enlaces compartidos.</p>
     `
     detail.append(section)
-  }
-
-  function renderEntry(entry) {
-    const signedAmount = entry.movement_type === "reversal"
-      ? -Number(entry.amount_minor || 0)
-      : Number(entry.amount_minor || 0)
-    return `
-      <article class="payment-request-reconciliation-entry">
-        <div><strong>${escapeHtml(entry.movement_type === "reversal" ? "Reverso" : "Pago confirmado")}</strong><span>${escapeHtml(entry.operation_date || "Sin fecha")} · referencia terminación ${escapeHtml(entry.reference_hint || "—")}</span></div>
-        <strong>${formatMinor(signedAmount, entry.currency)}</strong>
-        ${entry.evidence_id && entry.evidence_status === "shareable"
-          ? `<button class="small-btn" type="button" data-request-evidence-id="${escapeHtml(entry.evidence_id)}">Ver comprobante</button>`
-          : `<span>Evidencia no disponible</span>`}
-      </article>
-    `
-  }
-
-  function stateLabel(value) {
-    return ({
-      not_payable: "Sin snapshot pagable",
-      unpaid: "Sin conciliar",
-      partially_paid: "Pago parcial",
-      paid: "Pagada",
-    })[value] || "Sin conciliar"
   }
 
   function formatMinor(value, currency = "MXN") {
