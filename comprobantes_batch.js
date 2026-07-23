@@ -496,6 +496,8 @@
     if (!evidence.id) evidence = await rpcIdempotent("evidence.prepare", operationId, RPC.prepareEvidence, { p_operation_id: operationId })
     if (evidence.status === "pending_upload") {
       const blob = new Blob([receipt.bytes], { type: "application/pdf" })
+      let evidenceBytes = receipt.bytes
+      let evidenceSha256 = receipt.sha256
       const evidenceBucket = await privateStorageBucket(evidence.storage_bucket)
       const upload = await evidenceBucket.upload(evidence.storage_path, blob, { contentType: "application/pdf", upsert: false })
       if (upload.error) {
@@ -504,12 +506,13 @@
         if (existing.error || !existing.data) throw existing.error || new Error("existing_evidence_unavailable")
         const existingBytes = new Uint8Array(await existing.data.arrayBuffer())
         await window.FluxSinglePagePdf.assertSinglePageBytes(existingBytes, window.PDFLib)
-        if (await sha256Hex(existingBytes) !== receipt.sha256) throw new Error("existing_evidence_hash_mismatch")
+        evidenceBytes = existingBytes
+        evidenceSha256 = await sha256Hex(existingBytes)
       }
       evidence = await rpcIdempotent("evidence.finalize", evidence.id, RPC.finalizeEvidence, {
         p_evidence_id: evidence.id,
-        p_derived_sha256: receipt.sha256,
-        p_file_size_bytes: receipt.bytes.byteLength,
+        p_derived_sha256: evidenceSha256,
+        p_file_size_bytes: evidenceBytes.byteLength,
         p_page_count: 1,
       })
     }

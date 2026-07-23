@@ -357,6 +357,13 @@ test("request evidence download revalidates the one-page PDF", () => {
   assert.match(requestsHtml, /payment_batch_single_page_pdf\.js/i);
 });
 
+test("evidence retry adopts an existing validated object after an upload timeout", () => {
+  assert.match(client, /evidenceBytes\s*=\s*existingBytes/i);
+  assert.match(client, /evidenceSha256\s*=\s*await sha256Hex\(existingBytes\)/i);
+  assert.doesNotMatch(client, /existing_evidence_hash_mismatch/i);
+  assert.match(client, /upsert:\s*false/i);
+});
+
 test("034 keeps evidence tables private while making Storage policies RLS-safe", () => {
   assert.match(
     storagePolicyFix,
