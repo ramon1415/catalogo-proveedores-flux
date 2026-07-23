@@ -42,10 +42,12 @@ test("migration 033 is fail-closed on the certified 032 contract", () => {
   assert.match(migration, /commit;\s*$/i)
 })
 
-test("terminal states extend 032 without reusing unrelated request states", () => {
-  assert.match(migration, /bank_payment_operations_status_check[\s\S]*'reconciled'/)
-  assert.match(migration, /payment_allocation_plans_status_check[\s\S]*'confirmed'/)
-  assert.match(migration, /payment_allocation_reservations_status_check[\s\S]*'consumed'/)
+test("terminal states extend 032 additively without replacing certified constraints", () => {
+  assert.match(migration, /reconciliation_status text not null default 'unreconciled'/)
+  assert.match(migration, /confirmation_status text not null default 'unconfirmed'/)
+  assert.match(migration, /consumption_status text not null default 'available'/)
+  assert.match(migration, /set status = 'released',[\s\S]*consumption_status = 'consumed'/)
+  assert.doesNotMatch(migration, /\bdrop\b|\btruncate\b/i)
   assert.doesNotMatch(migration, /alter\s+type\s+public\.payment_request_status/i)
 })
 

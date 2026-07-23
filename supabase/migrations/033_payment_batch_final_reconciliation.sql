@@ -28,22 +28,19 @@ end
 $precheck$;
 
 alter table public.bank_payment_operations
-  drop constraint bank_payment_operations_status_check;
-alter table public.bank_payment_operations
-  add constraint bank_payment_operations_status_check
-  check (status in ('available', 'reserved', 'reconciled', 'cancelled'));
+  add column reconciliation_status text not null default 'unreconciled',
+  add constraint bank_payment_operations_reconciliation_status_check
+  check (reconciliation_status in ('unreconciled', 'reconciled'));
 
 alter table public.payment_allocation_plans
-  drop constraint payment_allocation_plans_status_check;
-alter table public.payment_allocation_plans
-  add constraint payment_allocation_plans_status_check
-  check (status in ('draft', 'reserved', 'confirmed', 'cancelled'));
+  add column confirmation_status text not null default 'unconfirmed',
+  add constraint payment_allocation_plans_confirmation_status_check
+  check (confirmation_status in ('unconfirmed', 'confirmed'));
 
 alter table public.payment_allocation_reservations
-  drop constraint payment_allocation_reservations_status_check;
-alter table public.payment_allocation_reservations
-  add constraint payment_allocation_reservations_status_check
-  check (status in ('active', 'released', 'cancelled', 'expired', 'consumed'));
+  add column consumption_status text not null default 'available',
+  add constraint payment_allocation_reservations_consumption_status_check
+  check (consumption_status in ('available', 'consumed'));
 
 create table public.payment_operation_evidence (
   id uuid primary key default gen_random_uuid(),
@@ -469,15 +466,19 @@ begin
   where item.plan_id = v_plan.id;
 
   v_block_reason := case
-    when v_operation.status = 'reconciled' then 'bank_operation_already_reconciled'
+    when v_operation.reconciliation_status = 'reconciled'
+      then 'bank_operation_already_reconciled'
     when v_operation.status <> 'reserved' then 'bank_operation_not_reserved'
     when v_plan.id is null or v_plan.status <> 'reserved'
+      or v_plan.confirmation_status <> 'unconfirmed'
       then 'payment_allocation_plan_not_reserved'
     when coalesce(v_plan_items, 0) = 0 then 'payment_allocation_items_required'
     when coalesce(v_invalid_items, 0) > 0 then 'payment_allocation_items_stale'
     when v_plan.total_amount_minor <> v_remaining
       then 'operation_requires_full_atomic_allocation'
-    when v_reservation.id is null or v_reservation.status <> 'active'
+    when v_reservation.id is null
+      or v_reservation.status <> 'active'
+      or v_reservation.consumption_status <> 'available'
       then 'payment_reservation_not_active'
     when v_reservation.expires_at <= now() then 'payment_reservation_expired'
     when v_reservation.created_by <> v_actor
@@ -491,7 +492,12 @@ begin
 
   return jsonb_build_object(
     'operation_id', v_operation.id,
-    'operation_status', v_operation.status,
+    'operation_status', case
+      when v_operation.reconciliation_status = 'reconciled' then 'reconciled'
+      else v_operation.status
+    end,
+    'operation_workflow_status', v_operation.status,
+    'reconciliation_status', v_operation.reconciliation_status,
     'amount_minor', v_operation.amount_minor,
     'confirmed_minor', v_confirmed,
     'remaining_minor', v_remaining,
@@ -500,7 +506,12 @@ begin
     'reference_hint', right(v_operation.bank_unique_folio, 6),
     'plan', case when v_plan.id is null then null else jsonb_build_object(
       'id', v_plan.id,
-      'status', v_plan.status,
+      'status', case
+        when v_plan.confirmation_status = 'confirmed' then 'confirmed'
+        else v_plan.status
+      end,
+      'workflow_status', v_plan.status,
+      'confirmation_status', v_plan.confirmation_status,
       'total_amount_minor', v_plan.total_amount_minor,
       'currency', v_plan.currency,
       'items', coalesce((
@@ -522,10 +533,13 @@ begin
     'reservation', case when v_reservation.id is null then null else jsonb_build_object(
       'id', v_reservation.id,
       'status', case
+        when v_reservation.consumption_status = 'consumed' then 'consumed'
         when v_reservation.status = 'active' and v_reservation.expires_at <= now()
           then 'expired'
         else v_reservation.status
       end,
+      'workflow_status', v_reservation.status,
+      'consumption_status', v_reservation.consumption_status,
       'expires_at', v_reservation.expires_at,
       'owned_by_current_actor', v_reservation.created_by = v_actor
     ) end,
@@ -551,8 +565,11 @@ begin
     ) end,
     'can_prepare_evidence',
       v_operation.status = 'reserved'
+      and v_operation.reconciliation_status = 'unreconciled'
       and v_plan.status = 'reserved'
+      and v_plan.confirmation_status = 'unconfirmed'
       and v_reservation.status = 'active'
+      and v_reservation.consumption_status = 'available'
       and v_reservation.expires_at > now()
       and v_reservation.created_by = v_actor
       and (
@@ -596,6 +613,12 @@ begin
   where id = p_operation_id
   for update;
   if not found then raise exception 'bank_payment_operation_not_found'; end if;
+  if v_operation.reconciliation_status = 'reconciled' then
+    raise exception 'bank_operation_already_reconciled';
+  end if;
+  if v_operation.status <> 'reserved' then
+    raise exception 'bank_operation_not_reserved';
+  end if;
 
   v_actor := public.payment_reconciliation_require_finance(v_operation.company_id);
   v_payload := jsonb_build_object('operation_id', v_operation.id);
@@ -611,7 +634,9 @@ begin
 
   select * into v_plan
   from public.payment_allocation_plans
-  where operation_id = v_operation.id and status = 'reserved'
+  where operation_id = v_operation.id
+    and status = 'reserved'
+    and confirmation_status = 'unconfirmed'
   order by proposed_at desc, id desc
   limit 1
   for update;
@@ -619,7 +644,9 @@ begin
 
   select * into v_reservation
   from public.payment_allocation_reservations
-  where plan_id = v_plan.id and status = 'active'
+  where plan_id = v_plan.id
+    and status = 'active'
+    and consumption_status = 'available'
   order by created_at desc, id desc
   limit 1
   for update;
@@ -961,16 +988,21 @@ begin
   if v_operation.company_id <> v_initial.company_id then
     raise exception 'bank_payment_operation_company_changed';
   end if;
-  if v_operation.status = 'reconciled' then
+  if v_operation.reconciliation_status = 'reconciled' then
     raise exception 'bank_operation_already_reconciled';
   end if;
   if v_operation.status <> 'reserved' then
     raise exception 'bank_operation_not_reserved';
   end if;
+  if v_plan.confirmation_status <> 'unconfirmed' then
+    raise exception 'payment_allocation_plan_not_reserved';
+  end if;
 
   select * into v_reservation
   from public.payment_allocation_reservations
-  where plan_id = v_plan.id and status = 'active'
+  where plan_id = v_plan.id
+    and status = 'active'
+    and consumption_status = 'available'
   order by created_at desc, id desc
   limit 1
   for update;
@@ -1135,19 +1167,20 @@ begin
   end loop;
 
   update public.payment_allocation_reservations
-  set status = 'consumed',
+  set status = 'released',
+      consumption_status = 'consumed',
       closed_by = v_actor,
       closed_at = clock_timestamp(),
       close_reason = 'Consumed by atomic bank operation confirmation'
   where id = v_reservation.id;
 
   update public.payment_allocation_plans
-  set status = 'confirmed',
+  set confirmation_status = 'confirmed',
       updated_at = clock_timestamp()
   where id = v_plan.id;
 
   update public.bank_payment_operations
-  set status = 'reconciled'
+  set reconciliation_status = 'reconciled'
   where id = v_operation.id;
 
   v_event_id := public.append_financial_outbox_event_internal(
@@ -1333,7 +1366,9 @@ begin
 
   select
     count(operation.id)::integer,
-    count(operation.id) filter (where operation.status = 'reconciled')::integer,
+    count(operation.id) filter (
+      where operation.reconciliation_status = 'reconciled'
+    )::integer,
     count(operation.id) filter (where operation.status = 'cancelled')::integer
     into v_total, v_reconciled, v_cancelled
   from public.bank_payment_operations operation
@@ -1365,7 +1400,12 @@ begin
         'currency', operation.currency,
         'operation_id', operation.id,
         'page_number', extraction.page_number,
-        'status', operation.status
+        'status', case
+          when operation.reconciliation_status = 'reconciled' then 'reconciled'
+          else operation.status
+        end,
+        'workflow_status', operation.status,
+        'reconciliation_status', operation.reconciliation_status
       ) order by extraction.page_number, operation.id)
       from public.bank_payment_operations operation
       join public.payment_document_extractions extraction
