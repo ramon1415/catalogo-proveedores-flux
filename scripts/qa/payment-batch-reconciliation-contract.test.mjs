@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
-const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
+const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8").replace(/\r\n/g, "\n")
 
 const migration = read("supabase/migrations/032_payment_batch_reconciliation.sql")
 const html = read("comprobantes_batch.html")
