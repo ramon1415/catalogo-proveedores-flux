@@ -21,7 +21,7 @@
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
-  const state = { context: null, batches: [], selectedId: null, detail: null, operation: null, candidates: [], candidateOperationId: null, summaryFilter: "", trigger: null, busy: false, detailRequest: 0, candidateRequest: 0 }
+  const state = { context: null, batches: [], selectedId: null, detail: null, operation: null, candidates: [], candidateOperationId: null, duplicateBatch: null, summaryFilter: "", trigger: null, busy: false, detailRequest: 0, candidateRequest: 0 }
   const dom = {}
 
   document.addEventListener("DOMContentLoaded", init)
@@ -54,7 +54,7 @@
   }
 
   function bindDom() {
-    ;["userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle","accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn","batchSearch","batchStatusFilter","batchList","batchDetail","countTotal","countProcessing","countReview","countCompleted","countFailed","newBatchDialog","newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId","batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill","uploadProgressText","uploadError","submitNewBatchBtn","operationDialog","operationTitle","operationSubtitle","operationContent","closeOperationBtn","openSourcePdfBtn","acceptExtractionBtn","rejectExtractionBtn","findCandidatesBtn","proposePlanBtn","reservePlanBtn","expireReservationBtn","releaseReservationBtn","cancelPlanBtn","confirmOperationBtn","operationActionReason","operationReasonInput"].forEach((id) => { dom[id] = document.getElementById(id) })
+    ;["userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle","accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn","batchSearch","batchStatusFilter","batchList","batchDetail","countTotal","countProcessing","countReview","countCompleted","countFailed","newBatchDialog","newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId","batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill","uploadProgressText","uploadError","submitNewBatchBtn","duplicateBatchDialog","closeDuplicateBatchBtn","dismissDuplicateBatchBtn","openDuplicateBatchBtn","duplicateBatchFolio","duplicateBatchStatus","operationDialog","operationTitle","operationSubtitle","operationContent","closeOperationBtn","openSourcePdfBtn","acceptExtractionBtn","rejectExtractionBtn","findCandidatesBtn","proposePlanBtn","reservePlanBtn","expireReservationBtn","releaseReservationBtn","cancelPlanBtn","confirmOperationBtn","operationActionReason","operationReasonInput","operationSecondaryActions"].forEach((id) => { dom[id] = document.getElementById(id) })
   }
 
   function bindEvents() {
@@ -66,6 +66,9 @@
     dom.cancelNewBatchBtn.addEventListener("click", closeNewBatch)
     dom.newBatchForm.addEventListener("submit", submitBatch)
     dom.batchPdfFile.addEventListener("change", validateSelectedFile)
+    dom.closeDuplicateBatchBtn.addEventListener("click", closeDuplicateBatch)
+    dom.dismissDuplicateBatchBtn.addEventListener("click", closeDuplicateBatch)
+    dom.openDuplicateBatchBtn.addEventListener("click", openDuplicateBatch)
     dom.batchSearch.addEventListener("input", renderBatchList)
     dom.batchStatusFilter.addEventListener("change", renderBatchList)
     dom.batchList.addEventListener("click", (event) => { const button = event.target.closest("[data-batch-id]"); if (button) openBatch(button.dataset.batchId) })
@@ -188,13 +191,32 @@
     const extractionId = operation.extraction_id || operation.payment_document_extraction_id
     const extractionStatus = operationStatus(operation)
     const bankOperationId = operation.bank_operation_id
-    dom.operationContent.innerHTML = `<div class="receipt-operation-summary">${operationCard("Fecha", operation.application_date || operation.operation_date || "Sin fecha")}${operationCard("Importe", formatMinor(amountMinor(operation), operation.currency))}${operationCard("Remanente financiero", formatMinor(operation.financial_remainder_minor ?? amountMinor(operation), operation.currency))}${operationCard("Disponible para reservar", formatMinor(operation.available_minor ?? amountMinor(operation), operation.currency))}${operationCard("Beneficiario", operation.beneficiary_name || "Por identificar")}${operationCard("Referencia", operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}${operationCard("Extracción", statusLabel(extractionStatus))}</div>${extractionNotice(extractionStatus, issues, operation.rejection_reason)}<section class="data-section"><div class="section-heading">Evidencia extraída y redactada</div><pre class="receipt-evidence">${escapeHtml(array(operation.evidence_excerpt).join("\n") || "Sin extracto disponible.")}</pre></section><section class="data-section"><div class="section-heading">Candidatas pagables</div><div class="receipt-candidate-list" id="candidateList">${renderCandidates(operation, plan)}</div></section>${planNotice(plan)}`
+    dom.operationContent.innerHTML = `${operationWorkflow(extractionStatus, bankOperationId, plan)}
+      <div class="receipt-operation-summary">${operationCard("Fecha", operation.application_date || operation.operation_date || "Sin fecha")}${operationCard("Importe", formatMinor(amountMinor(operation), operation.currency))}${operationCard("Remanente financiero", formatMinor(operation.financial_remainder_minor ?? amountMinor(operation), operation.currency))}${operationCard("Disponible para reservar", formatMinor(operation.available_minor ?? amountMinor(operation), operation.currency))}${operationCard("Beneficiario", operation.beneficiary_name || "Por identificar")}${operationCard("Referencia", operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}${operationCard("Extracción", statusLabel(extractionStatus))}</div>
+      ${extractionNotice(extractionStatus, issues, operation.rejection_reason)}
+      <section class="data-section"><div class="section-heading">Datos leídos del PDF</div><p class="receipt-section-help">Compara estos datos con la página original antes de continuar.</p><pre class="receipt-evidence">${escapeHtml(array(operation.evidence_excerpt).join("\n") || "Sin extracto disponible.")}</pre></section>
+      <section class="data-section"><div class="section-heading">Solicitud aprobada para este pago</div><p class="receipt-section-help">Flux muestra solicitudes pagables compatibles. Elegir una y capturar el importe solo prepara la relación; todavía no confirma el pago.</p><div class="receipt-candidate-list" id="candidateList">${renderCandidates(operation, plan)}</div></section>
+      ${planNotice(plan)}`
     const sourceAvailable = sourceDocument.storage_bucket === "payment-batch-documents"
       && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/source\.pdf$/i.test(sourceDocument.storage_path || "")
     dom.openSourcePdfBtn.disabled = !sourceAvailable || state.busy
     dom.openSourcePdfBtn.title = sourceAvailable ? `Abrir la página ${operation.page_number || 1} del PDF fuente` : "El backend aún no expone la ruta privada del PDF."
     dom.openSourcePdfBtn.setAttribute("aria-label", dom.openSourcePdfBtn.title)
     syncOperationActions()
+  }
+
+  function operationWorkflow(extractionStatus, bankOperationId, plan) {
+    const hasOperation = Boolean(bankOperationId)
+    const hasCandidates = hasOperation && state.candidateOperationId === bankOperationId && state.candidates.length > 0
+    const hasPlan = Boolean(plan.id)
+    const reserved = plan.status === "reserved" && plan.reservation_status === "active"
+    const steps = [
+      { number: "1", label: "Revisar PDF", hint: hasOperation ? "Datos aceptados" : extractionStatus === "rejected" ? "Extracción rechazada" : "Compara la extracción", state: hasOperation ? "done" : extractionStatus === "rejected" ? "blocked" : "active" },
+      { number: "2", label: "Encontrar solicitud", hint: hasCandidates || hasPlan ? "Solicitud localizada" : "Solo solicitudes pagables", state: hasCandidates || hasPlan ? "done" : hasOperation ? "active" : "" },
+      { number: "3", label: "Asignar importe", hint: reserved ? "Importe reservado" : hasPlan ? "Asignación preparada" : "Selecciona y captura monto", state: reserved ? "done" : hasPlan || hasCandidates ? "active" : "" },
+      { number: "4", label: "Conciliar y publicar", hint: "Pendiente de habilitación", state: reserved ? "active locked" : "locked" },
+    ]
+    return `<ol class="receipt-operation-workflow" aria-label="Progreso de la operación">${steps.map((step) => `<li class="receipt-operation-step ${step.state}"><span>${step.number}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.hint)}</small></li>`).join("")}</ol>`
   }
 
   function syncOperationActions() {
@@ -212,23 +234,47 @@
       && plan.reservation_expired === true
       && Boolean(plan.reservation_id)
     const validReason = dom.operationReasonInput.value.trim().length >= 10
-    dom.acceptExtractionBtn.hidden = !extractionId
-    dom.acceptExtractionBtn.disabled = !can("can_review") || !extractionId || !operation.extraction_updated_at || extractionStatus !== "review_required" || state.busy
-    dom.rejectExtractionBtn.hidden = !extractionId
-    dom.rejectExtractionBtn.disabled = !can("can_review") || !extractionId || !operation.extraction_updated_at || !["review_required","blocked"].includes(extractionStatus) || !validReason || state.busy
-    dom.findCandidatesBtn.disabled = !can("can_propose") || !bankOperationId || openPlan || state.busy
-    dom.proposePlanBtn.disabled = !can("can_propose") || !bankOperationId || openPlan || state.candidateOperationId !== bankOperationId || !state.candidates.length || state.busy
-    dom.reservePlanBtn.disabled = !can("can_reserve") || !plan.id || plan.status !== "draft" || !planItems.length || state.busy
-    dom.expireReservationBtn.disabled = !can("can_reserve") || !expirableReservation || state.busy
-    dom.releaseReservationBtn.disabled = !can("can_reserve") || !activeReservation || !validReason || state.busy
-    dom.cancelPlanBtn.disabled = !can("can_propose") || !plan.id || !openPlan || expirableReservation || !validReason || state.busy
+    const candidateReady = state.candidateOperationId === bankOperationId && state.candidates.length > 0
+    const showAccept = Boolean(extractionId) && extractionStatus === "review_required"
+    const showReject = Boolean(extractionId) && ["review_required","blocked"].includes(extractionStatus)
+    dom.acceptExtractionBtn.hidden = !showAccept
+    dom.acceptExtractionBtn.disabled = !can("can_review") || !operation.extraction_updated_at || state.busy
+    dom.rejectExtractionBtn.hidden = !showReject
+    dom.rejectExtractionBtn.disabled = !can("can_review") || !operation.extraction_updated_at || !validReason || state.busy
+    dom.findCandidatesBtn.hidden = !bankOperationId || openPlan || candidateReady
+    dom.findCandidatesBtn.disabled = !can("can_propose") || state.busy
+    dom.proposePlanBtn.hidden = !bankOperationId || openPlan || !candidateReady
+    dom.proposePlanBtn.disabled = !can("can_propose") || state.busy
+    dom.reservePlanBtn.hidden = !plan.id || plan.status !== "draft" || !planItems.length
+    dom.reservePlanBtn.disabled = !can("can_reserve") || !planItems.length || state.busy
+    dom.expireReservationBtn.hidden = !expirableReservation
+    dom.expireReservationBtn.disabled = !can("can_reserve") || state.busy
+    dom.releaseReservationBtn.hidden = !activeReservation
+    dom.releaseReservationBtn.disabled = !can("can_reserve") || !validReason || state.busy
+    dom.cancelPlanBtn.hidden = !plan.id || !openPlan || expirableReservation
+    dom.cancelPlanBtn.disabled = !can("can_propose") || !validReason || state.busy
     dom.operationReasonInput.disabled = state.busy || !(
-      (can("can_review") && ["review_required","blocked"].includes(extractionStatus))
+      (can("can_review") && showReject)
       || (can("can_reserve") && activeReservation)
       || (can("can_propose") && openPlan && !expirableReservation)
     )
+    dom.confirmOperationBtn.hidden = true
     dom.confirmOperationBtn.disabled = true
-    dom.operationActionReason.textContent = actionReason()
+    dom.operationSecondaryActions.hidden = [dom.rejectExtractionBtn, dom.releaseReservationBtn, dom.expireReservationBtn, dom.cancelPlanBtn].every((button) => button.hidden)
+    dom.operationActionReason.textContent = nextActionReason(operation, plan, candidateReady, activeReservation)
+  }
+
+  function nextActionReason(operation, plan, candidateReady, activeReservation) {
+    const extractionStatus = operationStatus(operation)
+    if (!can("can_review") && !can("can_propose") && !can("can_reserve")) return actionReason()
+    if (extractionStatus === "rejected") return "La extracción fue rechazada. Abre otra operación del lote para continuar."
+    if (!operation.bank_operation_id) return "Paso 1 de 4: abre el PDF, compara los datos y confirma si son correctos."
+    if (!plan.id && !candidateReady) return "Paso 2 de 4: busca la solicitud aprobada que corresponde a este pago."
+    if (!plan.id) return "Paso 3 de 4: elige la solicitud, captura el importe y presiona Asignar importe."
+    if (plan.status === "draft") return "Paso 3 de 4: revisa la asignación y reserva el importe durante 30 minutos."
+    if (activeReservation) return "Paso 4 de 4: la reserva está lista. Conciliar y publicar evidencia sigue pendiente de habilitación."
+    if (plan.reservation_status === "expired") return "La reserva venció. Ciérrala antes de preparar una nueva asignación."
+    return "Revisa el estado de la asignación antes de continuar."
   }
 
   function extractionNotice(status, issues, rejectionReason) {
@@ -249,10 +295,10 @@
   }
 
   function renderCandidates(operation, plan) {
-    if (!operation.bank_operation_id) return `<div class="receipt-batch-empty">Acepta una extracción válida para crear la operación bancaria antes de buscar candidatas.</div>`
+    if (!operation.bank_operation_id) return `<div class="receipt-batch-empty"><strong>Primero revisa el PDF.</strong><span>Aceptar los datos crea la operación bancaria necesaria para buscar la solicitud.</span></div>`
     if (["draft","reserved"].includes(plan.status)) return renderPlanItems(plan)
-    if (state.candidateOperationId !== operation.bank_operation_id || !state.candidates.length) return `<div class="receipt-batch-empty">Busca solicitudes candidatas después de aceptar la extracción.</div>`
-    return state.candidates.map((candidate) => `<label class="receipt-candidate"><input type="checkbox" data-candidate-check value="${escapeHtml(candidate.snapshot_id)}"><span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")} · saldo ${escapeHtml(formatMinor(candidate.available_minor ?? 0, candidate.currency))}</span></span><input class="f-ctrl" type="text" inputmode="decimal" data-candidate-amount placeholder="0.00" aria-label="Monto a asignar a ${escapeHtml(candidate.request_number || "solicitud")}"></label>`).join("")
+    if (state.candidateOperationId !== operation.bank_operation_id || !state.candidates.length) return `<div class="receipt-batch-empty"><strong>Aún no has buscado solicitudes.</strong><span>Usa “Buscar solicitud aprobada” para encontrar posibles coincidencias.</span></div>`
+    return state.candidates.map((candidate) => `<div class="receipt-candidate"><label class="receipt-candidate-choice"><input type="checkbox" data-candidate-check value="${escapeHtml(candidate.snapshot_id)}"><span>Elegir</span></label><span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")} · saldo disponible ${escapeHtml(formatMinor(candidate.available_minor ?? 0, candidate.currency))}</span></span><label class="receipt-candidate-amount"><span>Importe a vincular</span><input class="f-ctrl" type="text" inputmode="decimal" data-candidate-amount placeholder="0.00" aria-label="Importe a vincular con ${escapeHtml(candidate.request_number || "solicitud")}"></label></div>`).join("")
   }
 
   function renderPlanItems(plan) {
@@ -337,17 +383,17 @@
     if (!operationId || state.candidateOperationId !== operationId || !can("can_propose") || ["draft","reserved"].includes(plan.status)) return
     const rows = Array.from(dom.operationContent.querySelectorAll(".receipt-candidate"))
     const selectedRows = rows.filter((row) => row.querySelector("[data-candidate-check]")?.checked)
-    if (!selectedRows.length) return toast("Asignaciones requeridas", "Selecciona al menos una solicitud candidata.", "warning")
+    if (!selectedRows.length) return toast("Selecciona una solicitud", "Elige al menos una solicitud aprobada para vincular este pago.", "warning")
     const allocations = selectedRows.map((row) => ({ snapshot_id: row.querySelector("[data-candidate-check]").value, amount_minor: parser.parseMoneyToMinor(row.querySelector("[data-candidate-amount]").value) }))
     if (allocations.some((item) => !item.snapshot_id || !Number.isInteger(item.amount_minor) || item.amount_minor <= 0)) return toast("Importes inválidos", "Cada solicitud seleccionada necesita un importe válido mayor a cero.", "warning")
-    await mutate(RPC.propose, { p_operation_id: operationId, p_allocations: allocations, p_idempotency_key: commandId() }, "Plan propuesto")
+    await mutate(RPC.propose, { p_operation_id: operationId, p_allocations: allocations, p_idempotency_key: commandId() }, "Asignación preparada")
   }
 
   async function reservePlan() {
     const plan = object(state.operation?.plan || state.operation?.allocation_plan)
     if (!can("can_reserve") || !plan.id || plan.status !== "draft" || !array(plan.items).length) return
     const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString()
-    await mutate(RPC.reserve, { p_plan_id: plan.id, p_expires_at: expires, p_idempotency_key: commandId() }, "Capacidad reservada")
+    await mutate(RPC.reserve, { p_plan_id: plan.id, p_expires_at: expires, p_idempotency_key: commandId() }, "Importe reservado por 30 minutos")
   }
 
   async function expireReservation() {
@@ -404,6 +450,20 @@
 
   function openNewBatch() { dom.newBatchForm.reset(); dom.uploadError.textContent = ""; dom.uploadProgress.hidden = true; dom.newBatchDialog.showModal(); dom.batchCompanyId.focus() }
   function closeNewBatch() { if (!state.busy) dom.newBatchDialog.close() }
+  function closeDuplicateBatch() { state.duplicateBatch = null; dom.duplicateBatchDialog.close() }
+  async function openDuplicateBatch() {
+    const batchId = state.duplicateBatch?.id
+    if (!batchId) return
+    state.duplicateBatch = null
+    dom.duplicateBatchDialog.close()
+    await openBatch(batchId)
+  }
+  function showDuplicateBatch(batch) {
+    state.duplicateBatch = batch
+    dom.duplicateBatchFolio.textContent = batch.folio
+    dom.duplicateBatchStatus.textContent = statusLabel(batch.status)
+    dom.duplicateBatchDialog.showModal()
+  }
   function validateSelectedFile() { const error = validateFile(dom.batchPdfFile.files[0]); dom.uploadError.textContent = error || ""; dom.batchPdfHint.textContent = error || (dom.batchPdfFile.files[0] ? `${formatBytes(dom.batchPdfFile.files[0].size)} · listo para procesar` : "Solo PDF. El límite y bucket los autoriza el servidor.") }
 
   async function submitBatch(event) {
@@ -451,18 +511,18 @@
       if (!batchId || !documentId || !bucketId || !storagePath) throw new Error("upload_contract_incomplete")
       const resumeExtraction = created?.duplicate && created?.status === "extracting"
       if (created?.duplicate && !["awaiting_upload","extracting"].includes(created?.status)) {
-        setProgress(100, "El PDF ya existe; se abrió el batch original sin duplicarlo.")
-        state.selectedId = batchId
-        toast("Batch ya registrado", "Se reutilizó la ingesta existente por su huella SHA-256.", "success")
-        await loadBatches()
-        dom.newBatchDialog.close()
+        await surfaceDuplicateBatch(created, batchId)
+        return
+      }
+      if (created?.duplicate) {
+        await surfaceDuplicateBatch(created, batchId)
         return
       }
       if (!resumeExtraction) {
         setProgress(50, "Subiendo al bucket privado autorizado…")
         const bucket = client.storage.from(bucketId)
         const upload = await bucket.upload(storagePath, file, { contentType: "application/pdf", upsert: false })
-        if (upload.error && !(created?.duplicate && /exist|duplicate|409/i.test(`${upload.error.statusCode || ""} ${upload.error.message || ""}`))) throw upload.error
+        if (upload.error) throw upload.error
         setProgress(68, "Finalizando documento…")
         const { error: finalizeError } = await client.rpc(RPC.finalizeBatch, {
           p_batch_id: batchId,
@@ -506,6 +566,18 @@
     return parser.parseBbvaDocument(pages, { fileName })
   }
 
+  async function surfaceDuplicateBatch(created, batchId) {
+    setProgress(100, "Este archivo ya fue cargado. No se creó otro lote.")
+    await loadBatches()
+    const existing = state.batches.find((batch) => batch.id === batchId) || {}
+    dom.newBatchDialog.close()
+    showDuplicateBatch({
+      id: batchId,
+      folio: existing.batch_number || existing.public_folio || created?.batch_number || created?.public_folio || shortId(batchId),
+      status: existing.batch_status || existing.status || created?.status || "awaiting_upload",
+    })
+  }
+
   function validateFile(file) {
     if (!file) return "Selecciona un archivo PDF."
     if (!/\.pdf$/i.test(file.name) || (file.type && file.type !== "application/pdf")) return "Solo se admite PDF válido."
@@ -546,7 +618,7 @@
   function reconciliationStatus(item) { return item.reconciliation_status || "unreconciled" }
   function batchStatus(item) { return item.batch_status || item.status || "awaiting_upload" }
   function amountMinor(item) { const exact = safeMinorInteger(item.amount_minor); if (exact !== null) return exact; return parser.parseMoneyToMinor(item.amount) || 0 }
-  function statusLabel(status) { return ({ awaiting_upload:"Esperando carga",extracting:"Extrayendo",review_required:"Por revisar",accepted:"Aceptada",blocked:"Bloqueada",ready:"Listo",available:"Disponible",draft:"Borrador",reserved:"Reservado",active:"Activa",released:"Liberado",rejected:"Rechazado",cancelled:"Cancelado",expired:"Expirado",unreconciled:"Sin conciliar",failed:"Con incidencia" })[status] || String(status || "Sin estado") }
+  function statusLabel(status) { return ({ awaiting_upload:"Esperando carga",extracting:"Extrayendo",review_required:"Por revisar",accepted:"Aceptada",blocked:"Bloqueada",ready:"Listo",available:"Disponible",draft:"Borrador",reserved:"Reservado",active:"Activa",released:"Liberado",rejected:"Rechazado",cancelled:"Cancelado",expired:"Expirado",unreconciled:"Pendiente de conciliación",failed:"Con incidencia" })[status] || String(status || "Sin estado") }
   function statusTone(status) { if (["accepted","ready","available"].includes(status)) return "success"; if (["failed","rejected"].includes(status)) return "danger"; if (["awaiting_upload","extracting","reserved","review_required","blocked"].includes(status)) return "warning"; if (status === "draft") return "violet"; return "neutral" }
   function issueLabel(value) { return ({ bank_not_identified:"Banco no identificado",operation_date_missing:"Fecha faltante",amount_missing_or_invalid:"Importe inválido",currency_missing_or_invalid:"Moneda inválida",bank_reference_missing:"Referencia faltante",bank_unique_folio_missing:"Folio único faltante",strong_bank_identity_missing:"Cuenta origen empresarial completa faltante",beneficiary_missing:"Beneficiario faltante",bank_status_not_operated:"Estado bancario distinto de Operado" })[value] || value }
   function metric(label, value) { return `<div class="receipt-batch-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>` }
@@ -595,6 +667,7 @@
     if (/permission|42501|row-level|not authorized/i.test(detail)) return "No tienes permisos para esta operación."
     return message || code || detail
   }
+
   function toast(title, desc, variant) { if (typeof Components !== "undefined" && Components.showToast) return Components.showToast({ title, desc, variant }); const node = document.createElement("div"); node.className = `toast-v2 ${variant}`; node.textContent = `${title}: ${desc}`; document.getElementById("toastStack").append(node); setTimeout(() => node.remove(), 5000) }
   function escapeHtml(value) { return String(value == null ? "" : value).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;") }
 })()
