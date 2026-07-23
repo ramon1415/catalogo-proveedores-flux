@@ -19,7 +19,7 @@
     evidenceAccess: "get_payment_operation_evidence_access",
     linkReceipt: "link_payment_receipt_to_request",
   })
-  const PDF_WORKER = "./vendor/pdfjs-worker-3.11.174.min.js?v=20260723-vendored"
+  const PDF_WORKER = "./pdfjs-worker-3.11.174.min.js?v=20260723-vendored-root"
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
