@@ -20,6 +20,8 @@
     linkReceipt: "link_payment_receipt_to_request",
   })
   const PDF_WORKER = "./pdfjs-worker-3.11.174.min.js?v=20260723-vendored-root"
+  const TRANSIENT_RPC_RETRY_LIMIT = 2
+  const TRANSIENT_RPC_RETRY_DELAY_MS = 250
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
@@ -695,10 +697,16 @@
     const key = `${scope}:${targetId}`
     const idempotencyKey = state.commandKeys.get(key) || commandId()
     state.commandKeys.set(key, idempotencyKey)
-    const { data, error } = await client.rpc(rpcName, { ...args, p_idempotency_key: idempotencyKey })
-    if (error) throw error
-    state.commandKeys.delete(key)
-    return object(data)
+    for (let attempt = 0; attempt <= TRANSIENT_RPC_RETRY_LIMIT; attempt += 1) {
+      const { data, error } = await client.rpc(rpcName, { ...args, p_idempotency_key: idempotencyKey })
+      if (!error) {
+        state.commandKeys.delete(key)
+        return object(data)
+      }
+      if (error.code !== "PGRST202" || attempt === TRANSIENT_RPC_RETRY_LIMIT) throw error
+      await new Promise((resolve) => setTimeout(resolve, TRANSIENT_RPC_RETRY_DELAY_MS * (attempt + 1)))
+    }
+    throw new Error("rpc_retry_exhausted")
   }
 
   function clearIndividualReceipt() {
