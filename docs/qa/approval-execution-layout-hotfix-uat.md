@@ -8,13 +8,13 @@
 - Migraciones forward-only:
   - `033_separate_approval_material_from_payment_execution_data.sql`, ya aplicada una sola vez en DEV;
   - `034_support_multiple_active_company_directors.sql`, ya aplicada una sola vez en DEV;
-  - `035_fix_provider_payment_method_enum_validation.sql`, preparada para corregir el defecto runtime detectado por la fixture.
+  - `035_fix_provider_payment_method_enum_validation.sql`, aplicada una sola vez en DEV para corregir el defecto runtime detectado por la fixture.
 - SHA-256 aplicado de 033: `629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc`.
 - SHA-256 aplicado de 034: `e4ffc2e4e0425b9325fcc37d10261c1b90f9e18bb7874f65cc9ced82476a33e8`.
-- SHA-256 preparado de 035: `5f18e641446f293cf444a2fd7e482cfc9d684efa82b17a908f6cdda8d961a3a7`.
+- SHA-256 aplicado de 035: `5f18e641446f293cf444a2fd7e482cfc9d684efa82b17a908f6cdda8d961a3a7`.
 - SHA-256 anterior invalidado y prohibido para LOAD: `da310d7a8113a94b79dc2c3cfb7a42439047e61fd86df745473a0782b1019e21`.
-- Target autorizado para una fase posterior: Supabase DEV `scsirgbuqjcwoaxfacth`.
-- Estado de este documento: 033 y 034 aplicadas y verificadas en DEV; 035 pendiente de precheck, publicación, backup y aplicación única.
+- Target aplicado y verificado: Supabase DEV `scsirgbuqjcwoaxfacth`.
+- Estado de este documento: 033, 034 y 035 aplicadas exactamente una vez y verificadas en DEV; UAT funcional, conciliación final y retiro de identidades temporales completados.
 
 `CLAUDE.md` no existe en la base registrada de `origin/dev`; por ello no fue posible leerlo. No se sustituyó por instrucciones inventadas.
 
@@ -284,6 +284,93 @@ En cada combinación confirmar:
   - `Migration 029 remains byte-identical to the applied contract`.
 - Esos dos defectos de baseline están fuera de los archivos y del alcance autorizado para este hotfix.
 
+## Resultado DEV y UAT funcional
+
+Ejecución controlada del 23 de julio de 2026 sobre Supabase DEV
+`scsirgbuqjcwoaxfacth`:
+
+- `PRECHECK_034_PASS`, aplicación única y `MIGRATION_034_POSTCHECK_PASS`.
+- `PRECHECK_035_PASS`, backup lógico privado, aplicación única y
+  `POSTCHECK_035_PASS`.
+- La creación integral de proveedor mediante una sesión real de Finanzas pasó
+  después de 035; el intento anterior falló de forma atómica y no dejó filas
+  parciales.
+- Operadora Tlacatecpan terminó con Ramón activo, Denise activa = 0 y Denise
+  inactiva = 1.
+
+### Fixture y sesiones
+
+- Se creó una empresa inequívocamente sintética, aislada y exclusiva de DEV,
+  con presupuesto, cuenta origen, proveedor, banco y cinco identidades por rol.
+- Los cinco inicios de sesión usaron Supabase Auth real; no se fabricaron JWT.
+- No se reutilizaron `QA_TRIAGE_FINANCE_1` ni `QA_TRIAGE_FINANCE_2`.
+- Al terminar la UAT, las cinco cuentas quedaron bloqueadas hasta 2036. Cada
+  intento de refrescar su sesión devolvió `400 user_banned`.
+- Se retiraron las cinco filas de rol, se desactivaron membresías y asignación
+  de aprobador, y los cinco perfiles quedaron inactivos. Las solicitudes,
+  cortes, decisiones y línea de Layout se conservaron para auditoría.
+- El archivo local privado de credenciales se depuró de passwords y tokens; su
+  SHA-256 final es
+  `f6ec1190cc065a9b7aa6f70bf194f6000c6b917e9e8f38f400c12c142ae945f9`.
+
+### `MULTI_DIRECTOR_UAT_PASS`
+
+- Director A y Director B coexistieron activos en la misma empresa QA.
+- Se creó un corte con un único `director_id`, correspondiente a A.
+- B intentó decidirlo y recibió `P0001 batch_director_required`.
+- A lo aprobó y Finanzas lo cerró.
+- B se retiró y reactivó de forma controlada mientras A permaneció activo; el
+  corte conservó el mismo Director y estado.
+- Los dos cortes QA terminaron cerrados y sus dos items fueron decididos por A.
+
+### `LAYOUT_FUNCTIONAL_UAT_PASS`
+
+- La primera solicitud llegó a un corte cerrado y apareció como
+  `invalid_data / incomplete_layout_data`, con autorización vigente.
+- Finanzas completó cuenta origen, referencia, concepto de Layout y fecha
+  programada mediante la RPC autorizada.
+- `approval_material_updated_at` permaneció exactamente en
+  `2026-07-23T12:31:23.421822+00:00`.
+- La respuesta confirmó `approval_preserved=true`,
+  `direction_approval_current=true`, `direction_reapproval_required=false` y
+  `missing_fields=[]`.
+- La reclasificación fue `ready_regular`.
+- Se creó `LAY-2026-0073` en borrador con un pago: `payment_layouts +1` y
+  `payment_layout_lines +1`.
+- Durante la creación del Layout: batches +0, items +0, receipts +0,
+  notificaciones +0 e intentos de entrega +0.
+- La solicitud quedó en `finance_validation`, no pagada y sin receipt.
+
+### `MATERIAL_CHANGE_CONTROL_PASS`
+
+- Una segunda solicitud fue aprobada, asignada a A y cerrada por Finanzas.
+- El monto cambió de 1,750 a 1,900 MXN.
+- `approval_material_updated_at` avanzó de
+  `2026-07-23T12:34:26.498306+00:00` a
+  `2026-07-23T12:35:04.319531+00:00`.
+- La clasificación cambió a `direction_reapproval_required` con motivo
+  `stale_direction_approval`, sin crear batch, item, Layout, línea, receipt,
+  notificación ni intento adicional.
+- El contrato focal también cubre proveedor, empresa, centro de costo,
+  partida, mes, moneda y método de pago.
+
+### Conciliación final
+
+- `payment_receipts=8`, sin cambio frente al baseline.
+- `notification_delivery_attempts=118`, sin cambio.
+- `approval_batches=12`, `approval_batch_items=35`,
+  `payment_layouts=13`, `payment_layout_lines=14`; los deltas corresponden
+  exactamente a la UAT descrita.
+- Las notificaciones globales terminaron en 383 por eventos de auditoría de la
+  creación, decisión y retiro del fixture; el delta específico de creación del
+  Layout fue cero y el dispatcher no se ejecutó.
+- Cinco usuarios Auth bloqueados; perfiles activos, roles, membresías,
+  asignaciones de aprobador y Directores activos del fixture: cero.
+- Dos solicitudes, dos cortes, dos items y una línea de Layout QA preservados;
+  cero receipts QA.
+- Evidencia privada final exportada con SHA-256
+  `6858650b5edcd72a4907e62c8ecd9594213b02524af678d69f9b61f4ba14c047`.
+
 ## Guion breve para la demostración
 
 1. Mostrar una solicitud sintética ya aprobada en un corte cerrado.
@@ -292,18 +379,22 @@ En cada combinación confirmar:
 4. Mostrar el mensaje de autorización conservada y la solicitud en Listas para layout.
 5. Mostrar que otras solicitudes incompletas no bloquean la lista.
 6. Crear el layout con una solicitud.
-7. Mostrar Director A y Director B activos simultáneamente en una empresa QA.
-8. Crear un corte para A, comprobar que B no puede decidirlo y mostrar que quitar B no altera el corte.
+7. Mostrar el pool de Directores y explicar la selección de uno por corte, sin
+   reactivar a Denise ni modificar personas reales durante la demo.
+8. Mostrar la evidencia histórica de UAT: A y B coexistieron, B no pudo decidir
+   el corte de A y quitar/reactivar B no alteró ese corte.
 9. Mostrar estado Activo/Inactivo separado del rol.
 10. Terminar antes de confirmar el pago.
 
-## Riesgos y límites conocidos antes de DEV
+## Riesgos y límites conocidos tras UAT DEV
 
 - P0: ninguno identificado en revisión estática.
-- P1: ninguno después del PASS visual 30/30; la aplicación y UAT siguen siendo gates obligatorios.
+- P1: ninguno después de aplicación, postchecks, UAT funcional y PASS visual 30/30.
 - P2: los casos históricos stale no se reconcilian automáticamente. Algunos pueden seguir requiriendo análisis por falta de historial demostrable.
-- P2: la prueba end-to-end, evidencia de timestamps y postcheck sobre datos sintéticos quedan pendientes hasta aplicar en DEV con la fixture autorizada.
-- P2: Escape y recorrido completo de teclado se reconfirman en UAT; reflow y axe ya tienen cobertura automatizada.
+- P2: la UAT funcional usó sesiones Auth reales y las mismas RPC/PostgREST del
+  frontend porque el Preview sólo expone inicio de sesión Google; la interfaz
+  quedó cubierta por la matriz visual automatizada 30/30, reflow extremo,
+  teclado, Escape y Axe.
 - P2: la suite heredada conserva dos fallos reproducibles en el SHA base, documentados arriba; el hotfix no los modifica.
 - P3: `pending.html` se reutiliza como pantalla neutral para el perfil inactivo y su contenido se adapta después de resolver el perfil.
 
