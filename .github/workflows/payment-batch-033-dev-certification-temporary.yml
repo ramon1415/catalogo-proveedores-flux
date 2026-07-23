@@ -1,0 +1,424 @@
+name: Payment batch 033 DEV apply and schema certification (temporary)
+
+'on':
+  push:
+    branches:
+      - ops/ramon-payment-batch-033-dev-certification
+    paths:
+      - .github/workflows/payment-batch-033-dev-certification-temporary.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: payment-batch-033-dev-certification
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Exact 033 apply and sanitized postcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: DEV
+    env:
+      PROJECT_REF: scsirgbuqjcwoaxfacth
+      EXPECTED_DEV_SHA: 207e9e1ab96c2c8491715d708dfbf290a59c253a
+      EXPECTED_MIGRATION_SHA256: c9519b3f8138242385708cb7d155a3a66ff5e1bfe5c7e100315110b0cd139e58
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - name: Checkout isolated operational branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate immutable DEV scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/payment-batch-033-dev-certification-temporary.yml'
+          migration='supabase/migrations/033_payment_batch_final_reconciliation.sql'
+          test "${GITHUB_REPOSITORY}" = 'ramon1415/catalogo-proveedores-flux'
+          test "${GITHUB_REF_NAME}" = 'ops/ramon-payment-batch-033-dev-certification'
+          git merge-base --is-ancestor "${EXPECTED_DEV_SHA}" HEAD
+          test "$(git diff --name-only "${EXPECTED_DEV_SHA}" HEAD)" = "${workflow}"
+          test "$(sha256sum "${migration}" | cut -d' ' -f1)" = "${EXPECTED_MIGRATION_SHA256}"
+          test -n "${SUPABASE_DEV_DB_URL:?Missing DEV database URL}"
+          test "${SUPABASE_DEV_PROJECT_REF:?Missing DEV project ref}" = "${PROJECT_REF}"
+          case "${SUPABASE_DEV_DB_URL}" in
+            *"${PROJECT_REF}"*) ;;
+            *) echo '::error::Database URL is not the authorized DEV project.'; exit 1 ;;
+          esac
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          ! grep -Eiq '(^|[^[:alnum:]_])(drop|truncate)([^[:alnum:]_]|$)' "${migration}"
+          ! grep -Eiq '\b(alter[[:space:]]+table|insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(public\.)?payment_receipts\b' "${migration}"
+          grep -Eiq '^[[:space:]]*begin[[:space:]]*;' "${migration}"
+          grep -Eiq '^[[:space:]]*commit[[:space:]]*;' "${migration}"
+          echo "scope=DEV"
+          echo "project_ref=${PROJECT_REF}"
+          echo "dev_sha=${EXPECTED_DEV_SHA}"
+          echo "migration_sha256=${EXPECTED_MIGRATION_SHA256}"
+          echo 'mode=exact_transactional_sql'
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends postgresql-client
+          psql --version
+
+      - name: Precheck 032 baseline and absence of 033
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          precheck="${RUNNER_TEMP}/payment-batch-033-precheck.tsv"
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt > "${precheck}" <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SELECT 'database_read_only|' || current_setting('transaction_read_only');
+          SELECT CASE
+            WHEN to_regclass('supabase_migrations.schema_migrations') IS NULL
+              THEN format('SELECT %L;', 'history_state|history_relation_absent')
+            ELSE format(
+              'SELECT ''history_state|'' || CASE WHEN EXISTS (SELECT 1 FROM %I.%I WHERE version::text = ''033'') THEN ''033_present'' ELSE ''033_absent'' END;',
+              'supabase_migrations',
+              'schema_migrations'
+            )
+          END \gexec
+          SELECT 'baseline_032_tables|' || count(*)
+          FROM unnest(ARRAY[
+            'public.payment_matching_policy_versions','public.payable_snapshots',
+            'public.payment_ingestion_batches','public.payment_documents',
+            'public.payment_document_extractions','public.bank_payment_operations',
+            'public.payment_operation_documents','public.payment_allocation_plans',
+            'public.payment_allocation_items','public.payment_allocation_reservations',
+            'public.payment_allocation_movements','public.financial_command_receipts',
+            'public.financial_outbox_events','public.financial_outbox_delivery_attempts',
+            'public.financial_break_glass_audit','public.legacy_payment_receipt_links'
+          ]) item(name)
+          WHERE to_regclass(item.name) IS NOT NULL;
+          SELECT 'baseline_032_functions|' || count(*)
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN (
+            'payment_reconciliation_set_updated_at',
+            'payment_reconciliation_normalize_currency',
+            'payment_reconciliation_normalize_bank_name',
+            'payment_amount_to_minor',
+            'rotate_payment_matching_policy',
+            'payment_reconciliation_hash_text',
+            'payment_reconciliation_account_material',
+            'payment_reconciliation_account_hash',
+            'payment_reconciliation_account_last4',
+            'payment_reconciliation_redact_free_text',
+            'payment_reconciliation_payload_hash',
+            'payment_reconciliation_require_finance',
+            'payment_reconciliation_storage_path_allowed',
+            'payment_reconciliation_command_replay',
+            'payment_reconciliation_store_command',
+            'append_financial_outbox_event_internal',
+            'payment_reconciliation_protect_immutable',
+            'payment_reconciliation_protect_policy_version',
+            'create_payable_snapshot_internal',
+            'materialize_closed_batch_payable_snapshots',
+            'materialize_extraordinary_payable_snapshot',
+            'payment_operation_confirmed_minor',
+            'payable_snapshot_confirmed_minor',
+            'payment_operation_reserved_minor',
+            'payable_snapshot_reserved_minor',
+            'payment_reconciliation_snapshot_is_payable',
+            'payment_operation_fingerprint_v1',
+            'get_payment_batch_context',
+            'create_payment_ingestion_batch',
+            'finalize_payment_ingestion_upload',
+            'submit_payment_document_extractions',
+            'list_payment_ingestion_batches',
+            'get_payment_ingestion_batch_detail',
+            'accept_payment_document_extraction',
+            'reject_payment_document_extraction',
+            'find_payment_allocation_candidates',
+            'propose_payment_allocations',
+            'reserve_payment_allocations',
+            'expire_payment_reservation',
+            'release_payment_reservation',
+            'cancel_payment_allocation_plan',
+            'payment_reconciliation_validate_document_scope',
+            'payment_reconciliation_validate_extraction_scope',
+            'payment_reconciliation_validate_operation_scope',
+            'payment_reconciliation_protect_operation_fact',
+            'payment_reconciliation_validate_plan_scope',
+            'payment_reconciliation_validate_item_scope',
+            'payment_reconciliation_validate_reservation_scope',
+            'payment_reconciliation_validate_movement_scope'
+          );
+          SELECT 'new_033_tables|' || count(*)
+          FROM unnest(ARRAY[
+            'public.payment_extraction_corrections',
+            'public.payment_operation_evidence',
+            'public.payment_request_receipt_links'
+          ]) item(name)
+          WHERE to_regclass(item.name) IS NOT NULL;
+          SELECT 'new_033_functions|' || count(*)
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN (
+            'payment_receipt_protect_append_only',
+            'payment_receipt_validate_evidence_transition',
+            'payment_receipt_normalize_match_text',
+            'correct_payment_document_extraction',
+            'get_payment_receipt_link_preview',
+            'prepare_payment_operation_evidence',
+            'finalize_payment_operation_evidence',
+            'review_payment_operation_evidence',
+            'find_payment_receipt_candidates',
+            'link_payment_receipt_to_request',
+            'get_payment_operation_evidence_access',
+            'get_payment_request_receipt_summary',
+            'get_payment_batch_receipt_summary'
+          );
+          SELECT 'final_link_rpc_absent|' || (
+            to_regprocedure('public.link_payment_receipt_to_request(uuid,uuid,text)') IS NULL
+          );
+          SELECT 'private_bucket|' || EXISTS (
+            SELECT 1 FROM storage.buckets
+            WHERE id='payment-batch-documents' AND "public"=false
+          );
+          SELECT 'payment_receipts_rows|' || count(*) FROM public.payment_receipts;
+          SELECT 'payment_receipts_schema_sha256|' || encode(
+            extensions.digest(convert_to(coalesce(string_agg(
+              concat_ws(':', ordinal_position, column_name, data_type, is_nullable, coalesce(column_default,'')),
+              '|' ORDER BY ordinal_position
+            ),''),'UTF8'),'sha256'),'hex'
+          ) FROM information_schema.columns
+          WHERE table_schema='public' AND table_name='payment_receipts';
+          SELECT 'notification_events_rows|' || CASE
+            WHEN to_regclass('public.notification_events') IS NULL THEN '-1'
+            ELSE (SELECT count(*)::text FROM public.notification_events)
+          END;
+          SELECT 'core_state_sha256|' || encode(extensions.digest(convert_to(concat_ws('|',
+            (SELECT count(*)::text FROM public.payment_requests),
+            (SELECT count(*)::text FROM public.proveedores),
+            (SELECT count(*)::text FROM public.payable_snapshots),
+            (SELECT count(*)::text FROM public.bank_payment_operations),
+            (SELECT count(*)::text FROM public.financial_outbox_events)
+          ),'UTF8'),'sha256'),'hex');
+          COMMIT;
+          SQL
+          sed -E 's/^/PRECHECK: /' "${precheck}"
+          grep -qx 'database_read_only|on' "${precheck}"
+          grep -qx 'baseline_032_tables|16' "${precheck}"
+          grep -qx 'baseline_032_functions|49' "${precheck}"
+          grep -qx 'new_033_tables|0' "${precheck}"
+          grep -qx 'new_033_functions|0' "${precheck}"
+          grep -qx 'final_link_rpc_absent|true' "${precheck}"
+          grep -qx 'private_bucket|true' "${precheck}"
+          ! grep -qx 'history_state|033_present' "${precheck}"
+          payment_receipts_rows="$(sed -n 's/^payment_receipts_rows|//p' "${precheck}")"
+          payment_receipts_schema_sha256="$(sed -n 's/^payment_receipts_schema_sha256|//p' "${precheck}")"
+          notification_events_rows="$(sed -n 's/^notification_events_rows|//p' "${precheck}")"
+          core_state_sha256="$(sed -n 's/^core_state_sha256|//p' "${precheck}")"
+          test -n "${payment_receipts_rows}"
+          test "${#payment_receipts_schema_sha256}" = 64
+          test -n "${notification_events_rows}"
+          test "${#core_state_sha256}" = 64
+          {
+            echo "PAYMENT_RECEIPTS_ROWS=${payment_receipts_rows}"
+            echo "PAYMENT_RECEIPTS_SCHEMA_SHA256=${payment_receipts_schema_sha256}"
+            echo "NOTIFICATION_EVENTS_ROWS=${notification_events_rows}"
+            echo "CORE_STATE_SHA256=${core_state_sha256}"
+          } >> "${GITHUB_ENV}"
+          echo 'precheck=PASS'
+
+      - name: Apply migration 033 exact SQL transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          migration='supabase/migrations/033_payment_batch_final_reconciliation.sql'
+          rollback_check() {
+            echo 'migration_apply=FAILED'
+            export PGOPTIONS='-c default_transaction_read_only=on'
+            psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt <<'SQL' || true
+          BEGIN TRANSACTION READ ONLY;
+          SELECT 'rollback_033_tables|' || count(*)
+          FROM unnest(ARRAY[
+            'public.payment_extraction_corrections',
+            'public.payment_operation_evidence',
+            'public.payment_request_receipt_links'
+          ]) item(name)
+          WHERE to_regclass(item.name) IS NOT NULL;
+          COMMIT;
+          SQL
+          }
+          trap rollback_check ERR
+          test "$(sha256sum "${migration}" | cut -d' ' -f1)" = "${EXPECTED_MIGRATION_SHA256}"
+          PGOPTIONS='-c lock_timeout=5000 -c statement_timeout=120000 -c idle_in_transaction_session_timeout=30000' \
+            psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 --echo-errors -f "${migration}"
+          trap - ERR
+          echo 'migration_apply=PASS'
+          echo 'transaction=COMMITTED'
+          echo 'schema_history_modified=false'
+
+      - name: Postcheck objects, security, and preserved state
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          postcheck="${RUNNER_TEMP}/payment-batch-033-postcheck.tsv"
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -qAt > "${postcheck}" <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SELECT 'new_tables|' || count(*)
+          FROM unnest(ARRAY[
+            'public.payment_extraction_corrections',
+            'public.payment_operation_evidence',
+            'public.payment_request_receipt_links'
+          ]) item(name)
+          WHERE to_regclass(item.name) IS NOT NULL;
+          SELECT 'new_functions|' || count(*)
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN (
+            'payment_receipt_protect_append_only',
+            'payment_receipt_validate_evidence_transition',
+            'payment_receipt_normalize_match_text',
+            'correct_payment_document_extraction',
+            'get_payment_receipt_link_preview',
+            'prepare_payment_operation_evidence',
+            'finalize_payment_operation_evidence',
+            'review_payment_operation_evidence',
+            'find_payment_receipt_candidates',
+            'link_payment_receipt_to_request',
+            'get_payment_operation_evidence_access',
+            'get_payment_request_receipt_summary',
+            'get_payment_batch_receipt_summary'
+          );
+          SELECT 'new_triggers|' || count(*)
+          FROM pg_trigger t
+          WHERE NOT t.tgisinternal AND t.tgname IN (
+            'payment_extraction_corrections_immutable',
+            'payment_request_receipt_links_immutable',
+            'payment_operation_evidence_transition'
+          );
+          SELECT 'unique_link_constraints|' || count(*)
+          FROM pg_constraint c
+          WHERE c.conrelid='public.payment_request_receipt_links'::regclass
+            AND c.contype='u' AND c.conname IN (
+              'payment_request_receipt_links_operation_key',
+              'payment_request_receipt_links_request_key',
+              'payment_request_receipt_links_evidence_key'
+            );
+          SELECT 'rls_tables|' || count(*)
+          FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='public' AND c.relname IN (
+            'payment_extraction_corrections',
+            'payment_operation_evidence',
+            'payment_request_receipt_links'
+          ) AND c.relrowsecurity;
+          SELECT 'direct_table_grants|' || count(*)
+          FROM information_schema.role_table_grants
+          WHERE table_schema='public' AND table_name IN (
+            'payment_extraction_corrections',
+            'payment_operation_evidence',
+            'payment_request_receipt_links'
+          ) AND grantee IN ('PUBLIC','anon','authenticated','service_role');
+          SELECT 'anon_financial_execute|' || count(*)
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN (
+            'correct_payment_document_extraction',
+            'get_payment_receipt_link_preview',
+            'prepare_payment_operation_evidence',
+            'finalize_payment_operation_evidence',
+            'review_payment_operation_evidence',
+            'find_payment_receipt_candidates',
+            'link_payment_receipt_to_request',
+            'get_payment_operation_evidence_access',
+            'get_payment_request_receipt_summary',
+            'get_payment_batch_receipt_summary',
+            'get_payment_batch_context'
+          ) AND has_function_privilege('anon', p.oid, 'EXECUTE');
+          SELECT 'authenticated_public_execute|' || count(*)
+          FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='public' AND p.proname IN (
+            'correct_payment_document_extraction',
+            'get_payment_receipt_link_preview',
+            'prepare_payment_operation_evidence',
+            'finalize_payment_operation_evidence',
+            'review_payment_operation_evidence',
+            'find_payment_receipt_candidates',
+            'link_payment_receipt_to_request',
+            'get_payment_operation_evidence_access',
+            'get_payment_request_receipt_summary',
+            'get_payment_batch_receipt_summary',
+            'get_payment_batch_context'
+          ) AND has_function_privilege('authenticated', p.oid, 'EXECUTE');
+          SELECT 'private_bucket|' || EXISTS (
+            SELECT 1 FROM storage.buckets
+            WHERE id='payment-batch-documents' AND "public"=false
+          );
+          SELECT 'evidence_storage_policies|' || count(*)
+          FROM pg_policies p
+          WHERE p.schemaname='storage' AND p.tablename='objects'
+            AND (
+              position('/evidence/' IN coalesce(p.qual,'') || ' ' || coalesce(p.with_check,'')) > 0
+              OR position('payment_operation_evidence' IN coalesce(p.qual,'') || ' ' || coalesce(p.with_check,'')) > 0
+            );
+          SELECT 'payment_receipts_rows|' || count(*) FROM public.payment_receipts;
+          SELECT 'payment_receipts_schema_sha256|' || encode(
+            extensions.digest(convert_to(coalesce(string_agg(
+              concat_ws(':', ordinal_position, column_name, data_type, is_nullable, coalesce(column_default,'')),
+              '|' ORDER BY ordinal_position
+            ),''),'UTF8'),'sha256'),'hex'
+          ) FROM information_schema.columns
+          WHERE table_schema='public' AND table_name='payment_receipts';
+          SELECT 'notification_events_rows|' || CASE
+            WHEN to_regclass('public.notification_events') IS NULL THEN '-1'
+            ELSE (SELECT count(*)::text FROM public.notification_events)
+          END;
+          SELECT CASE
+            WHEN to_regclass('supabase_migrations.schema_migrations') IS NULL
+              THEN format('SELECT %L;', 'history_state|history_relation_absent')
+            ELSE format(
+              'SELECT ''history_state|'' || CASE WHEN EXISTS (SELECT 1 FROM %I.%I WHERE version::text = ''033'') THEN ''033_present'' ELSE ''033_absent'' END;',
+              'supabase_migrations',
+              'schema_migrations'
+            )
+          END \gexec
+          SELECT 'final_link_rpc_present|' || (
+            to_regprocedure('public.link_payment_receipt_to_request(uuid,uuid,text)') IS NOT NULL
+          );
+          SELECT 'context_contract|' || (
+            position('''can_match''' IN pg_get_functiondef('public.get_payment_batch_context()'::regprocedure)) > 0
+            AND position('''can_link''' IN pg_get_functiondef('public.get_payment_batch_context()'::regprocedure)) > 0
+          );
+          COMMIT;
+          SQL
+          sed -E 's/^/POSTCHECK: /' "${postcheck}"
+          grep -qx 'new_tables|3' "${postcheck}"
+          grep -qx 'new_functions|13' "${postcheck}"
+          grep -qx 'new_triggers|3' "${postcheck}"
+          grep -qx 'unique_link_constraints|3' "${postcheck}"
+          grep -qx 'rls_tables|3' "${postcheck}"
+          grep -qx 'direct_table_grants|0' "${postcheck}"
+          grep -qx 'anon_financial_execute|0' "${postcheck}"
+          grep -qx 'authenticated_public_execute|11' "${postcheck}"
+          grep -qx 'private_bucket|true' "${postcheck}"
+          grep -qx 'evidence_storage_policies|2' "${postcheck}"
+          grep -qx "payment_receipts_rows|${PAYMENT_RECEIPTS_ROWS}" "${postcheck}"
+          grep -qx "payment_receipts_schema_sha256|${PAYMENT_RECEIPTS_SCHEMA_SHA256}" "${postcheck}"
+          grep -qx "notification_events_rows|${NOTIFICATION_EVENTS_ROWS}" "${postcheck}"
+          grep -qx 'final_link_rpc_present|true' "${postcheck}"
+          grep -qx 'context_contract|true' "${postcheck}"
+          echo 'postcheck=PASS'
+
+      - name: Publish sanitized evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-batch-033-dev-schema-evidence
+          path: |
+            ${{ runner.temp }}/payment-batch-033-precheck.tsv
+            ${{ runner.temp }}/payment-batch-033-postcheck.tsv
+          if-no-files-found: warn
+          retention-days: 30
