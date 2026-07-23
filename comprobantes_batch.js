@@ -10,18 +10,27 @@
     batchDetail: "get_payment_ingestion_batch_detail",
     acceptExtraction: "accept_payment_document_extraction",
     rejectExtraction: "reject_payment_document_extraction",
-    candidates: "find_payment_allocation_candidates",
-    propose: "propose_payment_allocations",
-    reserve: "reserve_payment_allocations",
-    expireReservation: "expire_payment_reservation",
-    releaseReservation: "release_payment_reservation",
-    cancelPlan: "cancel_payment_allocation_plan",
+    candidates: "find_payment_receipt_candidates",
+    linkPreview: "get_payment_receipt_link_preview",
+    correctExtraction: "correct_payment_document_extraction",
+    prepareEvidence: "prepare_payment_operation_evidence",
+    finalizeEvidence: "finalize_payment_operation_evidence",
+    reviewEvidence: "review_payment_operation_evidence",
+    evidenceAccess: "get_payment_operation_evidence_access",
+    linkReceipt: "link_payment_receipt_to_request",
   })
   const PDF_WORKER = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
 
   const client = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   const parser = window.FluxPaymentBatchParser
-  const state = { context: null, batches: [], selectedId: null, detail: null, operation: null, candidates: [], candidateOperationId: null, duplicateBatch: null, summaryFilter: "", trigger: null, busy: false, detailRequest: 0, candidateRequest: 0 }
+  const state = {
+    context: null, batches: [], selectedId: null, detail: null, operation: null,
+    candidates: [], candidateOperationId: null, candidateSearchCompleted: false,
+    selectedRequestId: null, linkPreview: null, individualReceipt: null,
+    duplicateBatch: null, summaryFilter: "", trigger: null, busy: false,
+    detailRequest: 0, candidateRequest: 0, previewRequest: 0,
+    commandKeys: new Map(),
+  }
   const dom = {}
 
   document.addEventListener("DOMContentLoaded", init)
@@ -54,7 +63,27 @@
   }
 
   function bindDom() {
-    ;["userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle","accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn","batchSearch","batchStatusFilter","batchList","batchDetail","countTotal","countProcessing","countReview","countCompleted","countFailed","newBatchDialog","newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId","batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill","uploadProgressText","uploadError","submitNewBatchBtn","duplicateBatchDialog","closeDuplicateBatchBtn","dismissDuplicateBatchBtn","openDuplicateBatchBtn","duplicateBatchFolio","duplicateBatchStatus","operationDialog","operationTitle","operationSubtitle","operationContent","closeOperationBtn","openSourcePdfBtn","acceptExtractionBtn","rejectExtractionBtn","findCandidatesBtn","proposePlanBtn","reservePlanBtn","expireReservationBtn","releaseReservationBtn","cancelPlanBtn","confirmOperationBtn","operationActionReason","operationReasonInput","operationSecondaryActions"].forEach((id) => { dom[id] = document.getElementById(id) })
+    ;[
+      "userName","userEmail","logoutBtn","themeToggle","accessState","accessTitle",
+      "accessMessage","accessHome","batchWorkspace","refreshBtn","newBatchBtn",
+      "batchSearch","batchStatusFilter","batchList","batchDetail","countTotal",
+      "countProcessing","countReview","countCompleted","countFailed","newBatchDialog",
+      "newBatchForm","closeNewBatchBtn","cancelNewBatchBtn","batchCompanyId",
+      "batchPdfFile","batchPdfHint","uploadProgress","uploadProgressFill",
+      "uploadProgressText","uploadError","submitNewBatchBtn","duplicateBatchDialog",
+      "closeDuplicateBatchBtn","dismissDuplicateBatchBtn","openDuplicateBatchBtn",
+      "duplicateBatchFolio","duplicateBatchStatus","operationDialog","operationTitle",
+      "operationSubtitle","operationContent","closeOperationBtn","openReceiptPdfBtn",
+      "acceptExtractionBtn","findCandidatesBtn","confirmOperationBtn",
+      "operationActionReason","operationSecondaryActions","openCorrectionBtn",
+      "extractionCorrectionDialog","extractionCorrectionForm","closeCorrectionBtn",
+      "cancelCorrectionBtn","markReceiptUnusableBtn","correctionDate",
+      "correctionAmount","correctionCurrency","correctionReference",
+      "correctionBeneficiary","correctionConcept","correctionReason",
+      "linkConfirmationDialog","linkConfirmationForm","closeLinkConfirmationBtn",
+      "cancelLinkConfirmationBtn","linkConfirmationCopy","linkConfirmationSummary",
+      "linkConfirmationCheck","submitLinkConfirmationBtn",
+    ].forEach((id) => { dom[id] = document.getElementById(id) })
   }
 
   function bindEvents() {
@@ -75,17 +104,42 @@
     dom.batchDetail.addEventListener("click", (event) => { const button = event.target.closest("[data-operation-id]"); if (button) openOperation(button.dataset.operationId, button) })
     document.querySelectorAll("[data-summary-filter]").forEach((button) => button.addEventListener("click", () => { state.summaryFilter = button.dataset.summaryFilter; updateSummaryFilter(); renderBatchList() }))
     dom.closeOperationBtn.addEventListener("click", () => dom.operationDialog.close())
-    dom.operationDialog.addEventListener("close", () => { state.candidateRequest += 1; state.candidates = []; state.candidateOperationId = null; state.trigger?.focus() })
-    dom.openSourcePdfBtn.addEventListener("click", openSourcePdf)
+    dom.operationDialog.addEventListener("close", () => {
+      state.candidateRequest += 1
+      state.previewRequest += 1
+      state.candidates = []
+      state.candidateOperationId = null
+      state.candidateSearchCompleted = false
+      state.selectedRequestId = null
+      clearIndividualReceipt()
+      state.trigger?.focus()
+    })
+    dom.openReceiptPdfBtn.addEventListener("click", openIndividualReceipt)
     dom.acceptExtractionBtn.addEventListener("click", acceptExtraction)
-    dom.rejectExtractionBtn.addEventListener("click", rejectExtraction)
     dom.findCandidatesBtn.addEventListener("click", loadCandidates)
-    dom.proposePlanBtn.addEventListener("click", proposePlan)
-    dom.reservePlanBtn.addEventListener("click", reservePlan)
-    dom.expireReservationBtn.addEventListener("click", expireReservation)
-    dom.releaseReservationBtn.addEventListener("click", releaseReservation)
-    dom.cancelPlanBtn.addEventListener("click", cancelPlan)
-    dom.operationReasonInput.addEventListener("input", syncOperationActions)
+    dom.confirmOperationBtn.addEventListener("click", openLinkConfirmation)
+    dom.openCorrectionBtn.addEventListener("click", openCorrection)
+    dom.closeCorrectionBtn.addEventListener("click", () => dom.extractionCorrectionDialog.close())
+    dom.cancelCorrectionBtn.addEventListener("click", () => dom.extractionCorrectionDialog.close())
+    dom.extractionCorrectionForm.addEventListener("submit", submitCorrection)
+    dom.markReceiptUnusableBtn.addEventListener("click", markReceiptUnusable)
+    dom.closeLinkConfirmationBtn.addEventListener("click", () => dom.linkConfirmationDialog.close())
+    dom.cancelLinkConfirmationBtn.addEventListener("click", () => dom.linkConfirmationDialog.close())
+    dom.linkConfirmationForm.addEventListener("submit", executeLink)
+    dom.linkConfirmationCheck.addEventListener("change", () => {
+      dom.submitLinkConfirmationBtn.disabled = !dom.linkConfirmationCheck.checked || state.busy
+    })
+    dom.operationContent.addEventListener("change", (event) => {
+      const radio = event.target.closest("[data-candidate-radio]")
+      if (!radio) return
+      state.selectedRequestId = radio.value
+      renderOperation()
+    })
+    dom.operationContent.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-evidence-action]")
+      if (!button) return
+      openPersistedEvidence(button.dataset.evidenceId, button.dataset.evidenceAction === "download")
+    })
   }
 
   function applyTheme() { const theme = localStorage.getItem("flux-theme"); if (theme) document.documentElement.dataset.theme = theme }
@@ -168,284 +222,448 @@
   }
 
   function openOperation(operationId, trigger) {
-    const operations = batchOperations(state.detail)
-    const operation = operations.find((item) => item.id === operationId)
+    const operation = batchOperations(state.detail).find((item) => item.id === operationId)
     if (!operation) return
     state.operation = operation
     state.candidates = []
     state.candidateOperationId = null
+    state.candidateSearchCompleted = false
+    state.selectedRequestId = null
+    state.linkPreview = null
     state.candidateRequest += 1
+    state.previewRequest += 1
     state.trigger = trigger
-    dom.operationReasonInput.value = ""
-    dom.operationTitle.textContent = `Operación · página ${operation.source_page || operation.page_number || "—"}`
+    clearIndividualReceipt()
+    dom.operationTitle.textContent = `Comprobante · página ${operation.source_page || operation.page_number || "—"}`
     dom.operationSubtitle.textContent = operation.bank_unique_folio || operation.bank_reference || "Sin referencia bancaria"
     renderOperation()
     dom.operationDialog.showModal()
+    refreshLinkPreview()
   }
 
   function renderOperation() {
     const operation = state.operation
+    if (!operation) return
     const issues = array(operation.review_issues || operation.issues)
-    const plan = object(operation.plan || operation.allocation_plan)
+    const preview = object(state.linkPreview)
+    const evidence = object(preview.evidence)
+    const link = object(preview.link)
     const sourceDocument = object(state.detail?.document || array(state.detail?.documents)[0])
-    const extractionId = operation.extraction_id || operation.payment_document_extraction_id
     const extractionStatus = operationStatus(operation)
     const bankOperationId = operation.bank_operation_id
-    dom.operationContent.innerHTML = `${operationWorkflow(extractionStatus, bankOperationId, plan)}
-      <div class="receipt-operation-summary">${operationCard("Fecha", operation.application_date || operation.operation_date || "Sin fecha")}${operationCard("Importe", formatMinor(amountMinor(operation), operation.currency))}${operationCard("Remanente financiero", formatMinor(operation.financial_remainder_minor ?? amountMinor(operation), operation.currency))}${operationCard("Disponible para reservar", formatMinor(operation.available_minor ?? amountMinor(operation), operation.currency))}${operationCard("Beneficiario", operation.beneficiary_name || "Por identificar")}${operationCard("Referencia", operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}${operationCard("Extracción", statusLabel(extractionStatus))}</div>
+    dom.operationContent.innerHTML = `${operationWorkflow(extractionStatus, bankOperationId, evidence, link)}
+      <div class="receipt-operation-summary">${operationCard("Fecha", operation.application_date || operation.operation_date || "Sin fecha")}${operationCard("Importe del comprobante", formatMinor(amountMinor(operation), operation.currency))}${operationCard("Moneda", operation.currency || "Sin moneda")}${operationCard("Beneficiario", operation.beneficiary_name || "Por identificar")}${operationCard("Referencia", operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}${operationCard("Extracción", statusLabel(extractionStatus))}</div>
       ${extractionNotice(extractionStatus, issues, operation.rejection_reason)}
-      <section class="data-section"><div class="section-heading">Datos leídos del PDF</div><p class="receipt-section-help">Compara estos datos con la página original antes de continuar.</p><pre class="receipt-evidence">${escapeHtml(array(operation.evidence_excerpt).join("\n") || "Sin extracto disponible.")}</pre></section>
-      <section class="data-section"><div class="section-heading">Solicitud aprobada para este pago</div><p class="receipt-section-help">Flux muestra solicitudes pagables compatibles. Elegir una y capturar el importe solo prepara la relación; todavía no confirma el pago.</p><div class="receipt-candidate-list" id="candidateList">${renderCandidates(operation, plan)}</div></section>
-      ${planNotice(plan)}`
+      <section class="data-section"><div class="section-heading">Datos leídos del PDF</div><p class="receipt-section-help">Abre el comprobante individual de una sola página y compara fecha, importe, beneficiario y referencia.</p><pre class="receipt-evidence">${escapeHtml(array(operation.evidence_excerpt).join("\n") || "Sin extracto disponible.")}</pre></section>
+      ${link.id ? renderLinkedReceipt(link, evidence) : `
+        <section class="data-section"><div class="section-heading">Solicitud aprobada para este comprobante</div>
+          <p class="receipt-candidate-explanation">Busca solicitudes aprobadas que aún no tienen comprobante y compara proveedor, moneda e importe con este pago. Este botón solo realiza una búsqueda; no modifica ni marca ninguna solicitud como pagada.</p>
+          <div class="receipt-candidate-list" id="candidateList">${renderCandidates(operation, evidence)}</div>
+          ${renderSelectedComparison(operation)}
+        </section>`}`
     const sourceAvailable = sourceDocument.storage_bucket === "payment-batch-documents"
       && /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/source\.pdf$/i.test(sourceDocument.storage_path || "")
-    dom.openSourcePdfBtn.disabled = !sourceAvailable || state.busy
-    dom.openSourcePdfBtn.title = sourceAvailable ? `Abrir la página ${operation.page_number || 1} del PDF fuente` : "El backend aún no expone la ruta privada del PDF."
-    dom.openSourcePdfBtn.setAttribute("aria-label", dom.openSourcePdfBtn.title)
+    dom.openReceiptPdfBtn.disabled = (!sourceAvailable && !evidence.id) || state.busy
+    dom.openReceiptPdfBtn.title = evidence.id
+      ? "Abrir el comprobante privado de una sola página"
+      : sourceAvailable
+        ? `Crear y abrir únicamente la página ${operation.page_number || 1}`
+        : "No existe una página privada disponible."
+    dom.openReceiptPdfBtn.setAttribute("aria-label", dom.openReceiptPdfBtn.title)
     syncOperationActions()
   }
 
-  function operationWorkflow(extractionStatus, bankOperationId, plan) {
-    const hasOperation = Boolean(bankOperationId)
-    const hasCandidates = hasOperation && state.candidateOperationId === bankOperationId && state.candidates.length > 0
-    const hasPlan = Boolean(plan.id)
-    const reserved = plan.status === "reserved" && plan.reservation_status === "active"
+  function operationWorkflow(extractionStatus, bankOperationId, evidence, link) {
+    const receiptReady = evidence.status === "shareable"
+    const searched = state.candidateOperationId === bankOperationId && state.candidateSearchCompleted
+    const selected = Boolean(selectedCandidate())
+    const linked = Boolean(link.id)
     const steps = [
-      { number: "1", label: "Revisar PDF", hint: hasOperation ? "Datos aceptados" : extractionStatus === "rejected" ? "Extracción rechazada" : "Compara la extracción", state: hasOperation ? "done" : extractionStatus === "rejected" ? "blocked" : "active" },
-      { number: "2", label: "Encontrar solicitud", hint: hasCandidates || hasPlan ? "Solicitud localizada" : "Solo solicitudes pagables", state: hasCandidates || hasPlan ? "done" : hasOperation ? "active" : "" },
-      { number: "3", label: "Asignar importe", hint: reserved ? "Importe reservado" : hasPlan ? "Asignación preparada" : "Selecciona y captura monto", state: reserved ? "done" : hasPlan || hasCandidates ? "active" : "" },
-      { number: "4", label: "Conciliar y publicar", hint: "Pendiente de habilitación", state: reserved ? "active locked" : "locked" },
+      { number: "1", label: "Revisar comprobante", hint: receiptReady ? "Datos y página aceptados" : extractionStatus === "rejected" ? "Revisión cerrada" : "Compara una sola página", state: receiptReady ? "done" : extractionStatus === "rejected" ? "blocked" : "active" },
+      { number: "2", label: "Buscar solicitud aprobada", hint: searched ? "Búsqueda terminada" : "Consulta sin escrituras", state: searched ? "done" : receiptReady ? "active" : "" },
+      { number: "3", label: "Confirmar coincidencia", hint: selected || linked ? "Coincidencia seleccionada" : "Importes de solo lectura", state: linked ? "done" : selected ? "active" : "" },
+      { number: "4", label: "Comprobante vinculado", hint: linked ? "Solicitud pagada" : "Confirmación humana", state: linked ? "done" : selected ? "active" : "" },
     ]
-    return `<ol class="receipt-operation-workflow" aria-label="Progreso de la operación">${steps.map((step) => `<li class="receipt-operation-step ${step.state}"><span>${step.number}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.hint)}</small></li>`).join("")}</ol>`
+    return `<ol class="receipt-operation-workflow" aria-label="Progreso del comprobante">${steps.map((step) => `<li class="receipt-operation-step ${step.state}"><span>${step.number}</span><strong>${escapeHtml(step.label)}</strong><small>${escapeHtml(step.hint)}</small></li>`).join("")}</ol>`
   }
 
   function syncOperationActions() {
     const operation = state.operation
     if (!operation) return
-    const plan = object(operation.plan || operation.allocation_plan)
     const extractionId = operation.extraction_id || operation.payment_document_extraction_id
     const extractionStatus = operationStatus(operation)
     const bankOperationId = operation.bank_operation_id
-    const openPlan = ["draft","reserved"].includes(plan.status)
-    const planItems = array(plan.items)
-    const activeReservation = plan.reservation_status === "active" && Boolean(plan.reservation_id)
-    const expirableReservation = plan.status === "reserved"
-      && plan.reservation_status === "expired"
-      && plan.reservation_expired === true
-      && Boolean(plan.reservation_id)
-    const validReason = dom.operationReasonInput.value.trim().length >= 10
-    const candidateReady = state.candidateOperationId === bankOperationId && state.candidates.length > 0
-    const showAccept = Boolean(extractionId) && extractionStatus === "review_required"
-    const showReject = Boolean(extractionId) && ["review_required","blocked"].includes(extractionStatus)
-    dom.acceptExtractionBtn.hidden = !showAccept
-    dom.acceptExtractionBtn.disabled = !can("can_review") || !operation.extraction_updated_at || state.busy
-    dom.rejectExtractionBtn.hidden = !showReject
-    dom.rejectExtractionBtn.disabled = !can("can_review") || !operation.extraction_updated_at || !validReason || state.busy
-    dom.findCandidatesBtn.hidden = !bankOperationId || openPlan || candidateReady
-    dom.findCandidatesBtn.disabled = !can("can_propose") || state.busy
-    dom.proposePlanBtn.hidden = !bankOperationId || openPlan || !candidateReady
-    dom.proposePlanBtn.disabled = !can("can_propose") || state.busy
-    dom.reservePlanBtn.hidden = !plan.id || plan.status !== "draft" || !planItems.length
-    dom.reservePlanBtn.disabled = !can("can_reserve") || !planItems.length || state.busy
-    dom.expireReservationBtn.hidden = !expirableReservation
-    dom.expireReservationBtn.disabled = !can("can_reserve") || state.busy
-    dom.releaseReservationBtn.hidden = !activeReservation
-    dom.releaseReservationBtn.disabled = !can("can_reserve") || !validReason || state.busy
-    dom.cancelPlanBtn.hidden = !plan.id || !openPlan || expirableReservation
-    dom.cancelPlanBtn.disabled = !can("can_propose") || !validReason || state.busy
-    dom.operationReasonInput.disabled = state.busy || !(
-      (can("can_review") && showReject)
-      || (can("can_reserve") && activeReservation)
-      || (can("can_propose") && openPlan && !expirableReservation)
+    const evidence = object(state.linkPreview?.evidence)
+    const linked = Boolean(state.linkPreview?.link?.id)
+    const receiptReviewed = state.individualReceipt?.extractionId === extractionId
+      && state.individualReceipt?.pageCount === 1
+    const showAccept = Boolean(extractionId) && !linked && (
+      extractionStatus === "review_required"
+      || (Boolean(bankOperationId) && evidence.status !== "shareable")
     )
-    dom.confirmOperationBtn.hidden = true
-    dom.confirmOperationBtn.disabled = true
-    dom.operationSecondaryActions.hidden = [dom.rejectExtractionBtn, dom.releaseReservationBtn, dom.expireReservationBtn, dom.cancelPlanBtn].every((button) => button.hidden)
-    dom.operationActionReason.textContent = nextActionReason(operation, plan, candidateReady, activeReservation)
+    const contractReady = can("can_match") && can("can_link")
+    dom.acceptExtractionBtn.hidden = !showAccept
+    dom.acceptExtractionBtn.textContent = bankOperationId
+      ? "Comprobante revisado, continuar"
+      : "Datos correctos, continuar"
+    dom.acceptExtractionBtn.disabled = !can("can_review") || !contractReady
+      || !operation.extraction_updated_at || !receiptReviewed || state.busy
+    dom.findCandidatesBtn.hidden = !bankOperationId || evidence.status !== "shareable" || linked
+    dom.findCandidatesBtn.disabled = !can("can_match") || state.busy
+    dom.confirmOperationBtn.hidden = linked || !selectedCandidate()
+    dom.confirmOperationBtn.disabled = !can("can_link") || !selectedCandidate()
+      || evidence.status !== "shareable" || state.busy
+    dom.openCorrectionBtn.hidden = linked || !["review_required","blocked"].includes(extractionStatus)
+    dom.openCorrectionBtn.disabled = !can("can_review") || !contractReady || state.busy
+    dom.operationSecondaryActions.hidden = dom.openCorrectionBtn.hidden
+    dom.operationActionReason.textContent = nextActionReason(operation, evidence, linked, contractReady)
   }
 
-  function nextActionReason(operation, plan, candidateReady, activeReservation) {
+  function nextActionReason(operation, evidence, linked, contractReady) {
     const extractionStatus = operationStatus(operation)
-    if (!can("can_review") && !can("can_propose") && !can("can_reserve")) return actionReason()
-    if (extractionStatus === "rejected") return "La extracción fue rechazada. Abre otra operación del lote para continuar."
-    if (!operation.bank_operation_id) return "Paso 1 de 4: abre el PDF, compara los datos y confirma si son correctos."
-    if (!plan.id && !candidateReady) return "Paso 2 de 4: busca la solicitud aprobada que corresponde a este pago."
-    if (!plan.id) return "Paso 3 de 4: elige la solicitud, captura el importe y presiona Asignar importe."
-    if (plan.status === "draft") return "Paso 3 de 4: revisa la asignación y reserva el importe durante 30 minutos."
-    if (activeReservation) return "Paso 4 de 4: la reserva está lista. Conciliar y publicar evidencia sigue pendiente de habilitación."
-    if (plan.reservation_status === "expired") return "La reserva venció. Ciérrala antes de preparar una nueva asignación."
-    return "Revisa el estado de la asignación antes de continuar."
+    if (!contractReady) return "El contrato 1:1 todavía no está instalado en este ambiente. La interfaz permanece en modo seguro."
+    if (linked) return "Paso 4 de 4: el comprobante está vinculado y la solicitud quedó pagada."
+    if (extractionStatus === "rejected") return "Este registro no puede utilizarse como comprobante individual."
+    if (evidence.status !== "shareable") return "Paso 1 de 4: abre el comprobante individual, revisa los datos y confírmalos."
+    if (state.candidateOperationId !== operation.bank_operation_id) return "Paso 2 de 4: busca solicitudes aprobadas compatibles. La búsqueda no modifica datos."
+    if (!selectedCandidate()) return state.candidates.length
+      ? "Paso 3 de 4: selecciona la solicitud correcta."
+      : "No existe una coincidencia exacta. El caso requiere revisión."
+    return "Paso 3 de 4: revisa la comparación y confirma la coincidencia."
   }
 
   function extractionNotice(status, issues, rejectionReason) {
-    if (status === "blocked") return `<div class="notice-v2 warning"><span class="notice-icon">!</span><span><span class="notice-title">Extracción bloqueada</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(issues.length ? issues.map(issueLabel).join(", ") : "Faltan datos bancarios válidos; revisa el PDF fuente y rechaza si corresponde.")}</span></span></div>`
-    if (status === "rejected") return `<div class="notice-v2 danger"><span class="notice-icon">!</span><span><span class="notice-title">Extracción rechazada</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(rejectionReason ? `Motivo: ${rejectionReason}` : "No puede convertirse en operación bancaria.")}</span></span></div>`
-    if (status === "accepted") return `<div class="notice-v2 success"><span class="notice-icon">✓</span><span><span class="notice-title">Extracción aceptada</span><span class="notice-sep">—</span><span class="notice-desc">La operación bancaria canónica ya fue creada.</span></span></div>`
+    if (status === "blocked") return `<div class="notice-v2 warning"><span class="notice-icon">!</span><span><span class="notice-title">Extracción bloqueada</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(issues.length ? issues.map(issueLabel).join(", ") : "Faltan datos bancarios válidos; revisa el comprobante individual.")}</span></span></div>`
+    if (status === "rejected") return `<div class="notice-v2 danger"><span class="notice-icon">!</span><span><span class="notice-title">Revisión cerrada</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(rejectionReason ? `Motivo: ${rejectionReason}` : "No puede utilizarse como comprobante individual.")}</span></span></div>`
+    if (status === "accepted") return `<div class="notice-v2 success"><span class="notice-icon">✓</span><span><span class="notice-title">Datos aceptados</span><span class="notice-sep">—</span><span class="notice-desc">El importe y la moneda del comprobante quedaron inmutables para el matching.</span></span></div>`
     if (issues.length) return `<div class="notice-v2 warning"><span class="notice-icon">!</span><span><span class="notice-title">Revisión requerida</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(issues.map(issueLabel).join(", "))}</span></span></div>`
-    return `<div class="notice-v2 success"><span class="notice-icon">✓</span><span><span class="notice-title">Extracción lista para revisión</span><span class="notice-sep">—</span><span class="notice-desc">Abre el PDF fuente y valida los datos antes de aceptar.</span></span></div>`
+    return `<div class="notice-v2 success"><span class="notice-icon">✓</span><span><span class="notice-title">Extracción lista para revisión</span><span class="notice-sep">—</span><span class="notice-desc">Abre el comprobante individual y valida los datos antes de aceptar.</span></span></div>`
   }
 
-  function planNotice(plan) {
-    if (!plan.id) return ""
-    const status = [statusLabel(plan.status || "draft")]
-    if (plan.reservation_status) status.push(`Reserva ${statusLabel(plan.reservation_status).toLowerCase()}`)
-    const reason = plan.cancel_reason || plan.close_reason
-    if (reason) status.push(`Motivo: ${reason}`)
-    return `<div class="notice-v2 info"><span class="notice-icon">i</span><span><span class="notice-title">Plan ${escapeHtml(shortId(plan.id))}</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(status.join(" · "))}</span></span></div>`
+  function renderCandidates(operation, evidence) {
+    if (!operation.bank_operation_id) return `<div class="receipt-batch-empty"><strong>Primero revisa el comprobante.</strong><span>Aceptar los datos crea la operación bancaria necesaria para buscar la solicitud.</span></div>`
+    if (evidence.status !== "shareable") return `<div class="receipt-batch-empty"><strong>Primero termina la revisión.</strong><span>La búsqueda solo se habilita cuando el comprobante individual fue aceptado.</span></div>`
+    if (state.candidateOperationId !== operation.bank_operation_id || !state.candidateSearchCompleted) return `<div class="receipt-batch-empty"><strong>Aún no has buscado solicitudes.</strong><span>Usa “Buscar solicitud aprobada”. La consulta no cambia estados ni crea registros.</span></div>`
+    if (!state.candidates.length) return `<div class="receipt-match-result none"><strong>No encontramos una solicitud aprobada que coincida con el proveedor, la moneda y el importe de este comprobante.</strong><span>No puedes forzar otro importe. Revisa los datos o remite el caso para análisis.</span></div>`
+    const message = state.candidates.length === 1
+      ? "Encontramos una solicitud aprobada compatible con este comprobante."
+      : "Encontramos varias solicitudes compatibles. Selecciona la solicitud correcta."
+    return `<div class="receipt-match-result exact"><strong>${message}</strong></div>${state.candidates.map((candidate) => `
+      <label class="receipt-candidate${state.selectedRequestId === candidate.payment_request_id ? " selected" : ""}">
+        <input type="radio" name="receiptCandidate" data-candidate-radio value="${escapeHtml(candidate.payment_request_id)}"${state.selectedRequestId === candidate.payment_request_id ? " checked" : ""}>
+        <span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")}</span></span>
+        <span class="receipt-candidate-facts">
+          <span><small>Solicitud</small><strong>${escapeHtml(formatMinor(candidate.amount_minor, candidate.currency))}</strong></span>
+          <span><small>Comprobante</small><strong>${escapeHtml(formatMinor(amountMinor(operation), operation.currency))}</strong></span>
+          <span><small>Moneda</small><strong>${escapeHtml(candidate.currency)}</strong></span>
+          <span><small>Estado</small><strong>Aprobada</strong></span>
+        </span>
+      </label>`).join("")}`
   }
 
-  function renderCandidates(operation, plan) {
-    if (!operation.bank_operation_id) return `<div class="receipt-batch-empty"><strong>Primero revisa el PDF.</strong><span>Aceptar los datos crea la operación bancaria necesaria para buscar la solicitud.</span></div>`
-    if (["draft","reserved"].includes(plan.status)) return renderPlanItems(plan)
-    if (state.candidateOperationId !== operation.bank_operation_id || !state.candidates.length) return `<div class="receipt-batch-empty"><strong>Aún no has buscado solicitudes.</strong><span>Usa “Buscar solicitud aprobada” para encontrar posibles coincidencias.</span></div>`
-    return state.candidates.map((candidate) => `<div class="receipt-candidate"><label class="receipt-candidate-choice"><input type="checkbox" data-candidate-check value="${escapeHtml(candidate.snapshot_id)}"><span>Elegir</span></label><span class="receipt-candidate-main"><strong>${escapeHtml(candidate.request_number || "Solicitud")}</strong><span>${escapeHtml(candidate.proveedor_name || "Proveedor")} · saldo disponible ${escapeHtml(formatMinor(candidate.available_minor ?? 0, candidate.currency))}</span></span><label class="receipt-candidate-amount"><span>Importe a vincular</span><input class="f-ctrl" type="text" inputmode="decimal" data-candidate-amount placeholder="0.00" aria-label="Importe a vincular con ${escapeHtml(candidate.request_number || "solicitud")}"></label></div>`).join("")
+  function renderSelectedComparison(operation) {
+    const candidate = selectedCandidate()
+    if (!candidate) return ""
+    return `<section class="receipt-match-comparison" aria-label="Comparación de coincidencia">
+      <div class="section-heading">Confirmar coincidencia</div>
+      <dl>
+        <div><dt>Folio de solicitud</dt><dd>${escapeHtml(candidate.request_number || "—")}</dd></div>
+        <div><dt>Proveedor</dt><dd>${escapeHtml(candidate.proveedor_name || "Proveedor")}</dd></div>
+        <div><dt>Beneficiario del comprobante</dt><dd>${escapeHtml(operation.beneficiary_name || "Por identificar")}</dd></div>
+        <div><dt>Importe de la solicitud</dt><dd>${escapeHtml(formatMinor(candidate.amount_minor, candidate.currency))}</dd></div>
+        <div><dt>Importe del comprobante</dt><dd>${escapeHtml(formatMinor(amountMinor(operation), operation.currency))}</dd></div>
+        <div><dt>Moneda</dt><dd>${escapeHtml(operation.currency || "—")}</dd></div>
+        <div><dt>Fecha del pago</dt><dd>${escapeHtml(operation.application_date || "Sin fecha")}</dd></div>
+        <div><dt>Referencia bancaria</dt><dd>${escapeHtml(operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}</dd></div>
+        <div><dt>Estado actual</dt><dd>Aprobada</dd></div>
+      </dl>
+      <p>Los importes provienen del PDF aceptado y del snapshot aprobado. Son de solo lectura.</p>
+    </section>`
   }
 
-  function renderPlanItems(plan) {
-    const items = array(plan.items)
-    if (!items.length) return `<div class="receipt-batch-empty">El plan no expone asignaciones verificables; no puede reservarse.</div>`
-    return items.map((item) => `<div class="receipt-candidate receipt-candidate-readonly"><span class="receipt-plan-position">${escapeHtml(item.position || "—")}</span><span class="receipt-candidate-main"><strong>${escapeHtml(item.request_number || "Solicitud")}</strong><span>${escapeHtml(item.proveedor_name || "Proveedor")} · snapshot ${escapeHtml(shortId(item.snapshot_id))}</span></span><strong class="receipt-plan-amount">${escapeHtml(formatMinor(item.amount_minor || 0, item.currency || plan.currency))}</strong></div>`).join("")
+  function renderLinkedReceipt(link, evidence) {
+    return `<section class="receipt-linked-card">
+      <span class="payment-final-status success">Comprobante vinculado</span>
+      <h3>${escapeHtml(link.request_number || "Solicitud")}</h3>
+      <dl>
+        <div><dt>Estado</dt><dd>Pagada</dd></div>
+        <div><dt>Importe pagado</dt><dd>${escapeHtml(formatMinor(link.amount_minor, link.currency))}</dd></div>
+        <div><dt>Fecha de pago</dt><dd>${escapeHtml(link.payment_date || "Sin fecha")}</dd></div>
+        <div><dt>Referencia</dt><dd>${escapeHtml(link.reference_hint || "—")}</dd></div>
+      </dl>
+      <div class="receipt-linked-actions">
+        <button class="secondary-btn" type="button" data-evidence-action="view" data-evidence-id="${escapeHtml(evidence.id || link.evidence_id)}">Ver comprobante</button>
+        <button class="secondary-btn" type="button" data-evidence-action="download" data-evidence-id="${escapeHtml(evidence.id || link.evidence_id)}">Descargar comprobante</button>
+      </div>
+    </section>`
   }
 
   async function acceptExtraction() {
     const extractionId = state.operation?.extraction_id || state.operation?.payment_document_extraction_id
-    if (!extractionId || !state.operation?.extraction_updated_at || operationStatus(state.operation) !== "review_required" || !can("can_review")) return
-    await mutate(RPC.acceptExtraction, {
-      p_extraction_id: extractionId,
-      p_expected_updated_at: state.operation.extraction_updated_at,
-      p_idempotency_key: commandId(),
-    }, "Extracción aceptada")
-  }
-
-  async function openSourcePdf() {
-    const sourceDocument = object(state.detail?.document || array(state.detail?.documents)[0])
-    const pageNumber = Math.max(1, Number(state.operation?.page_number) || 1)
-    if (state.busy || sourceDocument.storage_bucket !== "payment-batch-documents"
-      || !/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/source\.pdf$/i.test(sourceDocument.storage_path || "")) return
-    const preview = window.open("about:blank", "_blank")
-    if (!preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el PDF fuente.", "warning")
-    preview.opener = null
+    if (!extractionId || !state.operation?.extraction_updated_at || !can("can_review")
+      || !can("can_link") || state.individualReceipt?.extractionId !== extractionId) return
     setBusy(true)
     try {
-      const { data, error } = await client.storage
-        .from(sourceDocument.storage_bucket)
-        .createSignedUrl(sourceDocument.storage_path, 300)
-      if (error || !data?.signedUrl) throw error || new Error("source_pdf_url_unavailable")
-      const signedUrl = new URL(data.signedUrl, window.location.origin)
-      signedUrl.hash = `page=${pageNumber}`
-      preview.location.replace(signedUrl.href)
+      let operationId = state.operation.bank_operation_id
+      if (!operationId) {
+        const accepted = await rpcIdempotent("extraction.accept", extractionId, RPC.acceptExtraction, {
+          p_extraction_id: extractionId,
+          p_expected_updated_at: state.operation.extraction_updated_at,
+        })
+        operationId = accepted.operation_id
+      }
+      await persistIndividualReceipt(operationId)
+      toast("Comprobante revisado", "Los datos y la evidencia individual quedaron listos para buscar una solicitud.", "success")
+      await loadBatches()
     } catch (error) {
-      preview.close()
-      toast("No se pudo abrir el PDF", friendlyError(error), "danger")
+      toast("No se pudo aceptar el comprobante", friendlyError(error), "danger")
+      await loadBatches()
     } finally { setBusy(false) }
   }
 
-  async function rejectExtraction() {
-    const extractionId = state.operation?.extraction_id || state.operation?.payment_document_extraction_id
-    const reason = dom.operationReasonInput.value.trim()
-    if (!can("can_review") || !extractionId || !state.operation?.extraction_updated_at || !["review_required","blocked"].includes(operationStatus(state.operation))) return
-    if (reason.length < 10) return toast("Motivo requerido", "Describe el rechazo con al menos 10 caracteres.", "warning")
-    await mutate(RPC.rejectExtraction, {
-      p_extraction_id: extractionId,
-      p_expected_updated_at: state.operation.extraction_updated_at,
-      p_reason: reason,
-      p_idempotency_key: commandId(),
-    }, "Extracción rechazada")
+  async function openIndividualReceipt() {
+    const sourceDocument = object(state.detail?.document || array(state.detail?.documents)[0])
+    const pageNumber = Math.max(1, Number(state.operation?.page_number) || 1)
+    const evidenceId = state.linkPreview?.evidence?.id || state.linkPreview?.link?.evidence_id
+    if (evidenceId && state.linkPreview?.evidence?.status === "shareable") return openPersistedEvidence(evidenceId, false)
+    if (state.busy || !window.FluxSinglePagePdf
+      || sourceDocument.storage_bucket !== "payment-batch-documents"
+      || !/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/source\.pdf$/i.test(sourceDocument.storage_path || "")) return
+    const preview = window.open("about:blank", "_blank")
+    if (!preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el comprobante.", "warning")
+    preview.opener = null
+    setBusy(true)
+    try {
+      const { data, error } = await client.storage.from(sourceDocument.storage_bucket).createSignedUrl(sourceDocument.storage_path, 120)
+      if (error || !data?.signedUrl) throw error || new Error("source_pdf_url_unavailable")
+      const bytes = await window.FluxSinglePagePdf.deriveSinglePageFromUrl({ sourceUrl: data.signedUrl, pageNumber, pdfLib: window.PDFLib })
+      await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
+      clearIndividualReceipt()
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      state.individualReceipt = {
+        extractionId: state.operation.extraction_id || state.operation.payment_document_extraction_id,
+        bytes, blobUrl, pageCount: 1,
+        sha256: await sha256Hex(bytes),
+      }
+      preview.location.replace(blobUrl)
+      renderOperation()
+    } catch (error) {
+      preview.close()
+      toast("No se pudo aislar el comprobante", friendlyError(error), "danger")
+    } finally { setBusy(false) }
+  }
+
+  async function persistIndividualReceipt(operationId) {
+    const receipt = state.individualReceipt
+    if (!receipt?.bytes || receipt.pageCount !== 1) throw new Error("single_page_receipt_required")
+    let evidence = object(state.linkPreview?.evidence)
+    if (evidence.status === "shareable") return evidence
+    if (!evidence.id) evidence = await rpcIdempotent("evidence.prepare", operationId, RPC.prepareEvidence, { p_operation_id: operationId })
+    if (evidence.status === "pending_upload") {
+      const blob = new Blob([receipt.bytes], { type: "application/pdf" })
+      const upload = await client.storage.from(evidence.storage_bucket).upload(evidence.storage_path, blob, { contentType: "application/pdf", upsert: false })
+      if (upload.error) {
+        if (!/duplicate|already exists|409/i.test(upload.error.message || "")) throw upload.error
+        const existing = await client.storage.from(evidence.storage_bucket).download(evidence.storage_path)
+        if (existing.error || !existing.data) throw existing.error || new Error("existing_evidence_unavailable")
+        const existingBytes = new Uint8Array(await existing.data.arrayBuffer())
+        await window.FluxSinglePagePdf.assertSinglePageBytes(existingBytes, window.PDFLib)
+        if (await sha256Hex(existingBytes) !== receipt.sha256) throw new Error("existing_evidence_hash_mismatch")
+      }
+      evidence = await rpcIdempotent("evidence.finalize", evidence.id, RPC.finalizeEvidence, {
+        p_evidence_id: evidence.id,
+        p_derived_sha256: receipt.sha256,
+        p_file_size_bytes: receipt.bytes.byteLength,
+        p_page_count: 1,
+      })
+    }
+    if (evidence.status === "pending_review") evidence = await rpcIdempotent("evidence.review", evidence.id, RPC.reviewEvidence, {
+      p_evidence_id: evidence.id,
+      p_shareable: true,
+      p_single_operation_attested: true,
+      p_reason: "Datos y comprobante individual revisados por Finanzas",
+    })
+    if (evidence.status !== "shareable") throw new Error("shareable_single_page_evidence_required")
+    return evidence
   }
 
   async function loadCandidates() {
     const operationId = state.operation?.bank_operation_id
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    if (!operationId || !can("can_propose") || ["draft","reserved"].includes(plan.status)) return
+    if (!operationId || !can("can_match") || state.linkPreview?.evidence?.status !== "shareable") return
     const requestId = ++state.candidateRequest
     state.candidates = []
     state.candidateOperationId = null
+    state.candidateSearchCompleted = false
+    state.selectedRequestId = null
     setBusy(true)
     try {
       const { data, error } = await client.rpc(RPC.candidates, { p_operation_id: operationId, p_limit: 20 })
-      if (requestId !== state.candidateRequest
-        || state.operation?.bank_operation_id !== operationId
-        || !dom.operationDialog.open) return
+      if (requestId !== state.candidateRequest || state.operation?.bank_operation_id !== operationId || !dom.operationDialog.open) return
       if (error) throw error
       state.candidates = array(data?.items || data)
       state.candidateOperationId = operationId
+      state.candidateSearchCompleted = true
+      state.selectedRequestId = state.candidates.length === 1 ? state.candidates[0].payment_request_id : null
       renderOperation()
     } catch (error) {
-      if (requestId === state.candidateRequest && state.operation?.bank_operation_id === operationId) {
-        toast("No se pudieron buscar candidatas", friendlyError(error), "danger")
-      }
+      if (requestId === state.candidateRequest && state.operation?.bank_operation_id === operationId) toast("No se pudieron buscar solicitudes", friendlyError(error), "danger")
     } finally { setBusy(false) }
   }
 
-  async function proposePlan() {
+  function selectedCandidate() {
+    return state.candidates.find((candidate) => candidate.payment_request_id === state.selectedRequestId) || null
+  }
+
+  function openLinkConfirmation() {
+    const operation = state.operation
+    const candidate = selectedCandidate()
+    if (!operation?.bank_operation_id || !candidate || !can("can_link")) return
+    const amount = formatMinor(amountMinor(operation), operation.currency)
+    dom.linkConfirmationCopy.textContent = `Vas a vincular el comprobante de ${amount} con la solicitud ${candidate.request_number || "seleccionada"} y marcarla como pagada. El importe se toma del comprobante y no puede modificarse.`
+    dom.linkConfirmationSummary.innerHTML = `<div><dt>Solicitud</dt><dd>${escapeHtml(candidate.request_number || "—")}</dd></div><div><dt>Proveedor</dt><dd>${escapeHtml(candidate.proveedor_name || "Proveedor")}</dd></div><div><dt>Importe</dt><dd>${escapeHtml(amount)}</dd></div><div><dt>Moneda</dt><dd>${escapeHtml(operation.currency || "—")}</dd></div>`
+    dom.linkConfirmationCheck.checked = false
+    dom.submitLinkConfirmationBtn.disabled = true
+    dom.linkConfirmationDialog.showModal()
+  }
+
+  async function executeLink(event) {
+    event.preventDefault()
     const operationId = state.operation?.bank_operation_id
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    if (!operationId || state.candidateOperationId !== operationId || !can("can_propose") || ["draft","reserved"].includes(plan.status)) return
-    const rows = Array.from(dom.operationContent.querySelectorAll(".receipt-candidate"))
-    const selectedRows = rows.filter((row) => row.querySelector("[data-candidate-check]")?.checked)
-    if (!selectedRows.length) return toast("Selecciona una solicitud", "Elige al menos una solicitud aprobada para vincular este pago.", "warning")
-    const allocations = selectedRows.map((row) => ({ snapshot_id: row.querySelector("[data-candidate-check]").value, amount_minor: parser.parseMoneyToMinor(row.querySelector("[data-candidate-amount]").value) }))
-    if (allocations.some((item) => !item.snapshot_id || !Number.isInteger(item.amount_minor) || item.amount_minor <= 0)) return toast("Importes inválidos", "Cada solicitud seleccionada necesita un importe válido mayor a cero.", "warning")
-    await mutate(RPC.propose, { p_operation_id: operationId, p_allocations: allocations, p_idempotency_key: commandId() }, "Asignación preparada")
-  }
-
-  async function reservePlan() {
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    if (!can("can_reserve") || !plan.id || plan.status !== "draft" || !array(plan.items).length) return
-    const expires = new Date(Date.now() + 30 * 60 * 1000).toISOString()
-    await mutate(RPC.reserve, { p_plan_id: plan.id, p_expires_at: expires, p_idempotency_key: commandId() }, "Importe reservado por 30 minutos")
-  }
-
-  async function expireReservation() {
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    if (!can("can_reserve") || !plan.reservation_id || plan.status !== "reserved"
-      || plan.reservation_status !== "expired" || plan.reservation_expired !== true) return
-    await mutate(RPC.expireReservation, {
-      p_reservation_id: plan.reservation_id,
-      p_idempotency_key: commandId(),
-    }, "Reserva expirada")
-  }
-
-  async function releaseReservation() {
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    const reason = dom.operationReasonInput.value.trim()
-    if (!can("can_reserve") || !plan.reservation_id || plan.reservation_status !== "active") return
-    if (reason.length < 10) return toast("Motivo requerido", "Describe la liberación con al menos 10 caracteres.", "warning")
-    await mutate(RPC.releaseReservation, {
-      p_reservation_id: plan.reservation_id,
-      p_reason: reason,
-      p_idempotency_key: commandId(),
-    }, "Reserva liberada")
-  }
-
-  async function cancelPlan() {
-    const plan = object(state.operation?.plan || state.operation?.allocation_plan)
-    const reason = dom.operationReasonInput.value.trim()
-    if (!can("can_propose") || !plan.id || !["draft","reserved"].includes(plan.status)) return
-    if (reason.length < 10) return toast("Motivo requerido", "Describe la cancelación con al menos 10 caracteres.", "warning")
-    await mutate(RPC.cancelPlan, {
-      p_plan_id: plan.id,
-      p_reason: reason,
-      p_idempotency_key: commandId(),
-    }, "Plan cancelado")
-  }
-
-  async function mutate(name, args, successTitle) {
+    const candidate = selectedCandidate()
+    if (!operationId || !candidate || !dom.linkConfirmationCheck.checked || !can("can_link") || state.busy) return
     setBusy(true)
     try {
-      const { error } = await client.rpc(name, args)
-      if (error) throw error
-      toast(successTitle, "El servidor registró la operación con idempotencia.", "success")
+      const result = await rpcIdempotent("receipt.link", `${operationId}:${candidate.payment_request_id}`, RPC.linkReceipt, {
+        p_operation_id: operationId,
+        p_payment_request_id: candidate.payment_request_id,
+      })
+      dom.linkConfirmationDialog.close()
+      toast("Comprobante vinculado", `${result.request_number || "La solicitud"} quedó marcada como pagada.`, "success")
       state.candidates = []
-      state.candidateOperationId = null
-      dom.operationReasonInput.value = ""
+      state.selectedRequestId = null
       await loadBatches()
     } catch (error) {
-      toast("No se pudo completar", friendlyError(error), "danger")
-      state.candidates = []
-      state.candidateOperationId = null
+      toast("No se pudo vincular", friendlyError(error), "danger")
+      await refreshLinkPreview()
+    } finally { setBusy(false) }
+  }
+
+  async function refreshLinkPreview() {
+    const operationId = state.operation?.bank_operation_id
+    if (!operationId || !can("can_link")) return
+    const requestId = ++state.previewRequest
+    const { data, error } = await client.rpc(RPC.linkPreview, { p_operation_id: operationId })
+    if (requestId !== state.previewRequest || state.operation?.bank_operation_id !== operationId || !dom.operationDialog.open) return
+    if (error) return
+    state.linkPreview = object(data)
+    renderOperation()
+  }
+
+  async function openPersistedEvidence(evidenceId, download) {
+    if (!evidenceId || state.busy) return
+    const preview = download ? null : window.open("about:blank", "_blank")
+    if (!download && !preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el comprobante.", "warning")
+    if (preview) preview.opener = null
+    setBusy(true)
+    try {
+      const { data, error } = await client.rpc(RPC.evidenceAccess, { p_evidence_id: evidenceId })
+      if (error) throw error
+      const signed = await client.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, Number(data.url_ttl_seconds || 300))
+      if (signed.error || !signed.data?.signedUrl) throw signed.error || new Error("evidence_url_unavailable")
+      if (!download) preview.location.replace(signed.data.signedUrl)
+      else {
+        const response = await fetch(signed.data.signedUrl, { cache: "no-store" })
+        if (!response.ok) throw new Error("evidence_download_failed")
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
+        const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = `comprobante-${String(state.operation?.bank_unique_folio || evidenceId).slice(-8)}.pdf`
+        anchor.click()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+    } catch (error) {
+      preview?.close()
+      toast("No se pudo abrir el comprobante", friendlyError(error), "danger")
+    } finally { setBusy(false) }
+  }
+
+  function openCorrection() {
+    const operation = state.operation
+    if (!operation || !["review_required","blocked"].includes(operationStatus(operation))) return
+    dom.correctionDate.value = operation.application_date || operation.operation_date || ""
+    dom.correctionAmount.value = minorToDecimal(amountMinor(operation)) || ""
+    dom.correctionCurrency.value = operation.currency || "MXN"
+    dom.correctionReference.value = operation.bank_unique_folio || operation.bank_reference || ""
+    dom.correctionBeneficiary.value = operation.beneficiary_name || ""
+    dom.correctionConcept.value = operation.payment_reason || operation.concept || ""
+    dom.correctionReason.value = ""
+    dom.extractionCorrectionDialog.showModal()
+  }
+
+  async function submitCorrection(event) {
+    event.preventDefault()
+    const extractionId = state.operation?.extraction_id || state.operation?.payment_document_extraction_id
+    const amount = parser.parseMoneyToMinor(dom.correctionAmount.value)
+    const reason = dom.correctionReason.value.trim()
+    if (!extractionId || !Number.isInteger(amount) || amount <= 0 || reason.length < 10) return toast("Corrección incompleta", "Captura datos válidos y un motivo de al menos 10 caracteres.", "warning")
+    setBusy(true)
+    try {
+      await rpcIdempotent("extraction.correct", extractionId, RPC.correctExtraction, {
+        p_extraction_id: extractionId,
+        p_expected_updated_at: state.operation.extraction_updated_at,
+        p_application_date: dom.correctionDate.value,
+        p_amount_minor: amount,
+        p_currency: dom.correctionCurrency.value.trim().toUpperCase(),
+        p_bank_unique_folio: dom.correctionReference.value.trim().toUpperCase(),
+        p_beneficiary_name: dom.correctionBeneficiary.value.trim(),
+        p_payment_reason: dom.correctionConcept.value.trim(),
+        p_reason: reason,
+      })
+      dom.extractionCorrectionDialog.close()
+      clearIndividualReceipt()
+      toast("Corrección guardada", "Los datos quedaron auditados y deben revisarse nuevamente.", "success")
+      await loadBatches()
+    } catch (error) {
+      toast("No se pudo corregir", friendlyError(error), "danger")
       await loadBatches()
     } finally { setBusy(false) }
+  }
+
+  async function markReceiptUnusable() {
+    const extractionId = state.operation?.extraction_id || state.operation?.payment_document_extraction_id
+    const reason = dom.correctionReason.value.trim()
+    if (!extractionId || reason.length < 10) return toast("Motivo requerido", "Explica por qué la página no es un comprobante individual.", "warning")
+    setBusy(true)
+    try {
+      await rpcIdempotent("extraction.reject", extractionId, RPC.rejectExtraction, {
+        p_extraction_id: extractionId,
+        p_expected_updated_at: state.operation.extraction_updated_at,
+        p_reason: reason,
+      })
+      dom.extractionCorrectionDialog.close()
+      clearIndividualReceipt()
+      toast("Comprobante enviado a revisión", "La página no podrá vincularse ni compartirse.", "success")
+      await loadBatches()
+    } catch (error) {
+      toast("No se pudo cerrar la revisión", friendlyError(error), "danger")
+    } finally { setBusy(false) }
+  }
+
+  async function rpcIdempotent(scope, targetId, rpcName, args) {
+    const key = `${scope}:${targetId}`
+    const idempotencyKey = state.commandKeys.get(key) || commandId()
+    state.commandKeys.set(key, idempotencyKey)
+    const { data, error } = await client.rpc(rpcName, { ...args, p_idempotency_key: idempotencyKey })
+    if (error) throw error
+    state.commandKeys.delete(key)
+    return object(data)
+  }
+
+  function clearIndividualReceipt() {
+    if (state.individualReceipt?.blobUrl) URL.revokeObjectURL(state.individualReceipt.blobUrl)
+    state.individualReceipt = null
   }
 
   function openNewBatch() { dom.newBatchForm.reset(); dom.uploadError.textContent = ""; dom.uploadProgress.hidden = true; dom.newBatchDialog.showModal(); dom.batchCompanyId.focus() }
@@ -589,7 +807,7 @@
   function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = busy; dom.batchPdfFile.disabled = busy; if (dom.operationDialog.open) renderOperation() }
   function setProgress(percent, text) { dom.uploadProgress.hidden = false; dom.uploadProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`; dom.uploadProgressText.textContent = text }
   function updateSummaryFilter() { document.querySelectorAll("[data-summary-filter]").forEach((button) => { const active = button.dataset.summaryFilter === state.summaryFilter; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)) }) }
-  function actionReason() { if (!can("can_review") && !can("can_propose") && !can("can_reserve")) return state.context?.block_reason || "Acciones no autorizadas."; return "Las capacidades se revalidan en cada RPC." }
+  function actionReason() { if (!can("can_review") && !can("can_match") && !can("can_link")) return state.context?.block_reason || "Acciones no autorizadas."; return "Las capacidades se revalidan en cada RPC." }
   function operationStatus(item) { return item.extraction_status || item.operation_status || item.status || "review_required" }
   function batchOperations(detail) {
     const extractions = new Map(array(detail?.extractions).map((extraction) => [extraction.id, extraction]))
@@ -607,13 +825,12 @@
   }
   function refreshOpenOperationFromDetail() {
     if (!state.operation || !dom.operationDialog.open) return
-    const operationId = state.operation.id
-    const extractionId = state.operation.extraction_id || state.operation.payment_document_extraction_id
-    const refreshed = batchOperations(state.detail)
-      .find((item) => item.id === operationId || item.extraction_id === extractionId)
-    if (!refreshed) { state.operation = null; dom.operationDialog.close(); return }
+    const refreshed = batchOperations(state.detail).find((item) => item.id === state.operation.id)
+    if (!refreshed) return dom.operationDialog.close()
     state.operation = refreshed
+    state.linkPreview = null
     renderOperation()
+    refreshLinkPreview()
   }
   function reconciliationStatus(item) { return item.reconciliation_status || "unreconciled" }
   function batchStatus(item) { return item.batch_status || item.status || "awaiting_upload" }
