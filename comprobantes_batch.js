@@ -33,6 +33,15 @@
   }
   const dom = {}
 
+  async function privateStorageBucket(bucketId) {
+    const { data, error } = await client.auth.getSession()
+    if (error) throw error
+    const accessToken = data?.session?.access_token
+    if (!accessToken) throw new Error("storage_session_unavailable")
+    if (typeof client.storage?.setAuth === "function") client.storage.setAuth(accessToken)
+    return client.storage.from(bucketId)
+  }
+
   document.addEventListener("DOMContentLoaded", init)
 
   async function init() {
@@ -439,7 +448,8 @@
     let receiptStage = "download_source"
     let sourceBlobUrl = null
     try {
-      const { data, error } = await client.storage.from(sourceDocument.storage_bucket).download(sourceDocument.storage_path)
+      const sourceBucket = await privateStorageBucket(sourceDocument.storage_bucket)
+      const { data, error } = await sourceBucket.download(sourceDocument.storage_path)
       if (error || !data) throw error || new Error("source_pdf_download_unavailable")
       sourceBlobUrl = URL.createObjectURL(data)
       receiptStage = "derive_page"
@@ -486,10 +496,11 @@
     if (!evidence.id) evidence = await rpcIdempotent("evidence.prepare", operationId, RPC.prepareEvidence, { p_operation_id: operationId })
     if (evidence.status === "pending_upload") {
       const blob = new Blob([receipt.bytes], { type: "application/pdf" })
-      const upload = await client.storage.from(evidence.storage_bucket).upload(evidence.storage_path, blob, { contentType: "application/pdf", upsert: false })
+      const evidenceBucket = await privateStorageBucket(evidence.storage_bucket)
+      const upload = await evidenceBucket.upload(evidence.storage_path, blob, { contentType: "application/pdf", upsert: false })
       if (upload.error) {
         if (!/duplicate|already exists|409/i.test(upload.error.message || "")) throw upload.error
-        const existing = await client.storage.from(evidence.storage_bucket).download(evidence.storage_path)
+        const existing = await evidenceBucket.download(evidence.storage_path)
         if (existing.error || !existing.data) throw existing.error || new Error("existing_evidence_unavailable")
         const existingBytes = new Uint8Array(await existing.data.arrayBuffer())
         await window.FluxSinglePagePdf.assertSinglePageBytes(existingBytes, window.PDFLib)
@@ -593,7 +604,8 @@
     try {
       const { data, error } = await client.rpc(RPC.evidenceAccess, { p_evidence_id: evidenceId })
       if (error) throw error
-      const file = await client.storage.from(data.storage_bucket).download(data.storage_path)
+      const evidenceBucket = await privateStorageBucket(data.storage_bucket)
+      const file = await evidenceBucket.download(data.storage_path)
       if (file.error || !file.data) throw file.error || new Error("evidence_download_failed")
       const bytes = new Uint8Array(await file.data.arrayBuffer())
       await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
@@ -763,7 +775,7 @@
       }
       if (!resumeExtraction) {
         setProgress(50, "Subiendo al bucket privado autorizado…")
-        const bucket = client.storage.from(bucketId)
+        const bucket = await privateStorageBucket(bucketId)
         const upload = await bucket.upload(storagePath, file, { contentType: "application/pdf", upsert: false })
         if (upload.error) throw upload.error
         setProgress(68, "Finalizando documento…")
