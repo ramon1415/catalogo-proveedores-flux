@@ -9,6 +9,10 @@ const migration = readFileSync(
   join(root, "supabase", "migrations", "033_payment_batch_final_reconciliation.sql"),
   "utf8",
 );
+const storagePolicyFix = readFileSync(
+  join(root, "supabase", "migrations", "034_payment_receipt_evidence_storage_policy_fix.sql"),
+  "utf8",
+);
 const html = readFileSync(join(root, "comprobantes_batch.html"), "utf8");
 const client = readFileSync(join(root, "comprobantes_batch.js"), "utf8");
 const helper = readFileSync(
@@ -353,6 +357,25 @@ test("request evidence download revalidates the one-page PDF", () => {
   assert.match(requestsHtml, /payment_batch_single_page_pdf\.js/i);
 });
 
+test("034 keeps evidence tables private while making Storage policies RLS-safe", () => {
+  assert.match(
+    storagePolicyFix,
+    /function\s+public\.payment_receipt_evidence_storage_path_allowed[\s\S]*security\s+definer/i,
+  );
+  assert.match(
+    storagePolicyFix,
+    /create policy payment_receipt_evidence_finance_select[\s\S]*payment_receipt_evidence_storage_path_allowed\(name,\s*false\)/i,
+  );
+  assert.match(
+    storagePolicyFix,
+    /create policy payment_receipt_evidence_finance_insert[\s\S]*payment_receipt_evidence_storage_path_allowed\(name,\s*true\)/i,
+  );
+  assert.doesNotMatch(
+    storagePolicyFix,
+    /grant\s+select\s+on\s+(?:table\s+)?public\.payment_operation_evidence\s+to\s+authenticated/i,
+  );
+});
+
 test("critical PDF runtime is versioned locally for finance and request evidence", () => {
   const pdfLib = readFileSync(join(root, "pdf-lib-1.17.1.min.js"));
   const pdfJs = readFileSync(join(root, "pdfjs-3.11.174.min.js"));
@@ -392,6 +415,7 @@ test("removed N:M client module is no longer loaded", () => {
 test("final files contain no secrets, database URLs, or mojibake", () => {
   const surface = [
     migration,
+    storagePolicyFix,
     html,
     client,
     helper,
