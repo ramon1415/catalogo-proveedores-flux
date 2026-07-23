@@ -6,11 +6,20 @@
 - Base exacta: `origin/dev` en `4b2d25cbb54d4cc6d9ff2c02453d6a232ce60738`.
 - Rama: `hotfix/ramon-client-demo-approval-execution-layout`.
 - Migración forward-only: `033_separate_approval_material_from_payment_execution_data.sql`.
-- SHA-256 de la migración preparada: `da310d7a8113a94b79dc2c3cfb7a42439047e61fd86df745473a0782b1019e21`.
+- SHA-256 vigente de la migración preparada: `629081c0c25d2cbd43214f92ffd03a9f4ec1f27c84bc33694e05a913a63084dc`.
+- SHA-256 anterior invalidado y prohibido para LOAD: `da310d7a8113a94b79dc2c3cfb7a42439047e61fd86df745473a0782b1019e21`.
 - Target autorizado para una fase posterior: Supabase DEV `scsirgbuqjcwoaxfacth`.
 - Estado de este documento: revisión de código y preparación de pruebas; sin aplicación en DEV.
 
 `CLAUDE.md` no existe en la base registrada de `origin/dev`; por ello no fue posible leerlo. No se sustituyó por instrucciones inventadas.
+
+La primera ejecución real del precheck se detuvo antes de consultar DEV con
+`ERROR 42601` porque PostgreSQL no admite `position(needle, haystack)`. La
+auditoría exhaustiva encontró 33 expresiones: 14 en el precheck independiente,
+14 en el precheck embebido de la migración y 5 adicionales en su postcheck. Las
+33 conservan la misma semántica mediante `strpos(haystack, needle)` y la prueba
+contractual exige cero llamadas inválidas, paridad exacta de los 14 tokens de
+precheck y los conteos 14/19.
 
 ## Diagnóstico técnico
 
@@ -238,10 +247,10 @@ En cada combinación confirmar:
 ## Verificación estática y de regresión
 
 - `node --check`: PASS en los cuatro JavaScript modificados.
-- Contrato nuevo: 16/16 PASS, incluidas ejecuciones aisladas de los adaptadores que enrutan por RPC los INSERT/UPDATE completos del catálogo y el editor operativo de Solicitudes, conservando directas solo las mutaciones ajenas a esos contratos.
+- Contrato nuevo: 17/17 PASS, incluidas ejecuciones aisladas de los adaptadores que enrutan por RPC los INSERT/UPDATE completos del catálogo y el editor operativo de Solicitudes, además de la regresión semántica para la sintaxis PostgreSQL de los prechecks.
 - IDs únicos y `git diff --check`: PASS.
 - Parser PostgreSQL (`pglast`): PASS; migración 033 con 52 statements y precheck read-only con 6 statements.
-- Suite completa bajo `scripts/qa/`: 152/154 PASS.
+- Suite completa bajo `scripts/qa/`: 153/155 PASS.
 - Los dos fallos restantes se reprodujeron sin cambios en un worktree limpio del SHA base `4b2d25cbb54d4cc6d9ff2c02453d6a232ce60738`:
   - `PostgREST P0001 errors preserve actionable domain messages`;
   - `Migration 029 remains byte-identical to the applied contract`.

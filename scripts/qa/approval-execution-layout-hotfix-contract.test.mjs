@@ -189,6 +189,117 @@ function returnedJsonKeys(definition) {
   return [...match[1].matchAll(/'([a-z][a-z0-9_]*)'\s*,/g)].map((entry) => entry[1])
 }
 
+function sqlCallArguments(source, functionName) {
+  const calls = []
+  const marker = new RegExp(`\\b${escapeRegex(functionName)}\\s*\\(`, "gi")
+  let match
+
+  while ((match = marker.exec(source))) {
+    const open = source.indexOf("(", match.index)
+    let depth = 1
+    let argumentStart = open + 1
+    let quote = ""
+    let lineComment = false
+    let blockComment = false
+    const args = []
+
+    for (let index = open + 1; index < source.length; index += 1) {
+      const character = source[index]
+      const next = source[index + 1]
+
+      if (lineComment) {
+        if (character === "\n") lineComment = false
+        continue
+      }
+      if (blockComment) {
+        if (character === "*" && next === "/") {
+          blockComment = false
+          index += 1
+        }
+        continue
+      }
+      if (quote) {
+        if (character === quote && next === quote) {
+          index += 1
+          continue
+        }
+        if (character === quote) quote = ""
+        continue
+      }
+      if (character === "-" && next === "-") {
+        lineComment = true
+        index += 1
+        continue
+      }
+      if (character === "/" && next === "*") {
+        blockComment = true
+        index += 1
+        continue
+      }
+      if (character === "'" || character === '"') {
+        quote = character
+        continue
+      }
+      if (character === "(") {
+        depth += 1
+        continue
+      }
+      if (character === ")") {
+        depth -= 1
+        if (depth === 0) {
+          args.push(source.slice(argumentStart, index).trim())
+          calls.push(args)
+          marker.lastIndex = index + 1
+          break
+        }
+        continue
+      }
+      if (character === "," && depth === 1) {
+        args.push(source.slice(argumentStart, index).trim())
+        argumentStart = index + 1
+      }
+    }
+  }
+
+  return calls
+}
+
+function inspectedFunctionTokens(source) {
+  return sqlCallArguments(source, "strpos")
+    .filter((args) => (
+      args.length === 2
+      && compact(args[0]).toLowerCase() === "lower(function_info.prosrc)"
+    ))
+    .map((args) => {
+      const token = args[1].match(/^'((?:''|[^'])*)'$/)
+      assert.ok(token, `unexpected strpos needle: ${args[1]}`)
+      return token[1].replace(/''/g, "'")
+    })
+}
+
+function functionDefinitionInspectionContract(source) {
+  const firstProcedure = "public.mark_payment_request_material_change()"
+  const firstProcedureIndex = source.indexOf(`'${firstProcedure}'::regprocedure`)
+  assert.ok(firstProcedureIndex > 0, "missing material-change precheck procedure")
+  const blockStart = source.lastIndexOf("if not exists (", firstProcedureIndex)
+  const blockEnd = source.indexOf(
+    "function definitions drift from the expected 022/023 baseline",
+    firstProcedureIndex,
+  )
+  assert.ok(blockStart >= 0 && blockEnd > blockStart, "missing function-definition drift block")
+  const block = source.slice(blockStart, blockEnd)
+  const procedures = [...block.matchAll(/'(public\.[a-z][a-z0-9_]*\([^']*\))'::regprocedure/gi)]
+
+  return procedures.map((entry, index) => {
+    const chunkStart = entry.index
+    const chunkEnd = procedures[index + 1]?.index ?? block.length
+    return {
+      regprocedure: entry[1],
+      tokens: inspectedFunctionTokens(block.slice(chunkStart, chunkEnd)),
+    }
+  })
+}
+
 test("migration 033 separates the exact material and request-execution fields", () => {
   const material = sqlFunction("mark_payment_request_material_change")
   assert.doesNotMatch(material, /security\s+definer/i)
@@ -917,6 +1028,75 @@ test("read-only precheck is independently executable and drift-aware", () => {
   assert.match(precheck, /function definitions drift from the expected 022\/023 baseline/i)
   assert.match(precheck, /stale_closed_direction_requests/i)
   assert.match(precheck, /AMBIGUOUS_UNTIL_AUDITED/i)
+})
+
+test("migration and standalone prechecks use valid PostgreSQL search syntax with semantic parity", () => {
+  for (const [name, sql] of [
+    ["migration 033", migration],
+    ["standalone precheck", precheck],
+  ]) {
+    const invalidPositionCalls = sqlCallArguments(sql, "position")
+      .filter((args) => args.length > 1)
+    assert.deepEqual(
+      invalidPositionCalls,
+      [],
+      `${name} contains prohibited position(argument_1, argument_2) syntax`,
+    )
+  }
+
+  const expectedInspectionContract = [
+    {
+      regprocedure: "public.mark_payment_request_material_change()",
+      tokens: [
+        "old.provider_bank_account_id",
+        "old.company_bank_account_id",
+        "old.due_date",
+        "old.scheduled_payment_date",
+        "old.payment_reference",
+        "old.payment_concept",
+      ],
+    },
+    {
+      regprocedure: "public.mark_provider_payment_material_change()",
+      tokens: [
+        "update public.payment_requests",
+        "approval_material_updated_at",
+      ],
+    },
+    {
+      regprocedure:
+        "public.complete_payment_request_layout_data(uuid,uuid,text,text,date)",
+      tokens: [
+        "approval_batch_require_finance",
+        "update public.payment_requests",
+        "direction_reapproval_required",
+      ],
+    },
+    {
+      regprocedure:
+        "public.approval_batch_payment_layout_candidates(date,date,uuid,uuid)",
+      tokens: [
+        "direction_reapproval_required",
+        "ready_regular",
+        "legacy_eligible",
+      ],
+    },
+  ]
+  const standaloneContract = functionDefinitionInspectionContract(precheck)
+  const embeddedContract = functionDefinitionInspectionContract(migration)
+  assert.deepEqual(standaloneContract, expectedInspectionContract)
+  assert.deepEqual(embeddedContract, expectedInspectionContract)
+  assert.deepEqual(embeddedContract, standaloneContract)
+
+  const standaloneCorrections = sqlCallArguments(precheck, "strpos")
+  const migrationCorrections = sqlCallArguments(migration, "strpos")
+  assert.equal(standaloneCorrections.length, 14)
+  assert.equal(migrationCorrections.length, 19)
+  assert.equal(
+    standaloneCorrections.length + migrationCorrections.length,
+    33,
+    "all 33 invalid PostgreSQL calls must remain corrected",
+  )
 })
 
 test("hotfix adds no frontend privilege, notification, receipt mutation, or destructive SQL path", () => {

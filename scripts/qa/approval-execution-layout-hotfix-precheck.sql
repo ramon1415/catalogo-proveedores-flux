@@ -206,62 +206,62 @@ begin
     from pg_proc function_info
     where function_info.oid =
       'public.mark_payment_request_material_change()'::regprocedure
-      and position(
-        'old.provider_bank_account_id',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'old.provider_bank_account_id'
       ) > 0
-      and position(
-        'old.company_bank_account_id',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'old.company_bank_account_id'
       ) > 0
-      and position('old.due_date', lower(function_info.prosrc)) > 0
-      and position(
-        'old.scheduled_payment_date',
-        lower(function_info.prosrc)
+      and strpos(lower(function_info.prosrc), 'old.due_date') > 0
+      and strpos(
+        lower(function_info.prosrc),
+        'old.scheduled_payment_date'
       ) > 0
-      and position('old.payment_reference', lower(function_info.prosrc)) > 0
-      and position('old.payment_concept', lower(function_info.prosrc)) > 0
+      and strpos(lower(function_info.prosrc), 'old.payment_reference') > 0
+      and strpos(lower(function_info.prosrc), 'old.payment_concept') > 0
   ) or not exists (
     select 1
     from pg_proc function_info
     where function_info.oid =
       'public.mark_provider_payment_material_change()'::regprocedure
-      and position(
-        'update public.payment_requests',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'update public.payment_requests'
       ) > 0
-      and position(
-        'approval_material_updated_at',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'approval_material_updated_at'
       ) > 0
   ) or not exists (
     select 1
     from pg_proc function_info
     where function_info.oid =
       'public.complete_payment_request_layout_data(uuid,uuid,text,text,date)'::regprocedure
-      and position(
-        'approval_batch_require_finance',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'approval_batch_require_finance'
       ) > 0
-      and position(
-        'update public.payment_requests',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'update public.payment_requests'
       ) > 0
-      and position(
-        'direction_reapproval_required',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'direction_reapproval_required'
       ) > 0
   ) or not exists (
     select 1
     from pg_proc function_info
     where function_info.oid =
       'public.approval_batch_payment_layout_candidates(date,date,uuid,uuid)'::regprocedure
-      and position(
-        'direction_reapproval_required',
-        lower(function_info.prosrc)
+      and strpos(
+        lower(function_info.prosrc),
+        'direction_reapproval_required'
       ) > 0
-      and position('ready_regular', lower(function_info.prosrc)) > 0
-      and position('legacy_eligible', lower(function_info.prosrc)) > 0
+      and strpos(lower(function_info.prosrc), 'ready_regular') > 0
+      and strpos(lower(function_info.prosrc), 'legacy_eligible') > 0
   ) then
     raise exception '033_read_only_precheck: function definitions drift from the expected 022/023 baseline';
   end if;
