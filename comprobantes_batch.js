@@ -436,12 +436,14 @@
     if (!preview) return toast("Ventana bloqueada", "Permite ventanas emergentes para abrir el comprobante.", "warning")
     preview.opener = null
     setBusy(true)
-    let receiptStage = "signed_url"
+    let receiptStage = "download_source"
+    let sourceBlobUrl = null
     try {
-      const { data, error } = await client.storage.from(sourceDocument.storage_bucket).createSignedUrl(sourceDocument.storage_path, 120)
-      if (error || !data?.signedUrl) throw error || new Error("source_pdf_url_unavailable")
+      const { data, error } = await client.storage.from(sourceDocument.storage_bucket).download(sourceDocument.storage_path)
+      if (error || !data) throw error || new Error("source_pdf_download_unavailable")
+      sourceBlobUrl = URL.createObjectURL(data)
       receiptStage = "derive_page"
-      const bytes = await window.FluxSinglePagePdf.deriveSinglePageFromUrl({ sourceUrl: data.signedUrl, pageNumber, pdfLib: window.PDFLib })
+      const bytes = await window.FluxSinglePagePdf.deriveSinglePageFromUrl({ sourceUrl: sourceBlobUrl, pageNumber, pdfLib: window.PDFLib })
       receiptStage = "validate_page"
       await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
       clearIndividualReceipt()
@@ -470,7 +472,10 @@
         `${friendlyError(error)}${diagnostic ? ` Código de soporte: ${diagnostic}.` : ""}`,
         "danger",
       )
-    } finally { setBusy(false) }
+    } finally {
+      if (sourceBlobUrl) URL.revokeObjectURL(sourceBlobUrl)
+      setBusy(false)
+    }
   }
 
   async function persistIndividualReceipt(operationId) {
@@ -588,15 +593,15 @@
     try {
       const { data, error } = await client.rpc(RPC.evidenceAccess, { p_evidence_id: evidenceId })
       if (error) throw error
-      const signed = await client.storage.from(data.storage_bucket).createSignedUrl(data.storage_path, Number(data.url_ttl_seconds || 300))
-      if (signed.error || !signed.data?.signedUrl) throw signed.error || new Error("evidence_url_unavailable")
-      if (!download) preview.location.replace(signed.data.signedUrl)
-      else {
-        const response = await fetch(signed.data.signedUrl, { cache: "no-store" })
-        if (!response.ok) throw new Error("evidence_download_failed")
-        const bytes = new Uint8Array(await response.arrayBuffer())
-        await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
-        const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      const file = await client.storage.from(data.storage_bucket).download(data.storage_path)
+      if (file.error || !file.data) throw file.error || new Error("evidence_download_failed")
+      const bytes = new Uint8Array(await file.data.arrayBuffer())
+      await window.FluxSinglePagePdf.assertSinglePageBytes(bytes, window.PDFLib)
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+      if (!download) {
+        preview.location.replace(url)
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+      } else {
         const anchor = document.createElement("a")
         anchor.href = url
         anchor.download = `comprobante-${String(state.operation?.bank_unique_folio || evidenceId).slice(-8)}.pdf`
