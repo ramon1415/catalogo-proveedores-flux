@@ -224,6 +224,7 @@ try {
     DIRECTION: "direction",
     OPERATION: "operation",
     PENDING: "pending",
+    INACTIVE: "inactive",
   }
 
   const SYSADMIN_ROLES = ["sysadmin", "system_admin", "admin", "superadmin"]
@@ -250,14 +251,14 @@ try {
   const navSections = ["Operacion", "General", "Configuracion"]
   const ROLE_CACHE_KEY = "flux-role-state-v1"
   const NAV_HTML_CACHE_KEY = "flux-nav-html-v1"
-  const NAV_RENDER_VERSION = "20260721-receipt-batches"
+  const NAV_RENDER_VERSION = "20260723-inactive-profile-gate"
 
   const roleState = {
     loaded: false,
     session: null,
     profile: null,
     roles: [],
-    group: ROLE_GROUPS.OPERATION,
+    group: ROLE_GROUPS.PENDING,
   }
 
   let rolePromise = null
@@ -279,7 +280,10 @@ try {
     canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canCreateProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION].includes(roleState.group),
     canAccessConfigTab: (tab) => canAccessConfigTab(tab),
-    isPending: () => roleState.group === ROLE_GROUPS.PENDING,
+    // pending.html is the neutral access gate for both states. isInactive()
+    // keeps the business states distinguishable without allowing a redirect loop.
+    isPending: () => [ROLE_GROUPS.PENDING, ROLE_GROUPS.INACTIVE].includes(roleState.group),
+    isInactive: () => roleState.group === ROLE_GROUPS.INACTIVE,
     isSysadmin: () => roleState.group === ROLE_GROUPS.SYSADMIN,
     defaultRedirect: () => defaultLandingForRole(),
   }
@@ -344,6 +348,10 @@ try {
   }
 
   function fallbackFirstPaintModules() {
+    // Do not paint operational modules before the server has revalidated the
+    // current profile. This prevents stale role/navigation cache from granting
+    // an inactive profile a residual first paint.
+    if (!roleState.loaded) return []
     return modules.filter((item) => !item.hidden && !item.sensitive)
   }
 
@@ -353,17 +361,11 @@ try {
   }
 
   function readCachedNavHtml() {
-    try {
-      return sessionStorage.getItem(NAV_HTML_CACHE_KEY) || ""
-    } catch (_) {
-      return ""
-    }
+    return ""
   }
 
   function persistNavHtml(html) {
-    try {
-      if (html && html.trim()) sessionStorage.setItem(NAV_HTML_CACHE_KEY, html)
-    } catch (_) {}
+    // Navigation is authorization-derived and is intentionally not persisted.
   }
 
   function renderNavigationHtml(nav, html, mode, signature = "") {
@@ -389,6 +391,12 @@ try {
     const nav = document.querySelector(".nav")
     if (!nav) return
     if (nav.dataset.fluxNavMode === "role" && nav.innerHTML.trim()) return
+    if (!roleState.loaded) {
+      nav.innerHTML = ""
+      nav.dataset.fluxNavMode = "pending-auth"
+      nav.setAttribute("aria-busy", "true")
+      return
+    }
     const cachedHtml = !roleState.loaded ? readCachedNavHtml() : ""
     if (cachedHtml.trim()) {
       const activeKey = currentModuleKey()
@@ -414,7 +422,10 @@ try {
 
     const visibleModules = modulesForCurrentRole().filter((item) => !item.hidden)
     if (!visibleModules.length) {
-      ensureFirstPaintNavigation()
+      nav.innerHTML = ""
+      nav.dataset.fluxNavMode = "role"
+      nav.setAttribute("aria-busy", "false")
+      markShellReady()
       return
     }
 
@@ -456,30 +467,239 @@ try {
     window.supabase.__fluxIncomeCompatibility = true
   }
 
-  // Cache de roles en sessionStorage: permite pintar el menu al instante en
-  // cada navegacion (es MPA) sin esperar a sesion+perfil+roles de Supabase.
-  // Solo guarda perfil/roles/grupo; NUNCA tokens de sesion. Siempre se
-  // revalida en segundo plano via resolveRoleAccess().
+  function applyProviderCatalogRpcCompatibility() {
+    const client = window.getFluxSupabaseClient?.()
+    if (!client || client.__fluxProviderCatalogRpcCompatibility) return
+
+    const originalFrom = client.from.bind(client)
+    const isCatalogFormPayload = (payload) => (
+      payload
+      && !Array.isArray(payload)
+      && typeof payload === "object"
+      && ["alias", "nombre_completo", "metodo_pago"].every((key) => (
+        Object.prototype.hasOwnProperty.call(payload, key)
+      ))
+    )
+
+    const routedMutation = (payload, requiresProviderId = false) => {
+      let providerId = null
+      let unsupportedFilter = false
+      let selectedColumns = null
+      let requestPromise = null
+      const execute = () => {
+        if (!requestPromise) {
+          if (unsupportedFilter || (requiresProviderId && !providerId)) {
+            requestPromise = Promise.resolve({
+              data: null,
+              error: {
+                code: "P0001",
+                message: "provider_catalog_rpc_requires_exact_id",
+              },
+            })
+          } else {
+            requestPromise = client.rpc(
+              "save_provider_catalog_with_payment_execution_data",
+              {
+                p_proveedor_id: providerId || null,
+                p_payload: payload,
+              },
+            ).then(({ data, error }) => {
+              const record = {
+                ...payload,
+                id: data?.id || providerId || null,
+              }
+              const projectedRecord = selectedColumns && selectedColumns.trim() !== "*"
+                ? Object.fromEntries(
+                    selectedColumns
+                      .split(",")
+                      .map((column) => column.trim())
+                      .filter((column) => /^[a-z_][a-z0-9_]*$/i.test(column))
+                      .filter((column) => Object.prototype.hasOwnProperty.call(record, column))
+                      .map((column) => [column, record[column]]),
+                  )
+                : record
+              return {
+                data: error ? null : projectedRecord,
+                error: error || null,
+              }
+            })
+          }
+        }
+        return requestPromise
+      }
+      const chain = {
+        eq(column, value) {
+          if (column === "id" && value) providerId = value
+          else unsupportedFilter = true
+          return chain
+        },
+        select(columns) {
+          selectedColumns = typeof columns === "string" ? columns : null
+          return chain
+        },
+        single() {
+          return chain
+        },
+        maybeSingle() {
+          return chain
+        },
+        then(onFulfilled, onRejected) {
+          return execute().then(onFulfilled, onRejected)
+        },
+        catch(onRejected) {
+          return execute().catch(onRejected)
+        },
+        finally(onFinally) {
+          return execute().finally(onFinally)
+        },
+      }
+      return chain
+    }
+
+    client.from = (tableName) => {
+      const builder = originalFrom(tableName)
+      if (tableName !== "proveedores") return builder
+
+      const originalInsert = builder.insert.bind(builder)
+      const originalUpdate = builder.update.bind(builder)
+      builder.insert = (payload, options) => (
+        isCatalogFormPayload(payload)
+          ? routedMutation(payload)
+          : originalInsert(payload, options)
+      )
+      builder.update = (payload, options) => (
+        isCatalogFormPayload(payload)
+          ? routedMutation(payload, true)
+          : originalUpdate(payload, options)
+      )
+      return builder
+    }
+    client.__fluxProviderCatalogRpcCompatibility = true
+  }
+
+  function applyPaymentRequestExecutionRpcCompatibility() {
+    const client = window.getFluxSupabaseClient?.()
+    if (!client || client.__fluxPaymentRequestExecutionRpcCompatibility) return
+
+    const originalFrom = client.from.bind(client)
+    const executionFields = new Set([
+      "company_bank_account_id",
+      "scheduled_payment_date",
+      "payment_reference",
+      "payment_concept",
+    ])
+    const allowedPayloadFields = new Set([...executionFields, "updated_at"])
+    const isExecutionOnlyPayload = (payload) => {
+      if (!payload || Array.isArray(payload) || typeof payload !== "object") return false
+      const fields = Object.keys(payload)
+      return fields.some((field) => executionFields.has(field))
+        && fields.every((field) => allowedPayloadFields.has(field))
+    }
+
+    const routedUpdate = (payload) => {
+      let requestId = null
+      let unsupportedFilter = false
+      let selectedColumns = null
+      let requestPromise = null
+      const execute = () => {
+        if (!requestPromise) {
+          if (unsupportedFilter || !requestId) {
+            requestPromise = Promise.resolve({
+              data: null,
+              error: {
+                code: "P0001",
+                message: "payment_execution_rpc_requires_exact_id",
+              },
+            })
+          } else {
+            requestPromise = client.rpc(
+              "complete_payment_request_layout_data",
+              {
+                p_payment_request_id: requestId,
+                p_company_bank_account_id: payload.company_bank_account_id ?? null,
+                p_scheduled_payment_date: payload.scheduled_payment_date ?? null,
+                p_payment_reference: payload.payment_reference ?? null,
+                p_payment_concept: payload.payment_concept ?? null,
+              },
+            ).then(({ error }) => {
+              if (error || selectedColumns === null) {
+                return { data: null, error: error || null }
+              }
+              const record = { ...payload, id: requestId }
+              const projectedRecord = selectedColumns.trim() === "*"
+                ? record
+                : Object.fromEntries(
+                    selectedColumns
+                      .split(",")
+                      .map((column) => column.trim())
+                      .filter((column) => /^[a-z_][a-z0-9_]*$/i.test(column))
+                      .filter((column) => Object.prototype.hasOwnProperty.call(record, column))
+                      .map((column) => [column, record[column]]),
+                  )
+              return { data: projectedRecord, error: null }
+            })
+          }
+        }
+        return requestPromise
+      }
+      const chain = {
+        eq(column, value) {
+          if (column === "id" && value) requestId = value
+          else unsupportedFilter = true
+          return chain
+        },
+        select(columns) {
+          selectedColumns = typeof columns === "string" ? columns : "*"
+          return chain
+        },
+        single() {
+          return chain
+        },
+        maybeSingle() {
+          return chain
+        },
+        then(onFulfilled, onRejected) {
+          return execute().then(onFulfilled, onRejected)
+        },
+        catch(onRejected) {
+          return execute().catch(onRejected)
+        },
+        finally(onFinally) {
+          return execute().finally(onFinally)
+        },
+      }
+      return chain
+    }
+
+    client.from = (tableName) => {
+      const builder = originalFrom(tableName)
+      if (tableName !== "payment_requests") return builder
+
+      const originalUpdate = builder.update.bind(builder)
+      builder.update = (payload, options) => (
+        isExecutionOnlyPayload(payload)
+          ? routedUpdate(payload)
+          : originalUpdate(payload, options)
+      )
+      return builder
+    }
+    client.__fluxPaymentRequestExecutionRpcCompatibility = true
+  }
+
+  // El estado de autorización se resuelve siempre contra Supabase. Los caches
+  // históricos se eliminan para que un perfil inactivo no conserve módulos ni
+  // permisos de una sesión anterior.
   function hydrateRoleStateFromCache() {
-    try {
-      const cached = JSON.parse(sessionStorage.getItem(ROLE_CACHE_KEY) || "null")
-      if (!cached || !cached.group) return false
-      roleState.profile = cached.profile || null
-      roleState.roles = Array.isArray(cached.roles) ? cached.roles : []
-      roleState.group = cached.group
-      roleState.loaded = true
-      return true
-    } catch (_) { return false }
+    clearRoleStateCache()
+    roleState.profile = null
+    roleState.roles = []
+    roleState.group = ROLE_GROUPS.PENDING
+    roleState.loaded = false
+    return false
   }
 
   function persistRoleStateCache() {
-    try {
-      sessionStorage.setItem(ROLE_CACHE_KEY, JSON.stringify({
-        profile: roleState.profile,
-        roles: roleState.roles,
-        group: roleState.group,
-      }))
-    } catch (_) {}
+    clearRoleStateCache()
   }
 
   function clearRoleStateCache() {
@@ -489,16 +709,17 @@ try {
 
   function applyShell() {
     applyIncomeCompatibility()
+    applyProviderCatalogRpcCompatibility()
+    applyPaymentRequestExecutionRpcCompatibility()
     hydrateRoleStateFromCache()
     ensureFirstPaintNavigation()
     hideLegacyNavigation()
-    // Pinta el menu desde cache ANTES de loadFluxExtensions(): esa funcion usa
-    // XHR sincronos (bloqueantes) por cada extension, lo que retrasaba la
-    // aparicion del menu y causaba el parpadeo en cada cambio de seccion.
-    if (roleState.loaded) applyDemoNavigation()
-    loadFluxExtensions()
     resolveRoleAccess().then(() => {
+      if (![ROLE_GROUPS.PENDING, ROLE_GROUPS.INACTIVE].includes(roleState.group)) {
+        loadFluxExtensions()
+      }
       applyDemoNavigation()
+      renderInactiveProfileGate()
       applyPostLoginRedirect()
       enforcePageVisibility()
       markShellReady()
@@ -508,7 +729,19 @@ try {
 
   function resolveRoleAccess() {
     if (rolePromise) return rolePromise
-    rolePromise = loadRoleState()
+    rolePromise = loadRoleState().then((state) => {
+      if (
+        state.group === ROLE_GROUPS.INACTIVE
+        && !["", "index.html", "pending.html"].includes(pageName)
+      ) {
+        clearRoleStateCache()
+        window.location.replace("./pending.html")
+        // Operational pages await FluxAuth.ready() before loading data. Keep
+        // those continuations paused until navigation replaces this document.
+        return new Promise(() => {})
+      }
+      return state
+    })
     return rolePromise
   }
 
@@ -528,19 +761,28 @@ try {
         // con un grupo viejo hidratado.
         roleState.profile = null
         roleState.roles = []
-        roleState.group = ROLE_GROUPS.OPERATION
+        roleState.group = ROLE_GROUPS.PENDING
         clearRoleStateCache()
         roleState.loaded = true
         return roleState
       }
 
       roleState.profile = await resolveProfile(client, session)
+      if (roleState.profile && roleState.profile.active !== true) {
+        roleState.roles = []
+        roleState.group = ROLE_GROUPS.INACTIVE
+        clearRoleStateCache()
+        roleState.loaded = true
+        return roleState
+      }
       roleState.roles = await resolveRoles(client, roleState.profile)
       roleState.group = groupFromRoles(roleState.roles)
       persistRoleStateCache()
     } catch (_) {
+      roleState.profile = null
       roleState.roles = []
-      roleState.group = ROLE_GROUPS.OPERATION
+      roleState.group = ROLE_GROUPS.PENDING
+      clearRoleStateCache()
     }
 
     roleState.loaded = true
@@ -625,7 +867,7 @@ try {
   }
 
   function defaultLandingForRole() {
-    if (roleState.group === ROLE_GROUPS.PENDING) return "pending.html"
+    if ([ROLE_GROUPS.PENDING, ROLE_GROUPS.INACTIVE].includes(roleState.group)) return "pending.html"
     const first = modules.find((m) => !m.hidden && m.groups.includes(roleState.group))
     return first ? first.file : "solicitudes.html"
   }
@@ -633,7 +875,7 @@ try {
   function enforcePageVisibility() {
     if (pageName === "index.html" || pageName === "" || pageName === "pending.html") return
     if (!roleState.session) return
-    if (roleState.group === ROLE_GROUPS.PENDING) {
+    if ([ROLE_GROUPS.PENDING, ROLE_GROUPS.INACTIVE].includes(roleState.group)) {
       window.location.replace("./pending.html")
       return
     }
@@ -662,6 +904,20 @@ try {
 
   function normalizeRole(value) {
     return String(value || "").trim().toLowerCase()
+  }
+
+  function renderInactiveProfileGate() {
+    if (roleState.group !== ROLE_GROUPS.INACTIVE || pageName !== "pending.html") return
+    clearRoleStateCache()
+    document.title = "Perfil inactivo | Flux"
+    const title = document.querySelector(".card h1")
+    const description = document.querySelector(".card p:not(.powered)")
+    const icon = document.querySelector(".card .icon")
+    if (title) title.textContent = "Perfil inactivo"
+    if (description) {
+      description.textContent = "Este perfil conserva su historial, pero no puede acceder a módulos operativos. Contacta a SysAdmin si necesitas reactivar el acceso."
+    }
+    if (icon) icon.textContent = "!"
   }
 
   function markShellReady() {
@@ -767,7 +1023,8 @@ try {
   hydrateRoleStateFromCache()
   ensureFirstPaintNavigation()
   applyIncomeCompatibility()
-  loadFluxExtensions()
+  applyProviderCatalogRpcCompatibility()
+  applyPaymentRequestExecutionRpcCompatibility()
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", applyShell)

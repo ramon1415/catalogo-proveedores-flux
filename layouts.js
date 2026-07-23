@@ -31,6 +31,10 @@ let activeLayoutLines = []
 let layoutPagosintIssueCounts = new Map()
 let layoutFormatSummaries = new Map()
 let layoutEligibilityPreview = null
+let layoutEligibilityPreviewParamsKey = null
+let layoutPreviewRequestSequence = 0
+let activeLayoutPreviewRequestId = 0
+let inFlightLayoutPreviewRequestId = null
 let activeLayoutRebatchItem = null
 let activeLayoutCompletionRequest = null
 let layoutActionConfirmResolve = null
@@ -102,6 +106,13 @@ function cacheDom() {
   dom.layoutCompletionReference = document.getElementById("layoutCompletionReference")
   dom.layoutCompletionConcept = document.getElementById("layoutCompletionConcept")
   dom.layoutCompletionDate = document.getElementById("layoutCompletionDate")
+  dom.layoutCompletionProviderFields = document.getElementById("layoutCompletionProviderFields")
+  dom.layoutCompletionDestinationType = document.getElementById("layoutCompletionDestinationType")
+  dom.layoutCompletionProviderBank = document.getElementById("layoutCompletionProviderBank")
+  dom.layoutCompletionBeneficiary = document.getElementById("layoutCompletionBeneficiary")
+  dom.layoutCompletionClabe = document.getElementById("layoutCompletionClabe")
+  dom.layoutCompletionProviderAccount = document.getElementById("layoutCompletionProviderAccount")
+  dom.layoutCompletionConvenio = document.getElementById("layoutCompletionConvenio")
   dom.layoutCompletionImpact = document.getElementById("layoutCompletionImpact")
   dom.closeLayoutCompletionBtn = document.getElementById("closeLayoutCompletionBtn")
   dom.cancelLayoutCompletionBtn = document.getElementById("cancelLayoutCompletionBtn")
@@ -159,9 +170,12 @@ function bindEvents() {
   dom.statusFilter?.addEventListener("change", renderLayoutsTable)
   dom.layoutCompanyId?.addEventListener("change", () => {
     renderLayoutBankAccountOptions()
-    invalidateLayoutPreview()
+    invalidateLayoutPreview({ filtersChanged: true })
   })
-  ;[dom.layoutPeriodStart, dom.layoutPeriodEnd, dom.layoutBankAccountId].forEach((field) => field?.addEventListener("change", invalidateLayoutPreview))
+  ;[dom.layoutPeriodStart, dom.layoutPeriodEnd].forEach((field) => {
+    field?.addEventListener("input", () => invalidateLayoutPreview({ filtersChanged: true }))
+  })
+  dom.layoutBankAccountId?.addEventListener("change", () => invalidateLayoutPreview({ filtersChanged: true }))
   dom.reviewLayoutBtn?.addEventListener("click", reviewLayoutEligibility)
   dom.layoutEligibilityPreview?.addEventListener("click", handleLayoutPreviewAction)
   dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal)
@@ -172,6 +186,7 @@ function bindEvents() {
   dom.layoutRebatchForm?.addEventListener("submit", submitLayoutRebatch)
   dom.closeLayoutCompletionBtn?.addEventListener("click", closeLayoutCompletionDialog)
   dom.cancelLayoutCompletionBtn?.addEventListener("click", closeLayoutCompletionDialog)
+  dom.layoutCompletionDestinationType?.addEventListener("change", syncProviderExecutionDestinationRequirements)
   dom.layoutCompletionForm?.addEventListener("submit", submitLayoutCompletion)
   dom.closeLinesModalBtn?.addEventListener("click", closeLinesModal)
   dom.closePagosintReferenceModalBtn?.addEventListener("click", closePagosintReferenceModal)
@@ -359,12 +374,15 @@ async function openNewLayoutModal() {
 }
 
 function closeNewLayoutModal() {
+  invalidateLayoutPreview()
   if (dom.newLayoutDialog.open) dom.newLayoutDialog.close()
 }
 
 function resetNewLayoutForm() {
   dom.newLayoutForm?.reset()
   layoutEligibilityPreview = null
+  layoutEligibilityPreviewParamsKey = null
+  activeLayoutPreviewRequestId = ++layoutPreviewRequestSequence
   activeLayoutRebatchItem = null
   dom.layoutEligibilityPreview.classList.add("hidden")
   dom.layoutEligibilityPreview.innerHTML = ""
@@ -372,6 +390,7 @@ function resetNewLayoutForm() {
   dom.submitNewLayoutBtn.textContent = "Crear layout"
   dom.layoutInvalidBox.classList.add("hidden")
   dom.layoutInvalidBox.innerHTML = ""
+  resetLayoutPreviewScrollPositions()
 
   const today = new Date()
   const endDate = new Date(today)
@@ -423,13 +442,19 @@ function renderLayoutBankAccountOptions() {
   if (selected && accounts.some((a) => a.id === selected)) dom.layoutBankAccountId.value = selected
 }
 
-function invalidateLayoutPreview() {
+function invalidateLayoutPreview({ filtersChanged = false } = {}) {
+  activeLayoutPreviewRequestId = ++layoutPreviewRequestSequence
   layoutEligibilityPreview = null
+  layoutEligibilityPreviewParamsKey = null
   dom.layoutEligibilityPreview?.classList.add("hidden")
   if (dom.layoutEligibilityPreview) dom.layoutEligibilityPreview.innerHTML = ""
   if (dom.submitNewLayoutBtn) {
     dom.submitNewLayoutBtn.disabled = true
     dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
+  }
+  resetLayoutPreviewScrollPositions()
+  if (filtersChanged) {
+    renderLayoutNotice("Los filtros cambiaron. Revisa nuevamente las solicitudes.")
   }
 }
 
@@ -442,24 +467,54 @@ function layoutPreviewParams() {
   }
 }
 
+function layoutPreviewParamsKey(params = layoutPreviewParams()) {
+  return JSON.stringify([
+    params.p_period_start || "",
+    params.p_period_end || "",
+    params.p_company_id || "",
+    params.p_company_bank_account_id || "",
+  ])
+}
+
 async function reviewLayoutEligibility() {
   if (!ensureActorProfile()) return
+  if (inFlightLayoutPreviewRequestId !== null) return
   const params = layoutPreviewParams()
   if (!params.p_period_start || !params.p_period_end) return showToast("Fechas requeridas", "Captura fecha inicio y fecha fin.", "warning")
   if (params.p_period_start > params.p_period_end) return showToast("Rango invalido", "La fecha inicio no puede ser mayor a la fecha fin.", "warning")
 
+  const paramsKey = layoutPreviewParamsKey(params)
+  const requestId = ++layoutPreviewRequestSequence
+  activeLayoutPreviewRequestId = requestId
+  inFlightLayoutPreviewRequestId = requestId
+  layoutEligibilityPreview = null
+  layoutEligibilityPreviewParamsKey = null
+  dom.layoutEligibilityPreview?.classList.add("hidden")
+  if (dom.layoutEligibilityPreview) dom.layoutEligibilityPreview.innerHTML = ""
+  dom.submitNewLayoutBtn.disabled = true
+  dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
+  dom.layoutInvalidBox.classList.add("hidden")
+  dom.layoutInvalidBox.innerHTML = ""
+  resetLayoutPreviewScrollPositions()
   setButtonLoading(dom.reviewLayoutBtn, true, "Revisando...")
   try {
     const { data, error } = await supabaseClient.rpc("preview_payment_layout_eligibility", params)
     if (error) throw error
+    if (requestId !== activeLayoutPreviewRequestId || paramsKey !== layoutPreviewParamsKey()) return
     layoutEligibilityPreview = data || {}
+    layoutEligibilityPreviewParamsKey = paramsKey
     renderLayoutEligibilityPreview()
   } catch (error) {
-    invalidateLayoutPreview()
+    if (requestId !== activeLayoutPreviewRequestId) return
+    layoutEligibilityPreview = null
+    layoutEligibilityPreviewParamsKey = null
     renderLayoutNotice(friendlyRpcError(error))
     showToast("No se pudo revisar", friendlyRpcError(error), "danger")
   } finally {
-    setButtonLoading(dom.reviewLayoutBtn, false, "Revisar solicitudes")
+    if (inFlightLayoutPreviewRequestId === requestId) {
+      inFlightLayoutPreviewRequestId = null
+      setButtonLoading(dom.reviewLayoutBtn, false, "Revisar solicitudes")
+    }
   }
 }
 
@@ -479,26 +534,38 @@ function renderLayoutEligibilityPreview() {
   const invalid = previewRows("invalid_data")
   const ready = [...regular, ...extraordinary, ...legacy]
   const totals = aggregatePreviewTotals(ready)
+  const noReadyMessage = invalid.length
+    ? "Completa los datos pendientes"
+    : pendingClose.length
+      ? "Finanzas debe cerrar el corte"
+      : pendingDirector.length
+        ? "Pendiente de decisión de Dirección"
+        : directionReapproval.length
+          ? "Requiere nueva autorización de Dirección"
+          : "No hay pagos liberados"
 
   dom.layoutEligibilityPreview.innerHTML = `
     <div class="layout-preview-summary">
       ${previewMetric("Listas para layout", ready.length)}
       ${previewMetric("Regulares / extraordinarias", `${regular.length + legacy.length} / ${extraordinary.length}`)}
       ${previewMetric("Rechazadas", rejected.length, rejected.length ? "layoutPreviewRejected" : null, "danger")}
-      ${previewMetric("Reautorizacion requerida", directionReapproval.length)}
+      ${previewMetric("Cambio crítico", directionReapproval.length)}
       ${previewMetric("Datos por completar", invalid.length, invalid.length ? "layoutPreviewInvalid" : null, "warning")}
       ${previewMetric("Importe listo", totals.map((row) => formatPreviewMoney(row.amount, row.currency)).join(" | ") || "Sin importe")}
     </div>
-    ${renderPreviewSection("Listas para layout", "Solo estas solicitudes se incluiran", ready, "ready")}
+    ${renderPreviewSection("Listas para layout", ready.length ? "Solo estas solicitudes se incluirán" : noReadyMessage, ready, "ready")}
     ${renderPreviewSection("Pendientes de cierre", "Direccion aprobo; Finanzas debe liberar el corte", pendingClose, "pending_close")}
     ${renderPreviewSection("Pendientes de Direccion", "No se incluiran en el layout", pendingDirector, "pending_director")}
-    ${renderPreviewSection("Reautorizacion de Direccion", "Los datos cambiaron despues de la autorizacion", directionReapproval, "direction_reapproval")}
+    ${renderPreviewSection("Nueva autorización de Dirección", "Existe un cambio crítico posterior a la autorización", directionReapproval, "direction_reapproval")}
     ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected", "layoutPreviewRejected")}
     ${renderPreviewSection("Solicitudes por completar", "Corrige aqui los datos faltantes para que vuelvan a evaluarse", invalid, "invalid", "layoutPreviewInvalid")}
   `
   dom.layoutEligibilityPreview.classList.remove("hidden")
   dom.submitNewLayoutBtn.disabled = ready.length === 0
-  dom.submitNewLayoutBtn.textContent = ready.length ? `Crear layout con ${ready.length} pagos` : "Sin pagos liberados"
+  dom.submitNewLayoutBtn.textContent = ready.length
+    ? `Crear layout con ${ready.length} ${ready.length === 1 ? "pago" : "pagos"}`
+    : noReadyMessage
+  resetLayoutPreviewScrollPositions()
 }
 
 function previewMetric(label, value, targetId = null, tone = "") {
@@ -543,10 +610,13 @@ function renderPreviewRow(row, kind) {
     detailIsHtml = true
     detail = `<strong>Falta completar</strong><small>${escapeHtml(formatMissingFields(row.missing_fields))}</small>`
     const missing = Array.isArray(row.missing_fields) ? row.missing_fields : []
-    if (missing.some((field) => requestOwnedLayoutFields().includes(field))) {
+    if (missing.some((field) => (
+      requestOwnedLayoutFields().includes(field)
+      || providerExecutionLayoutFields().includes(field)
+    ))) {
       actions += `<button class="small-btn warning" type="button" data-preview-action="complete-layout-data" data-request-id="${escapeHtml(row.payment_request_id)}">Completar datos</button>`
     }
-    if (missing.some((field) => providerOwnedLayoutFields().includes(field)) && row.proveedor_id) {
+    if (missing.some((field) => providerRecordLayoutFields().includes(field)) && row.proveedor_id) {
       actions += `<button class="small-btn" type="button" data-preview-action="open-provider" data-provider-id="${escapeHtml(row.proveedor_id)}">Completar proveedor</button>`
     }
   } else if (row.classification === "legacy_eligible") {
@@ -587,7 +657,7 @@ async function handleLayoutPreviewAction(event) {
   if (!button) return
   if (button.dataset.previewAction === "focus-section") {
     const section = document.getElementById(button.dataset.targetId)
-    section?.scrollIntoView({ behavior: "smooth", block: "start" })
+    scrollLayoutModalToSection(section)
     window.setTimeout(() => section?.focus({ preventScroll: true }), 250)
     return
   }
@@ -610,29 +680,62 @@ async function handleLayoutPreviewAction(event) {
   if (button.dataset.previewAction === "rebatch") await openLayoutRebatchDialog(button.dataset.itemId)
 }
 
+function layoutModalScrollContainer() {
+  return dom.newLayoutDialog?.querySelector(".modal-scroll") || null
+}
+
+function resetLayoutPreviewScrollPositions() {
+  const container = layoutModalScrollContainer()
+  if (container) container.scrollTop = 0
+  dom.layoutEligibilityPreview?.querySelectorAll(".layout-preview-list").forEach((list) => {
+    list.scrollTop = 0
+  })
+}
+
+function scrollLayoutModalToSection(section) {
+  const container = layoutModalScrollContainer()
+  if (!section || !container) return
+  const containerRect = container.getBoundingClientRect()
+  const sectionRect = section.getBoundingClientRect()
+  const targetTop = container.scrollTop + sectionRect.top - containerRect.top - 12
+  container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" })
+}
+
 function requestOwnedLayoutFields() {
   return [
     "scheduled_payment_date",
     "company_bank_account_id",
     "company_bank_account_id_not_found",
+    "company_bank_account_company_mismatch",
     "company_bank_account_inactive",
     "source_account_number",
+    "source_account_number_invalid",
     "payment_reference",
+    "payment_reference_invalid",
     "payment_concept",
+    "payment_concept_invalid",
   ]
 }
 
-function providerOwnedLayoutFields() {
+function providerExecutionLayoutFields() {
   return [
-    "proveedor_id",
-    "proveedor_not_found",
-    "proveedor_inactive",
     "beneficiary_name",
+    "beneficiary_name_invalid",
     "destination_type",
+    "destination_type_invalid",
     "clabe",
+    "clabe_invalid",
     "cuenta_bancaria",
+    "cuenta_bancaria_invalid",
     "convenio_number",
+    "convenio_number_invalid",
+    "banco",
+    "banco_invalid",
   ]
+}
+
+function providerRecordLayoutFields() {
+  return ["proveedor_id", "proveedor_not_found", "proveedor_inactive"]
 }
 
 function findPreviewRequest(requestId) {
@@ -647,7 +750,7 @@ function openLayoutCompletionDialog(requestId) {
   const accounts = companyBankAccounts.filter((account) => (
     account.company_id === request.company_id
     && account.active
-    && cleanText(account.account_number)
+    && /^[0-9]{1,18}$/.test(cleanText(account.account_number).replace(/[\s-]/g, ""))
   ))
   dom.layoutCompletionTitle.textContent = `Completar ${request.request_number || "solicitud"}`
   dom.layoutCompletionSummary.innerHTML = `<strong>${escapeHtml(request.provider_name || "Sin proveedor")}</strong><span>${escapeHtml(formatPreviewMoney(request.amount, request.currency))}</span><small>Pendiente: ${escapeHtml(formatMissingFields(missing))}</small>`
@@ -656,18 +759,38 @@ function openLayoutCompletionDialog(requestId) {
   dom.layoutCompletionReference.value = request.payment_reference || ""
   dom.layoutCompletionConcept.value = request.payment_concept || ""
   dom.layoutCompletionDate.value = request.scheduled_payment_date || ""
+  const providerMissing = missing.filter((field) => providerExecutionLayoutFields().includes(field))
+  const showProviderFields = providerMissing.length > 0
+  dom.layoutCompletionProviderFields.classList.toggle("hidden", !showProviderFields)
+  dom.layoutCompletionDestinationType.value = request.destination_type || ""
+  dom.layoutCompletionProviderBank.value = ""
+  dom.layoutCompletionBeneficiary.value = request.beneficiary_name || ""
+  dom.layoutCompletionClabe.value = request.destination_type === "clabe" ? request.destination_value || "" : ""
+  dom.layoutCompletionProviderAccount.value = request.destination_type === "cuenta" ? request.destination_value || "" : ""
+  dom.layoutCompletionConvenio.value = request.destination_type === "convenio"
+    ? String(request.destination_value || "").replace(/^CONVENIO\s+/i, "")
+    : ""
   dom.layoutCompletionBankAccount.required = missing.some((field) => [
     "company_bank_account_id",
     "company_bank_account_id_not_found",
+    "company_bank_account_company_mismatch",
     "company_bank_account_inactive",
     "source_account_number",
+    "source_account_number_invalid",
   ].includes(field))
-  dom.layoutCompletionReference.required = missing.includes("payment_reference")
-  dom.layoutCompletionConcept.required = missing.includes("payment_concept")
+  dom.layoutCompletionReference.required = missing.some((field) => ["payment_reference", "payment_reference_invalid"].includes(field))
+  dom.layoutCompletionConcept.required = missing.some((field) => ["payment_concept", "payment_concept_invalid"].includes(field))
   dom.layoutCompletionDate.required = missing.includes("scheduled_payment_date")
+  dom.layoutCompletionDestinationType.required = providerMissing.some((field) => ["destination_type", "destination_type_invalid"].includes(field))
+  dom.layoutCompletionProviderBank.required = providerMissing.some((field) => ["banco", "banco_invalid"].includes(field))
+  dom.layoutCompletionBeneficiary.required = providerMissing.some((field) => ["beneficiary_name", "beneficiary_name_invalid"].includes(field))
+  dom.layoutCompletionClabe.required = providerMissing.some((field) => ["clabe", "clabe_invalid"].includes(field))
+  dom.layoutCompletionProviderAccount.required = providerMissing.some((field) => ["cuenta_bancaria", "cuenta_bancaria_invalid"].includes(field))
+  dom.layoutCompletionConvenio.required = providerMissing.some((field) => ["convenio_number", "convenio_number_invalid"].includes(field))
+  syncProviderExecutionDestinationRequirements()
   dom.layoutCompletionImpact.textContent = request.direction_approval_current
-    ? "Estos datos forman parte de la autorizacion. Al guardarlos, el historial se conserva y Direccion debera revisar nuevamente la solicitud antes del pago."
-    : "Al guardar, la solicitud se volvera a evaluar automaticamente en este mismo preview."
+    ? "Estos son datos operativos de ejecución. Al guardarlos se conserva la autorización vigente de Dirección."
+    : "Al guardar, los datos operativos se reevaluarán sin alterar el contenido económico aprobado."
   dom.layoutCompletionDialog.showModal()
 }
 
@@ -675,6 +798,20 @@ function closeLayoutCompletionDialog() {
   activeLayoutCompletionRequest = null
   dom.layoutCompletionForm?.reset()
   if (dom.layoutCompletionDialog?.open) dom.layoutCompletionDialog.close()
+}
+
+function syncProviderExecutionDestinationRequirements() {
+  const enabled = !dom.layoutCompletionProviderFields?.classList.contains("hidden")
+  const destinationType = cleanText(dom.layoutCompletionDestinationType?.value)
+  if (dom.layoutCompletionClabe) {
+    dom.layoutCompletionClabe.required = enabled && destinationType === "clabe"
+  }
+  if (dom.layoutCompletionProviderAccount) {
+    dom.layoutCompletionProviderAccount.required = enabled && destinationType === "cuenta"
+  }
+  if (dom.layoutCompletionConvenio) {
+    dom.layoutCompletionConvenio.required = enabled && destinationType === "convenio"
+  }
 }
 
 async function submitLayoutCompletion(event) {
@@ -685,8 +822,42 @@ async function submitLayoutCompletion(event) {
     showToast("Referencia invalida", "Captura de 1 a 5 digitos.", "warning")
     return
   }
+  if (!dom.layoutCompletionProviderFields.classList.contains("hidden")) {
+    const destinationType = cleanText(dom.layoutCompletionDestinationType.value)
+    const clabe = cleanText(dom.layoutCompletionClabe.value).replace(/[\s-]/g, "")
+    const account = cleanText(dom.layoutCompletionProviderAccount.value).replace(/[\s-]/g, "")
+    const agreement = cleanText(dom.layoutCompletionConvenio.value)
+    if (!["clabe", "cuenta", "convenio"].includes(destinationType)) {
+      showToast("Tipo de destino requerido", "Selecciona CLABE, cuenta bancaria o convenio.", "warning")
+      return
+    }
+    if (destinationType === "clabe" && !/^[0-9]{18}$/.test(clabe)) {
+      showToast("CLABE inválida", "Captura exactamente 18 dígitos.", "warning")
+      return
+    }
+    if (destinationType === "cuenta" && !/^[0-9]{1,18}$/.test(account)) {
+      showToast("Cuenta inválida", "Captura de 1 a 18 dígitos.", "warning")
+      return
+    }
+    if (destinationType === "convenio" && (!agreement || agreement.length > 30)) {
+      showToast("Convenio inválido", "Captura un convenio de hasta 30 caracteres.", "warning")
+      return
+    }
+  }
   setButtonLoading(dom.submitLayoutCompletionBtn, true, "Guardando...")
   try {
+    if (!dom.layoutCompletionProviderFields.classList.contains("hidden")) {
+      const { error: providerError } = await supabaseClient.rpc("complete_provider_payment_execution_data", {
+        p_proveedor_id: activeLayoutCompletionRequest.proveedor_id,
+        p_destination_type: cleanText(dom.layoutCompletionDestinationType.value) || null,
+        p_clabe: cleanText(dom.layoutCompletionClabe.value) || null,
+        p_cuenta_bancaria: cleanText(dom.layoutCompletionProviderAccount.value) || null,
+        p_convenio_number: cleanText(dom.layoutCompletionConvenio.value) || null,
+        p_beneficiary_name: cleanText(dom.layoutCompletionBeneficiary.value) || null,
+        p_banco: cleanText(dom.layoutCompletionProviderBank.value) || null,
+      })
+      if (providerError) throw providerError
+    }
     const { data, error } = await supabaseClient.rpc("complete_payment_request_layout_data", {
       p_payment_request_id: activeLayoutCompletionRequest.payment_request_id,
       p_company_bank_account_id: dom.layoutCompletionBankAccount.value || null,
@@ -696,13 +867,21 @@ async function submitLayoutCompletion(event) {
     })
     if (error) throw error
     const requiresDirection = Boolean(data?.direction_reapproval_required)
+    const approvalPreserved = data?.approval_preserved === true
+    const remainingMissing = Array.isArray(data?.missing_fields) ? data.missing_fields : []
     closeLayoutCompletionDialog()
     await reviewLayoutEligibility()
     showToast(
-      "Datos guardados",
+      approvalPreserved && !requiresDirection && !remainingMissing.length
+        ? "Datos de ejecución completados"
+        : "Datos guardados",
       requiresDirection
-        ? "La solicitud conserva su historial y ahora requiere una nueva revision de Direccion antes de entrar al layout."
-        : "La solicitud fue reevaluada. Revisa su estado actualizado en la lista.",
+        ? "La solicitud ya presenta un cambio crítico y requiere nueva autorización de Dirección."
+        : approvalPreserved && !remainingMissing.length
+          ? "Datos de ejecución completados. La autorización de Dirección se conserva."
+          : approvalPreserved
+            ? `La autorización de Dirección se conserva. Aún faltan: ${formatMissingFields(remainingMissing)}.`
+          : "Los datos operativos se guardaron y la solicitud fue reevaluada.",
       requiresDirection ? "warning" : "success"
     )
   } catch (error) {
@@ -770,6 +949,11 @@ async function submitNewLayout(event) {
     showToast("Revision requerida", "Revisa las solicitudes antes de crear el layout.", "warning")
     return
   }
+  if (layoutEligibilityPreviewParamsKey !== layoutPreviewParamsKey()) {
+    invalidateLayoutPreview({ filtersChanged: true })
+    showToast("Revisión desactualizada", "Los filtros cambiaron. Revisa nuevamente las solicitudes.", "warning")
+    return
+  }
 
   const periodStart = dom.layoutPeriodStart.value
   const periodEnd = dom.layoutPeriodEnd.value
@@ -821,6 +1005,7 @@ async function submitNewLayout(event) {
       numberValue(data?.rejected_count) || numberValue(data?.pending_close_count) || numberValue(data?.direction_reapproval_count) || invalidCount ? "warning" : "success"
     )
     layoutEligibilityPreview = null
+    layoutEligibilityPreviewParamsKey = null
     dom.layoutEligibilityPreview.classList.add("hidden")
     dom.submitNewLayoutBtn.disabled = true
     dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
@@ -859,17 +1044,32 @@ function formatMissingFields(fields) {
     payment_concept: "concepto de pago requerido",
     company_bank_account_id: "cuenta origen requerida",
     company_bank_account_id_not_found: "cuenta origen no encontrada",
+    company_bank_account_company_mismatch: "la cuenta origen no pertenece a la empresa",
     company_bank_account_inactive: "cuenta origen inactiva",
     source_account_number: "numero de cuenta origen requerido",
+    source_account_number_invalid: "numero de cuenta origen invalido",
     scheduled_payment_date: "fecha programada requerida",
+    company_id: "empresa requerida",
+    company_not_found: "empresa no encontrada",
+    company_inactive: "empresa inactiva",
+    company_name: "nombre de empresa requerido",
     proveedor_id: "proveedor requerido",
     proveedor_not_found: "proveedor no encontrado",
     proveedor_inactive: "proveedor inactivo",
     beneficiary_name: "beneficiario requerido",
+    beneficiary_name_invalid: "beneficiario invalido",
     destination_type: "tipo de cuenta destino requerido",
+    destination_type_invalid: "tipo de cuenta destino invalido",
     clabe: "CLABE del proveedor requerida",
+    clabe_invalid: "CLABE del proveedor invalida",
     cuenta_bancaria: "cuenta del proveedor requerida",
+    cuenta_bancaria_invalid: "cuenta del proveedor invalida",
     convenio_number: "numero de convenio requerido",
+    convenio_number_invalid: "numero de convenio invalido",
+    banco: "banco del proveedor requerido",
+    banco_invalid: "banco del proveedor invalido",
+    payment_reference_invalid: "referencia de pago invalida",
+    payment_concept_invalid: "concepto de pago invalido",
     unsupported_layout_currency: "moneda no compatible con layout",
     invalid_amount: "importe invalido",
     budget_revalidation_required: "presupuesto por revalidar",
@@ -1981,6 +2181,7 @@ function friendlyRpcError(error) {
     invalid_period_range: "La fecha inicio no puede ser mayor a la fecha fin.",
     company_not_found: "La empresa seleccionada no existe.",
     company_bank_account_not_found_or_inactive: "La cuenta origen no existe o esta inactiva.",
+    company_bank_account_not_found_inactive_or_company_mismatch: "La cuenta origen debe estar activa y pertenecer a la empresa de la solicitud.",
     finance_role_required: "Se requiere rol de Finanzas.",
     finance_reapproval_required: "La solicitud requiere revalidacion de presupuesto por un cambio material.",
     rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
@@ -1992,6 +2193,16 @@ function friendlyRpcError(error) {
     payment_request_layout_data_locked: "La solicitud ya fue pagada o tiene una ejecucion y sus datos de layout estan bloqueados.",
     payment_reference_must_be_numeric: "La referencia debe contener solo digitos.",
     payment_reference_too_long: "La referencia acepta de 1 a 5 digitos.",
+    payment_concept_too_long: "El concepto acepta hasta 120 caracteres.",
+    payment_concept_invalid_characters: "El concepto contiene caracteres no permitidos.",
+    payment_request_provider_not_found_or_inactive: "El proveedor no existe o está inactivo.",
+    proveedor_not_found_or_inactive: "El proveedor no existe o está inactivo.",
+    approval_material_timestamp_changed_by_execution_data: "No se guardó: los datos operativos intentaron alterar la autorización de Dirección.",
+    operational_update_changed_approval_material_timestamp: "No se guardó: los datos operativos intentaron alterar la autorización de Dirección.",
+    operational_update_invalidated_direction_approval: "No se guardó: la autorización de Dirección no pudo conservarse.",
+    payment_execution_rpc_required: "Los datos de ejecución solo pueden modificarse mediante el flujo autorizado de Finanzas.",
+    provider_payment_execution_rpc_required: "Los datos bancarios del proveedor solo pueden modificarse mediante el flujo autorizado de Finanzas.",
+    provider_payment_execution_data_invalid: "Corrige los datos bancarios del proveedor antes de continuar.",
   }
   const key = Object.keys(known).find((k) => message.includes(k))
   if (key) return known[key]

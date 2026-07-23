@@ -608,7 +608,7 @@ function groupFromRoleNames(roleNames) {
 async function loadUsers() {
   const tbody = document.getElementById("usersTableBody")
   if (!tbody) return
-  tbody.innerHTML = `<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando…</td></tr>`
+  tbody.innerHTML = `<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text-3)">Cargando…</td></tr>`
 
   try {
     // Traer todos los profiles con sus roles
@@ -638,7 +638,7 @@ async function loadUsers() {
 
     renderUsersTable()
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(err.message)}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(err.message)}</td></tr>`
   }
 }
 
@@ -656,7 +656,7 @@ function renderUsersTable() {
   })
 
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin resultados.</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Sin resultados.</td></tr>`
     return
   }
 
@@ -665,6 +665,10 @@ function renderUsersTable() {
       <td>
         <span class="cell-main">${escHtml(u.full_name || "Sin nombre")}</span>
         <span class="cell-sub">${escHtml(u.email || "")}</span>
+      </td>
+      <td>
+        ${Components.badge(u.active === true ? "Activo" : "Inactivo", u.active === true ? "success" : "neutral")}
+        ${u.active === true ? "" : `<span class="cell-sub">Este perfil conserva historial, pero no puede agregarse a una membresía ni utilizarse como aprobador.</span>`}
       </td>
       <td>${u.roleNames.length ? escHtml(u.roleNames.join(", ")) : Components.badge("Sin rol", "neutral")}</td>
       <td>${Components.badge(GROUP_LABELS[u.group] || u.group, GROUP_BADGE[u.group] || "neutral")}</td>
@@ -692,7 +696,7 @@ function openAssignRole(profileId, currentGroup) {
   if (!user) return
   assigningProfileId = profileId
   document.getElementById("assignRoleSubtitle").textContent =
-    `${user.full_name || user.email} — rol actual: ${GROUP_LABELS[currentGroup] || currentGroup}`
+    `${user.full_name || user.email} - rol actual: ${GROUP_LABELS[currentGroup] || currentGroup}. Perfil ${user.active === true ? "activo" : "inactivo"}; cambiar el rol no modifica este estado.`
   // Preselect current group radio
   const roleMap = { sysadmin: "sysadmin", admin_finance: "finance", direction: "director", operation: "solicitante", pending: "pending" }
   const currentValue = roleMap[currentGroup] || "pending"
@@ -738,7 +742,14 @@ async function saveAssignRole() {
       if (ie) throw ie
     }
 
-    showToast("Rol actualizado", "El acceso del usuario fue actualizado correctamente.", "success")
+    const updatedUser = allUsers.find((user) => user.id === assigningProfileId)
+    showToast(
+      "Rol actualizado",
+      updatedUser?.active === true
+        ? "El acceso del usuario fue actualizado correctamente."
+        : "El rol se guardó, pero el perfil continúa inactivo y sin acceso operativo.",
+      "success"
+    )
     closeAssignRole()
     await loadSystemAdministration()
   } catch (err) {
@@ -785,7 +796,7 @@ async function loadApproverRoutingAdmin() {
 
 function populateRoutingBaseSelectors() {
   const profileOptions = `<option value="">Seleccionar usuario...</option>` +
-    allUsers.filter(user => user.active !== false).map(user => `<option value="${escHtml(user.id)}">${escHtml(user.full_name || user.email || "Sin nombre")}</option>`).join("")
+    allUsers.filter(user => user.active === true).map(user => `<option value="${escHtml(user.id)}">${escHtml(user.full_name || user.email || "Sin nombre")}</option>`).join("")
   const companyOptions = `<option value="">Seleccionar empresa...</option>` +
     routingCompanies.map(company => `<option value="${escHtml(company.id)}">${escHtml(company.legal_name || company.name || "Sin empresa")}</option>`).join("")
   const membershipProfile = document.getElementById("routingMembershipProfile")
@@ -805,7 +816,7 @@ function renderRoutingMemberships() {
   }
   tbody.innerHTML = routingMemberships.map(row => `
     <tr>
-      <td><span class="cell-main">${escHtml(row.profile_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.profile_email || "")}</span></td>
+      <td><span class="cell-main">${escHtml(row.profile_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.profile_email || "")}</span>${allUsers.find((user) => user.id === row.profile_id)?.active === true ? "" : `<span class="cell-sub" style="color:var(--ruby)">Perfil inactivo; se conserva solo por historial.</span>`}</td>
       <td>${escHtml(row.company_name || "Sin empresa")}</td>
       <td>${Components.badge(row.active ? "Activa" : "Inactiva", row.active ? "success" : "neutral")}</td>
       <td><button type="button" class="small-btn" data-routing-membership-id="${escHtml(row.id)}">${row.active ? "Desactivar" : "Activar"}</button></td>
@@ -994,6 +1005,7 @@ function friendlyRoutingError(error) {
     approver_company_membership_required: "El usuario no pertenece a la empresa o su membresía no está activa.",
     approver_role_required: "El usuario no tiene rol finance/director.",
     approver_not_eligible_for_company: "El aprobador debe ser finance/director y pertenecer a la empresa.",
+    profile_not_found_or_inactive: "Solo los perfiles activos pueden recibir una membresía.",
     requester_cannot_be_own_pool_approver: "El solicitante no puede agregarse como su propio aprobador.",
     approver_already_configured: "Este aprobador ya está configurado para el solicitante y la empresa.",
   }

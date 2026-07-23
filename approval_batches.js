@@ -14,8 +14,6 @@ const state = {
   companies: [],
   directorCandidates: [],
   directors: [],
-  companySettings: [],
-  companySettingsLoaded: false,
   releaseItemId: null,
   selectedEligibleIds: new Set(),
   addingProgress: null,
@@ -49,8 +47,9 @@ function cacheDom() {
     "createBatchBtn", "viewTabs", "batchSearch", "batchStatusFilter", "batchList",
     "batchDetail", "pageContext", "createBatchDialog", "createBatchForm", "createCompanyId",
     "createDirectorId", "createPeriodStart", "createPeriodEnd", "createLabel", "createNotes",
-    "directorDialog", "directorForm", "directorCompanyId", "directorProfileId", "directorActive",
-    "batchEnforcementEnabled", "batchEnforcementHelp", "directorList", "rebatchDialog",
+    "directorDialog", "directorForm", "directorCompanyId", "directorProfileId",
+    "directorCurrentName", "directorCurrentStatus", "directorCandidateStatus", "directorFormHelp",
+    "saveDirectorBtn", "rebatchDialog",
     "rebatchForm", "rebatchNote", "rebatchOriginalReason", "rebatchTargetBatch", "confirmActionDialog",
     "confirmActionTitle", "confirmActionBody", "confirmActionCloseBtn", "confirmActionCancelBtn",
     "confirmActionConfirmBtn",
@@ -103,8 +102,9 @@ function bindEvents() {
   dom.createCompanyId?.addEventListener("change", fillCreateDirectors)
   dom.directorCompanyId?.addEventListener("change", async () => {
     await loadDirectorCandidates(dom.directorCompanyId.value || null)
-    syncEnforcementControl()
+    syncDirectorForm()
   })
+  dom.directorProfileId?.addEventListener("change", syncDirectorCandidateStatus)
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-close-dialog]")
     if (button) document.getElementById(button.dataset.closeDialog)?.close()
@@ -159,32 +159,6 @@ async function loadReferenceData() {
   if (companies.error) throw companies.error
   state.companies = companies.data || []
   fillCompanyOptions()
-  await loadCompanySettings()
-}
-
-async function loadCompanySettings() {
-  state.companySettingsLoaded = false
-  const { data, error } = await supabaseClient
-    .from("approval_batch_company_settings")
-    .select("company_id,regular_payments_require_closed_batch,enforcement_started_at,enabled_by,enabled_at,updated_at")
-  if (error) {
-    state.companySettings = []
-    syncEnforcementControl()
-    return
-  }
-  const rows = data || []
-  const enabledByIds = [...new Set(rows.map((row) => row.enabled_by).filter(Boolean))]
-  let actorNames = new Map()
-  if (enabledByIds.length) {
-    const profiles = await supabaseClient.from("profiles").select("id,full_name,email").in("id", enabledByIds)
-    actorNames = new Map((profiles.data || []).map((profile) => [profile.id, profile.full_name || profile.email || "Finanzas"]))
-  }
-  state.companySettings = rows.map((row) => ({
-    ...row,
-    enabled_by_name: actorNames.get(row.enabled_by) || "Finanzas",
-  }))
-  state.companySettingsLoaded = true
-  syncEnforcementControl()
 }
 
 async function loadDirectors() {
@@ -193,7 +167,7 @@ async function loadDirectors() {
   if (error) return showToast("No se cargaron directores", friendlyError(error), "warning")
   state.directors = asArray(data)
   fillCreateDirectors()
-  renderDirectorList()
+  syncDirectorForm()
 }
 
 async function loadDirectorCandidates(companyId = null) {
@@ -239,7 +213,6 @@ async function loadBatches() {
 }
 
 async function refreshAll() {
-  await loadCompanySettings()
   await loadDirectors()
   await loadBatches()
 }
@@ -847,35 +820,34 @@ async function createBatch(event) {
 async function openDirectorDialog() {
   fillCompanyOptions()
   await loadDirectorCandidates(dom.directorCompanyId.value || null)
-  fillProfileOptions()
-  syncEnforcementControl()
-  renderDirectorList()
+  syncDirectorForm()
   dom.directorDialog.showModal()
 }
 
 async function saveDirector(event) {
   event.preventDefault()
-  if (!state.companySettingsLoaded) {
-    showToast("Configuracion no disponible", "No se pudo leer el control de cierre. Recarga la pantalla antes de guardar para evitar un cambio accidental.", "warning")
+  const companyId = dom.directorCompanyId.value
+  const directorProfileId = dom.directorProfileId.value
+  if (!companyId || !directorProfileId) {
+    showToast("Datos incompletos", "Selecciona una empresa y un perfil activo con rol Dirección.", "warning")
     return
   }
   const submit = dom.directorForm.querySelector('[type="submit"]')
   submit.disabled = true
   try {
-    const { error } = await supabaseClient.rpc("set_company_batch_configuration", {
-      p_company_id: dom.directorCompanyId.value,
-      p_director_profile_id: dom.directorProfileId.value,
-      p_director_active: dom.directorActive.checked,
-      p_enable_enforcement: Boolean(dom.batchEnforcementEnabled.checked),
+    const { error } = await supabaseClient.rpc("set_company_director_for_future_batches", {
+      p_company_id: companyId,
+      p_director_profile_id: directorProfileId,
     })
     if (error) throw error
-    showToast("Configuracion actualizada", "Director y control de cierre quedaron guardados para la empresa.", "success")
-    await loadCompanySettings()
+    showToast("Director actualizado", "Los cortes futuros usarán al Director seleccionado; los cortes históricos permanecen intactos.", "success")
     await loadDirectors()
+    await loadDirectorCandidates(companyId)
+    syncDirectorForm()
   } catch (error) {
     showToast("No se pudo guardar", friendlyError(error), "error")
   } finally {
-    submit.disabled = false
+    syncDirectorCandidateStatus()
   }
 }
 
@@ -934,39 +906,92 @@ function fillCompanyOptions() {
 }
 
 function fillProfileOptions() {
+  if (!dom.directorProfileId) return
+  const selected = dom.directorProfileId.value
   dom.directorProfileId.innerHTML = `<option value="">Selecciona...</option>${state.directorCandidates.map((profile) => `<option value="${escapeHtml(profile.profile_id)}">${escapeHtml(profile.name || profile.email || profile.profile_id)}</option>`).join("")}`
+  if (state.directorCandidates.some((profile) => profile.profile_id === selected)) {
+    dom.directorProfileId.value = selected
+  }
 }
 
 function fillCreateDirectors() {
   const companyId = dom.createCompanyId?.value
-  const rows = state.directors.filter((row) => row.active && row.director_profile_active !== false && row.director_role_valid !== false && (!companyId || row.company_id === companyId))
+  const rows = state.directors.filter((row) => (
+    row.active
+    && row.director_profile_active !== false
+    && row.director_role_valid !== false
+    && row.director_membership_active !== false
+    && (!companyId || row.company_id === companyId)
+  ))
   dom.createDirectorId.innerHTML = `<option value="">Selecciona...</option>${rows.map((row) => `<option value="${escapeHtml(row.director_profile_id)}">${escapeHtml(row.director_name || row.director_email)}</option>`).join("")}`
 }
 
-function syncEnforcementControl() {
-  if (!dom.batchEnforcementEnabled) return
-  dom.batchEnforcementEnabled.disabled = !state.companySettingsLoaded
-  if (!state.companySettingsLoaded) {
-    dom.batchEnforcementEnabled.checked = false
-    dom.batchEnforcementHelp.textContent = "El control de cierre no esta disponible hasta que la configuracion 022 pueda leerse."
+function syncDirectorForm() {
+  const companyId = dom.directorCompanyId?.value || ""
+  const activeRows = state.directors.filter((row) => row.company_id === companyId && row.active)
+  const current = activeRows[0] || null
+  fillProfileOptions()
+
+  if (!companyId) {
+    dom.directorCurrentName.textContent = "Selecciona una empresa."
+    dom.directorCurrentStatus.textContent = "Sin empresa seleccionada."
+    dom.directorCandidateStatus.textContent = "Selecciona una empresa para consultar candidatos."
+    dom.directorFormHelp.textContent = "Solo se muestran perfiles activos con rol Dirección."
+    dom.directorProfileId.value = ""
+    dom.directorProfileId.disabled = true
+    dom.saveDirectorBtn.disabled = true
     return
   }
-  const companyId = dom.directorCompanyId?.value
-  const setting = state.companySettings.find((row) => row.company_id === companyId)
-  const alreadyActivated = Boolean(setting?.enforcement_started_at)
-  dom.batchEnforcementEnabled.checked = alreadyActivated || Boolean(setting?.regular_payments_require_closed_batch)
-  dom.batchEnforcementEnabled.disabled = !state.companySettingsLoaded || alreadyActivated
-  dom.batchEnforcementHelp.textContent = alreadyActivated
-    ? `Activo desde ${formatDateTime(setting.enforcement_started_at)} por ${setting.enabled_by_name || "Finanzas"}. El control ya esta activo y no puede deshabilitarse desde el MVP.`
-    : "Inactivo. Puede activarse una sola vez; las solicitudes posteriores requeriran un corte cerrado."
+
+  if (activeRows.length > 1) {
+    dom.directorCurrentName.textContent = "Configuración incompatible"
+    dom.directorCurrentStatus.textContent = "Hay más de un Director activo para esta empresa. Corrige la duplicidad antes de guardar."
+    dom.directorProfileId.value = ""
+    dom.directorProfileId.disabled = true
+    dom.saveDirectorBtn.disabled = true
+    dom.directorFormHelp.textContent = "No se elegirá un Director arbitrariamente."
+    syncDirectorCandidateStatus()
+    return
+  }
+
+  if (!current) {
+    dom.directorCurrentName.textContent = "Sin Director activo"
+    dom.directorCurrentStatus.textContent = "Selecciona un perfil elegible para los cortes futuros."
+  } else {
+    dom.directorCurrentName.textContent = current.director_name || current.director_email || "Perfil sin nombre"
+    dom.directorCurrentStatus.textContent = current.director_profile_active === false
+      ? "Inactivo: conserva historial, pero dejó de ser elegible."
+      : current.director_role_valid === false
+        ? "Rol inválido: el perfil ya no tiene rol Dirección."
+        : current.director_membership_active === false
+          ? "Sin membresía activa en esta empresa: dejó de ser elegible."
+          : "Activo, con rol Dirección y membresía válida."
+  }
+
+  dom.directorProfileId.disabled = !state.directorCandidates.length
+  if (current && state.directorCandidates.some((profile) => profile.profile_id === current.director_profile_id)) {
+    dom.directorProfileId.value = current.director_profile_id
+  } else if (!state.directorCandidates.some((profile) => profile.profile_id === dom.directorProfileId.value)) {
+    dom.directorProfileId.value = ""
+  }
+  dom.directorFormHelp.textContent = state.directorCandidates.length
+    ? "Selecciona el Director que se usará únicamente en cortes futuros."
+    : "No hay perfiles activos con rol Dirección disponibles."
+  syncDirectorCandidateStatus()
 }
 
-function renderDirectorList() {
-  if (!dom.directorList) return
-  dom.directorList.innerHTML = state.directors.length ? `<div class="batch-table-wrap"><table class="batch-table" style="min-width:620px"><thead><tr><th>Empresa</th><th>Director</th><th>Estado</th><th>Pagos regulares</th></tr></thead><tbody>${state.directors.map((row) => {
-    const enforced = state.companySettings.some((setting) => setting.company_id === row.company_id && setting.regular_payments_require_closed_batch)
-    return `<tr><td>${escapeHtml(row.company_name)}</td><td>${escapeHtml(row.director_name || row.director_email)}</td><td>${statusBadge(row.active && row.director_profile_active !== false && row.director_role_valid !== false ? "active" : "inactive")}</td><td>${enforced ? "Corte cerrado obligatorio" : "Compatibilidad legacy"}</td></tr>`
-  }).join("")}</tbody></table></div>` : `<div class="batch-empty">No hay directores configurados.</div>`
+function syncDirectorCandidateStatus() {
+  if (!dom.directorCandidateStatus || !dom.saveDirectorBtn) return
+  const selected = state.directorCandidates.find((profile) => profile.profile_id === dom.directorProfileId?.value)
+  if (!selected) {
+    dom.directorCandidateStatus.textContent = state.directorCandidates.length
+      ? "Selecciona un perfil para continuar."
+      : "No hay perfiles activos con rol Dirección disponibles."
+    dom.saveDirectorBtn.disabled = true
+    return
+  }
+  dom.directorCandidateStatus.textContent = `Activo · Rol válido: ${asArray(selected.roles).join(", ") || "Dirección"}.`
+  dom.saveDirectorBtn.disabled = false
 }
 
 function setDefaultPeriod() {
@@ -1081,6 +1106,10 @@ function friendlyError(error) {
     payment_request_in_another_open_batch: "La solicitud ya pertenece a otro corte abierto.",
     reject_reason_required: "El motivo de rechazo es obligatorio.",
     director_role_required: "El perfil seleccionado no tiene un rol activo de Direccion.",
+    director_profile_not_found_or_inactive: "El perfil seleccionado está inactivo o ya no existe.",
+    director_company_membership_required: "El Director necesita una membresía activa en la empresa.",
+    director_self_assignment_not_allowed: "Quien configura el Director no puede asignarse a sí mismo.",
+    company_active_director_conflict: "La empresa tiene más de un Director activo. Corrige la duplicidad antes de guardar.",
     rebatch_release_note_required: "La nota de reingreso es obligatoria.",
     rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
     batch_item_already_released: "Esta solicitud ya fue habilitada para otro corte.",

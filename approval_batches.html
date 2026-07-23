@@ -62,6 +62,10 @@
     .batch-selection-count{color:var(--text-3);font-size:11px}
     .batch-progress{grid-column:1/-1;color:var(--accent-text);font-size:11px;font-weight:700}
     .batch-action-help{width:100%;font-size:10.5px;color:var(--text-3);text-align:right}
+    .director-current-panel{padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-hover)}
+    .director-current-panel span{display:block;color:var(--text-3);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.45px}
+    .director-current-panel strong{display:block;margin-top:4px;color:var(--text-1);font-size:13px}
+    .director-status-line{margin-top:6px;color:var(--text-3);font-size:11px;line-height:1.45}
     .batch-status-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);font-size:11.5px}
     .batch-status-banner strong{display:block;color:var(--text-1);margin-bottom:2px}
     .batch-status-banner.info{background:color-mix(in srgb,#2563eb 8%,transparent)}
@@ -153,8 +157,20 @@
   <dialog id="directorDialog">
     <form id="directorForm" class="modal-content">
       <div class="modal-header"><div><h2>Director por empresa</h2><p>Autorizador final de cortes.</p></div><button class="icon-btn" type="button" aria-label="Cerrar" data-close-dialog="directorDialog">&times;</button></div>
-      <div class="modal-scroll"><div class="modal-grid"><label>Empresa<select class="batch-field" id="directorCompanyId" required></select></label><label>Perfil<select class="batch-field" id="directorProfileId" required></select></label><label class="check-label full"><input id="directorActive" type="checkbox" checked> Configuracion activa</label><label class="check-label full"><input id="batchEnforcementEnabled" type="checkbox"> Activar corte cerrado obligatorio para pagos regulares nuevos</label><div class="full batch-list-meta" id="batchEnforcementHelp">La activacion es irreversible por empresa dentro del MVP.</div></div><div id="directorList" style="margin-top:14px"></div></div>
-      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="directorDialog">Cerrar</button><button class="primary-btn" type="submit">Guardar</button></div>
+      <div class="modal-scroll">
+        <div class="modal-grid">
+          <label class="full">Empresa<select class="batch-field" id="directorCompanyId" required></select></label>
+          <div class="full director-current-panel" aria-live="polite">
+            <span>Director actual</span>
+            <strong id="directorCurrentName">Selecciona una empresa.</strong>
+            <div class="director-status-line" id="directorCurrentStatus">Sin empresa seleccionada.</div>
+          </div>
+          <label class="full">Nuevo Director<select class="batch-field" id="directorProfileId" aria-describedby="directorCandidateStatus directorFormHelp" required></select></label>
+          <div class="full director-status-line" id="directorCandidateStatus">Selecciona una empresa para consultar candidatos.</div>
+          <div class="full batch-list-meta" id="directorFormHelp">Solo se muestran perfiles activos con rol Dirección.</div>
+        </div>
+      </div>
+      <div class="modal-actions"><button class="secondary-btn" type="button" data-close-dialog="directorDialog">Cancelar</button><button class="primary-btn" id="saveDirectorBtn" type="submit">Guardar Director</button></div>
     </form>
   </dialog>
 
@@ -178,8 +194,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
-  <script src="./config.js?v=20260712-approval-batches"></script>
+  <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./approval_batches.js?v=20260714-qa-closure-p2"></script>
+  <script src="./approval_batches.js?v=20260723-approval-execution-hotfix"></script>
 </body>
 </html>

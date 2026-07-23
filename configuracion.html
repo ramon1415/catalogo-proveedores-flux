@@ -231,6 +231,7 @@
                 <thead>
                   <tr>
                     <th>Usuario</th>
+                    <th>Estado del perfil</th>
                     <th>Rol actual</th>
                     <th>Nivel de acceso</th>
                     <th>Registrado</th>
@@ -238,7 +239,7 @@
                   </tr>
                 </thead>
                 <tbody id="usersTableBody">
-                  <tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando usuarios…</td></tr>
+                  <tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text-3)">Cargando usuarios…</td></tr>
                 </tbody>
               </table>
             </div>
@@ -253,6 +254,7 @@
             <div style="padding:0 16px 10px">
               <strong style="font-size:12px;color:var(--text-1)">Alcance usuario–empresa</strong>
               <p style="font-size:11px;color:var(--text-3);margin-top:3px">Define en qué empresas puede operar cada perfil.</p>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">Solo los perfiles activos pueden recibir una membresía. El rol y el estado del perfil son controles independientes.</p>
             </div>
             <div class="table-wrapper">
               <table>
@@ -452,8 +454,8 @@
   <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./config.js?v=20260624-static-nav"></script>
+  <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260709-multi-approver-pool"></script>
+  <script src="./configuracion.js?v=20260723-approval-execution-hotfix"></script>
 </body>
 </html>
