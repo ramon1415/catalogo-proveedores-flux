@@ -1,4 +1,4 @@
-name: Extraordinary 039 DEV read-only precheck
+name: Extraordinary 039 DEV postgrant audit
 
 on:
   push:
@@ -7,6 +7,10 @@ on:
     paths:
       - .github/workflows/extraordinary-039-dev-precheck-readonly.yml
       - scripts/qa/extraordinary-039-dev-precheck-readonly.sql
+      - scripts/qa/extraordinary-039-dev-postcheck-readonly.sql
+      - scripts/qa/extraordinary-039-dev-uat.mjs
+      - scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs
+      - supabase/migrations/039_enable_extraordinary_evidence_storage_policy_helper.sql
 
 permissions:
   contents: read
@@ -15,14 +19,14 @@ permissions:
   statuses: read
 
 concurrency:
-  group: extraordinary-039-dev-read-only-precheck
+  group: extraordinary-039-dev-reconciled-execution
   cancel-in-progress: false
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: fe4a62de0f55139d5d07f66eb6bda07b3e0f3996
+  EXPECTED_PARENT: 98371579d56a71561b55e6c5683dcdfd66ec4cee
   EXPECTED_BASE: eccb7adb37e64782146c0907513f6667d8765d51
-  EXPECTED_MIGRATION_SHA256: 4b87e078916c663c9238c8d7cf842212bf59b680a7c7de53ad2554ed498789ec
+  EXPECTED_MIGRATION_SHA256: d5097286a3e98833241907d124141eac1b9d92938e4fb724c6a6975941c59201
   FEATURE_BRANCH: feature/ramon-post-yanin-bugs-extraordinary
   PR_NUMBER: "277"
   EVIDENCE_DIR: /tmp/extraordinary-039-dev-precheck
@@ -30,16 +34,18 @@ env:
 
 jobs:
   precheck:
-    name: MEJ-05 039 read-only precheck
+    name: MEJ-05 039 reconciled read-only precheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: DEV
+    outputs:
+      mode: ${{ steps.state_gate.outputs.mode }}
 
     steps:
       - name: Checkout exact pushed commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 4
 
       - name: Guard repository, branch, commit scope and PR identity
         shell: bash
@@ -52,6 +58,9 @@ jobs:
             "ramon1415/catalogo-proveedores-flux"
           test "$GITHUB_REF_NAME" = "$FEATURE_BRANCH"
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(
+            sha256sum "$MIGRATION_FILE" | cut -d' ' -f1
+          )" = "$EXPECTED_MIGRATION_SHA256"
           git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
 
           mapfile -t changed_files < <(
@@ -61,9 +70,12 @@ jobs:
             ".github/workflows/extraordinary-039-dev-precheck-readonly.yml"
             "scripts/qa/extraordinary-039-dev-precheck-readonly.sql"
             "scripts/qa/extraordinary-039-dev-postcheck-readonly.sql"
+            "scripts/qa/extraordinary-039-dev-uat.mjs"
             "scripts/qa/extraordinary-039-private-logical-backup.sql"
             "scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs"
             "scripts/qa/shadow/039_postgrant_storage_policy_contracts.sql"
+            "scripts/qa/shadow/039_pregrant_storage_policy_contracts.sql"
+            "scripts/qa/shadow/run-extraordinary-migrations.ps1"
             "supabase/migrations/039_enable_extraordinary_evidence_storage_policy_helper.sql"
           )
           mapfile -t expected_files < <(
@@ -119,13 +131,21 @@ jobs:
           test -n "$SUPABASE_DEV_DB_URL"
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
           test "$DEV_PROJECT_REF" = "scsirgbuqjcwoaxfacth"
+          case "$SUPABASE_DEV_DB_URL" in
+            *"$DEV_PROJECT_REF"*) ;;
+            *)
+              echo "::error::Non-DEV database URL"
+              exit 1
+              ;;
+          esac
           if ! command -v psql >/dev/null 2>&1; then
             sudo apt-get -qq update >/dev/null
             sudo apt-get -qq install -y postgresql-client >/dev/null
           fi
           psql --version
 
-      - name: Execute exact read-only precheck
+      - name: Execute exact read-only state gate
+        id: state_gate
         shell: bash
         env:
           SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
@@ -140,18 +160,47 @@ jobs:
           -c statement_timeout=30000 \
           -c lock_timeout=5000"
 
+          state="$(
+            psql "$SUPABASE_DEV_DB_URL" \
+              --no-psqlrc \
+              --set ON_ERROR_STOP=1 \
+              --set VERBOSITY=terse \
+              --tuples-only \
+              --no-align \
+              --command "
+                begin transaction read only;
+                select case
+                  when has_function_privilege(
+                    'authenticated',
+                    'public.extraordinary_evidence_storage_allowed(text,boolean)',
+                    'EXECUTE'
+                  )
+                  then 'postgrant'
+                  else 'pregrant'
+                end;
+                rollback;
+              " \
+              | grep -E '^(pregrant|postgrant)$' \
+              | tail -n 1
+          )"
+          test "$state" = "postgrant"
+
+          sql_file="scripts/qa/extraordinary-039-dev-postcheck-readonly.sql"
+          result_marker="MIGRATION_039_POSTCHECK_PASS"
+
           psql "$SUPABASE_DEV_DB_URL" \
             --no-psqlrc \
             --set ON_ERROR_STOP=1 \
             --set VERBOSITY=terse \
-            --file scripts/qa/extraordinary-039-dev-precheck-readonly.sql \
+            --file "$sql_file" \
             | tee "$EVIDENCE_DIR/precheck-result.txt"
 
-          grep -F '"result": "MEJ05_039_PRECHECK_PASS"' \
+          grep -F "\"result\": \"$result_marker\"" \
             "$EVIDENCE_DIR/precheck-result.txt"
           grep -F '"transaction_read_only": "on"' \
             "$EVIDENCE_DIR/precheck-result.txt"
           grep -F 'ROLLBACK' "$EVIDENCE_DIR/precheck-result.txt"
+          echo "mode=$state" >> "$GITHUB_OUTPUT"
 
       - name: Upload sanitized precheck evidence
         if: always()
@@ -163,8 +212,9 @@ jobs:
           retention-days: 7
 
   migrate:
-    name: Apply exact migration 039 once
+    name: Migration 039 locked after successful one-shot
     needs: precheck
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: DEV
@@ -177,7 +227,7 @@ jobs:
       - name: Checkout exact prechecked commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 4
 
       - name: Reconfirm immutable migration identity
         shell: bash
@@ -342,11 +392,27 @@ jobs:
           jq -e '
             .backup_kind == "EXTRAORDINARY_039_PRIVATE_LOGICAL_BACKUP"
             and .transaction_read_only == "on"
+            and .helper.source_raw_facts.sha256 ==
+              "c3a6a4d1b447323a320f5663bef28a201b420826485f47eba41c0118faf0d86e"
+            and .helper.source_raw_facts.crlf_count == 42
+            and .helper.source_raw_facts.bare_lf_count == 0
+            and .helper.source_canonical_facts.sha256 ==
+              "53042a2a564b84c8e19620bbbd487b8e3f33b9a47cc31faadedda992918e978c"
+            and .helper.effective_execute.postgres == true
+            and .helper.effective_execute.service_role == true
+            and .helper.effective_execute.authenticated == false
+            and .helper.effective_execute.anon == false
+            and .helper.effective_execute.public_acl_entry == false
+            and (.policies | length) == 2
             and .bucket.object_count == 0
             and .extraordinary_policy_counts.operadora_enabled == 0
           ' "$MIGRATION_EVIDENCE_DIR/private-backup.json" >/dev/null
+          sha256sum "$MIGRATION_EVIDENCE_DIR/private-backup.json" \
+            | cut -d' ' -f1 \
+            > "$MIGRATION_EVIDENCE_DIR/private-backup.sha256"
 
-      - name: Apply exact migration 039 once
+      - name: Archived migration step - permanently unreachable
+        if: ${{ false }}
         shell: bash
         run: |
           set -euo pipefail
@@ -362,7 +428,7 @@ jobs:
           migration_exit=$?
           set -e
           if [ "$migration_exit" -ne 0 ]; then
-            echo "::error::BLOCKED_MIGRATION_039_FIRST_ATTEMPT_FAILED"
+            echo "::error::BLOCKED_MIGRATION_039_RECONCILED_ATTEMPT_FAILED"
             exit "$migration_exit"
           fi
           grep -F "MIGRATION_039_POSTCHECK_PASS" \
@@ -390,9 +456,23 @@ jobs:
             .result == "MIGRATION_039_POSTCHECK_PASS"
             and .transaction_read_only == "on"
             and .authenticated_execute == true
+            and .service_role_execute == true
+            and .postgres_execute == true
             and .anon_execute == false
             and .public_execute == false
+            and .helper_body_sha256 ==
+              "c3a6a4d1b447323a320f5663bef28a201b420826485f47eba41c0118faf0d86e"
+            and .helper_body_octet_length == 1289
+            and .helper_body_crlf_count == 42
+            and .helper_body_bare_lf_count == 0
+            and .helper_canonical_sha256 ==
+              "53042a2a564b84c8e19620bbbd487b8e3f33b9a47cc31faadedda992918e978c"
+            and .helper_reconciliation_classification ==
+              "B_LINE_ENDING_OR_OUTER_WHITESPACE_ONLY"
+            and .policy_count == 2
             and .bucket_private == true
+            and .bucket_file_size_limit == 5242880
+            and (.bucket_allowed_mime_types | length) == 4
             and .bucket_object_count == 0
           ' "$MIGRATION_EVIDENCE_DIR/postcheck-sanitized.json" >/dev/null
           jq -e -n \
@@ -415,14 +495,16 @@ jobs:
         with:
           name: extraordinary-039-migration-${{ github.run_id }}
           path: |
-            /tmp/extraordinary-039-migration/migration-result.log
-            /tmp/extraordinary-039-migration/postcheck-sanitized.json
+             /tmp/extraordinary-039-migration/migration-result.log
+             /tmp/extraordinary-039-migration/postcheck-sanitized.json
+             /tmp/extraordinary-039-migration/private-backup.sha256
           if-no-files-found: warn
           retention-days: 7
 
   uat:
-    name: MEJ-05 secure end-to-end UAT
-    needs: migrate
+    name: UAT locked pending forward-only consumption fix
+    needs: [precheck, migrate]
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: DEV
@@ -436,7 +518,7 @@ jobs:
       UAT_EVIDENCE_DIR: /tmp/extraordinary-039-uat
 
     steps:
-      - name: Checkout exact migrated commit
+      - name: Checkout exact postgrant commit
         uses: actions/checkout@v4
 
       - name: Re-run focused contracts
@@ -496,7 +578,7 @@ jobs:
             --no-package-lock \
             --ignore-scripts \
             @supabase/supabase-js@2 \
-            pg@8
+            pg@8.22.0
 
       - name: Execute real-session Storage and MEJ-05 UAT
         shell: bash
@@ -520,6 +602,8 @@ jobs:
               "SECURE_EXTRAORDINARY_UAT_PASS"
             and .secure_extraordinary_negative ==
               "SECURE_EXTRAORDINARY_NEGATIVE_PASS"
+            and .payable_snapshots_delta == 1
+            and .financial_outbox_delta == 1
             and .payment_receipts_delta == 0
             and .paid_delta == 0
             and .notifications_delta == 0
@@ -538,3 +622,17 @@ jobs:
           path: /tmp/extraordinary-039-uat/uat-result-sanitized.json
           if-no-files-found: warn
           retention-days: 7
+
+  blocker:
+    name: Forward-only extraordinary consumption fix required
+    needs: [precheck, migrate, uat]
+    if: >-
+      always() &&
+      needs.precheck.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop before any additional DEV mutation
+        shell: bash
+        run: |
+          echo "::error::BLOCKED_MEJ05_CONSUMPTION_TRIGGER_RECHECK_DECISION_REQUIRED"
+          exit 1

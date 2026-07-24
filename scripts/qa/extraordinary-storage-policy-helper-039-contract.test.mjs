@@ -6,6 +6,93 @@ import test from "node:test"
 const read = (path) => readFileSync(path, "utf8")
 const sha256 = (path) =>
   createHash("sha256").update(readFileSync(path)).digest("hex")
+const hashText = (algorithm, value) =>
+  createHash(algorithm).update(Buffer.from(value, "utf8")).digest("hex")
+const canonicalizeHelperBody = (value) =>
+  value.replaceAll("\r\n", "\n").replace(/^[ \t\n\r]+|[ \t\n\r]+$/g, "")
+
+const scanDollarQuotes = (sql) => {
+  const blocks = []
+  let index = 0
+
+  while (index < sql.length) {
+    if (sql.startsWith("--", index)) {
+      const newline = sql.indexOf("\n", index + 2)
+      index = newline === -1 ? sql.length : newline + 1
+      continue
+    }
+    if (sql.startsWith("/*", index)) {
+      let depth = 1
+      index += 2
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith("/*", index)) {
+          depth += 1
+          index += 2
+        } else if (sql.startsWith("*/", index)) {
+          depth -= 1
+          index += 2
+        } else {
+          index += 1
+        }
+      }
+      assert.equal(depth, 0, "unterminated SQL block comment")
+      continue
+    }
+    if (sql[index] === "'" || sql[index] === '"') {
+      const quote = sql[index]
+      index += 1
+      while (index < sql.length) {
+        if (sql[index] === quote) {
+          if (sql[index + 1] === quote) {
+            index += 2
+            continue
+          }
+          index += 1
+          break
+        }
+        index += 1
+      }
+      continue
+    }
+    if (sql[index] === "$") {
+      const tag = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0]
+      if (tag) {
+        const bodyStart = index + tag.length
+        const bodyEnd = sql.indexOf(tag, bodyStart)
+        assert.notEqual(bodyEnd, -1, `unterminated SQL dollar quote ${tag}`)
+        blocks.push({
+          start: index,
+          bodyStart,
+          bodyEnd,
+          end: bodyEnd + tag.length,
+          tag,
+        })
+        index = bodyEnd + tag.length
+        continue
+      }
+    }
+    index += 1
+  }
+
+  return blocks
+}
+
+const extractFunction = (sql, qualifiedName) => {
+  const functionStart = sql
+    .toLowerCase()
+    .indexOf(`create or replace function ${qualifiedName.toLowerCase()}(`)
+  assert.notEqual(functionStart, -1, `missing function ${qualifiedName}`)
+  const bodyBlock = scanDollarQuotes(sql).find(
+    (block) => block.start > functionStart,
+  )
+  assert.ok(bodyBlock, `missing dollar-quoted body for ${qualifiedName}`)
+  const semicolon = sql.indexOf(";", bodyBlock.end)
+  assert.notEqual(semicolon, -1, `missing terminator for ${qualifiedName}`)
+  return {
+    body: sql.slice(bodyBlock.bodyStart, bodyBlock.bodyEnd),
+    definition: sql.slice(functionStart, semicolon + 1),
+  }
+}
 
 const migration036Path =
   "supabase/migrations/036_quarantine_legacy_extraordinary_authorizations.sql"
@@ -24,6 +111,12 @@ const backupPath =
 const uatPath = "scripts/qa/extraordinary-039-dev-uat.mjs"
 const workflowPath =
   ".github/workflows/extraordinary-039-dev-precheck-readonly.yml"
+const shadowPregrantPath =
+  "scripts/qa/shadow/039_pregrant_storage_policy_contracts.sql"
+const shadowPostgrantPath =
+  "scripts/qa/shadow/039_postgrant_storage_policy_contracts.sql"
+const shadowRunnerPath =
+  "scripts/qa/shadow/run-extraordinary-migrations.ps1"
 
 const migration037 = read(migration037Path)
 const migration038 = read(migration038Path)
@@ -33,6 +126,13 @@ const postcheck = read(postcheckPath)
 const backup = read(backupPath)
 const uat = read(uatPath)
 const workflow = read(workflowPath)
+const shadowPregrant = read(shadowPregrantPath)
+const shadowPostgrant = read(shadowPostgrantPath)
+const shadowRunner = read(shadowRunnerPath)
+const approvedHelper = extractFunction(
+  migration037,
+  "public.extraordinary_evidence_storage_allowed",
+)
 
 test("migrations 036-038 remain byte-identical to the applied branch head", () => {
   assert.equal(
@@ -65,10 +165,7 @@ test("037 policies depend on the helper in write and read modes", () => {
 })
 
 test("the approved helper is boolean, stable, definer and side-effect-free", () => {
-  const helper = migration037.match(
-    /create or replace function public\.extraordinary_evidence_storage_allowed\([\s\S]*?\n\$\$;/i,
-  )?.[0]
-  assert.ok(helper)
+  const helper = approvedHelper.definition
   assert.match(helper, /returns boolean/i)
   assert.match(helper, /\bstable\b/i)
   assert.match(helper, /\bsecurity definer\b/i)
@@ -90,6 +187,49 @@ test("the approved helper is boolean, stable, definer and side-effect-free", () 
   assert.match(
     helper,
     /v_actor = v_authorization\.external_director_profile_id/i,
+  )
+})
+
+test("helper comparison accepts only CRLF transport and outer whitespace", () => {
+  const lfBody = approvedHelper.body
+  const crlfBody = lfBody.replaceAll("\n", "\r\n")
+  const canonicalBody = canonicalizeHelperBody(lfBody)
+
+  assert.equal(Buffer.byteLength(lfBody), 1247)
+  assert.equal(hashText("md5", lfBody), "9295f516acb33ab9a9f9e5df67ce707b")
+  assert.equal(
+    hashText("sha256", lfBody),
+    "6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d",
+  )
+  assert.equal(Buffer.byteLength(crlfBody), 1289)
+  assert.equal(hashText("md5", crlfBody), "a7879f8dcc683cb5b552387bedb0d499")
+  assert.equal(
+    hashText("sha256", crlfBody),
+    "c3a6a4d1b447323a320f5663bef28a201b420826485f47eba41c0118faf0d86e",
+  )
+  assert.equal(Buffer.byteLength(canonicalBody), 1245)
+  assert.equal(
+    hashText("md5", canonicalBody),
+    "1cdbbec6f293ca5a546e3fb993f1a4c4",
+  )
+  assert.equal(
+    hashText("sha256", canonicalBody),
+    "53042a2a564b84c8e19620bbbd487b8e3f33b9a47cc31faadedda992918e978c",
+  )
+  assert.equal(
+    canonicalizeHelperBody(crlfBody),
+    canonicalBody,
+    "audited CRLF transport must canonicalize to the approved LF body",
+  )
+
+  const interiorMutation = crlfBody.replace(
+    "v_authorization.status = 'draft'",
+    "v_authorization.status  = 'draft'",
+  )
+  assert.notEqual(
+    canonicalizeHelperBody(interiorMutation),
+    canonicalBody,
+    "interior whitespace must remain byte-significant",
   )
 })
 
@@ -125,10 +265,19 @@ test("039 grants exactly EXECUTE to authenticated and keeps anon/PUBLIC denied",
 
 test("039 fail-closes on definition, policies, bucket and prior ACL", () => {
   for (const source of [migration039, precheck]) {
-    assert.match(source, /9295f516acb33ab9a9f9e5df67ce707b/i)
+    assert.match(source, /1cdbbec6f293ca5a546e3fb993f1a4c4/i)
     assert.match(
       source,
-      /6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d/i,
+      /53042a2a564b84c8e19620bbbd487b8e3f33b9a47cc31faadedda992918e978c/i,
+    )
+    assert.match(
+      source,
+      /replace\(v_function_source,\s*E'\\r\\n',\s*E'\\n'\)/i,
+    )
+    assert.match(source, /\bbtrim\(/i)
+    assert.doesNotMatch(
+      source,
+      /regexp_replace\(\s*v_function_source[\s\S]{0,120}'\\s\+'/i,
     )
     assert.match(source, /function_info\.prosrc/i)
     assert.doesNotMatch(source, /md5\(pg_get_functiondef/i)
@@ -138,6 +287,10 @@ test("039 fail-closes on definition, policies, bucket and prior ACL", () => {
     assert.match(source, /extraordinary_evidence_select/i)
     assert.match(source, /extraordinary-approval-evidence/i)
     assert.match(source, /file_size_limit = 5242880/i)
+    assert.match(source, /service_role/i)
+    assert.match(source, /aclexplode/i)
+    assert.match(source, /proparallel/i)
+    assert.match(source, /proleakproof/i)
     assert.match(source, /Operadora extraordinary policy is enabled/i)
   }
 })
@@ -177,10 +330,56 @@ test("DEV precheck is session and transaction read-only with rollback", () => {
   assert.match(precheck, /set local statement_timeout = '30s'/i)
   assert.match(precheck, /set local lock_timeout = '5s'/i)
   assert.match(precheck, /\brollback;/i)
+  assert.match(precheck, /MEJ05_039_RECONCILED_PRECHECK_PASS/i)
+  for (const source of [precheck, migration039]) {
+    assert.match(source, /event_type = 'legacy_revoked_preserved'/i)
+    assert.match(source, /migration-036:revoked:/i)
+    assert.match(source, /migration_036_governance/i)
+    assert.doesNotMatch(
+      source,
+      /count\(\*\)\s+filter\s*\(\s*where status = 'revoked'\s*\)\s*<> 1/i,
+    )
+  }
   assert.doesNotMatch(
     precheck,
     /^\s*(insert|update|delete|truncate|merge|grant|revoke|alter|create|drop)\b/im,
   )
+})
+
+test("shadow reproduces the audited CRLF body and Supabase service ACL", () => {
+  assert.match(shadowRunner, /migration 037 audited CRLF transport copy/i)
+  assert.match(
+    shadowRunner,
+    /alter default privileges[\s\S]*grant execute on functions to service_role/i,
+  )
+  assert.match(shadowRunner, /\.Replace\("`n",\s*"`r`n"\)/)
+  assert.match(
+    shadowRunner,
+    /266542d2b587c46f99a64eabe3b362f7cb039249b7efda1479572bffbded7c87/i,
+  )
+  for (const source of [shadowPregrant, shadowPostgrant]) {
+    assert.match(source, /a7879f8dcc683cb5b552387bedb0d499/i)
+    assert.match(
+      source,
+      /c3a6a4d1b447323a320f5663bef28a201b420826485f47eba41c0118faf0d86e/i,
+    )
+    assert.match(
+      source,
+      /53042a2a564b84c8e19620bbbd487b8e3f33b9a47cc31faadedda992918e978c/i,
+    )
+    assert.match(source, /service_role/i)
+    assert.match(source, /aclexplode/i)
+  }
+  assert.match(shadowPostgrant, /v_actor_null/i)
+  assert.match(shadowPostgrant, /v_wrong_company/i)
+  assert.match(shadowPostgrant, /v_finance_write/i)
+  assert.match(shadowPostgrant, /v_finance_non_owner_write/i)
+  assert.match(shadowPostgrant, /v_director_read/i)
+  assert.match(shadowPostgrant, /v_requester_read/i)
+  assert.match(shadowPostgrant, /v_inactive_membership_read/i)
+  assert.match(shadowPostgrant, /v_sysadmin_read/i)
+  assert.match(shadowPostgrant, /v_non_draft_write/i)
+  assert.match(shadowPostgrant, /SHADOW_039_LIVE_BODY_CONTRACT_PASS/i)
 })
 
 test("private backup and remote postcheck are read-only and sanitized", () => {
@@ -204,12 +403,48 @@ test("private backup and remote postcheck are read-only and sanitized", () => {
   assert.match(postcheck, /MIGRATION_039_POSTCHECK_PASS/)
 })
 
-test("one-shot workflow prechecks, backs up privately, applies once and then runs UAT", () => {
+test("postgrant recovery locks both 039 replay and the blocked UAT", () => {
   assert.match(workflow, /permissions:[\s\S]*deployments:\s*read/i)
   assert.match(workflow, /permissions:[\s\S]*pull-requests:\s*read/i)
   assert.match(workflow, /permissions:[\s\S]*statuses:\s*read/i)
-  assert.match(workflow, /needs:\s*precheck/i)
-  assert.match(workflow, /needs:\s*migrate/i)
+  assert.match(workflow, /outputs:[\s\S]*state_gate\.outputs\.mode/i)
+  assert.match(workflow, /id:\s*state_gate/i)
+  assert.match(
+    workflow,
+    /state="\$\([\s\S]*begin transaction read only;[\s\S]*has_function_privilege\([\s\S]*authenticated[\s\S]*postgrant[\s\S]*pregrant/i,
+  )
+  assert.match(
+    workflow,
+    /sql_file="scripts\/qa\/extraordinary-039-dev-postcheck-readonly\.sql"/i,
+  )
+  assert.match(
+    workflow,
+    /migrate:\s*[\s\S]*?needs:\s*precheck\s*[\s\S]*?if:\s*\$\{\{\s*false\s*\}\}/i,
+  )
+  assert.match(
+    workflow,
+    /Archived migration step - permanently unreachable[\s\S]*?if:\s*\$\{\{\s*false\s*\}\}/i,
+  )
+  assert.match(workflow, /test "\$state" = "postgrant"/i)
+  assert.doesNotMatch(
+    workflow,
+    /needs\.precheck\.outputs\.mode == 'pregrant'/i,
+  )
+  assert.match(
+    workflow,
+    /uat:\s*[\s\S]*?needs:\s*\[precheck,\s*migrate\]\s*[\s\S]*?if:\s*\$\{\{\s*false\s*\}\}/i,
+  )
+  assert.match(
+    workflow,
+    /blocker:\s*[\s\S]*?needs:\s*\[precheck,\s*migrate,\s*uat\][\s\S]*?BLOCKED_MEJ05_CONSUMPTION_TRIGGER_RECHECK_DECISION_REQUIRED/i,
+  )
+  assert.doesNotMatch(workflow, /needs\.migrate\.result == 'success'/i)
+  assert.doesNotMatch(workflow, /needs\.precheck\.outputs\.mode == 'pregrant'/i)
+  assert.equal(
+    (workflow.match(/fetch-depth:\s*4\b/g) ?? []).length,
+    2,
+    "precheck and migration checkouts must include EXPECTED_BASE",
+  )
   assert.match(
     workflow,
     /Verify real-session UAT credentials before migration[\s\S]*api-keys\?reveal=true/i,
@@ -223,7 +458,7 @@ test("one-shot workflow prechecks, backs up privately, applies once and then run
     workflow,
     new RegExp(`EXPECTED_MIGRATION_SHA256:\\s*${sha256(migration039Path)}`),
   )
-  assert.match(workflow, /BLOCKED_MIGRATION_039_FIRST_ATTEMPT_FAILED/i)
+  assert.match(workflow, /BLOCKED_MIGRATION_039_RECONCILED_ATTEMPT_FAILED/i)
   assert.equal(
     (workflow.match(/--file "\$MIGRATION_FILE"/g) ?? []).length,
     1,
@@ -240,6 +475,17 @@ test("one-shot workflow prechecks, backs up privately, applies once and then run
 test("UAT uses real Auth sessions, private Storage and no payment confirmation", () => {
   assert.match(uat, /auth\.signInWithPassword/i)
   assert.match(uat, /auth\.admin\.createUser/i)
+  assert.match(uat, /layout\?\.status === "draft"/i)
+  assert.doesNotMatch(uat, /layout\?\.status === "created"/i)
+  assert.match(uat, /searchParams\.set\("sslmode",\s*"require"\)/i)
+  assert.match(uat, /searchParams\.set\("uselibpqcompat",\s*"true"\)/i)
+  assert.doesNotMatch(uat, /rejectUnauthorized\s*:\s*false/i)
+  assert.doesNotMatch(uat, /NODE_TLS_REJECT_UNAUTHORIZED/i)
+  assert.doesNotMatch(
+    uat,
+    /\b(from|join)\s+public\.[a-z0-9_]+\s+authorization\b/i,
+  )
+  assert.match(workflow, /pg@8\.22\.0/i)
   assert.match(uat, /\.storage[\s\S]*\.upload\(/i)
   assert.match(uat, /contentType:\s*"application\/pdf"/i)
   assert.match(uat, /metadata:\s*\{\s*sha256:/i)
@@ -249,6 +495,11 @@ test("UAT uses real Auth sessions, private Storage and no payment confirmation",
   assert.match(uat, /ratify_extraordinary_authorization/i)
   assert.match(uat, /createSignedUrl\([^,]+,\s*120\)/i)
   assert.match(uat, /consumed_pending_ratification/i)
+  assert.match(uat, /payable_snapshots:\s*1/i)
+  assert.match(uat, /financial_outbox_events:\s*1/i)
+  assert.match(uat, /snapshot\.payment_request_id = \$1/i)
+  assert.match(uat, /event\.company_id = \$2/i)
+  assert.match(uat, /object\.name like \$2::text \|\| '\/%'/i)
   assert.match(uat, /PRE_RATIFICATION_PAID/i)
   assert.doesNotMatch(uat, /\bservice_role\b/i)
   assert.doesNotMatch(uat, /eyJ[A-Za-z0-9_-]{20,}/)
@@ -292,6 +543,9 @@ test("UAT cleanup blocks users and removes effective QA IAM", () => {
   assert.match(uat, /set active = false/i)
   assert.match(uat, /delete from public\.user_roles/i)
   assert.match(uat, /set enabled = false/i)
+  assert.match(uat, /QA_AUTHORIZATION_REVOKE_FAILED/i)
+  assert.match(uat, /QA_ORPHAN_STORAGE_REMOVE_FAILED/i)
+  assert.match(uat, /QA_ORPHAN_STORAGE_OBJECT_REMAINS/i)
   assert.match(uat, /QA_REFRESH_TOKENS_REMAIN/i)
   assert.match(uat, /OPERADORA_POLICY_ENABLED/i)
 })

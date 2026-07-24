@@ -30,6 +30,14 @@ if (!databaseUrl.includes(projectRef)) {
   throw new Error("NON_DEV_DATABASE_URL")
 }
 
+const databaseConnectionUrl = new URL(databaseUrl)
+const configuredSslMode = databaseConnectionUrl.searchParams.get("sslmode")
+if (configuredSslMode && configuredSslMode !== "require") {
+  throw new Error("UNEXPECTED_DEV_DATABASE_SSL_MODE")
+}
+databaseConnectionUrl.searchParams.set("uselibpqcompat", "true")
+databaseConnectionUrl.searchParams.set("sslmode", "require")
+
 mkdirSync(evidenceDir, { recursive: true })
 
 const fail = (code) => {
@@ -51,7 +59,7 @@ const serviceClient = createClient(supabaseUrl, serviceRoleKey, {
 })
 
 const db = new Client({
-  connectionString: databaseUrl,
+  connectionString: databaseConnectionUrl.href,
   application_name: "flux-extraordinary-039-dev-uat",
 })
 
@@ -171,63 +179,100 @@ async function signInUsers() {
 }
 
 async function currentCounts() {
-  const { rows } = await db.query(`
-    select
-      (select count(*) from public.payment_requests) as payment_requests,
-      (
-        select count(*)
-        from public.payment_request_extraordinary_authorizations
-      ) as authorizations,
-      (
-        select count(*)
-        from public.payment_request_extraordinary_events
-      ) as authorization_events,
-      (
-        select count(*)
-        from storage.objects
-        where bucket_id = 'extraordinary-approval-evidence'
-      ) as storage_objects,
-      (select count(*) from public.payment_layouts) as payment_layouts,
-      (
-        select count(*) from public.payment_layout_lines
-      ) as payment_layout_lines,
-      (select count(*) from public.payment_receipts) as payment_receipts,
-      (
-        select count(*)
-        from public.payment_requests
-        where status::text = 'paid'
-      ) as paid_requests,
-      (
-        select count(*) from public.notification_events
-      ) as notification_events,
-      (
-        select count(*) from public.financial_outbox_events
-      ) as financial_outbox_events,
-      (
-        select count(*)
-        from public.financial_outbox_delivery_attempts
-      ) as delivery_attempts,
-      md5(coalesce((
-        select string_agg(to_jsonb(plan)::text, '' order by plan.id)
-        from public.payment_allocation_plans plan
-      ), '')) as allocation_plans_hash,
-      md5(coalesce((
-        select string_agg(
-          to_jsonb(reservation)::text,
-          ''
-          order by reservation.id
-        )
-        from public.payment_allocation_reservations reservation
-      ), '')) as allocation_reservations_hash,
-      md5(coalesce((
-        select string_agg(
-          to_jsonb(operation)::text,
-          ''
-          order by operation.id
-        )
-        from public.bank_payment_operations operation
-      ), '')) as bank_operations_hash
-  `)
+  const { rows } = await db.query(
+    `
+      select
+        (
+          select count(*)
+          from public.payment_requests
+          where id = $1
+        ) as payment_requests,
+        (
+          select count(*)
+          from public.payment_request_extraordinary_authorizations authorization_row
+          where authorization_row.payment_request_id = $1
+        ) as authorizations,
+        (
+          select count(*)
+          from public.payment_request_extraordinary_events event
+          join public.payment_request_extraordinary_authorizations authorization_row
+            on authorization_row.id = event.authorization_id
+          where authorization_row.payment_request_id = $1
+        ) as authorization_events,
+        (
+          select count(*)
+          from storage.objects object
+          where object.bucket_id = 'extraordinary-approval-evidence'
+            and object.name like $2::text || '/%'
+        ) as storage_objects,
+        (
+          select count(distinct layout.id)
+          from public.payment_layouts layout
+          join public.payment_layout_lines line on line.layout_id = layout.id
+          where line.payment_request_id = $1
+        ) as payment_layouts,
+        (
+          select count(*)
+          from public.payment_layout_lines line
+          where line.payment_request_id = $1
+        ) as payment_layout_lines,
+        (
+          select count(*)
+          from public.payable_snapshots snapshot
+          where snapshot.payment_request_id = $1
+        ) as payable_snapshots,
+        (
+          select count(*)
+          from public.payment_receipts receipt
+          where receipt.payment_request_id = $1
+        ) as payment_receipts,
+        (
+          select count(*)
+          from public.payment_requests request
+          where request.id = $1
+            and request.status::text = 'paid'
+        ) as paid_requests,
+        (
+          select count(*)
+          from public.notification_events event
+          where event.source_id = $1
+            or event.recipient_profile_id = any($3::uuid[])
+        ) as notification_events,
+        (
+          select count(*)
+          from public.financial_outbox_events event
+          where event.company_id = $2
+        ) as financial_outbox_events,
+        (
+          select count(*)
+          from public.financial_outbox_delivery_attempts attempt
+          join public.financial_outbox_events event
+            on event.id = attempt.event_id
+          where event.company_id = $2
+        ) as delivery_attempts,
+        md5(coalesce((
+          select string_agg(to_jsonb(plan)::text, '' order by plan.id)
+          from public.payment_allocation_plans plan
+        ), '')) as allocation_plans_hash,
+        md5(coalesce((
+          select string_agg(
+            to_jsonb(reservation)::text,
+            ''
+            order by reservation.id
+          )
+          from public.payment_allocation_reservations reservation
+        ), '')) as allocation_reservations_hash,
+        md5(coalesce((
+          select string_agg(
+            to_jsonb(operation)::text,
+            ''
+            order by operation.id
+          )
+          from public.bank_payment_operations operation
+        ), '')) as bank_operations_hash
+    `,
+    [ids.request, ids.company, Object.values(profileIds)],
+  )
   return rows[0]
 }
 
@@ -1236,27 +1281,27 @@ async function runStorageAndMainUat() {
     },
     "CREATE_EXTRAORDINARY_LAYOUT_FAILED",
   )
-  ensure(layout?.status === "created", "LAYOUT_STATUS_INVALID")
+  ensure(layout?.status === "draft", "LAYOUT_STATUS_INVALID")
   ensure(count(layout?.payment_count) === 1, "LAYOUT_PAYMENT_COUNT_INVALID")
   ensure(count(layout?.extraordinary_count) === 1, "LAYOUT_EXTRAORDINARY_COUNT_INVALID")
 
   const { rows: consumedRows } = await db.query(
     `
       select
-        authorization.status,
-        authorization.consumed_layout_id is not null as has_layout,
-        authorization.consumed_layout_line_id is not null as has_line,
+        authorization_row.status,
+        authorization_row.consumed_layout_id is not null as has_layout,
+        authorization_row.consumed_layout_line_id is not null as has_line,
         request.status::text as request_status,
         (
           select count(*)
           from public.payment_layout_lines line
-          where line.layout_id = authorization.consumed_layout_id
-            and line.payment_request_id = authorization.payment_request_id
+          where line.layout_id = authorization_row.consumed_layout_id
+            and line.payment_request_id = authorization_row.payment_request_id
         ) as line_count
-      from public.payment_request_extraordinary_authorizations authorization
+      from public.payment_request_extraordinary_authorizations authorization_row
       join public.payment_requests request
-        on request.id = authorization.payment_request_id
-      where authorization.id = $1
+        on request.id = authorization_row.payment_request_id
+      where authorization_row.id = $1
     `,
     [authorization.authorization_id],
   )
@@ -1322,9 +1367,9 @@ async function runStorageAndMainUat() {
           line.request_number,
           line.status
         from public.payment_layout_lines line
-        join public.payment_request_extraordinary_authorizations authorization
-          on authorization.consumed_layout_line_id = line.id
-        where authorization.id = $1
+        join public.payment_request_extraordinary_authorizations authorization_row
+          on authorization_row.consumed_layout_line_id = line.id
+        where authorization_row.id = $1
       `,
       [authorization.authorization_id],
     )
@@ -1410,9 +1455,9 @@ async function runStorageAndMainUat() {
           $1,
           $2,
           (
-            select authorization.consumed_layout_line_id
-            from public.payment_request_extraordinary_authorizations authorization
-            where authorization.id = $3
+            select authorization_row.consumed_layout_line_id
+            from public.payment_request_extraordinary_authorizations authorization_row
+            where authorization_row.id = $3
           )
         )
       `,
@@ -1483,10 +1528,11 @@ async function validateFinalDeltas() {
     storage_objects: 1,
     payment_layouts: 1,
     payment_layout_lines: 1,
+    payable_snapshots: 1,
     payment_receipts: 0,
     paid_requests: 0,
     notification_events: 0,
-    financial_outbox_events: 0,
+    financial_outbox_events: 1,
     delivery_attempts: 0,
   }
   const deltas = {}
@@ -1504,19 +1550,19 @@ async function validateFinalDeltas() {
   const { rows } = await db.query(
     `
       select
-        authorization.status,
-        authorization.evidence_verified_at is not null as evidence_verified,
-        authorization.ratified_at is not null as ratified,
+        authorization_row.status,
+        authorization_row.evidence_verified_at is not null as evidence_verified,
+        authorization_row.ratified_at is not null as ratified,
         request.status::text as request_status,
         (
           select count(*)
           from public.payment_request_extraordinary_events event
-          where event.authorization_id = authorization.id
+          where event.authorization_id = authorization_row.id
         ) as event_count
-      from public.payment_request_extraordinary_authorizations authorization
+      from public.payment_request_extraordinary_authorizations authorization_row
       join public.payment_requests request
-        on request.id = authorization.payment_request_id
-      where authorization.id = $1
+        on request.id = authorization_row.payment_request_id
+      where authorization_row.id = $1
     `,
     [authorization.authorization_id],
   )
@@ -1539,16 +1585,46 @@ async function cleanup() {
       [authorization.authorization_id],
     )
     if (["draft", "active"].includes(rows[0]?.status)) {
-      await clients.get("finance").rpc(
+      const { error: revokeError } = await clients.get("finance").rpc(
         "revoke_payment_request_extraordinary",
         {
           p_payment_request_id: ids.request,
           p_reason: "Synthetic QA cleanup after incomplete MEJ05 039 UAT",
         },
       )
-      await serviceClient.storage
+      ensure(!revokeError, "QA_AUTHORIZATION_REVOKE_FAILED")
+      const { error: removeError } = await serviceClient.storage
         .from(authorization.storage_bucket)
         .remove([authorization.storage_path])
+      ensure(!removeError, "QA_ORPHAN_STORAGE_REMOVE_FAILED")
+
+      const { rows: cleanupRows } = await db.query(
+        `
+          select
+            authorization_row.status,
+            (
+              select count(*)
+              from storage.objects object
+              where object.bucket_id = $2
+                and object.name = $3
+            ) as object_count
+          from public.payment_request_extraordinary_authorizations authorization_row
+          where authorization_row.id = $1
+        `,
+        [
+          authorization.authorization_id,
+          authorization.storage_bucket,
+          authorization.storage_path,
+        ],
+      )
+      ensure(
+        cleanupRows[0]?.status === "revoked",
+        "QA_AUTHORIZATION_NOT_REVOKED",
+      )
+      ensure(
+        count(cleanupRows[0]?.object_count) === 0,
+        "QA_ORPHAN_STORAGE_OBJECT_REMAINS",
+      )
     }
   }
 
@@ -1737,6 +1813,8 @@ async function run() {
       private_object_preserved: success,
       signed_url_published: false,
     },
+    payable_snapshots_delta: deltas?.payable_snapshots ?? null,
+    financial_outbox_delta: deltas?.financial_outbox_events ?? null,
     payment_receipts_delta: deltas?.payment_receipts ?? null,
     paid_delta: deltas?.paid_requests ?? null,
     notifications_delta: deltas?.notification_events ?? null,

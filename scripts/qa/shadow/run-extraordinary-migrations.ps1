@@ -68,6 +68,14 @@ $migration038 = Join-Path $migrationsDir (
 $migration039 = Join-Path $migrationsDir (
   '039_enable_extraordinary_evidence_storage_policy_helper.sql'
 )
+$expectedMigration037Sha256 = (
+  '266542d2b587c46f99a64eabe3b362f7cb039249b7efda1479572bffbded7c87'
+)
+$migration037TransportCopy = Join-Path (
+  [System.IO.Path]::GetTempPath()
+) (
+  'flux-shadow-037-crlf-{0}.sql' -f [guid]::NewGuid().ToString('N')
+)
 
 $allMigrations = @(
   Get-ChildItem -LiteralPath $migrationsDir -File -Filter '*.sql' |
@@ -124,45 +132,114 @@ function Invoke-PsqlFile {
   }
 }
 
-Write-Output "REBUILD $Database"
-& $dropdb `
-  --if-exists `
-  -h $HostName `
-  -p $Port `
-  -U $DatabaseUser `
-  $Database
-if ($LASTEXITCODE -ne 0) {
-  throw "Could not drop disposable shadow database $Database"
+function Invoke-PsqlCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Sql,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  Write-Output "RUN $Label"
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $output = @(
+    & $psql `
+      -X `
+      -v ON_ERROR_STOP=1 `
+      -h $HostName `
+      -p $Port `
+      -U $DatabaseUser `
+      -d $Database `
+      --command $Sql 2>&1
+  )
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousErrorActionPreference
+  $output | ForEach-Object { Write-Output $_ }
+
+  if ($exitCode -ne 0) {
+    throw "$Label failed with exit code $exitCode"
+  }
 }
 
-& $createdb `
-  -h $HostName `
-  -p $Port `
-  -U $DatabaseUser `
-  $Database
-if ($LASTEXITCODE -ne 0) {
-  throw "Could not create disposable shadow database $Database"
+$migration037Hash = (
+  Get-FileHash -LiteralPath $migration037 -Algorithm SHA256
+).Hash.ToLowerInvariant()
+if ($migration037Hash -ne $expectedMigration037Sha256) {
+  throw "Migration 037 source hash drifted: $migration037Hash"
 }
 
-Invoke-PsqlFile -Path $prelude -Label 'Supabase prelude'
-
-foreach ($migration in $baseMigrations) {
-  Invoke-PsqlFile -Path $migration.FullName -Label $migration.Name
+$migration037Source = [System.IO.File]::ReadAllText($migration037)
+if ($migration037Source.Contains("`r")) {
+  throw 'Migration 037 source must remain LF-only'
 }
+$migration037Transported = $migration037Source.Replace("`n", "`r`n")
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText(
+  $migration037TransportCopy,
+  $migration037Transported,
+  $utf8NoBom
+)
 
-Invoke-PsqlFile -Path $seed -Label 'synthetic 7/1/1 seed'
-Invoke-PsqlFile -Path $precheck036 -Label 'migration 036 read-only precheck'
-Invoke-PsqlFile -Path $migration036 -Label 'migration 036 exact file'
-Invoke-PsqlFile -Path $postcheck036 -Label 'migration 036 postcheck'
-Invoke-PsqlFile -Path $migration037 -Label 'migration 037 exact file'
-Invoke-PsqlFile -Path $fixture038 -Label 'migration 038 old-failure reproduction'
-Invoke-PsqlFile -Path $migration038 -Label 'migration 038 exact file'
-Invoke-PsqlFile -Path $contracts038 -Label 'migration 038 mixed-close contracts'
-Invoke-PsqlFile -Path $devPrecheck039 -Label 'migration 039 read-only precheck'
-Invoke-PsqlFile -Path $pregrant039 -Label 'migration 039 pregrant denial'
-Invoke-PsqlFile -Path $migration039 -Label 'migration 039 exact file'
-Invoke-PsqlFile -Path $postgrant039 -Label 'migration 039 Storage policy contracts'
-Invoke-PsqlFile -Path $postcheck037 -Label 'migration 037 postcheck and regressions'
+try {
+  Write-Output "REBUILD $Database"
+  & $dropdb `
+    --if-exists `
+    -h $HostName `
+    -p $Port `
+    -U $DatabaseUser `
+    $Database
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not drop disposable shadow database $Database"
+  }
+
+  & $createdb `
+    -h $HostName `
+    -p $Port `
+    -U $DatabaseUser `
+    $Database
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not create disposable shadow database $Database"
+  }
+
+  Invoke-PsqlFile -Path $prelude -Label 'Supabase prelude'
+  Invoke-PsqlCommand `
+    -Sql (
+      'alter default privileges for role postgres in schema public ' +
+      'grant execute on functions to service_role;'
+    ) `
+    -Label 'Supabase function default privileges'
+
+  foreach ($migration in $baseMigrations) {
+    Invoke-PsqlFile -Path $migration.FullName -Label $migration.Name
+  }
+
+  Invoke-PsqlFile -Path $seed -Label 'synthetic 7/1/1 seed'
+  Invoke-PsqlFile -Path $precheck036 -Label 'migration 036 read-only precheck'
+  Invoke-PsqlFile -Path $migration036 -Label 'migration 036 exact file'
+  Invoke-PsqlFile -Path $postcheck036 -Label 'migration 036 postcheck'
+  Invoke-PsqlFile `
+    -Path $migration037TransportCopy `
+    -Label 'migration 037 audited CRLF transport copy'
+  Invoke-PsqlFile -Path $fixture038 -Label 'migration 038 old-failure reproduction'
+  Invoke-PsqlFile -Path $migration038 -Label 'migration 038 exact file'
+  Invoke-PsqlFile -Path $contracts038 -Label 'migration 038 mixed-close contracts'
+  Invoke-PsqlFile -Path $devPrecheck039 -Label 'migration 039 read-only precheck'
+  Invoke-PsqlFile -Path $pregrant039 -Label 'migration 039 pregrant denial'
+  Invoke-PsqlFile -Path $migration039 -Label 'migration 039 exact file'
+  Invoke-PsqlFile `
+    -Path $postgrant039 `
+    -Label 'migration 039 Storage policy contracts'
+  Invoke-PsqlFile `
+    -Path $postcheck037 `
+    -Label 'migration 037 postcheck and regressions'
+}
+finally {
+  if (Test-Path -LiteralPath $migration037TransportCopy -PathType Leaf) {
+    Remove-Item -LiteralPath $migration037TransportCopy -Force
+  }
+}
 
 Write-Output 'SHADOW_036_037_038_SEQUENCE_PASS'
-Write-Output 'SHADOW_039_STORAGE_POLICY_PASS'
+Write-Output 'SHADOW_039_LIVE_BODY_CONTRACT_PASS'
