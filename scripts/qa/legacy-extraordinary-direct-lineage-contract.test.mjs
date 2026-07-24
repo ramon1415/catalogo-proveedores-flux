@@ -10,6 +10,10 @@ const standalonePrecheck = readFileSync(
   new URL("./legacy-extraordinary-direct-lineage-precheck.sql", import.meta.url),
   "utf8",
 )
+const privateBackup = readFileSync(
+  new URL("./post-yanin-036-037-private-logical-backup.sql", import.meta.url),
+  "utf8",
+)
 
 function classifyLegacyPaid({
   requestStatus = "paid",
@@ -94,6 +98,11 @@ test("migration 036 encodes direct FK lineage and the exact 7/1/1 matrix", () =>
   assert.match(migration, /v_consumed\s*<>\s*7/)
   assert.match(migration, /v_quarantined\s*<>\s*1/)
   assert.match(migration, /v_revoked\s*<>\s*1/)
+  assert.match(
+    migration,
+    /drop constraint if exists payment_request_extraordinary_revoke_check/,
+  )
+  assert.match(migration, /status <> 'revoked'[\s\S]*revoke_reason is null/)
 })
 
 test("migration 036 cannot mutate ALLOC-001 tables", () => {
@@ -113,4 +122,16 @@ test("standalone precheck is read-only, sanitized and uses the same direct linea
   assert.doesNotMatch(migration, /\bauthorization\.(?:[a-z_*])/i)
   assert.doesNotMatch(standalonePrecheck, /select\s+ranked\.id|select\s+request\.id/i)
   assert.doesNotMatch(standalonePrecheck, /^\s*(insert|update|delete|truncate)\b/im)
+})
+
+test("private logical backup is read-only and covers legacy plus ALLOC state", () => {
+  assert.match(privateBackup, /begin transaction read only/)
+  assert.match(privateBackup, /legacy_authorizations/)
+  assert.match(privateBackup, /allocation_plans/)
+  assert.match(privateBackup, /allocation_reservations/)
+  assert.match(privateBackup, /bank_operations/)
+  assert.match(privateBackup, /replaced_function_definitions/)
+  assert.match(privateBackup, /affected_trigger_definitions/)
+  assert.match(privateBackup, /rollback;/)
+  assert.doesNotMatch(privateBackup, /^\s*(insert|update|delete|truncate|create|alter|drop)\b/im)
 })

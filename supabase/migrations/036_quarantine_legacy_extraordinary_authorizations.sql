@@ -203,6 +203,26 @@ alter table public.payment_request_extraordinary_authorizations
   );
 
 alter table public.payment_request_extraordinary_authorizations
+  drop constraint if exists payment_request_extraordinary_revoke_check;
+
+alter table public.payment_request_extraordinary_authorizations
+  add constraint payment_request_extraordinary_revoke_check
+  check (
+    (
+      status = 'revoked'
+      and revoked_by is not null
+      and revoked_at is not null
+      and nullif(btrim(revoke_reason), '') is not null
+    )
+    or (
+      status <> 'revoked'
+      and revoked_by is null
+      and revoked_at is null
+      and revoke_reason is null
+    )
+  );
+
+alter table public.payment_request_extraordinary_authorizations
   drop constraint if exists payment_request_extraordinary_authorizations_legacy_classification_check;
 
 alter table public.payment_request_extraordinary_authorizations

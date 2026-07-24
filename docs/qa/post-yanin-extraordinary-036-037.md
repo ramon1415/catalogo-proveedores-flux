@@ -143,18 +143,27 @@ operación bancaria. No resolverlo por coincidencias financieras ni desde 036/03
 - Auditoría read-only de linaje: PASS.
 - Regresión de objeto ajeno, ruta directa, ambigüedad y mismatch: PASS.
 - Contratos locales 036/037 y post-Yanin: PASS.
-- Suite focalizada de aprobación/layout y contratos nuevos: 38/38 PASS.
+- Suite focalizada de aprobación/layout y contratos nuevos: 39/39 PASS.
 - Suite completa: 208/209 PASS; el único fallo es el contrato preexistente de
   byte-identidad de la migración 029. Este hotfix no modifica migraciones
   001–035.
 - `node --check` en JavaScript modificado: PASS.
 - `git diff --check`: PASS.
 - SHA-256 036:
-  `de9e2415a2821c94ed4df244335859adf545a94478c9bb85cadbe69f3baffd6d`.
+  `c74f0b1262e6e4791a08936e85fda8e87542723402b0e021bd1645ff22fda965`.
 - SHA-256 037:
   `c3ac140ea4f02d0a735e5e4b3679c2379f92aa1110e3d222d6d84d71b684e3d0`.
-- Draft PR, backup, aplicación DEV, postchecks y UAT: pendientes del gate de
-  autenticación GitHub y de la secuencia controlada.
+- Backup lógico privado read-only: PASS, nueve autorizaciones y ALLOC-001
+  incluidos; SHA-256
+  `9b271235c2a355a34cfa04f4fa3307b9375a66aa84f6760dff6f7e3474de0916`.
+- El primer intento de 036 fue rechazado por el constraint preexistente
+  `payment_request_extraordinary_revoke_check`; PostgreSQL revirtió toda la
+  transacción. El post-audit confirmó `8 active / 1 revoked`, cero columnas
+  legacy y ausencia del ledger nuevo.
+- La corrección local reemplaza ese constraint por una regla compatible con
+  estados no revocados y conserva los campos de revocación fail-closed.
+- Segundo intento de 036, 037, postchecks y UAT: detenidos hasta autorización
+  explícita de retry.
 
 No se aplicó ninguna migración desde este documento. No autoriza cambios en
 PROD ni merge.
