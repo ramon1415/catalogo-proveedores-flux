@@ -73,6 +73,7 @@ import {
   classifyAuthenticatedReadOnlyError,
   createAuthenticatedReadOnlyEnvelope,
   parseAuthenticatedReadOnlyChildResult,
+  resolveQaCompanyScopeReadOnly,
   runAuthenticatedReadOnlyPrecheck,
   validateAuthenticatedReadOnlyEnvelope,
 } from "./provider-intake-authenticated-readonly-observability.mjs"
@@ -89,6 +90,8 @@ const AUTHORIZED_MIGRATION_031_SHA256 =
 const migration = read(migrationPath)
 const runner = read("scripts/qa/provider-intake-matching-gate2-uat.mjs")
 const authenticatedReadonly = read("scripts/qa/provider-intake-authenticated-readonly-observability.mjs")
+const QA_COMPANY_UUID = ["11111111", "1111", "4111", "8111", "111111111111"].join("-")
+const OTHER_COMPANY_UUID = ["22222222", "2222", "4222", "8222", "222222222222"].join("-")
 
 const functionDefinition = (name) => {
   const pattern = new RegExp(
@@ -234,11 +237,11 @@ test("public provider intake Edge Function remains outside Migration 031", () =>
   assert.doesNotMatch(migration, /supabase\/functions\/provider-intake|edge function/i)
 })
 
-test("permanent Gate 2 runner connects every mutable capability behind the explicit gate", async () => {
+test("permanent Gate 2 runner connects 68 capabilities behind the explicit gate", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 63)
+  assert.equal(Object.keys(audit.capabilities).length, 68)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -522,7 +525,8 @@ test("updated capability audit certifies alias separation without network or wri
 test("V6N no-write mocked recertifies the post-V6H baseline and 48 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
-  assert.equal(result.baseline.intake_links, 3)
+  assert.equal(result.baseline.intake_links, 4)
+  assert.equal(result.baseline.intake_links_qa_company, 3)
   assert.equal(result.baseline.link_state, "ALREADY_NORMALIZED")
   assert.equal(result.expired_link_normalization.writes, 0)
   assert.equal(result.simulation.main, "PASS")
@@ -531,7 +535,7 @@ test("V6N no-write mocked recertifies the post-V6H baseline and 48 cleanup cases
   assert.equal(result.simulation.payment_intake_events_final, 50)
   assert.equal(result.cleanup_matrix.status, "PASS")
   assert.equal(result.cleanup_matrix.total, 48)
-  assert.equal(result.capability_count, 63)
+  assert.equal(result.capability_count, 68)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -815,11 +819,11 @@ const v6kRequestInput = (overrides = {}) => ({
   ...overrides,
 })
 
-test("V6N capability audit executes 63 concrete QA capabilities", async () => {
+test("V6N-R7 capability audit executes 68 concrete QA capabilities", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
-  assert.equal(audit.capability_count, 63)
-  assert.equal(Object.keys(audit.capabilities).length, 63)
+  assert.equal(audit.capability_count, 68)
+  assert.equal(Object.keys(audit.capabilities).length, 68)
   for (const capability of [
     "canonical_idempotency_header",
     "finalized_request_capture",
@@ -832,6 +836,11 @@ test("V6N capability audit executes 63 concrete QA capabilities", async () => {
     "evidence_flush_before_throw",
     "post_v6h_baseline_support",
     "already_normalized_link_idempotency",
+    "deterministic_qa_company_scope_resolution",
+    "qa_company_scope_parameterization",
+    "global_company_link_count_separation",
+    "qa_company_identifier_non_export",
+    "multi_company_safe_link_classification",
   ]) assert.equal(audit.capabilities[capability], true)
 })
 
@@ -1283,27 +1292,40 @@ test("V6N permite transaccionalidad read only explícita y conserva orden de con
             .map((column_name) => ({ column_name })),
         }
       }
+      if (normalized.startsWith("with company_link_state as")) {
+        return { rows: [{ company_id: QA_COMPANY_UUID }] }
+      }
       if (normalized.includes("from public.intake_links") &&
           normalized.includes("order by created_at asc")) {
         return { rows: [
-          { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
-          { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
-          { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+          { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+          { label: "other", status: "revoked", expires_at: null },
+          { label: "QA V6B historical", status: "revoked", expires_at: null },
         ] }
+      }
+      if (normalized.includes("count(distinct company_id)::int")) {
+        return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
       }
       if (normalized.includes("from auth.users au")) return { rows: [] }
       if (normalized.startsWith("select count(*)::int")) {
-        if (normalized.includes("from public.intake_links where status='active' and")) {
+        if (normalized.includes("from public.intake_links") &&
+            normalized.includes("label like 'qa v6b %'")) {
+          return { rows: [{ count: normalized.includes("status='active'") ? 0 : 1 }] }
+        }
+        if (normalized.includes("from public.intake_links") &&
+            normalized.includes("status='active' and")) {
           return { rows: [{ count: 0 }] }
         }
-        if (normalized.includes("from public.intake_links where status='expired'")) {
+        if (normalized.includes("from public.intake_links") &&
+            normalized.includes("status='expired'")) {
           return { rows: [{ count: 1 }] }
         }
-        if (normalized.includes("from public.intake_links where status='revoked'")) {
+        if (normalized.includes("from public.intake_links") &&
+            normalized.includes("status='revoked'")) {
           return { rows: [{ count: 2 }] }
         }
         if (normalized.includes("from public.intake_links")) {
-          return { rows: [{ count: 3 }] }
+          return { rows: [{ count: normalized.includes(" where ") ? 0 : 4 }] }
         }
         return { rows: [{ count: 0 }] }
       }
@@ -1582,19 +1604,25 @@ test("V6N completes the authenticated read-only path with explicit rollback", as
             .map((column_name) => ({ column_name })),
         }
       }
+      if (normalized.startsWith("with company_link_state as")) {
+        return { rows: [{ company_id: QA_COMPANY_UUID }] }
+      }
       if (normalized.includes("from public.intake_links") &&
           normalized.includes("order by created_at asc")) {
         return { rows: [
-          { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
-          { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
-          { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+          { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+          { label: "other", status: "revoked", expires_at: null },
+          { label: "QA V6B historical", status: "revoked", expires_at: null },
         ] }
+      }
+      if (normalized.includes("count(distinct company_id)::int")) {
+        return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
       }
       if (normalized.includes("from auth.users au")) return { rows: [] }
       if (normalized.startsWith("select count(*)::int")) {
         let count = 0
         if (normalized.includes("from public.intake_links")) {
-          if (!normalized.includes(" where ")) count = 3
+          if (!normalized.includes(" where ")) count = 4
           else if (normalized.includes("status='expired'")) count = 1
           else if (normalized.includes("status='revoked'")) count = 2
           if (normalized.includes("label like 'qa v6b %'")) {
@@ -1696,4 +1724,262 @@ test("V6N cleanup matrix closes 48 no-write scenarios", async () => {
   assert.equal(result.total, 48)
   assert.equal(result.failures, 0)
   assert.equal(result.public_submit_calls, 0)
+})
+
+const createV6NR7ResolverClient = (rows) => ({
+  async query(sql, params = []) {
+    this.lastSql = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+    this.lastParams = params
+    return { rows }
+  },
+})
+
+const createV6NR7PassClient = () => {
+  const calls = []
+  return {
+    calls,
+    async connect() {
+      this.connected = true
+    },
+    async end() {
+      this.closed = true
+    },
+    async query(sql, params = []) {
+      const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+      calls.push({ sql: normalized, params: [...params] })
+      if (normalized === "show default_transaction_read_only") {
+        return { rows: [{ default_transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_read_only") {
+        return { rows: [{ transaction_read_only: "on" }] }
+      }
+      if (normalized === "show transaction_isolation") {
+        return { rows: [{ transaction_isolation: "read committed" }] }
+      }
+      if (normalized.includes("from information_schema.columns")) {
+        return {
+          rows: ["company_id", "created_at", "expires_at", "label", "status"]
+            .map((column_name) => ({ column_name })),
+        }
+      }
+      if (normalized.startsWith("with company_link_state as")) {
+        return { rows: [{ company_id: QA_COMPANY_UUID }] }
+      }
+      if (normalized.includes("select current_timestamp as database_now")) {
+        return { rows: [{ database_now: "2026-07-21T00:00:00Z" }] }
+      }
+      if (normalized.includes("order by created_at asc")) {
+        return {
+          rows: [
+            { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+            { label: "other", status: "revoked", expires_at: null },
+            { label: "QA V6B historical", status: "revoked", expires_at: null },
+          ],
+        }
+      }
+      if (normalized.includes("count(distinct company_id)::int")) {
+        return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
+      }
+      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.startsWith("select count(*)::int")) {
+        if (!normalized.includes("from public.intake_links")) return { rows: [{ count: 0 }] }
+        if (!normalized.includes(" where ")) return { rows: [{ count: 4 }] }
+        if (normalized.includes("label like 'qa v6b %'")) {
+          return { rows: [{ count: normalized.includes("status='active'") ? 0 : 1 }] }
+        }
+        if (normalized.includes("status='expired'")) return { rows: [{ count: 1 }] }
+        if (normalized.includes("status='revoked'")) return { rows: [{ count: 2 }] }
+        return { rows: [{ count: 0 }] }
+      }
+      return { rows: [] }
+    },
+  }
+}
+
+const runV6NR7Pass = async (env = {}) => {
+  const client = createV6NR7PassClient()
+  const result = await runAuthenticatedReadOnlyPrecheck({
+    env: {
+      SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
+      ...env,
+    },
+    createClient: async () => client,
+  })
+  return { result, client }
+}
+
+test("V6N-R7 resolves without QA_COMPANY_ID", async () => {
+  const result = await resolveQaCompanyScopeReadOnly(
+    createV6NR7ResolverClient([{ company_id: QA_COMPANY_UUID }]),
+  )
+  assert.equal(result.source, "DETERMINISTIC_READ_ONLY")
+})
+
+test("V6N-R7 accepts exactly one deterministic candidate", async () => {
+  const result = await resolveQaCompanyScopeReadOnly(
+    createV6NR7ResolverClient([{ company_id: QA_COMPANY_UUID }]),
+  )
+  assert.equal(result.candidateCount, 1)
+})
+
+test("V6N-R7 blocks when candidate_count is zero", async () => {
+  await assert.rejects(
+    resolveQaCompanyScopeReadOnly(createV6NR7ResolverClient([])),
+    /QA_COMPANY_SCOPE_NOT_FOUND/,
+  )
+})
+
+test("V6N-R7 blocks when candidate_count is two", async () => {
+  await assert.rejects(
+    resolveQaCompanyScopeReadOnly(createV6NR7ResolverClient([
+      { company_id: QA_COMPANY_UUID },
+      { company_id: OTHER_COMPANY_UUID },
+    ])),
+    /QA_COMPANY_SCOPE_AMBIGUOUS/,
+  )
+})
+
+test("V6N-R7 verifies a matching protected value when supplied", async () => {
+  const result = await resolveQaCompanyScopeReadOnly(
+    createV6NR7ResolverClient([{ company_id: QA_COMPANY_UUID }]),
+    QA_COMPANY_UUID,
+  )
+  assert.equal(result.source, "PROTECTED_VALUE_VERIFIED")
+})
+
+test("V6N-R7 rejects a protected value different from the candidate", async () => {
+  await assert.rejects(
+    resolveQaCompanyScopeReadOnly(
+      createV6NR7ResolverClient([{ company_id: QA_COMPANY_UUID }]),
+      OTHER_COMPANY_UUID,
+    ),
+    /QA_COMPANY_SCOPE_PROTECTED_VALUE_MISMATCH/,
+  )
+})
+
+test("V6N-R7 rejects an invalid protected UUID", async () => {
+  await assert.rejects(
+    resolveQaCompanyScopeReadOnly(
+      createV6NR7ResolverClient([{ company_id: QA_COMPANY_UUID }]),
+      "invalid-value",
+    ),
+    /QA_COMPANY_SCOPE_RESULT_INVALID/,
+  )
+})
+
+test("V6N-R7 never exports the resolved UUID", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(JSON.stringify(result).includes(QA_COMPANY_UUID), false)
+  assert.equal(result.qa_company_id_exported, false)
+})
+
+test("V6N-R7 records two global company scopes", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.distinct_company_scopes, 2)
+})
+
+test("V6N-R7 records four links globally", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.intake_links_global, 4)
+})
+
+test("V6N-R7 records three links in the QA company", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.intake_links_qa_company, 3)
+})
+
+test("V6N-R7 preserves the other company active-valid link outside classification", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.intake_links_global - result.intake_links_qa_company, 1)
+})
+
+test("V6N-R7 does not let the other company active link block QA", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.state, "ALREADY_NORMALIZED")
+})
+
+test("V6N-R7 parameterizes the company-scoped links query", async () => {
+  const { client } = await runV6NR7Pass()
+  const scoped = client.calls.find((entry) => entry.sql.includes("order by created_at asc"))
+  assert.match(scoped.sql, /where company_id = \$1::uuid/)
+  assert.deepEqual(scoped.params, [QA_COMPANY_UUID])
+})
+
+test("V6N-R7 separates global and company-scoped totals", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.notEqual(result.intake_links_global, result.intake_links_qa_company)
+})
+
+test("V6N-R7 fresh baseline keeps global intake_links at four", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.fresh_baseline.intake_links, 4)
+})
+
+test("V6N-R7 fresh baseline keeps QA scope at three", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.fresh_baseline.intake_links_qa_company, 3)
+})
+
+test("V6N-R7 recognizes the strict ALREADY_NORMALIZED scope", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.state, "ALREADY_NORMALIZED")
+})
+
+test("V6N-R7 rejects an unexpected active link inside QA scope", () => {
+  assert.throws(() => classifyAuthenticatedLinkState([
+    { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    { label: "QA V6B historical", status: "revoked", expires_at: null },
+    { label: "unexpected", status: "active", expires_at: "2026-07-22T00:00:00Z" },
+  ], "2026-07-21T00:00:00Z"), /LINK_STATE_CONTRACT_MISMATCH/)
+})
+
+test("V6N-R7 rejects a second expired link", () => {
+  assert.throws(() => classifyAuthenticatedLinkState([
+    { label: "expired one", status: "expired", expires_at: "2026-07-19T00:00:00Z" },
+    { label: "expired two", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    { label: "QA V6B historical", status: "revoked", expires_at: null },
+  ], "2026-07-21T00:00:00Z"), /LINK_STATE_CONTRACT_MISMATCH/)
+})
+
+test("V6N-R7 rejects QA scope without the allowlisted revoked marker", () => {
+  assert.throws(() => classifyAuthenticatedLinkState([
+    { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    { label: "other one", status: "revoked", expires_at: null },
+    { label: "other two", status: "revoked", expires_at: null },
+  ], "2026-07-21T00:00:00Z"), /LINK_STATE_CONTRACT_MISMATCH/)
+})
+
+test("V6N-R7 rejects an unknown link state", () => {
+  assert.throws(() => classifyAuthenticatedLinkState([
+    { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
+    { label: "QA V6B historical", status: "revoked", expires_at: null },
+    { label: "other", status: "mystery", expires_at: null },
+  ], "2026-07-21T00:00:00Z"), /LINK_STATE_CONTRACT_MISMATCH/)
+})
+
+test("V6N-R7 resolves scope only after transaction_read_only is on", async () => {
+  const { client } = await runV6NR7Pass()
+  const readOnlyIndex = client.calls.findIndex((entry) => entry.sql === "show transaction_read_only")
+  const resolverIndex = client.calls.findIndex((entry) => entry.sql.startsWith("with company_link_state as"))
+  assert.ok(readOnlyIndex > -1 && resolverIndex > readOnlyIndex)
+})
+
+test("V6N-R7 completes ROLLBACK exactly once", async () => {
+  const { result, client } = await runV6NR7Pass()
+  assert.equal(result.rollback_completed, true)
+  assert.equal(client.calls.filter((entry) => entry.sql === "rollback").length, 1)
+})
+
+test("V6N-R7 keeps public submit blocked", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.provider_intake_calls, 0)
+  assert.equal(result.diagnostic_public_submit_attempts, 0)
+})
+
+test("V6N-R7 modifies zero real links", async () => {
+  const { result } = await runV6NR7Pass()
+  assert.equal(result.links_created, 0)
+  assert.equal(result.links_modified, 0)
+  assert.equal(result.writes, 0)
 })

@@ -45,6 +45,7 @@ import {
   classifyAuthenticatedLinkState,
   classifyAuthenticatedReadOnlyError,
   parseAuthenticatedReadOnlyChildResult,
+  resolveQaCompanyScopeReadOnly,
   runAuthenticatedReadOnlyMockMatrix,
   runAuthenticatedReadOnlyPrecheck,
   scanReadOnlySql,
@@ -97,7 +98,7 @@ export const EXPECTED_BASELINE = Object.freeze({
   payment_layout_lines: 13,
   cash_funds: 5,
   notification_events: 322,
-  intake_links: 3,
+  intake_links: 4,
   matched_intakes: 0,
   provider_matched: 4,
   states: {
@@ -109,6 +110,8 @@ export const EXPECTED_BASELINE = Object.freeze({
     cancelled: 0,
   },
 })
+
+export const EXPECTED_QA_COMPANY_LINKS = 3
 
 export const EXPECTED_EXPIRED_LINK_PRE_STATE = Object.freeze({
   total: 2,
@@ -1320,6 +1323,13 @@ function newContext(mode) {
   return {
     mode,
     providerTargets: [],
+    otherCompanyLinks: [
+      {
+        label: "Other company active",
+        status: "active",
+        expires_at: "2026-12-31T00:00:00.000Z",
+      },
+    ],
     expiredLink: null,
     expiredLinkCompanyId: null,
     expiredLinkDatabaseNow: null,
@@ -2327,6 +2337,7 @@ export async function runCapabilityAudit() {
     validateAuthenticatedReadOnlyEnvelope,
     parseAuthenticatedReadOnlyChildResult,
     runAuthenticatedReadOnlyPrecheck,
+    resolveQaCompanyScopeReadOnly,
     runAuthenticatedReadOnlyPrecheckDiagnostic,
   }
   for (const [name, implementation] of Object.entries(functions)) {
@@ -2429,6 +2440,19 @@ export async function runCapabilityAudit() {
         authenticatedReadOnly.caller_category === "DB_AUTH_FAILED",
       no_public_submit_before_readonly_pass:
         authenticatedReadOnly.public_submit_calls === 0,
+      deterministic_qa_company_scope_resolution:
+        authenticatedReadOnly.qa_company_scope_source === "DETERMINISTIC_READ_ONLY" &&
+        authenticatedReadOnly.qa_company_candidate_count === 1,
+      qa_company_scope_parameterization:
+        typeof resolveQaCompanyScopeReadOnly === "function",
+      global_company_link_count_separation:
+        authenticatedReadOnly.intake_links_global === 4 &&
+        authenticatedReadOnly.intake_links_qa_company === EXPECTED_QA_COMPANY_LINKS,
+      qa_company_identifier_non_export:
+        authenticatedReadOnly.qa_company_id_exported === false,
+      multi_company_safe_link_classification:
+        authenticatedReadOnly.distinct_company_scopes === 2 &&
+        authenticatedReadOnly.other_company_active_valid === 1,
     }
   return {
     mode: "capability-audit",
@@ -3932,7 +3956,7 @@ export async function runNoWriteMocked() {
   const cleanupMatrix = await runV6MCleanupMatrix()
   const authenticatedReadOnly = runAuthenticatedReadOnlyMockMatrix()
   const baseline = clone(EXPECTED_BASELINE)
-  gate(baseline.intake_links === 3, "POST_V6H_BASELINE_DRIFT")
+  gate(baseline.intake_links === 4, "POST_V6H_BASELINE_DRIFT")
   gate(
     digest(EXPECTED_ALREADY_NORMALIZED_LINK_STATE) === digest({
       total: 3,
@@ -3948,12 +3972,25 @@ export async function runNoWriteMocked() {
   const simulation = {
     status: "PASS",
     normalization_historical_writes: 0,
-    link_after_create: { total: 4, expired: 1, revoked: 2, active: 1 },
+    link_after_create: {
+      global_total: 5,
+      qa_company_total: 4,
+      expired: 1,
+      revoked: 2,
+      active: 1,
+    },
     fixtures_created: 2,
     provisioning_events: 2,
     main: "PASS",
     race: "PASS",
-    link_after_revoke: { total: 4, expired: 1, revoked: 3, active: 0, qa_total: 2, qa_revoked: 2 },
+    link_after_revoke: {
+      global_total: 5,
+      qa_company_total: 4,
+      expired: 1,
+      revoked: 3,
+      active: 0,
+      qa_revoked: 2,
+    },
     provider_matched_final: 9,
     payment_intake_events_final: 50,
     fixtures_final: "rejected",
@@ -3976,6 +4013,9 @@ export async function runNoWriteMocked() {
     baseline: {
       status: "PASS",
       intake_links: baseline.intake_links,
+      intake_links_qa_company: EXPECTED_QA_COMPANY_LINKS,
+      distinct_company_scopes: 2,
+      other_company_active_valid: 1,
       link_state: "ALREADY_NORMALIZED",
       existing_revoked_qa_links: 1,
     },

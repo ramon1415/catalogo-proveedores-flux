@@ -13,7 +13,9 @@ export const AUTHENTICATED_READ_ONLY_STAGES = Object.freeze([
   "TRANSACTION_READ_ONLY_ASSERTION",
   "DATABASE_TIME_QUERY",
   "SCHEMA_CONTRACT_INSPECTION",
+  "QA_COMPANY_SCOPE_RESOLUTION",
   "INTAKE_LINKS_READ",
+  "GLOBAL_LINK_BASELINE_CAPTURE",
   "LINK_STATE_CLASSIFICATION",
   "FRESH_BASELINE_CAPTURE",
   "RESULT_CONTRACT_VALIDATION",
@@ -25,6 +27,11 @@ export const AUTHENTICATED_READ_ONLY_STAGES = Object.freeze([
 
 export const AUTHENTICATED_READ_ONLY_ERROR_CATEGORIES = Object.freeze([
   "BLOCKED_SECRET_UNAVAILABLE",
+  "QA_COMPANY_SCOPE_NOT_FOUND",
+  "QA_COMPANY_SCOPE_AMBIGUOUS",
+  "QA_COMPANY_SCOPE_RESOLUTION_FAILED",
+  "QA_COMPANY_SCOPE_PROTECTED_VALUE_MISMATCH",
+  "QA_COMPANY_SCOPE_RESULT_INVALID",
   "DB_URL_INVALID",
   "DB_DNS_FAILED",
   "DB_NETWORK_FAILED",
@@ -109,7 +116,9 @@ const STAGE_FALLBACK = new Map([
   ["TRANSACTION_READ_ONLY_ASSERTION", "TRANSACTION_READ_ONLY_ASSERTION_FAILED"],
   ["DATABASE_TIME_QUERY", "DB_CONNECTION_FAILED"],
   ["SCHEMA_CONTRACT_INSPECTION", "SCHEMA_CONTRACT_MISMATCH"],
+  ["QA_COMPANY_SCOPE_RESOLUTION", "QA_COMPANY_SCOPE_RESOLUTION_FAILED"],
   ["INTAKE_LINKS_READ", "DB_PERMISSION_FAILED"],
+  ["GLOBAL_LINK_BASELINE_CAPTURE", "SCHEMA_CONTRACT_MISMATCH"],
   ["LINK_STATE_CLASSIFICATION", "LINK_STATE_CONTRACT_MISMATCH"],
   ["FRESH_BASELINE_CAPTURE", "SCHEMA_CONTRACT_MISMATCH"],
   ["RESULT_CONTRACT_VALIDATION", "RESULT_CONTRACT_INVALID"],
@@ -132,6 +141,7 @@ const PERSISTENT_CONFIGURATION_SQL = /\b(?:alter\s+role|alter\s+database|alter\s
 const ALLOWED_READ_ONLY_SQL = [
   /^(?:show)\s+(?:default_transaction_read_only|transaction_read_only|transaction_isolation)\b/iu,
   /^(?:select)\s+.+/iu,
+  /^(?:with)\s+.+\sselect\s+.+/iu,
   /^(?:set)\s+session\s+characteristics\s+as\s+transaction\s+read\s+only\b/iu,
   /^(?:set)\s+application_name\s*(?:=|to)\s+/iu,
   /^(?:set)\s+local\s+statement_timeout\s*(?:=|to)\s+/iu,
@@ -140,7 +150,9 @@ const ALLOWED_READ_ONLY_SQL = [
   /^(?:rollback)\b/iu,
 ]
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu
+const UUID_VALUE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const SECRET_PATTERN = /(?:postgres(?:ql)?:\/\/|eyJhbGci|sb_secret_|bearer\s+[a-z0-9._-]{12,})/iu
+const QA_LABEL_PREFIX = "QA V6B "
 
 export class AuthenticatedReadOnlyObservabilityError extends Error {
   constructor(code, { stage = null, category = null } = {}) {
@@ -257,12 +269,6 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
     })
   }
   const now = numericTime(databaseNow)
-  const scopes = new Set(rows.map((row) => String(row?.company_scope || "").trim()).filter(Boolean))
-  if (scopes.size > 1) {
-    throw new AuthenticatedReadOnlyObservabilityError("LINK_STATE_CONTRACT_MISMATCH", {
-      category: "LINK_STATE_CONTRACT_MISMATCH",
-    })
-  }
   const counts = {
     total: rows.length,
     active_valid: 0,
@@ -270,6 +276,7 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
     expired: 0,
     revoked: 0,
     paused: 0,
+    unknown: 0,
     other_active: 0,
     qa_historical: 0,
     qa_active: 0,
@@ -277,7 +284,7 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
   }
   for (const row of rows) {
     const status = String(row?.status || "")
-    const qa = /^QA V6B /u.test(String(row?.label || ""))
+    const qa = String(row?.label || "").startsWith(QA_LABEL_PREFIX)
     if (qa) counts.qa_historical += 1
     if (status === "active") {
       if (qa) counts.qa_active += 1
@@ -289,6 +296,7 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
       counts.revoked += 1
       if (qa) counts.qa_revoked += 1
     } else if (status === "paused") counts.paused += 1
+    else counts.unknown += 1
   }
   const normalizationRequired = counts.total === 2 &&
     counts.active_valid === 0 && counts.active_expired === 1 &&
@@ -296,6 +304,7 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
   const alreadyNormalized = counts.total === 3 &&
     counts.active_valid === 0 && counts.active_expired === 0 &&
     counts.expired === 1 && counts.revoked === 2 && counts.other_active === 0 &&
+    counts.paused === 0 && counts.unknown === 0 &&
     counts.qa_historical === 1 && counts.qa_active === 0 && counts.qa_revoked === 1
   if (!normalizationRequired && !alreadyNormalized) {
     throw new AuthenticatedReadOnlyObservabilityError("LINK_STATE_CONTRACT_MISMATCH", {
@@ -332,6 +341,14 @@ export function createAuthenticatedReadOnlyEnvelope(mode = MODE) {
     query_completed: false,
     rollback_completed: false,
     client_closed: false,
+    qa_company_scope_source: null,
+    qa_company_scope_applied: false,
+    qa_company_candidate_count: 0,
+    qa_company_id_exported: false,
+    intake_links_global: null,
+    distinct_company_scopes: null,
+    global_company_scope_count: null,
+    intake_links_qa_company: null,
     fresh_baseline_completed: false,
     fresh_baseline: null,
     read_only_sql_scan: "PASS",
@@ -368,6 +385,13 @@ const REQUIRED_ENVELOPE_FIELDS = Object.freeze([
   "transaction_read_only",
   "query_completed",
   "rollback_completed",
+  "qa_company_scope_source",
+  "qa_company_scope_applied",
+  "qa_company_candidate_count",
+  "qa_company_id_exported",
+  "intake_links_global",
+  "distinct_company_scopes",
+  "intake_links_qa_company",
   "writes",
   "token_generated",
   "provider_intake_calls",
@@ -390,7 +414,7 @@ export function validateAuthenticatedReadOnlyEnvelope(value) {
   if (!["PASS", "BLOCKED", "FAIL"].includes(value.status) ||
       value.writes !== 0 || value.token_generated !== false ||
       value.provider_intake_calls !== 0 || value.raw_error_exported !== false ||
-      value.raw_detail_exported !== false) {
+      value.raw_detail_exported !== false || value.qa_company_id_exported !== false) {
     throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
       category: "RESULT_CONTRACT_INVALID",
     })
@@ -409,7 +433,15 @@ export function validateAuthenticatedReadOnlyEnvelope(value) {
           String(value.initial_default_transaction_read_only || "").toLowerCase(),
         ) ||
         value.session_read_only_bootstrap_applied !== true ||
-        value.session_default_transaction_read_only !== true) {
+        value.session_default_transaction_read_only !== true ||
+        !["DETERMINISTIC_READ_ONLY", "PROTECTED_VALUE_VERIFIED"].includes(
+          value.qa_company_scope_source,
+        ) ||
+        value.qa_company_scope_applied !== true ||
+        value.qa_company_candidate_count !== 1 ||
+        value.intake_links_global !== 4 ||
+        value.distinct_company_scopes !== 2 ||
+        value.intake_links_qa_company !== 3) {
       throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
         category: "RESULT_CONTRACT_INVALID",
       })
@@ -483,10 +515,60 @@ function parseDatabaseUrl(value) {
        and table_name = 'intake_links'
      order by column_name
   `,
+  qaCompanyScopeCandidates: `
+    with company_link_state as (
+      select company_id,
+             count(*)::int as total,
+             count(*) filter (where status = 'active')::int as active,
+             count(*) filter (
+               where status = 'active' and expires_at is not null and expires_at >= now()
+             )::int as active_valid,
+             count(*) filter (
+               where status = 'active' and expires_at is not null and expires_at < now()
+             )::int as active_expired,
+             count(*) filter (
+               where status = 'active' and expires_at is null
+             )::int as other_active,
+             count(*) filter (where status = 'expired')::int as expired,
+             count(*) filter (where status = 'revoked')::int as revoked,
+             count(*) filter (where status = 'paused')::int as paused,
+             count(*) filter (
+               where status not in ('active', 'expired', 'revoked', 'paused')
+             )::int as unknown,
+             count(*) filter (
+               where status = 'revoked' and label like 'QA V6B %'
+             )::int as qa_revoked,
+             count(*) filter (
+               where status = 'active' and label like 'QA V6B %'
+             )::int as qa_active
+        from public.intake_links
+       group by company_id
+    )
+    select company_id::text as company_id
+      from company_link_state
+     where total = 3
+       and active = 0
+       and active_valid = 0
+       and active_expired = 0
+       and other_active = 0
+       and expired = 1
+       and revoked = 2
+       and paused = 0
+       and unknown = 0
+       and qa_revoked = 1
+       and qa_active = 0
+     order by company_id
+  `,
   links: `
-    select company_id::text as company_scope, label, status, expires_at
+    select label, status, expires_at
       from public.intake_links
+     where company_id = $1::uuid
      order by created_at asc
+  `,
+  globalLinkAggregate: `
+    select count(*)::int as intake_links_global,
+           count(distinct company_id)::int as distinct_company_scopes
+      from public.intake_links
   `,
   qaProfiles: `
     select p.id::text as profile_id, au.id::text as auth_user_id,
@@ -530,13 +612,13 @@ const STATE_SCALARS = Object.freeze(Object.fromEntries(
 ))
 
 const LINK_SCALARS = Object.freeze({
-  active: "select count(*)::int from public.intake_links where status='active'",
-  active_expired: "select count(*)::int from public.intake_links where status='active' and expires_at < now()",
-  expired: "select count(*)::int from public.intake_links where status='expired'",
-  revoked: "select count(*)::int from public.intake_links where status='revoked'",
-  qa_historical: "select count(*)::int from public.intake_links where label like 'QA V6B %'",
-  qa_active: "select count(*)::int from public.intake_links where label like 'QA V6B %' and status='active'",
-  qa_revoked: "select count(*)::int from public.intake_links where label like 'QA V6B %' and status='revoked'",
+  active: "select count(*)::int from public.intake_links where company_id=$1::uuid and status='active'",
+  active_expired: "select count(*)::int from public.intake_links where company_id=$1::uuid and status='active' and expires_at < now()",
+  expired: "select count(*)::int from public.intake_links where company_id=$1::uuid and status='expired'",
+  revoked: "select count(*)::int from public.intake_links where company_id=$1::uuid and status='revoked'",
+  qa_historical: "select count(*)::int from public.intake_links where company_id=$1::uuid and label like 'QA V6B %'",
+  qa_active: "select count(*)::int from public.intake_links where company_id=$1::uuid and label like 'QA V6B %' and status='active'",
+  qa_revoked: "select count(*)::int from public.intake_links where company_id=$1::uuid and label like 'QA V6B %' and status='revoked'",
 })
 
 function iamScalarSql(table, foreignKey, activeOnly = false) {
@@ -563,6 +645,57 @@ async function queryReadOnly(client, sql, params = []) {
   return await client.query(sql, params)
 }
 
+export async function resolveQaCompanyScopeReadOnly(client, protectedValue = null) {
+  let result
+  try {
+    result = await queryReadOnly(client, SQL.qaCompanyScopeCandidates)
+  } catch (error) {
+    if (error instanceof AuthenticatedReadOnlyObservabilityError) throw error
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_RESOLUTION_FAILED", {
+      category: "QA_COMPANY_SCOPE_RESOLUTION_FAILED",
+    })
+  }
+  if (!Array.isArray(result?.rows)) {
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_RESULT_INVALID", {
+      category: "QA_COMPANY_SCOPE_RESULT_INVALID",
+    })
+  }
+  const candidates = result.rows.map((row) => String(row?.company_id || "").trim())
+  if (candidates.some((candidate) => !UUID_VALUE_PATTERN.test(candidate))) {
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_RESULT_INVALID", {
+      category: "QA_COMPANY_SCOPE_RESULT_INVALID",
+    })
+  }
+  if (candidates.length === 0) {
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_NOT_FOUND", {
+      category: "QA_COMPANY_SCOPE_NOT_FOUND",
+    })
+  }
+  if (candidates.length > 1) {
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_AMBIGUOUS", {
+      category: "QA_COMPANY_SCOPE_AMBIGUOUS",
+    })
+  }
+  const companyId = candidates[0]
+  const supplied = String(protectedValue || "").trim()
+  if (supplied && !UUID_VALUE_PATTERN.test(supplied)) {
+    throw new AuthenticatedReadOnlyObservabilityError("QA_COMPANY_SCOPE_RESULT_INVALID", {
+      category: "QA_COMPANY_SCOPE_RESULT_INVALID",
+    })
+  }
+  if (supplied && supplied.toLowerCase() !== companyId.toLowerCase()) {
+    throw new AuthenticatedReadOnlyObservabilityError(
+      "QA_COMPANY_SCOPE_PROTECTED_VALUE_MISMATCH",
+      { category: "QA_COMPANY_SCOPE_PROTECTED_VALUE_MISMATCH" },
+    )
+  }
+  return Object.freeze({
+    candidateCount: 1,
+    companyId,
+    source: supplied ? "PROTECTED_VALUE_VERIFIED" : "DETERMINISTIC_READ_ONLY",
+  })
+}
+
 async function scalar(client, sql, params = []) {
   const result = await queryReadOnly(client, sql, params)
   const count = Number(result?.rows?.[0]?.count)
@@ -574,7 +707,7 @@ async function scalar(client, sql, params = []) {
   return count
 }
 
-async function captureFreshBaseline(client, linkState) {
+async function captureFreshBaseline(client, linkState, qaCompanyId, globalAggregate) {
   const profileRows = await queryReadOnly(client, SQL.qaProfiles)
   const profiles = Array.isArray(profileRows?.rows) ? profileRows.rows : []
   const profileIds = profiles.map((row) => row.profile_id)
@@ -584,7 +717,9 @@ async function captureFreshBaseline(client, linkState) {
   baseline.states = {}
   for (const [key, sql] of Object.entries(STATE_SCALARS)) baseline.states[key] = await scalar(client, sql)
   baseline.links = {}
-  for (const [key, sql] of Object.entries(LINK_SCALARS)) baseline.links[key] = await scalar(client, sql)
+  for (const [key, sql] of Object.entries(LINK_SCALARS)) {
+    baseline.links[key] = await scalar(client, sql, [qaCompanyId])
+  }
   baseline.iam = {
     qa_principals: profiles.length,
     profiles_inactive: profiles.filter((row) => row.active === false).length,
@@ -594,7 +729,11 @@ async function captureFreshBaseline(client, linkState) {
     sessions: authUserIds.length ? await scalar(client, IAM_SCALARS.sessions, [authUserIds]) : 0,
     refresh_tokens: authUserIds.length ? await scalar(client, IAM_SCALARS.refresh_tokens, [authUserIds]) : 0,
   }
-  if (baseline.intake_links !== linkState.counts.total ||
+  baseline.distinct_company_scopes = globalAggregate.distinct_company_scopes
+  baseline.intake_links_qa_company = linkState.counts.total
+  if (baseline.intake_links !== globalAggregate.intake_links_global ||
+      baseline.distinct_company_scopes !== 2 ||
+      baseline.intake_links_qa_company !== 3 ||
       baseline.links.active_expired !== linkState.counts.active_expired ||
       baseline.links.expired !== linkState.counts.expired ||
       baseline.links.revoked !== linkState.counts.revoked) {
@@ -618,6 +757,8 @@ export async function runAuthenticatedReadOnlyPrecheck({
   const envelope = createAuthenticatedReadOnlyEnvelope(mode)
   let client = null
   let databaseUrl = null
+  let qaCompanyId = null
+  let protectedQaCompanyId = null
   let currentStage = "ENVIRONMENT_VALIDATION"
   const sqlScan = scanReadOnlySql(ALL_READ_ONLY_SQL)
   envelope.read_only_sql_statements = sqlScan.statements_scanned
@@ -716,12 +857,6 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.transaction_isolation = String(transactionIsolation.rows[0].transaction_isolation || "")
     completed(envelope, currentStage)
 
-    currentStage = "DATABASE_TIME_QUERY"
-    const clock = await queryReadOnly(client, SQL.databaseTime)
-    const databaseNow = clock?.rows?.[0]?.database_now
-    numericTime(databaseNow)
-    completed(envelope, currentStage)
-
     currentStage = "SCHEMA_CONTRACT_INSPECTION"
     const schema = await queryReadOnly(client, SQL.schema)
     const columns = new Set((schema?.rows || []).map((row) => String(row.column_name)))
@@ -732,14 +867,43 @@ export async function runAuthenticatedReadOnlyPrecheck({
     }
     completed(envelope, currentStage)
 
+    currentStage = "QA_COMPANY_SCOPE_RESOLUTION"
+    protectedQaCompanyId = String(env.QA_COMPANY_ID || "").trim() || null
+    const qaScope = await resolveQaCompanyScopeReadOnly(client, protectedQaCompanyId)
+    qaCompanyId = qaScope.companyId
+    envelope.qa_company_scope_source = qaScope.source
+    envelope.qa_company_scope_applied = true
+    envelope.qa_company_candidate_count = qaScope.candidateCount
+    completed(envelope, currentStage)
+
+    currentStage = "DATABASE_TIME_QUERY"
+    const clock = await queryReadOnly(client, SQL.databaseTime)
+    const databaseNow = clock?.rows?.[0]?.database_now
+    numericTime(databaseNow)
+    completed(envelope, currentStage)
+
     currentStage = "INTAKE_LINKS_READ"
-    const links = await queryReadOnly(client, SQL.links)
+    const links = await queryReadOnly(client, SQL.links, [qaCompanyId])
     if (!Array.isArray(links?.rows)) {
       throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
         category: "RESULT_CONTRACT_INVALID",
       })
     }
     envelope.query_completed = true
+    envelope.intake_links_qa_company = links.rows.length
+    completed(envelope, currentStage)
+
+    currentStage = "GLOBAL_LINK_BASELINE_CAPTURE"
+    const globalLinks = await queryReadOnly(client, SQL.globalLinkAggregate)
+    const globalAggregate = globalLinks?.rows?.[0]
+    envelope.intake_links_global = Number(globalAggregate?.intake_links_global)
+    envelope.distinct_company_scopes = Number(globalAggregate?.distinct_company_scopes)
+    envelope.global_company_scope_count = envelope.distinct_company_scopes
+    if (envelope.intake_links_global !== 4 || envelope.distinct_company_scopes !== 2) {
+      throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
+        category: "RESULT_CONTRACT_INVALID",
+      })
+    }
     completed(envelope, currentStage)
 
     currentStage = "LINK_STATE_CLASSIFICATION"
@@ -751,7 +915,15 @@ export async function runAuthenticatedReadOnlyPrecheck({
     completed(envelope, currentStage)
 
     currentStage = "FRESH_BASELINE_CAPTURE"
-    envelope.fresh_baseline = await captureFreshBaseline(client, linkState)
+    envelope.fresh_baseline = await captureFreshBaseline(
+      client,
+      linkState,
+      qaCompanyId,
+      {
+        intake_links_global: envelope.intake_links_global,
+        distinct_company_scopes: envelope.distinct_company_scopes,
+      },
+    )
     envelope.fresh_baseline_completed = true
     completed(envelope, currentStage)
 
@@ -778,7 +950,10 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.sqlstate_class = null
     completed(envelope, currentStage)
     validateAuthenticatedReadOnlyEnvelope(envelope)
-    assertSanitizedAuthenticatedReadOnlyEvidence(envelope, [databaseUrl])
+    assertSanitizedAuthenticatedReadOnlyEvidence(
+      envelope,
+      [databaseUrl, qaCompanyId, protectedQaCompanyId],
+    )
     JSON.stringify(envelope)
     return envelope
   } catch (error) {
@@ -804,9 +979,14 @@ export async function runAuthenticatedReadOnlyPrecheck({
       envelope.last_completed_stage = "ENVIRONMENT_VALIDATION"
     }
     if (!envelope.fresh_baseline_completed) envelope.fresh_baseline = null
-    assertSanitizedAuthenticatedReadOnlyEvidence(envelope, [databaseUrl])
+    assertSanitizedAuthenticatedReadOnlyEvidence(
+      envelope,
+      [databaseUrl, qaCompanyId, protectedQaCompanyId],
+    )
     return envelope
   } finally {
+    qaCompanyId = null
+    protectedQaCompanyId = null
     if (client) {
       try {
         await client.end()
@@ -871,13 +1051,13 @@ export function parseAuthenticatedReadOnlyChildResult({ stdout, exitCode = 0 } =
 export function runAuthenticatedReadOnlyMockMatrix() {
   const now = "2026-07-21T20:00:00.000Z"
   const normalizationRequired = classifyAuthenticatedLinkState([
-    { company_scope: "scope", label: "historical", status: "revoked", expires_at: null },
-    { company_scope: "scope", label: "active", status: "active", expires_at: "2026-07-20T20:00:00.000Z" },
+    { label: "historical", status: "revoked", expires_at: null },
+    { label: "active", status: "active", expires_at: "2026-07-20T20:00:00.000Z" },
   ], now)
   const alreadyNormalized = classifyAuthenticatedLinkState([
-    { company_scope: "scope", label: "historical", status: "expired", expires_at: "2026-07-20T20:00:00.000Z" },
-    { company_scope: "scope", label: "other", status: "revoked", expires_at: null },
-    { company_scope: "scope", label: "QA V6B historical", status: "revoked", expires_at: null },
+    { label: "historical", status: "expired", expires_at: "2026-07-20T20:00:00.000Z" },
+    { label: "other", status: "revoked", expires_at: null },
+    { label: "QA V6B historical", status: "revoked", expires_at: null },
   ], now)
   const families = [
     ["ENOTFOUND", "DB_DNS_FAILED"],
@@ -917,6 +1097,14 @@ export function runAuthenticatedReadOnlyMockMatrix() {
     transaction_read_only: true,
     query_completed: true,
     fresh_baseline_completed: true,
+    qa_company_scope_source: "DETERMINISTIC_READ_ONLY",
+    qa_company_scope_applied: true,
+    qa_company_candidate_count: 1,
+    qa_company_id_exported: false,
+    intake_links_global: 4,
+    distinct_company_scopes: 2,
+    intake_links_qa_company: 3,
+    other_company_active_valid: 1,
     transaction_isolation: "read committed",
     public_submit_calls: 0,
     diagnostic_public_submit_attempts: 0,
