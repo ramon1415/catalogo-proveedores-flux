@@ -125,11 +125,13 @@ test("039 grants exactly EXECUTE to authenticated and keeps anon/PUBLIC denied",
 
 test("039 fail-closes on definition, policies, bucket and prior ACL", () => {
   for (const source of [migration039, precheck]) {
-    assert.match(source, /4cf587cd26796af6bb9f75c36002757a/i)
+    assert.match(source, /9295f516acb33ab9a9f9e5df67ce707b/i)
     assert.match(
       source,
-      /978d2cdac722a202389e151250c5b972a0e1bec43a74e0f5ae59fd1996174cdb/i,
+      /6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d/i,
     )
+    assert.match(source, /function_info\.prosrc/i)
+    assert.doesNotMatch(source, /md5\(pg_get_functiondef/i)
     assert.match(source, /authenticated already has EXECUTE/i)
     assert.match(source, /anon or PUBLIC unexpectedly has EXECUTE/i)
     assert.match(source, /extraordinary_evidence_insert/i)

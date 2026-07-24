@@ -24,14 +24,22 @@ begin
     raise exception 'shadow 039 postgrant: ACL is not least privilege';
   end if;
 
-  if md5(pg_get_functiondef(
-       'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
-     )) <> '4cf587cd26796af6bb9f75c36002757a'
-     or encode(sha256(convert_to(pg_get_functiondef(
-       'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
-     ), 'UTF8')), 'hex') <>
-       '978d2cdac722a202389e151250c5b972a0e1bec43a74e0f5ae59fd1996174cdb' then
-    raise exception 'shadow 039 postgrant: helper definition changed';
+  if (
+       select md5(function_info.prosrc)
+       from pg_proc function_info
+       where function_info.oid =
+         'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+     ) <> '9295f516acb33ab9a9f9e5df67ce707b'
+     or (
+       select encode(
+         sha256(convert_to(function_info.prosrc, 'UTF8')),
+         'hex'
+       )
+       from pg_proc function_info
+       where function_info.oid =
+         'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+     ) <> '6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d' then
+    raise exception 'shadow 039 postgrant: helper body changed';
   end if;
 
   perform set_config(

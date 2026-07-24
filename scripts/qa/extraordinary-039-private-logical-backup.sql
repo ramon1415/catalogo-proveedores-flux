@@ -23,6 +23,21 @@ select jsonb_build_object(
       encode(sha256(convert_to(pg_get_functiondef(
         'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
       ), 'UTF8')), 'hex'),
+    'body_md5', (
+      select md5(function_info.prosrc)
+      from pg_proc function_info
+      where function_info.oid =
+        'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+    ),
+    'body_sha256', (
+      select encode(
+        sha256(convert_to(function_info.prosrc, 'UTF8')),
+        'hex'
+      )
+      from pg_proc function_info
+      where function_info.oid =
+        'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+    ),
     'acl', (
       select coalesce(function_info.proacl::text, '<default>')
       from pg_proc function_info

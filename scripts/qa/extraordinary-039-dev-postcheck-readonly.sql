@@ -9,7 +9,11 @@ do $postcheck$
 declare
   v_function_oid oid :=
     'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure;
-  v_function_definition text := pg_get_functiondef(v_function_oid);
+  v_function_source text := (
+    select function_info.prosrc
+    from pg_proc function_info
+    where function_info.oid = v_function_oid
+  );
 begin
   if current_setting('transaction_read_only') <> 'on' then
     raise exception '039_remote_postcheck: transaction is not read only';
@@ -25,13 +29,13 @@ begin
     raise exception '039_remote_postcheck: helper ACL is invalid';
   end if;
 
-  if md5(v_function_definition) <>
-       '4cf587cd26796af6bb9f75c36002757a'
+  if md5(v_function_source) <>
+       '9295f516acb33ab9a9f9e5df67ce707b'
      or encode(
-       sha256(convert_to(v_function_definition, 'UTF8')),
+       sha256(convert_to(v_function_source, 'UTF8')),
        'hex'
-     ) <> '978d2cdac722a202389e151250c5b972a0e1bec43a74e0f5ae59fd1996174cdb' then
-    raise exception '039_remote_postcheck: helper definition changed';
+     ) <> '6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d' then
+    raise exception '039_remote_postcheck: helper body changed';
   end if;
 
   if (
@@ -99,12 +103,21 @@ select jsonb_build_object(
   'authenticated_execute', true,
   'anon_execute', false,
   'public_execute', false,
-  'helper_definition_md5', md5(pg_get_functiondef(
-    'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
-  )),
-  'helper_definition_sha256', encode(sha256(convert_to(pg_get_functiondef(
-    'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
-  ), 'UTF8')), 'hex'),
+  'helper_body_md5', (
+    select md5(function_info.prosrc)
+    from pg_proc function_info
+    where function_info.oid =
+      'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+  ),
+  'helper_body_sha256', (
+    select encode(
+      sha256(convert_to(function_info.prosrc, 'UTF8')),
+      'hex'
+    )
+    from pg_proc function_info
+    where function_info.oid =
+      'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure
+  ),
   'policy_count', 2,
   'bucket_private', true,
   'bucket_object_count', (

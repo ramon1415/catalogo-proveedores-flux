@@ -20,8 +20,9 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: eccb7adb37e64782146c0907513f6667d8765d51
-  EXPECTED_MIGRATION_SHA256: 21ad6a0fc2af1b38b036b86da3cb73954e675b41af2445c69ea7951ca84cd7b6
+  EXPECTED_PARENT: fe4a62de0f55139d5d07f66eb6bda07b3e0f3996
+  EXPECTED_BASE: eccb7adb37e64782146c0907513f6667d8765d51
+  EXPECTED_MIGRATION_SHA256: 4b87e078916c663c9238c8d7cf842212bf59b680a7c7de53ad2554ed498789ec
   FEATURE_BRANCH: feature/ramon-post-yanin-bugs-extraordinary
   PR_NUMBER: "277"
   EVIDENCE_DIR: /tmp/extraordinary-039-dev-precheck
@@ -38,7 +39,7 @@ jobs:
       - name: Checkout exact pushed commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Guard repository, branch, commit scope and PR identity
         shell: bash
@@ -51,11 +52,32 @@ jobs:
             "ramon1415/catalogo-proveedores-flux"
           test "$GITHUB_REF_NAME" = "$FEATURE_BRANCH"
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
 
           mapfile -t changed_files < <(
             git diff --name-only HEAD^ HEAD | sort
           )
           expected_files=(
+            ".github/workflows/extraordinary-039-dev-precheck-readonly.yml"
+            "scripts/qa/extraordinary-039-dev-precheck-readonly.sql"
+            "scripts/qa/extraordinary-039-dev-postcheck-readonly.sql"
+            "scripts/qa/extraordinary-039-private-logical-backup.sql"
+            "scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs"
+            "scripts/qa/shadow/039_postgrant_storage_policy_contracts.sql"
+            "supabase/migrations/039_enable_extraordinary_evidence_storage_policy_helper.sql"
+          )
+          mapfile -t expected_files < <(
+            printf '%s\n' "${expected_files[@]}" | sort
+          )
+          test "${#changed_files[@]}" -eq "${#expected_files[@]}"
+          for index in "${!expected_files[@]}"; do
+            test "${changed_files[$index]}" = "${expected_files[$index]}"
+          done
+
+          mapfile -t cumulative_files < <(
+            git diff --name-only "$EXPECTED_BASE" HEAD | sort
+          )
+          expected_cumulative_files=(
             ".github/workflows/extraordinary-039-dev-precheck-readonly.yml"
             "scripts/qa/extraordinary-039-dev-precheck-readonly.sql"
             "scripts/qa/extraordinary-039-dev-postcheck-readonly.sql"
@@ -67,12 +89,14 @@ jobs:
             "scripts/qa/shadow/run-extraordinary-migrations.ps1"
             "supabase/migrations/039_enable_extraordinary_evidence_storage_policy_helper.sql"
           )
-          mapfile -t expected_files < <(
-            printf '%s\n' "${expected_files[@]}" | sort
+          mapfile -t expected_cumulative_files < <(
+            printf '%s\n' "${expected_cumulative_files[@]}" | sort
           )
-          test "${#changed_files[@]}" -eq "${#expected_files[@]}"
-          for index in "${!expected_files[@]}"; do
-            test "${changed_files[$index]}" = "${expected_files[$index]}"
+          test "${#cumulative_files[@]}" -eq \
+            "${#expected_cumulative_files[@]}"
+          for index in "${!expected_cumulative_files[@]}"; do
+            test "${cumulative_files[$index]}" = \
+              "${expected_cumulative_files[$index]}"
           done
 
           pr_json="$(
@@ -153,7 +177,7 @@ jobs:
       - name: Checkout exact prechecked commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Reconfirm immutable migration identity
         shell: bash
@@ -168,7 +192,7 @@ jobs:
             sha256sum "$MIGRATION_FILE" | cut -d' ' -f1
           )" = "$EXPECTED_MIGRATION_SHA256"
           test "$(
-            git diff --name-only "$EXPECTED_PARENT" "$GITHUB_SHA" \
+            git diff --name-only "$EXPECTED_BASE" "$GITHUB_SHA" \
               -- supabase/migrations/036_quarantine_legacy_extraordinary_authorizations.sql \
                  supabase/migrations/037_secure_extraordinary_external_authorization.sql \
                  supabase/migrations/038_materialize_only_released_batch_items.sql
@@ -376,8 +400,8 @@ jobs:
               "$MIGRATION_EVIDENCE_DIR/private-backup.json" \
             --slurpfile after \
               "$MIGRATION_EVIDENCE_DIR/postcheck-sanitized.json" '
-              $before[0].helper.definition_sha256 ==
-                $after[0].helper_definition_sha256
+              $before[0].helper.body_sha256 ==
+                $after[0].helper_body_sha256
               and $before[0].business_counts ==
                 $after[0].business_counts
               and $before[0].allocation_integrity ==

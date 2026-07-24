@@ -7,7 +7,8 @@ begin;
 do $precheck$
 declare
   v_function_oid oid;
-  v_function_definition text;
+  v_function_source text;
+  v_function_language name;
   v_function_owner name;
   v_function_result text;
   v_function_volatility "char";
@@ -26,7 +27,8 @@ begin
   end if;
 
   select
-    pg_get_functiondef(function_info.oid),
+    function_info.prosrc,
+    language_info.lanname,
     pg_get_userbyid(function_info.proowner),
     pg_get_function_result(function_info.oid),
     function_info.provolatile,
@@ -34,7 +36,8 @@ begin
     function_info.proconfig,
     function_info.proacl
   into strict
-    v_function_definition,
+    v_function_source,
+    v_function_language,
     v_function_owner,
     v_function_result,
     v_function_volatility,
@@ -42,9 +45,11 @@ begin
     v_function_config,
     v_function_acl
   from pg_proc function_info
+  join pg_language language_info on language_info.oid = function_info.prolang
   where function_info.oid = v_function_oid;
 
   if v_function_owner <> 'postgres'
+     or v_function_language <> 'plpgsql'
      or v_function_result <> 'boolean'
      or v_function_volatility <> 's'
      or not v_function_security_definer
@@ -53,49 +58,49 @@ begin
     raise exception '039_precheck: evidence Storage helper attributes drifted';
   end if;
 
-  if md5(v_function_definition) <>
-       '4cf587cd26796af6bb9f75c36002757a'
+  if md5(v_function_source) <>
+       '9295f516acb33ab9a9f9e5df67ce707b'
      or encode(
-       sha256(convert_to(v_function_definition, 'UTF8')),
+       sha256(convert_to(v_function_source, 'UTF8')),
        'hex'
-     ) <> '978d2cdac722a202389e151250c5b972a0e1bec43a74e0f5ae59fd1996174cdb' then
-    raise exception '039_precheck: evidence Storage helper definition drifted';
+     ) <> '6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d' then
+    raise exception '039_precheck: evidence Storage helper body drifted';
   end if;
 
-  if lower(v_function_definition) ~
+  if lower(v_function_source) ~
        '\m(insert|update|delete|truncate|merge|execute|format)\M'
-     or position('set_config' in lower(v_function_definition)) > 0
-     or position('signed' in lower(v_function_definition)) > 0 then
+     or position('set_config' in lower(v_function_source)) > 0
+     or position('signed' in lower(v_function_source)) > 0 then
     raise exception '039_precheck: helper is not side-effect-free';
   end if;
 
   if position(
        'p_name !~ ''^[0-9a-f-]{36}/[0-9a-f-]{36}/evidence/[0-9a-f-]{36}$'''
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'evidence_storage_path = p_name'
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'v_authorization.status = ''draft'''
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'v_authorization.authorized_by = v_actor'
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'extraordinary_profile_is_active_member'
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'v_actor = v_authorization.external_director_profile_id'
-       in v_function_definition
+       in v_function_source
      ) = 0
      or position(
        'current_user_has_role(public.flux_finance_roles())'
-       in v_function_definition
+       in v_function_source
      ) = 0 then
     raise exception '039_precheck: helper authorization contract drifted';
   end if;
@@ -330,7 +335,8 @@ do $postcheck$
 declare
   v_function_oid oid :=
     'public.extraordinary_evidence_storage_allowed(text,boolean)'::regprocedure;
-  v_function_definition text;
+  v_function_source text;
+  v_function_language name;
   v_function_owner name;
   v_function_result text;
   v_function_volatility "char";
@@ -339,7 +345,8 @@ declare
   v_function_acl aclitem[];
 begin
   select
-    pg_get_functiondef(function_info.oid),
+    function_info.prosrc,
+    language_info.lanname,
     pg_get_userbyid(function_info.proowner),
     pg_get_function_result(function_info.oid),
     function_info.provolatile,
@@ -347,7 +354,8 @@ begin
     function_info.proconfig,
     function_info.proacl
   into strict
-    v_function_definition,
+    v_function_source,
+    v_function_language,
     v_function_owner,
     v_function_result,
     v_function_volatility,
@@ -355,21 +363,23 @@ begin
     v_function_config,
     v_function_acl
   from pg_proc function_info
+  join pg_language language_info on language_info.oid = function_info.prolang
   where function_info.oid = v_function_oid;
 
   if v_function_owner <> 'postgres'
+     or v_function_language <> 'plpgsql'
      or v_function_result <> 'boolean'
      or v_function_volatility <> 's'
      or not v_function_security_definer
      or v_function_config is distinct from
        array['search_path=public, pg_temp']::text[]
-     or md5(v_function_definition) <>
-       '4cf587cd26796af6bb9f75c36002757a'
+     or md5(v_function_source) <>
+       '9295f516acb33ab9a9f9e5df67ce707b'
      or encode(
-       sha256(convert_to(v_function_definition, 'UTF8')),
+       sha256(convert_to(v_function_source, 'UTF8')),
        'hex'
-     ) <> '978d2cdac722a202389e151250c5b972a0e1bec43a74e0f5ae59fd1996174cdb' then
-    raise exception '039_postcheck: helper definition or attributes changed';
+     ) <> '6e7db4df1e8f4aa44ffd2cc710ee49823761b7f801975616945cfb81c9dd475d' then
+    raise exception '039_postcheck: helper body or attributes changed';
   end if;
 
   if not has_function_privilege(
