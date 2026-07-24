@@ -869,15 +869,11 @@
         await surfaceDuplicateBatch(created, batchId)
         return
       }
-      if (created?.duplicate) {
-        await surfaceDuplicateBatch(created, batchId)
-        return
-      }
       if (!resumeExtraction) {
-        setProgress(50, "Subiendo al bucket privado autorizado…")
+        setProgress(50, created?.duplicate ? "Reanudando carga interrumpida…" : "Subiendo al bucket privado autorizado…")
         const bucket = await privateStorageBucket(bucketId)
         const upload = await bucket.upload(storagePath, file, { contentType: "application/pdf", upsert: false })
-        if (upload.error) throw upload.error
+        if (upload.error && !storageObjectAlreadyExists(upload.error)) throw upload.error
         setProgress(68, "Finalizando documento…")
         const { error: finalizeError } = await client.rpc(RPC.finalizeBatch, {
           p_batch_id: batchId,
@@ -939,6 +935,11 @@
     const max = Number(state.context?.upload_policy?.max_file_bytes || 25 * 1024 * 1024)
     if (file.size < 1 || file.size > max) return `El PDF debe pesar máximo ${formatBytes(max)}.`
     return ""
+  }
+  function storageObjectAlreadyExists(error) {
+    const status = Number(error?.statusCode || error?.status || 0)
+    const detail = [error?.name, error?.message, error?.error].filter(Boolean).join(" ")
+    return status === 409 || /already exists|duplicate/i.test(detail)
   }
 
   function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = busy; dom.batchPdfFile.disabled = busy; if (dom.operationDialog.open) renderOperation() }
