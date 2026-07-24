@@ -44,6 +44,15 @@ $postcheck036 = Join-Path $PSScriptRoot '036_postcheck.sql'
 $postcheck037 = Join-Path $PSScriptRoot '037_postcheck_and_negative.sql'
 $fixture038 = Join-Path $PSScriptRoot '038_fixture_and_old_failure.sql'
 $contracts038 = Join-Path $PSScriptRoot '038_mixed_close_contracts.sql'
+$pregrant039 = Join-Path $PSScriptRoot (
+  '039_pregrant_storage_policy_contracts.sql'
+)
+$postgrant039 = Join-Path $PSScriptRoot (
+  '039_postgrant_storage_policy_contracts.sql'
+)
+$devPrecheck039 = Join-Path $repoRoot (
+  'scripts\qa\extraordinary-039-dev-precheck-readonly.sql'
+)
 $precheck036 = Join-Path $repoRoot (
   'scripts\qa\legacy-extraordinary-direct-lineage-precheck.sql'
 )
@@ -55,6 +64,9 @@ $migration037 = Join-Path $migrationsDir (
 )
 $migration038 = Join-Path $migrationsDir (
   '038_materialize_only_released_batch_items.sql'
+)
+$migration039 = Join-Path $migrationsDir (
+  '039_enable_extraordinary_evidence_storage_policy_helper.sql'
 )
 
 $allMigrations = @(
@@ -143,9 +155,14 @@ Invoke-PsqlFile -Path $precheck036 -Label 'migration 036 read-only precheck'
 Invoke-PsqlFile -Path $migration036 -Label 'migration 036 exact file'
 Invoke-PsqlFile -Path $postcheck036 -Label 'migration 036 postcheck'
 Invoke-PsqlFile -Path $migration037 -Label 'migration 037 exact file'
-Invoke-PsqlFile -Path $postcheck037 -Label 'migration 037 postcheck and regressions'
 Invoke-PsqlFile -Path $fixture038 -Label 'migration 038 old-failure reproduction'
 Invoke-PsqlFile -Path $migration038 -Label 'migration 038 exact file'
 Invoke-PsqlFile -Path $contracts038 -Label 'migration 038 mixed-close contracts'
+Invoke-PsqlFile -Path $devPrecheck039 -Label 'migration 039 read-only precheck'
+Invoke-PsqlFile -Path $pregrant039 -Label 'migration 039 pregrant denial'
+Invoke-PsqlFile -Path $migration039 -Label 'migration 039 exact file'
+Invoke-PsqlFile -Path $postgrant039 -Label 'migration 039 Storage policy contracts'
+Invoke-PsqlFile -Path $postcheck037 -Label 'migration 037 postcheck and regressions'
 
 Write-Output 'SHADOW_036_037_038_SEQUENCE_PASS'
+Write-Output 'SHADOW_039_STORAGE_POLICY_PASS'
