@@ -60,6 +60,7 @@
     .layout-completion-summary strong{color:var(--text-1)}
     .layout-completion-summary small{grid-column:1/-1;color:var(--text-3)}
     .layout-completion-impact{padding:10px 12px;border-left:3px solid #d97706;background:color-mix(in srgb,#d97706 8%,transparent);color:var(--text-2);font-size:11.5px;line-height:1.5}
+    .layout-completion-error{padding:10px 12px;border:1px solid rgba(220,38,38,.35);border-left:3px solid #dc2626;border-radius:7px;background:color-mix(in srgb,#dc2626 8%,var(--bg-surface));color:var(--text-1);font-size:11.5px;line-height:1.5}
     .layout-provider-execution-fields{min-width:0;padding:12px;border:1px solid var(--border);border-radius:9px}
     .layout-provider-execution-fields legend{padding:0 6px;color:var(--text-2);font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px}
     @media(max-width:760px){#newLayoutDialog,#layoutCompletionDialog{width:calc(100vw - 12px);max-width:calc(100vw - 12px);max-height:calc(100dvh - 8px)}#newLayoutDialog .modal-content,#layoutCompletionDialog .modal-content{max-height:calc(100dvh - 8px);gap:12px}.layout-preview-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.layout-preview-metric:nth-child(2n){border-right:0}.layout-preview-metric:nth-child(-n+4){border-bottom:1px solid var(--border)}.layout-preview-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.layout-preview-actions{grid-column:1/-1;justify-content:flex-start}.modal-actions{flex-wrap:wrap}.modal-actions button{flex:1 1 150px;min-width:0;max-width:100%;white-space:normal}}
@@ -210,7 +211,7 @@
           <label class="full-row">Destino<select id="layoutRebatchTarget"><option value="">Dejar disponible para siguiente corte</option></select></label>
         </div>
       </div>
-      <div class="modal-actions"><button type="button" id="cancelLayoutRebatchBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitLayoutRebatchBtn" class="primary-btn">Enviar nuevamente</button></div>
+      <div class="modal-actions"><button type="button" id="cancelLayoutRebatchBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitLayoutRebatchBtn" class="primary-btn">Corregir y enviar nuevamente</button></div>
     </form>
   </dialog>
 
@@ -239,6 +240,7 @@
             </div>
           </fieldset>
           <div class="full-row layout-completion-impact" id="layoutCompletionImpact"></div>
+          <div class="full-row layout-completion-error hidden" id="layoutCompletionError" role="alert" aria-live="assertive"></div>
         </div>
       </div>
       <div class="modal-actions"><button type="button" id="cancelLayoutCompletionBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitLayoutCompletionBtn" class="primary-btn">Guardar y reevaluar</button></div>
@@ -383,7 +385,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260723-approval-execution-hotfix"></script>
+  <script src="./layouts.js?v=20260723-layout-dialog-regression"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>

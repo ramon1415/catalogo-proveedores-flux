@@ -14,6 +14,9 @@ const state = {
   companies: [],
   directorCandidates: [],
   directors: [],
+  regularizations: [],
+  regularization: null,
+  regularizationDecision: null,
   releaseItemId: null,
   selectedEligibleIds: new Set(),
   addingProgress: null,
@@ -36,6 +39,7 @@ async function init() {
     await loadDirectorCandidates()
     state.selectedId = new URLSearchParams(window.location.search).get("batch_id") || null
     await loadBatches()
+    await loadRegularizations()
   } catch (error) {
     showToast("No se pudo iniciar", friendlyError(error), "error")
   }
@@ -52,7 +56,10 @@ function cacheDom() {
     "saveDirectorBtn", "rebatchDialog",
     "rebatchForm", "rebatchNote", "rebatchOriginalReason", "rebatchTargetBatch", "confirmActionDialog",
     "confirmActionTitle", "confirmActionBody", "confirmActionCloseBtn", "confirmActionCancelBtn",
-    "confirmActionConfirmBtn",
+    "confirmActionConfirmBtn", "regularizationCard", "regularizationCount", "regularizationList",
+    "regularizationDialog", "regularizationForm", "regularizationDialogTitle",
+    "regularizationDialogSubtitle", "regularizationSummary", "regularizationNote",
+    "closeRegularizationBtn", "cancelRegularizationBtn", "submitRegularizationBtn",
   ].forEach((id) => { dom[id] = document.getElementById(id) })
 }
 
@@ -93,6 +100,8 @@ function bindEvents() {
   dom.directorForm?.addEventListener("submit", addDirector)
   dom.directorActiveList?.addEventListener("click", removeDirector)
   dom.rebatchForm?.addEventListener("submit", releaseRejectedItem)
+  dom.regularizationList?.addEventListener("click", handleRegularizationAction)
+  dom.regularizationForm?.addEventListener("submit", submitRegularization)
   dom.confirmActionConfirmBtn?.addEventListener("click", () => closeConfirmation(true))
   dom.confirmActionCancelBtn?.addEventListener("click", () => closeConfirmation(false))
   dom.confirmActionCloseBtn?.addEventListener("click", () => closeConfirmation(false))
@@ -108,7 +117,9 @@ function bindEvents() {
   dom.directorProfileId?.addEventListener("change", syncDirectorCandidateStatus)
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-close-dialog]")
-    if (button) document.getElementById(button.dataset.closeDialog)?.close()
+    if (!button) return
+    if (button.dataset.closeDialog === "regularizationDialog" && state.mutating) return
+    document.getElementById(button.dataset.closeDialog)?.close()
   })
 }
 
@@ -216,6 +227,159 @@ async function loadBatches() {
 async function refreshAll() {
   await loadDirectors()
   await loadBatches()
+  await loadRegularizations()
+}
+
+async function loadRegularizations() {
+  if (!state.isAuthorized || !dom.regularizationList) return
+  const { data, error } = await supabaseClient.rpc("list_extraordinary_regularizations", {
+    p_company_id: null,
+  })
+  if (error) {
+    state.regularizations = []
+    renderRegularizations()
+    return showToast("No se cargaron contingencias", friendlyError(error), "warning")
+  }
+  state.regularizations = asArray(data)
+  renderRegularizations()
+}
+
+function renderRegularizations() {
+  const rows = state.regularizations
+  const pending = rows.filter((row) => row.status === "consumed_pending_ratification").length
+  dom.regularizationCount.textContent = `${pending} ${pending === 1 ? "pendiente" : "pendientes"}`
+  dom.regularizationCount.className = `badge ${pending ? "warning" : "success"}`
+  if (!rows.length) {
+    dom.regularizationList.innerHTML = `<div class="regularization-empty">No hay contingencias consumidas por ratificar.</div>`
+    return
+  }
+  dom.regularizationList.innerHTML = rows.map((row) => {
+    const actions = [
+      `<button class="secondary-btn" type="button" data-regularization-action="evidence" data-authorization-id="${escapeHtml(row.authorization_id)}">Ver evidencia</button>`,
+      row.can_decide && row.status === "consumed_pending_ratification"
+        ? `<button class="secondary-btn" type="button" data-regularization-action="dispute" data-authorization-id="${escapeHtml(row.authorization_id)}">Registrar discrepancia</button><button class="primary-btn" type="button" data-regularization-action="ratify" data-authorization-id="${escapeHtml(row.authorization_id)}">Ratificar</button>`
+        : "",
+    ].join("")
+    return `<div class="regularization-row"><div><strong>${escapeHtml(row.request_number || "Solicitud")}</strong><small>${escapeHtml(formatMoney(row.amount, row.currency))}</small></div><div><strong>${escapeHtml(extraordinaryCategoryLabel(row.category))}</strong><small>${escapeHtml(regularizationStatusLabel(row.status))}</small></div><div><strong>Consumida ${escapeHtml(formatDateTime(row.consumed_at))}</strong><small>Ratificar antes de ${escapeHtml(formatDateTime(row.ratification_due_at))}</small></div><div class="regularization-actions">${actions}</div></div>`
+  }).join("")
+}
+
+async function handleRegularizationAction(event) {
+  const button = event.target.closest("[data-regularization-action]")
+  if (!button || state.mutating) return
+  const row = state.regularizations.find((item) => item.authorization_id === button.dataset.authorizationId)
+  if (!row) return
+  if (button.dataset.regularizationAction === "evidence") {
+    await openRegularizationEvidence(row)
+    return
+  }
+  openRegularizationDialog(row, button.dataset.regularizationAction)
+}
+
+async function openRegularizationEvidence(row) {
+  try {
+    const { data: access, error: accessError } = await supabaseClient.rpc(
+      "get_extraordinary_authorization_evidence_access",
+      { p_authorization_id: row.authorization_id },
+    )
+    if (accessError) throw accessError
+    const { data: signed, error: signedError } = await supabaseClient.storage
+      .from(access.storage_bucket)
+      .createSignedUrl(access.storage_path, Number(access.url_ttl_seconds || 120))
+    if (signedError) throw signedError
+    const link = document.createElement("a")
+    link.href = signed.signedUrl
+    link.target = "_blank"
+    link.rel = "noopener noreferrer"
+    link.click()
+  } catch (error) {
+    showToast("No se abrió la evidencia", friendlyError(error), "error")
+  }
+}
+
+function openRegularizationDialog(row, decision) {
+  if (!row.can_decide || !["ratify", "dispute"].includes(decision)) return
+  state.regularization = row
+  state.regularizationDecision = decision
+  dom.regularizationForm.reset()
+  const isDispute = decision === "dispute"
+  dom.regularizationDialogTitle.textContent = isDispute ? "Registrar discrepancia" : "Ratificar contingencia"
+  dom.regularizationDialogSubtitle.textContent = isDispute
+    ? "La confirmación del pago permanecerá bloqueada."
+    : "La ratificación habilita la confirmación posterior; no confirma el pago."
+  dom.regularizationSummary.innerHTML = `<strong>${escapeHtml(row.request_number || "Solicitud")}</strong>${escapeHtml(formatMoney(row.amount, row.currency))}<br>${escapeHtml(extraordinaryCategoryLabel(row.category))} · consumida ${escapeHtml(formatDateTime(row.consumed_at))}`
+  dom.regularizationNote.required = isDispute
+  dom.regularizationNote.minLength = isDispute ? 20 : 0
+  dom.regularizationNote.placeholder = isDispute
+    ? "Explica la discrepancia en al menos 20 caracteres."
+    : "Nota opcional de ratificación."
+  dom.submitRegularizationBtn.textContent = isDispute ? "Registrar discrepancia" : "Ratificar"
+  dom.regularizationDialog.showModal()
+  dom.regularizationNote.focus()
+}
+
+async function submitRegularization(event) {
+  event.preventDefault()
+  if (state.mutating || !state.regularization || !state.regularizationDecision) return
+  const note = dom.regularizationNote.value.trim()
+  if (state.regularizationDecision === "dispute" && note.length < 20) {
+    dom.regularizationNote.focus()
+    return showToast("Motivo requerido", "Explica la discrepancia en al menos 20 caracteres.", "warning")
+  }
+  state.mutating = true
+  dom.submitRegularizationBtn.disabled = true
+  dom.closeRegularizationBtn.disabled = true
+  dom.cancelRegularizationBtn.disabled = true
+  try {
+    const rpc = state.regularizationDecision === "dispute"
+      ? "dispute_extraordinary_authorization"
+      : "ratify_extraordinary_authorization"
+    const params = {
+      p_authorization_id: state.regularization.authorization_id,
+      p_idempotency_key: `regularization:${state.regularization.authorization_id}:${state.regularizationDecision}:${crypto.randomUUID()}`,
+      ...(state.regularizationDecision === "dispute"
+        ? { p_reason: note }
+        : { p_note: note || null }),
+    }
+    const { error } = await supabaseClient.rpc(rpc, params)
+    if (error) throw error
+    dom.regularizationDialog.close()
+    showToast(
+      state.regularizationDecision === "dispute" ? "Discrepancia registrada" : "Contingencia ratificada",
+      state.regularizationDecision === "dispute"
+        ? "La confirmación del pago sigue bloqueada."
+        : "La ratificación quedó auditada; no se confirmó ningún pago.",
+      state.regularizationDecision === "dispute" ? "warning" : "success",
+    )
+    state.regularization = null
+    state.regularizationDecision = null
+    await loadRegularizations()
+  } catch (error) {
+    showToast("No se guardó la decisión", friendlyError(error), "error")
+  } finally {
+    state.mutating = false
+    dom.submitRegularizationBtn.disabled = false
+    dom.closeRegularizationBtn.disabled = false
+    dom.cancelRegularizationBtn.disabled = false
+  }
+}
+
+function regularizationStatusLabel(status) {
+  return ({
+    consumed_pending_ratification: "Ratificación pendiente",
+    ratified: "Ratificada",
+    disputed: "Con discrepancia",
+  })[status] || status || "Sin estado"
+}
+
+function extraordinaryCategoryLabel(value) {
+  return ({
+    operational_emergency: "Emergencia operativa / fuga",
+    urgent_reimbursement: "Reembolso urgente",
+    urgent_termination: "Desvinculación o finiquito urgente",
+    critical_service: "Servicio crítico",
+    other: "Otro",
+  })[value] || value || "Sin categoría"
 }
 
 function renderViewTabs() {
@@ -352,7 +516,7 @@ function renderItemsTable(batch, items) {
   const canReleaseAny = state.isFinance && ["partially_approved", "closed"].includes(batch.status) && items.some((item) => item.director_status === "rejected" && item.rebatch_status === "blocked")
   const hasActionColumn = canRemove || canReleaseAny
   return `<div class="batch-table-wrap batch-table-scroll"><table class="batch-table"><thead><tr><th>Folio / revision</th><th>Proveedor</th><th>Centro / partida</th><th>Metodo</th><th>Monto</th><th>Solicitante</th><th>Decision actual</th><th>Contexto</th>${hasActionColumn ? "<th></th>" : ""}</tr></thead><tbody>${items.map((item) => `
-    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong><div class="batch-inline-badges">${item.previous_item_id ? `<span class="badge warning">Reenviada</span>` : ""}<span class="badge info">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</span></div></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : itemDecisionBadge(batch.status, item)}</td><td>${renderItemReviewContext(item, canDecide)}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Enviar nuevamente</button>` : ""}</td>` : ""}</tr>
+    <tr data-item-id="${escapeHtml(item.id)}"><td><strong>${escapeHtml(item.request_number || "-")}</strong><div class="batch-inline-badges">${item.previous_item_id ? `<span class="badge warning">Reenviada</span>` : ""}<span class="badge info">${escapeHtml(reviewSequenceLabel(item.review_sequence))}</span></div></td><td>${escapeHtml(item.provider_name || "-")}</td><td>${escapeHtml(item.cost_center || "-")}<br><span class="batch-list-meta">${escapeHtml(item.budget_category || "-")}</span></td><td>${escapeHtml(paymentMethodLabel(item.payment_method))}</td><td>${formatMoney(item.amount, item.currency)}</td><td>${escapeHtml(item.requester_name || "-")}</td><td>${canDecide && item.director_status === "pending" ? `<select class="decision-select" data-decision-item="${escapeHtml(item.id)}" aria-label="Decision para ${escapeHtml(item.request_number || "solicitud")}"><option value="">Sin decision</option><option value="approved">Aprobar</option><option value="rejected">Rechazar</option></select>` : itemDecisionBadge(batch.status, item)}</td><td>${renderItemReviewContext(item, canDecide)}</td>${hasActionColumn ? `<td>${canRemove ? `<button class="secondary-btn" type="button" data-detail-action="remove" data-item-id="${escapeHtml(item.id)}">Quitar</button>` : item.director_status === "rejected" && item.rebatch_status === "blocked" ? `<button class="secondary-btn" type="button" data-detail-action="release-rebatch" data-item-id="${escapeHtml(item.id)}">Corregir y enviar nuevamente</button>` : ""}</td>` : ""}</tr>
   `).join("")}</tbody></table></div>`
 }
 
@@ -715,22 +879,47 @@ async function approveEntireBatch() {
 
 async function closeBatch() {
   const items = asArray(state.detail?.items)
-  const approved = items.filter((item) => item.director_status === "approved").length
   const rejected = items.filter((item) => item.director_status === "rejected").length
+  const { data: preview, error: previewError } = await supabaseClient.rpc("preview_approval_batch_close", {
+    p_batch_id: state.selectedId,
+  })
+  if (previewError) throw previewError
+  const ready = Number(preview?.ready_count || 0)
+  const blocked = Number(preview?.blocked_count || 0)
+  const pending = Number(preview?.pending_count || 0)
+  if (pending > 0) throw new Error("batch_has_pending_items")
+  if (!preview?.can_close || ready === 0) throw new Error("batch_no_releasable_items")
+  const readyItems = asArray(preview?.ready_items)
+  const blockedItems = asArray(preview?.blocked_items)
+  const blockedDetail = blockedItems.length
+    ? `<div><strong>Se conservarán bloqueadas</strong><div class="confirm-summary-list">${blockedItems.slice(0, 8).map((item) => `<div><strong>${escapeHtml(item.request_number || "-")}</strong><br>${escapeHtml(closeBlockReasonLabel(item.reason))}</div>`).join("")}</div></div>`
+    : ""
   const confirmed = await showConfirmation({
     title: "Liberar corte para pago",
-    bodyHtml: `<p>Finanzas cerrara el corte y el servidor revalidara cada solicitud antes de liberar pagos.</p><div class="confirm-summary-list">${confirmationRow("Pagos por revalidar", String(approved))}${confirmationRow("Rechazos bloqueados", String(rejected))}${confirmationTotalsRows(items.filter((item) => item.director_status === "approved"), "Importe por revalidar")}</div><div class="confirm-warning">Si una aprobacion dejo de estar vigente, el corte completo permanecera sin cerrar.</div>`,
-    confirmLabel: `Liberar ${approved} pagos`,
+    bodyHtml: `<p>El servidor revalidó cada solicitud. Solo las vigentes se liberarán; las demás conservarán su decisión e historial.</p><div class="confirm-summary-list">${confirmationRow("Pagos por liberar", String(ready))}${confirmationRow("Bloqueadas", String(blocked))}${confirmationRow("Rechazos incluidos", String(rejected))}${confirmationTotalsRows(readyItems, "Importe por liberar")}</div>${blockedDetail}<div class="confirm-warning">Los cambios materiales requieren una nueva revisión de Dirección. Un ítem bloqueado no impide liberar los válidos.</div>`,
+    confirmLabel: `Liberar ${ready} pagos`,
   })
   if (!confirmed) return
   const { data, error } = await supabaseClient.rpc("close_approval_batch", { p_batch_id: state.selectedId })
   if (error) throw error
   showToast(
     "Corte liberado",
-    `${Number(data?.approved_released_count || approved)} pagos pueden continuar y ${Number(data?.rejected_blocked_count || rejected)} permanecen rechazados.`,
+    `${Number(data?.approved_released_count || ready)} pagos pueden continuar y ${Number(data?.blocked_count || blocked)} permanecen bloqueados.`,
     "success"
   )
   await reloadSelected()
+}
+
+function closeBlockReasonLabel(value) {
+  return ({
+    direction_rejected: "Rechazada por Dirección.",
+    direction_pending: "Pendiente de decisión de Dirección.",
+    request_data_changed_after_direction_decision: "Los datos materiales cambiaron; requiere nueva revisión.",
+    direction_reapproval_required: "Existe una revisión posterior pendiente o rechazada.",
+    payment_request_already_executed: "La solicitud ya tiene una ejecución registrada.",
+    extraordinary_authorization_active: "La solicitud tiene una contingencia extraordinaria vigente.",
+    budget_validation_required: "El presupuesto ya no es liberable.",
+  })[value] || value || "No cumple la revalidación de liberación."
 }
 
 async function runRpc(name, args, successTitle) {
@@ -1151,6 +1340,15 @@ function friendlyError(error) {
     rebatch_correction_note_too_short: "Explica en al menos 10 caracteres que se corrigio.",
     batch_item_already_released: "Esta solicitud ya fue habilitada para otro corte.",
     batch_requires_at_least_one_approved_item: "El corte debe conservar al menos una solicitud aprobada.",
+    batch_no_releasable_items: "Ninguna solicitud conserva una autorización vigente para liberarse. Corrige o envía las afectadas a una nueva revisión.",
+    batch_has_pending_items: "Dirección aún no decide todas las solicitudes del corte.",
+    registered_external_director_required: "Solo el Director externo registrado y todavía activo puede decidir esta contingencia.",
+    extraordinary_authorization_not_pending_ratification: "La contingencia ya no está pendiente de ratificación.",
+    ratification_window_elapsed: "La ventana de ratificación terminó. La confirmación permanece bloqueada.",
+    extraordinary_authorization_materially_stale: "La solicitud cambió después de la autorización externa.",
+    dispute_reason_too_short: "Explica la discrepancia en al menos 20 caracteres.",
+    extraordinary_evidence_access_denied: "No tienes permiso para consultar esta evidencia.",
+    extraordinary_evidence_not_finalized: "La evidencia aún no está finalizada.",
     finance_reapproval_required: "La solicitud cambio despues de la decision anterior. El sistema debe revalidar presupuesto y Direccion debe revisarla nuevamente.",
     request_data_changed_after_direction_decision: "Los datos de la solicitud cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.",
     direction_reapproval_required: "La autorizacion de Direccion ya no esta vigente. La solicitud debe enviarse nuevamente a un corte.",
