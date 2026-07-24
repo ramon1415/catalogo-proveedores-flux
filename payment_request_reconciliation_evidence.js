@@ -18,6 +18,10 @@
       await accessEvidence(
         button.dataset.requestEvidenceId,
         button.dataset.requestEvidenceAction === "download",
+        {
+          requestNumber: button.dataset.requestNumber,
+          providerName: button.dataset.providerName,
+        },
       )
     } catch (error) {
       toast("No se pudo abrir el comprobante", error?.message || "Intenta de nuevo.", "danger")
@@ -26,7 +30,7 @@
     }
   })
 
-  async function accessEvidence(evidenceId, download) {
+  async function accessEvidence(evidenceId, download, identity = {}) {
     const preview = download ? null : window.open("about:blank", "_blank")
     if (!download && !preview) throw new Error("popup_blocked")
     if (preview) preview.opener = null
@@ -52,7 +56,7 @@
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
       const anchor = document.createElement("a")
       anchor.href = url
-      anchor.download = `comprobante-${String(evidenceId).slice(-8)}.pdf`
+      anchor.download = buildEvidenceFilename(identity, evidenceId)
       anchor.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (error) {
@@ -70,6 +74,7 @@
     })
     if (error) return
 
+    const providerName = await getProviderName(paymentRequestId)
     const link = data?.link && typeof data.link === "object" ? data.link : null
     const section = document.createElement("section")
     section.className = "payment-request-reconciliation"
@@ -88,13 +93,47 @@
           <div><strong>${escapeHtml(link.request_number || "Solicitud pagada")}</strong><span>${escapeHtml(link.payment_date || "Sin fecha")} · referencia ${escapeHtml(link.reference_hint || "—")}</span></div>
           <div class="payment-request-reconciliation-actions">
             <button class="small-btn" type="button" data-request-evidence-action="view" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Ver comprobante</button>
-            <button class="small-btn" type="button" data-request-evidence-action="download" data-request-evidence-id="${escapeHtml(link.evidence_id)}">Descargar para compartir</button>
+            <button class="small-btn" type="button" data-request-evidence-action="download" data-request-evidence-id="${escapeHtml(link.evidence_id)}" data-request-number="${escapeHtml(link.request_number || data.request_number)}" data-provider-name="${escapeHtml(providerName)}">Descargar para compartir</button>
           </div>
         </article>`
         : `<div class="receipt-match-result none"><strong>Esta solicitud todavía no tiene un comprobante individual vinculado.</strong></div>`}
       <p class="payment-request-provider-block"><strong>Compartición controlada:</strong> Finanzas puede descargar el PDF individual y compartirlo por el canal autorizado. Flux no genera enlaces públicos ni concede acceso por coincidencia de correo o RFC.</p>
     `
     detail.append(section)
+  }
+
+  async function getProviderName(paymentRequestId) {
+    const requestResult = await client
+      .from("payment_requests")
+      .select("proveedor_id")
+      .eq("id", paymentRequestId)
+      .maybeSingle()
+    if (requestResult.error || !requestResult.data?.proveedor_id) return "Proveedor"
+
+    const providerResult = await client
+      .from("proveedores")
+      .select("alias,nombre_completo")
+      .eq("id", requestResult.data.proveedor_id)
+      .maybeSingle()
+    return providerResult.data?.alias || providerResult.data?.nombre_completo || "Proveedor"
+  }
+
+  function buildEvidenceFilename(identity, evidenceId) {
+    const requestNumber = sanitizeFilenamePart(
+      identity?.requestNumber,
+      `Solicitud-${String(evidenceId).slice(-8)}`,
+    )
+    const providerName = sanitizeFilenamePart(identity?.providerName, "Proveedor").slice(0, 80)
+    return `${requestNumber}_${providerName}_Comprobante.pdf`
+  }
+
+  function sanitizeFilenamePart(value, fallback) {
+    return String(value || fallback)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      || fallback
   }
 
   function formatMinor(value, currency = "MXN") {
