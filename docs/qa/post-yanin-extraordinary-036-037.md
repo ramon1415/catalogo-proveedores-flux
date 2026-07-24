@@ -150,9 +150,9 @@ operación bancaria. No resolverlo por coincidencias financieras ni desde 036/03
 - `node --check` en JavaScript modificado: PASS.
 - `git diff --check`: PASS.
 - SHA-256 036:
-  `f9a9fe6902ce9011c915fe505fa0e10e7b62333ddcc8380967acd61f9e7e5494`.
+  `de9e2415a2821c94ed4df244335859adf545a94478c9bb85cadbe69f3baffd6d`.
 - SHA-256 037:
-  `991a0535a7ad9bcd80b72a711d12793a8691a26302857c093285cf5fe22621d3`.
+  `c3ac140ea4f02d0a735e5e4b3679c2379f92aa1110e3d222d6d84d71b684e3d0`.
 - Draft PR, backup, aplicación DEV, postchecks y UAT: pendientes del gate de
   autenticación GitHub y de la secuencia controlada.
 

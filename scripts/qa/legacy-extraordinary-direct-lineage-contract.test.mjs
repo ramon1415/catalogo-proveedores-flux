@@ -88,7 +88,7 @@ test("case D: amount or currency mismatch blocks classification", () => {
 test("migration 036 encodes direct FK lineage and the exact 7/1/1 matrix", () => {
   assert.match(migration, /receipt_link\.payment_request_id\s*=\s*request\.id/)
   assert.match(migration, /snapshot\.payment_request_id\s*=\s*request\.id/)
-  assert.match(migration, /snapshot\.source_id\s*=\s*authorization\.id/)
+  assert.match(migration, /snapshot\.source_id\s*=\s*extraordinary_auth\.id/)
   assert.match(migration, /allocation_snapshot\.id\s*=\s*allocation_item\.snapshot_id/)
   assert.match(migration, /allocation_snapshot\.payment_request_id\s*=\s*request\.id/)
   assert.match(migration, /v_consumed\s*<>\s*7/)
@@ -109,6 +109,8 @@ test("standalone precheck is read-only, sanitized and uses the same direct linea
   assert.match(standalonePrecheck, /allocation_snapshot\.payment_request_id\s*=\s*request\.id/)
   assert.match(standalonePrecheck, /direct_allocation_item_count/)
   assert.match(standalonePrecheck, /rollback;/)
+  assert.doesNotMatch(standalonePrecheck, /\bauthorization\.(?:[a-z_*])/i)
+  assert.doesNotMatch(migration, /\bauthorization\.(?:[a-z_*])/i)
   assert.doesNotMatch(standalonePrecheck, /select\s+ranked\.id|select\s+request\.id/i)
   assert.doesNotMatch(standalonePrecheck, /^\s*(insert|update|delete|truncate)\b/im)
 })

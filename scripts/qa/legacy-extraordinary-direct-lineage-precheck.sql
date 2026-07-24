@@ -18,10 +18,10 @@ begin
   from public.payment_request_extraordinary_authorizations;
 
   select count(*) into v_consumed
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text = 'paid'
     and (
       select count(*)
@@ -41,7 +41,7 @@ begin
         and evidence.page_count = 1
         and snapshot.payment_request_id = request.id
         and snapshot.source_type = 'extraordinary_authorization'
-        and snapshot.source_id = authorization.id
+        and snapshot.source_id = extraordinary_auth.id
         and snapshot.amount_minor = round(request.amount_requested * 100)::bigint
         and snapshot.currency = request.currency
         and receipt_link.amount_minor = snapshot.amount_minor
@@ -71,10 +71,10 @@ begin
     );
 
   select count(*) into v_quarantined
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text <> 'paid'
     and not exists (
       select 1 from public.payment_request_receipt_links receipt_link
@@ -130,11 +130,11 @@ $precheck$;
 
 with ranked as (
   select
-    authorization.*,
+    extraordinary_auth.*,
     row_number() over (
-      order by authorization.authorized_at, authorization.id
+      order by extraordinary_auth.authorized_at, extraordinary_auth.id
     ) as legacy_sequence
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
 )
 select
   'LEG-' || lpad(ranked.legacy_sequence::text, 3, '0') as legacy_case,

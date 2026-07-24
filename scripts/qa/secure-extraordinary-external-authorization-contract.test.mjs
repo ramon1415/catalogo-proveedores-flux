@@ -30,6 +30,7 @@ test("authorization is two-step, idempotent, time-bounded and Director-bound", (
   assert.match(migration, /valid_until/)
   assert.match(migration, /external_authorization_time_invalid/)
   assert.match(migration, /finance_actor_must_differ_from_external_director/)
+  assert.doesNotMatch(migration, /\bauthorization\.(?:[a-z_*])/i)
 })
 
 test("evidence remains private and is checked before activation", () => {

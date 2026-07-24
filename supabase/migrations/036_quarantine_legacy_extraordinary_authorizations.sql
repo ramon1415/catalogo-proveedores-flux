@@ -28,10 +28,10 @@ begin
 
   select
     count(*),
-    count(*) filter (where authorization.status = 'active'),
-    count(*) filter (where authorization.status = 'revoked')
+    count(*) filter (where extraordinary_auth.status = 'active'),
+    count(*) filter (where extraordinary_auth.status = 'revoked')
   into v_total, v_active, v_revoked
-  from public.payment_request_extraordinary_authorizations authorization;
+  from public.payment_request_extraordinary_authorizations extraordinary_auth;
 
   if v_total <> 9 or v_active <> 8 or v_revoked <> 1 then
     raise exception
@@ -41,10 +41,10 @@ begin
 
   select count(*)
   into v_consumed
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text = 'paid'
     and (
       select count(*)
@@ -64,7 +64,7 @@ begin
         and evidence.page_count = 1
         and snapshot.payment_request_id = request.id
         and snapshot.source_type = 'extraordinary_authorization'
-        and snapshot.source_id = authorization.id
+        and snapshot.source_id = extraordinary_auth.id
         and snapshot.amount_minor = round(request.amount_requested * 100)::bigint
         and snapshot.currency = request.currency
         and receipt_link.amount_minor = snapshot.amount_minor
@@ -99,10 +99,10 @@ begin
 
   select count(*)
   into v_quarantined
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text <> 'paid'
     and not exists (
       select 1
@@ -282,11 +282,11 @@ revoke all on table public.payment_request_extraordinary_events
   from public, anon, authenticated, service_role;
 
 with eligible as (
-  select authorization.id
-  from public.payment_request_extraordinary_authorizations authorization
+  select extraordinary_auth.id
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text = 'paid'
     and (
       select count(*)
@@ -301,7 +301,7 @@ with eligible as (
         and evidence.page_count = 1
         and snapshot.payment_request_id = request.id
         and snapshot.source_type = 'extraordinary_authorization'
-        and snapshot.source_id = authorization.id
+        and snapshot.source_id = extraordinary_auth.id
         and snapshot.amount_minor = round(request.amount_requested * 100)::bigint
         and snapshot.currency = request.currency
         and receipt_link.amount_minor = snapshot.amount_minor
@@ -332,7 +332,7 @@ with eligible as (
       where cash_fund.payment_request_id = request.id
     )
 )
-update public.payment_request_extraordinary_authorizations authorization
+update public.payment_request_extraordinary_authorizations extraordinary_auth
 set status = 'legacy_consumed_unverified',
     legacy_previous_status = 'active',
     legacy_classified_at = clock_timestamp(),
@@ -341,15 +341,15 @@ set status = 'legacy_consumed_unverified',
       'legacy_paid_with_direct_receipt_link_without_new_receipt_ledger',
     updated_at = clock_timestamp()
 from eligible
-where authorization.id = eligible.id
-  and authorization.status = 'active';
+where extraordinary_auth.id = eligible.id
+  and extraordinary_auth.status = 'active';
 
 with eligible as (
-  select authorization.id
-  from public.payment_request_extraordinary_authorizations authorization
+  select extraordinary_auth.id
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   join public.payment_requests request
-    on request.id = authorization.payment_request_id
-  where authorization.status = 'active'
+    on request.id = extraordinary_auth.payment_request_id
+  where extraordinary_auth.status = 'active'
     and request.status::text <> 'paid'
     and not exists (
       select 1
@@ -394,7 +394,7 @@ with eligible as (
         and batch.status in ('draft', 'submitted')
     )
 )
-update public.payment_request_extraordinary_authorizations authorization
+update public.payment_request_extraordinary_authorizations extraordinary_auth
 set status = 'legacy_quarantined',
     legacy_previous_status = 'active',
     legacy_classified_at = clock_timestamp(),
@@ -403,8 +403,8 @@ set status = 'legacy_quarantined',
       'legacy_active_unpaid_without_secure_evidence_contract',
     updated_at = clock_timestamp()
 from eligible
-where authorization.id = eligible.id
-  and authorization.status = 'active';
+where extraordinary_auth.id = eligible.id
+  and extraordinary_auth.status = 'active';
 
 insert into public.payment_request_extraordinary_events(
   authorization_id,
@@ -416,27 +416,27 @@ insert into public.payment_request_extraordinary_events(
   metadata
 )
 select
-  authorization.id,
-  authorization.payment_request_id,
+  extraordinary_auth.id,
+  extraordinary_auth.payment_request_id,
   request.company_id,
-  case authorization.status
+  case extraordinary_auth.status
     when 'legacy_consumed_unverified' then 'legacy_consumed_classified'
     when 'legacy_quarantined' then 'legacy_quarantined'
   end,
   null,
-  'migration-036:' || authorization.id::text,
+  'migration-036:' || extraordinary_auth.id::text,
   jsonb_build_object(
     'classification_source', 'migration_036_governance',
-    'previous_status', authorization.legacy_previous_status,
-    'status', authorization.status,
+    'previous_status', extraordinary_auth.legacy_previous_status,
+    'status', extraordinary_auth.status,
     'amount_minor', round(request.amount_requested * 100)::bigint,
     'currency', request.currency,
     'direct_lineage_only', true
   )
-from public.payment_request_extraordinary_authorizations authorization
+from public.payment_request_extraordinary_authorizations extraordinary_auth
 join public.payment_requests request
-  on request.id = authorization.payment_request_id
-where authorization.status in (
+  on request.id = extraordinary_auth.payment_request_id
+where extraordinary_auth.status in (
   'legacy_consumed_unverified',
   'legacy_quarantined'
 );
@@ -451,20 +451,20 @@ insert into public.payment_request_extraordinary_events(
   metadata
 )
 select
-  authorization.id,
-  authorization.payment_request_id,
+  extraordinary_auth.id,
+  extraordinary_auth.payment_request_id,
   request.company_id,
   'legacy_revoked_preserved',
   null,
-  'migration-036:revoked:' || authorization.id::text,
+  'migration-036:revoked:' || extraordinary_auth.id::text,
   jsonb_build_object(
     'classification_source', 'migration_036_governance',
     'status', 'revoked'
   )
-from public.payment_request_extraordinary_authorizations authorization
+from public.payment_request_extraordinary_authorizations extraordinary_auth
 join public.payment_requests request
-  on request.id = authorization.payment_request_id
-where authorization.status = 'revoked';
+  on request.id = extraordinary_auth.payment_request_id
+where extraordinary_auth.status = 'revoked';
 
 create or replace function public.authorize_payment_request_extraordinary(
   p_payment_request_id uuid,
@@ -558,4 +558,3 @@ $postcheck$;
 
 comment on table public.payment_request_extraordinary_events is
   'Append-only non-dispatchable ledger for extraordinary authorization governance.';
-

@@ -127,11 +127,11 @@ alter table public.payment_request_extraordinary_authorizations
   add column if not exists disputed_at timestamptz,
   add column if not exists dispute_reason text;
 
-update public.payment_request_extraordinary_authorizations authorization
+update public.payment_request_extraordinary_authorizations extraordinary_auth
 set company_id = request.company_id
 from public.payment_requests request
-where request.id = authorization.payment_request_id
-  and authorization.company_id is null;
+where request.id = extraordinary_auth.payment_request_id
+  and extraordinary_auth.company_id is null;
 
 alter table public.payment_request_extraordinary_authorizations
   alter column company_id set not null;
@@ -993,9 +993,9 @@ begin
   end if;
   if exists (
     select 1
-    from public.payment_request_extraordinary_authorizations authorization
-    where authorization.payment_request_id = v_request.id
-      and authorization.status in (
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
+    where extraordinary_auth.payment_request_id = v_request.id
+      and extraordinary_auth.status in (
         'draft', 'active', 'consumed_pending_ratification'
       )
   ) then
@@ -1276,23 +1276,23 @@ set search_path = public, pg_temp
 as $$
   select exists (
     select 1
-    from public.payment_request_extraordinary_authorizations authorization
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
     join public.payment_requests request
-      on request.id = authorization.payment_request_id
+      on request.id = extraordinary_auth.payment_request_id
     join public.extraordinary_payment_policies policy
-      on policy.company_id = authorization.company_id
-    where authorization.id = p_authorization_id
-      and authorization.status = 'active'
+      on policy.company_id = extraordinary_auth.company_id
+    where extraordinary_auth.id = p_authorization_id
+      and extraordinary_auth.status = 'active'
       and policy.enabled
       and policy.evidence_required
-      and authorization.evidence_verified_at is not null
-      and authorization.evidence_match_attested_at is not null
-      and authorization.valid_until > clock_timestamp()
-      and authorization.external_authorized_at >=
+      and extraordinary_auth.evidence_verified_at is not null
+      and extraordinary_auth.evidence_match_attested_at is not null
+      and extraordinary_auth.valid_until > clock_timestamp()
+      and extraordinary_auth.external_authorized_at >=
         request.approval_material_updated_at
       and request.currency = 'MXN'
       and request.amount_requested <= policy.max_amount_mxn
-      and authorization.category = any(policy.allowed_categories)
+      and extraordinary_auth.category = any(policy.allowed_categories)
       and request.status::text in (
         'submitted', 'pending_approval', 'approved'
       )
@@ -1336,10 +1336,10 @@ set search_path = public, pg_temp
 as $$
   select exists (
     select 1
-    from public.payment_request_extraordinary_authorizations authorization
-    where authorization.payment_request_id = p_payment_request_id
-      and authorization.status = 'active'
-      and public.extraordinary_authorization_is_ready(authorization.id)
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
+    where extraordinary_auth.payment_request_id = p_payment_request_id
+      and extraordinary_auth.status = 'active'
+      and public.extraordinary_authorization_is_ready(extraordinary_auth.id)
   );
 $$;
 
@@ -1354,10 +1354,10 @@ declare
 begin
   if exists (
     select 1
-    from public.payment_request_extraordinary_authorizations authorization
-    where authorization.payment_request_id = new.payment_request_id
-      and authorization.idempotency_key is not null
-      and authorization.status in (
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
+    where extraordinary_auth.payment_request_id = new.payment_request_id
+      and extraordinary_auth.idempotency_key is not null
+      and extraordinary_auth.status in (
         'consumed_pending_ratification',
         'ratified',
         'disputed',
@@ -1400,16 +1400,16 @@ declare
   v_now timestamptz := clock_timestamp();
 begin
   perform set_config('app.extraordinary_internal', 'on', true);
-  update public.payment_request_extraordinary_authorizations authorization
+  update public.payment_request_extraordinary_authorizations extraordinary_auth
   set status = 'consumed_pending_ratification',
       consumed_at = v_now,
       consumed_layout_id = new.layout_id,
       consumed_layout_line_id = new.id,
       updated_at = v_now
-  where authorization.payment_request_id = new.payment_request_id
-    and authorization.status = 'active'
-    and public.extraordinary_authorization_is_ready(authorization.id)
-  returning authorization.id into v_authorization_id;
+  where extraordinary_auth.payment_request_id = new.payment_request_id
+    and extraordinary_auth.status = 'active'
+    and public.extraordinary_authorization_is_ready(extraordinary_auth.id)
+  returning extraordinary_auth.id into v_authorization_id;
 
   if v_authorization_id is not null then
     perform public.extraordinary_append_event(
@@ -1796,15 +1796,15 @@ begin
   end if;
   perform set_config('app.extraordinary_internal', 'on', true);
   for v_authorization in
-    update public.payment_request_extraordinary_authorizations authorization
+    update public.payment_request_extraordinary_authorizations extraordinary_auth
     set status = 'expired',
         updated_at = clock_timestamp()
-    where authorization.payment_request_id = new.id
-      and authorization.idempotency_key is not null
-      and authorization.status in (
+    where extraordinary_auth.payment_request_id = new.id
+      and extraordinary_auth.idempotency_key is not null
+      and extraordinary_auth.status in (
         'active', 'consumed_pending_ratification', 'ratified'
       )
-    returning authorization.id
+    returning extraordinary_auth.id
   loop
     perform public.extraordinary_append_event(
       v_authorization.id,
@@ -1909,36 +1909,36 @@ begin
   return coalesce((
     select jsonb_agg(
       jsonb_build_object(
-        'authorization_id', authorization.id,
-        'payment_request_id', authorization.payment_request_id,
+        'authorization_id', extraordinary_auth.id,
+        'payment_request_id', extraordinary_auth.payment_request_id,
         'request_number', request.request_number,
-        'company_id', authorization.company_id,
+        'company_id', extraordinary_auth.company_id,
         'amount', request.amount_requested,
         'currency', request.currency,
-        'category', authorization.category,
-        'status', authorization.status,
-        'consumed_at', authorization.consumed_at,
-        'ratification_due_at', authorization.ratification_due_at,
-        'layout_id', authorization.consumed_layout_id,
-        'layout_line_id', authorization.consumed_layout_line_id,
+        'category', extraordinary_auth.category,
+        'status', extraordinary_auth.status,
+        'consumed_at', extraordinary_auth.consumed_at,
+        'ratification_due_at', extraordinary_auth.ratification_due_at,
+        'layout_id', extraordinary_auth.consumed_layout_id,
+        'layout_line_id', extraordinary_auth.consumed_layout_line_id,
         'can_decide',
-          v_actor = authorization.external_director_profile_id
+          v_actor = extraordinary_auth.external_director_profile_id
       )
-      order by authorization.ratification_due_at, authorization.id
+      order by extraordinary_auth.ratification_due_at, extraordinary_auth.id
     )
-    from public.payment_request_extraordinary_authorizations authorization
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
     join public.payment_requests request
-      on request.id = authorization.payment_request_id
-    where authorization.status in (
+      on request.id = extraordinary_auth.payment_request_id
+    where extraordinary_auth.status in (
       'consumed_pending_ratification', 'ratified', 'disputed'
     )
-      and (p_company_id is null or authorization.company_id = p_company_id)
+      and (p_company_id is null or extraordinary_auth.company_id = p_company_id)
       and (
         (
-          v_actor = authorization.external_director_profile_id
+          v_actor = extraordinary_auth.external_director_profile_id
           and public.extraordinary_profile_is_company_director(
             v_actor,
-            authorization.company_id
+            extraordinary_auth.company_id
           )
         )
         or (
@@ -1947,7 +1947,7 @@ begin
             public.current_user_has_role(public.flux_sysadmin_roles())
             or public.extraordinary_profile_is_active_member(
               v_actor,
-              authorization.company_id
+              extraordinary_auth.company_id
             )
           )
         )
@@ -2110,25 +2110,25 @@ begin
     );
 
   select
-    authorization.*,
+    extraordinary_auth.*,
     author.full_name as authorized_by_name,
     external_director.full_name as external_director_name
   into v_authorization
-  from public.payment_request_extraordinary_authorizations authorization
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
   left join public.profiles author
-    on author.id = authorization.authorized_by
+    on author.id = extraordinary_auth.authorized_by
   left join public.profiles external_director
-    on external_director.id = authorization.external_director_profile_id
-  where authorization.payment_request_id = p_payment_request_id
-  order by authorization.authorized_at desc, authorization.id desc
+    on external_director.id = extraordinary_auth.external_director_profile_id
+  where extraordinary_auth.payment_request_id = p_payment_request_id
+  order by extraordinary_auth.authorized_at desc, extraordinary_auth.id desc
   limit 1;
   v_has_authorization := found;
 
   select exists (
     select 1
-    from public.payment_request_extraordinary_authorizations authorization
-    where authorization.payment_request_id = p_payment_request_id
-      and authorization.status in (
+    from public.payment_request_extraordinary_authorizations extraordinary_auth
+    where extraordinary_auth.payment_request_id = p_payment_request_id
+      and extraordinary_auth.status in (
         'draft', 'active', 'consumed_pending_ratification'
       )
   )
