@@ -654,16 +654,70 @@
         preview.location.replace(url)
         setTimeout(() => URL.revokeObjectURL(url), 60000)
       } else {
+        const identity = await getLinkedDownloadIdentity()
         const anchor = document.createElement("a")
         anchor.href = url
-        anchor.download = `comprobante-${String(state.operation?.bank_unique_folio || evidenceId).slice(-8)}.pdf`
+        anchor.download = buildEvidenceFilename(identity, evidenceId)
+        anchor.style.display = "none"
+        document.body.append(anchor)
         anchor.click()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        anchor.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 10000)
       }
     } catch (error) {
       preview?.close()
       toast("No se pudo abrir el comprobante", friendlyError(error), "danger")
     } finally { setBusy(false) }
+  }
+
+  async function getLinkedDownloadIdentity() {
+    const link = object(state.linkPreview?.link)
+    const fallback = {
+      requestNumber: link.request_number || "Solicitud",
+      providerName: "Proveedor",
+    }
+    if (!link.payment_request_id) return fallback
+
+    const requestResult = await client
+      .from("payment_requests")
+      .select("request_number,proveedor_id")
+      .eq("id", link.payment_request_id)
+      .maybeSingle()
+    if (requestResult.error || !requestResult.data) return fallback
+
+    const identity = {
+      requestNumber: requestResult.data.request_number || fallback.requestNumber,
+      providerName: fallback.providerName,
+    }
+    if (!requestResult.data.proveedor_id) return identity
+
+    const providerResult = await client
+      .from("proveedores")
+      .select("alias,nombre_completo")
+      .eq("id", requestResult.data.proveedor_id)
+      .maybeSingle()
+    identity.providerName = providerResult.data?.alias
+      || providerResult.data?.nombre_completo
+      || fallback.providerName
+    return identity
+  }
+
+  function buildEvidenceFilename(identity, evidenceId) {
+    const requestNumber = sanitizeFilenamePart(
+      identity?.requestNumber,
+      `Solicitud-${String(evidenceId).slice(-8)}`,
+    )
+    const providerName = sanitizeFilenamePart(identity?.providerName, "Proveedor").slice(0, 80)
+    return `${requestNumber}_${providerName}_Comprobante.pdf`
+  }
+
+  function sanitizeFilenamePart(value, fallback) {
+    return String(value || fallback)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      || fallback
   }
 
   function openCorrection() {
