@@ -144,7 +144,7 @@ operación bancaria. No resolverlo por coincidencias financieras ni desde 036/03
 - Regresión de objeto ajeno, ruta directa, ambigüedad y mismatch: PASS.
 - Contratos locales 036/037 y post-Yanin: PASS.
 - Suite focalizada de aprobación/layout y contratos nuevos: 39/39 PASS.
-- Suite completa: 208/209 PASS; el único fallo es el contrato preexistente de
+- Suite completa: 209/210 PASS; el único fallo es el contrato preexistente de
   byte-identidad de la migración 029. Este hotfix no modifica migraciones
   001–035.
 - `node --check` en JavaScript modificado: PASS.
