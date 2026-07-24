@@ -42,6 +42,8 @@ $prelude = Join-Path $PSScriptRoot '000_supabase_prelude.sql'
 $seed = Join-Path $PSScriptRoot '035_seed_extraordinary_7_1_1.sql'
 $postcheck036 = Join-Path $PSScriptRoot '036_postcheck.sql'
 $postcheck037 = Join-Path $PSScriptRoot '037_postcheck_and_negative.sql'
+$fixture038 = Join-Path $PSScriptRoot '038_fixture_and_old_failure.sql'
+$contracts038 = Join-Path $PSScriptRoot '038_mixed_close_contracts.sql'
 $precheck036 = Join-Path $repoRoot (
   'scripts\qa\legacy-extraordinary-direct-lineage-precheck.sql'
 )
@@ -50,6 +52,9 @@ $migration036 = Join-Path $migrationsDir (
 )
 $migration037 = Join-Path $migrationsDir (
   '037_secure_extraordinary_external_authorization.sql'
+)
+$migration038 = Join-Path $migrationsDir (
+  '038_materialize_only_released_batch_items.sql'
 )
 
 $allMigrations = @(
@@ -139,5 +144,8 @@ Invoke-PsqlFile -Path $migration036 -Label 'migration 036 exact file'
 Invoke-PsqlFile -Path $postcheck036 -Label 'migration 036 postcheck'
 Invoke-PsqlFile -Path $migration037 -Label 'migration 037 exact file'
 Invoke-PsqlFile -Path $postcheck037 -Label 'migration 037 postcheck and regressions'
+Invoke-PsqlFile -Path $fixture038 -Label 'migration 038 old-failure reproduction'
+Invoke-PsqlFile -Path $migration038 -Label 'migration 038 exact file'
+Invoke-PsqlFile -Path $contracts038 -Label 'migration 038 mixed-close contracts'
 
-Write-Output 'SHADOW_036_037_SEQUENCE_PASS'
+Write-Output 'SHADOW_036_037_038_SEQUENCE_PASS'
