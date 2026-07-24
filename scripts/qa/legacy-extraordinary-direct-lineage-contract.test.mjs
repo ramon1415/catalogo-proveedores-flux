@@ -100,9 +100,20 @@ test("migration 036 encodes direct FK lineage and the exact 7/1/1 matrix", () =>
   assert.match(migration, /v_revoked\s*<>\s*1/)
   assert.match(
     migration,
+    /drop constraint payment_request_extraordinary_revoke_check/,
+  )
+  assert.doesNotMatch(
+    migration,
     /drop constraint if exists payment_request_extraordinary_revoke_check/,
   )
   assert.match(migration, /status <> 'revoked'[\s\S]*revoke_reason is null/)
+})
+
+test("migration 036 owns one explicit transaction", () => {
+  assert.match(migration, /^\s*--[\s\S]*?\nbegin;\s*$/im)
+  assert.match(migration, /\ncommit;\s*$/)
+  assert.equal((migration.match(/^\s*begin;\s*$/gim) || []).length, 1)
+  assert.equal((migration.match(/^\s*commit;\s*$/gim) || []).length, 1)
 })
 
 test("migration 036 cannot mutate ALLOC-001 tables", () => {
@@ -114,7 +125,28 @@ test("migration 036 cannot mutate ALLOC-001 tables", () => {
 
 test("standalone precheck is read-only, sanitized and uses the same direct lineage", () => {
   assert.match(standalonePrecheck, /begin transaction read only/)
+  assert.match(standalonePrecheck, /EXTRAORDINARY_CATALOG_INVENTORY_PASS/)
   assert.match(standalonePrecheck, /LEGACY_DIRECT_LINEAGE_PRECHECK_PASS/)
+  assert.match(
+    standalonePrecheck,
+    /payment_request_extraordinary_status_check/,
+  )
+  assert.match(
+    standalonePrecheck,
+    /payment_request_extraordinary_revoke_check/,
+  )
+  assert.match(
+    standalonePrecheck,
+    /payment_request_extraordinary_active_uidx/,
+  )
+  assert.match(
+    standalonePrecheck,
+    /partial 036\/037 objects/,
+  )
+  assert.doesNotMatch(
+    standalonePrecheck,
+    /payment_request_extraordinary_authorizations_status_check/,
+  )
   assert.match(standalonePrecheck, /allocation_snapshot\.payment_request_id\s*=\s*request\.id/)
   assert.match(standalonePrecheck, /direct_allocation_item_count/)
   assert.match(standalonePrecheck, /rollback;/)

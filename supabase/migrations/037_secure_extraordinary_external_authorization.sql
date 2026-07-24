@@ -5,7 +5,15 @@
 -- This migration does not enable the policy for any company and does not
 -- create receipts, payments, notifications or outbox events.
 
+begin;
+
 do $precheck$
+declare
+  v_status_constraint text;
+  v_revoke_constraint text;
+  v_status_constraint_count integer;
+  v_secure_column_count integer;
+  v_release_column_count integer;
 begin
   if to_regclass('public.payment_request_extraordinary_events') is null
      or to_regclass('public.company_directors') is null
@@ -15,6 +23,111 @@ begin
      or to_regprocedure('public.payment_request_layout_missing_fields(public.payment_requests)') is null
      or to_regprocedure('public.approval_batch_payment_layout_candidates(date,date,uuid,uuid)') is null then
     raise exception '037_precheck: required approval and layout objects are missing';
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_status_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_status_check';
+
+  if v_status_constraint is distinct from
+      'CHECK (status = ANY (ARRAY[''active''::text, ''revoked''::text, ''legacy_consumed_unverified''::text, ''legacy_quarantined''::text]))' then
+    raise exception
+      '037_precheck: canonical 036 status constraint drift: %',
+      v_status_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_revoke_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_revoke_check';
+
+  if v_revoke_constraint is distinct from
+      'CHECK (status = ''revoked''::text AND revoked_by IS NOT NULL AND revoked_at IS NOT NULL AND NULLIF(btrim(revoke_reason), ''''::text) IS NOT NULL OR status <> ''revoked''::text AND revoked_by IS NULL AND revoked_at IS NULL AND revoke_reason IS NULL)' then
+    raise exception
+      '037_precheck: canonical 036 revoke constraint drift: %',
+      v_revoke_constraint;
+  end if;
+
+  select count(*)
+  into v_status_constraint_count
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname like '%status_check';
+
+  if v_status_constraint_count <> 1
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_legacy_class_check'
+     ) then
+    raise exception '037_precheck: 036 constraint catalog is invalid';
+  end if;
+
+  select count(*)
+  into v_secure_column_count
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'payment_request_extraordinary_authorizations'
+    and column_name in (
+      'company_id',
+      'external_director_profile_id',
+      'evidence_type',
+      'evidence_storage_bucket',
+      'evidence_storage_path',
+      'evidence_sha256',
+      'evidence_mime_type',
+      'evidence_size_bytes',
+      'evidence_verified_at',
+      'evidence_match_attested_by',
+      'evidence_match_attested_at',
+      'external_authorized_at',
+      'valid_until',
+      'ratification_due_at',
+      'idempotency_key',
+      'consumed_at',
+      'consumed_layout_id',
+      'consumed_layout_line_id',
+      'ratified_by',
+      'ratified_at',
+      'ratification_note',
+      'disputed_by',
+      'disputed_at',
+      'dispute_reason'
+    );
+
+  select count(*)
+  into v_release_column_count
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'approval_batch_items'
+    and column_name in (
+      'finance_release_status',
+      'finance_release_reason',
+      'finance_released_by',
+      'finance_released_at'
+    );
+
+  if v_secure_column_count <> 0
+     or v_release_column_count <> 0
+     or to_regclass('public.extraordinary_payment_policies') is not null
+     or to_regprocedure(
+       'public.begin_extraordinary_authorization(uuid,text,text,uuid,timestamp with time zone,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.finalize_extraordinary_authorization(uuid,text,text,text,bigint,boolean,text)'
+     ) is not null then
+    raise exception '037_precheck: partial 037 objects detected';
   end if;
 
   if (
@@ -43,17 +156,24 @@ end
 $precheck$;
 
 create table public.extraordinary_payment_policies (
-  company_id uuid primary key references public.companies(id),
+  company_id uuid not null,
   enabled boolean not null default false,
   max_amount_mxn numeric(18,2) not null,
   allowed_categories text[] not null,
   authorization_valid_hours integer not null,
   ratification_due_hours integer not null,
   evidence_required boolean not null default true,
-  created_by uuid not null references public.profiles(id),
+  created_by uuid not null,
   created_at timestamptz not null default clock_timestamp(),
-  updated_by uuid not null references public.profiles(id),
+  updated_by uuid not null,
   updated_at timestamptz not null default clock_timestamp(),
+  constraint extraordinary_payment_policies_pkey primary key (company_id),
+  constraint extraordinary_payment_policies_company_fkey
+    foreign key (company_id) references public.companies(id),
+  constraint extraordinary_payment_policies_created_by_fkey
+    foreign key (created_by) references public.profiles(id),
+  constraint extraordinary_payment_policies_updated_by_fkey
+    foreign key (updated_by) references public.profiles(id),
   constraint extraordinary_payment_policies_amount_check check (
     max_amount_mxn > 0
   ),
@@ -102,30 +222,46 @@ using (
 );
 
 alter table public.payment_request_extraordinary_authorizations
-  add column if not exists company_id uuid references public.companies(id),
-  add column if not exists external_director_profile_id uuid references public.profiles(id),
-  add column if not exists evidence_type text,
-  add column if not exists evidence_storage_bucket text,
-  add column if not exists evidence_storage_path text,
-  add column if not exists evidence_sha256 text,
-  add column if not exists evidence_mime_type text,
-  add column if not exists evidence_size_bytes bigint,
-  add column if not exists evidence_verified_at timestamptz,
-  add column if not exists evidence_match_attested_by uuid references public.profiles(id),
-  add column if not exists evidence_match_attested_at timestamptz,
-  add column if not exists external_authorized_at timestamptz,
-  add column if not exists valid_until timestamptz,
-  add column if not exists ratification_due_at timestamptz,
-  add column if not exists idempotency_key text,
-  add column if not exists consumed_at timestamptz,
-  add column if not exists consumed_layout_id uuid references public.payment_layouts(id),
-  add column if not exists consumed_layout_line_id uuid references public.payment_layout_lines(id),
-  add column if not exists ratified_by uuid references public.profiles(id),
-  add column if not exists ratified_at timestamptz,
-  add column if not exists ratification_note text,
-  add column if not exists disputed_by uuid references public.profiles(id),
-  add column if not exists disputed_at timestamptz,
-  add column if not exists dispute_reason text;
+  add column company_id uuid,
+  add column external_director_profile_id uuid,
+  add column evidence_type text,
+  add column evidence_storage_bucket text,
+  add column evidence_storage_path text,
+  add column evidence_sha256 text,
+  add column evidence_mime_type text,
+  add column evidence_size_bytes bigint,
+  add column evidence_verified_at timestamptz,
+  add column evidence_match_attested_by uuid,
+  add column evidence_match_attested_at timestamptz,
+  add column external_authorized_at timestamptz,
+  add column valid_until timestamptz,
+  add column ratification_due_at timestamptz,
+  add column idempotency_key text,
+  add column consumed_at timestamptz,
+  add column consumed_layout_id uuid,
+  add column consumed_layout_line_id uuid,
+  add column ratified_by uuid,
+  add column ratified_at timestamptz,
+  add column ratification_note text,
+  add column disputed_by uuid,
+  add column disputed_at timestamptz,
+  add column dispute_reason text;
+
+alter table public.payment_request_extraordinary_authorizations
+  add constraint payment_request_extraordinary_company_fkey
+    foreign key (company_id) references public.companies(id),
+  add constraint payment_request_extraordinary_director_fkey
+    foreign key (external_director_profile_id) references public.profiles(id),
+  add constraint payment_request_extraordinary_evidence_actor_fkey
+    foreign key (evidence_match_attested_by) references public.profiles(id),
+  add constraint payment_request_extraordinary_layout_fkey
+    foreign key (consumed_layout_id) references public.payment_layouts(id),
+  add constraint payment_request_extraordinary_layout_line_fkey
+    foreign key (consumed_layout_line_id) references public.payment_layout_lines(id),
+  add constraint payment_request_extraordinary_ratified_by_fkey
+    foreign key (ratified_by) references public.profiles(id),
+  add constraint payment_request_extraordinary_disputed_by_fkey
+    foreign key (disputed_by) references public.profiles(id);
 
 update public.payment_request_extraordinary_authorizations extraordinary_auth
 set company_id = request.company_id
@@ -137,10 +273,10 @@ alter table public.payment_request_extraordinary_authorizations
   alter column company_id set not null;
 
 alter table public.payment_request_extraordinary_authorizations
-  drop constraint if exists payment_request_extraordinary_authorizations_status_check;
+  drop constraint payment_request_extraordinary_status_check;
 
 alter table public.payment_request_extraordinary_authorizations
-  add constraint payment_request_extraordinary_authorizations_status_check
+  add constraint payment_request_extraordinary_status_check
   check (
     status in (
       'draft',
@@ -156,7 +292,7 @@ alter table public.payment_request_extraordinary_authorizations
   );
 
 alter table public.payment_request_extraordinary_authorizations
-  add constraint payment_request_extraordinary_authorizations_evidence_type_check
+  add constraint payment_request_extraordinary_evidence_type_check
   check (
     evidence_type is null
     or evidence_type in (
@@ -193,7 +329,7 @@ alter table public.payment_request_extraordinary_authorizations
   );
 
 alter table public.payment_request_extraordinary_authorizations
-  add constraint payment_request_extraordinary_authorizations_secure_lifecycle_check
+  add constraint payment_request_extraordinary_lifecycle_check
   check (
     status in (
       'legacy_consumed_unverified',
@@ -283,10 +419,12 @@ alter table public.payment_request_extraordinary_events
 -- Finance records a separate per-item release result so one stale approval
 -- cannot prevent other current approvals from being released.
 alter table public.approval_batch_items
-  add column if not exists finance_release_status text,
-  add column if not exists finance_release_reason text,
-  add column if not exists finance_released_by uuid references public.profiles(id),
-  add column if not exists finance_released_at timestamptz;
+  add column finance_release_status text,
+  add column finance_release_reason text,
+  add column finance_released_by uuid,
+  add column finance_released_at timestamptz,
+  add constraint approval_batch_items_finance_released_by_fkey
+    foreign key (finance_released_by) references public.profiles(id);
 
 update public.approval_batch_items item
 set finance_release_status = case
@@ -2560,7 +2698,63 @@ on public.payment_request_extraordinary_authorizations
 from authenticated;
 
 do $postcheck$
+declare
+  v_status_constraint text;
+  v_status_constraint_count integer;
 begin
+  select count(*)
+  into v_status_constraint_count
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname like '%status_check';
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_status_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_status_check';
+
+  if v_status_constraint_count <> 1
+     or v_status_constraint is distinct from
+       'CHECK (status = ANY (ARRAY[''draft''::text, ''active''::text, ''consumed_pending_ratification''::text, ''ratified''::text, ''revoked''::text, ''expired''::text, ''disputed''::text, ''legacy_consumed_unverified''::text, ''legacy_quarantined''::text]))'
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_revoke_check'
+     )
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_legacy_class_check'
+     )
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_lifecycle_check'
+     ) then
+    raise exception '037_postcheck: canonical extraordinary constraints are invalid';
+  end if;
+
+  if exists (
+    select 1
+    from public.extraordinary_payment_policies
+    where enabled
+  ) then
+    raise exception '037_postcheck: every extraordinary policy must default disabled';
+  end if;
+
   if exists (
     select 1
     from public.extraordinary_payment_policies policy
@@ -2664,3 +2858,5 @@ comment on function public.finalize_extraordinary_authorization(
 comment on function public.assert_extraordinary_payment_confirmation_allowed(
   uuid,uuid,uuid
 ) is 'Central server-side ratification guard for extraordinary payment confirmation.';
+
+commit;

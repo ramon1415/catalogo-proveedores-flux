@@ -1,0 +1,191 @@
+{
+  "project_ref": "scsirgbuqjcwoaxfacth",
+  "captured_utc": "2026-07-24T04:15:37Z",
+  "table": "public.payment_request_extraordinary_authorizations",
+  "columns": [
+    { "name": "id", "type": "uuid", "not_null": true, "default": "gen_random_uuid()" },
+    { "name": "payment_request_id", "type": "uuid", "not_null": true, "default": null },
+    { "name": "category", "type": "text", "not_null": true, "default": null },
+    { "name": "reason", "type": "text", "not_null": true, "default": null },
+    { "name": "status", "type": "text", "not_null": true, "default": "'active'::text" },
+    { "name": "authorized_by", "type": "uuid", "not_null": true, "default": null },
+    { "name": "authorized_at", "type": "timestamp with time zone", "not_null": true, "default": "now()" },
+    { "name": "revoked_by", "type": "uuid", "not_null": false, "default": null },
+    { "name": "revoked_at", "type": "timestamp with time zone", "not_null": false, "default": null },
+    { "name": "revoke_reason", "type": "text", "not_null": false, "default": null },
+    { "name": "created_at", "type": "timestamp with time zone", "not_null": true, "default": "now()" },
+    { "name": "updated_at", "type": "timestamp with time zone", "not_null": true, "default": "now()" }
+  ],
+  "constraints": [
+    {
+      "name": "payment_request_extraordinary_authoriza_payment_request_id_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (payment_request_id) REFERENCES payment_requests(id)"
+    },
+    {
+      "name": "payment_request_extraordinary_authorizations_authorized_by_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (authorized_by) REFERENCES profiles(id)"
+    },
+    {
+      "name": "payment_request_extraordinary_authorizations_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "payment_request_extraordinary_authorizations_revoked_by_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (revoked_by) REFERENCES profiles(id)"
+    },
+    {
+      "name": "payment_request_extraordinary_category_check",
+      "type": "c",
+      "definition": "CHECK (category = ANY (ARRAY['operational_emergency'::text, 'urgent_reimbursement'::text, 'urgent_termination'::text, 'critical_service'::text, 'other'::text]))"
+    },
+    {
+      "name": "payment_request_extraordinary_reason_check",
+      "type": "c",
+      "definition": "CHECK (char_length(btrim(reason)) >= 20)"
+    },
+    {
+      "name": "payment_request_extraordinary_revoke_check",
+      "type": "c",
+      "definition": "CHECK (status = 'active'::text AND revoked_by IS NULL AND revoked_at IS NULL AND revoke_reason IS NULL OR status = 'revoked'::text AND revoked_by IS NOT NULL AND revoked_at IS NOT NULL AND NULLIF(btrim(revoke_reason), ''::text) IS NOT NULL)"
+    },
+    {
+      "name": "payment_request_extraordinary_status_check",
+      "type": "c",
+      "definition": "CHECK (status = ANY (ARRAY['active'::text, 'revoked'::text]))"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "payment_request_extraordinary_active_uidx",
+      "definition": "CREATE UNIQUE INDEX payment_request_extraordinary_active_uidx ON public.payment_request_extraordinary_authorizations USING btree (payment_request_id) WHERE (status = 'active'::text)"
+    },
+    {
+      "name": "payment_request_extraordinary_authorizations_pkey",
+      "definition": "CREATE UNIQUE INDEX payment_request_extraordinary_authorizations_pkey ON public.payment_request_extraordinary_authorizations USING btree (id)"
+    },
+    {
+      "name": "payment_request_extraordinary_request_idx",
+      "definition": "CREATE INDEX payment_request_extraordinary_request_idx ON public.payment_request_extraordinary_authorizations USING btree (payment_request_id, created_at DESC)"
+    }
+  ],
+  "triggers": [
+    {
+      "name": "enqueue_extraordinary_payment_notification",
+      "definition": "CREATE TRIGGER enqueue_extraordinary_payment_notification AFTER INSERT ON payment_request_extraordinary_authorizations FOR EACH ROW EXECUTE FUNCTION enqueue_extraordinary_payment_notification()"
+    },
+    {
+      "name": "materialize_extraordinary_payable_snapshot",
+      "definition": "CREATE TRIGGER materialize_extraordinary_payable_snapshot AFTER INSERT OR UPDATE OF status ON payment_request_extraordinary_authorizations FOR EACH ROW EXECUTE FUNCTION materialize_extraordinary_payable_snapshot()"
+    },
+    {
+      "name": "set_payment_request_extraordinary_updated_at",
+      "definition": "CREATE TRIGGER set_payment_request_extraordinary_updated_at BEFORE UPDATE ON payment_request_extraordinary_authorizations FOR EACH ROW EXECUTE FUNCTION set_batch_execution_updated_at()"
+    }
+  ],
+  "functions": [
+    "public.approval_batch_payment_layout_candidates(p_period_start date, p_period_end date, p_company_id uuid, p_company_bank_account_id uuid)",
+    "public.approval_batch_request_has_active_extraordinary(p_payment_request_id uuid)",
+    "public.authorize_payment_request_extraordinary(p_payment_request_id uuid, p_category text, p_reason text)",
+    "public.create_payable_snapshot_internal(p_payment_request_id uuid, p_source_type text, p_source_id uuid, p_source_status text, p_authorized_by uuid, p_authorized_at timestamp with time zone, p_materialized_by uuid, p_reason text)",
+    "public.enqueue_extraordinary_payment_notification()",
+    "public.get_payment_request_execution_context(p_payment_request_id uuid)",
+    "public.get_payment_request_execution_readiness(p_payment_request_id uuid)",
+    "public.materialize_extraordinary_payable_snapshot()",
+    "public.revoke_payment_request_extraordinary(p_payment_request_id uuid, p_reason text)"
+  ],
+  "function_grants": [
+    {
+      "grantee": "postgres",
+      "function": "public.approval_batch_payment_layout_candidates(p_period_start date, p_period_end date, p_company_id uuid, p_company_bank_account_id uuid)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.approval_batch_request_has_active_extraordinary(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.approval_batch_request_has_active_extraordinary(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "authenticated",
+      "function": "public.authorize_payment_request_extraordinary(p_payment_request_id uuid, p_category text, p_reason text)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.authorize_payment_request_extraordinary(p_payment_request_id uuid, p_category text, p_reason text)"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.authorize_payment_request_extraordinary(p_payment_request_id uuid, p_category text, p_reason text)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.create_payable_snapshot_internal(p_payment_request_id uuid, p_source_type text, p_source_id uuid, p_source_status text, p_authorized_by uuid, p_authorized_at timestamp with time zone, p_materialized_by uuid, p_reason text)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.enqueue_extraordinary_payment_notification()"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.enqueue_extraordinary_payment_notification()"
+    },
+    {
+      "grantee": "authenticated",
+      "function": "public.get_payment_request_execution_context(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.get_payment_request_execution_context(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.get_payment_request_execution_context(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.get_payment_request_execution_readiness(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.get_payment_request_execution_readiness(p_payment_request_id uuid)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.materialize_extraordinary_payable_snapshot()"
+    },
+    {
+      "grantee": "authenticated",
+      "function": "public.revoke_payment_request_extraordinary(p_payment_request_id uuid, p_reason text)"
+    },
+    {
+      "grantee": "postgres",
+      "function": "public.revoke_payment_request_extraordinary(p_payment_request_id uuid, p_reason text)"
+    },
+    {
+      "grantee": "service_role",
+      "function": "public.revoke_payment_request_extraordinary(p_payment_request_id uuid, p_reason text)"
+    }
+  ],
+  "status_counts": {
+    "active": 8,
+    "revoked": 1
+  },
+  "partial_036_037_objects": {
+    "legacy_columns": 0,
+    "events_table": null,
+    "policies_table": null,
+    "secure_begin_rpc": null,
+    "secure_finalize_rpc": null
+  },
+  "legacy_rpc_grants": {
+    "public": false,
+    "anon": false,
+    "authenticated": true
+  },
+  "identifier_over_63_bytes": 0
+}

@@ -9,7 +9,169 @@ declare
   v_revoked integer;
   v_consumed integer;
   v_quarantined integer;
+  v_status_constraint text;
+  v_revoke_constraint text;
+  v_category_constraint text;
+  v_reason_constraint text;
+  v_status_reference_count integer;
+  v_active_index text;
+  v_trigger_names text[];
+  v_partial_column_count integer;
 begin
+  if to_regclass('public.payment_request_extraordinary_authorizations') is null
+     or to_regclass('public.payment_request_receipt_links') is null
+     or to_regclass('public.payment_operation_evidence') is null
+     or to_regclass('public.payable_snapshots') is null
+     or to_regclass('public.payment_allocation_items') is null
+     or to_regprocedure(
+       'public.approval_batch_request_has_active_extraordinary(uuid)'
+     ) is null
+     or to_regprocedure(
+       'public.authorize_payment_request_extraordinary(uuid,text,text)'
+     ) is null then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT required objects missing';
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_status_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_status_check';
+
+  if v_status_constraint is distinct from
+      'CHECK (status = ANY (ARRAY[''active''::text, ''revoked''::text]))' then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT status=%',
+      v_status_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_revoke_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_revoke_check';
+
+  if v_revoke_constraint is distinct from
+      'CHECK (status = ''active''::text AND revoked_by IS NULL AND revoked_at IS NULL AND revoke_reason IS NULL OR status = ''revoked''::text AND revoked_by IS NOT NULL AND revoked_at IS NOT NULL AND NULLIF(btrim(revoke_reason), ''''::text) IS NOT NULL)' then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT revoke=%',
+      v_revoke_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_category_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_category_check';
+
+  if v_category_constraint is distinct from
+      'CHECK (category = ANY (ARRAY[''operational_emergency''::text, ''urgent_reimbursement''::text, ''urgent_termination''::text, ''critical_service''::text, ''other''::text]))' then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT category=%',
+      v_category_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_reason_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_reason_check';
+
+  if v_reason_constraint is distinct from
+      'CHECK (char_length(btrim(reason)) >= 20)' then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT reason=%',
+      v_reason_constraint;
+  end if;
+
+  select count(*)
+  into v_status_reference_count
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.contype = 'c'
+    and pg_get_constraintdef(constraint_info.oid, true) ilike '%status%';
+
+  if v_status_reference_count <> 2 then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT status_references=%',
+      v_status_reference_count;
+  end if;
+
+  select pg_get_indexdef(index_info.indexrelid)
+  into v_active_index
+  from pg_index index_info
+  join pg_class index_class on index_class.oid = index_info.indexrelid
+  where index_info.indrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and index_class.relname =
+      'payment_request_extraordinary_active_uidx';
+
+  if v_active_index is distinct from
+      'CREATE UNIQUE INDEX payment_request_extraordinary_active_uidx ON public.payment_request_extraordinary_authorizations USING btree (payment_request_id) WHERE (status = ''active''::text)' then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT active_index=%',
+      v_active_index;
+  end if;
+
+  select array_agg(trigger_info.tgname order by trigger_info.tgname)
+  into v_trigger_names
+  from pg_trigger trigger_info
+  where trigger_info.tgrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and not trigger_info.tgisinternal;
+
+  if v_trigger_names is distinct from array[
+      'enqueue_extraordinary_payment_notification',
+      'materialize_extraordinary_payable_snapshot',
+      'set_payment_request_extraordinary_updated_at'
+    ]::text[] then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT triggers=%',
+      v_trigger_names;
+  end if;
+
+  select count(*)
+  into v_partial_column_count
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'payment_request_extraordinary_authorizations'
+    and column_name in (
+      'legacy_previous_status',
+      'legacy_classified_at',
+      'legacy_classified_by',
+      'legacy_classification_reason',
+      'company_id',
+      'external_director_profile_id',
+      'evidence_storage_path',
+      'idempotency_key',
+      'consumed_at',
+      'ratified_at',
+      'disputed_at'
+    );
+
+  if v_partial_column_count <> 0
+     or to_regclass('public.payment_request_extraordinary_events') is not null
+     or to_regclass('public.extraordinary_payment_policies') is not null
+     or to_regprocedure(
+       'public.begin_extraordinary_authorization(uuid,text,text,uuid,timestamp with time zone,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.finalize_extraordinary_authorization(uuid,text,text,text,bigint,boolean,text)'
+     ) is not null then
+    raise exception
+      'BLOCKED_EXTRAORDINARY_CATALOG_DRIFT partial 036/037 objects';
+  end if;
+
   select
     count(*),
     count(*) filter (where status = 'active'),
@@ -124,6 +286,7 @@ begin
       'BLOCKED_DIRECT_LEGACY_LINEAGE_MISMATCH total=% active=% revoked=% consumed=% quarantined=%',
       v_total, v_active, v_revoked, v_consumed, v_quarantined;
   end if;
+  raise notice 'EXTRAORDINARY_CATALOG_INVENTORY_PASS';
   raise notice 'LEGACY_DIRECT_LINEAGE_PRECHECK_PASS';
 end
 $precheck$;

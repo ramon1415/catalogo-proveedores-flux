@@ -8,6 +8,8 @@
 -- * This migration is intentionally fail-closed against the approved DEV
 --   baseline of nine historical authorizations.
 
+begin;
+
 do $precheck$
 declare
   v_total integer;
@@ -15,6 +17,14 @@ declare
   v_revoked integer;
   v_consumed integer;
   v_quarantined integer;
+  v_status_constraint text;
+  v_revoke_constraint text;
+  v_category_constraint text;
+  v_reason_constraint text;
+  v_status_constraint_count integer;
+  v_active_index text;
+  v_trigger_names text[];
+  v_legacy_column_count integer;
 begin
   if to_regclass('public.payment_request_extraordinary_authorizations') is null
      or to_regclass('public.payment_request_receipt_links') is null
@@ -24,6 +34,144 @@ begin
      or to_regprocedure('public.approval_batch_request_has_active_extraordinary(uuid)') is null
      or to_regprocedure('public.authorize_payment_request_extraordinary(uuid,text,text)') is null then
     raise exception '036_precheck: required reconciliation or extraordinary objects are missing';
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_status_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_status_check';
+
+  if v_status_constraint is distinct from
+      'CHECK (status = ANY (ARRAY[''active''::text, ''revoked''::text]))' then
+    raise exception
+      '036_precheck: canonical status constraint drift: %',
+      v_status_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_revoke_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_revoke_check';
+
+  if v_revoke_constraint is distinct from
+      'CHECK (status = ''active''::text AND revoked_by IS NULL AND revoked_at IS NULL AND revoke_reason IS NULL OR status = ''revoked''::text AND revoked_by IS NOT NULL AND revoked_at IS NOT NULL AND NULLIF(btrim(revoke_reason), ''''::text) IS NOT NULL)' then
+    raise exception
+      '036_precheck: canonical revoke constraint drift: %',
+      v_revoke_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_category_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_category_check';
+
+  if v_category_constraint is distinct from
+      'CHECK (category = ANY (ARRAY[''operational_emergency''::text, ''urgent_reimbursement''::text, ''urgent_termination''::text, ''critical_service''::text, ''other''::text]))' then
+    raise exception
+      '036_precheck: canonical category constraint drift: %',
+      v_category_constraint;
+  end if;
+
+  select pg_get_constraintdef(constraint_info.oid, true)
+  into v_reason_constraint
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname =
+      'payment_request_extraordinary_reason_check';
+
+  if v_reason_constraint is distinct from
+      'CHECK (char_length(btrim(reason)) >= 20)' then
+    raise exception
+      '036_precheck: canonical reason constraint drift: %',
+      v_reason_constraint;
+  end if;
+
+  select count(*)
+  into v_status_constraint_count
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.contype = 'c'
+    and pg_get_constraintdef(constraint_info.oid, true) ilike '%status%';
+
+  if v_status_constraint_count <> 2 then
+    raise exception
+      '036_precheck: unexpected status constraints (% found)',
+      v_status_constraint_count;
+  end if;
+
+  select pg_get_indexdef(index_info.indexrelid)
+  into v_active_index
+  from pg_index index_info
+  join pg_class index_class on index_class.oid = index_info.indexrelid
+  where index_info.indrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and index_class.relname =
+      'payment_request_extraordinary_active_uidx';
+
+  if v_active_index is distinct from
+      'CREATE UNIQUE INDEX payment_request_extraordinary_active_uidx ON public.payment_request_extraordinary_authorizations USING btree (payment_request_id) WHERE (status = ''active''::text)' then
+    raise exception
+      '036_precheck: canonical active index drift: %',
+      v_active_index;
+  end if;
+
+  select array_agg(trigger_info.tgname order by trigger_info.tgname)
+  into v_trigger_names
+  from pg_trigger trigger_info
+  where trigger_info.tgrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and not trigger_info.tgisinternal;
+
+  if v_trigger_names is distinct from array[
+      'enqueue_extraordinary_payment_notification',
+      'materialize_extraordinary_payable_snapshot',
+      'set_payment_request_extraordinary_updated_at'
+    ]::text[] then
+    raise exception
+      '036_precheck: extraordinary trigger catalog drift: %',
+      v_trigger_names;
+  end if;
+
+  select count(*)
+  into v_legacy_column_count
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'payment_request_extraordinary_authorizations'
+    and column_name in (
+      'legacy_previous_status',
+      'legacy_classified_at',
+      'legacy_classified_by',
+      'legacy_classification_reason',
+      'company_id',
+      'external_director_profile_id',
+      'evidence_storage_path',
+      'idempotency_key',
+      'consumed_at',
+      'ratified_at',
+      'disputed_at'
+    );
+
+  if v_legacy_column_count <> 0
+     or to_regclass('public.payment_request_extraordinary_events') is not null
+     or to_regclass('public.extraordinary_payment_policies') is not null
+     or to_regprocedure(
+       'public.begin_extraordinary_authorization(uuid,text,text,uuid,timestamp with time zone,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.finalize_extraordinary_authorization(uuid,text,text,text,bigint,boolean,text)'
+     ) is not null then
+    raise exception '036_precheck: partial 036/037 objects detected';
   end if;
 
   select
@@ -182,17 +330,24 @@ select
   ), '')) as bank_operation_hash;
 
 alter table public.payment_request_extraordinary_authorizations
-  add column if not exists legacy_previous_status text,
-  add column if not exists legacy_classified_at timestamptz,
-  add column if not exists legacy_classified_by uuid
-    references public.profiles(id),
-  add column if not exists legacy_classification_reason text;
+  add column legacy_previous_status text,
+  add column legacy_classified_at timestamptz,
+  add column legacy_classified_by uuid,
+  add column legacy_classification_reason text;
 
 alter table public.payment_request_extraordinary_authorizations
-  drop constraint if exists payment_request_extraordinary_authorizations_status_check;
+  add constraint payment_request_extraordinary_legacy_actor_fkey
+  foreign key (legacy_classified_by)
+  references public.profiles(id);
 
 alter table public.payment_request_extraordinary_authorizations
-  add constraint payment_request_extraordinary_authorizations_status_check
+  drop constraint payment_request_extraordinary_status_check;
+
+alter table public.payment_request_extraordinary_authorizations
+  drop constraint payment_request_extraordinary_revoke_check;
+
+alter table public.payment_request_extraordinary_authorizations
+  add constraint payment_request_extraordinary_status_check
   check (
     status in (
       'active',
@@ -201,9 +356,6 @@ alter table public.payment_request_extraordinary_authorizations
       'legacy_quarantined'
     )
   );
-
-alter table public.payment_request_extraordinary_authorizations
-  drop constraint if exists payment_request_extraordinary_revoke_check;
 
 alter table public.payment_request_extraordinary_authorizations
   add constraint payment_request_extraordinary_revoke_check
@@ -223,10 +375,7 @@ alter table public.payment_request_extraordinary_authorizations
   );
 
 alter table public.payment_request_extraordinary_authorizations
-  drop constraint if exists payment_request_extraordinary_authorizations_legacy_classification_check;
-
-alter table public.payment_request_extraordinary_authorizations
-  add constraint payment_request_extraordinary_authorizations_legacy_classification_check
+  add constraint payment_request_extraordinary_legacy_class_check
   check (
     (
       status in ('legacy_consumed_unverified', 'legacy_quarantined')
@@ -248,14 +397,26 @@ comment on column public.payment_request_extraordinary_authorizations.legacy_cla
 
 create table public.payment_request_extraordinary_events (
   id uuid primary key default gen_random_uuid(),
-  authorization_id uuid references public.payment_request_extraordinary_authorizations(id),
-  payment_request_id uuid references public.payment_requests(id),
-  company_id uuid references public.companies(id),
+  authorization_id uuid,
+  payment_request_id uuid,
+  company_id uuid,
   event_type text not null,
-  actor_profile_id uuid references public.profiles(id),
+  actor_profile_id uuid,
   idempotency_key text not null,
   metadata jsonb not null default '{}'::jsonb,
   occurred_at timestamptz not null default clock_timestamp(),
+  constraint payment_request_extraordinary_events_authorization_fkey
+    foreign key (authorization_id)
+    references public.payment_request_extraordinary_authorizations(id),
+  constraint payment_request_extraordinary_events_request_fkey
+    foreign key (payment_request_id)
+    references public.payment_requests(id),
+  constraint payment_request_extraordinary_events_company_fkey
+    foreign key (company_id)
+    references public.companies(id),
+  constraint payment_request_extraordinary_events_actor_fkey
+    foreign key (actor_profile_id)
+    references public.profiles(id),
   constraint payment_request_extraordinary_events_type_check check (
     event_type in (
       'legacy_consumed_classified',
@@ -527,6 +688,7 @@ declare
   v_revoked integer;
   v_active integer;
   v_events integer;
+  v_status_constraint_count integer;
 begin
   select * into v_baseline from legacy_036_immutable_baseline;
 
@@ -548,6 +710,59 @@ begin
   from public.payment_request_extraordinary_events;
   if v_events <> 10 then
     raise exception '036_postcheck: expected 10 legacy events, got %', v_events;
+  end if;
+
+  select count(*)
+  into v_status_constraint_count
+  from pg_constraint constraint_info
+  where constraint_info.conrelid =
+      'public.payment_request_extraordinary_authorizations'::regclass
+    and constraint_info.conname like '%status_check';
+
+  if v_status_constraint_count <> 1
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_status_check'
+     )
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_revoke_check'
+     )
+     or not exists (
+       select 1
+       from pg_constraint constraint_info
+       where constraint_info.conrelid =
+           'public.payment_request_extraordinary_authorizations'::regclass
+         and constraint_info.conname =
+           'payment_request_extraordinary_legacy_class_check'
+     ) then
+    raise exception '036_postcheck: canonical constraints are invalid';
+  end if;
+
+  if has_function_privilege(
+       'authenticated',
+       'public.authorize_payment_request_extraordinary(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'anon',
+       'public.authorize_payment_request_extraordinary(uuid,text,text)',
+       'EXECUTE'
+     )
+     or has_function_privilege(
+       'public',
+       'public.authorize_payment_request_extraordinary(uuid,text,text)',
+       'EXECUTE'
+     ) then
+    raise exception '036_postcheck: legacy extraordinary RPC is still executable';
   end if;
 
   if v_baseline.request_count <> (select count(*) from public.payment_requests)
@@ -578,3 +793,5 @@ $postcheck$;
 
 comment on table public.payment_request_extraordinary_events is
   'Append-only non-dispatchable ledger for extraordinary authorization governance.';
+
+commit;
