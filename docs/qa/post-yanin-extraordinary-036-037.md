@@ -167,3 +167,56 @@ operación bancaria. No resolverlo por coincidencias financieras ni desde 036/03
 
 No se aplicó ninguna migración desde este documento. No autoriza cambios en
 PROD ni merge.
+## Migration 040 review gate
+
+Migration `040_fix_extraordinary_consumption_and_material_invalidation.sql`
+is a forward-only correction prepared for review. It is not authorized for
+DEV application by the commit that introduces it.
+
+The correction keeps the `BEFORE INSERT` readiness validation and row lock.
+The `AFTER INSERT` consumer no longer calls the general readiness helper after
+the new line already exists. Instead, an internal read-only predicate permits
+exactly the current layout line and rejects every other line, receipt, receipt
+link, allocation item, allocation movement or allocation reservation. The
+consumer updates exactly one active secure authorization, records the layout
+and line lineage, and appends `authorization_consumed` in the same transaction.
+An event failure therefore rolls back both the line and the state transition.
+
+The validator also closes the lock-wait race: if a concurrent transaction
+consumes or closes the authorization while another insert waits, the second
+insert rechecks for any secure authorization and fails instead of falling
+through to the regular path.
+
+Material invalidation now uses:
+
+```sql
+after update on public.payment_requests
+for each row
+when (
+  old.approval_material_updated_at
+  is distinct from
+  new.approval_material_updated_at
+)
+```
+
+This catches timestamp changes made by the existing `BEFORE UPDATE` material
+trigger even when `approval_material_updated_at` was not named in the original
+`SET`. Operational-only updates that leave the timestamp unchanged do not
+invalidate an authorization.
+
+Local review requires all of these markers:
+
+- `SHADOW_040_OLD_CONSUMPTION_DEFECT_REPRODUCED`
+- `MIGRATION_040_STATIC_POSTCHECK_PASS`
+- `SHADOW_040_CONSUMPTION_PASS`
+- `SHADOW_040_MATERIAL_INVALIDATION_PASS`
+- `SHADOW_040_CONCURRENCY_PASS`
+- `SHADOW_040_GUARDS_PASS`
+
+The concurrency contract uses two independent PostgreSQL sessions and requires
+exactly one successful insert, one line, one state transition and one
+`authorization_consumed` event.
+
+The separate application gate remains: run the read-only 040 DEV precheck,
+apply 040 exactly once only after explicit authorization, run the read-only
+postcheck, and only then authorize a new mutable MEJ-05 UAT.

@@ -50,8 +50,26 @@ $pregrant039 = Join-Path $PSScriptRoot (
 $postgrant039 = Join-Path $PSScriptRoot (
   '039_postgrant_storage_policy_contracts.sql'
 )
+$oldFailure040 = Join-Path $PSScriptRoot (
+  '040_old_failure_reproduction.sql'
+)
+$contracts040 = Join-Path $PSScriptRoot (
+  '040_consumption_material_guards_contracts.sql'
+)
+$concurrencyFixture040 = Join-Path $PSScriptRoot (
+  '040_concurrency_fixture.sql'
+)
+$concurrencyAssert040 = Join-Path $PSScriptRoot (
+  '040_concurrency_assert.sql'
+)
 $devPrecheck039 = Join-Path $repoRoot (
   'scripts\qa\extraordinary-039-dev-precheck-readonly.sql'
+)
+$devPrecheck040 = Join-Path $repoRoot (
+  'scripts\qa\extraordinary-040-dev-precheck-readonly.sql'
+)
+$devPostcheck040 = Join-Path $repoRoot (
+  'scripts\qa\extraordinary-040-dev-postcheck-readonly.sql'
 )
 $precheck036 = Join-Path $repoRoot (
   'scripts\qa\legacy-extraordinary-direct-lineage-precheck.sql'
@@ -67,6 +85,9 @@ $migration038 = Join-Path $migrationsDir (
 )
 $migration039 = Join-Path $migrationsDir (
   '039_enable_extraordinary_evidence_storage_policy_helper.sql'
+)
+$migration040 = Join-Path $migrationsDir (
+  '040_fix_extraordinary_consumption_and_material_invalidation.sql'
 )
 $expectedMigration037Sha256 = (
   '266542d2b587c46f99a64eabe3b362f7cb039249b7efda1479572bffbded7c87'
@@ -163,6 +184,118 @@ function Invoke-PsqlCommand {
   }
 }
 
+function Invoke-040Concurrency {
+  $insertTemplate = @'
+begin;
+set local lock_timeout = '15s';
+insert into public.payment_layout_lines(
+  id,
+  layout_id,
+  payment_request_id,
+  company_id,
+  proveedor_id,
+  company_bank_account_id,
+  source_account_number,
+  company_name,
+  destination_type,
+  destination_value,
+  beneficiary_name,
+  amount,
+  payment_reference,
+  payment_concept,
+  request_number,
+  status
+) values (
+  '{0}'::uuid,
+  '{1}'::uuid,
+  '42100000-0000-4000-8000-000000000001'::uuid,
+  '02000000-0000-4000-8000-000000000001'::uuid,
+  '42000000-0000-4000-8000-000000000001'::uuid,
+  '42900000-0000-4000-8000-000000000001'::uuid,
+  '424000000000000001',
+  'Shadow QA Company',
+  'cuenta',
+  '424000000000000001',
+  'Shadow 040 Concurrent',
+  4201,
+  '42001',
+  'Shadow 040 concurrent request',
+  'SHADOW-040-CONCURRENT',
+  'included'
+);
+select pg_sleep(0.5);
+commit;
+'@
+  $commands = @(
+    ($insertTemplate -f
+      '42300000-0000-4000-8000-000000000001',
+      '42200000-0000-4000-8000-000000000001'),
+    ($insertTemplate -f
+      '42300000-0000-4000-8000-000000000002',
+      '42200000-0000-4000-8000-000000000002')
+  )
+
+  Write-Output 'RUN migration 040 true two-session concurrency'
+  $jobs = @(
+    foreach ($sql in $commands) {
+      Start-Job -ScriptBlock {
+        param(
+          [string]$PsqlPath,
+          [string]$ServerHost,
+          [int]$ServerPort,
+          [string]$UserName,
+          [string]$DatabaseName,
+          [string]$CommandText
+        )
+        $result = @(
+          & $PsqlPath `
+            -X `
+            -v ON_ERROR_STOP=1 `
+            -h $ServerHost `
+            -p $ServerPort `
+            -U $UserName `
+            -d $DatabaseName `
+            --command $CommandText 2>&1
+        )
+        [pscustomobject]@{
+          ExitCode = $LASTEXITCODE
+          Output = ($result | Out-String)
+        }
+      } -ArgumentList @(
+        $psql,
+        $HostName,
+        $Port,
+        $DatabaseUser,
+        $Database,
+        $sql
+      )
+    }
+  )
+
+  try {
+    $jobs | Wait-Job -Timeout 30 | Out-Null
+    if ($jobs.State -contains 'Running') {
+      throw 'migration 040 concurrency sessions did not finish'
+    }
+    $results = @($jobs | Receive-Job)
+    $results | ForEach-Object {
+      Write-Output $_.Output
+    }
+    $winnerCount = @(
+      $results | Where-Object { $_.ExitCode -eq 0 }
+    ).Count
+    $failureCount = @(
+      $results | Where-Object { $_.ExitCode -ne 0 }
+    ).Count
+    if ($winnerCount -ne 1 -or $failureCount -ne 1) {
+      throw 'migration 040 concurrency did not produce exactly one winner'
+    }
+  }
+  finally {
+    $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+  }
+}
+
 $migration037Hash = (
   Get-FileHash -LiteralPath $migration037 -Algorithm SHA256
 ).Hash.ToLowerInvariant()
@@ -232,6 +365,26 @@ try {
     -Path $postgrant039 `
     -Label 'migration 039 Storage policy contracts'
   Invoke-PsqlFile `
+    -Path $devPrecheck040 `
+    -Label 'migration 040 read-only precheck'
+  Invoke-PsqlFile `
+    -Path $oldFailure040 `
+    -Label 'migration 040 old consumer failure reproduction'
+  Invoke-PsqlFile -Path $migration040 -Label 'migration 040 exact file'
+  Invoke-PsqlFile `
+    -Path $devPostcheck040 `
+    -Label 'migration 040 read-only postcheck'
+  Invoke-PsqlFile `
+    -Path $contracts040 `
+    -Label 'migration 040 atomic consumption and material contracts'
+  Invoke-PsqlFile `
+    -Path $concurrencyFixture040 `
+    -Label 'migration 040 concurrency fixture'
+  Invoke-040Concurrency
+  Invoke-PsqlFile `
+    -Path $concurrencyAssert040 `
+    -Label 'migration 040 concurrency assertion'
+  Invoke-PsqlFile `
     -Path $postcheck037 `
     -Label 'migration 037 postcheck and regressions'
 }
@@ -243,3 +396,4 @@ finally {
 
 Write-Output 'SHADOW_036_037_038_SEQUENCE_PASS'
 Write-Output 'SHADOW_039_LIVE_BODY_CONTRACT_PASS'
+Write-Output 'SHADOW_040_STATIC_MIGRATION_PASS'
