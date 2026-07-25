@@ -108,6 +108,7 @@ const negative = {
   wrong_director_ratification_denied: false,
   discrepancy_rollback_pass: false,
   material_change_rollback_pass: false,
+  operational_change_rollback_pass: false,
   anon_helper_denied: false,
   anon_upload_denied: false,
   outsider_helper_false: false,
@@ -1291,19 +1292,27 @@ async function runStorageAndMainUat() {
         authorization_row.status,
         authorization_row.consumed_layout_id is not null as has_layout,
         authorization_row.consumed_layout_line_id is not null as has_line,
+        authorization_row.consumed_layout_id = $2::uuid as layout_matches,
         request.status::text as request_status,
         (
           select count(*)
           from public.payment_layout_lines line
           where line.layout_id = authorization_row.consumed_layout_id
             and line.payment_request_id = authorization_row.payment_request_id
-        ) as line_count
+            and line.id = authorization_row.consumed_layout_line_id
+        ) as line_count,
+        (
+          select count(*)
+          from public.payment_request_extraordinary_events event
+          where event.authorization_id = authorization_row.id
+            and event.event_type = 'authorization_consumed'
+        ) as consumed_event_count
       from public.payment_request_extraordinary_authorizations authorization_row
       join public.payment_requests request
         on request.id = authorization_row.payment_request_id
       where authorization_row.id = $1
     `,
-    [authorization.authorization_id],
+    [authorization.authorization_id, layout.layout_id],
   )
   const consumed = consumedRows[0]
   ensure(
@@ -1311,7 +1320,12 @@ async function runStorageAndMainUat() {
     "CONSUMED_STATUS_INVALID",
   )
   ensure(consumed?.has_layout && consumed?.has_line, "CONSUMED_LINEAGE_INVALID")
+  ensure(consumed?.layout_matches, "CONSUMED_LAYOUT_ID_INVALID")
   ensure(count(consumed?.line_count) === 1, "CONSUMED_LINE_COUNT_INVALID")
+  ensure(
+    count(consumed?.consumed_event_count) === 1,
+    "AUTHORIZATION_CONSUMED_EVENT_COUNT_INVALID",
+  )
   ensure(consumed?.request_status !== "paid", "REQUEST_PAID_BEFORE_RATIFICATION")
 
   await expectRpcDenied(
@@ -1414,6 +1428,54 @@ async function runStorageAndMainUat() {
     )
     await db.query("rollback")
     negative.discrepancy_rollback_pass = true
+  } catch (error) {
+    await db.query("rollback").catch(() => {})
+    throw error
+  }
+
+  await db.query("begin")
+  try {
+    const { rows: beforeOperationalRows } = await db.query(
+      `
+        select approval_material_updated_at
+        from public.payment_requests
+        where id = $1
+      `,
+      [ids.request],
+    )
+    await db.query(
+      `
+        update public.payment_requests
+        set operational_comments =
+          coalesce(operational_comments, '') || ' [MEJ05 040 QA]'
+        where id = $1
+      `,
+      [ids.request],
+    )
+    const { rows: afterOperationalRows } = await db.query(
+      `
+        select
+          request.approval_material_updated_at,
+          authorization_row.status
+        from public.payment_requests request
+        join public.payment_request_extraordinary_authorizations authorization_row
+          on authorization_row.payment_request_id = request.id
+        where request.id = $1
+          and authorization_row.id = $2
+      `,
+      [ids.request, authorization.authorization_id],
+    )
+    ensure(
+      String(afterOperationalRows[0]?.approval_material_updated_at) ===
+        String(beforeOperationalRows[0]?.approval_material_updated_at),
+      "OPERATIONAL_CHANGE_ADVANCED_MATERIAL_TIMESTAMP",
+    )
+    ensure(
+      afterOperationalRows[0]?.status === "consumed_pending_ratification",
+      "OPERATIONAL_CHANGE_INVALIDATED_AUTHORIZATION",
+    )
+    await db.query("rollback")
+    negative.operational_change_rollback_pass = true
   } catch (error) {
     await db.query("rollback").catch(() => {})
     throw error
@@ -1801,6 +1863,23 @@ async function run() {
     secure_extraordinary_negative: Object.values(negative).every(Boolean)
       ? "SECURE_EXTRAORDINARY_NEGATIVE_PASS"
       : "BLOCKED",
+    atomic_consumption: success
+      ? "MEJ05_ATOMIC_CONSUMPTION_PASS"
+      : "BLOCKED",
+    single_consumption: success
+      ? "MEJ05_SINGLE_CONSUMPTION_PASS"
+      : "BLOCKED",
+    pre_ratification_guards: success
+      ? "MEJ05_PRE_RATIFICATION_GUARDS_PASS"
+      : "BLOCKED",
+    ratification: success ? "MEJ05_RATIFICATION_PASS" : "BLOCKED",
+    indirect_material_invalidation: success
+      ? "MEJ05_INDIRECT_MATERIAL_INVALIDATION_PASS"
+      : "BLOCKED",
+    operational_change_preserves_authorization: success
+      ? "MEJ05_OPERATIONAL_CHANGE_PRESERVES_AUTH_PASS"
+      : "BLOCKED",
+    dispute: success ? "MEJ05_DISPUTE_PASS" : "BLOCKED",
     authorization_states: success
       ? ["draft", "active", "consumed_pending_ratification", "ratified"]
       : [],
@@ -1822,6 +1901,9 @@ async function run() {
     alloc_001_intact: success,
     operadora_policy_enabled: false,
     qa_cleanup: success ? "PASS" : cleanupError ? "FAIL" : "PASS",
+    qa_sanitization: cleanupError
+      ? "BLOCKED"
+      : "MEJ05_QA_SANITIZATION_PASS",
     prod_writes: 0,
     main_writes: 0,
     dev_direct_branch_writes: 0,
