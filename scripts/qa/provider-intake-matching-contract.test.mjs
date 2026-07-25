@@ -8,17 +8,25 @@ import {
   EXPECTED_EXPIRED_LINK_POST_STATE,
   EXPECTED_ALREADY_NORMALIZED_LINK_STATE,
   EXPECTED_EXPIRED_LINK_PRE_STATE,
+  DEMO_LINK_REVOCATION_CONTRACT,
+  MOCK_BASELINE,
   MUTABLE_ACCESSIBILITY_HOOKS,
   assertSanitizedProviderEvidence,
   assertExpiredLinkNormalizationTransition,
   assertMutableAuthorization,
   buildLiveProviderTargets,
+  classifyConcurrentDevEvolution,
   classifyExpiredLinkState,
   classifyExpiredLinkStateFromDatabaseFilter,
   classifyNoWriteBrowserRequest,
+  createLiveStartSnapshot,
+  demoLinkProtectedSnapshot,
+  identifyAuthorizedDemoLink,
+  isAlreadyNormalizedSafeHistory,
   normalizationProtectedSnapshot,
   runCapabilityAudit,
   runNoWriteMocked,
+  runRelativeBaselineNoWriteMatrix,
   runV6KCleanupMatrix,
   runV6MCleanupMatrix,
   sanitizedProviderAlignment,
@@ -27,6 +35,9 @@ import {
   validateNormalizationDryRunResult,
   validateNormalizationMutation,
   validateNormalizationOptimisticSnapshot,
+  validateDemoLinkRevocationResult,
+  validateRunScopedDelta,
+  validateRunScopedSideEffects,
 } from "./provider-intake-matching-gate2-uat.mjs"
 import {
   assertLiveProviderLocatorInputs,
@@ -92,6 +103,22 @@ const runner = read("scripts/qa/provider-intake-matching-gate2-uat.mjs")
 const authenticatedReadonly = read("scripts/qa/provider-intake-authenticated-readonly-observability.mjs")
 const QA_COMPANY_UUID = ["11111111", "1111", "4111", "8111", "111111111111"].join("-")
 const OTHER_COMPANY_UUID = ["22222222", "2222", "4222", "8222", "222222222222"].join("-")
+const QA_PROFILE_ROWS = Object.freeze([
+  { profile_id: "qa-profile-1", auth_user_id: "qa-user-1", active: false, blocked: true },
+  { profile_id: "qa-profile-2", auth_user_id: "qa-user-2", active: false, blocked: true },
+])
+const STATIC_INTEGRITY_ROW = Object.freeze({
+  candidates_rpc: true,
+  comparison_rpc: true,
+  mutation_rpc: true,
+  intake_links_rls: true,
+  payment_intake_rls: true,
+  orphan_intakes: 0,
+  orphan_events: 0,
+  orphan_files: 0,
+  active_expired_links: 0,
+  duplicate_active_scopes: 0,
+})
 
 const functionDefinition = (name) => {
   const pattern = new RegExp(
@@ -237,11 +264,11 @@ test("public provider intake Edge Function remains outside Migration 031", () =>
   assert.doesNotMatch(migration, /supabase\/functions\/provider-intake|edge function/i)
 })
 
-test("permanent Gate 2 runner connects 68 capabilities behind the explicit gate", async () => {
+test("permanent Gate 2 runner connects 78 capabilities behind the explicit gate", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 68)
+  assert.equal(Object.keys(audit.capabilities).length, 78)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -400,6 +427,219 @@ for (const [name, operation] of negativeNormalizationCases) {
   })
 }
 
+const authorizedDemoRow = (overrides = {}) => ({
+  id: "demo-link-in-memory",
+  company_id: "demo-company-in-memory",
+  label: DEMO_LINK_REVOCATION_CONTRACT.logical_alias,
+  status: "active",
+  created_at: DEMO_LINK_REVOCATION_CONTRACT.created_at,
+  updated_at: "2026-07-24T16:40:57.713Z",
+  expires_at: DEMO_LINK_REVOCATION_CONTRACT.expires_at,
+  token_hash: "d".repeat(64),
+  token_prefix: "demo-prefix",
+  max_submissions_per_day: 2,
+  allowed_file_types: ["application/pdf"],
+  max_file_mb: 10,
+  created_by: "admin-in-memory",
+  revoked_by: null,
+  revoked_at: null,
+  ...overrides,
+})
+
+test("LINK-C1 identifies exactly the authorized demo link", () => {
+  const result = identifyAuthorizedDemoLink([authorizedDemoRow()], {
+    expectedCompanyId: "demo-company-in-memory",
+    now: Date.parse("2026-07-25T00:00:00.000Z"),
+  })
+  assert.equal(result.candidate_count, 1)
+})
+
+test("LINK-C1 rejects a different demo label", () => {
+  assert.throws(
+    () => identifyAuthorizedDemoLink([authorizedDemoRow({ label: "DEMO_OTHER" })], {
+      expectedCompanyId: "demo-company-in-memory",
+    }),
+    /DEMO_LINK_NOT_FOUND/,
+  )
+})
+
+test("LINK-C1 rejects different timestamps", () => {
+  assert.throws(
+    () => identifyAuthorizedDemoLink([authorizedDemoRow({
+      created_at: "2026-07-24T16:41:59.000Z",
+    })], {
+      expectedCompanyId: "demo-company-in-memory",
+      now: Date.parse("2026-07-25T00:00:00.000Z"),
+    }),
+    /ACTIVE_QA_LINK_NOT_AUTHORIZED_FOR_REVOCATION/,
+  )
+})
+
+test("LINK-C1 rejects a different company scope", () => {
+  assert.throws(
+    () => identifyAuthorizedDemoLink([authorizedDemoRow()], {
+      expectedCompanyId: "different-company-in-memory",
+      now: Date.parse("2026-07-25T00:00:00.000Z"),
+    }),
+    /ACTIVE_QA_LINK_NOT_AUTHORIZED_FOR_REVOCATION/,
+  )
+})
+
+test("LINK-C1 rejects two demo candidates", () => {
+  assert.throws(
+    () => identifyAuthorizedDemoLink([
+      authorizedDemoRow(),
+      authorizedDemoRow({ id: "second-demo-in-memory" }),
+    ], {
+      expectedCompanyId: "demo-company-in-memory",
+      now: Date.parse("2026-07-25T00:00:00.000Z"),
+    }),
+    /DEMO_LINK_AMBIGUOUS/,
+  )
+})
+
+test("LINK-C1 validates dry-run rowCount one and rollback evidence", () => {
+  const before = authorizedDemoRow()
+  const after = {
+    ...before,
+    status: "revoked",
+    updated_at: "2026-07-25T00:01:00.000Z",
+    revoked_by: "admin-in-memory",
+    revoked_at: "2026-07-25T00:01:00.000Z",
+  }
+  const result = validateDemoLinkRevocationResult(before, after, {
+    rowCount: 1,
+    rolledBack: true,
+  })
+  assert.equal(result.rolled_back, true)
+  assert.equal(result.protected_fields_intact, true)
+})
+
+test("LINK-C1 validates apply rowCount one", () => {
+  const before = authorizedDemoRow()
+  const result = validateDemoLinkRevocationResult(before, {
+    ...before,
+    status: "revoked",
+    revoked_by: "admin-in-memory",
+    revoked_at: "2026-07-25T00:01:00.000Z",
+  }, { rowCount: 1 })
+  assert.equal(result.row_count, 1)
+})
+
+test("LINK-C1 rejects changes to protected demo fields", () => {
+  const before = authorizedDemoRow()
+  assert.throws(
+    () => validateDemoLinkRevocationResult(before, {
+      ...before,
+      label: "CHANGED",
+      status: "revoked",
+      revoked_by: "admin-in-memory",
+      revoked_at: "2026-07-25T00:01:00.000Z",
+    }, { rowCount: 1 }),
+    /DEMO_LINK_PROTECTED_FIELDS_CHANGED/,
+  )
+  assert.notDeepEqual(
+    demoLinkProtectedSnapshot(before),
+    demoLinkProtectedSnapshot({ ...before, label: "CHANGED" }),
+  )
+})
+
+test("LINK-C1 safe history accepts revoked greater than or equal to two", () => {
+  assert.equal(isAlreadyNormalizedSafeHistory({
+    total: 5,
+    activeValid: 0,
+    activeExpired: 0,
+    expired: 1,
+    revoked: 4,
+    paused: 0,
+    otherActive: 0,
+  }), true)
+})
+
+test("LINK-C1 safe history rejects active and second expired links", () => {
+  assert.equal(isAlreadyNormalizedSafeHistory({
+    total: 4,
+    activeValid: 1,
+    activeExpired: 0,
+    expired: 1,
+    revoked: 2,
+    paused: 0,
+    otherActive: 0,
+  }), false)
+  assert.equal(isAlreadyNormalizedSafeHistory({
+    total: 4,
+    activeValid: 0,
+    activeExpired: 0,
+    expired: 2,
+    revoked: 2,
+    paused: 0,
+    otherActive: 0,
+  }), false)
+})
+
+test("Stage C live snapshot accepts evolved baselines and records a hash", () => {
+  const evolved = structuredClone(MOCK_BASELINE)
+  evolved.payment_intake += 50
+  evolved.payment_intake_events += 120
+  evolved.notification_events += 9
+  const snapshot = createLiveStartSnapshot(evolved, {
+    capturedAt: "2026-07-25T00:00:00.000Z",
+  })
+  assert.equal(snapshot.kind, "LIVE_START_SNAPSHOT")
+  assert.equal(snapshot.absolute_baseline_enforced, false)
+  assert.match(snapshot.snapshot_hash, /^[0-9a-f]{64}$/)
+})
+
+test("Stage C validates relative run-scoped deltas", () => {
+  const result = validateRunScopedDelta(
+    { intakes: 2, events: 11, provider_matched: 5 },
+    { intakes: 2, events: 11, provider_matched: 5 },
+  )
+  assert.equal(result.status, "PASS")
+  assert.equal(result.run_scoped, true)
+})
+
+test("Stage C tolerates concurrent unrelated DEV evolution", () => {
+  const start = createLiveStartSnapshot(MOCK_BASELINE, {
+    capturedAt: "2026-07-24T00:00:00.000Z",
+  })
+  const current = structuredClone(MOCK_BASELINE)
+  current.notification_events += 7
+  const result = classifyConcurrentDevEvolution(start, current, { runOwned: {} })
+  assert.equal(result.classification, "CONCURRENT_DEV_EVOLUTION")
+  assert.equal(result.blocks_run, false)
+})
+
+test("Stage C validates zero run-scoped side effects", () => {
+  assert.equal(validateRunScopedSideEffects({
+    payment_requests: 0,
+    proveedores: 0,
+    approval_batches: 0,
+    layouts: 0,
+    notifications: 0,
+    storage_objects: 0,
+    conversions: 0,
+  }).status, "PASS")
+})
+
+test("Stage C no-write matrix separates mock and live baselines across five cases", () => {
+  const result = runRelativeBaselineNoWriteMatrix()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.total, 5)
+  assert.equal(result.cases.every((entry) =>
+    entry.main === "PASS" &&
+    entry.race === "PASS" &&
+    entry.dev_writes === 0 &&
+    entry.cleanup === "48/48"), true)
+})
+
+test("Stage C live flow contains no absolute baseline comparator", () => {
+  assert.doesNotMatch(runner, /expectedBaselineEqual/u)
+  assert.match(runner, /kind:\s*"MOCK_BASELINE"/u)
+  assert.match(runner, /kind:\s*"LIVE_START_SNAPSHOT"/u)
+  assert.match(runner, /CONCURRENT_DEV_EVOLUTION/u)
+})
+
 const providerRows = (aliases = ["Proveedor sintético alfa", "Proveedor sintético beta"]) =>
   aliases.map((alias, index) => ({
     id: `00000000-0000-4000-8000-00000000000${index + 1}`,
@@ -525,17 +765,17 @@ test("updated capability audit certifies alias separation without network or wri
 test("V6N no-write mocked recertifies the post-V6H baseline and 48 cleanup cases without leakage", async () => {
   const result = await runNoWriteMocked()
   assert.equal(result.status, "PASS")
-  assert.equal(result.baseline.intake_links, 4)
-  assert.equal(result.baseline.intake_links_qa_company, 3)
+  assert.equal(result.baseline.intake_links, 5)
+  assert.equal(result.baseline.intake_links_qa_company, 4)
   assert.equal(result.baseline.link_state, "ALREADY_NORMALIZED")
   assert.equal(result.expired_link_normalization.writes, 0)
   assert.equal(result.simulation.main, "PASS")
   assert.equal(result.simulation.race, "PASS")
-  assert.equal(result.simulation.provider_matched_final, 9)
-  assert.equal(result.simulation.payment_intake_events_final, 50)
+  assert.equal(result.simulation.provider_matched_run_delta, 5)
+  assert.equal(result.simulation.payment_intake_events_run_delta, 11)
   assert.equal(result.cleanup_matrix.status, "PASS")
   assert.equal(result.cleanup_matrix.total, 48)
-  assert.equal(result.capability_count, 68)
+  assert.equal(result.capability_count, 78)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -819,11 +1059,11 @@ const v6kRequestInput = (overrides = {}) => ({
   ...overrides,
 })
 
-test("V6N-R7 capability audit executes 68 concrete QA capabilities", async () => {
+test("LINK-C1 capability audit executes 78 concrete QA capabilities", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
-  assert.equal(audit.capability_count, 68)
-  assert.equal(Object.keys(audit.capabilities).length, 68)
+  assert.equal(audit.capability_count, 78)
+  assert.equal(Object.keys(audit.capabilities).length, 78)
   for (const capability of [
     "canonical_idempotency_header",
     "finalized_request_capture",
@@ -1117,6 +1357,12 @@ const validPassReadonlyEnvelope = () => ({
   rollback_completed: true,
   fresh_baseline_completed: true,
   fresh_baseline: {},
+  live_snapshot_captured: true,
+  snapshot_shape_valid: true,
+  snapshot_hash_present: true,
+  static_integrity_pass: true,
+  iam_at_rest_pass: true,
+  absolute_live_baseline_enforced: false,
 })
 
 test("V6M classifies missing database secret without connection", async () => {
@@ -1306,8 +1552,10 @@ test("V6N permite transaccionalidad read only explícita y conserva orden de con
       if (normalized.includes("count(distinct company_id)::int")) {
         return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
       }
-      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.includes("as candidates_rpc")) return { rows: [STATIC_INTEGRITY_ROW] }
+      if (normalized.includes("from auth.users au")) return { rows: QA_PROFILE_ROWS }
       if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
         if (normalized.includes("from public.intake_links") &&
             normalized.includes("label like 'qa v6b %'")) {
           return { rows: [{ count: normalized.includes("status='active'") ? 0 : 1 }] }
@@ -1446,6 +1694,7 @@ test("V6N bloquea transacciones de negocio antes de aserción de transaction_rea
           assert.fail("Consulta de negocio ejecutada antes de transaction_read_only=on")
         }
         if (normalized.startsWith("select count(*)::int")) {
+          if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
           if (normalized.includes("from public.intake_links where status='active' and")) {
             return { rows: [{ count: 0 }] }
           }
@@ -1519,10 +1768,12 @@ test("V6N falla con rollback fallido con categorÃ­a READ_ONLY_ROLLBACK_FAILED"
           ],
         }
       }
+      if (normalized.includes("as candidates_rpc")) return { rows: [STATIC_INTEGRITY_ROW] }
       if (normalized.includes("from auth.users au")) {
-        return { rows: [] }
+        return { rows: QA_PROFILE_ROWS }
       }
       if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
         if (normalized.includes("from public.intake_links where status='active' and")) {
           return { rows: [{ count: 0 }] }
         }
@@ -1618,8 +1869,10 @@ test("V6N completes the authenticated read-only path with explicit rollback", as
       if (normalized.includes("count(distinct company_id)::int")) {
         return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
       }
-      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.includes("as candidates_rpc")) return { rows: [STATIC_INTEGRITY_ROW] }
+      if (normalized.includes("from auth.users au")) return { rows: QA_PROFILE_ROWS }
       if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
         let count = 0
         if (normalized.includes("from public.intake_links")) {
           if (!normalized.includes(" where ")) count = 4
@@ -1774,21 +2027,24 @@ const createV6NR7PassClient = () => {
             { label: "historical", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
             { label: "other", status: "revoked", expires_at: null },
             { label: "QA V6B historical", status: "revoked", expires_at: null },
+            { label: "DEMO_CLIENTE_FLUX_72H", status: "revoked", expires_at: "2026-07-27T16:40:57.713Z" },
           ],
         }
       }
       if (normalized.includes("count(distinct company_id)::int")) {
-        return { rows: [{ intake_links_global: 4, distinct_company_scopes: 2 }] }
+        return { rows: [{ intake_links_global: 5, distinct_company_scopes: 2 }] }
       }
-      if (normalized.includes("from auth.users au")) return { rows: [] }
+      if (normalized.includes("as candidates_rpc")) return { rows: [STATIC_INTEGRITY_ROW] }
+      if (normalized.includes("from auth.users au")) return { rows: QA_PROFILE_ROWS }
       if (normalized.startsWith("select count(*)::int")) {
+        if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
         if (!normalized.includes("from public.intake_links")) return { rows: [{ count: 0 }] }
-        if (!normalized.includes(" where ")) return { rows: [{ count: 4 }] }
+        if (!normalized.includes(" where ")) return { rows: [{ count: 5 }] }
         if (normalized.includes("label like 'qa v6b %'")) {
           return { rows: [{ count: normalized.includes("status='active'") ? 0 : 1 }] }
         }
         if (normalized.includes("status='expired'")) return { rows: [{ count: 1 }] }
-        if (normalized.includes("status='revoked'")) return { rows: [{ count: 2 }] }
+        if (normalized.includes("status='revoked'")) return { rows: [{ count: 3 }] }
         return { rows: [{ count: 0 }] }
       }
       return { rows: [] }
@@ -1878,14 +2134,14 @@ test("V6N-R7 records two global company scopes", async () => {
   assert.equal(result.distinct_company_scopes, 2)
 })
 
-test("V6N-R7 records four links globally", async () => {
+test("LINK-C1 records five links globally after demo revocation", async () => {
   const { result } = await runV6NR7Pass()
-  assert.equal(result.intake_links_global, 4)
+  assert.equal(result.intake_links_global, 5)
 })
 
-test("V6N-R7 records three links in the QA company", async () => {
+test("LINK-C1 records four safe-history links in the QA company", async () => {
   const { result } = await runV6NR7Pass()
-  assert.equal(result.intake_links_qa_company, 3)
+  assert.equal(result.intake_links_qa_company, 4)
 })
 
 test("V6N-R7 preserves the other company active-valid link outside classification", async () => {
@@ -1911,14 +2167,17 @@ test("V6N-R7 separates global and company-scoped totals", async () => {
   assert.notEqual(result.intake_links_global, result.intake_links_qa_company)
 })
 
-test("V6N-R7 fresh baseline keeps global intake_links at four", async () => {
+test("LINK-C1 live snapshot captures current global intake_links without freezing it", async () => {
   const { result } = await runV6NR7Pass()
-  assert.equal(result.fresh_baseline.intake_links, 4)
+  assert.equal(result.fresh_baseline.intake_links, 5)
+  assert.equal(result.absolute_live_baseline_enforced, false)
+  assert.match(result.fresh_baseline.snapshot_hash, /^[0-9a-f]{64}$/)
 })
 
-test("V6N-R7 fresh baseline keeps QA scope at three", async () => {
+test("LINK-C1 live snapshot captures revoked-tolerant QA scope", async () => {
   const { result } = await runV6NR7Pass()
-  assert.equal(result.fresh_baseline.intake_links_qa_company, 3)
+  assert.equal(result.fresh_baseline.intake_links_qa_company, 4)
+  assert.equal(result.fresh_baseline.links.revoked, 3)
 })
 
 test("V6N-R7 recognizes the strict ALREADY_NORMALIZED scope", async () => {

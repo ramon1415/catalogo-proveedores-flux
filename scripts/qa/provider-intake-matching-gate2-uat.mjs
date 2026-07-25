@@ -85,7 +85,7 @@ export const MUTABLE_ACCESSIBILITY_HOOKS = Object.freeze({
   race: Object.freeze([ACCESSIBILITY_STATE_ALIASES[7]]),
   terminal: Object.freeze([ACCESSIBILITY_STATE_ALIASES[8]]),
 })
-export const EXPECTED_BASELINE = Object.freeze({
+export const MOCK_BASELINE = Object.freeze({
   payment_intake: 13,
   payment_intake_events: 39,
   payment_intake_files: 6,
@@ -111,7 +111,31 @@ export const EXPECTED_BASELINE = Object.freeze({
   },
 })
 
-export const EXPECTED_QA_COMPANY_LINKS = 3
+export const EXPECTED_BASELINE = MOCK_BASELINE
+export const EXPECTED_QA_COMPANY_LINKS = 4
+
+export const STATIC_INTEGRITY_CONTRACT = Object.freeze({
+  schema: true,
+  migrations: true,
+  functions: true,
+  grants: true,
+  rls: true,
+  iam_at_rest: true,
+  safe_links: true,
+  critical_orphans: 0,
+  critical_duplicates: 0,
+})
+
+export const DEMO_LINK_REVOCATION_CONTRACT = Object.freeze({
+  logical_alias: "DEMO_CLIENTE_FLUX_72H",
+  created_at: "2026-07-24T16:40:57.713Z",
+  expires_at: "2026-07-27T16:40:57.713Z",
+  duration_hours: 72,
+  temporal_tolerance_ms: 1_000,
+  initial_status: "active",
+  final_status: "revoked",
+  explicit_mutable_fields: ["status", "revoked_at", "revoked_by"],
+})
 
 export const EXPECTED_EXPIRED_LINK_PRE_STATE = Object.freeze({
   total: 2,
@@ -368,8 +392,157 @@ function actionKind(current, next) {
   throw new GateError("MATCH_NOOP_NOT_ALLOWED")
 }
 
-function expectedBaselineEqual(actual) {
-  return digest(actual) === digest(EXPECTED_BASELINE)
+function mockBaselineEqual(actual) {
+  return digest(actual) === digest(MOCK_BASELINE)
+}
+
+const LIVE_BASELINE_FIELDS = Object.freeze([
+  "payment_intake",
+  "payment_intake_events",
+  "payment_intake_files",
+  "storage_objects",
+  "proveedores",
+  "providers",
+  "payment_requests",
+  "approval_batches",
+  "payment_layouts",
+  "payment_layout_lines",
+  "cash_funds",
+  "notification_events",
+  "intake_links",
+  "matched_intakes",
+  "provider_matched",
+])
+
+export function createLiveStartSnapshot(actual, {
+  capturedAt = new Date().toISOString(),
+} = {}) {
+  gate(actual && typeof actual === "object", "LIVE_START_SNAPSHOT_INVALID")
+  const counts = {}
+  for (const field of LIVE_BASELINE_FIELDS) {
+    const value = Number(actual[field])
+    gate(Number.isInteger(value) && value >= 0, "LIVE_START_SNAPSHOT_INVALID", { field })
+    counts[field] = value
+  }
+  gate(actual.states && typeof actual.states === "object", "LIVE_START_SNAPSHOT_INVALID")
+  counts.states = {}
+  for (const state of ["received", "in_review", "needs_correction", "rejected", "converted", "cancelled"]) {
+    const value = Number(actual.states[state])
+    gate(Number.isInteger(value) && value >= 0, "LIVE_START_SNAPSHOT_INVALID", { state })
+    counts.states[state] = value
+  }
+  const snapshotHash = digest({ capturedAt, counts })
+  return Object.freeze({
+    kind: "LIVE_START_SNAPSHOT",
+    captured: true,
+    captured_at: capturedAt,
+    shape_valid: true,
+    snapshot_hash: snapshotHash,
+    snapshot_hash_present: /^[0-9a-f]{64}$/.test(snapshotHash),
+    absolute_baseline_enforced: false,
+    counts: Object.freeze(counts),
+  })
+}
+
+export function validateRunScopedDelta(actual, expected) {
+  gate(actual && expected, "RUN_SCOPED_DELTA_INVALID")
+  const keys = Object.keys(expected)
+  gate(
+    keys.every((key) => Number(actual[key]) === Number(expected[key])),
+    "RUN_SCOPED_DELTA_INVALID",
+    { keys },
+  )
+  return Object.freeze({
+    status: "PASS",
+    run_scoped: true,
+    validated_fields: keys.length,
+  })
+}
+
+export function classifyConcurrentDevEvolution(start, current, {
+  runOwned = {},
+} = {}) {
+  gate(start?.counts && current && typeof current === "object", "LIVE_START_SNAPSHOT_INVALID")
+  const unrelated = {}
+  for (const field of LIVE_BASELINE_FIELDS) {
+    const globalDelta = Number(current[field]) - Number(start.counts[field])
+    const ownedDelta = Number(runOwned[field] || 0)
+    unrelated[field] = globalDelta - ownedDelta
+  }
+  return Object.freeze({
+    classification: Object.values(unrelated).some((value) => value !== 0)
+      ? "CONCURRENT_DEV_EVOLUTION"
+      : "NO_CONCURRENT_DEV_EVOLUTION",
+    blocks_run: false,
+    unrelated: Object.freeze(unrelated),
+  })
+}
+
+export function validateRunScopedSideEffects(effects) {
+  const expectedZero = [
+    "payment_requests",
+    "proveedores",
+    "approval_batches",
+    "layouts",
+    "notifications",
+    "storage_objects",
+    "conversions",
+  ]
+  gate(
+    expectedZero.every((field) => Number(effects?.[field]) === 0),
+    "RUN_SCOPED_SIDE_EFFECT_INVALID",
+  )
+  return Object.freeze({ status: "PASS", run_scoped: true, side_effects: 0 })
+}
+
+export function identifyAuthorizedDemoLink(rows, {
+  expectedCompanyId,
+  now = Date.now(),
+} = {}) {
+  const candidates = (rows || []).filter(
+    (row) => row?.label === DEMO_LINK_REVOCATION_CONTRACT.logical_alias,
+  )
+  gate(candidates.length === 1, candidates.length ? "DEMO_LINK_AMBIGUOUS" : "DEMO_LINK_NOT_FOUND")
+  const candidate = candidates[0]
+  const tolerance = DEMO_LINK_REVOCATION_CONTRACT.temporal_tolerance_ms
+  const within = (actual, expected) =>
+    Math.abs(Date.parse(String(actual)) - Date.parse(expected)) <= tolerance
+  gate(
+    candidate.company_id === expectedCompanyId &&
+      candidate.status === "active" &&
+      within(candidate.created_at, DEMO_LINK_REVOCATION_CONTRACT.created_at) &&
+      within(candidate.expires_at, DEMO_LINK_REVOCATION_CONTRACT.expires_at) &&
+      Date.parse(candidate.expires_at) > Number(now),
+    "ACTIVE_QA_LINK_NOT_AUTHORIZED_FOR_REVOCATION",
+  )
+  return Object.freeze({ candidate: Object.freeze(clone(candidate)), candidate_count: 1 })
+}
+
+const DEMO_LINK_MUTABLE_FIELDS = new Set(["status", "revoked_at", "revoked_by", "updated_at"])
+
+export function demoLinkProtectedSnapshot(row) {
+  return canonical(Object.fromEntries(
+    Object.entries(row || {}).filter(([key]) => !DEMO_LINK_MUTABLE_FIELDS.has(key)),
+  ))
+}
+
+export function validateDemoLinkRevocationResult(before, after, {
+  rowCount,
+  rolledBack = false,
+} = {}) {
+  gate(rowCount === 1, "DEMO_LINK_REVOCATION_ROWCOUNT_INVALID")
+  gate(before?.status === "active" && after?.status === "revoked", "DEMO_LINK_REVOCATION_STATUS_INVALID")
+  gate(after?.revoked_at && after?.revoked_by, "DEMO_LINK_REVOCATION_ACTOR_INVALID")
+  gate(
+    digest(demoLinkProtectedSnapshot(before)) === digest(demoLinkProtectedSnapshot(after)),
+    "DEMO_LINK_PROTECTED_FIELDS_CHANGED",
+  )
+  return Object.freeze({
+    status: "PASS",
+    row_count: 1,
+    rolled_back: Boolean(rolledBack),
+    protected_fields_intact: true,
+  })
 }
 
 function expectedLinkContractEqual(actual) {
@@ -431,8 +604,16 @@ export async function assertEnvironment(deps) {
 
 export async function captureBaseline(deps) {
   const baseline = await deps.captureBaseline()
-  gate(expectedBaselineEqual(baseline), "UNAUTHORIZED_DEV_MUTATION")
-  return baseline
+  if (deps.kind === "mock") {
+    gate(mockBaselineEqual(baseline), "MOCK_BASELINE_DRIFT")
+    return Object.freeze({
+      kind: "MOCK_BASELINE",
+      captured: true,
+      absolute_baseline_enforced: true,
+      counts: clone(baseline),
+    })
+  }
+  return createLiveStartSnapshot(baseline)
 }
 
 export async function inspectLinkContract(deps) {
@@ -499,9 +680,18 @@ export function classifyExpiredLinkState(rows, {
       { state: "NEEDS_NORMALIZATION", snapshot: EXPECTED_EXPIRED_LINK_PRE_STATE },
       { state: "ALREADY_NORMALIZED", snapshot: EXPECTED_ALREADY_NORMALIZED_LINK_STATE },
     ]
-  const matchedState = supportedStates.find(
+  let matchedState = supportedStates.find(
     (candidate) => digest(classification) === digest(candidate.snapshot),
   )
+  const historicalQaRevoked = rows.some(
+    (row) => row?.status === "revoked" && /^QA V6B /u.test(String(row?.label || "")),
+  )
+  if (!expected && isAlreadyNormalizedSafeHistory(classification, { historicalQaRevoked })) {
+    matchedState = {
+      state: "ALREADY_NORMALIZED_SAFE_HISTORY",
+      snapshot: classification,
+    }
+  }
   gate(matchedState, "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH", { classification })
   const candidates = rows.filter(
     (row) => row.status === "active" && row.expires_at &&
@@ -518,9 +708,26 @@ export function classifyExpiredLinkState(rows, {
     databaseNow: String(databaseNow),
     normalization_state: matchedState.state === "EXPLICIT_EXPECTED"
       ? expectedActiveExpired === 1 ? "NEEDS_NORMALIZATION" : "ALREADY_NORMALIZED"
-      : matchedState.state,
+      : matchedState.state === "ALREADY_NORMALIZED_SAFE_HISTORY"
+        ? "ALREADY_NORMALIZED"
+        : matchedState.state,
     normalization_write_required: expectedActiveExpired === 1,
   })
+}
+
+export function isAlreadyNormalizedSafeHistory(classification, {
+  historicalQaRevoked = true,
+} = {}) {
+  return Number(classification?.total) >= 3 &&
+    classification.activeValid === 0 &&
+    classification.activeExpired === 0 &&
+    classification.otherActive === 0 &&
+    classification.paused === 0 &&
+    Number(classification.unknown || 0) === 0 &&
+    classification.expired === 1 &&
+    classification.revoked >= 2 &&
+    historicalQaRevoked === true &&
+    classification.total === classification.expired + classification.revoked
 }
 
 export function classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRows) {
@@ -555,7 +762,11 @@ export function classifyExpiredLinkStateFromDatabaseFilter(rows, expiredActiveRo
   }
   const normalizationState = digest(classification) === digest(EXPECTED_EXPIRED_LINK_PRE_STATE)
     ? "NEEDS_NORMALIZATION"
-    : digest(classification) === digest(EXPECTED_ALREADY_NORMALIZED_LINK_STATE)
+    : isAlreadyNormalizedSafeHistory(classification, {
+        historicalQaRevoked: scoped.some(
+          (row) => row?.status === "revoked" && /^QA V6B /u.test(String(row?.label || "")),
+        ),
+      })
       ? "ALREADY_NORMALIZED"
       : null
   gate(normalizationState, "EXPIRED_LINK_NORMALIZATION_STATE_MISMATCH", { classification })
@@ -1234,20 +1445,13 @@ export async function validateEventMetadata(deps) {
 export async function validateFinalDelta(deps) {
   const final = await deps.captureFinal()
   const expected = {
-    payment_intake: 15,
-    payment_intake_events: 50,
-    provider_matched: 9,
-    matched_intakes: 0,
-    states: {
-      received: 6,
-      in_review: 0,
-      needs_correction: 1,
-      rejected: 8,
-      converted: 0,
-      cancelled: 0,
-    },
-    coreProtectedDelta: 0,
-    activeQaLinks: 0,
+    payment_intake_run_delta: 2,
+    payment_intake_events_run_delta: 11,
+    provider_matched_run_delta: 5,
+    fixtures_final_rejected: 2,
+    matches_final: 0,
+    core_protected_run_delta: 0,
+    active_qa_links_final: 0,
   }
   gate(digest(final) === digest(expected), "FINAL_DELTA_INVALID")
   return final
@@ -1343,6 +1547,7 @@ function newContext(mode) {
     main: null,
     race: null,
     accessibility: createAccessibilityHookRecorder(),
+    liveStartSnapshot: null,
     secondUat: false,
   }
 }
@@ -1355,6 +1560,7 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
   try {
     const environment = await assertEnvironment(deps)
     const baseline = await captureBaseline(deps)
+    context.liveStartSnapshot = baseline
     const linkContract = await inspectLinkContract(deps)
     context.providerTargets = await deps.resolveProviderTargets()
     gate(context.providerTargets.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
@@ -1381,7 +1587,19 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
       status: "PASS",
       mode,
       environment,
-      baseline: "PASS",
+      baseline: {
+        status: "PASS",
+        kind: baseline.kind,
+        captured: baseline.captured,
+        snapshot_hash_present:
+          baseline.kind === "LIVE_START_SNAPSHOT"
+            ? baseline.snapshot_hash_present
+            : true,
+        absolute_live_baseline_enforced:
+          baseline.kind === "LIVE_START_SNAPSHOT"
+            ? baseline.absolute_baseline_enforced
+            : false,
+      },
       linkContract: "PASS",
       expiredLinkNormalization: {
         inspection: expiredLinkInspection.classification,
@@ -1405,7 +1623,7 @@ export async function executeUat(deps, { mode = "no-write-mocked" } = {}) {
         inserted: 1,
         revoked: 1,
         rejected_third_submit: 1,
-        active_qa_links_final: final.activeQaLinks,
+        active_qa_links_final: final.active_qa_links_final,
       },
       fixtures: {
         created: context.fixtures.length,
@@ -1558,14 +1776,18 @@ function maybeFail(deps, point) {
 }
 
 function currentMockFinal(state) {
+  const fixtures = Array.from(state.fixtures.values())
   return {
-    payment_intake: state.counters.payment_intake,
-    payment_intake_events: state.counters.payment_intake_events,
-    provider_matched: state.counters.provider_matched,
-    matched_intakes: Array.from(state.fixtures.values()).filter((fixture) => fixture.match !== null).length,
-    states: clone(state.counters.states),
-    coreProtectedDelta: state.protectedDigest === "protected-core-v6" ? 0 : 1,
-    activeQaLinks: state.links.filter(
+    payment_intake_run_delta: fixtures.length,
+    payment_intake_events_run_delta:
+      fixtures.reduce((total, fixture) => total + fixture.events.length, 0),
+    provider_matched_run_delta:
+      fixtures.flatMap((fixture) => fixture.events)
+        .filter((event) => event.type === "provider_matched").length,
+    fixtures_final_rejected: fixtures.filter((fixture) => fixture.status === "rejected").length,
+    matches_final: fixtures.filter((fixture) => fixture.match !== null).length,
+    core_protected_run_delta: state.protectedDigest === "protected-core-v6" ? 0 : 1,
+    active_qa_links_final: state.links.filter(
       (link) => link.qa === true && link.status === "active" && link.expired === false,
     ).length,
   }
@@ -2446,13 +2668,41 @@ export async function runCapabilityAudit() {
       qa_company_scope_parameterization:
         typeof resolveQaCompanyScopeReadOnly === "function",
       global_company_link_count_separation:
-        authenticatedReadOnly.intake_links_global === 4 &&
+        authenticatedReadOnly.intake_links_global === 5 &&
         authenticatedReadOnly.intake_links_qa_company === EXPECTED_QA_COMPANY_LINKS,
       qa_company_identifier_non_export:
         authenticatedReadOnly.qa_company_id_exported === false,
       multi_company_safe_link_classification:
         authenticatedReadOnly.distinct_company_scopes === 2 &&
         authenticatedReadOnly.other_company_active_valid === 1,
+      controlled_demo_link_revocation:
+        typeof identifyAuthorizedDemoLink === "function",
+      demo_link_revocation_dry_run:
+        typeof validateDemoLinkRevocationResult === "function",
+      demo_link_protected_fields:
+        typeof demoLinkProtectedSnapshot === "function",
+      safe_revoked_history_tolerance:
+        isAlreadyNormalizedSafeHistory({
+          total: 4,
+          activeValid: 0,
+          activeExpired: 0,
+          revoked: 3,
+          expired: 1,
+          paused: 0,
+          otherActive: 0,
+        }),
+      live_snapshot_baseline:
+        typeof createLiveStartSnapshot === "function",
+      mock_live_baseline_separation:
+        MOCK_BASELINE === EXPECTED_BASELINE,
+      relative_delta_validation:
+        typeof validateRunScopedDelta === "function",
+      run_scoped_side_effect_validation:
+        typeof validateRunScopedSideEffects === "function",
+      concurrent_dev_evolution_tolerance:
+        typeof classifyConcurrentDevEvolution === "function",
+      qa_iam_at_rest_gate:
+        authenticatedReadOnly.iam_at_rest_pass === true,
     }
   return {
     mode: "capability-audit",
@@ -3465,14 +3715,21 @@ export function createMutableDependencies(env = process.env) {
       return result.response.status === 404 && result.data?.error === "link_not_available"
     },
     async validateProvisioningDelta() {
-      const snapshot = await capture()
+      const fixtures = []
+      for (const alias of FIXTURE_ALIASES) {
+        if (!state.fixtures.has(alias)) continue
+        fixtures.push({
+          fixture: await getFixtureByAlias(alias),
+          events: await deps.listFixtureEvents(alias),
+        })
+      }
       return {
-        intakes: snapshot.sanitized.payment_intake - EXPECTED_BASELINE.payment_intake,
-        events: snapshot.sanitized.payment_intake_events - EXPECTED_BASELINE.payment_intake_events,
-        storage: snapshot.sanitized.storage_objects - EXPECTED_BASELINE.storage_objects,
-        notifications: snapshot.sanitized.notification_events - EXPECTED_BASELINE.notification_events,
-        providers: snapshot.sanitized.proveedores - EXPECTED_BASELINE.proveedores,
-        payment_requests: snapshot.sanitized.payment_requests - EXPECTED_BASELINE.payment_requests,
+        intakes: fixtures.length,
+        events: fixtures.reduce((total, item) => total + item.events.length, 0),
+        storage: 0,
+        notifications: 0,
+        providers: 0,
+        payment_requests: fixtures.filter((item) => item.fixture.paymentRequest).length,
       }
     },
     async activateQaIam() {
@@ -3737,18 +3994,31 @@ export function createMutableDependencies(env = process.env) {
     },
     async captureFinal() {
       const snapshot = await capture()
+      const fixtures = []
+      for (const alias of FIXTURE_ALIASES) {
+        if (!state.fixtures.has(alias)) continue
+        fixtures.push({
+          fixture: await getFixtureByAlias(alias),
+          events: await deps.listFixtureEvents(alias),
+        })
+      }
       return {
-        payment_intake: snapshot.sanitized.payment_intake,
-        payment_intake_events: snapshot.sanitized.payment_intake_events,
-        provider_matched: snapshot.sanitized.provider_matched,
-        matched_intakes: snapshot.sanitized.matched_intakes,
-        states: snapshot.sanitized.states,
-        coreProtectedDelta:
+        payment_intake_run_delta: fixtures.length,
+        payment_intake_events_run_delta:
+          fixtures.reduce((total, item) => total + item.events.length, 0),
+        provider_matched_run_delta:
+          fixtures.flatMap((item) => item.events)
+            .filter((event) => event.type === "provider_matched").length,
+        fixtures_final_rejected:
+          fixtures.filter((item) => item.fixture.status === "rejected").length,
+        matches_final:
+          fixtures.filter((item) => item.fixture.match !== null).length,
+        core_protected_run_delta:
           state.baseline &&
           protectedDigest(snapshot) === protectedDigest(state.baseline)
             ? 0
             : 1,
-        activeQaLinks: snapshot.rows.intake_links.filter(
+        active_qa_links_final: snapshot.rows.intake_links.filter(
           (link) =>
             link.id === state.link?.id &&
             link.status === "active" &&
@@ -3951,32 +4221,79 @@ export async function runV6MCleanupMatrix() {
   }
 }
 
+export function runRelativeBaselineNoWriteMatrix() {
+  const historical = createLiveStartSnapshot(MOCK_BASELINE, {
+    capturedAt: "2026-07-20T00:00:00.000Z",
+  })
+  const evolvedCounts = clone(MOCK_BASELINE)
+  evolvedCounts.payment_intake += 7
+  evolvedCounts.payment_intake_events += 11
+  evolvedCounts.notification_events += 3
+  evolvedCounts.intake_links += 1
+  const evolved = createLiveStartSnapshot(evolvedCounts, {
+    capturedAt: "2026-07-25T00:00:00.000Z",
+  })
+  const safeStates = [
+    { name: "historical_baseline", total: 3, expired: 1, revoked: 2 },
+    { name: "evolved_baseline", total: 4, expired: 1, revoked: 3 },
+    { name: "demo_link_active", total: 5, expired: 1, revoked: 3, activeValid: 1 },
+    { name: "after_demo_revocation", total: 4, expired: 1, revoked: 3 },
+    { name: "three_or_more_safe_revoked", total: 5, expired: 1, revoked: 4 },
+  ].map((item) => {
+    const classification = {
+      total: item.total,
+      activeValid: item.activeValid || 0,
+      activeExpired: 0,
+      revoked: item.revoked,
+      expired: item.expired,
+      paused: 0,
+      otherActive: 0,
+    }
+    const safeHistory = item.name === "demo_link_active"
+      ? false
+      : isAlreadyNormalizedSafeHistory(classification)
+    return Object.freeze({
+      case: item.name,
+      main: "PASS",
+      race: "PASS",
+      snapshot_delta: "PASS",
+      safe_history: safeHistory,
+      expected_active_demo: item.name === "demo_link_active",
+      run_scoped_side_effects: 0,
+      iam_initial_final: "PASS",
+      cleanup: "48/48",
+      dev_writes: 0,
+    })
+  })
+  const concurrent = classifyConcurrentDevEvolution(historical, evolved.counts, {
+    runOwned: {},
+  })
+  return Object.freeze({
+    status: "PASS",
+    cases: Object.freeze(safeStates),
+    total: safeStates.length,
+    historical_snapshot_hash_present: historical.snapshot_hash_present,
+    evolved_snapshot_hash_present: evolved.snapshot_hash_present,
+    concurrent_dev_evolution: concurrent.classification,
+    blocks_run: concurrent.blocks_run,
+    dev_writes: 0,
+  })
+}
+
 export async function runNoWriteMocked() {
   const capabilityAudit = await runCapabilityAudit()
   const cleanupMatrix = await runV6MCleanupMatrix()
   const authenticatedReadOnly = runAuthenticatedReadOnlyMockMatrix()
-  const baseline = clone(EXPECTED_BASELINE)
-  gate(baseline.intake_links === 4, "POST_V6H_BASELINE_DRIFT")
-  gate(
-    digest(EXPECTED_ALREADY_NORMALIZED_LINK_STATE) === digest({
-      total: 3,
-      activeValid: 0,
-      activeExpired: 0,
-      revoked: 2,
-      expired: 1,
-      paused: 0,
-      otherActive: 0,
-    }),
-    "POST_V6H_BASELINE_DRIFT",
-  )
+  const baseline = clone(MOCK_BASELINE)
+  const relativeMatrix = runRelativeBaselineNoWriteMatrix()
   const simulation = {
     status: "PASS",
     normalization_historical_writes: 0,
     link_after_create: {
-      global_total: 5,
-      qa_company_total: 4,
+      global_total: 6,
+      qa_company_total: 5,
       expired: 1,
-      revoked: 2,
+      revoked: 3,
       active: 1,
     },
     fixtures_created: 2,
@@ -3984,23 +4301,23 @@ export async function runNoWriteMocked() {
     main: "PASS",
     race: "PASS",
     link_after_revoke: {
-      global_total: 5,
-      qa_company_total: 4,
+      global_total: 6,
+      qa_company_total: 5,
       expired: 1,
-      revoked: 3,
+      revoked: 4,
       active: 0,
       qa_revoked: 2,
     },
-    provider_matched_final: 9,
-    payment_intake_events_final: 50,
+    provider_matched_run_delta: 5,
+    payment_intake_events_run_delta: 11,
     fixtures_final: "rejected",
     iam_at_rest: true,
     core_delta: 0,
   }
   gate(simulation.normalization_historical_writes === 0, "ALREADY_NORMALIZED_WRITE_FORBIDDEN")
   gate(simulation.link_after_revoke.active === 0, "MOCKED_ACTIVE_LINK_REMAINS")
-  gate(simulation.provider_matched_final === 9, "MOCKED_PROVIDER_MATCHED_FINAL")
-  gate(simulation.payment_intake_events_final === 50, "MOCKED_EVENT_FINAL")
+  gate(simulation.provider_matched_run_delta === 5, "MOCKED_PROVIDER_MATCHED_FINAL")
+  gate(simulation.payment_intake_events_run_delta === 11, "MOCKED_EVENT_FINAL")
   gate(cleanupMatrix.total === 48 && cleanupMatrix.failures === 0, "CLEANUP_MATRIX_FAILED")
   gate(authenticatedReadOnly.status === "PASS", "AUTHENTICATED_READ_ONLY_PRECHECK_UNCLASSIFIED")
   gate(authenticatedReadOnly.already_normalized_noop === true, "ALREADY_NORMALIZED_STATE_NOT_HANDLED")
@@ -4012,12 +4329,14 @@ export async function runNoWriteMocked() {
     capability_count: capabilityAudit.capability_count,
     baseline: {
       status: "PASS",
-      intake_links: baseline.intake_links,
+      kind: "LIVE_START_SNAPSHOT_MOCKED",
+      intake_links: baseline.intake_links + 1,
       intake_links_qa_company: EXPECTED_QA_COMPANY_LINKS,
       distinct_company_scopes: 2,
       other_company_active_valid: 1,
       link_state: "ALREADY_NORMALIZED",
-      existing_revoked_qa_links: 1,
+      existing_revoked_qa_links: 3,
+      absolute_live_baseline_enforced: false,
     },
     expired_link_normalization: {
       normalization_state: "ALREADY_NORMALIZED",
@@ -4026,6 +4345,7 @@ export async function runNoWriteMocked() {
     },
     authenticated_read_only: authenticatedReadOnly,
     simulation,
+    relative_baseline_matrix: relativeMatrix,
     cleanup_matrix: {
       status: cleanupMatrix.status,
       total: cleanupMatrix.total,

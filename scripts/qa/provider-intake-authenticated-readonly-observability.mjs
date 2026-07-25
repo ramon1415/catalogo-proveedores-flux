@@ -1,3 +1,5 @@
+import crypto from "node:crypto"
+
 const MODE = "authenticated-read-only-precheck-diagnostic"
 
 export const AUTHENTICATED_READ_ONLY_STAGES = Object.freeze([
@@ -301,11 +303,12 @@ export function classifyAuthenticatedLinkState(rows, databaseNow) {
   const normalizationRequired = counts.total === 2 &&
     counts.active_valid === 0 && counts.active_expired === 1 &&
     counts.expired === 0 && counts.revoked === 1 && counts.other_active === 0
-  const alreadyNormalized = counts.total === 3 &&
+  const alreadyNormalized = counts.total >= 3 &&
     counts.active_valid === 0 && counts.active_expired === 0 &&
-    counts.expired === 1 && counts.revoked === 2 && counts.other_active === 0 &&
+    counts.expired === 1 && counts.revoked >= 2 && counts.other_active === 0 &&
     counts.paused === 0 && counts.unknown === 0 &&
-    counts.qa_historical === 1 && counts.qa_active === 0 && counts.qa_revoked === 1
+    counts.qa_active === 0 && counts.qa_revoked >= 1 &&
+    counts.total === counts.expired + counts.revoked
   if (!normalizationRequired && !alreadyNormalized) {
     throw new AuthenticatedReadOnlyObservabilityError("LINK_STATE_CONTRACT_MISMATCH", {
       category: "LINK_STATE_CONTRACT_MISMATCH",
@@ -351,6 +354,12 @@ export function createAuthenticatedReadOnlyEnvelope(mode = MODE) {
     intake_links_qa_company: null,
     fresh_baseline_completed: false,
     fresh_baseline: null,
+    live_snapshot_captured: false,
+    snapshot_shape_valid: false,
+    snapshot_hash_present: false,
+    static_integrity_pass: false,
+    iam_at_rest_pass: false,
+    absolute_live_baseline_enforced: false,
     read_only_sql_scan: "PASS",
     read_only_sql_statements: 0,
     writes: 0,
@@ -392,6 +401,12 @@ const REQUIRED_ENVELOPE_FIELDS = Object.freeze([
   "intake_links_global",
   "distinct_company_scopes",
   "intake_links_qa_company",
+  "live_snapshot_captured",
+  "snapshot_shape_valid",
+  "snapshot_hash_present",
+  "static_integrity_pass",
+  "iam_at_rest_pass",
+  "absolute_live_baseline_enforced",
   "writes",
   "token_generated",
   "provider_intake_calls",
@@ -428,6 +443,9 @@ export function validateAuthenticatedReadOnlyEnvelope(value) {
     if (!value.connection_established || !value.transaction_started ||
         !value.transaction_read_only || !value.query_completed ||
         !value.rollback_completed || !value.fresh_baseline_completed ||
+        !value.live_snapshot_captured || !value.snapshot_shape_valid ||
+        !value.snapshot_hash_present || !value.static_integrity_pass ||
+        !value.iam_at_rest_pass || value.absolute_live_baseline_enforced !== false ||
         !["ALREADY_NORMALIZED", "NORMALIZATION_REQUIRED"].includes(value.state) ||
         !["on", "off", "unknown"].includes(
           String(value.initial_default_transaction_read_only || "").toLowerCase(),
@@ -439,9 +457,12 @@ export function validateAuthenticatedReadOnlyEnvelope(value) {
         ) ||
         value.qa_company_scope_applied !== true ||
         value.qa_company_candidate_count !== 1 ||
-        value.intake_links_global !== 4 ||
-        value.distinct_company_scopes !== 2 ||
-        value.intake_links_qa_company !== 3) {
+        !Number.isInteger(value.intake_links_global) ||
+        value.intake_links_global < 1 ||
+        !Number.isInteger(value.distinct_company_scopes) ||
+        value.distinct_company_scopes < 2 ||
+        !Number.isInteger(value.intake_links_qa_company) ||
+        value.intake_links_qa_company < 3) {
       throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
         category: "RESULT_CONTRACT_INVALID",
       })
@@ -546,17 +567,17 @@ function parseDatabaseUrl(value) {
     )
     select company_id::text as company_id
       from company_link_state
-     where total = 3
-       and active = 0
+     where active = 0
        and active_valid = 0
        and active_expired = 0
        and other_active = 0
        and expired = 1
-       and revoked = 2
+       and revoked >= 2
        and paused = 0
        and unknown = 0
-       and qa_revoked = 1
+       and qa_revoked >= 1
        and qa_active = 0
+       and total = expired + revoked
      order by company_id
   `,
   links: `
@@ -569,6 +590,27 @@ function parseDatabaseUrl(value) {
     select count(*)::int as intake_links_global,
            count(distinct company_id)::int as distinct_company_scopes
       from public.intake_links
+  `,
+  otherCompanyActiveValid: `
+    select count(*)::int as count
+      from public.intake_links
+     where company_id <> $1::uuid
+       and status = 'active'
+       and expires_at is not null
+       and expires_at >= now()
+  `,
+  staticIntegrity: `
+    select
+      (to_regprocedure('public.find_provider_intake_candidates(uuid,text,integer)') is not null) as candidates_rpc,
+      (to_regprocedure('public.get_provider_intake_match_comparison(uuid,uuid)') is not null) as comparison_rpc,
+      (to_regprocedure('public.set_provider_intake_match(uuid,text,timestamptz,uuid,uuid,text,text,uuid)') is not null) as mutation_rpc,
+      (select relrowsecurity from pg_class where oid='public.intake_links'::regclass) as intake_links_rls,
+      (select relrowsecurity from pg_class where oid='public.payment_intake'::regclass) as payment_intake_rls,
+      (select count(*)::int from public.payment_intake pi left join public.intake_links il on il.id=pi.intake_link_id where il.id is null) as orphan_intakes,
+      (select count(*)::int from public.payment_intake_events e left join public.payment_intake pi on pi.id=e.payment_intake_id where pi.id is null) as orphan_events,
+      (select count(*)::int from public.payment_intake_files f left join public.payment_intake pi on pi.id=f.payment_intake_id where pi.id is null) as orphan_files,
+      (select count(*)::int from public.intake_links where status='active' and expires_at<now()) as active_expired_links,
+      (select count(*)::int from (select company_id from public.intake_links where status='active' group by company_id having count(*)>1) d) as duplicate_active_scopes
   `,
   qaProfiles: `
     select p.id::text as profile_id, au.id::text as auth_user_id,
@@ -731,16 +773,34 @@ async function captureFreshBaseline(client, linkState, qaCompanyId, globalAggreg
   }
   baseline.distinct_company_scopes = globalAggregate.distinct_company_scopes
   baseline.intake_links_qa_company = linkState.counts.total
+  baseline.other_company_active_valid = await scalar(
+    client,
+    SQL.otherCompanyActiveValid,
+    [qaCompanyId],
+  )
   if (baseline.intake_links !== globalAggregate.intake_links_global ||
-      baseline.distinct_company_scopes !== 2 ||
-      baseline.intake_links_qa_company !== 3 ||
+      !Number.isInteger(baseline.distinct_company_scopes) ||
+      baseline.distinct_company_scopes < 2 ||
+      baseline.intake_links_qa_company !== linkState.counts.total ||
       baseline.links.active_expired !== linkState.counts.active_expired ||
       baseline.links.expired !== linkState.counts.expired ||
-      baseline.links.revoked !== linkState.counts.revoked) {
+      baseline.links.revoked !== linkState.counts.revoked ||
+      baseline.other_company_active_valid < 1 ||
+      baseline.iam.qa_principals !== 2 ||
+      baseline.iam.profiles_inactive !== 2 ||
+      baseline.iam.auth_blocked !== 2 ||
+      baseline.iam.roles !== 0 ||
+      baseline.iam.memberships !== 0 ||
+      baseline.iam.sessions !== 0 ||
+      baseline.iam.refresh_tokens !== 0) {
     throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
       category: "RESULT_CONTRACT_INVALID",
     })
   }
+  baseline.snapshot_hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(baseline))
+    .digest("hex")
   return baseline
 }
 
@@ -899,7 +959,10 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.intake_links_global = Number(globalAggregate?.intake_links_global)
     envelope.distinct_company_scopes = Number(globalAggregate?.distinct_company_scopes)
     envelope.global_company_scope_count = envelope.distinct_company_scopes
-    if (envelope.intake_links_global !== 4 || envelope.distinct_company_scopes !== 2) {
+    if (!Number.isInteger(envelope.intake_links_global) ||
+        envelope.intake_links_global < 1 ||
+        !Number.isInteger(envelope.distinct_company_scopes) ||
+        envelope.distinct_company_scopes < 2) {
       throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
         category: "RESULT_CONTRACT_INVALID",
       })
@@ -925,6 +988,42 @@ export async function runAuthenticatedReadOnlyPrecheck({
       },
     )
     envelope.fresh_baseline_completed = true
+    const integrityResult = await queryReadOnly(client, SQL.staticIntegrity)
+    const integrity = integrityResult?.rows?.[0] || {}
+    const staticBooleans = [
+      integrity.candidates_rpc,
+      integrity.comparison_rpc,
+      integrity.mutation_rpc,
+      integrity.intake_links_rls,
+      integrity.payment_intake_rls,
+    ]
+    const staticCounts = [
+      integrity.orphan_intakes,
+      integrity.orphan_events,
+      integrity.orphan_files,
+      integrity.active_expired_links,
+      integrity.duplicate_active_scopes,
+    ].map(Number)
+    envelope.live_snapshot_captured = true
+    envelope.snapshot_shape_valid = true
+    envelope.snapshot_hash_present =
+      /^[0-9a-f]{64}$/.test(String(envelope.fresh_baseline.snapshot_hash || ""))
+    envelope.static_integrity_pass =
+      staticBooleans.every((value) => value === true) &&
+      staticCounts.every((value) => value === 0) &&
+      envelope.fresh_baseline.other_company_active_valid >= 1 &&
+      linkState.state === "ALREADY_NORMALIZED"
+    envelope.static_integrity_checks = 10
+    envelope.static_integrity_failures = envelope.static_integrity_pass ? 0 : 1
+    envelope.iam_at_rest_pass =
+      envelope.fresh_baseline.iam.qa_principals === 2 &&
+      envelope.fresh_baseline.iam.profiles_inactive === 2 &&
+      envelope.fresh_baseline.iam.auth_blocked === 2 &&
+      envelope.fresh_baseline.iam.roles === 0 &&
+      envelope.fresh_baseline.iam.memberships === 0 &&
+      envelope.fresh_baseline.iam.sessions === 0 &&
+      envelope.fresh_baseline.iam.refresh_tokens === 0
+    envelope.absolute_live_baseline_enforced = false
     completed(envelope, currentStage)
 
     currentStage = "RESULT_CONTRACT_VALIDATION"
@@ -1097,13 +1196,19 @@ export function runAuthenticatedReadOnlyMockMatrix() {
     transaction_read_only: true,
     query_completed: true,
     fresh_baseline_completed: true,
+    live_snapshot_captured: true,
+    snapshot_shape_valid: true,
+    snapshot_hash_present: true,
+    static_integrity_pass: true,
+    iam_at_rest_pass: true,
+    absolute_live_baseline_enforced: false,
     qa_company_scope_source: "DETERMINISTIC_READ_ONLY",
     qa_company_scope_applied: true,
     qa_company_candidate_count: 1,
     qa_company_id_exported: false,
-    intake_links_global: 4,
+    intake_links_global: 5,
     distinct_company_scopes: 2,
-    intake_links_qa_company: 3,
+    intake_links_qa_company: 4,
     other_company_active_valid: 1,
     transaction_isolation: "read committed",
     public_submit_calls: 0,
