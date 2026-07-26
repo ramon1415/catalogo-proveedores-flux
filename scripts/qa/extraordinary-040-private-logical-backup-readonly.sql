@@ -132,10 +132,10 @@ relevant_policies as (
 ),
 authorization_statuses as (
   select
-    authorization.status::text as status,
+    extraordinary_auth.status::text as status,
     count(*) as count
-  from public.payment_request_extraordinary_authorizations authorization
-  group by authorization.status
+  from public.payment_request_extraordinary_authorizations extraordinary_auth
+  group by extraordinary_auth.status
 ),
 business_counts as (
   select jsonb_build_object(

@@ -20,11 +20,13 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: 6cfc4305c307a15653922b3a070946e1017a2dc2
+  EXPECTED_PARENT: 4d6bec22b40ef7ca4bf94fd85519f9d8744fb3ca
   EXPECTED_DEV_TIP: fb7f406c3909a6ad881402870a7d56bccbdeb466
   EXPECTED_MERGE_BASE: eb7ffea22bbab37c4b4f752e718e86fe2c23ccf4
   EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
+  EXPECTED_BACKUP_SHA256: 08adee97663e641b64a171a47c26fdaa9a5831b8c513234ef5e00d04fa3af6b9
   MIGRATION_FILE: supabase/migrations/040_fix_extraordinary_consumption_and_material_invalidation.sql
+  BACKUP_FILE: scripts/qa/extraordinary-040-private-logical-backup-readonly.sql
   EVIDENCE_DIR: /tmp/extraordinary-040-one-shot
   FEATURE_BRANCH: feature/ramon-post-yanin-bugs-extraordinary
   PR_NUMBER: "277"
@@ -166,15 +168,18 @@ jobs:
           mapfile -t changed_files < <(
             git diff --name-only HEAD^ HEAD | sort
           )
-          test "${#changed_files[@]}" -eq 1
+          test "${#changed_files[@]}" -eq 2
           test "${changed_files[0]}" = \
             ".github/workflows/extraordinary-040-dev-one-shot.yml"
+          test "${changed_files[1]}" = \
+            "scripts/qa/extraordinary-040-private-logical-backup-readonly.sql"
           test "$(
             git diff --name-only \
               "$EXPECTED_PARENT" \
               "$GITHUB_SHA" \
               -- . \
-              ':(exclude).github/workflows/extraordinary-040-dev-one-shot.yml'
+              ':(exclude).github/workflows/extraordinary-040-dev-one-shot.yml' \
+              ':(exclude)scripts/qa/extraordinary-040-private-logical-backup-readonly.sql'
           )" = ""
 
           test "$(
@@ -218,7 +223,7 @@ jobs:
           test "$(jq -r '.merged' <<<"$pr_json")" = "false"
           test "$(jq -r '.mergeable' <<<"$pr_json")" != "false"
 
-      - name: Extract and verify the exact 040 Git blob
+      - name: Extract and verify exact migration and backup Git blobs
         shell: bash
         run: |
           set -euo pipefail
@@ -247,6 +252,33 @@ jobs:
           printf '%s\n' "$actual_sha" \
             > "$EVIDENCE_DIR/migration-sha256.txt"
           echo "MIGRATION_040_EXACT_BLOB_PASS"
+
+          test "$(
+            git rev-parse "${GITHUB_SHA}:${BACKUP_FILE}"
+          )" = "a4f4deb4861dc82abfb016bc0581127e444cb70a"
+          git show \
+            "$GITHUB_SHA:$BACKUP_FILE" \
+            > "$EVIDENCE_DIR/040-backup-exact.sql"
+
+          actual_backup_sha="$(
+            sha256sum "$EVIDENCE_DIR/040-backup-exact.sql" |
+            cut -d' ' -f1
+          )"
+          test "$actual_backup_sha" = "$EXPECTED_BACKUP_SHA256"
+          cmp --silent \
+            "$EVIDENCE_DIR/040-backup-exact.sql" \
+            "$BACKUP_FILE"
+          test "$(wc -c < "$EVIDENCE_DIR/040-backup-exact.sql")" -eq 9530
+          test "$(wc -l < "$EVIDENCE_DIR/040-backup-exact.sql")" -eq 309
+          if head -c 3 "$EVIDENCE_DIR/040-backup-exact.sql" |
+             od -An -t x1 |
+             grep -qi 'ef bb bf'; then
+            echo "::error::Unexpected backup BOM"
+            exit 1
+          fi
+          printf '%s\n' "$actual_backup_sha" \
+            > "$EVIDENCE_DIR/backup-source-sha256.txt"
+          echo "BACKUP_040_EXACT_BLOB_PASS"
 
       - name: Classify DEV database route and require secure libpq mode
         shell: bash
@@ -678,7 +710,7 @@ jobs:
             --set "backup_commit=$GITHUB_SHA" \
             --set "backup_project_ref=$DEV_PROJECT_REF" \
             --set "backup_migration_sha=$EXPECTED_MIGRATION_SHA256" \
-            --file scripts/qa/extraordinary-040-private-logical-backup-readonly.sql \
+            --file "$EVIDENCE_DIR/040-backup-exact.sql" \
             > "$EVIDENCE_DIR/private-backup.raw"
           grep -F "BACKUP_040_CLEAN_RUN_PASS" \
             "$EVIDENCE_DIR/private-backup.raw"
@@ -863,6 +895,7 @@ jobs:
           name: extraordinary-040-one-shot-${{ github.run_id }}
           path: |
             /tmp/extraordinary-040-one-shot/migration-sha256.txt
+            /tmp/extraordinary-040-one-shot/backup-source-sha256.txt
             /tmp/extraordinary-040-one-shot/client-tls-sanitized.json
             /tmp/extraordinary-040-one-shot/dev-binding.json
             /tmp/extraordinary-040-one-shot/state-before.json
