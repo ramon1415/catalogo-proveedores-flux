@@ -20,8 +20,9 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: 8a1035623ebe3d454c4edd1e97251e5a7b505f88
-  EXPECTED_BASE: fb7f406c3909a6ad881402870a7d56bccbdeb466
+  EXPECTED_PARENT: 8802e1418d83dffc15f3a79e6d1dfaf32215be88
+  EXPECTED_DEV_TIP: fb7f406c3909a6ad881402870a7d56bccbdeb466
+  EXPECTED_MERGE_BASE: eb7ffea22bbab37c4b4f752e718e86fe2c23ccf4
   EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
   MIGRATION_FILE: supabase/migrations/040_fix_extraordinary_consumption_and_material_invalidation.sql
   EVIDENCE_DIR: /tmp/extraordinary-040-one-shot
@@ -62,25 +63,89 @@ jobs:
             echo "::error::BLOCKED_040_ONE_SHOT_PARENT_CHANGED"
             exit 1
           fi
-          if ! git cat-file -e "${EXPECTED_BASE}^{commit}"; then
-            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+          if ! git cat-file -e "${EXPECTED_DEV_TIP}^{commit}"; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
+            exit 1
+          fi
+          if ! git cat-file -e "${EXPECTED_MERGE_BASE}^{commit}"; then
+            echo "::error::BLOCKED_040_GENEALOGY_OBJECT_MISSING"
             exit 1
           fi
           git cat-file -e "${GITHUB_SHA}^{commit}"
+          git cat-file -e "refs/remotes/origin/dev^{commit}"
 
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
-          git merge-base --is-ancestor "$EXPECTED_BASE" "$GITHUB_SHA"
-          if [ "$(git rev-parse refs/remotes/origin/dev)" != \
-               "$EXPECTED_BASE" ]; then
-            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+          actual_dev_tip="$(
+            git rev-parse refs/remotes/origin/dev
+          )"
+          if [ "$actual_dev_tip" != "$EXPECTED_DEV_TIP" ]; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
             exit 1
           fi
-          if ! git merge-base --is-ancestor \
-            "$EXPECTED_BASE" "refs/remotes/origin/dev"; then
-            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+          actual_merge_base="$(
+            git merge-base "$GITHUB_SHA" refs/remotes/origin/dev
+          )"
+          if [ "$actual_merge_base" != "$EXPECTED_MERGE_BASE" ]; then
+            echo "::error::BLOCKED_040_MERGE_BASE_CHANGED"
             exit 1
           fi
+          git merge-base --is-ancestor \
+            "$EXPECTED_MERGE_BASE" "$GITHUB_SHA"
+          git merge-base --is-ancestor \
+            "$EXPECTED_MERGE_BASE" refs/remotes/origin/dev
+
+          mapfile -t dev_delta_files < <(
+            git diff \
+              --name-only \
+              "$EXPECTED_MERGE_BASE" \
+              "$EXPECTED_DEV_TIP" |
+            sort
+          )
+          mapfile -t expected_dev_delta_files < <(
+            printf '%s\n' \
+              "comprobantes_batch.js" \
+              "payment_request_reconciliation_evidence.js" \
+              "scripts/qa/payment-batch-final-gaps-contract.test.mjs" |
+            sort
+          )
+          if [ "${#dev_delta_files[@]}" -ne \
+               "${#expected_dev_delta_files[@]}" ]; then
+            echo "::error::BLOCKED_040_UNREVIEWED_DEV_DELTA"
+            exit 1
+          fi
+          for index in "${!expected_dev_delta_files[@]}"; do
+            if [ "${dev_delta_files[$index]}" != \
+                 "${expected_dev_delta_files[$index]}" ]; then
+              echo "::error::BLOCKED_040_UNREVIEWED_DEV_DELTA"
+              exit 1
+            fi
+          done
+
+          mapfile -t feature_delta_files < <(
+            git diff \
+              --name-only \
+              "$EXPECTED_MERGE_BASE" \
+              "$GITHUB_SHA" |
+            sort
+          )
+          overlap="$(
+            comm -12 \
+              <(printf '%s\n' "${dev_delta_files[@]}" | sort) \
+              <(printf '%s\n' "${feature_delta_files[@]}" | sort)
+          )"
+          if [ -n "$overlap" ]; then
+            echo "::error::BLOCKED_040_DEV_FEATURE_FILE_OVERLAP"
+            exit 1
+          fi
+
+          echo "EXPECTED_DEV_TIP=$EXPECTED_DEV_TIP"
+          echo "ACTUAL_DEV_TIP=$actual_dev_tip"
+          echo "EXPECTED_MERGE_BASE=$EXPECTED_MERGE_BASE"
+          echo "ACTUAL_MERGE_BASE=$actual_merge_base"
+          echo "FEATURE_HEAD=$GITHUB_SHA"
+          echo "FEATURE_PARENT=$EXPECTED_PARENT"
+          echo "DEV_FEATURE_OVERLAP_COUNT=0"
 
       - name: Guard repository, branch, parent, PR and immutable files
         shell: bash
@@ -97,7 +162,6 @@ jobs:
             echo "::error::BLOCKED_040_ONE_SHOT_PARENT_CHANGED"
             exit 1
           fi
-          git merge-base --is-ancestor "$EXPECTED_BASE" "$GITHUB_SHA"
 
           mapfile -t changed_files < <(
             git diff --name-only HEAD^ HEAD | sort
@@ -135,7 +199,8 @@ jobs:
               gh api \
                 "repos/ramon1415/catalogo-proveedores-flux/pulls/$PR_NUMBER"
             )"
-            if [ "$(jq -r '.head.sha' <<<"$pr_json")" = "$GITHUB_SHA" ]; then
+            if [ "$(jq -r '.head.sha' <<<"$pr_json")" = "$GITHUB_SHA" ] && \
+               [ "$(jq -r '.mergeable' <<<"$pr_json")" != "null" ]; then
               break
             fi
             sleep 5
@@ -143,8 +208,9 @@ jobs:
           test "$(jq -r '.state' <<<"$pr_json")" = "open"
           test "$(jq -r '.draft' <<<"$pr_json")" = "true"
           test "$(jq -r '.base.ref' <<<"$pr_json")" = "dev"
-          if [ "$(jq -r '.base.sha' <<<"$pr_json")" != "$EXPECTED_BASE" ]; then
-            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+          if [ "$(jq -r '.base.sha' <<<"$pr_json")" != \
+               "$EXPECTED_DEV_TIP" ]; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
             exit 1
           fi
           test "$(jq -r '.head.ref' <<<"$pr_json")" = "$FEATURE_BRANCH"
