@@ -20,7 +20,7 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: 8802e1418d83dffc15f3a79e6d1dfaf32215be88
+  EXPECTED_PARENT: 6cfc4305c307a15653922b3a070946e1017a2dc2
   EXPECTED_DEV_TIP: fb7f406c3909a6ad881402870a7d56bccbdeb466
   EXPECTED_MERGE_BASE: eb7ffea22bbab37c4b4f752e718e86fe2c23ccf4
   EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
@@ -248,24 +248,126 @@ jobs:
             > "$EVIDENCE_DIR/migration-sha256.txt"
           echo "MIGRATION_040_EXACT_BLOB_PASS"
 
-      - name: Bind exclusively to the DEV database
+      - name: Classify DEV database route and require secure libpq mode
         shell: bash
         run: |
           set -euo pipefail
           test -n "$SUPABASE_DEV_DB_URL"
           echo "::add-mask::$SUPABASE_DEV_DB_URL"
-          case "$SUPABASE_DEV_DB_URL" in
-            *"$DEV_PROJECT_REF"*) ;;
-            *)
-              echo "::error::Non-DEV database URL"
-              exit 1
-              ;;
-          esac
+
+          python3 <<'PY' >> "$GITHUB_ENV"
+          import os
+          from urllib.parse import parse_qs, urlsplit
+
+          project_ref = "scsirgbuqjcwoaxfacth"
+          raw = os.environ["SUPABASE_DEV_DB_URL"]
+          parsed = urlsplit(raw)
+
+          host = (parsed.hostname or "").lower()
+          port = parsed.port
+          username = parsed.username or ""
+          params = parse_qs(parsed.query, keep_blank_values=True)
+
+          if parsed.scheme not in {"postgres", "postgresql"} or not host or not port:
+              raise SystemExit("BLOCKED_040_INVALID_DEV_DATABASE_URL")
+
+          ssl_values = params.get("sslmode", [])
+          if len(ssl_values) > 1:
+              raise SystemExit("BLOCKED_040_MULTIPLE_SSLMODE_PARAMETERS")
+
+          sslmode = ssl_values[0].lower() if ssl_values else ""
+          secure_modes = {"require", "verify-ca", "verify-full"}
+
+          if sslmode and sslmode not in secure_modes:
+              raise SystemExit("BLOCKED_040_INSECURE_SSLMODE_IN_SECRET")
+
+          direct_host = f"db.{project_ref}.supabase.co"
+
+          if host == direct_host and port == 5432:
+              route = "direct"
+          elif host.endswith(".pooler.supabase.com") and port == 5432:
+              route = "session_pooler"
+          elif port == 6543 and (
+              host == direct_host or host.endswith(".pooler.supabase.com")
+          ):
+              route = "transaction_pooler"
+          else:
+              raise SystemExit("BLOCKED_040_UNEXPECTED_DATABASE_ROUTE")
+
+          if route == "transaction_pooler":
+              raise SystemExit("BLOCKED_040_TRANSACTION_POOLER_NOT_ALLOWED")
+
+          if route == "direct":
+              if project_ref not in host:
+                  raise SystemExit("BLOCKED_040_DIRECT_PROJECT_REF_MISMATCH")
+          elif project_ref not in username and project_ref not in raw:
+              raise SystemExit("BLOCKED_040_POOLER_PROJECT_REF_MISMATCH")
+
+          print(f"DEV_DATABASE_ROUTE={route}")
+          print(f"DEV_DATABASE_PORT={port}")
+          print(
+              "DEV_DATABASE_SSLMODE_DECLARED="
+              f"{sslmode or 'environment_required'}"
+          )
+          PY
+
+          {
+            echo "PGSSLMODE=require"
+            echo "PGCONNECT_TIMEOUT=15"
+          } >> "$GITHUB_ENV"
+
+          echo "DEV_DATABASE_ROUTE_CLASSIFICATION_PASS"
+
+      - name: Verify client-side TLS with psql
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+
           if ! command -v psql >/dev/null 2>&1; then
             sudo apt-get -qq update >/dev/null
             sudo apt-get -qq install -y postgresql-client >/dev/null
           fi
           psql --version
+
+          test "${PGSSLMODE:-}" = "require"
+          if ! conninfo_output="$(
+            psql "$SUPABASE_DEV_DB_URL" \
+              --no-psqlrc \
+              --set ON_ERROR_STOP=1 \
+              --command '\conninfo' \
+              2>&1
+          )"; then
+            echo "::error::BLOCKED_040_CLIENT_TLS_NOT_CONFIRMED"
+            exit 1
+          fi
+          if ! grep -Eiq \
+            'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' \
+            <<<"$conninfo_output"; then
+            echo "::error::BLOCKED_040_CLIENT_TLS_NOT_CONFIRMED"
+            exit 1
+          fi
+
+          {
+            echo "{"
+            echo '  "client_tls_required": true,'
+            echo '  "client_tls_confirmed": true,'
+            printf '  "connection_route": "%s",\n' \
+              "$DEV_DATABASE_ROUTE"
+            printf '  "connection_port": %s,\n' "$DEV_DATABASE_PORT"
+            printf '  "sslmode_declared": "%s"\n' \
+              "$DEV_DATABASE_SSLMODE_DECLARED"
+            echo "}"
+          } > "$EVIDENCE_DIR/client-tls-sanitized.json"
+
+          echo "DEV_CLIENT_TLS_PASS"
+
+      - name: Verify read-only DEV database binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          test "${PGSSLMODE:-}" = "require"
 
           cat > "$EVIDENCE_DIR/dev-binding-readonly.sql" <<'SQL'
           \set ON_ERROR_STOP on
@@ -274,7 +376,7 @@ jobs:
           \pset format unaligned
           \pset tuples_only on
           select jsonb_build_object(
-            'ssl_active', coalesce((
+            'backend_ssl_observed', coalesce((
               select ssl
               from pg_stat_ssl
               where pid = pg_backend_pid()
@@ -298,14 +400,36 @@ jobs:
             > "$EVIDENCE_DIR/dev-binding.raw"
           grep '^{' "$EVIDENCE_DIR/dev-binding.raw" |
             tail -n 1 > "$EVIDENCE_DIR/dev-binding.json"
+          jq -e \
+            --arg route "$DEV_DATABASE_ROUTE" '
+              .client_tls_required == true
+              and .client_tls_confirmed == true
+              and .connection_route == $route
+            ' "$EVIDENCE_DIR/client-tls-sanitized.json" >/dev/null
           jq -e '
-            .ssl_active == true
-            and .database_expected == true
+            .database_expected == true
             and .role_expected == true
             and .transaction_read_only == "on"
           ' "$EVIDENCE_DIR/dev-binding.json" >/dev/null
+          backend_ssl_observed="$(
+            jq -r '.backend_ssl_observed | tostring' \
+              "$EVIDENCE_DIR/dev-binding.json"
+          )"
+          case "$backend_ssl_observed" in
+            true|false) ;;
+            *)
+              echo "::error::BLOCKED_040_BACKEND_SSL_OBSERVATION_INVALID"
+              exit 1
+              ;;
+          esac
+          if [ "$DEV_DATABASE_ROUTE" = "direct" ] && \
+             [ "$backend_ssl_observed" != "true" ]; then
+            echo "::error::BLOCKED_040_DIRECT_BACKEND_SSL_FALSE"
+            exit 1
+          fi
           grep -F "ROLLBACK" "$EVIDENCE_DIR/dev-binding.raw"
-          echo "DEV_DATABASE_BINDING_PASS"
+          echo "BACKEND_SSL_OBSERVED=$backend_ssl_observed"
+          echo "DEV_DATABASE_BINDING_AND_CLIENT_TLS_PASS"
 
       - name: Classify the one-shot state
         id: state_gate
@@ -739,6 +863,7 @@ jobs:
           name: extraordinary-040-one-shot-${{ github.run_id }}
           path: |
             /tmp/extraordinary-040-one-shot/migration-sha256.txt
+            /tmp/extraordinary-040-one-shot/client-tls-sanitized.json
             /tmp/extraordinary-040-one-shot/dev-binding.json
             /tmp/extraordinary-040-one-shot/state-before.json
             /tmp/extraordinary-040-one-shot/precheck-sanitized.json
