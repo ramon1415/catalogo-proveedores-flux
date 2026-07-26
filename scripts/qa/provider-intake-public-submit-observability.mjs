@@ -3,6 +3,12 @@ import fs from "node:fs"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
+import {
+  CANONICAL_DEV_PORTAL_ORIGIN,
+  CANONICAL_DEV_PORTAL_URL,
+  CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+  createCanonicalBrowserSubmitController,
+} from "./provider-intake-qa-credential-resolver.mjs"
 
 export const AUTHORIZED_DEV_PROJECT_REF = "scsirgbuqjcwoaxfacth"
 export const CANONICAL_IDEMPOTENCY_HEADER = "Idempotency-Key"
@@ -548,4 +554,29 @@ export async function runPublicSubmitObservabilityAudit({ previewUrl } = {}) {
     dev_writes: 0,
     mutable_execution: false,
   }
+}
+
+export function certifyCanonicalBrowserSubmitContract() {
+  const controller = createCanonicalBrowserSubmitController({
+    portalUrl: CANONICAL_DEV_PORTAL_URL,
+    endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+    enabled: false,
+  })
+  const contract = controller.sanitized()
+  gate(contract.browser_origin === CANONICAL_DEV_PORTAL_ORIGIN, "CANONICAL_BROWSER_ORIGIN_REQUIRED")
+  gate(contract.browser_path === "/solicitar.html", "CANONICAL_BROWSER_ORIGIN_REQUIRED")
+  gate(contract.public_submit_calls === 0, "PUBLIC_SUBMIT_OCCURRED_DURING_CRED_A1")
+  return Object.freeze({
+    mode: "credential-adapter-browser-contract-no-write",
+    status: "PASS",
+    ...contract,
+    runtime_turnstile_prepared: true,
+    provider_intake_calls: 0,
+    intake_tokens_generated: 0,
+    real_captcha_tokens_generated: 0,
+    links_created: 0,
+    iam_changes: 0,
+    dev_writes: 0,
+    mutable_execution: false,
+  })
 }

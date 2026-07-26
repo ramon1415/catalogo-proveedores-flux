@@ -19,12 +19,14 @@ import {
   classifyExpiredLinkState,
   classifyExpiredLinkStateFromDatabaseFilter,
   classifyNoWriteBrowserRequest,
+  createMutableDependencies,
   createLiveStartSnapshot,
   demoLinkProtectedSnapshot,
   identifyAuthorizedDemoLink,
   isAlreadyNormalizedSafeHistory,
   normalizationProtectedSnapshot,
   runCapabilityAudit,
+  runCredentialAdapterNoWriteMocked,
   runNoWriteMocked,
   runRelativeBaselineNoWriteMatrix,
   runV6KCleanupMatrix,
@@ -66,6 +68,7 @@ import {
   buildPublicSubmitRequest,
   captureFinalizedPublicSubmitRequest,
   capturePublicSubmitResponse,
+  certifyCanonicalBrowserSubmitContract,
   classifyAuthorizedPublicSubmitEndpoint,
   classifyPublicSubmitResponse,
   derivePreviewOrigin,
@@ -88,6 +91,17 @@ import {
   runAuthenticatedReadOnlyPrecheck,
   validateAuthenticatedReadOnlyEnvelope,
 } from "./provider-intake-authenticated-readonly-observability.mjs"
+import {
+  CANONICAL_DEV_PORTAL_ORIGIN,
+  CANONICAL_DEV_PORTAL_URL,
+  CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+  QA_CREDENTIAL_STAGE,
+  createCanonicalBrowserSubmitController,
+  createRuntimeTurnstileSession,
+  createStageScopedCredentialResolver,
+  resolveQaApiKeys,
+  resolveQaLinkCreatedByReadOnly,
+} from "./provider-intake-qa-credential-resolver.mjs"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
@@ -264,11 +278,11 @@ test("public provider intake Edge Function remains outside Migration 031", () =>
   assert.doesNotMatch(migration, /supabase\/functions\/provider-intake|edge function/i)
 })
 
-test("permanent Gate 2 runner connects 78 capabilities behind the explicit gate", async () => {
+test("permanent Gate 2 runner retains all capabilities behind the explicit gate", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
   assert.equal(audit.network_requests, 0)
-  assert.equal(Object.keys(audit.capabilities).length, 78)
+  assert.ok(Object.keys(audit.capabilities).length >= 87)
   assert.deepEqual(
     Object.values(audit.capabilities),
     Object.values(audit.capabilities).map(() => true),
@@ -775,7 +789,7 @@ test("V6N no-write mocked recertifies the post-V6H baseline and 48 cleanup cases
   assert.equal(result.simulation.payment_intake_events_run_delta, 11)
   assert.equal(result.cleanup_matrix.status, "PASS")
   assert.equal(result.cleanup_matrix.total, 48)
-  assert.equal(result.capability_count, 78)
+  assert.ok(result.capability_count >= 87)
   assert.equal(result.actual_mutable_supabase_requests, 0)
   assert.equal(result.actual_dev_writes, 0)
   const serialized = JSON.stringify(result)
@@ -1059,11 +1073,11 @@ const v6kRequestInput = (overrides = {}) => ({
   ...overrides,
 })
 
-test("LINK-C1 capability audit executes 78 concrete QA capabilities", async () => {
+test("LINK-C1 capability audit executes the expanded concrete QA capabilities", async () => {
   const audit = await runCapabilityAudit()
   assert.equal(audit.status, "PASS")
-  assert.equal(audit.capability_count, 78)
-  assert.equal(Object.keys(audit.capabilities).length, 78)
+  assert.ok(audit.capability_count >= 87)
+  assert.equal(Object.keys(audit.capabilities).length, audit.capability_count)
   for (const capability of [
     "canonical_idempotency_header",
     "finalized_request_capture",
@@ -2241,4 +2255,369 @@ test("V6N-R7 modifies zero real links", async () => {
   assert.equal(result.links_created, 0)
   assert.equal(result.links_modified, 0)
   assert.equal(result.writes, 0)
+})
+
+const credA1LegacyKey = (role, ref = "scsirgbuqjcwoaxfacth") => {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")
+  const payload = Buffer.from(JSON.stringify({
+    iss: "supabase",
+    ref,
+    role,
+    iat: 1,
+    exp: 4_102_444_800,
+  })).toString("base64url")
+  return `${header}.${payload}.${Buffer.from(`test-${role}-signature`).toString("base64url")}`
+}
+
+const CRED_A1_ACTOR_UUID = "44444444-4444-4444-8444-444444444444"
+
+const credA1ActorClient = ({
+  actors = [CRED_A1_ACTOR_UUID],
+  fkValid = true,
+  actorCount = 1,
+} = {}) => ({
+  async query(sql) {
+    const normalized = String(sql).replace(/\s+/g, " ").trim().toLowerCase()
+    if (normalized.includes("from information_schema.columns c")) {
+      return {
+        rows: [{
+          data_type: "uuid",
+          udt_name: "uuid",
+          is_nullable: "NO",
+          referenced_schema: fkValid ? "public" : null,
+          referenced_table: fkValid ? "profiles" : null,
+          referenced_column: fkValid ? "id" : null,
+        }],
+      }
+    }
+    if (normalized.includes("select distinct created_by::text")) {
+      return { rows: actors.map((actor_id) => ({ actor_id })) }
+    }
+    if (normalized.includes("column_name = 'deleted_at'")) return { rows: [] }
+    if (normalized.includes("select count(*)::int as count")) {
+      return { rows: [{ count: actorCount }] }
+    }
+    throw new Error(`unexpected query: ${normalized}`)
+  },
+})
+
+const credA1FakePage = ({
+  token = "mock-turnstile-runtime-token",
+  response = {
+    status: 201,
+    ok: true,
+    contentType: "application/json",
+    payload: { status: "received", duplicate: false },
+  },
+} = {}) => ({
+  url: () => CANONICAL_DEV_PORTAL_URL,
+  locator: () => ({
+    first: () => ({
+      waitFor: async () => true,
+      inputValue: async () => token,
+    }),
+  }),
+  evaluate: async () => response,
+})
+
+test("CRED-A1 DB-only baseline resolves with only the protected database URL", async () => {
+  const resolver = createStageScopedCredentialResolver({
+    SUPABASE_DEV_DB_URL: "postgresql://qa:protected@db.invalid/dev",
+  })
+  const stage = await resolver.resolve(QA_CREDENTIAL_STAGE.READ_ONLY_BASELINE, {
+    runnerIdentity: { verified: true },
+  })
+  assert.equal(stage.sanitized.db_credential_present, true)
+  assert.equal(stage.sanitized.api_keys_loaded, false)
+  assert.equal(stage.sanitized.captcha_loaded, false)
+  assert.equal(stage.sanitized.link_actor_loaded, false)
+  resolver.clear()
+})
+
+for (const [name, variable] of [
+  ["service-role", "SUPABASE_DEV_SERVICE_ROLE_KEY"],
+  ["anon", "SUPABASE_DEV_ANON_KEY"],
+  ["CAPTCHA", "QA_CAPTCHA_TOKEN"],
+  ["link actor", "QA_LINK_CREATED_BY"],
+]) {
+  test(`CRED-A1 mutable adapter construction does not require ${name} at baseline`, () => {
+    const accesses = []
+    const env = new Proxy({
+      SUPABASE_DEV_DB_URL: "postgresql://qa:protected@db.invalid/dev",
+    }, {
+      get(target, property) {
+        accesses.push(String(property))
+        return target[property]
+      },
+    })
+    assert.doesNotThrow(() => createMutableDependencies(env))
+    assert.equal(accesses.includes(variable), false)
+  })
+}
+
+test("CRED-A1 baseline does not access any future-stage environment name", async () => {
+  const accesses = []
+  const env = new Proxy({
+    SUPABASE_DEV_DB_URL: "postgresql://qa:protected@db.invalid/dev",
+  }, {
+    get(target, property) {
+      accesses.push(String(property))
+      return target[property]
+    },
+  })
+  const resolver = createStageScopedCredentialResolver(env)
+  await resolver.resolve(QA_CREDENTIAL_STAGE.READ_ONLY_BASELINE)
+  for (const name of [
+    "SUPABASE_DEV_SERVICE_ROLE_KEY",
+    "SUPABASE_DEV_ANON_KEY",
+    "SUPABASE_ACCESS_TOKEN",
+    "QA_CAPTCHA_TOKEN",
+    "QA_LINK_CREATED_BY",
+  ]) assert.equal(accesses.includes(name), false)
+  resolver.clear()
+})
+
+test("CRED-A1 resolves direct protected legacy API keys in memory", async () => {
+  const result = await resolveQaApiKeys({
+    SUPABASE_DEV_ANON_KEY: credA1LegacyKey("anon"),
+    SUPABASE_DEV_SERVICE_ROLE_KEY: credA1LegacyKey("service_role"),
+  }, { maskSecret: () => true })
+  assert.equal(result.sanitized.api_key_source, "DIRECT_PROTECTED_ENV")
+  assert.equal(result.sanitized.anon_key_present, true)
+  assert.equal(result.sanitized.service_role_present, true)
+  result.clear()
+})
+
+test("CRED-A1 resolves legacy API keys through the Management API", async () => {
+  const anon = credA1LegacyKey("anon")
+  const serviceRole = credA1LegacyKey("service_role")
+  let requests = 0
+  const result = await resolveQaApiKeys({
+    SUPABASE_ACCESS_TOKEN: "protected-management-token",
+  }, {
+    fetchImpl: async (url, options) => {
+      requests += 1
+      assert.equal(
+        url,
+        "https://api.supabase.com/v1/projects/scsirgbuqjcwoaxfacth/api-keys?reveal=true",
+      )
+      assert.match(options.headers.Authorization, /^Bearer /)
+      return new Response(JSON.stringify([
+        { name: "anon", type: "legacy", api_key: anon },
+        { name: "service_role", type: "legacy", api_key: serviceRole },
+      ]), { status: 200 })
+    },
+    maskSecret: () => true,
+    readPublicAnonKey: async () => anon,
+  })
+  assert.equal(requests, 1)
+  assert.equal(result.sanitized.api_key_source, "SUPABASE_MANAGEMENT_API")
+  assert.equal(result.sanitized.public_key_project_match, true)
+  result.clear()
+})
+
+for (const status of [401, 403]) {
+  test(`CRED-A1 blocks Management API ${status}`, async () => {
+    await assert.rejects(
+      resolveQaApiKeys({ SUPABASE_ACCESS_TOKEN: "protected-management-token" }, {
+        fetchImpl: async () => new Response("", { status }),
+        maskSecret: () => true,
+      }),
+      (error) =>
+        error.code === "API_GATEWAY_KEYS_READ_UNAVAILABLE" &&
+        error.category === "BLOCKED_ACCESS",
+    )
+  })
+}
+
+test("CRED-A1 blocks when legacy API keys are unavailable", async () => {
+  await assert.rejects(
+    resolveQaApiKeys({ SUPABASE_ACCESS_TOKEN: "protected-management-token" }, {
+      fetchImpl: async () => new Response(JSON.stringify([
+        { name: "publishable", type: "publishable", api_key: "sb_publishable_test" },
+      ]), { status: 200 }),
+      maskSecret: () => true,
+    }),
+    (error) =>
+      error.code === "LEGACY_KEYS_UNAVAILABLE" &&
+      error.category === "BLOCKED_API_KEY_CONTRACT",
+  )
+})
+
+test("CRED-A1 blocks an API key for another project", async () => {
+  await assert.rejects(
+    resolveQaApiKeys({
+      SUPABASE_DEV_ANON_KEY: credA1LegacyKey("anon", "otherproject"),
+      SUPABASE_DEV_SERVICE_ROLE_KEY: credA1LegacyKey("service_role", "otherproject"),
+    }, { maskSecret: () => true }),
+    (error) =>
+      error.code === "API_KEY_PROJECT_MISMATCH" &&
+      error.category === "BLOCKED_API_KEY_CONTRACT",
+  )
+})
+
+test("CRED-A1 API key material is omitted from JSON evidence", async () => {
+  const anon = credA1LegacyKey("anon")
+  const serviceRole = credA1LegacyKey("service_role")
+  const result = await resolveQaApiKeys({
+    SUPABASE_DEV_ANON_KEY: anon,
+    SUPABASE_DEV_SERVICE_ROLE_KEY: serviceRole,
+  }, { maskSecret: () => true })
+  const serialized = JSON.stringify(result)
+  assert.equal(serialized.includes(anon), false)
+  assert.equal(serialized.includes(serviceRole), false)
+  assert.equal(result.sanitized.api_key_values_exported, false)
+  result.clear()
+})
+
+test("CRED-A1 resolves exactly one valid link actor from QA history", async () => {
+  const result = await resolveQaLinkCreatedByReadOnly(
+    credA1ActorClient(),
+    QA_COMPANY_UUID,
+  )
+  assert.equal(result.sanitized.link_created_by_source, "QA_LINK_HISTORY")
+  assert.equal(result.sanitized.candidate_count, 1)
+  assert.equal(result.sanitized.id_exported, false)
+  assert.equal(JSON.stringify(result).includes(CRED_A1_ACTOR_UUID), false)
+  result.clear()
+})
+
+test("CRED-A1 blocks a missing link actor", async () => {
+  await assert.rejects(
+    resolveQaLinkCreatedByReadOnly(
+      credA1ActorClient({ actors: [] }),
+      QA_COMPANY_UUID,
+    ),
+    (error) =>
+      error.code === "QA_LINK_CREATED_BY_NOT_FOUND" &&
+      error.category === "BLOCKED_DATA",
+  )
+})
+
+test("CRED-A1 blocks ambiguous link actors", async () => {
+  await assert.rejects(
+    resolveQaLinkCreatedByReadOnly(
+      credA1ActorClient({
+        actors: [
+          CRED_A1_ACTOR_UUID,
+          "55555555-5555-4555-8555-555555555555",
+        ],
+      }),
+      QA_COMPANY_UUID,
+    ),
+    (error) =>
+      error.code === "QA_LINK_CREATED_BY_AMBIGUOUS" &&
+      error.category === "BLOCKED_DATA",
+  )
+})
+
+test("CRED-A1 blocks an invalid link actor foreign key contract", async () => {
+  await assert.rejects(
+    resolveQaLinkCreatedByReadOnly(
+      credA1ActorClient({ fkValid: false }),
+      QA_COMPANY_UUID,
+    ),
+    (error) =>
+      error.code === "QA_LINK_CREATED_BY_FK_INVALID" &&
+      error.category === "BLOCKED_DATA",
+  )
+})
+
+test("CRED-A1 captures a mocked Turnstile runtime token only in memory", async () => {
+  const session = createRuntimeTurnstileSession({
+    readToken: async () => "mock-turnstile-runtime-token",
+  })
+  const protectedToken = await session.capture(credA1FakePage())
+  const consumed = await protectedToken.use(async (value) => value.length > 8)
+  assert.equal(consumed, true)
+  assert.equal(session.sanitized().captcha_source, "TURNSTILE_RUNTIME_WIDGET")
+  assert.equal(session.sanitized().captcha_token_persisted, false)
+  assert.equal(session.sanitized().captcha_token_exported, false)
+})
+
+test("CRED-A1 blocks a second CAPTCHA token", async () => {
+  const session = createRuntimeTurnstileSession({
+    readToken: async () => "mock-turnstile-runtime-token",
+  })
+  const protectedToken = await session.capture(credA1FakePage())
+  await protectedToken.use(async () => true)
+  await assert.rejects(
+    session.capture(credA1FakePage()),
+    (error) => error.code === "SECOND_CAPTCHA_TOKEN_BLOCKED",
+  )
+})
+
+test("CRED-A1 browser contract uses the canonical DEV origin", () => {
+  const result = certifyCanonicalBrowserSubmitContract()
+  assert.equal(result.browser_origin, CANONICAL_DEV_PORTAL_ORIGIN)
+  assert.equal(result.browser_path, "/solicitar.html")
+  assert.equal(result.public_submit_calls, 0)
+})
+
+test("CRED-A1 browser controller permits one mocked POST and blocks the second", async () => {
+  const captchaSession = createRuntimeTurnstileSession({
+    readToken: async () => "mock-turnstile-runtime-token",
+  })
+  const controller = createCanonicalBrowserSubmitController({
+    portalUrl: CANONICAL_DEV_PORTAL_URL,
+    endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+    enabled: true,
+    captchaSession,
+  })
+  const input = {
+    page: credA1FakePage(),
+    intakeToken: "mock_intake_token_0000000000000001",
+    idempotencyKey: "cred-a1-idempotency-1",
+    payload: { provider_name: "Synthetic" },
+  }
+  const response = await controller.submitOnce(input)
+  assert.equal(response.status, 201)
+  await assert.rejects(
+    controller.submitOnce(input),
+    (error) => error.code === "SECOND_PUBLIC_POST_BLOCKED",
+  )
+  controller.clear()
+})
+
+test("CRED-A1 disabled browser controller cannot execute a public submit", async () => {
+  const controller = createCanonicalBrowserSubmitController()
+  await assert.rejects(
+    controller.submitOnce({
+      page: credA1FakePage(),
+      intakeToken: "mock_intake_token_0000000000000001",
+      idempotencyKey: "cred-a1-idempotency-1",
+      payload: { provider_name: "Synthetic" },
+    }),
+    (error) => error.code === "PUBLIC_SUBMIT_DISABLED_CRED_A1",
+  )
+  assert.equal(controller.sanitized().public_submit_calls, 0)
+})
+
+test("CRED-A1 mocked matrix cleans memory and performs no writes", async () => {
+  const result = await runCredentialAdapterNoWriteMocked()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.cases.length, 6)
+  assert.equal(result.public_submit_calls, 0)
+  assert.equal(result.links_created, 0)
+  assert.equal(result.iam_changes, 0)
+  assert.equal(result.dev_writes, 0)
+  assert.deepEqual(result.cleanup, {
+    api_keys_cleared: true,
+    captcha_cleared: true,
+    actor_id_cleared: true,
+  })
+})
+
+test("CRED-A1 mocked evidence contains no protected values or internal identifiers", async () => {
+  const result = await runCredentialAdapterNoWriteMocked()
+  const serialized = JSON.stringify(result)
+  assert.equal(serialized.includes("protected-management-token"), false)
+  assert.equal(serialized.includes("mock-turnstile-runtime-token"), false)
+  assert.equal(serialized.includes(CRED_A1_ACTOR_UUID), false)
+  assert.equal(serialized.includes("postgresql://"), false)
+  assert.equal(
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu
+      .test(serialized),
+    false,
+  )
 })

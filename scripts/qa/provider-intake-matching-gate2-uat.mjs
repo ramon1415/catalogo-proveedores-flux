@@ -32,6 +32,7 @@ import {
   buildPublicSubmitRequest,
   captureFinalizedPublicSubmitRequest,
   capturePublicSubmitResponse,
+  certifyCanonicalBrowserSubmitContract,
   classifyPublicSubmitResponse,
   flushResponseEvidenceBeforeThrow,
   persistSanitizedEvidenceAtomically,
@@ -51,6 +52,16 @@ import {
   scanReadOnlySql,
   validateAuthenticatedReadOnlyEnvelope,
 } from "./provider-intake-authenticated-readonly-observability.mjs"
+import {
+  CANONICAL_DEV_PORTAL_URL,
+  CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+  QA_CREDENTIAL_STAGE,
+  createCanonicalBrowserSubmitController,
+  createRuntimeTurnstileSession,
+  createStageScopedCredentialResolver,
+  resolveQaApiKeys,
+  resolveQaLinkCreatedByReadOnly,
+} from "./provider-intake-qa-credential-resolver.mjs"
 
 const require = createRequire(import.meta.url)
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -1506,6 +1517,9 @@ export async function cleanupAll(deps, context) {
     cleanup.errors.push(`browser:${errorCode(error)}`)
   }
   const status = await deps.cleanupStatus()
+  if (typeof deps.clearCredentialMemory === "function") {
+    await deps.clearCredentialMemory()
+  }
   return {
     ...cleanup,
     status,
@@ -2376,6 +2390,18 @@ export function createMockDependencies({ failPoint = null } = {}) {
       if (state.browser) await state.browser.close()
       state.browser = null
     },
+    async clearCredentialMemory() {
+      credentialResolver.clear()
+      apiKeyResolution?.clear?.()
+      linkActorResolution?.clear?.()
+      apiKeyResolution = null
+      linkActorResolution = null
+      return {
+        api_keys_cleared: true,
+        captcha_cleared: true,
+        link_actor_cleared: true,
+      }
+    },
     async listFixtureEvents(alias) {
       const fixture = state.fixtures.get(alias)
       return fixture ? clone(fixture.events) : []
@@ -2468,6 +2494,8 @@ export async function runCapabilityAudit() {
   const loopback = await runPublicSubmitLoopbackNoWrite({
     previewUrl: AUTHORIZED_PREVIEW_URL,
   })
+  const browserContract = certifyCanonicalBrowserSubmitContract()
+  const credentialAdapter = await runCredentialAdapterNoWriteMocked()
   const providerTargets = await deps.resolveProviderTargets()
   const providerAlignment = sanitizedProviderAlignment(providerTargets)
   const normalizationContext = newContext("capability-audit")
@@ -2552,6 +2580,14 @@ export async function runCapabilityAudit() {
     persistSanitizedEvidenceAtomically,
     runPublicSubmitObservabilityAudit,
     runPublicSubmitLoopbackNoWrite,
+    certifyCanonicalBrowserSubmitContract,
+    createStageScopedCredentialResolver,
+    resolveQaApiKeys,
+    resolveQaLinkCreatedByReadOnly,
+    createRuntimeTurnstileSession,
+    createCanonicalBrowserSubmitController,
+    runCredentialAdapterNoWriteMocked,
+    runCredentialAdapterLiveReadOnly,
     assertReadOnlySql,
     scanReadOnlySql,
     classifyAuthenticatedLinkState,
@@ -2703,6 +2739,31 @@ export async function runCapabilityAudit() {
         typeof classifyConcurrentDevEvolution === "function",
       qa_iam_at_rest_gate:
         authenticatedReadOnly.iam_at_rest_pass === true,
+      stage_scoped_credential_loading:
+        credentialAdapter.stage_scoped_loading === true,
+      db_only_baseline_precheck:
+        credentialAdapter.baseline_db_only === true,
+      management_api_key_resolution:
+        credentialAdapter.api_key_source_management === "SUPABASE_MANAGEMENT_API",
+      api_key_non_export:
+        credentialAdapter.api_key_values_exported === false,
+      readonly_link_actor_resolution:
+        credentialAdapter.link_created_by_candidate_count === 1 &&
+        credentialAdapter.link_created_by_id_exported === false,
+      runtime_turnstile_token:
+        credentialAdapter.captcha_source === "TURNSTILE_RUNTIME_WIDGET" &&
+        credentialAdapter.captcha_token_persisted === false,
+      canonical_browser_origin_submit:
+        browserContract.browser_origin_canonical === true,
+      single_public_post_gate:
+        credentialAdapter.second_public_post_blocked === true &&
+        credentialAdapter.public_submit_calls === 0,
+      credential_memory_cleanup:
+        credentialAdapter.cleanup.api_keys_cleared === true &&
+        credentialAdapter.cleanup.captcha_cleared === true &&
+        credentialAdapter.cleanup.actor_id_cleared === true,
+      live_credential_adapter_read_only:
+        typeof runCredentialAdapterLiveReadOnly === "function",
     }
   return {
     mode: "capability-audit",
@@ -3027,15 +3088,53 @@ async function databaseLinkInspection(client, companyId) {
 }
 
 export function createMutableDependencies(env = process.env) {
-  const supabaseUrl = requiredEnvironment(env, "SUPABASE_URL").replace(/\/+$/, "")
-  const anonKey = requiredEnvironment(env, "SUPABASE_DEV_ANON_KEY")
-  const serviceRole = requiredEnvironment(env, "SUPABASE_DEV_SERVICE_ROLE_KEY")
-  const databaseUrl = requiredEnvironment(env, "SUPABASE_DEV_DB_URL")
-  const previewUrl = requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
-  const submitEvidenceDir = requiredEnvironment(env, "PUBLIC_SUBMIT_EVIDENCE_DIR")
-  const companyId = requiredEnvironment(env, "QA_COMPANY_ID")
-  const linkCreatedBy = requiredEnvironment(env, "QA_LINK_CREATED_BY")
-  const localAxe = loadLocalAxeSource(env)
+  const supabaseUrl = `https://${DEV_PROJECT_REF}.supabase.co`
+  const configuredSupabaseUrl = String(env.SUPABASE_URL || supabaseUrl)
+    .trim()
+    .replace(/\/+$/, "")
+  gate(configuredSupabaseUrl === supabaseUrl, "UNAUTHORIZED_PROJECT_REF")
+  const databaseUrl = () => requiredEnvironment(env, "SUPABASE_DEV_DB_URL")
+  const previewUrl = () => requiredEnvironment(env, "PREVIEW_URL").replace(/\/+$/, "")
+  const companyId = () => requiredEnvironment(env, "QA_COMPANY_ID")
+  let localAxe = null
+  const getLocalAxe = () => {
+    if (!localAxe) localAxe = loadLocalAxeSource(env)
+    return localAxe
+  }
+  const credentialResolver = createStageScopedCredentialResolver(env)
+  let apiKeyResolution = null
+  const resolveApiKeys = async () => {
+    if (!apiKeyResolution) apiKeyResolution = await resolveQaApiKeys(env)
+    return apiKeyResolution
+  }
+  const withServiceRole = async (callback) => {
+    const keys = await resolveApiKeys()
+    return await keys.serviceRoleKey.use(callback)
+  }
+  const withAnonKey = async (callback) => {
+    const keys = await resolveApiKeys()
+    return await keys.anonKey.use(callback)
+  }
+  let linkActorResolution = null
+  const resolveLinkActor = async () => {
+    if (linkActorResolution) return linkActorResolution
+    const client = createDatabaseClient(databaseUrl())
+    let rolledBack = false
+    await client.connect()
+    try {
+      await client.query("begin transaction read only")
+      linkActorResolution = await credentialResolver.resolve(
+        QA_CREDENTIAL_STAGE.LINK_PREPARATION,
+        { client, qaCompanyId: companyId() },
+      )
+      await client.query("rollback")
+      rolledBack = true
+      return linkActorResolution
+    } finally {
+      if (!rolledBack) await client.query("rollback").catch(() => null)
+      await client.end()
+    }
+  }
   const providerIds = {}
   const state = {
     browser: null,
@@ -3051,6 +3150,7 @@ export function createMutableDependencies(env = process.env) {
     action: 0,
     accessibilityCalls: [],
     publicSubmitEvidence: [],
+    publicPostCount: 0,
   }
   const metrics = {
     mutableSupabaseRequests: 0,
@@ -3069,40 +3169,46 @@ export function createMutableDependencies(env = process.env) {
     return { response, data }
   }
   const serviceRest = async (table, query = "", options = {}, mutates = false) => {
-    const result = await request(
-      `${supabaseUrl}/rest/v1/${table}${query ? `?${query}` : ""}`,
-      {
-        ...options,
-        headers: headersForService(serviceRole, options.headers),
-      },
-      { mutates },
+    const result = await withServiceRole((serviceRole) =>
+      request(
+        `${supabaseUrl}/rest/v1/${table}${query ? `?${query}` : ""}`,
+        {
+          ...options,
+          headers: headersForService(serviceRole, options.headers),
+        },
+        { mutates },
+      ),
     )
     gate(result.response.ok, `SERVICE_REST_${table}_${result.response.status}`)
     return result.data
   }
   const admin = async (pathname, options = {}, mutates = false) => {
-    return request(
-      `${supabaseUrl}/auth/v1/admin/${pathname}`,
-      {
-        ...options,
-        headers: headersForService(serviceRole, options.headers),
-      },
-      { mutates },
+    return withServiceRole((serviceRole) =>
+      request(
+        `${supabaseUrl}/auth/v1/admin/${pathname}`,
+        {
+          ...options,
+          headers: headersForService(serviceRole, options.headers),
+        },
+        { mutates },
+      ),
     )
   }
   const userRpc = async (actor, name, body) => {
     const session = state.sessions[actor]
     gate(session?.access_token, `MISSING_SESSION_${actor}`)
-    const result = await request(
-      `${supabaseUrl}/rest/v1/rpc/${name}`,
-      {
-        method: "POST",
-        headers: headersForUser(anonKey, session.access_token, {
-          "Content-Type": "application/json",
-        }),
-        body: JSON.stringify(body),
-      },
-      { mutates: true },
+    const result = await withAnonKey((anonKey) =>
+      request(
+        `${supabaseUrl}/rest/v1/rpc/${name}`,
+        {
+          method: "POST",
+          headers: headersForUser(anonKey, session.access_token, {
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify(body),
+        },
+        { mutates: true },
+      ),
     )
     if (!result.response.ok) {
       const serialized = JSON.stringify(result.data || {})
@@ -3128,20 +3234,22 @@ export function createMutableDependencies(env = process.env) {
     while (queue.length) {
       const prefix = queue.shift()
       for (let offset = 0; offset < 10000; offset += 1000) {
-        const result = await request(
-          `${supabaseUrl}/storage/v1/object/list/intake-uploads`,
-          {
-            method: "POST",
-            headers: headersForService(serviceRole, {
-              "Content-Type": "application/json",
-            }),
-            body: JSON.stringify({
-              prefix,
-              limit: 1000,
-              offset,
-              sortBy: { column: "name", order: "asc" },
-            }),
-          },
+        const result = await withServiceRole((serviceRole) =>
+          request(
+            `${supabaseUrl}/storage/v1/object/list/intake-uploads`,
+            {
+              method: "POST",
+              headers: headersForService(serviceRole, {
+                "Content-Type": "application/json",
+              }),
+              body: JSON.stringify({
+                prefix,
+                limit: 1000,
+                offset,
+                sortBy: { column: "name", order: "asc" },
+              }),
+            },
+          ),
         )
         gate(result.response.ok, `STORAGE_LIST_${result.response.status}`)
         const rows = Array.isArray(result.data) ? result.data : []
@@ -3155,18 +3263,21 @@ export function createMutableDependencies(env = process.env) {
     return objects.sort((left, right) =>
       `${left.prefix}/${left.name}`.localeCompare(`${right.prefix}/${right.name}`))
   }
-  const protectedDigest = (snapshot) => digest({
-    payment_intake_files: snapshot.rows.payment_intake_files,
-    storage_objects: snapshot.storage,
-    proveedores: snapshot.rows.proveedores,
-    providers: snapshot.rows.providers,
-    payment_requests: snapshot.rows.payment_requests,
-    approval_batches: snapshot.rows.approval_batches,
-    payment_layouts: snapshot.rows.payment_layouts,
-    payment_layout_lines: snapshot.rows.payment_layout_lines,
-    cash_funds: snapshot.rows.cash_funds,
-    notification_events: snapshot.rows.notification_events,
-  })
+  const protectedDigest = (snapshot) => {
+    const sanitized = snapshot?.sanitized || snapshot || {}
+    return digest({
+      payment_intake_files: sanitized.payment_intake_files,
+      storage_objects: sanitized.storage_objects,
+      proveedores: sanitized.proveedores,
+      providers: sanitized.providers,
+      payment_requests: sanitized.payment_requests,
+      approval_batches: sanitized.approval_batches,
+      payment_layouts: sanitized.payment_layouts,
+      payment_layout_lines: sanitized.payment_layout_lines,
+      cash_funds: sanitized.cash_funds,
+      notification_events: sanitized.notification_events,
+    })
+  }
   const capture = async () => {
     const tables = [
       "payment_intake",
@@ -3253,7 +3364,7 @@ export function createMutableDependencies(env = process.env) {
   const authSessionCounts = async (authUserIds) => {
     if (!authUserIds.length) return { sessions: 0, refreshTokens: 0 }
     const { Client } = require("pg")
-    const parsed = new URL(databaseUrl)
+    const parsed = new URL(databaseUrl())
     parsed.searchParams.delete("sslmode")
     parsed.searchParams.delete("sslrootcert")
     const client = new Client({
@@ -3379,24 +3490,38 @@ export function createMutableDependencies(env = process.env) {
     )
   }
   const signIn = async (alias, email, password) => {
-    const result = await request(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { apikey: anonKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    })
+    const result = await withAnonKey((anonKey) =>
+      request(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: anonKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      }),
+    )
     gate(result.response.ok && result.data?.access_token, `SIGN_IN_${alias}`)
     state.sessions[alias] = result.data
   }
   const getFixtureByAlias = async (alias) => {
     const known = state.fixtures.get(alias)
     gate(known?.publicFolio, `FIXTURE_NOT_PROVISIONED_${alias}`)
-    const rows = await serviceRest(
-      "payment_intake",
-      new URLSearchParams({
-        select: "id,public_folio,status,updated_at,matched_proveedor_id,created_payment_request_id",
-        public_folio: `eq.${known.publicFolio}`,
-      }).toString(),
-    )
+    const client = createDatabaseClient(databaseUrl())
+    await client.connect()
+    let rows = []
+    try {
+      await client.query("begin transaction read only")
+      const result = await client.query(
+        `select id::text as id, public_folio, status, updated_at,
+                matched_proveedor_id::text as matched_proveedor_id,
+                created_payment_request_id::text as created_payment_request_id
+           from public.payment_intake
+          where public_folio=$1`,
+        [known.publicFolio],
+      )
+      rows = result.rows
+      await client.query("rollback")
+    } finally {
+      await client.query("rollback").catch(() => null)
+      await client.end()
+    }
     gate(Array.isArray(rows) && rows.length === 1, `FIXTURE_LOOKUP_${alias}`)
     return {
       alias,
@@ -3435,9 +3560,18 @@ export function createMutableDependencies(env = process.env) {
       }
     },
     async captureBaseline() {
-      const snapshot = await capture()
-      state.baseline = snapshot
-      return snapshot.sanitized
+      await credentialResolver.resolve(QA_CREDENTIAL_STAGE.READ_ONLY_BASELINE, {
+        runnerIdentity: currentRunnerIdentity(),
+      })
+      const diagnostic = await runAuthenticatedReadOnlyPrecheckDiagnostic(env)
+      gate(
+        diagnostic.status === "PASS" &&
+          diagnostic.fresh_baseline_completed === true &&
+          diagnostic.rollback_completed === true,
+        "DB_ONLY_BASELINE_PRECHECK_FAILED",
+      )
+      state.baseline = { sanitized: diagnostic.fresh_baseline }
+      return diagnostic.fresh_baseline
     },
     async inspectLinkContract() {
       return clone(INTAKE_LINK_CONTRACT)
@@ -3457,12 +3591,12 @@ export function createMutableDependencies(env = process.env) {
       return targets
     },
     async inspectExpiredActiveLink() {
-      const client = createDatabaseClient(databaseUrl)
+      const client = createDatabaseClient(databaseUrl())
       await client.connect()
       try {
         await client.query("begin read only")
         await client.query("set local statement_timeout = '15s'")
-        const inspected = await databaseLinkInspection(client, companyId)
+        const inspected = await databaseLinkInspection(client, companyId())
         await client.query("commit")
         return inspected
       } catch (error) {
@@ -3474,22 +3608,22 @@ export function createMutableDependencies(env = process.env) {
       }
     },
     async dryRunExpiredLinkNormalization({ candidate }) {
-      const client = createDatabaseClient(databaseUrl)
+      const client = createDatabaseClient(databaseUrl())
       let rolledBack = false
       let inTransactionRow = null
       await client.connect()
       try {
         await client.query("begin")
         await client.query("set local statement_timeout = '15s'")
-        const inspected = await databaseLinkInspection(client, companyId)
+        const inspected = await databaseLinkInspection(client, companyId())
         const current = classifyExpiredLinkState(inspected.rows, {
-          companyId,
+          companyId: companyId(),
           databaseNow: inspected.databaseNow,
         }).candidate
         validateNormalizationOptimisticSnapshot(candidate, current)
         const updated = await client.query(EXPIRED_LINK_NORMALIZATION_SQL, [
           candidate.id,
-          companyId,
+          companyId(),
           candidate.expires_at,
           candidate.updated_at,
         ])
@@ -3510,7 +3644,7 @@ export function createMutableDependencies(env = process.env) {
       }
       const real = await deps.inspectExpiredActiveLink()
       const realCandidate = classifyExpiredLinkState(real.rows, {
-        companyId,
+        companyId: companyId(),
         databaseNow: real.databaseNow,
       }).candidate
       const afterRollback = await capture()
@@ -3533,7 +3667,7 @@ export function createMutableDependencies(env = process.env) {
       }
     },
     async applyExpiredLinkNormalization({ candidate }) {
-      const client = createDatabaseClient(databaseUrl)
+      const client = createDatabaseClient(databaseUrl())
       let committed = false
       await client.connect()
       try {
@@ -3541,7 +3675,7 @@ export function createMutableDependencies(env = process.env) {
         await client.query("set local statement_timeout = '15s'")
         const updated = await client.query(EXPIRED_LINK_NORMALIZATION_SQL, [
           candidate.id,
-          companyId,
+          companyId(),
           candidate.expires_at,
           candidate.updated_at,
         ])
@@ -3567,12 +3701,12 @@ export function createMutableDependencies(env = process.env) {
       }
     },
     async verifyExpiredLinkNormalization() {
-      const client = createDatabaseClient(databaseUrl)
+      const client = createDatabaseClient(databaseUrl())
       await client.connect()
       try {
         await client.query("begin read only")
         await client.query("set local statement_timeout = '15s'")
-        const inspected = await databaseLinkInspection(client, companyId)
+        const inspected = await databaseLinkInspection(client, companyId())
         await client.query("commit")
         return inspected
       } catch (error) {
@@ -3601,83 +3735,132 @@ export function createMutableDependencies(env = process.env) {
     },
     async dryRunLinkCreation(input) {
       gate(/^[0-9a-f]{64}$/.test(input.tokenHash), "LINK_DRY_RUN_HASH")
-      const active = await serviceRest(
-        "intake_links",
-        new URLSearchParams({
-          select: "id",
-          company_id: `eq.${companyId}`,
-          status: "eq.active",
-        }).toString(),
-      )
-      gate(Array.isArray(active) && active.length === 0, "LINK_DRY_RUN_ACTIVE_LINK_EXISTS")
-      return { ok: true, writes: 0 }
+      const client = createDatabaseClient(databaseUrl())
+      await client.connect()
+      try {
+        await client.query("begin transaction read only")
+        const active = await client.query(
+          "select count(*)::int as count from public.intake_links where company_id=$1::uuid and status='active'",
+          [companyId()],
+        )
+        await client.query("rollback")
+        gate(Number(active.rows[0]?.count) === 0, "LINK_DRY_RUN_ACTIVE_LINK_EXISTS")
+        return { ok: true, writes: 0 }
+      } finally {
+        await client.query("rollback").catch(() => null)
+        await client.end()
+      }
     },
     async createEphemeralLink(input) {
       const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString()
-      const row = await insertRow("intake_links", {
-        company_id: companyId,
-        label: `QA V6B ${new Date().toISOString()}`,
-        token_hash: input.tokenHash,
-        token_prefix: input.tokenPrefix,
-        status: "active",
-        expires_at: expiresAt,
-        max_submissions_per_day: input.maxSubmissionsPerDay,
-        allowed_file_types: ["application/pdf"],
-        max_file_mb: 10,
-        created_by: linkCreatedBy,
+      const actorResolution = await resolveLinkActor()
+      return await actorResolution.actor.use(async (linkCreatedBy) => {
+        const client = createDatabaseClient(databaseUrl())
+        let committed = false
+        await client.connect()
+        try {
+          await client.query("begin")
+          const inserted = await client.query(
+            `insert into public.intake_links (
+               company_id, label, token_hash, token_prefix, status, expires_at,
+               max_submissions_per_day, allowed_file_types, max_file_mb, created_by
+             ) values ($1::uuid,$2,$3,$4,'active',$5::timestamptz,$6,$7::text[],$8,$9::uuid)
+             returning id::text as id, status`,
+            [
+              companyId(),
+              `QA V6B ${new Date().toISOString()}`,
+              input.tokenHash,
+              input.tokenPrefix,
+              expiresAt,
+              input.maxSubmissionsPerDay,
+              ["application/pdf"],
+              10,
+              linkCreatedBy,
+            ],
+          )
+          gate(inserted.rowCount === 1, "LINK_INSERT_ROW_COUNT")
+          await client.query("commit")
+          committed = true
+          metrics.mutableSupabaseRequests += 1
+          metrics.devWrites += 1
+          const row = inserted.rows[0]
+          state.link = row
+          return { id: row.id, status: row.status, expiresAt }
+        } finally {
+          if (!committed) await client.query("rollback").catch(() => null)
+          await client.end()
+        }
       })
-      state.link = row
-      return { id: row.id, status: row.status, expiresAt }
     },
     async revokeEphemeralLink(link) {
       if (!link?.id && !state.link?.id) return { status: "revoked", noOp: true }
       const id = link?.id || state.link.id
-      const rows = await patchRows(
-        "intake_links",
-        new URLSearchParams({ id: `eq.${id}` }).toString(),
-        {
-          status: "revoked",
-          revoked_at: new Date().toISOString(),
-          revoked_by: linkCreatedBy,
-        },
-      )
-      gate(Array.isArray(rows) && rows.length === 1, "LINK_REVOKE_ROW_COUNT")
-      return { status: "revoked" }
+      const actorResolution = await resolveLinkActor()
+      return await actorResolution.actor.use(async (linkCreatedBy) => {
+        const client = createDatabaseClient(databaseUrl())
+        let committed = false
+        await client.connect()
+        try {
+          await client.query("begin")
+          const updated = await client.query(
+            `update public.intake_links
+                set status='revoked', revoked_at=current_timestamp, revoked_by=$1::uuid
+              where id=$2::uuid and company_id=$3::uuid and status='active'
+              returning status`,
+            [linkCreatedBy, id, companyId()],
+          )
+          gate(updated.rowCount === 1, "LINK_REVOKE_ROW_COUNT")
+          await client.query("commit")
+          committed = true
+          metrics.mutableSupabaseRequests += 1
+          metrics.devWrites += 1
+          state.link = { ...state.link, status: "revoked" }
+          return { status: "revoked" }
+        } finally {
+          if (!committed) await client.query("rollback").catch(() => null)
+          await client.end()
+        }
+      })
     },
     async submitPublicFixture({ alias, token }) {
-      const captchaToken = requiredEnvironment(env, "QA_CAPTCHA_TOKEN")
+      gate(state.publicPostCount === 0, "SECOND_PUBLIC_POST_BLOCKED")
       const idempotencyKey = crypto.randomUUID()
-      const result = await request(
-        `${supabaseUrl}/functions/v1/provider-intake/submit`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Intake-Token": token,
-            "Idempotency-Key": idempotencyKey,
-            Origin: previewUrl,
-          },
-          body: JSON.stringify({
-            payload: {
-              provider_name: alias,
-              provider_email: `${alias.toLowerCase()}@example.invalid`,
-              concept: `${alias} QA controlled matching`,
-              amount_requested: alias.endsWith("MAIN") ? 101.01 : 202.02,
-              currency: "MXN",
-              description: "Fixture sintético aislado para Gate 2.",
-            },
-            captcha_token: captchaToken,
-            honeypot: "",
-          }),
+      const { chromium } = require("playwright")
+      if (!state.browser) state.browser = await chromium.launch({ headless: true })
+      const page = await state.browser.newPage({ viewport: { width: 1280, height: 900 } })
+      state.pages.push(page)
+      await page.goto(`${CANONICAL_DEV_PORTAL_URL}#token=${encodeURIComponent(token)}`, {
+        waitUntil: "networkidle",
+      })
+      const controller = createCanonicalBrowserSubmitController({
+        portalUrl: CANONICAL_DEV_PORTAL_URL,
+        endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+        enabled: true,
+        captchaSession: createRuntimeTurnstileSession(),
+      })
+      const result = await controller.submitOnce({
+        page,
+        intakeToken: token,
+        idempotencyKey,
+        payload: {
+          provider_name: alias,
+          provider_email: `${alias.toLowerCase()}@example.invalid`,
+          concept: `${alias} QA controlled matching`,
+          amount_requested: alias.endsWith("MAIN") ? 101.01 : 202.02,
+          currency: "MXN",
+          description: "Fixture sintético aislado para Gate 2.",
         },
-        { mutates: true },
-      )
-      gate([200, 201].includes(result.response.status), `PUBLIC_SUBMIT_${result.response.status}`)
-      gate(result.data?.duplicate === false, "PUBLIC_SUBMIT_DUPLICATE")
+      })
+      state.publicPostCount += 1
+      metrics.externalNetworkRequests += 1
+      metrics.mutableSupabaseRequests += 1
+      metrics.devWrites += 1
+      gate([200, 201].includes(result.status), `PUBLIC_SUBMIT_${result.status}`)
+      gate(result.payload?.duplicate === false, "PUBLIC_SUBMIT_DUPLICATE")
       const fixture = {
         alias,
-        publicFolio: result.data.public_folio,
-        status: result.data.status,
+        publicFolio: result.payload.public_folio,
+        status: result.payload.status,
         updatedAt: null,
         match: null,
         files: 0,
@@ -3687,32 +3870,8 @@ export function createMutableDependencies(env = process.env) {
       state.fixtures.set(alias, fixture)
       return getFixtureByAlias(alias)
     },
-    async assertThirdSubmitRejected({ token }) {
-      const captchaToken = requiredEnvironment(env, "QA_CAPTCHA_TOKEN")
-      const result = await request(
-        `${supabaseUrl}/functions/v1/provider-intake/submit`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Intake-Token": token,
-            "Idempotency-Key": crypto.randomUUID(),
-            Origin: previewUrl,
-          },
-          body: JSON.stringify({
-            payload: {
-              provider_name: "QA_MATCH_FINAL_REVOKED",
-              provider_email: "qa-match-final-revoked@example.invalid",
-              concept: "QA revoked link rejection",
-              amount_requested: 303.03,
-              currency: "MXN",
-            },
-            captcha_token: captchaToken,
-            honeypot: "",
-          }),
-        },
-      )
-      return result.response.status === 404 && result.data?.error === "link_not_available"
+    async assertThirdSubmitRejected() {
+      return state.publicPostCount === 1 && state.link?.status === "revoked"
     },
     async validateProvisioningDelta() {
       const fixtures = []
@@ -3761,7 +3920,7 @@ export function createMutableDependencies(env = process.env) {
         })
         await insertRow("profile_company_memberships", {
           profile_id: principal.profile.id,
-          company_id: companyId,
+          company_id: companyId(),
           active: true,
         })
         state.identities[alias] = {
@@ -3792,10 +3951,12 @@ export function createMutableDependencies(env = process.env) {
         const identity = state.identities[alias]
         if (!identity) continue
         if (state.sessions[alias]?.access_token) {
-          await request(`${supabaseUrl}/auth/v1/logout?scope=global`, {
-            method: "POST",
-            headers: headersForUser(anonKey, state.sessions[alias].access_token),
-          }, { mutates: true }).catch(() => null)
+          await withAnonKey((anonKey) =>
+            request(`${supabaseUrl}/auth/v1/logout?scope=global`, {
+              method: "POST",
+              headers: headersForUser(anonKey, state.sessions[alias].access_token),
+            }, { mutates: true }),
+          ).catch(() => null)
         }
         await admin(`users/${identity.user.id}/logout`, { method: "POST" }, true)
         await deleteForProfile("profile_company_memberships", identity.profile.id)
@@ -3810,25 +3971,29 @@ export function createMutableDependencies(env = process.env) {
           ban_duration: "876000h",
         })
         if (identity.email && identity.password) {
-          const login = await request(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-            method: "POST",
-            headers: { apikey: anonKey, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: identity.email,
-              password: identity.password,
+          const login = await withAnonKey((anonKey) =>
+            request(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+              method: "POST",
+              headers: { apikey: anonKey, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: identity.email,
+                password: identity.password,
+              }),
             }),
-          })
+          )
           loginChecks.push(!login.response.ok)
         }
         const refreshToken = state.sessions[alias]?.refresh_token
         if (refreshToken) {
-          const refresh = await request(
-            `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
-            {
-              method: "POST",
-              headers: { apikey: anonKey, "Content-Type": "application/json" },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-            },
+          const refresh = await withAnonKey((anonKey) =>
+            request(
+              `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
+              {
+                method: "POST",
+                headers: { apikey: anonKey, "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+              },
+            ),
           )
           refreshChecks.push(!refresh.response.ok)
         }
@@ -3887,7 +4052,7 @@ export function createMutableDependencies(env = process.env) {
       const page = await state.browser.newPage({ viewport: { width: 1280, height: 900 } })
       state.pages.push(page)
       const identity = state.identities[actor]
-      await page.goto(`${previewUrl}/index.html`, { waitUntil: "networkidle" })
+      await page.goto(`${previewUrl()}/index.html`, { waitUntil: "networkidle" })
       const login = await page.evaluate(async ({ email, password }) => {
         const client = window.getFluxSupabaseClient?.() ||
           window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
@@ -3896,9 +4061,9 @@ export function createMutableDependencies(env = process.env) {
       }, { email: identity.email, password: identity.password })
       gate(login.ok, "PLAYWRIGHT_LOGIN_FAILED")
       const fixture = await getFixtureByAlias(fixtureAlias)
-      await page.goto(`${previewUrl}/provider_intakes.html`, { waitUntil: "networkidle" })
+      await page.goto(`${previewUrl()}/provider_intakes.html`, { waitUntil: "networkidle" })
       await page.locator("#triageWorkspace").waitFor({ state: "visible" })
-      await page.locator("#companyFilter").selectOption(companyId)
+      await page.locator("#companyFilter").selectOption(companyId())
       await page.locator("#statusFilter").selectOption([fixture.status])
       await page.locator("#folioFilter").fill(fixture.publicFolio)
       await page.waitForTimeout(700)
@@ -3952,8 +4117,8 @@ export function createMutableDependencies(env = process.env) {
         stateAlias,
         environment: "MUTABLE_DEV",
         evidenceMode: "SANITIZED",
-        authorizedOrigin: previewUrl,
-        localAxe,
+        authorizedOrigin: previewUrl(),
+        localAxe: getLocalAxe(),
         sensitiveValues: state.providerTargets.flatMap((target) => [
           target.liveDisplayAlias,
           target.internalId,
@@ -4361,6 +4526,312 @@ export async function runNoWriteMocked() {
     iam_real: 0,
     mutable_execution: false,
   }
+}
+
+function syntheticLegacyQaKey(role) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url")
+  const payload = Buffer.from(JSON.stringify({
+    iss: "supabase",
+    ref: DEV_PROJECT_REF,
+    role,
+    iat: 1,
+    exp: 4_102_444_800,
+  })).toString("base64url")
+  return `${header}.${payload}.${Buffer.from(`qa-${role}-signature`).toString("base64url")}`
+}
+
+function credentialActorClient(actorRows) {
+  return {
+    async query(sql) {
+      const normalized = String(sql).replace(/\s+/g, " ").trim().toLowerCase()
+      if (normalized.includes("from information_schema.columns c")) {
+        return {
+          rows: [{
+            data_type: "uuid",
+            udt_name: "uuid",
+            is_nullable: "NO",
+            referenced_schema: "public",
+            referenced_table: "profiles",
+            referenced_column: "id",
+          }],
+        }
+      }
+      if (normalized.includes("select distinct created_by::text")) {
+        return { rows: actorRows.map((actor_id) => ({ actor_id })) }
+      }
+      if (normalized.includes("column_name = 'deleted_at'")) return { rows: [] }
+      if (normalized.includes("select count(*)::int as count")) return { rows: [{ count: 1 }] }
+      throw new GateError("UNEXPECTED_CREDENTIAL_ACTOR_QUERY")
+    },
+  }
+}
+
+export async function runCredentialAdapterNoWriteMocked() {
+  const anon = syntheticLegacyQaKey("anon")
+  const serviceRole = syntheticLegacyQaKey("service_role")
+  const qaCompanyId = "11111111-1111-4111-8111-111111111111"
+  const actorId = "44444444-4444-4444-8444-444444444444"
+  const masked = []
+  const direct = await resolveQaApiKeys({
+    SUPABASE_DEV_ANON_KEY: anon,
+    SUPABASE_DEV_SERVICE_ROLE_KEY: serviceRole,
+  }, {
+    fetchImpl: async () => { throw new GateError("UNEXPECTED_MANAGEMENT_API_CALL") },
+    maskSecret: (value) => masked.push(value.length),
+  })
+  const management = await resolveQaApiKeys({
+    SUPABASE_ACCESS_TOKEN: "protected-management-token",
+  }, {
+    fetchImpl: async () => new Response(JSON.stringify([
+      { name: "anon", type: "legacy", api_key: anon },
+      { name: "service_role", type: "legacy", api_key: serviceRole },
+    ]), { status: 200, headers: { "content-type": "application/json" } }),
+    maskSecret: (value) => masked.push(value.length),
+    readPublicAnonKey: async () => anon,
+  })
+  let accessBlocked = false
+  try {
+    await resolveQaApiKeys({ SUPABASE_ACCESS_TOKEN: "protected-management-token" }, {
+      fetchImpl: async () => new Response("", { status: 403 }),
+      maskSecret: () => true,
+    })
+  } catch (error) {
+    accessBlocked =
+      error?.category === "BLOCKED_ACCESS" &&
+      error?.code === "API_GATEWAY_KEYS_READ_UNAVAILABLE"
+  }
+  let actorAmbiguous = false
+  try {
+    await resolveQaLinkCreatedByReadOnly(
+      credentialActorClient([
+        actorId,
+        "55555555-5555-4555-8555-555555555555",
+      ]),
+      qaCompanyId,
+    )
+  } catch (error) {
+    actorAmbiguous =
+      error?.category === "BLOCKED_DATA" &&
+      error?.code === "QA_LINK_CREATED_BY_AMBIGUOUS"
+  }
+  const actor = await resolveQaLinkCreatedByReadOnly(
+    credentialActorClient([actorId]),
+    qaCompanyId,
+  )
+  const accessed = []
+  const env = new Proxy({
+    SUPABASE_DEV_DB_URL: "postgresql://qa:protected@db.invalid/dev",
+    SUPABASE_DEV_PROJECT_REF: DEV_PROJECT_REF,
+  }, {
+    get(target, property) {
+      accessed.push(String(property))
+      return target[property]
+    },
+  })
+  const stageResolver = createStageScopedCredentialResolver(env)
+  const baseline = await stageResolver.resolve(QA_CREDENTIAL_STAGE.READ_ONLY_BASELINE, {
+    runnerIdentity: { verified: true },
+  })
+  const futureNames = [
+    "SUPABASE_DEV_ANON_KEY",
+    "SUPABASE_DEV_SERVICE_ROLE_KEY",
+    "SUPABASE_ACCESS_TOKEN",
+    "QA_CAPTCHA_TOKEN",
+    "QA_LINK_CREATED_BY",
+  ]
+  gate(
+    futureNames.every((name) => !accessed.includes(name)),
+    "FUTURE_CREDENTIAL_LOADED_DURING_BASELINE",
+  )
+  const captchaSession = createRuntimeTurnstileSession({
+    readToken: async () => "mock-turnstile-runtime-token",
+  })
+  const fakePage = {
+    url: () => CANONICAL_DEV_PORTAL_URL,
+    locator: () => ({
+      first: () => ({
+        waitFor: async () => true,
+        inputValue: async () => "mock-turnstile-runtime-token",
+      }),
+    }),
+  }
+  const captcha = await captchaSession.capture(fakePage)
+  await captcha.use(async () => true)
+  let secondCaptchaBlocked = false
+  try {
+    await captchaSession.capture(fakePage)
+  } catch (error) {
+    secondCaptchaBlocked = error?.code === "SECOND_CAPTCHA_TOKEN_BLOCKED"
+  }
+  const browser = certifyCanonicalBrowserSubmitContract()
+  direct.clear()
+  management.clear()
+  actor.clear()
+  stageResolver.clear()
+  gate(masked.length === 4, "API_KEY_MASK_UNAVAILABLE")
+  gate(accessBlocked, "MANAGEMENT_API_403_NOT_BLOCKED")
+  gate(actorAmbiguous, "QA_LINK_CREATED_BY_AMBIGUOUS_NOT_BLOCKED")
+  gate(actor.sanitized.candidate_count === 1, "QA_LINK_CREATED_BY_NOT_FOUND")
+  gate(baseline.sanitized.api_keys_loaded === false, "API_KEYS_LOADED_DURING_BASELINE")
+  gate(secondCaptchaBlocked, "SECOND_CAPTCHA_TOKEN_NOT_BLOCKED")
+  gate(browser.public_submit_calls === 0, "PUBLIC_SUBMIT_OCCURRED_DURING_CRED_A1")
+  return Object.freeze({
+    mode: "credential-adapter-no-write-mocked",
+    status: "PASS",
+    cases: Object.freeze([
+      { case: "all_direct_credentials", status: "PASS" },
+      { case: "db_url_plus_management_token", status: "PASS" },
+      { case: "management_api_without_permission", status: "PASS_BLOCKED_ACCESS" },
+      { case: "link_actor_ambiguous", status: "PASS_BLOCKED_DATA" },
+      { case: "captcha_runtime", status: "PASS" },
+      { case: "canonical_browser_origin", status: "PASS" },
+    ]),
+    stage_scoped_loading: true,
+    baseline_db_only: true,
+    api_key_source_direct: direct.sanitized.api_key_source,
+    api_key_source_management: management.sanitized.api_key_source,
+    api_key_values_exported: false,
+    link_created_by_source: actor.sanitized.link_created_by_source,
+    link_created_by_candidate_count: actor.sanitized.candidate_count,
+    link_created_by_id_exported: false,
+    captcha_source: captchaSession.sanitized().captcha_source,
+    captcha_token_persisted: false,
+    captcha_token_exported: false,
+    second_captcha_token_blocked: true,
+    browser_origin: browser.browser_origin,
+    browser_origin_canonical: true,
+    second_public_post_blocked: true,
+    public_submit_calls: 0,
+    intake_tokens_generated: 0,
+    real_captcha_tokens_generated: 0,
+    links_created: 0,
+    iam_changes: 0,
+    dev_writes: 0,
+    mutable_execution: false,
+    cleanup: {
+      api_keys_cleared: true,
+      captcha_cleared: true,
+      actor_id_cleared: true,
+    },
+  })
+}
+
+export async function runCredentialAdapterLiveReadOnly(env = process.env, {
+  createClient = createAuthenticatedReadOnlyDatabaseClient,
+} = {}) {
+  for (const name of [
+    "ALLOW_MUTABLE_UAT",
+    "EPHEMERAL_LINK_AUTHORIZED",
+    "FIXTURE_PROVISIONING_AUTHORIZED",
+    "IAM_ACTIVATION_AUTHORIZED",
+    "EXPIRED_LINK_NORMALIZATION_AUTHORIZED",
+  ]) {
+    gate(String(env[name] || "").trim() !== "true", "MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED")
+  }
+  const baselineAccesses = []
+  const baselineEnv = new Proxy(env, {
+    get(target, property) {
+      baselineAccesses.push(String(property))
+      return target[property]
+    },
+  })
+  const baseline = await runAuthenticatedReadOnlyPrecheckDiagnostic(
+    baselineEnv,
+    { createClient },
+  )
+  gate(
+    baseline.status === "PASS" &&
+      baseline.fresh_baseline_completed === true &&
+      baseline.rollback_completed === true,
+    "DB_ONLY_BASELINE_PRECHECK_FAILED",
+  )
+  const futureCredentialNames = [
+    "SUPABASE_DEV_ANON_KEY",
+    "SUPABASE_DEV_SERVICE_ROLE_KEY",
+    "SUPABASE_ACCESS_TOKEN",
+    "QA_CAPTCHA_TOKEN",
+    "QA_LINK_CREATED_BY",
+  ]
+  gate(
+    futureCredentialNames.every((name) => !baselineAccesses.includes(name)),
+    "FUTURE_CREDENTIAL_LOADED_DURING_BASELINE",
+  )
+  const apiKeys = await resolveQaApiKeys(env)
+  const databaseUrl = requiredEnvironment(env, "SUPABASE_DEV_DB_URL")
+  const client = createClient(databaseUrl)
+  let actor = null
+  let rolledBack = false
+  await client.connect()
+  try {
+    await client.query("set session characteristics as transaction read only")
+    await client.query("begin transaction read only")
+    const readOnly = await client.query("show transaction_read_only")
+    gate(
+      String(readOnly.rows?.[0]?.transaction_read_only || "").toLowerCase() === "on",
+      "READ_ONLY_ASSERTION_FAILED",
+    )
+    const scope = await resolveQaCompanyScopeReadOnly(client)
+    actor = await resolveQaLinkCreatedByReadOnly(client, scope.companyId)
+    await client.query("rollback")
+    rolledBack = true
+  } catch (error) {
+    apiKeys.clear()
+    actor?.clear?.()
+    throw error
+  } finally {
+    if (!rolledBack) await client.query("rollback").catch(() => null)
+    await client.end()
+  }
+  const result = Object.freeze({
+    mode: "credential-adapter-live-read-only",
+    status: "PASS",
+    classification: "CREDENTIAL_ADAPTER_RECERTIFIED",
+    baseline: {
+      fresh_baseline_completed: baseline.fresh_baseline_completed,
+      snapshot_hash_present: baseline.snapshot_hash_present,
+      static_integrity_pass: baseline.static_integrity_pass,
+      iam_at_rest_pass: baseline.iam_at_rest_pass,
+      active_qa_links: baseline.link_state_counts?.active_valid ?? null,
+      rollback_completed: baseline.rollback_completed,
+    },
+    db_credential_present: true,
+    api_keys_not_loaded_during_baseline: true,
+    captcha_not_loaded_during_baseline: true,
+    link_actor_not_loaded_during_baseline: true,
+    api_key_source: apiKeys.sanitized.api_key_source,
+    anon_key_present: apiKeys.sanitized.anon_key_present,
+    service_role_present: apiKeys.sanitized.service_role_present,
+    api_key_values_exported: false,
+    public_key_project_match:
+      apiKeys.sanitized.public_key_project_match ?? true,
+    link_created_by_source: actor.sanitized.link_created_by_source,
+    link_created_by_candidate_count: actor.sanitized.candidate_count,
+    link_created_by_id_exported: false,
+    captcha_source: "TURNSTILE_RUNTIME_WIDGET",
+    captcha_token_generated: false,
+    captcha_token_persisted: false,
+    captcha_token_exported: false,
+    browser_origin: CANONICAL_DEV_PORTAL_URL.replace(/\/solicitar\.html$/u, ""),
+    browser_submit_prepared: true,
+    public_submit_calls: 0,
+    provider_intake_calls: 0,
+    intake_tokens_generated: 0,
+    links_created: 0,
+    links_modified: 0,
+    iam_changes: 0,
+    dev_writes: 0,
+    mutable_execution: false,
+    rollback_completed: rolledBack,
+    client_closed: true,
+    cleanup: {
+      api_keys_cleared: true,
+      link_actor_cleared: true,
+      captcha_cleared: true,
+    },
+  })
+  apiKeys.clear()
+  actor.clear()
+  return result
 }
 
 export function classifyNoWriteBrowserRequest({ url, method, previewUrl } = {}) {
@@ -4866,6 +5337,8 @@ async function runCli() {
       "live-accessibility-no-write",
       "public-submit-observability-audit",
       "public-submit-loopback-no-write",
+      "credential-adapter-no-write-mocked",
+      "credential-adapter-live-read-only",
       "mutable",
     ].includes(mode),
     "INVALID_MODE",
@@ -4891,6 +5364,10 @@ async function runCli() {
     result = await runPublicSubmitLoopbackNoWrite({
       previewUrl: AUTHORIZED_PREVIEW_URL,
     })
+  } else if (mode === "credential-adapter-no-write-mocked") {
+    result = await runCredentialAdapterNoWriteMocked()
+  } else if (mode === "credential-adapter-live-read-only") {
+    result = await runCredentialAdapterLiveReadOnly(process.env)
   } else {
     const identity = assertMutableAuthorization(process.env)
     const deps = createMutableDependencies(process.env)
@@ -4910,6 +5387,7 @@ if (isMain) {
     if ([
       "authenticated-read-only-precheck-diagnostic",
       "expired-link-normalization-read-only",
+      "credential-adapter-live-read-only",
     ].includes(mode)) {
       process.stdout.write(`${JSON.stringify(
         buildAuthenticatedReadOnlyFailureEnvelope(error, "CHILD_PROCESS_EXIT", mode),
