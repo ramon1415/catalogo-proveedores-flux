@@ -20,7 +20,7 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: b167476bea40355480e66fb8effbaadd46f57b47
+  EXPECTED_PARENT: 8a1035623ebe3d454c4edd1e97251e5a7b505f88
   EXPECTED_BASE: fb7f406c3909a6ad881402870a7d56bccbdeb466
   EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
   MIGRATION_FILE: supabase/migrations/040_fix_extraordinary_consumption_and_material_invalidation.sql
@@ -44,7 +44,43 @@ jobs:
       - name: Checkout exact pushed commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 0
+
+      - name: Fetch and verify complete authorized history
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch \
+            --no-tags \
+            --prune \
+            origin \
+            "+refs/heads/dev:refs/remotes/origin/dev" \
+            "+refs/heads/${FEATURE_BRANCH}:refs/remotes/origin/${FEATURE_BRANCH}"
+
+          if ! git cat-file -e "${EXPECTED_PARENT}^{commit}"; then
+            echo "::error::BLOCKED_040_ONE_SHOT_PARENT_CHANGED"
+            exit 1
+          fi
+          if ! git cat-file -e "${EXPECTED_BASE}^{commit}"; then
+            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+            exit 1
+          fi
+          git cat-file -e "${GITHUB_SHA}^{commit}"
+
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          git merge-base --is-ancestor "$EXPECTED_BASE" "$GITHUB_SHA"
+          if [ "$(git rev-parse refs/remotes/origin/dev)" != \
+               "$EXPECTED_BASE" ]; then
+            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor \
+            "$EXPECTED_BASE" "refs/remotes/origin/dev"; then
+            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+            exit 1
+          fi
 
       - name: Guard repository, branch, parent, PR and immutable files
         shell: bash
@@ -66,18 +102,20 @@ jobs:
           mapfile -t changed_files < <(
             git diff --name-only HEAD^ HEAD | sort
           )
-          expected_files=(
+          test "${#changed_files[@]}" -eq 1
+          test "${changed_files[0]}" = \
             ".github/workflows/extraordinary-040-dev-one-shot.yml"
-            "scripts/qa/extraordinary-039-dev-uat.mjs"
-            "scripts/qa/extraordinary-040-private-logical-backup-readonly.sql"
-          )
-          mapfile -t expected_files < <(
-            printf '%s\n' "${expected_files[@]}" | sort
-          )
-          test "${#changed_files[@]}" -eq "${#expected_files[@]}"
-          for index in "${!expected_files[@]}"; do
-            test "${changed_files[$index]}" = "${expected_files[$index]}"
-          done
+          test "$(
+            git diff --name-only \
+              "$EXPECTED_PARENT" \
+              "$GITHUB_SHA" \
+              -- . \
+              ':(exclude).github/workflows/extraordinary-040-dev-one-shot.yml'
+          )" = ""
+
+          test "$(
+            git rev-parse "${GITHUB_SHA}:${MIGRATION_FILE}"
+          )" = "84a9f1e1951b8c62897bdde23d5e955cf2118efb"
 
           while read -r expected_sha migration_path; do
             test "$(
@@ -105,6 +143,10 @@ jobs:
           test "$(jq -r '.state' <<<"$pr_json")" = "open"
           test "$(jq -r '.draft' <<<"$pr_json")" = "true"
           test "$(jq -r '.base.ref' <<<"$pr_json")" = "dev"
+          if [ "$(jq -r '.base.sha' <<<"$pr_json")" != "$EXPECTED_BASE" ]; then
+            echo "::error::BLOCKED_040_PR_BASE_CHANGED"
+            exit 1
+          fi
           test "$(jq -r '.head.ref' <<<"$pr_json")" = "$FEATURE_BRANCH"
           test "$(jq -r '.head.sha' <<<"$pr_json")" = "$GITHUB_SHA"
           test "$(jq -r '.merged' <<<"$pr_json")" = "false"
@@ -668,6 +710,8 @@ jobs:
     steps:
       - name: Checkout exact migrated commit
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run focused 036-040 and post-Yanin contracts
         shell: bash
