@@ -26,6 +26,7 @@ import {
   isAlreadyNormalizedSafeHistory,
   normalizationProtectedSnapshot,
   runCapabilityAudit,
+  runAuthenticatedReadOnlyBaselineInvariantDiagnostic as runBaselineInvariantRunnerDiagnostic,
   runCredentialAdapterNoWriteMocked,
   runNoWriteMocked,
   runRelativeBaselineNoWriteMatrix,
@@ -88,9 +89,18 @@ import {
   createAuthenticatedReadOnlyEnvelope,
   parseAuthenticatedReadOnlyChildResult,
   resolveQaCompanyScopeReadOnly,
+  runAuthenticatedReadOnlyBaselineInvariantDiagnostic as runBaselineInvariantCoreDiagnostic,
   runAuthenticatedReadOnlyPrecheck,
   validateAuthenticatedReadOnlyEnvelope,
 } from "./provider-intake-authenticated-readonly-observability.mjs"
+import {
+  BASELINE_INVARIANT_CODES,
+  BaselineInvariantViolation,
+  assertBaselineInvariant,
+  assertSanitizedBaselineInvariantEvidence,
+  createBaselineInvariantTracker,
+  sanitizeBaselineInvariantValue,
+} from "./provider-intake-baseline-invariants.mjs"
 import {
   CANONICAL_DEV_PORTAL_ORIGIN,
   CANONICAL_DEV_PORTAL_URL,
@@ -2213,6 +2223,219 @@ test("V6N-R7 rejects a second expired link", () => {
     { label: "expired two", status: "expired", expires_at: "2026-07-20T00:00:00Z" },
     { label: "QA V6B historical", status: "revoked", expires_at: null },
   ], "2026-07-21T00:00:00Z"), /LINK_STATE_CONTRACT_MISMATCH/)
+})
+
+const invariantSpecification = (
+  code,
+  condition = true,
+  actual = 1,
+  expected = 1,
+) => {
+  const postBaseline = code.startsWith("POST_BASELINE_")
+  let dimension = "GLOBAL"
+  if (postBaseline) dimension = "ENVELOPE"
+  else if (code.startsWith("IAM_")) dimension = "IAM"
+  else if (code.startsWith("LINK_")) dimension = "LINK_STATE"
+  else if (code.startsWith("SNAPSHOT_") || code.startsWith("STATIC_")) dimension = "SNAPSHOT"
+  return {
+    code,
+    condition,
+    stage: postBaseline ? "RESULT_CONTRACT_VALIDATION" : "FRESH_BASELINE_CAPTURE",
+    dimension,
+    context: `TEST_${code}`,
+    actual,
+    expected,
+  }
+}
+
+for (const code of BASELINE_INVARIANT_CODES) {
+  test(`BASE-D1 emits the specific invariant ${code}`, () => {
+    const tracker = createBaselineInvariantTracker()
+    assert.throws(
+      () => assertBaselineInvariant(
+        tracker,
+        invariantSpecification(code, false, 0, 1),
+      ),
+      (error) => {
+        assert.ok(error instanceof BaselineInvariantViolation)
+        assert.equal(error.category, "RESULT_CONTRACT_INVALID")
+        assert.equal(error.baselineInvariant.first_failed_invariant, code)
+        assert.equal(error.baselineInvariant.invariants_failed, 1)
+        assert.equal(error.baselineInvariant.baseline_invariant_matrix.length, 1)
+        return true
+      },
+    )
+  })
+}
+
+test("BASE-D1 records every real invariant as PASS when all conditions pass", () => {
+  const tracker = createBaselineInvariantTracker()
+  for (const code of BASELINE_INVARIANT_CODES) {
+    assertBaselineInvariant(tracker, invariantSpecification(code))
+  }
+  const summary = tracker.summary()
+  assert.equal(summary.invariants_evaluated, BASELINE_INVARIANT_CODES.length)
+  assert.equal(summary.invariants_passed, BASELINE_INVARIANT_CODES.length)
+  assert.equal(summary.invariants_failed, 0)
+  assert.equal(summary.first_failed_invariant, null)
+})
+
+for (const [label, failureIndex] of [
+  ["first", 0],
+  ["middle", Math.floor(BASELINE_INVARIANT_CODES.length / 2)],
+  ["last", BASELINE_INVARIANT_CODES.length - 1],
+]) {
+  test(`BASE-D1 stops at the ${label} failed invariant`, () => {
+    const tracker = createBaselineInvariantTracker()
+    let failure
+    for (const [index, code] of BASELINE_INVARIANT_CODES.entries()) {
+      try {
+        assertBaselineInvariant(
+          tracker,
+          invariantSpecification(code, index !== failureIndex, index, failureIndex),
+        )
+      } catch (error) {
+        failure = error
+        break
+      }
+    }
+    assert.ok(failure instanceof BaselineInvariantViolation)
+    assert.equal(
+      failure.baselineInvariant.first_failed_invariant,
+      BASELINE_INVARIANT_CODES[failureIndex],
+    )
+    assert.equal(failure.baselineInvariant.invariants_evaluated, failureIndex + 1)
+    assert.equal(failure.baselineInvariant.invariants_passed, failureIndex)
+    assert.equal(failure.baselineInvariant.invariants_failed, 1)
+  })
+}
+
+test("BASE-D1 prevents evaluation after the first invariant failure", () => {
+  const tracker = createBaselineInvariantTracker()
+  assert.throws(
+    () => assertBaselineInvariant(
+      tracker,
+      invariantSpecification(BASELINE_INVARIANT_CODES[0], false, 0, 1),
+    ),
+    BaselineInvariantViolation,
+  )
+  assert.throws(
+    () => assertBaselineInvariant(
+      tracker,
+      invariantSpecification(BASELINE_INVARIANT_CODES[1]),
+    ),
+    /BASELINE_INVARIANT_SHORT_CIRCUIT_VIOLATION/,
+  )
+  assert.equal(tracker.summary().invariants_evaluated, 1)
+})
+
+test("BASE-D1 sanitizes complex actual and expected values without exporting rows", () => {
+  const actual = sanitizeBaselineInvariantValue({
+    internal: QA_COMPANY_UUID,
+    nested: { label: "sensitive" },
+    count: 2,
+  })
+  const expected = sanitizeBaselineInvariantValue([1, true, { private: "value" }])
+  assert.deepEqual(actual, {
+    kind: "object",
+    entries: 3,
+    integers: 1,
+    booleans: 0,
+    nested: 1,
+    sensitive_values_exported: false,
+  })
+  assert.deepEqual(expected, {
+    kind: "array",
+    entries: 3,
+    integers: 1,
+    booleans: 1,
+    nested: 1,
+    sensitive_values_exported: false,
+  })
+  assert.doesNotMatch(
+    JSON.stringify({ actual, expected }),
+    /"sensitive"|"private"|11111111/u,
+  )
+})
+
+for (const [label, leaked] of [
+  ["UUID", QA_COMPANY_UUID],
+  ["DB URL", ["postgresql:", "//qa:secret@", "db.invalid/dev"].join("")],
+  ["API key", ["sb_", "secret_", "example_value_that_must_not_escape"].join("")],
+  ["SQL", ["select", " count(*) from public.payment_intake"].join("")],
+  ["stack", ["at captureFreshBaseline (file:", "///runner.mjs:10:2)"].join("")],
+  ["PII", ["qa.operator", "@", "example.test"].join("")],
+]) {
+  test(`BASE-D1 blocks ${label} leakage from invariant evidence`, () => {
+    assert.throws(
+      () => assertSanitizedBaselineInvariantEvidence({
+        raw: leaked,
+        baseline_invariant_matrix: [],
+        sensitive_values_exported: false,
+      }),
+      /BASELINE_INVARIANT_EVIDENCE_LEAKAGE/,
+    )
+  })
+}
+
+test("BASE-D1 real diagnostic rolls back and closes after the first baseline failure", async () => {
+  const client = createV6NR7PassClient()
+  const originalQuery = client.query.bind(client)
+  client.query = async (sql, params = []) => {
+    const normalized = String(sql).replace(/\s+/gu, " ").trim().toLowerCase()
+    if (normalized.includes("from public.user_roles")) {
+      client.calls.push({ sql: normalized, params: [...params] })
+      return { rows: [{ count: 1 }] }
+    }
+    return await originalQuery(sql, params)
+  }
+  const result = await runBaselineInvariantCoreDiagnostic({
+    env: {
+      SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
+    },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "RESULT_CONTRACT_INVALID")
+  assert.equal(result.baseline_invariant_code, "IAM_ROLE_COUNT_INVALID")
+  assert.equal(result.baseline_invariant_stage, "FRESH_BASELINE_CAPTURE")
+  assert.equal(result.baseline_invariant_dimension, "IAM")
+  assert.equal(result.invariants_failed, 1)
+  assert.equal(result.rollback_completed, true)
+  assert.equal(result.client_closed, true)
+  assert.equal(client.calls.filter((entry) => entry.sql === "rollback").length, 1)
+  assert.equal(result.provider_intake_calls, 0)
+  assert.equal(result.writes, 0)
+  assert.equal(result.token_generated, false)
+  assert.equal(JSON.stringify(result).includes(QA_COMPANY_UUID), false)
+})
+
+test("BASE-D1 real diagnostic records an all-PASS matrix without writes", async () => {
+  const client = createV6NR7PassClient()
+  const result = await runBaselineInvariantCoreDiagnostic({
+    env: {
+      SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
+    },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "PASS")
+  assert.ok(result.invariants_evaluated > BASELINE_INVARIANT_CODES.length)
+  assert.equal(result.invariants_failed, 0)
+  assert.equal(result.rollback_completed, true)
+  assert.equal(result.client_closed, true)
+  assert.equal(result.writes, 0)
+})
+
+test("BASE-D1 runner and capability surface expose the authenticated diagnostic", async () => {
+  assert.equal(typeof runBaselineInvariantRunnerDiagnostic, "function")
+  const audit = await runCapabilityAudit()
+  assert.equal(audit.capabilities.fresh_baseline_invariant_catalog, true)
+  assert.equal(audit.capabilities.baseline_invariant_short_circuit, true)
+  assert.equal(
+    audit.capabilities.authenticated_read_only_baseline_invariant_diagnostic,
+    true,
+  )
+  assert.ok(audit.capability_count >= 91)
 })
 
 test("V6N-R7 rejects QA scope without the allowlisted revoked marker", () => {

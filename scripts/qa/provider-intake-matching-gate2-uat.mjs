@@ -47,11 +47,17 @@ import {
   classifyAuthenticatedReadOnlyError,
   parseAuthenticatedReadOnlyChildResult,
   resolveQaCompanyScopeReadOnly,
+  runAuthenticatedReadOnlyBaselineInvariantDiagnostic as runAuthenticatedReadOnlyBaselineInvariantDiagnosticCore,
   runAuthenticatedReadOnlyMockMatrix,
   runAuthenticatedReadOnlyPrecheck,
   scanReadOnlySql,
   validateAuthenticatedReadOnlyEnvelope,
 } from "./provider-intake-authenticated-readonly-observability.mjs"
+import {
+  BASELINE_INVARIANT_CODES,
+  BASELINE_INVARIANT_DIAGNOSTIC_MODE,
+  assertSanitizedBaselineInvariantEvidence,
+} from "./provider-intake-baseline-invariants.mjs"
 import {
   CANONICAL_DEV_PORTAL_URL,
   CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
@@ -2597,6 +2603,8 @@ export async function runCapabilityAudit() {
     runAuthenticatedReadOnlyPrecheck,
     resolveQaCompanyScopeReadOnly,
     runAuthenticatedReadOnlyPrecheckDiagnostic,
+    runAuthenticatedReadOnlyBaselineInvariantDiagnosticCore,
+    runAuthenticatedReadOnlyBaselineInvariantDiagnostic,
   }
   for (const [name, implementation] of Object.entries(functions)) {
     gate(typeof implementation === "function", `CAPABILITY_FUNCTION_MISSING_${name}`)
@@ -2764,6 +2772,12 @@ export async function runCapabilityAudit() {
         credentialAdapter.cleanup.actor_id_cleared === true,
       live_credential_adapter_read_only:
         typeof runCredentialAdapterLiveReadOnly === "function",
+      fresh_baseline_invariant_catalog:
+        BASELINE_INVARIANT_CODES.length > 0,
+      baseline_invariant_short_circuit:
+        typeof runAuthenticatedReadOnlyBaselineInvariantDiagnosticCore === "function",
+      authenticated_read_only_baseline_invariant_diagnostic:
+        typeof runAuthenticatedReadOnlyBaselineInvariantDiagnostic === "function",
     }
   return {
     mode: "capability-audit",
@@ -2941,6 +2955,58 @@ export async function runAuthenticatedReadOnlyPrecheckDiagnostic(
     head_verified: identityVerified,
     mutable_execution: false,
   }
+  assertSanitizedAuthenticatedReadOnlyEvidence(envelope)
+  return envelope
+}
+
+export async function runAuthenticatedReadOnlyBaselineInvariantDiagnostic(
+  env = process.env,
+  { createClient = createAuthenticatedReadOnlyDatabaseClient } = {},
+) {
+  let identityVerified = false
+  const result = await runAuthenticatedReadOnlyBaselineInvariantDiagnosticCore({
+    env: {
+      SUPABASE_DEV_DB_URL: env.SUPABASE_DEV_DB_URL,
+    },
+    createClient,
+    validateEnvironment: async () => {
+      assertAuthenticatedReadOnlyModeEnvironment(env)
+      identityVerified = true
+      return true
+    },
+  })
+  const firstFailureIdentified =
+    result.invariants_failed === 1 &&
+    typeof result.first_failed_invariant === "string" &&
+    result.first_failed_invariant.length > 0
+  const postEnvelopeFailure =
+    firstFailureIdentified &&
+    result.baseline_invariant_stage === "RESULT_CONTRACT_VALIDATION"
+  const diagnosticResult = firstFailureIdentified
+    ? postEnvelopeFailure
+      ? "BASELINE_INVARIANTS_ALL_PASS_POST_ENVELOPE_FAIL"
+      : "BASELINE_INVARIANT_CAUSE_IDENTIFIED"
+    : "BASELINE_INVARIANT_NOT_IDENTIFIED"
+  const envelope = {
+    ...result,
+    mode: BASELINE_INVARIANT_DIAGNOSTIC_MODE,
+    diagnostic_status: firstFailureIdentified ? "PASS" : "BLOCKED_EVIDENCE",
+    diagnostic_result: diagnosticResult,
+    baseline_functional_approved: false,
+    invariant_catalog_loaded: true,
+    invariant_catalog_size: BASELINE_INVARIANT_CODES.length,
+    runner_identity_verified: identityVerified,
+    head_verified: identityVerified,
+    mutable_execution: false,
+    network_requests: result.connection_established ? 1 : 0,
+    post_attempts: 0,
+    tokens_generated: 0,
+    links_created: 0,
+    links_modified: 0,
+    iam_changes: 0,
+    dev_writes: 0,
+  }
+  assertSanitizedBaselineInvariantEvidence(envelope)
   assertSanitizedAuthenticatedReadOnlyEvidence(envelope)
   return envelope
 }
@@ -5331,6 +5397,7 @@ async function runCli() {
     [
       "capability-audit",
       "authenticated-read-only-precheck-diagnostic",
+      BASELINE_INVARIANT_DIAGNOSTIC_MODE,
       "expired-link-normalization-read-only",
       "live-provider-alias-read-only",
       "no-write-mocked",
@@ -5348,6 +5415,8 @@ async function runCli() {
     result = await runCapabilityAudit()
   } else if (mode === "authenticated-read-only-precheck-diagnostic") {
     result = await runAuthenticatedReadOnlyPrecheckDiagnostic(process.env)
+  } else if (mode === BASELINE_INVARIANT_DIAGNOSTIC_MODE) {
+    result = await runAuthenticatedReadOnlyBaselineInvariantDiagnostic(process.env)
   } else if (mode === "expired-link-normalization-read-only") {
     result = await runExpiredLinkNormalizationReadOnly(process.env)
   } else if (mode === "live-provider-alias-read-only") {
@@ -5386,6 +5455,7 @@ if (isMain) {
     const mode = String(modeArgument || "").slice("--mode=".length)
     if ([
       "authenticated-read-only-precheck-diagnostic",
+      BASELINE_INVARIANT_DIAGNOSTIC_MODE,
       "expired-link-normalization-read-only",
       "credential-adapter-live-read-only",
     ].includes(mode)) {

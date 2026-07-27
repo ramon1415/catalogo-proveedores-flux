@@ -1,4 +1,10 @@
 import crypto from "node:crypto"
+import {
+  BASELINE_INVARIANT_DIAGNOSTIC_MODE,
+  assertBaselineInvariant,
+  assertSanitizedBaselineInvariantEvidence,
+  createBaselineInvariantTracker,
+} from "./provider-intake-baseline-invariants.mjs"
 
 const MODE = "authenticated-read-only-precheck-diagnostic"
 
@@ -164,6 +170,40 @@ export class AuthenticatedReadOnlyObservabilityError extends Error {
     this.stage = stage
     this.category = category
   }
+}
+
+function resultContractInvalid() {
+  return new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
+    category: "RESULT_CONTRACT_INVALID",
+  })
+}
+
+function enforceBaselineInvariant(tracker, specification) {
+  if (tracker) return assertBaselineInvariant(tracker, specification)
+  if (specification.condition !== true) throw resultContractInvalid()
+  return true
+}
+
+function syncBaselineInvariantEnvelope(envelope, source) {
+  const summary = source?.summary ? source.summary() : source
+  if (!summary) return envelope
+  Object.assign(envelope, {
+    baseline_invariant_matrix: [...(summary.baseline_invariant_matrix || [])],
+    first_failed_invariant: summary.first_failed_invariant || null,
+    last_passed_invariant: summary.last_passed_invariant || null,
+    invariants_evaluated: Number(summary.invariants_evaluated || 0),
+    invariants_passed: Number(summary.invariants_passed || 0),
+    invariants_failed: Number(summary.invariants_failed || 0),
+    baseline_invariant_code: summary.first_failed_invariant || null,
+    baseline_invariant_stage: summary.failed_invariant_stage || null,
+    baseline_invariant_dimension: summary.failed_invariant_dimension || null,
+    baseline_invariant_context: summary.failed_invariant_context || null,
+    failed_actual_sanitized: summary.failed_actual_sanitized || null,
+    failed_expected_sanitized: summary.failed_expected_sanitized || null,
+    sensitive_values_exported: false,
+  })
+  assertSanitizedBaselineInvariantEvidence(envelope)
+  return envelope
 }
 
 function normalizedCode(error) {
@@ -374,6 +414,19 @@ export function createAuthenticatedReadOnlyEnvelope(mode = MODE) {
     raw_error_exported: false,
     database_uri_exported: false,
     internal_ids_exported: false,
+    baseline_invariant_matrix: [],
+    first_failed_invariant: null,
+    last_passed_invariant: null,
+    invariants_evaluated: 0,
+    invariants_passed: 0,
+    invariants_failed: 0,
+    baseline_invariant_code: null,
+    baseline_invariant_stage: null,
+    baseline_invariant_dimension: null,
+    baseline_invariant_context: null,
+    failed_actual_sanitized: null,
+    failed_expected_sanitized: null,
+    sensitive_values_exported: false,
   }
 }
 
@@ -413,64 +466,231 @@ const REQUIRED_ENVELOPE_FIELDS = Object.freeze([
   "raw_error_exported",
 ])
 
-export function validateAuthenticatedReadOnlyEnvelope(value) {
-  if (!value || typeof value !== "object") {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
+export function validateAuthenticatedReadOnlyEnvelope(
+  value,
+  { baselineInvariantTracker = null } = {},
+) {
+  const check = (code, condition, actual, expected, context = code) =>
+    enforceBaselineInvariant(baselineInvariantTracker, {
+      code,
+      condition,
+      stage: "RESULT_CONTRACT_VALIDATION",
+      dimension: "ENVELOPE",
+      context,
+      actual,
+      expected,
     })
-  }
+  check(
+    "POST_BASELINE_ENVELOPE_OBJECT_INVALID",
+    Boolean(value) && typeof value === "object",
+    value,
+    "OBJECT",
+  )
   for (const field of REQUIRED_ENVELOPE_FIELDS) {
-    if (!Object.hasOwn(value, field)) {
-      throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-        category: "RESULT_CONTRACT_INVALID",
-      })
-    }
+    check(
+      "POST_BASELINE_ENVELOPE_FIELD_MISSING",
+      Object.hasOwn(value, field),
+      Object.hasOwn(value, field),
+      true,
+      field,
+    )
   }
-  if (!["PASS", "BLOCKED", "FAIL"].includes(value.status) ||
-      value.writes !== 0 || value.token_generated !== false ||
-      value.provider_intake_calls !== 0 || value.raw_error_exported !== false ||
-      value.raw_detail_exported !== false || value.qa_company_id_exported !== false) {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
-    })
-  }
-  if (value.transaction_started && !value.rollback_completed) {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
-    })
-  }
+  check(
+    "POST_BASELINE_STATUS_INVALID",
+    ["PASS", "BLOCKED", "FAIL"].includes(value.status),
+    value.status,
+    "PASS_BLOCKED_OR_FAIL",
+  )
+  check("POST_BASELINE_WRITE_DELTA_INVALID", value.writes === 0, value.writes, 0)
+  check(
+    "POST_BASELINE_TOKEN_FLAG_INVALID",
+    value.token_generated === false,
+    value.token_generated,
+    false,
+  )
+  check(
+    "POST_BASELINE_PROVIDER_CALLS_INVALID",
+    value.provider_intake_calls === 0,
+    value.provider_intake_calls,
+    0,
+  )
+  check(
+    "POST_BASELINE_RAW_ERROR_FLAG_INVALID",
+    value.raw_error_exported === false,
+    value.raw_error_exported,
+    false,
+  )
+  check(
+    "POST_BASELINE_RAW_DETAIL_FLAG_INVALID",
+    value.raw_detail_exported === false,
+    value.raw_detail_exported,
+    false,
+  )
+  check(
+    "POST_BASELINE_QA_ID_EXPORTED",
+    value.qa_company_id_exported === false,
+    value.qa_company_id_exported,
+    false,
+  )
+  check(
+    "POST_BASELINE_ROLLBACK_MISSING",
+    !value.transaction_started || value.rollback_completed === true,
+    value.rollback_completed,
+    true,
+  )
   if (value.status === "PASS") {
-    if (!value.connection_established || !value.transaction_started ||
-        !value.transaction_read_only || !value.query_completed ||
-        !value.rollback_completed || !value.fresh_baseline_completed ||
-        !value.live_snapshot_captured || !value.snapshot_shape_valid ||
-        !value.snapshot_hash_present || !value.static_integrity_pass ||
-        !value.iam_at_rest_pass || value.absolute_live_baseline_enforced !== false ||
-        !["ALREADY_NORMALIZED", "NORMALIZATION_REQUIRED"].includes(value.state) ||
-        !["on", "off", "unknown"].includes(
-          String(value.initial_default_transaction_read_only || "").toLowerCase(),
-        ) ||
-        value.session_read_only_bootstrap_applied !== true ||
-        value.session_default_transaction_read_only !== true ||
-        !["DETERMINISTIC_READ_ONLY", "PROTECTED_VALUE_VERIFIED"].includes(
-          value.qa_company_scope_source,
-        ) ||
-        value.qa_company_scope_applied !== true ||
-        value.qa_company_candidate_count !== 1 ||
-        !Number.isInteger(value.intake_links_global) ||
-        value.intake_links_global < 1 ||
-        !Number.isInteger(value.distinct_company_scopes) ||
-        value.distinct_company_scopes < 2 ||
-        !Number.isInteger(value.intake_links_qa_company) ||
-        value.intake_links_qa_company < 3) {
-      throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-        category: "RESULT_CONTRACT_INVALID",
-      })
-    }
-  } else if (!value.failed_stage || !value.failure_category) {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
-    })
+    check(
+      "POST_BASELINE_CONNECTION_MISSING",
+      value.connection_established === true,
+      value.connection_established,
+      true,
+    )
+    check(
+      "POST_BASELINE_TRANSACTION_MISSING",
+      value.transaction_started === true,
+      value.transaction_started,
+      true,
+    )
+    check(
+      "POST_BASELINE_TRANSACTION_NOT_READ_ONLY",
+      value.transaction_read_only === true,
+      value.transaction_read_only,
+      true,
+    )
+    check("POST_BASELINE_QUERY_MISSING", value.query_completed === true, value.query_completed, true)
+    check(
+      "POST_BASELINE_ROLLBACK_MISSING",
+      value.rollback_completed === true,
+      value.rollback_completed,
+      true,
+    )
+    check(
+      "POST_BASELINE_FRESH_CAPTURE_MISSING",
+      value.fresh_baseline_completed === true,
+      value.fresh_baseline_completed,
+      true,
+    )
+    check(
+      "POST_BASELINE_SNAPSHOT_CAPTURE_MISSING",
+      value.live_snapshot_captured === true,
+      value.live_snapshot_captured,
+      true,
+    )
+    check(
+      "POST_BASELINE_SNAPSHOT_SHAPE_INVALID",
+      value.snapshot_shape_valid === true,
+      value.snapshot_shape_valid,
+      true,
+    )
+    check(
+      "POST_BASELINE_SNAPSHOT_HASH_INVALID",
+      value.snapshot_hash_present === true,
+      value.snapshot_hash_present,
+      true,
+    )
+    check(
+      "POST_BASELINE_STATIC_INTEGRITY_INVALID",
+      value.static_integrity_pass === true,
+      value.static_integrity_pass,
+      true,
+    )
+    check("POST_BASELINE_IAM_INVALID", value.iam_at_rest_pass === true, value.iam_at_rest_pass, true)
+    check(
+      "POST_BASELINE_ABSOLUTE_BASELINE_INVALID",
+      value.absolute_live_baseline_enforced === false,
+      value.absolute_live_baseline_enforced,
+      false,
+    )
+    check(
+      "POST_BASELINE_STATE_INVALID",
+      ["ALREADY_NORMALIZED", "NORMALIZATION_REQUIRED"].includes(value.state),
+      value.state,
+      "KNOWN_LINK_STATE",
+    )
+    const initialReadOnly = String(
+      value.initial_default_transaction_read_only || "",
+    ).toLowerCase()
+    check(
+      "POST_BASELINE_INITIAL_READ_ONLY_STATE_INVALID",
+      ["on", "off", "unknown"].includes(initialReadOnly),
+      initialReadOnly,
+      "ON_OFF_OR_UNKNOWN",
+    )
+    check(
+      "POST_BASELINE_SESSION_BOOTSTRAP_INVALID",
+      value.session_read_only_bootstrap_applied === true,
+      value.session_read_only_bootstrap_applied,
+      true,
+    )
+    check(
+      "POST_BASELINE_SESSION_READ_ONLY_INVALID",
+      value.session_default_transaction_read_only === true,
+      value.session_default_transaction_read_only,
+      true,
+    )
+    check(
+      "POST_BASELINE_QA_SCOPE_SOURCE_INVALID",
+      ["DETERMINISTIC_READ_ONLY", "PROTECTED_VALUE_VERIFIED"].includes(
+        value.qa_company_scope_source,
+      ),
+      value.qa_company_scope_source,
+      "KNOWN_QA_SCOPE_SOURCE",
+    )
+    check(
+      "POST_BASELINE_QA_SCOPE_NOT_APPLIED",
+      value.qa_company_scope_applied === true,
+      value.qa_company_scope_applied,
+      true,
+    )
+    check(
+      "POST_BASELINE_QA_CANDIDATE_COUNT_INVALID",
+      value.qa_company_candidate_count === 1,
+      value.qa_company_candidate_count,
+      1,
+    )
+    check(
+      "POST_BASELINE_GLOBAL_LINK_COUNT_NOT_INTEGER",
+      Number.isInteger(value.intake_links_global),
+      value.intake_links_global,
+      "INTEGER",
+    )
+    check(
+      "POST_BASELINE_GLOBAL_LINK_COUNT_INVALID",
+      value.intake_links_global >= 1,
+      value.intake_links_global,
+      1,
+    )
+    check(
+      "POST_BASELINE_COMPANY_SCOPE_COUNT_NOT_INTEGER",
+      Number.isInteger(value.distinct_company_scopes),
+      value.distinct_company_scopes,
+      "INTEGER",
+    )
+    check(
+      "POST_BASELINE_COMPANY_SCOPE_COUNT_INVALID",
+      value.distinct_company_scopes >= 2,
+      value.distinct_company_scopes,
+      2,
+    )
+    check(
+      "POST_BASELINE_QA_LINK_COUNT_NOT_INTEGER",
+      Number.isInteger(value.intake_links_qa_company),
+      value.intake_links_qa_company,
+      "INTEGER",
+    )
+    check(
+      "POST_BASELINE_QA_LINK_COUNT_INVALID",
+      value.intake_links_qa_company >= 3,
+      value.intake_links_qa_company,
+      3,
+    )
+  } else {
+    check(
+      "POST_BASELINE_FAILURE_CONTEXT_MISSING",
+      Boolean(value.failed_stage) && Boolean(value.failure_category),
+      Boolean(value.failed_stage) && Boolean(value.failure_category),
+      true,
+    )
   }
   return true
 }
@@ -738,38 +958,100 @@ export async function resolveQaCompanyScopeReadOnly(client, protectedValue = nul
   })
 }
 
-async function scalar(client, sql, params = []) {
+async function scalar(
+  client,
+  sql,
+  params = [],
+  {
+    baselineInvariantTracker = null,
+    dimension = "GLOBAL",
+    context = "SCALAR",
+  } = {},
+) {
   const result = await queryReadOnly(client, sql, params)
   const count = Number(result?.rows?.[0]?.count)
-  if (!Number.isFinite(count) || count < 0) {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
-    })
-  }
+  enforceBaselineInvariant(baselineInvariantTracker, {
+    code: "BASELINE_SCALAR_NOT_FINITE",
+    condition: Number.isFinite(count),
+    stage: "FRESH_BASELINE_CAPTURE",
+    dimension,
+    context,
+    actual: count,
+    expected: "FINITE_NUMBER",
+  })
+  enforceBaselineInvariant(baselineInvariantTracker, {
+    code: "BASELINE_SCALAR_NEGATIVE",
+    condition: count >= 0,
+    stage: "FRESH_BASELINE_CAPTURE",
+    dimension,
+    context,
+    actual: count,
+    expected: 0,
+  })
   return count
 }
 
-async function captureFreshBaseline(client, linkState, qaCompanyId, globalAggregate) {
+async function captureFreshBaseline(
+  client,
+  linkState,
+  qaCompanyId,
+  globalAggregate,
+  baselineInvariantTracker = null,
+) {
   const profileRows = await queryReadOnly(client, SQL.qaProfiles)
   const profiles = Array.isArray(profileRows?.rows) ? profileRows.rows : []
   const profileIds = profiles.map((row) => row.profile_id)
   const authUserIds = profiles.map((row) => row.auth_user_id)
   const baseline = {}
-  for (const [key, sql] of Object.entries(BASELINE_SCALARS)) baseline[key] = await scalar(client, sql)
+  for (const [key, sql] of Object.entries(BASELINE_SCALARS)) {
+    baseline[key] = await scalar(client, sql, [], {
+      baselineInvariantTracker,
+      dimension: "GLOBAL",
+      context: key,
+    })
+  }
   baseline.states = {}
-  for (const [key, sql] of Object.entries(STATE_SCALARS)) baseline.states[key] = await scalar(client, sql)
+  for (const [key, sql] of Object.entries(STATE_SCALARS)) {
+    baseline.states[key] = await scalar(client, sql, [], {
+      baselineInvariantTracker,
+      dimension: "INTAKE_STATES",
+      context: key,
+    })
+  }
   baseline.links = {}
   for (const [key, sql] of Object.entries(LINK_SCALARS)) {
-    baseline.links[key] = await scalar(client, sql, [qaCompanyId])
+    baseline.links[key] = await scalar(client, sql, [qaCompanyId], {
+      baselineInvariantTracker,
+      dimension: "QA_COMPANY",
+      context: key,
+    })
   }
   baseline.iam = {
     qa_principals: profiles.length,
     profiles_inactive: profiles.filter((row) => row.active === false).length,
     auth_blocked: profiles.filter((row) => row.blocked === true).length,
-    roles: profileIds.length ? await scalar(client, IAM_SCALARS.roles, [profileIds]) : 0,
-    memberships: profileIds.length ? await scalar(client, IAM_SCALARS.memberships, [profileIds]) : 0,
-    sessions: authUserIds.length ? await scalar(client, IAM_SCALARS.sessions, [authUserIds]) : 0,
-    refresh_tokens: authUserIds.length ? await scalar(client, IAM_SCALARS.refresh_tokens, [authUserIds]) : 0,
+    roles: profileIds.length ? await scalar(client, IAM_SCALARS.roles, [profileIds], {
+      baselineInvariantTracker,
+      dimension: "IAM",
+      context: "ROLES",
+    }) : 0,
+    memberships: profileIds.length ? await scalar(client, IAM_SCALARS.memberships, [profileIds], {
+      baselineInvariantTracker,
+      dimension: "IAM",
+      context: "MEMBERSHIPS",
+    }) : 0,
+    sessions: authUserIds.length ? await scalar(client, IAM_SCALARS.sessions, [authUserIds], {
+      baselineInvariantTracker,
+      dimension: "IAM",
+      context: "SESSIONS",
+    }) : 0,
+    refresh_tokens: authUserIds.length
+      ? await scalar(client, IAM_SCALARS.refresh_tokens, [authUserIds], {
+        baselineInvariantTracker,
+        dimension: "IAM",
+        context: "REFRESH_TOKENS",
+      })
+      : 0,
   }
   baseline.distinct_company_scopes = globalAggregate.distinct_company_scopes
   baseline.intake_links_qa_company = linkState.counts.total
@@ -777,26 +1059,115 @@ async function captureFreshBaseline(client, linkState, qaCompanyId, globalAggreg
     client,
     SQL.otherCompanyActiveValid,
     [qaCompanyId],
+    {
+      baselineInvariantTracker,
+      dimension: "GLOBAL",
+      context: "OTHER_COMPANY_ACTIVE_VALID",
+    },
   )
-  if (baseline.intake_links !== globalAggregate.intake_links_global ||
-      !Number.isInteger(baseline.distinct_company_scopes) ||
-      baseline.distinct_company_scopes < 2 ||
-      baseline.intake_links_qa_company !== linkState.counts.total ||
-      baseline.links.active_expired !== linkState.counts.active_expired ||
-      baseline.links.expired !== linkState.counts.expired ||
-      baseline.links.revoked !== linkState.counts.revoked ||
-      baseline.other_company_active_valid < 1 ||
-      baseline.iam.qa_principals !== 2 ||
-      baseline.iam.profiles_inactive !== 2 ||
-      baseline.iam.auth_blocked !== 2 ||
-      baseline.iam.roles !== 0 ||
-      baseline.iam.memberships !== 0 ||
-      baseline.iam.sessions !== 0 ||
-      baseline.iam.refresh_tokens !== 0) {
-    throw new AuthenticatedReadOnlyObservabilityError("RESULT_CONTRACT_INVALID", {
-      category: "RESULT_CONTRACT_INVALID",
+  const check = (code, condition, dimension, actual, expected, context = code) =>
+    enforceBaselineInvariant(baselineInvariantTracker, {
+      code,
+      condition,
+      stage: "FRESH_BASELINE_CAPTURE",
+      dimension,
+      context,
+      actual,
+      expected,
     })
-  }
+  check(
+    "GLOBAL_LINK_COUNT_MISMATCH",
+    baseline.intake_links === globalAggregate.intake_links_global,
+    "GLOBAL",
+    baseline.intake_links,
+    globalAggregate.intake_links_global,
+  )
+  check(
+    "GLOBAL_COMPANY_SCOPE_COUNT_NOT_INTEGER",
+    Number.isInteger(baseline.distinct_company_scopes),
+    "GLOBAL",
+    baseline.distinct_company_scopes,
+    "INTEGER",
+  )
+  check(
+    "GLOBAL_COMPANY_SCOPE_COUNT_INVALID",
+    baseline.distinct_company_scopes >= 2,
+    "GLOBAL",
+    baseline.distinct_company_scopes,
+    2,
+  )
+  check(
+    "LINK_STATE_TOTAL_MISMATCH",
+    baseline.intake_links_qa_company === linkState.counts.total,
+    "LINK_STATE",
+    baseline.intake_links_qa_company,
+    linkState.counts.total,
+  )
+  check(
+    "LINK_STATE_ACTIVE_EXPIRED_MISMATCH",
+    baseline.links.active_expired === linkState.counts.active_expired,
+    "LINK_STATE",
+    baseline.links.active_expired,
+    linkState.counts.active_expired,
+  )
+  check(
+    "LINK_STATE_EXPIRED_MISMATCH",
+    baseline.links.expired === linkState.counts.expired,
+    "LINK_STATE",
+    baseline.links.expired,
+    linkState.counts.expired,
+  )
+  check(
+    "LINK_STATE_REVOKED_MISMATCH",
+    baseline.links.revoked === linkState.counts.revoked,
+    "LINK_STATE",
+    baseline.links.revoked,
+    linkState.counts.revoked,
+  )
+  check(
+    "OTHER_COMPANY_ACTIVE_VALID_MISSING",
+    baseline.other_company_active_valid >= 1,
+    "GLOBAL",
+    baseline.other_company_active_valid,
+    1,
+  )
+  check(
+    "IAM_QA_PRINCIPAL_COUNT_INVALID",
+    baseline.iam.qa_principals === 2,
+    "IAM",
+    baseline.iam.qa_principals,
+    2,
+  )
+  check(
+    "IAM_PROFILE_INACTIVE_COUNT_INVALID",
+    baseline.iam.profiles_inactive === 2,
+    "IAM",
+    baseline.iam.profiles_inactive,
+    2,
+  )
+  check(
+    "IAM_AUTH_BLOCKED_COUNT_INVALID",
+    baseline.iam.auth_blocked === 2,
+    "IAM",
+    baseline.iam.auth_blocked,
+    2,
+  )
+  check("IAM_ROLE_COUNT_INVALID", baseline.iam.roles === 0, "IAM", baseline.iam.roles, 0)
+  check(
+    "IAM_MEMBERSHIP_COUNT_INVALID",
+    baseline.iam.memberships === 0,
+    "IAM",
+    baseline.iam.memberships,
+    0,
+  )
+  check("IAM_SESSION_COUNT_INVALID", baseline.iam.sessions === 0, "IAM", baseline.iam.sessions, 0)
+  check(
+    "IAM_REFRESH_TOKEN_COUNT_INVALID",
+    baseline.iam.refresh_tokens === 0,
+    "IAM",
+    baseline.iam.refresh_tokens,
+    0,
+  )
   baseline.snapshot_hash = crypto
     .createHash("sha256")
     .update(JSON.stringify(baseline))
@@ -813,6 +1184,7 @@ export async function runAuthenticatedReadOnlyPrecheck({
   createClient,
   validateEnvironment = async () => true,
   mode = MODE,
+  baselineInvariantTracker = null,
 } = {}) {
   const envelope = createAuthenticatedReadOnlyEnvelope(mode)
   let client = null
@@ -986,6 +1358,7 @@ export async function runAuthenticatedReadOnlyPrecheck({
         intake_links_global: envelope.intake_links_global,
         distinct_company_scopes: envelope.distinct_company_scopes,
       },
+      baselineInvariantTracker,
     )
     envelope.fresh_baseline_completed = true
     const integrityResult = await queryReadOnly(client, SQL.staticIntegrity)
@@ -1008,6 +1381,66 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.snapshot_shape_valid = true
     envelope.snapshot_hash_present =
       /^[0-9a-f]{64}$/.test(String(envelope.fresh_baseline.snapshot_hash || ""))
+    const freshCheck = (code, condition, dimension, actual, expected, context = code) =>
+      enforceBaselineInvariant(baselineInvariantTracker, {
+        code,
+        condition,
+        stage: "FRESH_BASELINE_CAPTURE",
+        dimension,
+        context,
+        actual,
+        expected,
+      })
+    if (baselineInvariantTracker) {
+      freshCheck(
+        "SNAPSHOT_HASH_INVALID",
+        envelope.snapshot_hash_present,
+        "SNAPSHOT",
+        envelope.fresh_baseline.snapshot_hash,
+        "SHA256_HEX",
+      )
+      const staticBooleanContexts = [
+        "CANDIDATES_RPC",
+        "COMPARISON_RPC",
+        "MUTATION_RPC",
+        "INTAKE_LINKS_RLS",
+        "PAYMENT_INTAKE_RLS",
+      ]
+      for (const [index, value] of staticBooleans.entries()) {
+        freshCheck(
+          "STATIC_INTEGRITY_BOOLEAN_INVALID",
+          value === true,
+          "SNAPSHOT",
+          value,
+          true,
+          staticBooleanContexts[index],
+        )
+      }
+      const staticCountContexts = [
+        "ORPHAN_INTAKES",
+        "ORPHAN_EVENTS",
+        "ORPHAN_FILES",
+        "ACTIVE_EXPIRED_LINKS",
+        "DUPLICATE_ACTIVE_SCOPES",
+      ]
+      for (const [index, value] of staticCounts.entries()) {
+        freshCheck(
+          "STATIC_INTEGRITY_COUNT_NONZERO",
+          value === 0,
+          "SNAPSHOT",
+          value,
+          0,
+          staticCountContexts[index],
+        )
+      }
+      freshCheck(
+        "LINK_STATE_UNSAFE",
+        linkState.state === "ALREADY_NORMALIZED",
+        "LINK_STATE",
+        linkState.state,
+        "ALREADY_NORMALIZED",
+      )
+    }
     envelope.static_integrity_pass =
       staticBooleans.every((value) => value === true) &&
       staticCounts.every((value) => value === 0) &&
@@ -1024,6 +1457,7 @@ export async function runAuthenticatedReadOnlyPrecheck({
       envelope.fresh_baseline.iam.sessions === 0 &&
       envelope.fresh_baseline.iam.refresh_tokens === 0
     envelope.absolute_live_baseline_enforced = false
+    syncBaselineInvariantEnvelope(envelope, baselineInvariantTracker)
     completed(envelope, currentStage)
 
     currentStage = "RESULT_CONTRACT_VALIDATION"
@@ -1048,7 +1482,8 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.sanitized_code = null
     envelope.sqlstate_class = null
     completed(envelope, currentStage)
-    validateAuthenticatedReadOnlyEnvelope(envelope)
+    validateAuthenticatedReadOnlyEnvelope(envelope, { baselineInvariantTracker })
+    syncBaselineInvariantEnvelope(envelope, baselineInvariantTracker)
     assertSanitizedAuthenticatedReadOnlyEvidence(
       envelope,
       [databaseUrl, qaCompanyId, protectedQaCompanyId],
@@ -1074,6 +1509,10 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.sqlstate_class = classified.sqlstate_class
     envelope.raw_detail_exported = false
     envelope.raw_error_exported = false
+    syncBaselineInvariantEnvelope(
+      envelope,
+      error?.baselineInvariant || baselineInvariantTracker,
+    )
     if (!envelope.last_completed_stage && currentStage !== "ENVIRONMENT_VALIDATION") {
       envelope.last_completed_stage = "ENVIRONMENT_VALIDATION"
     }
@@ -1098,6 +1537,15 @@ export async function runAuthenticatedReadOnlyPrecheck({
   }
 }
 
+export async function runAuthenticatedReadOnlyBaselineInvariantDiagnostic(options = {}) {
+  const baselineInvariantTracker = createBaselineInvariantTracker()
+  return await runAuthenticatedReadOnlyPrecheck({
+    ...options,
+    mode: BASELINE_INVARIANT_DIAGNOSTIC_MODE,
+    baselineInvariantTracker,
+  })
+}
+
 export function buildAuthenticatedReadOnlyFailureEnvelope(error, stage = "CHILD_PROCESS_EXIT", mode = MODE) {
   const envelope = createAuthenticatedReadOnlyEnvelope(mode)
   const classified = classifyAuthenticatedReadOnlyError(error, stage)
@@ -1109,6 +1557,7 @@ export function buildAuthenticatedReadOnlyFailureEnvelope(error, stage = "CHILD_
     sanitized_code: classified.sanitized_code,
     sqlstate_class: classified.sqlstate_class,
   })
+  syncBaselineInvariantEnvelope(envelope, error?.baselineInvariant)
   assertSanitizedAuthenticatedReadOnlyEvidence(envelope)
   return envelope
 }
