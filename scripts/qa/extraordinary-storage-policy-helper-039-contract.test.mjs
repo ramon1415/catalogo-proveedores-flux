@@ -111,6 +111,8 @@ const backupPath =
 const uatPath = "scripts/qa/extraordinary-039-dev-uat.mjs"
 const workflowPath =
   ".github/workflows/extraordinary-039-dev-precheck-readonly.yml"
+const workflow040Path =
+  ".github/workflows/extraordinary-040-dev-one-shot.yml"
 const shadowPregrantPath =
   "scripts/qa/shadow/039_pregrant_storage_policy_contracts.sql"
 const shadowPostgrantPath =
@@ -126,6 +128,7 @@ const postcheck = read(postcheckPath)
 const backup = read(backupPath)
 const uat = read(uatPath)
 const workflow = read(workflowPath)
+const workflow040 = read(workflow040Path)
 const shadowPregrant = read(shadowPregrantPath)
 const shadowPostgrant = read(shadowPostgrantPath)
 const shadowRunner = read(shadowRunnerPath)
@@ -498,8 +501,128 @@ test("UAT uses real Auth sessions, private Storage and no payment confirmation",
   assert.match(uat, /payable_snapshots:\s*1/i)
   assert.match(uat, /financial_outbox_events:\s*1/i)
   assert.match(uat, /snapshot\.payment_request_id = \$1/i)
-  assert.match(uat, /event\.company_id = \$2/i)
-  assert.match(uat, /object\.name like \$2::text \|\| '\/%'/i)
+  assert.doesNotMatch(uat, /object\.name like \$2::text/i)
+  assert.doesNotMatch(uat, /event\.company_id::text\s*=\s*\$2/i)
+  assert.doesNotMatch(uat, /event\.company_id\s*=\s*\$2::text/i)
+  assert.match(uat, /object\.name like \$4::text/i)
+  assert.match(uat, /`\$\{ids\.company\}\/%`/)
+
+  const companyUuidComparisons =
+    uat.match(/event\.company_id\s*=\s*\$2::uuid/g) ?? []
+  assert.equal(companyUuidComparisons.length, 2)
+  assert.match(
+    uat,
+    /\[\s*ids\.request,\s*ids\.company,\s*Object\.values\(profileIds\),\s*`\$\{ids\.company\}\/%`,\s*\]/,
+  )
+
+  const runStart = uat.indexOf("async function run()")
+  const entrypointStart = uat.indexOf("\ntry {\n  await run()", runStart)
+  assert.notEqual(runStart, -1)
+  assert.notEqual(entrypointStart, -1)
+  const runSource = uat.slice(runStart, entrypointStart)
+  const connect = runSource.indexOf("await db.connect()")
+  const preflight = runSource.indexOf("await currentCounts()")
+  const preflightPassed = runSource.indexOf(
+    "currentCountsPreflightPassed = true",
+  )
+  const preflightMarker = runSource.indexOf(
+    'console.log("CURRENT_COUNTS_PREFLIGHT_PASS")',
+  )
+  const createUsers = runSource.indexOf("await createUsers()")
+  assert(connect >= 0)
+  assert(preflight > connect)
+  assert(preflightPassed > preflight)
+  assert(preflightMarker > preflightPassed)
+  assert(createUsers > preflightMarker)
+  assert.match(
+    runSource,
+    /current_counts_preflight:\s*currentCountsPreflightPassed/,
+  )
+
+  const triggerEnd = workflow040.indexOf("\npermissions:")
+  const pathsStart = workflow040.indexOf("    paths:")
+  assert(pathsStart >= 0)
+  assert(triggerEnd > pathsStart)
+  const triggerPaths = workflow040.slice(pathsStart, triggerEnd)
+  assert.equal((triggerPaths.match(/^\s{6}- /gm) ?? []).length, 3)
+  for (const path of [
+    ".github/workflows/extraordinary-040-dev-one-shot.yml",
+    "scripts/qa/extraordinary-039-dev-uat.mjs",
+    "scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs",
+  ]) {
+    assert.match(triggerPaths, new RegExp(path.replaceAll(".", "\\.")))
+  }
+  assert.doesNotMatch(workflow040.slice(0, triggerEnd), /workflow_dispatch/)
+  assert.equal((workflow040.match(/GITHUB_RUN_ATTEMPT/g) ?? []).length, 2)
+
+  const stateGateStart = workflow040.indexOf(
+    "      - name: Classify the one-shot state",
+  )
+  const precheckStart = workflow040.indexOf(
+    "      - name: Archived installation precheck",
+    stateGateStart,
+  )
+  assert(stateGateStart >= 0)
+  assert(precheckStart > stateGateStart)
+  const stateGate = workflow040.slice(stateGateStart, precheckStart)
+  assert.match(
+    stateGate,
+    /if \[ "\$mode" != "already_applied_exact" \]; then/,
+  )
+  assert.match(stateGate, /STATE_GATE_040_ALREADY_APPLIED_EXACT/)
+
+  const backupStart = workflow040.indexOf(
+    "      - name: Archived pre-install backup",
+    precheckStart,
+  )
+  const migrationStart = workflow040.indexOf(
+    "      - name: Archived migration 040 step",
+    backupStart,
+  )
+  const postcheckStart = workflow040.indexOf(
+    "\n      - name:",
+    migrationStart + 8,
+  )
+  assert(backupStart > precheckStart)
+  assert(migrationStart > backupStart)
+  assert(postcheckStart > migrationStart)
+  assert.match(
+    workflow040.slice(precheckStart, backupStart),
+    /if:\s*\$\{\{\s*github\.run_attempt == 0\s*\}\}/,
+  )
+  assert.match(
+    workflow040.slice(backupStart, migrationStart),
+    /if:\s*\$\{\{\s*github\.run_attempt == 0\s*\}\}/,
+  )
+  assert.match(
+    workflow040.slice(migrationStart, postcheckStart),
+    /if:\s*\$\{\{\s*false\s*\}\}/,
+  )
+  assert.match(
+    workflow040,
+    /uat-mej05-after-040:[\s\S]*?needs:\s*apply-040-once[\s\S]*?outputs\.initial_mode ==[\s\S]*?'already_applied_exact'/,
+  )
+  assert.match(
+    workflow040,
+    /\.current_counts_preflight ==[\s\S]*?"CURRENT_COUNTS_PREFLIGHT_PASS"/,
+  )
+
+  const expectedFilesStart = workflow040.indexOf("expected_files=(")
+  const expectedFilesEnd = workflow040.indexOf(
+    "\n          )",
+    expectedFilesStart,
+  )
+  assert(expectedFilesStart >= 0)
+  assert(expectedFilesEnd > expectedFilesStart)
+  const expectedFiles = workflow040.slice(
+    expectedFilesStart,
+    expectedFilesEnd,
+  )
+  assert.equal((expectedFiles.match(/^\s{12}"/gm) ?? []).length, 3)
+  assert.match(
+    expectedFiles,
+    /scripts\/qa\/extraordinary-storage-policy-helper-039-contract\.test\.mjs/,
+  )
   assert.match(uat, /PRE_RATIFICATION_PAID/i)
   assert.doesNotMatch(uat, /\bservice_role\b/i)
   assert.doesNotMatch(uat, /eyJ[A-Za-z0-9_-]{20,}/)

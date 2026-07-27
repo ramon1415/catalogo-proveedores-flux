@@ -89,6 +89,7 @@ let evidenceBytes = null
 let mainCompleted = false
 let setupCommitted = false
 let baseline = null
+let currentCountsPreflightPassed = false
 let primaryError = null
 let cleanupError = null
 const negative = {
@@ -204,7 +205,7 @@ async function currentCounts() {
           select count(*)
           from storage.objects object
           where object.bucket_id = 'extraordinary-approval-evidence'
-            and object.name like $2::text || '/%'
+            and object.name like $4::text
         ) as storage_objects,
         (
           select count(distinct layout.id)
@@ -242,14 +243,14 @@ async function currentCounts() {
         (
           select count(*)
           from public.financial_outbox_events event
-          where event.company_id = $2
+          where event.company_id = $2::uuid
         ) as financial_outbox_events,
         (
           select count(*)
           from public.financial_outbox_delivery_attempts attempt
           join public.financial_outbox_events event
             on event.id = attempt.event_id
-          where event.company_id = $2
+          where event.company_id = $2::uuid
         ) as delivery_attempts,
         md5(coalesce((
           select string_agg(to_jsonb(plan)::text, '' order by plan.id)
@@ -272,7 +273,12 @@ async function currentCounts() {
           from public.bank_payment_operations operation
         ), '')) as bank_operations_hash
     `,
-    [ids.request, ids.company, Object.values(profileIds)],
+    [
+      ids.request,
+      ids.company,
+      Object.values(profileIds),
+      `${ids.company}/%`,
+    ],
   )
   return rows[0]
 }
@@ -1833,6 +1839,10 @@ async function run() {
   await db.connect()
   let deltas = null
   try {
+    await currentCounts()
+    currentCountsPreflightPassed = true
+    console.log("CURRENT_COUNTS_PREFLIGHT_PASS")
+
     await createUsers()
     await createFixture()
     await signInUsers()
@@ -1852,6 +1862,9 @@ async function run() {
   const sanitized = {
     result: success ? "READY_FOR_RAMON_REVIEW" : "BLOCKED_MEJ05_039_UAT",
     migration_039: "MIGRATION_039_POSTCHECK_PASS",
+    current_counts_preflight: currentCountsPreflightPassed
+      ? "CURRENT_COUNTS_PREFLIGHT_PASS"
+      : "BLOCKED",
     evidence_upload: success ? "MEJ05_EVIDENCE_UPLOAD_PASS" : "BLOCKED",
     storage_negative: Object.values(negative).every(Boolean)
       ? "MEJ05_STORAGE_NEGATIVE_PASS"

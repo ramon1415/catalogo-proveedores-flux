@@ -6,7 +6,8 @@ on:
       - feature/ramon-post-yanin-bugs-extraordinary
     paths:
       - .github/workflows/extraordinary-040-dev-one-shot.yml
-      - scripts/qa/extraordinary-040-private-logical-backup-readonly.sql
+      - scripts/qa/extraordinary-039-dev-uat.mjs
+      - scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs
 
 permissions:
   contents: read
@@ -20,7 +21,7 @@ concurrency:
 
 env:
   DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
-  EXPECTED_PARENT: 4d6bec22b40ef7ca4bf94fd85519f9d8744fb3ca
+  EXPECTED_PARENT: d54475fa74f6ea1392e68b82871888b0b449f041
   EXPECTED_DEV_TIP: fb7f406c3909a6ad881402870a7d56bccbdeb466
   EXPECTED_MERGE_BASE: eb7ffea22bbab37c4b4f752e718e86fe2c23ccf4
   EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
@@ -33,17 +34,26 @@ env:
 
 jobs:
   apply-040-once:
-    name: Apply migration 040 exactly once
+    name: Audit applied migration 040 without mutation
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: DEV
     outputs:
       initial_mode: ${{ steps.state_gate.outputs.mode }}
-      migration_applied: ${{ steps.migration.outputs.applied }}
     env:
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
 
     steps:
+      - name: Block manual reruns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "::error::BLOCKED_MEJ05_UAT_MANUAL_RERUN"
+            exit 1
+          fi
+          echo "MEJ05_UAT_FIRST_ATTEMPT_PASS"
+
       - name: Checkout exact pushed commit
         uses: actions/checkout@v4
         with:
@@ -168,18 +178,23 @@ jobs:
           mapfile -t changed_files < <(
             git diff --name-only HEAD^ HEAD | sort
           )
-          test "${#changed_files[@]}" -eq 2
-          test "${changed_files[0]}" = \
+          expected_files=(
             ".github/workflows/extraordinary-040-dev-one-shot.yml"
-          test "${changed_files[1]}" = \
-            "scripts/qa/extraordinary-040-private-logical-backup-readonly.sql"
+            "scripts/qa/extraordinary-039-dev-uat.mjs"
+            "scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs"
+          )
+          test "${#changed_files[@]}" -eq "${#expected_files[@]}"
+          for index in "${!expected_files[@]}"; do
+            test "${changed_files[$index]}" = "${expected_files[$index]}"
+          done
           test "$(
             git diff --name-only \
               "$EXPECTED_PARENT" \
               "$GITHUB_SHA" \
               -- . \
               ':(exclude).github/workflows/extraordinary-040-dev-one-shot.yml' \
-              ':(exclude)scripts/qa/extraordinary-040-private-logical-backup-readonly.sql'
+              ':(exclude)scripts/qa/extraordinary-039-dev-uat.mjs' \
+              ':(exclude)scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs'
           )" = ""
 
           test "$(
@@ -650,23 +665,20 @@ jobs:
             tail -n 1 > "$EVIDENCE_DIR/state-before.json"
           grep -F "ROLLBACK" "$EVIDENCE_DIR/state-before.raw"
           mode="$(jq -er '.mode' "$EVIDENCE_DIR/state-before.json")"
-          case "$mode" in
-            not_applied_expected|already_applied_exact) ;;
-            *)
-              echo "::error::BLOCKED_040_STATE_PARTIAL_OR_DRIFTED"
-              exit 1
-              ;;
-          esac
+          if [ "$mode" != "already_applied_exact" ]; then
+            echo "::error::BLOCKED_040_NOT_ALREADY_APPLIED_EXACT"
+            exit 1
+          fi
           jq -e '
             .transaction_read_only == "on"
             and .secure_open_authorizations == 0
             and .operadora_policy_enabled == false
           ' "$EVIDENCE_DIR/state-before.json" >/dev/null
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "STATE_GATE_040_${mode^^}"
+          echo "STATE_GATE_040_ALREADY_APPLIED_EXACT"
 
-      - name: Run the exact read-only 040 precheck
-        if: ${{ steps.state_gate.outputs.mode == 'not_applied_expected' }}
+      - name: Archived installation precheck — permanently unreachable
+        if: ${{ github.run_attempt == 0 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -693,8 +705,8 @@ jobs:
           grep -F "ROLLBACK" "$EVIDENCE_DIR/precheck.raw"
           echo "MEJ05_040_CATALOG_PRECHECK_PASS"
 
-      - name: Create private read-only logical backup
-        if: ${{ steps.state_gate.outputs.mode == 'not_applied_expected' }}
+      - name: Archived pre-install backup — permanently unreachable
+        if: ${{ github.run_attempt == 0 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -768,9 +780,9 @@ jobs:
             > "$EVIDENCE_DIR/private-backup-sanitized.json"
           echo "BACKUP_040_CLEAN_RUN_PASS"
 
-      - name: Execute the exact 040 blob once
+      - name: Archived migration 040 step — permanently unreachable
         id: migration
-        if: ${{ steps.state_gate.outputs.mode == 'not_applied_expected' }}
+        if: ${{ false }}
         shell: bash
         run: |
           set -euo pipefail
@@ -878,14 +890,8 @@ jobs:
               and $after[0].operadora_policy_enabled == false
             ' > "$EVIDENCE_DIR/delta-comparison.json"
 
-          if [ "${{ steps.state_gate.outputs.mode }}" = \
-               "not_applied_expected" ]; then
-            echo "MIGRATION_040_ONE_SHOT_PASS" \
-              > "$EVIDENCE_DIR/final-marker.txt"
-          else
-            echo "MIGRATION_040_ALREADY_APPLIED_AUDIT_PASS" \
-              > "$EVIDENCE_DIR/final-marker.txt"
-          fi
+          echo "POST_040_UAT_PREFLIGHT_PASS" \
+            > "$EVIDENCE_DIR/final-marker.txt"
           cat "$EVIDENCE_DIR/final-marker.txt"
 
       - name: Upload sanitized 040 evidence only
@@ -918,7 +924,8 @@ jobs:
     needs: apply-040-once
     if: >-
       ${{ needs['apply-040-once'].result == 'success' &&
-          needs['apply-040-once'].outputs.migration_applied == 'true' }}
+          needs['apply-040-once'].outputs.initial_mode ==
+            'already_applied_exact' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: DEV
@@ -932,10 +939,81 @@ jobs:
       UAT_EVIDENCE_DIR: /tmp/extraordinary-040-uat
 
     steps:
+      - name: Block manual reruns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "::error::BLOCKED_MEJ05_UAT_MANUAL_RERUN"
+            exit 1
+          fi
+          echo "MEJ05_UAT_FIRST_ATTEMPT_PASS"
+
       - name: Checkout exact migrated commit
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate currentCounts UUID and text parameter contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require("node:assert")
+          const fs = require("node:fs")
+
+          const source = fs.readFileSync(
+            "scripts/qa/extraordinary-039-dev-uat.mjs",
+            "utf8",
+          )
+          const currentCountsStart = source.indexOf(
+            "async function currentCounts()",
+          )
+          const roleIdStart = source.indexOf(
+            "async function roleId(",
+            currentCountsStart,
+          )
+          assert(currentCountsStart >= 0)
+          assert(roleIdStart > currentCountsStart)
+          const currentCountsSource = source.slice(
+            currentCountsStart,
+            roleIdStart,
+          )
+
+          assert(!currentCountsSource.includes("object.name like $2::text"))
+          assert(currentCountsSource.includes("object.name like $4::text"))
+          const companyUuidComparisons =
+            currentCountsSource.match(/event\.company_id = \$2::uuid/g) || []
+          assert.strictEqual(companyUuidComparisons.length, 2)
+          assert(currentCountsSource.includes("`${ids.company}/%`"))
+
+          const runStart = source.indexOf("async function run()")
+          const entrypointStart = source.indexOf("\ntry {\n  await run()", runStart)
+          assert(runStart >= 0)
+          assert(entrypointStart > runStart)
+          const runSource = source.slice(runStart, entrypointStart)
+          const connect = runSource.indexOf("await db.connect()")
+          const preflight = runSource.indexOf("await currentCounts()")
+          const preflightPassed = runSource.indexOf(
+            "currentCountsPreflightPassed = true",
+          )
+          const preflightMarker = runSource.indexOf(
+            'console.log("CURRENT_COUNTS_PREFLIGHT_PASS")',
+          )
+          const createUsers = runSource.indexOf("await createUsers()")
+          assert(connect >= 0)
+          assert(preflight > connect)
+          assert(preflightPassed > preflight)
+          assert(preflightMarker > preflightPassed)
+          assert(createUsers > preflightMarker)
+          assert(
+            runSource.includes(
+              "current_counts_preflight: currentCountsPreflightPassed",
+            ),
+          )
+
+          console.log("MEJ05_CURRENT_COUNTS_QUERY_CONTRACT_PASS")
+          NODE
 
       - name: Run focused 036-040 and post-Yanin contracts
         shell: bash
@@ -1022,6 +1100,8 @@ jobs:
           node scripts/qa/extraordinary-039-dev-uat.mjs
           jq -e '
             .result == "READY_FOR_RAMON_REVIEW"
+            and .current_counts_preflight ==
+              "CURRENT_COUNTS_PREFLIGHT_PASS"
             and .evidence_upload == "MEJ05_EVIDENCE_UPLOAD_PASS"
             and .storage_negative == "MEJ05_STORAGE_NEGATIVE_PASS"
             and .evidence_read == "MEJ05_EVIDENCE_READ_PASS"
