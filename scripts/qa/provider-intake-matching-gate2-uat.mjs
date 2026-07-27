@@ -1549,9 +1549,9 @@ function newContext(mode) {
     providerTargets: [],
     otherCompanyLinks: [
       {
-        label: "Other company active",
-        status: "active",
-        expires_at: "2026-12-31T00:00:00.000Z",
+        label: "Other company historical",
+        status: "revoked",
+        expires_at: null,
       },
     ],
     expiredLink: null,
@@ -2718,7 +2718,7 @@ export async function runCapabilityAudit() {
         authenticatedReadOnly.qa_company_id_exported === false,
       multi_company_safe_link_classification:
         authenticatedReadOnly.distinct_company_scopes === 2 &&
-        authenticatedReadOnly.other_company_active_valid === 1,
+        authenticatedReadOnly.other_company_links === 1,
       controlled_demo_link_revocation:
         typeof identifyAuthorizedDemoLink === "function",
       demo_link_revocation_dry_run:
@@ -4564,7 +4564,7 @@ export async function runNoWriteMocked() {
       intake_links: baseline.intake_links + 1,
       intake_links_qa_company: EXPECTED_QA_COMPANY_LINKS,
       distinct_company_scopes: 2,
-      other_company_active_valid: 1,
+      other_company_links: 1,
       link_state: "ALREADY_NORMALIZED",
       existing_revoked_qa_links: 3,
       absolute_live_baseline_enforced: false,

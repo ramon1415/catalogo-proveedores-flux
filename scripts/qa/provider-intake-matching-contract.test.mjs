@@ -2011,8 +2011,18 @@ const createV6NR7ResolverClient = (rows) => ({
   },
 })
 
-const createV6NR7PassClient = () => {
+const createV6NR7PassClient = ({
+  databaseNow = "2026-07-21T00:00:00Z",
+  distinctCompanyScopes,
+  intakeLinksGlobal,
+  otherCompanyRows = [{
+    status: "revoked",
+    expires_at: null,
+  }],
+} = {}) => {
   const calls = []
+  const globalLinkCount = intakeLinksGlobal ?? 4 + otherCompanyRows.length
+  const companyScopeCount = distinctCompanyScopes ?? (otherCompanyRows.length > 0 ? 2 : 1)
   return {
     calls,
     async connect() {
@@ -2043,7 +2053,7 @@ const createV6NR7PassClient = () => {
         return { rows: [{ company_id: QA_COMPANY_UUID }] }
       }
       if (normalized.includes("select current_timestamp as database_now")) {
-        return { rows: [{ database_now: "2026-07-21T00:00:00Z" }] }
+        return { rows: [{ database_now: databaseNow }] }
       }
       if (normalized.includes("order by created_at asc")) {
         return {
@@ -2056,14 +2066,21 @@ const createV6NR7PassClient = () => {
         }
       }
       if (normalized.includes("count(distinct company_id)::int")) {
-        return { rows: [{ intake_links_global: 5, distinct_company_scopes: 2 }] }
+        return {
+          rows: [{
+            intake_links_global: globalLinkCount,
+            distinct_company_scopes: companyScopeCount,
+          }],
+        }
       }
       if (normalized.includes("as candidates_rpc")) return { rows: [STATIC_INTEGRITY_ROW] }
       if (normalized.includes("from auth.users au")) return { rows: QA_PROFILE_ROWS }
       if (normalized.startsWith("select count(*)::int")) {
-        if (normalized.includes("company_id <>")) return { rows: [{ count: 1 }] }
+        if (normalized.includes("company_id <>")) {
+          return { rows: [{ count: otherCompanyRows.length }] }
+        }
         if (!normalized.includes("from public.intake_links")) return { rows: [{ count: 0 }] }
-        if (!normalized.includes(" where ")) return { rows: [{ count: 5 }] }
+        if (!normalized.includes(" where ")) return { rows: [{ count: globalLinkCount }] }
         if (normalized.includes("label like 'qa v6b %'")) {
           return { rows: [{ count: normalized.includes("status='active'") ? 0 : 1 }] }
         }
@@ -2076,8 +2093,8 @@ const createV6NR7PassClient = () => {
   }
 }
 
-const runV6NR7Pass = async (env = {}) => {
-  const client = createV6NR7PassClient()
+const runV6NR7Pass = async (env = {}, clientOptions = {}) => {
+  const client = createV6NR7PassClient(clientOptions)
   const result = await runAuthenticatedReadOnlyPrecheck({
     env: {
       SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
@@ -2168,15 +2185,90 @@ test("LINK-C1 records four safe-history links in the QA company", async () => {
   assert.equal(result.intake_links_qa_company, 4)
 })
 
-test("V6N-R7 preserves the other company active-valid link outside classification", async () => {
+test("V6N-R7 preserves the other-company link outside QA classification", async () => {
   const { result } = await runV6NR7Pass()
   assert.equal(result.status, "PASS")
   assert.equal(result.intake_links_global - result.intake_links_qa_company, 1)
 })
 
-test("V6N-R7 does not let the other company active link block QA", async () => {
+test("V6N-R7 does not let the other-company link block QA", async () => {
   const { result } = await runV6NR7Pass()
   assert.equal(result.state, "ALREADY_NORMALIZED")
+})
+
+for (const [state, row] of [
+  ["revoked", { status: "revoked", expires_at: null }],
+  ["expired", { status: "expired", expires_at: "2026-07-20T00:00:00Z" }],
+  ["active-expired", { status: "active", expires_at: "2026-07-20T00:00:00Z" }],
+]) {
+  test(`BASE-D2 accepts an external ${state} link without contaminating QA scope`, async () => {
+    const { result, client } = await runV6NR7Pass({}, { otherCompanyRows: [row] })
+    assert.equal(result.status, "PASS")
+    assert.equal(result.intake_links_global, 5)
+    assert.equal(result.intake_links_qa_company, 4)
+    assert.equal(result.distinct_company_scopes, 2)
+    assert.equal(result.fresh_baseline.other_company_links, 1)
+    const external = client.calls.find((entry) => entry.sql.includes("company_id <>"))
+    assert.ok(external)
+    assert.doesNotMatch(external.sql, /\b(?:status|expires_at|now\s*\()/u)
+  })
+}
+
+test("BASE-D2 fails closed when every link belongs to the QA company", async () => {
+  const client = createV6NR7PassClient({ otherCompanyRows: [] })
+  const result = await runBaselineInvariantCoreDiagnostic({
+    env: {
+      SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
+    },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "RESULT_CONTRACT_INVALID")
+  assert.equal(result.failed_stage, "GLOBAL_LINK_BASELINE_CAPTURE")
+  assert.equal(result.first_failed_invariant, null)
+  assert.equal(result.rollback_completed, true)
+  assert.equal(result.writes, 0)
+})
+
+test("BASE-D2 fails closed with sanitized evidence when no external link is observed", async () => {
+  const client = createV6NR7PassClient({
+    distinctCompanyScopes: 2,
+    intakeLinksGlobal: 4,
+    otherCompanyRows: [],
+  })
+  const result = await runBaselineInvariantCoreDiagnostic({
+    env: {
+      SUPABASE_DEV_DB_URL: ["postgresql:", "//qa:", "secret", "@", "db.invalid/dev"].join(""),
+    },
+    createClient: async () => client,
+  })
+  assert.equal(result.status, "FAIL")
+  assert.equal(result.failure_category, "RESULT_CONTRACT_INVALID")
+  assert.equal(result.first_failed_invariant, "OTHER_COMPANY_LINK_MISSING")
+  assert.deepEqual(result.failed_actual_sanitized, { value: 0 })
+  assert.deepEqual(result.failed_expected_sanitized, { value: 1 })
+  assert.equal(result.baseline_invariant_stage, "FRESH_BASELINE_CAPTURE")
+  assert.equal(result.baseline_invariant_dimension, "GLOBAL")
+  assert.equal(result.rollback_completed, true)
+  assert.equal(result.writes, 0)
+})
+
+test("BASE-D2 external-link evidence is independent of database time", async () => {
+  const row = { status: "active", expires_at: "2026-07-20T00:00:00Z" }
+  const before = await runV6NR7Pass(
+    {},
+    { databaseNow: "2026-07-21T00:00:00Z", otherCompanyRows: [row] },
+  )
+  const after = await runV6NR7Pass(
+    {},
+    { databaseNow: "2036-07-21T00:00:00Z", otherCompanyRows: [row] },
+  )
+  assert.equal(before.result.fresh_baseline.other_company_links, 1)
+  assert.equal(after.result.fresh_baseline.other_company_links, 1)
+  assert.deepEqual(
+    before.client.calls.find((entry) => entry.sql.includes("company_id <>")).sql,
+    after.client.calls.find((entry) => entry.sql.includes("company_id <>")).sql,
+  )
 })
 
 test("V6N-R7 parameterizes the company-scoped links query", async () => {
@@ -2278,6 +2370,10 @@ test("BASE-D1 records every real invariant as PASS when all conditions pass", ()
   assert.equal(summary.invariants_passed, BASELINE_INVARIANT_CODES.length)
   assert.equal(summary.invariants_failed, 0)
   assert.equal(summary.first_failed_invariant, null)
+})
+
+test("BASE-D2 keeps the invariant catalog unique", () => {
+  assert.equal(new Set(BASELINE_INVARIANT_CODES).size, BASELINE_INVARIANT_CODES.length)
 })
 
 for (const [label, failureIndex] of [

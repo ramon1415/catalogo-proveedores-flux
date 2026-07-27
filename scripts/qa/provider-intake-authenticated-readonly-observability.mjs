@@ -811,13 +811,10 @@ function parseDatabaseUrl(value) {
            count(distinct company_id)::int as distinct_company_scopes
       from public.intake_links
   `,
-  otherCompanyActiveValid: `
+  otherCompanyLinks: `
     select count(*)::int as count
       from public.intake_links
      where company_id <> $1::uuid
-       and status = 'active'
-       and expires_at is not null
-       and expires_at >= now()
   `,
   staticIntegrity: `
     select
@@ -1055,14 +1052,14 @@ async function captureFreshBaseline(
   }
   baseline.distinct_company_scopes = globalAggregate.distinct_company_scopes
   baseline.intake_links_qa_company = linkState.counts.total
-  baseline.other_company_active_valid = await scalar(
+  baseline.other_company_links = await scalar(
     client,
-    SQL.otherCompanyActiveValid,
+    SQL.otherCompanyLinks,
     [qaCompanyId],
     {
       baselineInvariantTracker,
       dimension: "GLOBAL",
-      context: "OTHER_COMPANY_ACTIVE_VALID",
+      context: "OTHER_COMPANY_LINK",
     },
   )
   const check = (code, condition, dimension, actual, expected, context = code) =>
@@ -1125,10 +1122,10 @@ async function captureFreshBaseline(
     linkState.counts.revoked,
   )
   check(
-    "OTHER_COMPANY_ACTIVE_VALID_MISSING",
-    baseline.other_company_active_valid >= 1,
+    "OTHER_COMPANY_LINK_MISSING",
+    baseline.other_company_links >= 1,
     "GLOBAL",
-    baseline.other_company_active_valid,
+    baseline.other_company_links,
     1,
   )
   check(
@@ -1444,7 +1441,7 @@ export async function runAuthenticatedReadOnlyPrecheck({
     envelope.static_integrity_pass =
       staticBooleans.every((value) => value === true) &&
       staticCounts.every((value) => value === 0) &&
-      envelope.fresh_baseline.other_company_active_valid >= 1 &&
+      envelope.fresh_baseline.other_company_links >= 1 &&
       linkState.state === "ALREADY_NORMALIZED"
     envelope.static_integrity_checks = 10
     envelope.static_integrity_failures = envelope.static_integrity_pass ? 0 : 1
@@ -1658,7 +1655,7 @@ export function runAuthenticatedReadOnlyMockMatrix() {
     intake_links_global: 5,
     distinct_company_scopes: 2,
     intake_links_qa_company: 4,
-    other_company_active_valid: 1,
+    other_company_links: 1,
     transaction_isolation: "read committed",
     public_submit_calls: 0,
     diagnostic_public_submit_attempts: 0,
