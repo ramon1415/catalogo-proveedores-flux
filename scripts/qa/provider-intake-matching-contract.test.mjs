@@ -5,26 +5,32 @@ import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
+  AUTHORIZED_POSTS_PER_CONTROLLER,
+  AUTHORIZED_PUBLIC_FIXTURE_POSTS,
   EXPECTED_EXPIRED_LINK_POST_STATE,
   EXPECTED_ALREADY_NORMALIZED_LINK_STATE,
   EXPECTED_EXPIRED_LINK_PRE_STATE,
   DEMO_LINK_REVOCATION_CONTRACT,
+  FIXTURE_ALIASES,
   MOCK_BASELINE,
   MUTABLE_ACCESSIBILITY_HOOKS,
   assertSanitizedProviderEvidence,
   assertExpiredLinkNormalizationTransition,
   assertMutableAuthorization,
+  assertPublicFixturePostBudget,
   buildLiveProviderTargets,
   classifyConcurrentDevEvolution,
   classifyExpiredLinkState,
   classifyExpiredLinkStateFromDatabaseFilter,
   classifyNoWriteBrowserRequest,
   createMutableDependencies,
+  createPublicFixtureSubmitAttempt,
   createLiveStartSnapshot,
   demoLinkProtectedSnapshot,
   identifyAuthorizedDemoLink,
   isAlreadyNormalizedSafeHistory,
   normalizationProtectedSnapshot,
+  provisionFixtures,
   runCapabilityAudit,
   runAuthenticatedReadOnlyBaselineInvariantDiagnostic as runBaselineInvariantRunnerDiagnostic,
   runCredentialAdapterNoWriteMocked,
@@ -34,6 +40,7 @@ import {
   runV6MCleanupMatrix,
   sanitizedProviderAlignment,
   validateExpiredLinkNormalizationEvidence,
+  validateProvisioningDelta,
   validateNormalizationApplyResult,
   validateNormalizationDryRunResult,
   validateNormalizationMutation,
@@ -2840,6 +2847,205 @@ test("CRED-A1 blocks an invalid link actor foreign key contract", async () => {
       error.code === "QA_LINK_CREATED_BY_FK_INVALID" &&
       error.category === "BLOCKED_DATA",
   )
+})
+
+test("POST-C0 fixes the global fixture budget at two and blocks count two", () => {
+  assert.deepEqual(FIXTURE_ALIASES, [
+    "QA_MATCH_FINAL_MAIN",
+    "QA_MATCH_FINAL_RACE",
+  ])
+  assert.equal(AUTHORIZED_PUBLIC_FIXTURE_POSTS, 2)
+  assert.equal(AUTHORIZED_POSTS_PER_CONTROLLER, 1)
+  assert.equal(assertPublicFixturePostBudget(0), true)
+  assert.equal(assertPublicFixturePostBudget(1), true)
+  assert.throws(
+    () => assertPublicFixturePostBudget(2),
+    (error) => error.code === "PUBLIC_FIXTURE_POST_BUDGET_EXHAUSTED",
+  )
+  assert.doesNotMatch(
+    runner,
+    /gate\(state\.publicPostCount === 0,\s*"SECOND_PUBLIC_POST_BLOCKED"\)/u,
+  )
+  const mutableSubmitStart = runner.lastIndexOf(
+    "async submitPublicFixture({ alias, token })",
+  )
+  const mutableSubmitEnd = runner.indexOf(
+    "async assertThirdSubmitRejected()",
+    mutableSubmitStart,
+  )
+  const mutableSubmit = runner.slice(mutableSubmitStart, mutableSubmitEnd)
+  assert.ok(
+    mutableSubmit.indexOf("createPublicFixtureSubmitAttempt") <
+      mutableSubmit.indexOf('require("playwright")'),
+  )
+})
+
+test("POST-C0 isolates controller CAPTCHA idempotency and payload per fixture", () => {
+  const sessions = []
+  const controllers = []
+  const idempotencyMaterial = []
+  const createAttempt = (alias, publicPostCount) =>
+    createPublicFixtureSubmitAttempt({
+      alias,
+      publicPostCount,
+      createCaptchaSession: () => {
+        const session = Object.freeze({ slot: sessions.length })
+        sessions.push(session)
+        return session
+      },
+      createController: ({ captchaSession }) => {
+        const controller = Object.freeze({
+          slot: controllers.length,
+          captchaSession,
+        })
+        controllers.push(controller)
+        return controller
+      },
+      createIdempotencyKey: () => {
+        const value = Object.freeze({ slot: idempotencyMaterial.length })
+        idempotencyMaterial.push(value)
+        return value
+      },
+    })
+
+  const main = createAttempt(FIXTURE_ALIASES[0], 0)
+  const race = createAttempt(FIXTURE_ALIASES[1], 1)
+  assert.notEqual(main.controller, race.controller)
+  assert.notEqual(main.captchaSession, race.captchaSession)
+  assert.notEqual(main.idempotencyKey, race.idempotencyKey)
+  assert.notDeepEqual(main.payload, race.payload)
+  assert.notEqual(main.payloadFingerprint, race.payloadFingerprint)
+
+  const factoriesBeforeThird = {
+    sessions: sessions.length,
+    controllers: controllers.length,
+    idempotency: idempotencyMaterial.length,
+  }
+  assert.throws(
+    () => createAttempt("QA_MATCH_FINAL_THIRD", 2),
+    (error) => error.code === "PUBLIC_FIXTURE_POST_BUDGET_EXHAUSTED",
+  )
+  assert.deepEqual(
+    {
+      sessions: sessions.length,
+      controllers: controllers.length,
+      idempotency: idempotencyMaterial.length,
+    },
+    factoriesBeforeThird,
+  )
+  assert.equal(sessions.length, 2)
+  assert.equal(controllers.length, 2)
+  assert.equal(idempotencyMaterial.length, 2)
+})
+
+test("POST-C0 provisions two fixtures revokes the link and only asserts closure", async () => {
+  const submittedAliases = []
+  let revocations = 0
+  let closureAssertions = 0
+  const thirdPostAttempts = 0
+  const thirdNetworkRequests = 0
+  const thirdCaptchaTokens = 0
+  const context = {
+    token: { raw: "synthetic-post-c0-token" },
+    link: { status: "active" },
+    fixtures: [],
+  }
+  const deps = {
+    async submitPublicFixture({ alias }) {
+      assertPublicFixturePostBudget(submittedAliases.length)
+      submittedAliases.push(alias)
+      return {
+        alias,
+        duplicate: false,
+        status: "received",
+        files: 0,
+        match: null,
+        paymentRequest: null,
+      }
+    },
+    async revokeEphemeralLink() {
+      revocations += 1
+      return { status: "revoked" }
+    },
+    async assertThirdSubmitRejected({ link }) {
+      closureAssertions += 1
+      assert.equal(link.status, "revoked")
+      assert.equal(submittedAliases.length, AUTHORIZED_PUBLIC_FIXTURE_POSTS)
+      return true
+    },
+    async validateProvisioningDelta() {
+      return {
+        intakes: 2,
+        events: 2,
+        storage: 0,
+        notifications: 0,
+        providers: 0,
+        payment_requests: 0,
+      }
+    },
+  }
+
+  const fixtures = await provisionFixtures(deps, context)
+  const delta = await validateProvisioningDelta(deps, context)
+  assert.equal(fixtures.length, 2)
+  assert.deepEqual(submittedAliases, FIXTURE_ALIASES)
+  assert.equal(revocations, 1)
+  assert.equal(closureAssertions, 1)
+  assert.equal(context.link.status, "revoked")
+  assert.deepEqual(delta, {
+    intakes: 2,
+    events: 2,
+    storage: 0,
+    notifications: 0,
+    providers: 0,
+    payment_requests: 0,
+  })
+  assert.deepEqual(
+    { thirdPostAttempts, thirdNetworkRequests, thirdCaptchaTokens },
+    { thirdPostAttempts: 0, thirdNetworkRequests: 0, thirdCaptchaTokens: 0 },
+  )
+})
+
+test("POST-C0 preserves the one-submit budget of each canonical controller", async () => {
+  const captchaSession = createRuntimeTurnstileSession({
+    readToken: async () => "mock-turnstile-runtime-token",
+  })
+  const controller = createCanonicalBrowserSubmitController({
+    portalUrl: CANONICAL_DEV_PORTAL_URL,
+    endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+    enabled: true,
+    captchaSession,
+  })
+  const input = {
+    page: credA1FakePage(),
+    intakeToken: "mock_intake_token_0000000000000001",
+    idempotencyKey: "post-c0-controller-idempotency",
+    payload: { provider_name: "Synthetic" },
+  }
+  const response = await controller.submitOnce(input)
+  assert.equal(response.status, 201)
+  await assert.rejects(
+    controller.submitOnce(input),
+    (error) => error.code === "SECOND_PUBLIC_POST_BLOCKED",
+  )
+  controller.clear()
+})
+
+test("POST-C0 no-write mocked contract exposes two submits and no live effects", async () => {
+  const result = await runNoWriteMocked()
+  assert.equal(result.status, "PASS")
+  assert.equal(result.simulation.public_fixture_submits, 2)
+  assert.equal(result.simulation.global_authorized_fixture_posts, 2)
+  assert.equal(result.simulation.per_controller_authorized_posts, 1)
+  assert.equal(result.simulation.third_post_attempts, 0)
+  assert.equal(result.simulation.third_post_network_requests, 0)
+  assert.equal(result.simulation.third_captcha_tokens, 0)
+  assert.equal(result.simulation.third_intakes, 0)
+  assert.equal(result.simulation.main, "PASS")
+  assert.equal(result.simulation.race, "PASS")
+  assert.equal(result.external_network_requests, 0)
+  assert.equal(result.actual_dev_writes, 0)
+  assert.equal(result.provider_intake_calls, 0)
 })
 
 test("CRED-A1 captures a mocked Turnstile runtime token only in memory", async () => {

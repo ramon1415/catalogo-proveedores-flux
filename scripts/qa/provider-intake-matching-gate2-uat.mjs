@@ -81,6 +81,8 @@ export const FIXTURE_ALIASES = Object.freeze([
   "QA_MATCH_FINAL_MAIN",
   "QA_MATCH_FINAL_RACE",
 ])
+export const AUTHORIZED_PUBLIC_FIXTURE_POSTS = FIXTURE_ALIASES.length
+export const AUTHORIZED_POSTS_PER_CONTROLLER = 1
 export const PRINCIPAL_ALIASES = Object.freeze([
   "QA_TRIAGE_FINANCE_1",
   "QA_TRIAGE_FINANCE_2",
@@ -388,6 +390,63 @@ function canonical(value) {
 
 function digest(value) {
   return crypto.createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex")
+}
+
+export function assertPublicFixturePostBudget(publicPostCount) {
+  gate(
+    FIXTURE_ALIASES.length === 2 &&
+      AUTHORIZED_PUBLIC_FIXTURE_POSTS === 2,
+    "PUBLIC_FIXTURE_CONTRACT_DIFFERENT",
+  )
+  gate(
+    Number.isInteger(publicPostCount) && publicPostCount >= 0,
+    "PUBLIC_FIXTURE_POST_COUNT_INVALID",
+  )
+  gate(
+    publicPostCount < AUTHORIZED_PUBLIC_FIXTURE_POSTS,
+    "PUBLIC_FIXTURE_POST_BUDGET_EXHAUSTED",
+  )
+  return true
+}
+
+function publicFixturePayload(alias) {
+  return {
+    provider_name: alias,
+    provider_email: `${alias.toLowerCase()}@example.invalid`,
+    concept: `${alias} QA controlled matching`,
+    amount_requested: alias.endsWith("MAIN") ? 101.01 : 202.02,
+    currency: "MXN",
+    description: "Fixture sintético aislado para Gate 2.",
+  }
+}
+
+export function createPublicFixtureSubmitAttempt({
+  alias,
+  publicPostCount,
+  createCaptchaSession = () => createRuntimeTurnstileSession(),
+  createController = ({ captchaSession }) =>
+    createCanonicalBrowserSubmitController({
+      portalUrl: CANONICAL_DEV_PORTAL_URL,
+      endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
+      enabled: true,
+      captchaSession,
+    }),
+  createIdempotencyKey = () => crypto.randomUUID(),
+} = {}) {
+  assertPublicFixturePostBudget(publicPostCount)
+  gate(FIXTURE_ALIASES.includes(alias), "PUBLIC_FIXTURE_ALIAS_INVALID")
+  const captchaSession = createCaptchaSession()
+  const controller = createController({ captchaSession })
+  const idempotencyKey = createIdempotencyKey()
+  const payload = publicFixturePayload(alias)
+  return Object.freeze({
+    alias,
+    captchaSession,
+    controller,
+    idempotencyKey,
+    payload: Object.freeze(payload),
+    payloadFingerprint: digest(payload),
+  })
 }
 
 function materialForMatch(input) {
@@ -1007,6 +1066,10 @@ export async function revokeEphemeralLink(deps, context) {
 }
 
 export async function provisionFixtures(deps, context) {
+  gate(
+    AUTHORIZED_PUBLIC_FIXTURE_POSTS === 2,
+    "PUBLIC_FIXTURE_CONTRACT_DIFFERENT",
+  )
   const fixtures = []
   for (const alias of FIXTURE_ALIASES) {
     const fixture = await deps.submitPublicFixture({
@@ -2135,6 +2198,7 @@ export function createMockDependencies({ failPoint = null } = {}) {
       return { status: "revoked" }
     },
     async submitPublicFixture({ alias }) {
+      assertPublicFixturePostBudget(state.linkCalls.publicSubmits)
       const fixtureNumber = state.linkCalls.publicSubmits + 1
       maybeFail(deps, `fixture_${fixtureNumber}`)
       gate(FIXTURE_ALIASES.includes(alias), "MOCK_FIXTURE_ALIAS")
@@ -2167,7 +2231,7 @@ export function createMockDependencies({ failPoint = null } = {}) {
         (link) => link.qa === true && link.status === "active" && link.expired === false,
       )
       gate(!active, "MOCK_THIRD_SUBMIT_LINK_ACTIVE")
-      return true
+      return state.linkCalls.publicSubmits === AUTHORIZED_PUBLIC_FIXTURE_POSTS
     },
     async validateProvisioningDelta() {
       return {
@@ -2550,6 +2614,8 @@ export async function runCapabilityAudit() {
     createEphemeralLink,
     revokeEphemeralLink,
     provisionFixtures,
+    assertPublicFixturePostBudget,
+    createPublicFixtureSubmitAttempt,
     validateProvisioningDelta,
     activateQaIam,
     deactivateQaIam,
@@ -2617,6 +2683,9 @@ export async function runCapabilityAudit() {
   const capabilities = {
       link_provisioning: true,
       fixture_provisioning: true,
+      two_fixture_public_post_budget:
+        AUTHORIZED_PUBLIC_FIXTURE_POSTS === 2 &&
+        AUTHORIZED_POSTS_PER_CONTROLLER === 1,
       iam_activation: true,
       transition_provider_intake: true,
       main: true,
@@ -3889,8 +3958,25 @@ export function createMutableDependencies(env = process.env) {
       })
     },
     async submitPublicFixture({ alias, token }) {
-      gate(state.publicPostCount === 0, "SECOND_PUBLIC_POST_BLOCKED")
-      const idempotencyKey = crypto.randomUUID()
+      const attempt = createPublicFixtureSubmitAttempt({
+        alias,
+        publicPostCount: state.publicPostCount,
+      })
+      const idempotencyFingerprint = digest(attempt.idempotencyKey)
+      gate(
+        state.publicSubmitEvidence.every((item) =>
+          item.controller !== attempt.controller &&
+          item.captchaSession !== attempt.captchaSession &&
+          item.idempotencyFingerprint !== idempotencyFingerprint &&
+          item.payloadFingerprint !== attempt.payloadFingerprint),
+        "PUBLIC_FIXTURE_ISOLATION_FAILED",
+      )
+      state.publicSubmitEvidence.push({
+        controller: attempt.controller,
+        captchaSession: attempt.captchaSession,
+        idempotencyFingerprint,
+        payloadFingerprint: attempt.payloadFingerprint,
+      })
       const { chromium } = require("playwright")
       if (!state.browser) state.browser = await chromium.launch({ headless: true })
       const page = await state.browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -3898,24 +3984,11 @@ export function createMutableDependencies(env = process.env) {
       await page.goto(`${CANONICAL_DEV_PORTAL_URL}#token=${encodeURIComponent(token)}`, {
         waitUntil: "networkidle",
       })
-      const controller = createCanonicalBrowserSubmitController({
-        portalUrl: CANONICAL_DEV_PORTAL_URL,
-        endpoint: CANONICAL_PUBLIC_SUBMIT_ENDPOINT,
-        enabled: true,
-        captchaSession: createRuntimeTurnstileSession(),
-      })
-      const result = await controller.submitOnce({
+      const result = await attempt.controller.submitOnce({
         page,
         intakeToken: token,
-        idempotencyKey,
-        payload: {
-          provider_name: alias,
-          provider_email: `${alias.toLowerCase()}@example.invalid`,
-          concept: `${alias} QA controlled matching`,
-          amount_requested: alias.endsWith("MAIN") ? 101.01 : 202.02,
-          currency: "MXN",
-          description: "Fixture sintético aislado para Gate 2.",
-        },
+        idempotencyKey: attempt.idempotencyKey,
+        payload: attempt.payload,
       })
       state.publicPostCount += 1
       metrics.externalNetworkRequests += 1
@@ -3937,7 +4010,9 @@ export function createMutableDependencies(env = process.env) {
       return getFixtureByAlias(alias)
     },
     async assertThirdSubmitRejected() {
-      return state.publicPostCount === 1 && state.link?.status === "revoked"
+      return state.publicPostCount === AUTHORIZED_PUBLIC_FIXTURE_POSTS &&
+        state.link?.status === "revoked" &&
+        state.publicSubmitEvidence.length === AUTHORIZED_PUBLIC_FIXTURE_POSTS
     },
     async validateProvisioningDelta() {
       const fixtures = []
@@ -4200,6 +4275,7 @@ export function createMutableDependencies(env = process.env) {
       state.pages = []
       if (state.browser) await state.browser.close()
       state.browser = null
+      state.publicSubmitEvidence = []
     },
     async listFixtureEvents(alias) {
       const fixture = await getFixtureByAlias(alias)
@@ -4528,6 +4604,13 @@ export async function runNoWriteMocked() {
       active: 1,
     },
     fixtures_created: 2,
+    public_fixture_submits: AUTHORIZED_PUBLIC_FIXTURE_POSTS,
+    global_authorized_fixture_posts: AUTHORIZED_PUBLIC_FIXTURE_POSTS,
+    per_controller_authorized_posts: AUTHORIZED_POSTS_PER_CONTROLLER,
+    third_post_attempts: 0,
+    third_post_network_requests: 0,
+    third_captcha_tokens: 0,
+    third_intakes: 0,
     provisioning_events: 2,
     main: "PASS",
     race: "PASS",
