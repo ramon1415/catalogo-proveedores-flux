@@ -91,6 +91,10 @@ export const PROVIDER_ALIASES = Object.freeze([
   "QA_MATCH_PROVIDER_A",
   "QA_MATCH_PROVIDER_B",
 ])
+export const PROVIDER_SELECTOR_ENV = Object.freeze({
+  [PROVIDER_ALIASES[0]]: "QA_MATCH_PROVIDER_A_ID",
+  [PROVIDER_ALIASES[1]]: "QA_MATCH_PROVIDER_B_ID",
+})
 const MOCK_LIVE_PROVIDER_ALIASES = Object.freeze([
   "Proveedor sintético alfa",
   "Proveedor sintético beta",
@@ -297,44 +301,88 @@ function clone(value) {
 }
 
 const SYNTHETIC_PROVIDER_PATTERN = /(?:qa|test|demo|fixture)/iu
+const PROVIDER_SELECTOR_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 
 export function isSyntheticProviderRow(row) {
   return [row?.alias, row?.nombre_completo, row?.email]
     .some((value) => SYNTHETIC_PROVIDER_PATTERN.test(String(value || "")))
 }
 
+function validateProviderSelectorIds(selectedProviderIds) {
+  gate(Array.isArray(selectedProviderIds), "QA_PROVIDER_SELECTORS_MISSING")
+  gate(
+    selectedProviderIds.length === 2,
+    selectedProviderIds.length < 2
+      ? "QA_PROVIDER_SELECTORS_MISSING"
+      : "QA_PROVIDER_SELECTOR_INVALID",
+  )
+  const normalized = selectedProviderIds.map((value) => String(value || "").trim().toLowerCase())
+  gate(normalized.every(Boolean), "QA_PROVIDER_SELECTORS_MISSING")
+  gate(
+    normalized.every((value) => PROVIDER_SELECTOR_UUID_PATTERN.test(value)),
+    "QA_PROVIDER_SELECTOR_INVALID",
+  )
+  gate(normalized[0] !== normalized[1], "QA_PROVIDER_SELECTORS_NOT_DISTINCT")
+  return Object.freeze(normalized)
+}
+
+export function resolveProviderSelectorIds(env = process.env) {
+  const selectedProviderIds = PROVIDER_ALIASES.map((logicalAlias) => {
+    const environmentName = PROVIDER_SELECTOR_ENV[logicalAlias]
+    return String(env[environmentName] || "").trim()
+  })
+  return validateProviderSelectorIds(selectedProviderIds)
+}
+
+export function buildLiveProviderSelectorQuery(selectedProviderIds) {
+  const exactIds = validateProviderSelectorIds(selectedProviderIds)
+  return new URLSearchParams({
+    select: "id,alias,nombre_completo,email,activo",
+    id: `in.(${exactIds.join(",")})`,
+  })
+}
+
 export function buildLiveProviderTargets(rows, {
   logicalAliases = PROVIDER_ALIASES,
+  selectedProviderIds,
 } = {}) {
   gate(Array.isArray(rows), "LIVE_PROVIDER_ALIAS_UNRESOLVED")
   gate(
-    Array.isArray(logicalAliases) && logicalAliases.length === 2,
+    Array.isArray(logicalAliases) &&
+      logicalAliases.length === 2 &&
+      logicalAliases.every((value, index) => value === PROVIDER_ALIASES[index]),
     "LIVE_PROVIDER_ALIAS_UNRESOLVED",
   )
-  const eligible = rows.filter(
-    (row) => row?.activo !== false && isSyntheticProviderRow(row),
-  )
-  gate(eligible.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
-  const ordered = eligible.slice().sort((left, right) =>
-    String(left.id || "").localeCompare(String(right.id || ""), "en"))
+  const exactIds = validateProviderSelectorIds(selectedProviderIds)
+  const selectedRows = exactIds.map((selectedId) => {
+    const matches = rows.filter(
+      (row) => String(row?.id || "").trim().toLowerCase() === selectedId,
+    )
+    gate(matches.length === 1, "QA_PROVIDER_TARGET_NOT_FOUND")
+    return matches[0]
+  })
   gate(
-    ordered.every((row) => String(row.id || "").trim()),
-    "LIVE_PROVIDER_ALIAS_UNRESOLVED",
+    selectedRows.every((row) => row?.activo !== false),
+    "QA_PROVIDER_TARGET_INACTIVE",
   )
-  gate(ordered[0].id !== ordered[1].id, "LIVE_PROVIDER_ALIAS_AMBIGUOUS")
+  gate(
+    selectedRows.every((row) => isSyntheticProviderRow(row)),
+    "QA_PROVIDER_TARGET_NOT_SYNTHETIC",
+  )
 
-  const targets = ordered.map((row, index) => {
+  const targets = selectedRows.map((row, index) => {
     const logicalAlias = String(logicalAliases[index] || "").trim()
     const liveDisplayAlias = normalizeLiveProviderText(row.alias)
     gate(logicalAlias, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
-    gate(liveDisplayAlias, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
+    gate(liveDisplayAlias, "QA_PROVIDER_TARGET_ALIAS_MISSING")
     gate(
       normalizeLiveProviderText(logicalAlias) !== liveDisplayAlias,
       "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
     )
     return Object.freeze({
       logicalAlias,
-      internalId: String(row.id),
+      internalId: exactIds[index],
       liveDisplayAlias,
       uiSearchText: liveDisplayAlias,
       expectedCardHeading: liveDisplayAlias,
@@ -342,18 +390,20 @@ export function buildLiveProviderTargets(rows, {
   })
   gate(
     targets[0].liveDisplayAlias !== targets[1].liveDisplayAlias,
-    "LIVE_PROVIDER_ALIAS_AMBIGUOUS",
+    "QA_PROVIDER_TARGET_ALIAS_AMBIGUOUS",
   )
   return Object.freeze(targets)
 }
 
-export function assertSanitizedProviderEvidence(value, targets) {
+export function assertSanitizedProviderEvidence(value, targets, sensitiveValues = []) {
   const serialized = JSON.stringify(value).normalize("NFC")
-  for (const target of targets || []) {
-    for (const secret of [target?.internalId, target?.liveDisplayAlias]) {
-      if (secret && serialized.includes(String(secret).normalize("NFC"))) {
-        throw new GateError("LIVE_PROVIDER_EVIDENCE_LEAKAGE")
-      }
+  const protectedValues = [
+    ...(targets || []).flatMap((target) => [target?.internalId, target?.liveDisplayAlias]),
+    ...(sensitiveValues || []),
+  ]
+  for (const secret of protectedValues) {
+    if (secret && serialized.includes(String(secret).normalize("NFC"))) {
+      throw new GateError("QA_PROVIDER_SELECTOR_EVIDENCE_LEAKAGE")
     }
   }
   return true
@@ -362,17 +412,15 @@ export function assertSanitizedProviderEvidence(value, targets) {
 export function sanitizedProviderAlignment(targets) {
   gate(Array.isArray(targets) && targets.length === 2, "LIVE_PROVIDER_ALIAS_UNRESOLVED")
   const result = {
-    status: "PASS",
-    eligible_targets: 2,
-    logical_aliases: [...PROVIDER_ALIASES],
-    live_aliases_present: targets.every((target) => Boolean(target.liveDisplayAlias)),
-    live_aliases_distinct:
+    target_count: 2,
+    selector_A_resolved: targets[0]?.logicalAlias === PROVIDER_ALIASES[0],
+    selector_B_resolved: targets[1]?.logicalAlias === PROVIDER_ALIASES[1],
+    IDs_distinct: targets[0]?.internalId !== targets[1]?.internalId,
+    aliases_present: targets.every((target) => Boolean(target.liveDisplayAlias)),
+    aliases_distinct:
       targets[0].liveDisplayAlias !== targets[1].liveDisplayAlias,
-    logical_alias_used_as_live_locator: targets.some((target) =>
-      normalizeLiveProviderText(target.logicalAlias) === target.uiSearchText),
-    provider_ids_exported: false,
-    live_aliases_exported: false,
-    writes: 0,
+    synthetic_validation: true,
+    active_validation: true,
   }
   assertSanitizedProviderEvidence(result, targets)
   return result
@@ -2088,7 +2136,9 @@ export function createMockDependencies({ failPoint = null } = {}) {
         email: `qa-provider-${index + 1}@example.invalid`,
         activo: true,
       }))
-      state.providerTargets = buildLiveProviderTargets(rows)
+      state.providerTargets = buildLiveProviderTargets(rows, {
+        selectedProviderIds: rows.map((row) => row.id),
+      })
       return state.providerTargets
     },
     async inspectExpiredActiveLink() {
@@ -2626,6 +2676,8 @@ export async function runCapabilityAudit() {
     validateEventMetadata,
     validateFinalDelta,
     cleanupAll,
+    resolveProviderSelectorIds,
+    buildLiveProviderSelectorQuery,
     buildLiveProviderTargets,
     sanitizedProviderAlignment,
     assertSanitizedProviderEvidence,
@@ -2678,8 +2730,12 @@ export async function runCapabilityAudit() {
   gate(typeof openProviderReplaceDialog === "function", "CAPABILITY_REPLACE_HELPER_MISSING")
   gate(typeof createMutableDependencies === "function", "CAPABILITY_MUTABLE_ADAPTER_MISSING")
   gate(typeof assertMutableAuthorization === "function", "CAPABILITY_MUTABLE_GATE_MISSING")
-  gate(providerAlignment.logical_alias_used_as_live_locator === false, "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR")
-  gate(providerAlignment.live_aliases_exported === false, "LIVE_PROVIDER_EVIDENCE_LEAKAGE")
+  gate(
+    providerAlignment.selector_A_resolved === true &&
+      providerAlignment.selector_B_resolved === true,
+    "QA_PROVIDER_TARGET_NOT_FOUND",
+  )
+  gate(providerAlignment.IDs_distinct === true, "QA_PROVIDER_SELECTORS_NOT_DISTINCT")
   const capabilities = {
       link_provisioning: true,
       fixture_provisioning: true,
@@ -2700,6 +2756,11 @@ export async function runCapabilityAudit() {
       delta_validation: true,
       mutable_authorization_gate: true,
       live_provider_alias_resolution: true,
+      explicit_provider_selector_contract: true,
+      exact_provider_selector_query: true,
+      provider_selector_order_mapping: true,
+      provider_selector_no_heuristic_fallback: true,
+      provider_selector_evidence_sanitization: true,
       logical_visual_identity_separation: true,
       live_alias_not_logged: true,
       logical_alias_not_used_as_live_locator: true,
@@ -2936,11 +2997,8 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
   const projectRef = new URL(supabaseUrl).hostname.split(".")[0]
   gate(projectRef === DEV_PROJECT_REF, "UNAUTHORIZED_PROJECT_REF")
 
-  const query = new URLSearchParams({
-    select: "id,alias,nombre_completo,email,activo",
-    order: "id.asc",
-    limit: "10000",
-  })
+  const selectedProviderIds = resolveProviderSelectorIds(env)
+  const query = buildLiveProviderSelectorQuery(selectedProviderIds)
   let rows
   try {
     const response = await fetch(`${supabaseUrl}/rest/v1/proveedores?${query}`, {
@@ -2954,7 +3012,8 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
     throw new GateError("LIVE_PROVIDER_ALIAS_READ_ONLY_QUERY_FAILED")
   }
 
-  const targets = buildLiveProviderTargets(rows)
+  gate(Array.isArray(rows) && rows.length === 2, "QA_PROVIDER_TARGET_NOT_FOUND")
+  const targets = buildLiveProviderTargets(rows, { selectedProviderIds })
   for (const target of targets) {
     assertLiveProviderLocatorInputs({
       sanitizedTargetAlias: target.logicalAlias,
@@ -3712,15 +3771,13 @@ export function createMutableDependencies(env = process.env) {
       return clone(INTAKE_LINK_CONTRACT)
     },
     async resolveProviderTargets() {
+      const selectedProviderIds = resolveProviderSelectorIds(env)
       const rows = await serviceRest(
         "proveedores",
-        new URLSearchParams({
-          select: "id,alias,nombre_completo,email,activo",
-          order: "id.asc",
-          limit: "10000",
-        }).toString(),
+        buildLiveProviderSelectorQuery(selectedProviderIds).toString(),
       )
-      const targets = buildLiveProviderTargets(rows)
+      gate(Array.isArray(rows) && rows.length === 2, "QA_PROVIDER_TARGET_NOT_FOUND")
+      const targets = buildLiveProviderTargets(rows, { selectedProviderIds })
       for (const target of targets) providerIds[target.logicalAlias] = target.internalId
       state.providerTargets = targets
       return targets

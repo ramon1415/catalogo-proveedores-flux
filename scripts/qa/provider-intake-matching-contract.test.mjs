@@ -14,10 +14,12 @@ import {
   FIXTURE_ALIASES,
   MOCK_BASELINE,
   MUTABLE_ACCESSIBILITY_HOOKS,
+  PROVIDER_SELECTOR_ENV,
   assertSanitizedProviderEvidence,
   assertExpiredLinkNormalizationTransition,
   assertMutableAuthorization,
   assertPublicFixturePostBudget,
+  buildLiveProviderSelectorQuery,
   buildLiveProviderTargets,
   classifyConcurrentDevEvolution,
   classifyExpiredLinkState,
@@ -36,6 +38,7 @@ import {
   runCredentialAdapterNoWriteMocked,
   runNoWriteMocked,
   runRelativeBaselineNoWriteMatrix,
+  resolveProviderSelectorIds,
   runV6KCleanupMatrix,
   runV6MCleanupMatrix,
   sanitizedProviderAlignment,
@@ -680,44 +683,198 @@ const providerRows = (aliases = ["Proveedor sintético alfa", "Proveedor sintét
     activo: true,
   }))
 
-test("provider target model separates logical internal and live visual identities", () => {
-  const targets = buildLiveProviderTargets(providerRows())
+const providerSelectorIds = (rows) => rows.slice(0, 2).map((row) => row.id)
+const exactProviderTargets = (rows, selectedProviderIds = providerSelectorIds(rows)) =>
+  buildLiveProviderTargets(rows, { selectedProviderIds })
+
+const assertProviderGate = (callback, code, protectedValues = []) => {
+  assert.throws(callback, (error) => {
+    const serialized = JSON.stringify({
+      message: error?.message,
+      details: error?.details,
+    })
+    return error?.code === code &&
+      protectedValues.every((value) => !serialized.includes(value))
+  })
+}
+
+test("PROVIDER-RESOLVER-C1 declares two protected exact selector names without values", () => {
+  assert.deepEqual(PROVIDER_SELECTOR_ENV, {
+    QA_MATCH_PROVIDER_A: "QA_MATCH_PROVIDER_A_ID",
+    QA_MATCH_PROVIDER_B: "QA_MATCH_PROVIDER_B_ID",
+  })
+  const rows = providerRows()
+  const env = {
+    QA_MATCH_PROVIDER_A_ID: rows[0].id,
+    QA_MATCH_PROVIDER_B_ID: rows[1].id,
+  }
+  assert.deepEqual(resolveProviderSelectorIds(env), providerSelectorIds(rows))
+  assertProviderGate(
+    () => resolveProviderSelectorIds({ QA_MATCH_PROVIDER_B_ID: rows[1].id }),
+    "QA_PROVIDER_SELECTORS_MISSING",
+  )
+  assertProviderGate(
+    () => resolveProviderSelectorIds({ QA_MATCH_PROVIDER_A_ID: rows[0].id }),
+    "QA_PROVIDER_SELECTORS_MISSING",
+  )
+  assertProviderGate(
+    () => resolveProviderSelectorIds({
+      QA_MATCH_PROVIDER_A_ID: "not-a-uuid",
+      QA_MATCH_PROVIDER_B_ID: rows[1].id,
+    }),
+    "QA_PROVIDER_SELECTOR_INVALID",
+    ["not-a-uuid"],
+  )
+  assertProviderGate(
+    () => resolveProviderSelectorIds({
+      QA_MATCH_PROVIDER_A_ID: rows[0].id,
+      QA_MATCH_PROVIDER_B_ID: rows[0].id,
+    }),
+    "QA_PROVIDER_SELECTORS_NOT_DISTINCT",
+    [rows[0].id],
+  )
+})
+
+test("PROVIDER-RESOLVER-C1 builds an exact two-ID query without UUID ordering or LIMIT", () => {
+  const rows = providerRows()
+  const selectedProviderIds = [rows[1].id, rows[0].id]
+  const query = buildLiveProviderSelectorQuery(selectedProviderIds)
+  assert.equal(query.get("select"), "id,alias,nombre_completo,email,activo")
+  assert.equal(query.get("id"), `in.(${selectedProviderIds.join(",")})`)
+  assert.equal(query.has("order"), false)
+  assert.equal(query.has("limit"), false)
+  assert.deepEqual([...query.keys()], ["select", "id"])
+})
+
+test("PROVIDER-RESOLVER-C1 maps A and B by selector order with twelve extra synthetic rows", () => {
+  const selectedRows = providerRows()
+  selectedRows[0].id = "00000000-0000-4000-8000-0000000000f0"
+  selectedRows[1].id = "00000000-0000-4000-8000-000000000001"
+  const extras = Array.from({ length: 12 }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index + 16).padStart(12, "0")}`,
+    alias: `Proveedor demo adicional ${index + 1}`,
+    nombre_completo: `QA fixture adicional ${index + 1}`,
+    email: `qa-extra-${index + 1}@example.invalid`,
+    activo: true,
+  }))
+  const selectedProviderIds = [selectedRows[0].id, selectedRows[1].id]
+  const targets = exactProviderTargets(
+    [...extras, selectedRows[1], selectedRows[0]],
+    selectedProviderIds,
+  )
   assert.equal(targets.length, 2)
   assert.equal(targets[0].logicalAlias, "QA_MATCH_PROVIDER_A")
   assert.equal(targets[1].logicalAlias, "QA_MATCH_PROVIDER_B")
+  assert.equal(targets[0].internalId, selectedProviderIds[0])
+  assert.equal(targets[1].internalId, selectedProviderIds[1])
   assert.notEqual(targets[0].logicalAlias, targets[0].liveDisplayAlias)
   assert.equal(targets[1].uiSearchText, targets[1].liveDisplayAlias)
   assert.equal(targets[1].expectedCardHeading, targets[1].liveDisplayAlias)
   assert.notEqual(targets[0].internalId, targets[1].internalId)
   assert.deepEqual(sanitizedProviderAlignment(targets), {
-    status: "PASS",
-    eligible_targets: 2,
-    logical_aliases: ["QA_MATCH_PROVIDER_A", "QA_MATCH_PROVIDER_B"],
-    live_aliases_present: true,
-    live_aliases_distinct: true,
-    logical_alias_used_as_live_locator: false,
-    provider_ids_exported: false,
-    live_aliases_exported: false,
-    writes: 0,
+    target_count: 2,
+    selector_A_resolved: true,
+    selector_B_resolved: true,
+    IDs_distinct: true,
+    aliases_present: true,
+    aliases_distinct: true,
+    synthetic_validation: true,
+    active_validation: true,
   })
 })
 
-test("provider target resolution rejects missing empty duplicate and logical live aliases", () => {
-  assert.throws(
-    () => buildLiveProviderTargets(providerRows().slice(0, 1)),
-    /LIVE_PROVIDER_ALIAS_UNRESOLVED/,
+test("PROVIDER-RESOLVER-C1 rejects missing invalid duplicate and unresolved selectors specifically", () => {
+  const rows = providerRows()
+  const selectedProviderIds = providerSelectorIds(rows)
+  assertProviderGate(
+    () => buildLiveProviderTargets(rows),
+    "QA_PROVIDER_SELECTORS_MISSING",
   )
-  assert.throws(
-    () => buildLiveProviderTargets(providerRows(["", "Proveedor sintético beta"])),
-    /LIVE_PROVIDER_ALIAS_UNRESOLVED/,
+  assertProviderGate(
+    () => buildLiveProviderTargets(rows, {
+      selectedProviderIds: ["not-a-uuid", selectedProviderIds[1]],
+    }),
+    "QA_PROVIDER_SELECTOR_INVALID",
+    ["not-a-uuid"],
   )
-  assert.throws(
-    () => buildLiveProviderTargets(providerRows(["Proveedor sintético", "Proveedor sintético"])),
-    /LIVE_PROVIDER_ALIAS_AMBIGUOUS/,
+  assertProviderGate(
+    () => buildLiveProviderTargets(rows, {
+      selectedProviderIds: [selectedProviderIds[0], selectedProviderIds[0]],
+    }),
+    "QA_PROVIDER_SELECTORS_NOT_DISTINCT",
+    [selectedProviderIds[0]],
   )
-  assert.throws(
-    () => buildLiveProviderTargets(providerRows(["QA_MATCH_PROVIDER_A", "Proveedor sintético"])),
-    /LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR/,
+  assertProviderGate(
+    () => buildLiveProviderTargets(rows.slice(1), { selectedProviderIds }),
+    "QA_PROVIDER_TARGET_NOT_FOUND",
+    selectedProviderIds,
+  )
+  assertProviderGate(
+    () => buildLiveProviderTargets(rows.slice(0, 1), { selectedProviderIds }),
+    "QA_PROVIDER_TARGET_NOT_FOUND",
+    selectedProviderIds,
+  )
+})
+
+test("PROVIDER-RESOLVER-C1 validates only selected rows as active synthetic usable targets", () => {
+  const rows = providerRows()
+  const selectedProviderIds = providerSelectorIds(rows)
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], activo: false },
+      rows[1],
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_INACTIVE",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      {
+        ...rows[0],
+        alias: "Proveedor operativo alfa",
+        nombre_completo: "Servicios operativos alfa",
+        email: "contacto@empresa.invalid",
+      },
+      rows[1],
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_NOT_SYNTHETIC",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], alias: "" },
+      rows[1],
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_ALIAS_MISSING",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], alias: "Proveedor QA duplicado" },
+      { ...rows[1], alias: "Proveedor QA duplicado" },
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_ALIAS_AMBIGUOUS",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], alias: "QA_MATCH_PROVIDER_A" },
+      rows[1],
+    ], selectedProviderIds),
+    "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
+  )
+  const extras = Array.from({ length: 12 }, (_, index) => ({
+    ...rows[0],
+    id: `00000000-0000-4000-8000-${String(index + 32).padStart(12, "0")}`,
+  }))
+  assertProviderGate(
+    () => exactProviderTargets([
+      {
+        ...rows[0],
+        alias: "Proveedor operativo alfa",
+        nombre_completo: "Servicios operativos alfa",
+        email: "contacto@empresa.invalid",
+      },
+      rows[1],
+      ...extras,
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_NOT_SYNTHETIC",
   )
 })
 
@@ -763,13 +920,99 @@ test("exact-card validation fails closed for missing ambiguous and mismatched ca
   )
 })
 
+test("PROVIDER-RESOLVER-C1 evidence rejects IDs live aliases and emails", () => {
+  const rows = providerRows()
+  const targets = exactProviderTargets(rows)
+  const protectedEmail = rows[0].email
+  for (const leaked of [
+    targets[0].liveDisplayAlias,
+    targets[1].internalId,
+    protectedEmail,
+  ]) {
+    assert.throws(
+      () => assertSanitizedProviderEvidence({ leaked }, targets, [protectedEmail]),
+      (error) =>
+        error.code === "QA_PROVIDER_SELECTOR_EVIDENCE_LEAKAGE" &&
+        !error.message.includes(leaked),
+    )
+  }
+  const sanitized = JSON.stringify(sanitizedProviderAlignment(targets))
+  for (const protectedValue of [
+    ...targets.flatMap((target) => [target.internalId, target.liveDisplayAlias]),
+    protectedEmail,
+  ]) {
+    assert.equal(sanitized.includes(protectedValue), false)
+  }
+})
+
+test("PROVIDER-RESOLVER-C1 capability audit certifies exact selectors without network or writes", async () => {
+  const audit = await runCapabilityAudit()
+  assert.equal(audit.network_requests, 0)
+  assert.equal(audit.writes, 0)
+  for (const capability of [
+    "live_provider_alias_resolution",
+    "explicit_provider_selector_contract",
+    "exact_provider_selector_query",
+    "provider_selector_order_mapping",
+    "provider_selector_no_heuristic_fallback",
+    "provider_selector_evidence_sanitization",
+    "logical_visual_identity_separation",
+    "live_alias_not_logged",
+    "logical_alias_not_used_as_live_locator",
+    "exact_card_validation",
+    "ambiguous_card_failure",
+    "missing_alias_failure",
+    "sanitization_before_evidence",
+  ]) {
+    assert.equal(audit.capabilities[capability], true)
+  }
+})
+
+test("provider target model separates logical internal and live visual identities", () => {
+  const rows = providerRows()
+  const targets = exactProviderTargets(rows)
+  assert.equal(targets.length, 2)
+  assert.equal(targets[0].logicalAlias, "QA_MATCH_PROVIDER_A")
+  assert.equal(targets[1].logicalAlias, "QA_MATCH_PROVIDER_B")
+  assert.notEqual(targets[0].logicalAlias, targets[0].liveDisplayAlias)
+  assert.notEqual(targets[0].internalId, targets[1].internalId)
+  assert.equal(sanitizedProviderAlignment(targets).target_count, 2)
+})
+
+test("provider target resolution rejects missing empty duplicate and logical live aliases", () => {
+  const rows = providerRows()
+  const selectedProviderIds = providerSelectorIds(rows)
+  assertProviderGate(
+    () => exactProviderTargets(rows.slice(1), selectedProviderIds),
+    "QA_PROVIDER_TARGET_NOT_FOUND",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([{ ...rows[0], alias: "" }, rows[1]], selectedProviderIds),
+    "QA_PROVIDER_TARGET_ALIAS_MISSING",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], alias: "Proveedor QA duplicado" },
+      { ...rows[1], alias: "Proveedor QA duplicado" },
+    ], selectedProviderIds),
+    "QA_PROVIDER_TARGET_ALIAS_AMBIGUOUS",
+  )
+  assertProviderGate(
+    () => exactProviderTargets([
+      { ...rows[0], alias: "QA_MATCH_PROVIDER_A" },
+      rows[1],
+    ], selectedProviderIds),
+    "LOGICAL_ALIAS_USED_AS_LIVE_LOCATOR",
+  )
+})
+
 test("provider evidence and exported errors reject live aliases and internal IDs", () => {
-  const targets = buildLiveProviderTargets(providerRows())
+  const targets = exactProviderTargets(providerRows())
   for (const leaked of [targets[0].liveDisplayAlias, targets[1].internalId]) {
     assert.throws(
       () => assertSanitizedProviderEvidence({ leaked }, targets),
       (error) =>
-        error.code === "LIVE_PROVIDER_EVIDENCE_LEAKAGE" &&
+        error.code === "QA_PROVIDER_SELECTOR_EVIDENCE_LEAKAGE" &&
         !error.message.includes(leaked),
     )
   }
