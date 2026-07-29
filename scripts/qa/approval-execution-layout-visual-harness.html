@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QA visual · Nuevo layout de pago</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../../ux2_shared.css">
+    <style>
+      body {
+        min-height: 100dvh;
+      }
+
+      .qa-page {
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .qa-page h1 {
+        font-size: 18px;
+      }
+
+      .qa-page p {
+        margin-top: 6px;
+        color: var(--text-2);
+      }
+
+      .qa-dialog-tools {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px 14px;
+        align-items: center;
+        padding: 9px 11px;
+        border: 1px dashed var(--border-strong);
+        border-radius: 9px;
+        background: var(--bg-hover);
+      }
+
+      .qa-dialog-tools strong,
+      .qa-dialog-tools small {
+        display: block;
+      }
+
+      .qa-dialog-tools small {
+        color: var(--text-2);
+      }
+
+      .qa-theme-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .qa-dialog-tools details {
+        grid-column: 1 / -1;
+      }
+
+      .qa-dialog-tools summary {
+        cursor: pointer;
+        color: var(--accent-text);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      #axeResults {
+        max-height: 82px;
+        margin-top: 6px;
+        overflow: auto;
+        padding: 7px;
+        border-radius: 6px;
+        background: var(--bg-input);
+        color: var(--text-2);
+        font: 10px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+        white-space: pre;
+      }
+
+      @media (max-width: 600px) {
+        .qa-page {
+          padding: 14px;
+        }
+
+        .qa-dialog-tools {
+          grid-template-columns: 1fr;
+        }
+
+        .qa-theme-actions {
+          justify-content: flex-start;
+        }
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js"></script>
+  </head>
+  <body>
+    <main class="qa-page" aria-labelledby="qaPageTitle">
+      <h1 id="qaPageTitle">Harness local del diálogo de layout</h1>
+      <p id="loadStatus" role="status" aria-live="polite">
+        Cargando el marcado real de <code>layouts.html</code>…
+      </p>
+      <button id="reopenDialogBtn" class="primary-btn hidden" type="button">
+        Volver a abrir el diálogo
+      </button>
+      <div id="dialogMount" aria-label="Área de prueba del diálogo"></div>
+    </main>
+
+    <script>
+      (() => {
+        "use strict";
+
+        const status = document.getElementById("loadStatus");
+        const mount = document.getElementById("dialogMount");
+        const reopenButton = document.getElementById("reopenDialogBtn");
+        let dialog = null;
+        let completionDialog = null;
+
+        const incompleteRows = [
+          ["SOL-QA-002", "Empresa Demo Norte", "Proveedor Ejemplo 02", "$8,420.00 MXN", "Cuenta bancaria de empresa"],
+          ["SOL-QA-003", "Empresa Demo Centro", "Proveedor Ejemplo 03", "$17,900.00 MXN", "CLABE, beneficiario"],
+          ["SOL-QA-004", "Empresa Demo Sur", "Proveedor Ejemplo 04", "$3,275.50 MXN", "Fecha programada"],
+          ["SOL-QA-005", "Empresa Demo Norte", "Proveedor Ejemplo 05", "$41,000.00 MXN", "Referencia de pago"],
+          ["SOL-QA-006", "Empresa Demo Centro", "Proveedor Ejemplo 06", "$6,802.75 MXN", "Banco, convenio"],
+          ["SOL-QA-007", "Empresa Demo Sur", "Proveedor Ejemplo 07", "$12,000.00 MXN", "Cuenta bancaria del proveedor"],
+          ["SOL-QA-008", "Empresa Demo Norte", "Proveedor Ejemplo 08", "$1,950.00 MXN", "Concepto de pago"],
+          ["SOL-QA-009", "Empresa Demo Centro", "Proveedor Ejemplo 09", "$22,640.00 MXN", "Fecha límite"],
+          ["SOL-QA-010", "Empresa Demo Sur", "Proveedor Ejemplo 10", "$9,300.00 MXN", "CLABE"],
+          ["SOL-QA-011", "Empresa Demo Norte", "Proveedor Ejemplo 11", "$14,510.00 MXN", "Beneficiario, banco"],
+          ["SOL-QA-012", "Empresa Demo Centro", "Proveedor Ejemplo 12", "$5,730.00 MXN", "Cuenta bancaria de empresa"],
+          ["SOL-QA-013", "Empresa Demo Sur", "Proveedor Ejemplo 13", "$28,200.00 MXN", "Referencia de pago"],
+          ["SOL-QA-014", "Empresa Demo Norte", "Proveedor Ejemplo 14", "$7,085.25 MXN", "Fecha programada"],
+          ["SOL-QA-015", "Empresa Demo Centro", "Proveedor Ejemplo 15", "$19,600.00 MXN", "Convenio"]
+        ];
+
+        const previewRow = ([folio, company, provider, amount, missing], index) => `
+          <div class="layout-preview-row">
+            <div><strong>${folio}</strong><small>${company}</small></div>
+            <div>${provider}</div>
+            <div><strong>${amount}</strong></div>
+            <div><strong>Falta completar</strong><small>${missing}</small></div>
+            <div class="layout-preview-actions">
+              <button class="small-btn" type="button">Abrir solicitud</button>
+              <button class="small-btn warning" type="button">Completar datos ${index + 1}</button>
+            </div>
+          </div>`;
+
+        function previewMarkup() {
+          return `
+            <div class="layout-preview-summary">
+              <div class="layout-preview-metric"><span>Listas para layout</span><strong>1</strong></div>
+              <div class="layout-preview-metric"><span>Regulares / extraordinarias</span><strong>1 / 0</strong></div>
+              <div class="layout-preview-metric"><span>Rechazadas</span><strong>0</strong></div>
+              <div class="layout-preview-metric"><span>Cambio crítico</span><strong>0</strong></div>
+              <button class="layout-preview-metric layout-preview-metric-action warning" type="button" aria-label="Ir a Datos por completar">
+                <span>Datos por completar</span><strong>${incompleteRows.length}</strong><small>Ver detalle</small>
+              </button>
+              <div class="layout-preview-metric"><span>Importe listo</span><strong>$12,450.00 MXN</strong></div>
+            </div>
+            <section class="layout-preview-section" tabindex="-1">
+              <div class="layout-preview-head">
+                <h3>Listas para layout</h3>
+                <span>1 · Solo estas solicitudes se incluirán</span>
+              </div>
+              <div class="layout-preview-list">
+                <div class="layout-preview-row">
+                  <div><strong>SOL-QA-001</strong><small>Empresa Demo Norte</small></div>
+                  <div>Proveedor Ejemplo 01</div>
+                  <div><strong>$12,450.00 MXN</strong></div>
+                  <div>Corte QA cerrado</div>
+                  <div class="layout-preview-actions"><button class="small-btn" type="button">Abrir solicitud</button></div>
+                </div>
+              </div>
+            </section>
+            <section id="layoutPreviewInvalid" class="layout-preview-section layout-preview-section-attention" tabindex="-1">
+              <div class="layout-preview-head">
+                <h3>Solicitudes por completar</h3>
+                <span>${incompleteRows.length} · No bloquean el pago listo</span>
+              </div>
+              <div class="layout-preview-list">
+                ${incompleteRows.map(previewRow).join("")}
+              </div>
+            </section>`;
+        }
+
+        function setTheme(theme) {
+          document.documentElement.dataset.theme = theme;
+          document.querySelectorAll("[data-qa-theme]").forEach((button) => {
+            button.setAttribute("aria-pressed", String(button.dataset.qaTheme === theme));
+          });
+        }
+
+        function summarizeAxe(results) {
+          const severities = ["critical", "serious"];
+          const ruleCounts = Object.fromEntries(
+            severities.map((impact) => [
+              impact,
+              results.violations.filter((violation) => violation.impact === impact).length
+            ])
+          );
+          const nodeCounts = Object.fromEntries(
+            severities.map((impact) => [
+              impact,
+              results.violations
+                .filter((violation) => violation.impact === impact)
+                .reduce((total, violation) => total + violation.nodes.length, 0)
+            ])
+          );
+          return {
+            tool: "axe-core",
+            version: window.axe.version,
+            scope: "#newLayoutDialog",
+            summary: {
+              critical: ruleCounts.critical,
+              serious: ruleCounts.serious,
+              criticalNodes: nodeCounts.critical,
+              seriousNodes: nodeCounts.serious,
+              totalViolations: results.violations.length
+            },
+            violations: results.violations.map((violation) => ({
+              id: violation.id,
+              impact: violation.impact,
+              nodes: violation.nodes.length,
+              targets: violation.nodes.map((node) => node.target)
+            }))
+          };
+        }
+
+        async function scanAxe() {
+          const output = document.getElementById("axeResults");
+          const summary = document.getElementById("axeSummary");
+          output.textContent = JSON.stringify({ status: "running" });
+          summary.textContent = "Ejecutando axe…";
+
+          if (!window.axe) {
+            const error = {
+              tool: "axe-core",
+              version: null,
+              status: "unavailable",
+              message: "No se pudo cargar axe-core 4.10.3 desde jsDelivr."
+            };
+            output.textContent = JSON.stringify(error, null, 2);
+            summary.textContent = "Axe no disponible";
+            return;
+          }
+
+          try {
+            const results = await window.axe.run(dialog);
+            const report = summarizeAxe(results);
+            output.textContent = JSON.stringify(report, null, 2);
+            summary.textContent = `Axe: ${report.summary.critical} críticas · ${report.summary.serious} serias`;
+          } catch (error) {
+            output.textContent = JSON.stringify({
+              tool: "axe-core",
+              version: window.axe.version,
+              status: "error",
+              message: String(error && error.message ? error.message : error)
+            }, null, 2);
+            summary.textContent = "Axe terminó con error";
+          }
+        }
+
+        function addQaTools(form) {
+          const tools = document.createElement("section");
+          tools.className = "qa-dialog-tools";
+          tools.setAttribute("aria-label", "Controles locales de QA");
+          tools.innerHTML = `
+            <div>
+              <strong>QA local · datos ficticios</strong>
+              <small id="axeSummary" role="status" aria-live="polite">Axe pendiente</small>
+            </div>
+            <div class="qa-theme-actions" aria-label="Tema de la vista">
+              <button class="small-btn" type="button" data-qa-theme="dark" aria-pressed="true">Oscuro</button>
+              <button class="small-btn" type="button" data-qa-theme="light" aria-pressed="false">Claro</button>
+              <button class="small-btn" id="runAxeBtn" type="button">Ejecutar axe</button>
+            </div>
+            <details>
+              <summary>Resultado JSON de axe</summary>
+              <pre id="axeResults" aria-live="polite">{"status":"pending"}</pre>
+            </details>`;
+          form.querySelector(".modal-header").insertAdjacentElement("afterend", tools);
+        }
+
+        function populateDialog() {
+          const title = dialog.querySelector(".modal-header h2");
+          if (!title?.id || dialog.getAttribute("aria-labelledby") !== title.id) {
+            throw new Error("El diálogo de producción no tiene un nombre accesible.");
+          }
+
+          const closeButton = dialog.querySelector("#closeNewLayoutModalBtn");
+          if (!closeButton?.getAttribute("aria-label")) {
+            throw new Error("El cierre del diálogo de producción no tiene etiqueta accesible.");
+          }
+
+          dialog.querySelector("#layoutPeriodStart").value = "2026-07-20";
+          dialog.querySelector("#layoutPeriodEnd").value = "2026-07-24";
+          dialog.querySelector("#layoutName").value = "Semana QA · datos ficticios";
+
+          const company = dialog.querySelector("#layoutCompanyId");
+          company.insertAdjacentHTML("beforeend", '<option value="qa-company" selected>Empresa Demo Norte</option>');
+          const account = dialog.querySelector("#layoutBankAccountId");
+          account.insertAdjacentHTML("beforeend", '<option value="qa-account" selected>Cuenta QA •••• 0001</option>');
+
+          const preview = dialog.querySelector("#layoutEligibilityPreview");
+          preview.innerHTML = previewMarkup();
+          preview.classList.remove("hidden");
+
+          const invalidBox = dialog.querySelector("#layoutInvalidBox");
+          invalidBox.classList.remove("hidden");
+          invalidBox.textContent = "Las solicitudes incompletas permanecen fuera del archivo; el pago listo sí puede incluirse.";
+
+          const submit = dialog.querySelector("#submitNewLayoutBtn");
+          submit.disabled = false;
+          submit.textContent = "Crear layout con 1 pago";
+
+          addQaTools(dialog.querySelector("#newLayoutForm"));
+        }
+
+        function populateCompletionDialog() {
+          completionDialog.querySelector("#layoutCompletionSummary").innerHTML =
+            "<strong>SOL-QA-002</strong><span>Proveedor Ejemplo 02 · $8,420.00 MXN</span><small>Datos sintéticos de QA</small>";
+          completionDialog.querySelector("#layoutCompletionImpact").textContent =
+            "Estos son datos operativos de ejecución. Al guardarlos se conserva la autorización vigente de Dirección.";
+          completionDialog.querySelector("#layoutCompletionReference").value = "40002";
+          completionDialog.querySelector("#layoutCompletionConcept").value =
+            "Pago sintético para validación de reflow";
+          completionDialog.querySelector("#layoutCompletionDate").value = "2026-07-24";
+          completionDialog.querySelector("#layoutCompletionBankAccount").insertAdjacentHTML(
+            "beforeend",
+            '<option value="qa-account" selected>Cuenta QA •••• 0001</option>'
+          );
+        }
+
+        function openQaDialog(kind) {
+          if (dialog.open) dialog.close();
+          if (completionDialog.open) completionDialog.close();
+          if (kind === "completion") {
+            completionDialog.showModal();
+            return completionDialog;
+          }
+          dialog.showModal();
+          return dialog;
+        }
+
+        function bindHarnessEvents() {
+          dialog.querySelectorAll("[data-qa-theme]").forEach((button) => {
+            button.addEventListener("click", () => setTheme(button.dataset.qaTheme));
+          });
+          dialog.querySelector("#runAxeBtn").addEventListener("click", scanAxe);
+
+          dialog.querySelector("#newLayoutForm").addEventListener("submit", (event) => event.preventDefault());
+          dialog.querySelector("#closeNewLayoutModalBtn").addEventListener("click", () => dialog.close());
+          dialog.querySelector("#cancelNewLayoutBtn").addEventListener("click", () => dialog.close());
+          dialog.addEventListener("close", () => reopenButton.classList.remove("hidden"));
+          reopenButton.addEventListener("click", () => {
+            reopenButton.classList.add("hidden");
+            openQaDialog("new-layout");
+          });
+          completionDialog.querySelector("#layoutCompletionForm").addEventListener("submit", (event) => event.preventDefault());
+          completionDialog.querySelector("#closeLayoutCompletionBtn").addEventListener("click", () => completionDialog.close());
+          completionDialog.querySelector("#cancelLayoutCompletionBtn").addEventListener("click", () => completionDialog.close());
+        }
+
+        async function loadProductionDialog() {
+          try {
+            const response = await fetch("../../layouts.html", { cache: "no-store" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const source = new DOMParser().parseFromString(await response.text(), "text/html");
+            const productionDialog = source.querySelector("#newLayoutDialog");
+            if (!productionDialog) throw new Error("No se encontró #newLayoutDialog");
+            const productionCompletionDialog = source.querySelector("#layoutCompletionDialog");
+            if (!productionCompletionDialog) throw new Error("No se encontró #layoutCompletionDialog");
+
+            const productionStyle = Array.from(source.querySelectorAll("style"))
+              .find((style) => style.textContent.includes("#newLayoutDialog"));
+            if (productionStyle) {
+              const style = document.createElement("style");
+              style.dataset.qaSource = "layouts.html";
+              style.textContent = productionStyle.textContent;
+              document.head.appendChild(style);
+            }
+
+            dialog = document.importNode(productionDialog, true);
+            completionDialog = document.importNode(productionCompletionDialog, true);
+            mount.appendChild(dialog);
+            mount.appendChild(completionDialog);
+            populateDialog();
+            populateCompletionDialog();
+            bindHarnessEvents();
+            window.__approvalLayoutQa = {
+              dialogs: {
+                newLayout: dialog,
+                completion: completionDialog
+              },
+              open: openQaDialog
+            };
+            status.textContent = "Diálogo real cargado desde layouts.html; no se inicializó la aplicación.";
+            openQaDialog("new-layout");
+            setTheme("dark");
+            await scanAxe();
+          } catch (error) {
+            status.textContent = `No se pudo cargar el harness: ${String(error && error.message ? error.message : error)}`;
+          }
+        }
+
+        loadProductionDialog();
+      })();
+    </script>
+  </body>
+</html>

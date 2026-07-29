@@ -1,0 +1,1159 @@
+name: Extraordinary 040 DEV one-shot
+
+on:
+  push:
+    branches:
+      - feature/ramon-post-yanin-bugs-extraordinary
+    paths:
+      - .github/workflows/extraordinary-040-dev-one-shot.yml
+      - scripts/qa/extraordinary-039-dev-uat.mjs
+      - scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs
+
+permissions:
+  contents: read
+  deployments: read
+  pull-requests: read
+  statuses: read
+
+concurrency:
+  group: extraordinary-040-dev-one-shot
+  cancel-in-progress: false
+
+env:
+  DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+  EXPECTED_PARENT: d54475fa74f6ea1392e68b82871888b0b449f041
+  EXPECTED_DEV_TIP: fb7f406c3909a6ad881402870a7d56bccbdeb466
+  EXPECTED_MERGE_BASE: eb7ffea22bbab37c4b4f752e718e86fe2c23ccf4
+  EXPECTED_MIGRATION_SHA256: 5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254
+  EXPECTED_BACKUP_SHA256: 08adee97663e641b64a171a47c26fdaa9a5831b8c513234ef5e00d04fa3af6b9
+  MIGRATION_FILE: supabase/migrations/040_fix_extraordinary_consumption_and_material_invalidation.sql
+  BACKUP_FILE: scripts/qa/extraordinary-040-private-logical-backup-readonly.sql
+  EVIDENCE_DIR: /tmp/extraordinary-040-one-shot
+  FEATURE_BRANCH: feature/ramon-post-yanin-bugs-extraordinary
+  PR_NUMBER: "277"
+
+jobs:
+  apply-040-once:
+    name: Audit applied migration 040 without mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: DEV
+    outputs:
+      initial_mode: ${{ steps.state_gate.outputs.mode }}
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - name: Block manual reruns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "::error::BLOCKED_MEJ05_UAT_MANUAL_RERUN"
+            exit 1
+          fi
+          echo "MEJ05_UAT_FIRST_ATTEMPT_PASS"
+
+      - name: Checkout exact pushed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch and verify complete authorized history
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch \
+            --no-tags \
+            --prune \
+            origin \
+            "+refs/heads/dev:refs/remotes/origin/dev" \
+            "+refs/heads/${FEATURE_BRANCH}:refs/remotes/origin/${FEATURE_BRANCH}"
+
+          if ! git cat-file -e "${EXPECTED_PARENT}^{commit}"; then
+            echo "::error::BLOCKED_040_ONE_SHOT_PARENT_CHANGED"
+            exit 1
+          fi
+          if ! git cat-file -e "${EXPECTED_DEV_TIP}^{commit}"; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
+            exit 1
+          fi
+          if ! git cat-file -e "${EXPECTED_MERGE_BASE}^{commit}"; then
+            echo "::error::BLOCKED_040_GENEALOGY_OBJECT_MISSING"
+            exit 1
+          fi
+          git cat-file -e "${GITHUB_SHA}^{commit}"
+          git cat-file -e "refs/remotes/origin/dev^{commit}"
+
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          actual_dev_tip="$(
+            git rev-parse refs/remotes/origin/dev
+          )"
+          if [ "$actual_dev_tip" != "$EXPECTED_DEV_TIP" ]; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
+            exit 1
+          fi
+          actual_merge_base="$(
+            git merge-base "$GITHUB_SHA" refs/remotes/origin/dev
+          )"
+          if [ "$actual_merge_base" != "$EXPECTED_MERGE_BASE" ]; then
+            echo "::error::BLOCKED_040_MERGE_BASE_CHANGED"
+            exit 1
+          fi
+          git merge-base --is-ancestor \
+            "$EXPECTED_MERGE_BASE" "$GITHUB_SHA"
+          git merge-base --is-ancestor \
+            "$EXPECTED_MERGE_BASE" refs/remotes/origin/dev
+
+          mapfile -t dev_delta_files < <(
+            git diff \
+              --name-only \
+              "$EXPECTED_MERGE_BASE" \
+              "$EXPECTED_DEV_TIP" |
+            sort
+          )
+          mapfile -t expected_dev_delta_files < <(
+            printf '%s\n' \
+              "comprobantes_batch.js" \
+              "payment_request_reconciliation_evidence.js" \
+              "scripts/qa/payment-batch-final-gaps-contract.test.mjs" |
+            sort
+          )
+          if [ "${#dev_delta_files[@]}" -ne \
+               "${#expected_dev_delta_files[@]}" ]; then
+            echo "::error::BLOCKED_040_UNREVIEWED_DEV_DELTA"
+            exit 1
+          fi
+          for index in "${!expected_dev_delta_files[@]}"; do
+            if [ "${dev_delta_files[$index]}" != \
+                 "${expected_dev_delta_files[$index]}" ]; then
+              echo "::error::BLOCKED_040_UNREVIEWED_DEV_DELTA"
+              exit 1
+            fi
+          done
+
+          mapfile -t feature_delta_files < <(
+            git diff \
+              --name-only \
+              "$EXPECTED_MERGE_BASE" \
+              "$GITHUB_SHA" |
+            sort
+          )
+          overlap="$(
+            comm -12 \
+              <(printf '%s\n' "${dev_delta_files[@]}" | sort) \
+              <(printf '%s\n' "${feature_delta_files[@]}" | sort)
+          )"
+          if [ -n "$overlap" ]; then
+            echo "::error::BLOCKED_040_DEV_FEATURE_FILE_OVERLAP"
+            exit 1
+          fi
+
+          echo "EXPECTED_DEV_TIP=$EXPECTED_DEV_TIP"
+          echo "ACTUAL_DEV_TIP=$actual_dev_tip"
+          echo "EXPECTED_MERGE_BASE=$EXPECTED_MERGE_BASE"
+          echo "ACTUAL_MERGE_BASE=$actual_merge_base"
+          echo "FEATURE_HEAD=$GITHUB_SHA"
+          echo "FEATURE_PARENT=$EXPECTED_PARENT"
+          echo "DEV_FEATURE_OVERLAP_COUNT=0"
+
+      - name: Guard repository, branch, parent, PR and immutable files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_REPOSITORY" = \
+            "ramon1415/catalogo-proveedores-flux"
+          test "$GITHUB_REF_NAME" = "$FEATURE_BRANCH"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [ "$(git rev-parse HEAD^)" != "$EXPECTED_PARENT" ]; then
+            echo "::error::BLOCKED_040_ONE_SHOT_PARENT_CHANGED"
+            exit 1
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only HEAD^ HEAD | sort
+          )
+          expected_files=(
+            ".github/workflows/extraordinary-040-dev-one-shot.yml"
+            "scripts/qa/extraordinary-039-dev-uat.mjs"
+            "scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs"
+          )
+          test "${#changed_files[@]}" -eq "${#expected_files[@]}"
+          for index in "${!expected_files[@]}"; do
+            test "${changed_files[$index]}" = "${expected_files[$index]}"
+          done
+          test "$(
+            git diff --name-only \
+              "$EXPECTED_PARENT" \
+              "$GITHUB_SHA" \
+              -- . \
+              ':(exclude).github/workflows/extraordinary-040-dev-one-shot.yml' \
+              ':(exclude)scripts/qa/extraordinary-039-dev-uat.mjs' \
+              ':(exclude)scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs'
+          )" = ""
+
+          test "$(
+            git rev-parse "${GITHUB_SHA}:${MIGRATION_FILE}"
+          )" = "84a9f1e1951b8c62897bdde23d5e955cf2118efb"
+
+          while read -r expected_sha migration_path; do
+            test "$(
+              sha256sum "$migration_path" | cut -d' ' -f1
+            )" = "$expected_sha"
+          done <<'HASHES'
+          844d98c16c56ff97976c64b6db20aeb35e90fe9720f45b91844dd5d3e23a7547 supabase/migrations/036_quarantine_legacy_extraordinary_authorizations.sql
+          266542d2b587c46f99a64eabe3b362f7cb039249b7efda1479572bffbded7c87 supabase/migrations/037_secure_extraordinary_external_authorization.sql
+          72b926c71204bc6ca76a3d06b97c5549d5d321eda69161d661cafdeaaff8f8bf supabase/migrations/038_materialize_only_released_batch_items.sql
+          d5097286a3e98833241907d124141eac1b9d92938e4fb724c6a6975941c59201 supabase/migrations/039_enable_extraordinary_evidence_storage_policy_helper.sql
+          5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254 supabase/migrations/040_fix_extraordinary_consumption_and_material_invalidation.sql
+          HASHES
+
+          pr_json=""
+          for _ in $(seq 1 12); do
+            pr_json="$(
+              gh api \
+                "repos/ramon1415/catalogo-proveedores-flux/pulls/$PR_NUMBER"
+            )"
+            if [ "$(jq -r '.head.sha' <<<"$pr_json")" = "$GITHUB_SHA" ] && \
+               [ "$(jq -r '.mergeable' <<<"$pr_json")" != "null" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$(jq -r '.state' <<<"$pr_json")" = "open"
+          test "$(jq -r '.draft' <<<"$pr_json")" = "true"
+          test "$(jq -r '.base.ref' <<<"$pr_json")" = "dev"
+          if [ "$(jq -r '.base.sha' <<<"$pr_json")" != \
+               "$EXPECTED_DEV_TIP" ]; then
+            echo "::error::BLOCKED_040_DEV_TIP_CHANGED_BEFORE_RUN"
+            exit 1
+          fi
+          test "$(jq -r '.head.ref' <<<"$pr_json")" = "$FEATURE_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$GITHUB_SHA"
+          test "$(jq -r '.merged' <<<"$pr_json")" = "false"
+          test "$(jq -r '.mergeable' <<<"$pr_json")" != "false"
+
+      - name: Extract and verify exact migration and backup Git blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$EVIDENCE_DIR"
+          mkdir -p "$EVIDENCE_DIR"
+          umask 077
+
+          git show \
+            "$GITHUB_SHA:$MIGRATION_FILE" \
+            > "$EVIDENCE_DIR/040-exact.sql"
+
+          actual_sha="$(
+            sha256sum "$EVIDENCE_DIR/040-exact.sql" |
+            cut -d' ' -f1
+          )"
+          test "$actual_sha" = "$EXPECTED_MIGRATION_SHA256"
+          cmp --silent "$EVIDENCE_DIR/040-exact.sql" "$MIGRATION_FILE"
+          test "$(wc -c < "$EVIDENCE_DIR/040-exact.sql")" -eq 25361
+          test "$(wc -l < "$EVIDENCE_DIR/040-exact.sql")" -eq 783
+          if head -c 3 "$EVIDENCE_DIR/040-exact.sql" |
+             od -An -t x1 |
+             grep -qi 'ef bb bf'; then
+            echo "::error::Unexpected BOM"
+            exit 1
+          fi
+          printf '%s\n' "$actual_sha" \
+            > "$EVIDENCE_DIR/migration-sha256.txt"
+          echo "MIGRATION_040_EXACT_BLOB_PASS"
+
+          test "$(
+            git rev-parse "${GITHUB_SHA}:${BACKUP_FILE}"
+          )" = "a4f4deb4861dc82abfb016bc0581127e444cb70a"
+          git show \
+            "$GITHUB_SHA:$BACKUP_FILE" \
+            > "$EVIDENCE_DIR/040-backup-exact.sql"
+
+          actual_backup_sha="$(
+            sha256sum "$EVIDENCE_DIR/040-backup-exact.sql" |
+            cut -d' ' -f1
+          )"
+          test "$actual_backup_sha" = "$EXPECTED_BACKUP_SHA256"
+          cmp --silent \
+            "$EVIDENCE_DIR/040-backup-exact.sql" \
+            "$BACKUP_FILE"
+          test "$(wc -c < "$EVIDENCE_DIR/040-backup-exact.sql")" -eq 9530
+          test "$(wc -l < "$EVIDENCE_DIR/040-backup-exact.sql")" -eq 309
+          if head -c 3 "$EVIDENCE_DIR/040-backup-exact.sql" |
+             od -An -t x1 |
+             grep -qi 'ef bb bf'; then
+            echo "::error::Unexpected backup BOM"
+            exit 1
+          fi
+          printf '%s\n' "$actual_backup_sha" \
+            > "$EVIDENCE_DIR/backup-source-sha256.txt"
+          echo "BACKUP_040_EXACT_BLOB_PASS"
+
+      - name: Classify DEV database route and require secure libpq mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+
+          python3 <<'PY' >> "$GITHUB_ENV"
+          import os
+          from urllib.parse import parse_qs, urlsplit
+
+          project_ref = "scsirgbuqjcwoaxfacth"
+          raw = os.environ["SUPABASE_DEV_DB_URL"]
+          parsed = urlsplit(raw)
+
+          host = (parsed.hostname or "").lower()
+          port = parsed.port
+          username = parsed.username or ""
+          params = parse_qs(parsed.query, keep_blank_values=True)
+
+          if parsed.scheme not in {"postgres", "postgresql"} or not host or not port:
+              raise SystemExit("BLOCKED_040_INVALID_DEV_DATABASE_URL")
+
+          ssl_values = params.get("sslmode", [])
+          if len(ssl_values) > 1:
+              raise SystemExit("BLOCKED_040_MULTIPLE_SSLMODE_PARAMETERS")
+
+          sslmode = ssl_values[0].lower() if ssl_values else ""
+          secure_modes = {"require", "verify-ca", "verify-full"}
+
+          if sslmode and sslmode not in secure_modes:
+              raise SystemExit("BLOCKED_040_INSECURE_SSLMODE_IN_SECRET")
+
+          direct_host = f"db.{project_ref}.supabase.co"
+
+          if host == direct_host and port == 5432:
+              route = "direct"
+          elif host.endswith(".pooler.supabase.com") and port == 5432:
+              route = "session_pooler"
+          elif port == 6543 and (
+              host == direct_host or host.endswith(".pooler.supabase.com")
+          ):
+              route = "transaction_pooler"
+          else:
+              raise SystemExit("BLOCKED_040_UNEXPECTED_DATABASE_ROUTE")
+
+          if route == "transaction_pooler":
+              raise SystemExit("BLOCKED_040_TRANSACTION_POOLER_NOT_ALLOWED")
+
+          if route == "direct":
+              if project_ref not in host:
+                  raise SystemExit("BLOCKED_040_DIRECT_PROJECT_REF_MISMATCH")
+          elif project_ref not in username and project_ref not in raw:
+              raise SystemExit("BLOCKED_040_POOLER_PROJECT_REF_MISMATCH")
+
+          print(f"DEV_DATABASE_ROUTE={route}")
+          print(f"DEV_DATABASE_PORT={port}")
+          print(
+              "DEV_DATABASE_SSLMODE_DECLARED="
+              f"{sslmode or 'environment_required'}"
+          )
+          PY
+
+          {
+            echo "PGSSLMODE=require"
+            echo "PGCONNECT_TIMEOUT=15"
+          } >> "$GITHUB_ENV"
+
+          echo "DEV_DATABASE_ROUTE_CLASSIFICATION_PASS"
+
+      - name: Verify client-side TLS with psql
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+          psql --version
+
+          test "${PGSSLMODE:-}" = "require"
+          if ! conninfo_output="$(
+            psql "$SUPABASE_DEV_DB_URL" \
+              --no-psqlrc \
+              --set ON_ERROR_STOP=1 \
+              --command '\conninfo' \
+              2>&1
+          )"; then
+            echo "::error::BLOCKED_040_CLIENT_TLS_NOT_CONFIRMED"
+            exit 1
+          fi
+          if ! grep -Eiq \
+            'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' \
+            <<<"$conninfo_output"; then
+            echo "::error::BLOCKED_040_CLIENT_TLS_NOT_CONFIRMED"
+            exit 1
+          fi
+
+          {
+            echo "{"
+            echo '  "client_tls_required": true,'
+            echo '  "client_tls_confirmed": true,'
+            printf '  "connection_route": "%s",\n' \
+              "$DEV_DATABASE_ROUTE"
+            printf '  "connection_port": %s,\n' "$DEV_DATABASE_PORT"
+            printf '  "sslmode_declared": "%s"\n' \
+              "$DEV_DATABASE_SSLMODE_DECLARED"
+            echo "}"
+          } > "$EVIDENCE_DIR/client-tls-sanitized.json"
+
+          echo "DEV_CLIENT_TLS_PASS"
+
+      - name: Verify read-only DEV database binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          test "${PGSSLMODE:-}" = "require"
+
+          cat > "$EVIDENCE_DIR/dev-binding-readonly.sql" <<'SQL'
+          \set ON_ERROR_STOP on
+          set session characteristics as transaction read only;
+          begin transaction read only;
+          \pset format unaligned
+          \pset tuples_only on
+          select jsonb_build_object(
+            'backend_ssl_observed', coalesce((
+              select ssl
+              from pg_stat_ssl
+              where pid = pg_backend_pid()
+            ), false),
+            'database_expected', current_database() = 'postgres',
+            'role_expected', current_user in ('postgres', 'supabase_admin'),
+            'transaction_read_only', current_setting('transaction_read_only')
+          );
+          rollback;
+          SQL
+
+          export PGOPTIONS="\
+          -c default_transaction_read_only=on \
+          -c statement_timeout=30000 \
+          -c lock_timeout=5000"
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file "$EVIDENCE_DIR/dev-binding-readonly.sql" \
+            > "$EVIDENCE_DIR/dev-binding.raw"
+          grep '^{' "$EVIDENCE_DIR/dev-binding.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/dev-binding.json"
+          jq -e \
+            --arg route "$DEV_DATABASE_ROUTE" '
+              .client_tls_required == true
+              and .client_tls_confirmed == true
+              and .connection_route == $route
+            ' "$EVIDENCE_DIR/client-tls-sanitized.json" >/dev/null
+          jq -e '
+            .database_expected == true
+            and .role_expected == true
+            and .transaction_read_only == "on"
+          ' "$EVIDENCE_DIR/dev-binding.json" >/dev/null
+          backend_ssl_observed="$(
+            jq -r '.backend_ssl_observed | tostring' \
+              "$EVIDENCE_DIR/dev-binding.json"
+          )"
+          case "$backend_ssl_observed" in
+            true|false) ;;
+            *)
+              echo "::error::BLOCKED_040_BACKEND_SSL_OBSERVATION_INVALID"
+              exit 1
+              ;;
+          esac
+          if [ "$DEV_DATABASE_ROUTE" = "direct" ] && \
+             [ "$backend_ssl_observed" != "true" ]; then
+            echo "::error::BLOCKED_040_DIRECT_BACKEND_SSL_FALSE"
+            exit 1
+          fi
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/dev-binding.raw"
+          echo "BACKEND_SSL_OBSERVED=$backend_ssl_observed"
+          echo "DEV_DATABASE_BINDING_AND_CLIENT_TLS_PASS"
+
+      - name: Classify the one-shot state
+        id: state_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+
+          cat > "$EVIDENCE_DIR/state-gate-readonly.sql" <<'SQL'
+          \set ON_ERROR_STOP on
+          set session characteristics as transaction read only;
+          begin transaction read only;
+          set local statement_timeout = '30s';
+          set local lock_timeout = '5s';
+          \pset format unaligned
+          \pset tuples_only on
+          with facts as (
+            select
+              to_regprocedure(
+                'public.extraordinary_authorization_can_consume_layout_line(uuid,uuid)'
+              ) is not null as helper_present,
+              lower(coalesce((
+                select procedure_info.prosrc
+                from pg_proc procedure_info
+                where procedure_info.oid =
+                  'public.extraordinary_consume_layout_line()'::regprocedure
+              ), '')) as consumer_source,
+              lower(coalesce((
+                select pg_get_triggerdef(trigger_info.oid)
+                from pg_trigger trigger_info
+                where trigger_info.tgrelid =
+                    'public.payment_requests'::regclass
+                  and trigger_info.tgname =
+                    'invalidate_extraordinary_on_material_change'
+                  and not trigger_info.tgisinternal
+                  and trigger_info.tgenabled = 'O'
+              ), '')) as trigger_definition
+          ),
+          classified as (
+            select
+              *,
+              case
+                when not helper_present
+                  and position(
+                    'extraordinary_authorization_is_ready'
+                    in consumer_source
+                  ) > 0
+                  and trigger_definition like
+                    '%after update of approval_material_updated_at%'
+                  then 'not_applied_expected'
+                when helper_present
+                  and position(
+                    'extraordinary_authorization_is_ready'
+                    in consumer_source
+                  ) = 0
+                  and position(
+                    'extraordinary_authorization_can_consume_layout_line'
+                    in consumer_source
+                  ) > 0
+                  and trigger_definition like '%after update on%'
+                  and trigger_definition not like '%update of%'
+                  and trigger_definition like
+                    '%old.approval_material_updated_at is distinct from new.approval_material_updated_at%'
+                  then 'already_applied_exact'
+                else 'partial_or_drifted'
+              end as mode
+            from facts
+          )
+          select jsonb_build_object(
+            'mode', classified.mode,
+            'transaction_read_only',
+              current_setting('transaction_read_only'),
+            'helper_present', classified.helper_present,
+            'consumer_has_vulnerable_recheck', position(
+              'extraordinary_authorization_is_ready'
+              in classified.consumer_source
+            ) > 0,
+            'consumer_has_atomic_helper', position(
+              'extraordinary_authorization_can_consume_layout_line'
+              in classified.consumer_source
+            ) > 0,
+            'material_trigger_uses_update_of',
+              classified.trigger_definition like '%update of%',
+            'material_trigger_uses_row_when',
+              classified.trigger_definition like
+                '%old.approval_material_updated_at is distinct from new.approval_material_updated_at%',
+            'secure_open_authorizations', (
+              select count(*)
+              from public.payment_request_extraordinary_authorizations
+              where idempotency_key is not null
+                and status in ('draft', 'active')
+            ),
+            'operadora_policy_enabled', exists (
+              select 1
+              from public.extraordinary_payment_policies policy
+              join public.companies company
+                on company.id = policy.company_id
+              where policy.enabled
+                and lower(coalesce(company.name, '')) like '%operadora%'
+            ),
+            'business_counts', jsonb_build_object(
+              'payment_requests', (
+                select count(*) from public.payment_requests
+              ),
+              'authorizations', (
+                select count(*)
+                from public.payment_request_extraordinary_authorizations
+              ),
+              'authorization_events', (
+                select count(*)
+                from public.payment_request_extraordinary_events
+              ),
+              'payment_layouts', (
+                select count(*) from public.payment_layouts
+              ),
+              'payment_layout_lines', (
+                select count(*) from public.payment_layout_lines
+              ),
+              'payment_receipts', (
+                select count(*) from public.payment_receipts
+              ),
+              'paid_requests', (
+                select count(*)
+                from public.payment_requests request
+                where request.status::text = 'paid'
+              ),
+              'notification_events', (
+                select count(*) from public.notification_events
+              ),
+              'financial_outbox_events', (
+                select count(*) from public.financial_outbox_events
+              ),
+              'delivery_attempts', (
+                select count(*)
+                from public.financial_outbox_delivery_attempts
+              ),
+              'storage_objects', (
+                select count(*)
+                from storage.objects object_info
+                where object_info.bucket_id =
+                  'extraordinary-approval-evidence'
+              )
+            ),
+            'allocation_integrity', jsonb_build_object(
+              'plans_hash', md5(coalesce((
+                select string_agg(
+                  to_jsonb(plan)::text,
+                  ''
+                  order by plan.id
+                )
+                from public.payment_allocation_plans plan
+              ), '')),
+              'reservations_hash', md5(coalesce((
+                select string_agg(
+                  to_jsonb(reservation)::text,
+                  ''
+                  order by reservation.id
+                )
+                from public.payment_allocation_reservations reservation
+              ), '')),
+              'operations_hash', md5(coalesce((
+                select string_agg(
+                  to_jsonb(operation)::text,
+                  ''
+                  order by operation.id
+                )
+                from public.bank_payment_operations operation
+              ), ''))
+            )
+          )
+          from classified;
+          rollback;
+          SQL
+
+          export PGOPTIONS="\
+          -c default_transaction_read_only=on \
+          -c statement_timeout=30000 \
+          -c lock_timeout=5000"
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file "$EVIDENCE_DIR/state-gate-readonly.sql" \
+            > "$EVIDENCE_DIR/state-before.raw"
+          grep '^{' "$EVIDENCE_DIR/state-before.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/state-before.json"
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/state-before.raw"
+          mode="$(jq -er '.mode' "$EVIDENCE_DIR/state-before.json")"
+          if [ "$mode" != "already_applied_exact" ]; then
+            echo "::error::BLOCKED_040_NOT_ALREADY_APPLIED_EXACT"
+            exit 1
+          fi
+          jq -e '
+            .transaction_read_only == "on"
+            and .secure_open_authorizations == 0
+            and .operadora_policy_enabled == false
+          ' "$EVIDENCE_DIR/state-before.json" >/dev/null
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "STATE_GATE_040_ALREADY_APPLIED_EXACT"
+
+      - name: Archived installation precheck — permanently unreachable
+        if: ${{ github.run_attempt == 0 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGOPTIONS="\
+          -c default_transaction_read_only=on \
+          -c statement_timeout=30000 \
+          -c lock_timeout=5000"
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file scripts/qa/extraordinary-040-dev-precheck-readonly.sql \
+            > "$EVIDENCE_DIR/precheck.raw"
+          grep '^{' "$EVIDENCE_DIR/precheck.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/precheck-sanitized.json"
+          jq -e '
+            .result == "MEJ05_040_CATALOG_PRECHECK_PASS"
+            and .transaction_read_only == "on"
+            and .dml == 0
+            and .ddl == 0
+            and .mutable_calls == 0
+          ' "$EVIDENCE_DIR/precheck-sanitized.json" >/dev/null
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/precheck.raw"
+          echo "MEJ05_040_CATALOG_PRECHECK_PASS"
+
+      - name: Archived pre-install backup — permanently unreachable
+        if: ${{ github.run_attempt == 0 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGOPTIONS="\
+          -c default_transaction_read_only=on \
+          -c statement_timeout=30000 \
+          -c lock_timeout=5000"
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --set "backup_commit=$GITHUB_SHA" \
+            --set "backup_project_ref=$DEV_PROJECT_REF" \
+            --set "backup_migration_sha=$EXPECTED_MIGRATION_SHA256" \
+            --file "$EVIDENCE_DIR/040-backup-exact.sql" \
+            > "$EVIDENCE_DIR/private-backup.raw"
+          grep -F "BACKUP_040_CLEAN_RUN_PASS" \
+            "$EVIDENCE_DIR/private-backup.raw"
+          grep '^{' "$EVIDENCE_DIR/private-backup.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/private-backup.json"
+          jq -e '
+            .result == "BACKUP_040_CLEAN_RUN_PASS"
+            and .backup_kind ==
+              "EXTRAORDINARY_040_PRIVATE_LOGICAL_BACKUP_READONLY"
+            and .transaction_read_only == "on"
+            and .project_ref == "scsirgbuqjcwoaxfacth"
+            and .migration_sha256 ==
+              "5a7ab21960f7517870f1f3cc44fe57abbe1e0bd76213af772b5a73bc1971b254"
+            and .operadora_policy_enabled == false
+            and .bucket.present == true
+            and .bucket.public == false
+          ' "$EVIDENCE_DIR/private-backup.json" >/dev/null
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/private-backup.raw"
+          sha256sum "$EVIDENCE_DIR/private-backup.json" |
+            cut -d' ' -f1 > "$EVIDENCE_DIR/private-backup.sha256"
+          jq '{
+            result,
+            backup_kind,
+            generated_at,
+            commit,
+            project_ref,
+            migration_sha256,
+            transaction_read_only,
+            functions: [
+              .functions[] |
+              {identity, owner, acl, definition_sha256}
+            ],
+            triggers: [
+              .triggers[] |
+              {name, enabled, definition_sha256}
+            ],
+            constraints: [
+              .constraints[] |
+              {schema, table, name, type}
+            ],
+            indexes: [
+              .indexes[] |
+              {schema, table, name, definition_sha256}
+            ],
+            policies: [
+              .policies[] |
+              {schema, table, name, permissive, roles, command}
+            ],
+            authorization_statuses,
+            bucket,
+            business_counts,
+            allocation_integrity,
+            operadora_policy_enabled
+          }' "$EVIDENCE_DIR/private-backup.json" \
+            > "$EVIDENCE_DIR/private-backup-sanitized.json"
+          echo "BACKUP_040_CLEAN_RUN_PASS"
+
+      - name: Archived migration 040 step — permanently unreachable
+        id: migration
+        if: ${{ false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          unset PGOPTIONS
+          export PGAPPNAME="flux-extraordinary-040-one-shot"
+
+          set +e
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file "$EVIDENCE_DIR/040-exact.sql" \
+            > "$EVIDENCE_DIR/migration-result.log" 2>&1
+          migration_exit=$?
+          set -e
+          printf '%s\n' "$migration_exit" \
+            > "$EVIDENCE_DIR/migration-exit-code.txt"
+
+          {
+            grep -E \
+              '^(BEGIN|COMMIT|CREATE|DROP|ALTER|REVOKE|GRANT|DO|NOTICE:.*MIGRATION_040_)' \
+              "$EVIDENCE_DIR/migration-result.log" || true
+          } > "$EVIDENCE_DIR/migration-result-sanitized.log"
+
+          if [ "$migration_exit" -ne 0 ]; then
+            export PGOPTIONS="\
+            -c default_transaction_read_only=on \
+            -c statement_timeout=30000 \
+            -c lock_timeout=5000"
+            psql "$SUPABASE_DEV_DB_URL" \
+              --no-psqlrc \
+              --set ON_ERROR_STOP=1 \
+              --set VERBOSITY=terse \
+              --file "$EVIDENCE_DIR/state-gate-readonly.sql" \
+              > "$EVIDENCE_DIR/state-after-failure.raw"
+            grep '^{' "$EVIDENCE_DIR/state-after-failure.raw" |
+              tail -n 1 \
+              > "$EVIDENCE_DIR/state-after-failure.json"
+            jq -e -n \
+              --slurpfile before "$EVIDENCE_DIR/state-before.json" \
+              --slurpfile after \
+                "$EVIDENCE_DIR/state-after-failure.json" '
+                $after[0].mode == "not_applied_expected"
+                and $before[0].business_counts ==
+                  $after[0].business_counts
+                and $before[0].allocation_integrity ==
+                  $after[0].allocation_integrity
+              ' >/dev/null
+            echo "ROLLBACK_CONFIRMED_BY_READ_ONLY_STATE_AUDIT" \
+              > "$EVIDENCE_DIR/failure-audit-marker.txt"
+            echo "::error::BLOCKED_MIGRATION_040_ONE_SHOT_FAILED"
+            exit "$migration_exit"
+          fi
+
+          grep -F "MIGRATION_040_STATIC_POSTCHECK_PASS" \
+            "$EVIDENCE_DIR/migration-result.log"
+          grep -Fx "COMMIT" "$EVIDENCE_DIR/migration-result.log"
+          echo "applied=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run remote postcheck and immutable delta comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGOPTIONS="\
+          -c default_transaction_read_only=on \
+          -c statement_timeout=30000 \
+          -c lock_timeout=5000"
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file scripts/qa/extraordinary-040-dev-postcheck-readonly.sql \
+            > "$EVIDENCE_DIR/postcheck.raw"
+          grep '^{' "$EVIDENCE_DIR/postcheck.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/postcheck-sanitized.json"
+          jq -e '
+            .result == "MIGRATION_040_POSTCHECK_PASS"
+            and .transaction_read_only == "on"
+            and .dml == 0
+            and .ddl == 0
+            and .mutable_calls == 0
+          ' "$EVIDENCE_DIR/postcheck-sanitized.json" >/dev/null
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/postcheck.raw"
+
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --file "$EVIDENCE_DIR/state-gate-readonly.sql" \
+            > "$EVIDENCE_DIR/state-after.raw"
+          grep '^{' "$EVIDENCE_DIR/state-after.raw" |
+            tail -n 1 > "$EVIDENCE_DIR/state-after.json"
+          grep -F "ROLLBACK" "$EVIDENCE_DIR/state-after.raw"
+          jq -e -n \
+            --slurpfile before "$EVIDENCE_DIR/state-before.json" \
+            --slurpfile after "$EVIDENCE_DIR/state-after.json" '
+              $after[0].mode == "already_applied_exact"
+              and $before[0].business_counts ==
+                $after[0].business_counts
+              and $before[0].allocation_integrity ==
+                $after[0].allocation_integrity
+              and $after[0].secure_open_authorizations == 0
+              and $after[0].operadora_policy_enabled == false
+            ' > "$EVIDENCE_DIR/delta-comparison.json"
+
+          echo "POST_040_UAT_PREFLIGHT_PASS" \
+            > "$EVIDENCE_DIR/final-marker.txt"
+          cat "$EVIDENCE_DIR/final-marker.txt"
+
+      - name: Upload sanitized 040 evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraordinary-040-one-shot-${{ github.run_id }}
+          path: |
+            /tmp/extraordinary-040-one-shot/migration-sha256.txt
+            /tmp/extraordinary-040-one-shot/backup-source-sha256.txt
+            /tmp/extraordinary-040-one-shot/client-tls-sanitized.json
+            /tmp/extraordinary-040-one-shot/dev-binding.json
+            /tmp/extraordinary-040-one-shot/state-before.json
+            /tmp/extraordinary-040-one-shot/precheck-sanitized.json
+            /tmp/extraordinary-040-one-shot/private-backup.sha256
+            /tmp/extraordinary-040-one-shot/private-backup-sanitized.json
+            /tmp/extraordinary-040-one-shot/migration-exit-code.txt
+            /tmp/extraordinary-040-one-shot/migration-result-sanitized.log
+            /tmp/extraordinary-040-one-shot/state-after-failure.json
+            /tmp/extraordinary-040-one-shot/failure-audit-marker.txt
+            /tmp/extraordinary-040-one-shot/postcheck-sanitized.json
+            /tmp/extraordinary-040-one-shot/state-after.json
+            /tmp/extraordinary-040-one-shot/delta-comparison.json
+            /tmp/extraordinary-040-one-shot/final-marker.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  uat-mej05-after-040:
+    name: Real MEJ-05 UAT and final Yanin regressions
+    needs: apply-040-once
+    if: >-
+      ${{ needs['apply-040-once'].result == 'success' &&
+          needs['apply-040-once'].outputs.initial_mode ==
+            'already_applied_exact' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: DEV
+    env:
+      SUPABASE_URL: https://scsirgbuqjcwoaxfacth.supabase.co
+      SUPABASE_DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_ANON_KEY: ${{ secrets.SUPABASE_DEV_ANON_KEY }}
+      SUPABASE_DEV_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_DEV_SERVICE_ROLE_KEY }}
+      UAT_EVIDENCE_DIR: /tmp/extraordinary-040-uat
+
+    steps:
+      - name: Block manual reruns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "::error::BLOCKED_MEJ05_UAT_MANUAL_RERUN"
+            exit 1
+          fi
+          echo "MEJ05_UAT_FIRST_ATTEMPT_PASS"
+
+      - name: Checkout exact migrated commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate currentCounts UUID and text parameter contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require("node:assert")
+          const fs = require("node:fs")
+
+          const source = fs.readFileSync(
+            "scripts/qa/extraordinary-039-dev-uat.mjs",
+            "utf8",
+          )
+          const currentCountsStart = source.indexOf(
+            "async function currentCounts()",
+          )
+          const roleIdStart = source.indexOf(
+            "async function roleId(",
+            currentCountsStart,
+          )
+          assert(currentCountsStart >= 0)
+          assert(roleIdStart > currentCountsStart)
+          const currentCountsSource = source.slice(
+            currentCountsStart,
+            roleIdStart,
+          )
+
+          assert(!currentCountsSource.includes("object.name like $2::text"))
+          assert(currentCountsSource.includes("object.name like $4::text"))
+          const companyUuidComparisons =
+            currentCountsSource.match(/event\.company_id = \$2::uuid/g) || []
+          assert.strictEqual(companyUuidComparisons.length, 2)
+          assert(currentCountsSource.includes("`${ids.company}/%`"))
+
+          const runStart = source.indexOf("async function run()")
+          const entrypointStart = source.indexOf("\ntry {\n  await run()", runStart)
+          assert(runStart >= 0)
+          assert(entrypointStart > runStart)
+          const runSource = source.slice(runStart, entrypointStart)
+          const connect = runSource.indexOf("await db.connect()")
+          const preflight = runSource.indexOf("await currentCounts()")
+          const preflightPassed = runSource.indexOf(
+            "currentCountsPreflightPassed = true",
+          )
+          const preflightMarker = runSource.indexOf(
+            'console.log("CURRENT_COUNTS_PREFLIGHT_PASS")',
+          )
+          const createUsers = runSource.indexOf("await createUsers()")
+          assert(connect >= 0)
+          assert(preflight > connect)
+          assert(preflightPassed > preflight)
+          assert(preflightMarker > preflightPassed)
+          assert(createUsers > preflightMarker)
+          assert(
+            runSource.includes(
+              "current_counts_preflight: currentCountsPreflightPassed",
+            ),
+          )
+
+          console.log("MEJ05_CURRENT_COUNTS_QUERY_CONTRACT_PASS")
+          NODE
+
+      - name: Run focused 036-040 and post-Yanin contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$UAT_EVIDENCE_DIR"
+          mkdir -p "$UAT_EVIDENCE_DIR"
+          node --check scripts/qa/extraordinary-039-dev-uat.mjs
+          node --test \
+            scripts/qa/approval-execution-layout-hotfix-contract.test.mjs \
+            scripts/qa/extraordinary-migration-catalog-contract.test.mjs \
+            scripts/qa/legacy-extraordinary-direct-lineage-contract.test.mjs \
+            scripts/qa/mixed-close-038-contract.test.mjs \
+            scripts/qa/post-yanin-regressions-contract.test.mjs \
+            scripts/qa/secure-extraordinary-external-authorization-contract.test.mjs \
+            scripts/qa/extraordinary-storage-policy-helper-039-contract.test.mjs \
+            scripts/qa/extraordinary-040-atomic-consumption-contract.test.mjs
+          jq -n '{
+            result: "FOCUSED_036_040_AND_YANIN_CONTRACTS_PASS",
+            yanin_layout: "YANIN_LAYOUT_REGRESSION_PASS",
+            yanin_messages: "YANIN_LAYOUT_MESSAGES_PASS",
+            yanin_rebatch: "YANIN_REBATCH_REGRESSION_PASS",
+            yanin_mixed_close: "YANIN_MIXED_CLOSE_REGRESSION_PASS",
+            p0: 0,
+            p1: 0
+          }' > "$UAT_EVIDENCE_DIR/regressions-sanitized.json"
+
+      - name: Install ephemeral DEV API keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          anon_key="${SUPABASE_DEV_ANON_KEY:-}"
+          service_key="${SUPABASE_DEV_SERVICE_ROLE_KEY:-}"
+
+          if [ -z "$anon_key" ] || [ -z "$service_key" ]; then
+            test -n "${SUPABASE_ACCESS_TOKEN:-}"
+            echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+            response="$(mktemp)"
+            trap 'rm -f "$response"' EXIT
+            curl --silent --show-error --fail \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              "https://api.supabase.com/v1/projects/$DEV_PROJECT_REF/api-keys?reveal=true" \
+              > "$response"
+            anon_key="$(
+              jq -er '.[] | select(.name == "anon") | .api_key' "$response"
+            )"
+            service_key="$(
+              jq -er \
+                '.[] | select(.name == "service_role") | .api_key' \
+                "$response"
+            )"
+          fi
+
+          test -n "$anon_key"
+          test -n "$service_key"
+          echo "::add-mask::$anon_key"
+          echo "::add-mask::$service_key"
+          {
+            echo "SUPABASE_DEV_ANON_KEY=$anon_key"
+            echo "SUPABASE_DEV_SERVICE_ROLE_KEY=$service_key"
+          } >> "$GITHUB_ENV"
+
+      - name: Install isolated UAT dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install \
+            --no-save \
+            --no-package-lock \
+            --ignore-scripts \
+            @supabase/supabase-js@2 \
+            pg@8.22.0
+
+      - name: Execute real-session Storage and MEJ-05 UAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          test -n "$SUPABASE_DEV_ANON_KEY"
+          test -n "$SUPABASE_DEV_SERVICE_ROLE_KEY"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_ANON_KEY"
+          echo "::add-mask::$SUPABASE_DEV_SERVICE_ROLE_KEY"
+          node scripts/qa/extraordinary-039-dev-uat.mjs
+          jq -e '
+            .result == "READY_FOR_RAMON_REVIEW"
+            and .current_counts_preflight ==
+              "CURRENT_COUNTS_PREFLIGHT_PASS"
+            and .evidence_upload == "MEJ05_EVIDENCE_UPLOAD_PASS"
+            and .storage_negative == "MEJ05_STORAGE_NEGATIVE_PASS"
+            and .evidence_read == "MEJ05_EVIDENCE_READ_PASS"
+            and .atomic_consumption ==
+              "MEJ05_ATOMIC_CONSUMPTION_PASS"
+            and .single_consumption ==
+              "MEJ05_SINGLE_CONSUMPTION_PASS"
+            and .pre_ratification_guards ==
+              "MEJ05_PRE_RATIFICATION_GUARDS_PASS"
+            and .ratification == "MEJ05_RATIFICATION_PASS"
+            and .indirect_material_invalidation ==
+              "MEJ05_INDIRECT_MATERIAL_INVALIDATION_PASS"
+            and .operational_change_preserves_authorization ==
+              "MEJ05_OPERATIONAL_CHANGE_PRESERVES_AUTH_PASS"
+            and .dispute == "MEJ05_DISPUTE_PASS"
+            and .secure_extraordinary_negative ==
+              "SECURE_EXTRAORDINARY_NEGATIVE_PASS"
+            and .authorization_states ==
+              ["draft", "active", "consumed_pending_ratification", "ratified"]
+            and .payment_receipts_delta == 0
+            and .paid_delta == 0
+            and .notifications_delta == 0
+            and .delivery_attempts_delta == 0
+            and .alloc_001_intact == true
+            and .operadora_policy_enabled == false
+            and .qa_cleanup == "PASS"
+            and .qa_sanitization == "MEJ05_QA_SANITIZATION_PASS"
+            and .prod_writes == 0
+            and .main_writes == 0
+            and .dev_direct_branch_writes == 0
+          ' "$UAT_EVIDENCE_DIR/uat-result-sanitized.json" >/dev/null
+
+      - name: Confirm QA sanitation even after a failed UAT
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$UAT_EVIDENCE_DIR/uat-result-sanitized.json"
+          jq -e '
+            .qa_cleanup == "PASS"
+            and .qa_sanitization == "MEJ05_QA_SANITIZATION_PASS"
+            and .operadora_policy_enabled == false
+          ' "$UAT_EVIDENCE_DIR/uat-result-sanitized.json" >/dev/null
+          echo "MEJ05_QA_SANITIZATION_PASS"
+
+      - name: Upload sanitized UAT evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraordinary-040-uat-${{ github.run_id }}
+          path: |
+            /tmp/extraordinary-040-uat/uat-result-sanitized.json
+            /tmp/extraordinary-040-uat/regressions-sanitized.json
+          if-no-files-found: warn
+          retention-days: 7

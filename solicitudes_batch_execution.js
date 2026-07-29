@@ -7,6 +7,9 @@
     deepLinkRequestId: new URLSearchParams(window.location.search).get("request_id"),
     deepLinkHandled: false,
     tableSignature: "",
+    extraordinarySubmitting: false,
+    extraordinaryDraft: null,
+    extraordinaryIdempotencyKey: null,
   }
   const dom = {}
   const executionContextCache = new Map()
@@ -21,7 +24,9 @@
   function init() {
     ;[
       "extraordinaryDialog", "extraordinaryForm", "extraordinarySubtitle", "extraordinarySummary", "extraordinaryCategory",
-      "extraordinaryReason", "extraordinaryConfirm", "closeExtraordinaryBtn", "cancelExtraordinaryBtn",
+      "extraordinaryReason", "extraordinaryDirector", "extraordinaryAuthorizedAt", "extraordinaryEvidenceType",
+      "extraordinaryEvidenceFile", "extraordinaryEvidenceAttestation", "extraordinaryEvidenceStatus",
+      "extraordinaryConfirm", "closeExtraordinaryBtn", "cancelExtraordinaryBtn",
       "submitExtraordinaryBtn", "revokeExtraordinaryDialog", "revokeExtraordinaryForm",
       "revokeExtraordinaryReason", "closeRevokeExtraordinaryBtn", "cancelRevokeExtraordinaryBtn",
       "submitRevokeExtraordinaryBtn",
@@ -167,9 +172,10 @@
     })
     const { data, error } = await supabaseClient
       .from("payment_request_extraordinary_authorizations")
-      .select("payment_request_id,category,authorized_at")
+      .select("payment_request_id,category,status,authorized_at")
       .in("payment_request_id", requestIds)
-      .eq("status", "active")
+      .in("status", ["draft", "active", "consumed_pending_ratification", "ratified", "disputed"])
+      .order("authorized_at", { ascending: true })
     if (error) return
 
     const active = new Map((data || []).map((row) => [row.payment_request_id, row]))
@@ -180,7 +186,7 @@
       const folio = row.querySelector("td:first-child .cell-main")
       folio?.insertAdjacentHTML(
         "afterend",
-        `<span class="badge warning extraordinary-row-badge" data-extraordinary-row-badge>Extraordinario</span>`
+        `<span class="badge warning extraordinary-row-badge" data-extraordinary-row-badge>${record.status === "draft" ? "Evidencia pendiente" : "Extraordinario"}</span>`
       )
     })
   }
@@ -210,14 +216,39 @@
     panel.id = "batchExecutionPanel"
     panel.className = `batch-execution-panel${extra ? " extraordinary" : ""}`
     if (extra) {
-      const currentLabel = extra.authorization_current === false
-        ? `<span class="badge warning">Requiere revocacion y nueva autorizacion</span>`
-        : `<span class="badge warning">Omite Direccion</span>`
+      const secure = extra.secure_contract === true
+      const status = extraordinaryStatusLabel(extra.status, secure)
+      const tone = ["active", "ratified"].includes(extra.status)
+        ? "success"
+        : ["disputed", "legacy_quarantined", "revoked", "expired"].includes(extra.status)
+          ? "danger"
+          : "warning"
+      const director = secure
+        ? `<span>Dirección externa: ${escapeHtml(extra.external_director_name || "Sin identificar")}</span>`
+        : ""
+      const validity = extra.valid_until
+        ? `<span>Vigente hasta ${escapeHtml(formatDateTime(extra.valid_until))}</span>`
+        : ""
+      const ratification = extra.ratification_due_at && ["consumed_pending_ratification", "ratified", "disputed"].includes(extra.status)
+        ? `<span>Ratificación límite ${escapeHtml(formatDateTime(extra.ratification_due_at))}</span>`
+        : ""
+      const evidence = extra.evidence_finalized
+        ? `<span>Evidencia privada verificada · SHA-256 ${escapeHtml(String(extra.evidence_sha256 || "").slice(0, 12))}…</span>`
+        : secure && extra.status === "draft"
+          ? `<span>Falta cargar y validar la evidencia.</span>`
+          : ""
+      const resume = secure && extra.status === "draft" && extra.can_resume
+        ? `<button class="primary-btn" type="button" data-batch-execution-action="authorize">Continuar carga de evidencia</button>`
+        : ""
+      const revoke = extra.can_revoke
+        ? `<button class="secondary-btn" type="button" data-batch-execution-action="revoke">Revocar autorización</button>`
+        : ""
       panel.innerHTML = `
-        <div class="batch-execution-head"><div><strong>Extraordinario - autorizado por Finanzas</strong><span>${escapeHtml(categoryLabel(extra.category))}</span></div>${currentLabel}</div>
-        <div class="batch-execution-meta"><span>${escapeHtml(extra.authorized_by_name || "Finanzas")}</span><span>${escapeHtml(formatDateTime(extra.authorized_at))}</span></div>
+        <div class="batch-execution-head"><div><strong>${secure ? "Contingencia extraordinaria con autorización externa" : "Autorización extraordinaria histórica"}</strong><span>${escapeHtml(categoryLabel(extra.category))}</span></div><span class="badge ${tone}">${escapeHtml(status)}</span></div>
+        <div class="batch-execution-meta"><span>Registró ${escapeHtml(extra.authorized_by_name || "Finanzas")}</span><span>${escapeHtml(formatDateTime(extra.authorized_at))}</span>${director}${validity}${ratification}${evidence}</div>
         <p>${escapeHtml(extra.reason || "Sin motivo registrado")}</p>
-        ${extra.can_revoke ? `<div class="batch-execution-actions"><button class="secondary-btn" type="button" data-batch-execution-action="revoke">Revocar extraordinario</button></div>` : `<div class="batch-execution-meta"><span>Ya fue incorporado a un layout, fondo de efectivo o registro de pago y no puede revocarse desde la solicitud.</span></div>`}`
+        ${extra.status === "disputed" ? `<div class="batch-execution-meta"><span>Discrepancia: ${escapeHtml(extra.dispute_reason || "Requiere revisión.")}</span></div>` : ""}
+        ${resume || revoke ? `<div class="batch-execution-actions">${resume}${revoke}</div>` : ""}`
     } else {
       const batchText = batch
         ? `${escapeHtml(batch.batch_label || "Corte")} - ${escapeHtml(batchStatusLabel(batch.batch_status, batch.director_status))}`
@@ -230,7 +261,7 @@
         <div class="batch-execution-head"><div><strong>Ruta de autorizacion y pago</strong><span>${batchText}</span></div>${context.budget_validation_current ? `<span class="badge success">${budgetLabel}</span>` : `<span class="badge warning">${budgetLabel}</span>`}</div>
         ${staleDirectionNotice}
         ${renderApprovalTimeline(context.approval_history)}
-        ${context.can_authorize_extraordinary ? `<div class="batch-execution-actions"><button class="primary-btn" type="button" data-batch-execution-action="authorize">Marcar como extraordinario</button></div>` : `<div class="batch-execution-meta"><span>${escapeHtml(blockReasonLabel(context.authorization_block_reason))}</span></div>`}
+        ${context.can_authorize_extraordinary ? `<div class="batch-execution-actions"><button class="primary-btn" type="button" data-batch-execution-action="authorize">Registrar autorización externa</button></div>` : `<div class="batch-execution-meta"><span>${escapeHtml(blockReasonLabel(context.authorization_block_reason))}</span></div>`}
       `
     }
     const firstCard = host.querySelector(".decision-card")
@@ -262,45 +293,158 @@
 
   function openExtraordinaryDialog() {
     const request = state.currentRequest
-    if (!request || !state.currentContext?.can_authorize_extraordinary) return
+    const context = state.currentContext
+    const existing = context?.extraordinary
+    const canResume = existing?.secure_contract === true && existing.status === "draft" && existing.can_resume
+    if (!request || (!context?.can_authorize_extraordinary && !canResume)) return
     dom.extraordinaryForm.reset()
-    dom.extraordinarySubtitle.textContent = "Confirma los datos antes de omitir la decision de Direccion."
+    state.extraordinaryDraft = canResume
+      ? {
+          authorization_id: existing.id,
+          storage_bucket: existing.storage_bucket,
+          storage_path: existing.storage_path,
+        }
+      : null
+    state.extraordinaryIdempotencyKey = `external-auth:${request.id}:${crypto.randomUUID()}`
+    const policy = context.extraordinary_policy || {}
+    const directors = Array.isArray(context.eligible_external_directors)
+      ? context.eligible_external_directors
+      : []
+    dom.extraordinaryDirector.innerHTML = `<option value="">Selecciona...</option>${directors.map((director) => `<option value="${escapeHtml(director.profile_id)}">${escapeHtml(director.name || "Director")}</option>`).join("")}`
+    const allowedCategories = new Set(Array.isArray(policy.allowed_categories) ? policy.allowed_categories : [])
+    Array.from(dom.extraordinaryCategory.options).forEach((option) => {
+      if (!option.value) return
+      option.disabled = allowedCategories.size > 0 && !allowedCategories.has(option.value)
+      option.hidden = option.disabled
+    })
+    dom.extraordinarySubtitle.textContent = canResume
+      ? "Completa la evidencia pendiente. La solicitud aún no está habilitada para layout."
+      : `La autorización tendrá una vigencia máxima de ${Number(policy.authorization_valid_hours || 0)} horas.`
     dom.extraordinarySummary.innerHTML = [
       summaryItem("Folio", request.requestNumber || "Sin folio"),
       summaryItem("Empresa", request.companyName || "Sin empresa"),
       summaryItem("Proveedor", request.providerName || "Sin proveedor"),
       summaryItem("Monto", formatMoney(request.amount, request.currency)),
       summaryItem("Moneda", request.currency || "MXN"),
-      summaryItem("Metodo", paymentMethodLabel(request.paymentMethod)),
+      summaryItem("Límite de política", formatMoney(policy.max_amount_mxn || 0, "MXN")),
     ].join("")
+    ;[
+      dom.extraordinaryDirector,
+      dom.extraordinaryAuthorizedAt,
+      dom.extraordinaryCategory,
+      dom.extraordinaryReason,
+    ].forEach((field) => { field.disabled = canResume })
+    if (canResume) {
+      dom.extraordinaryDirector.value = existing.external_director_profile_id || ""
+      dom.extraordinaryAuthorizedAt.value = toLocalDateTimeInput(existing.external_authorized_at)
+      dom.extraordinaryCategory.value = existing.category || ""
+      dom.extraordinaryReason.value = existing.reason || ""
+      showExtraordinaryStatus("Borrador recuperado. Selecciona el archivo original para completar su validación.", "warning")
+    } else {
+      dom.extraordinaryAuthorizedAt.value = toLocalDateTimeInput(new Date())
+      hideExtraordinaryStatus()
+    }
     dom.extraordinaryDialog.showModal()
+    setTimeout(() => (canResume ? dom.extraordinaryEvidenceType : dom.extraordinaryDirector)?.focus(), 0)
   }
 
   function closeExtraordinaryDialog() {
+    if (state.extraordinarySubmitting) return
     if (dom.extraordinaryDialog?.open) dom.extraordinaryDialog.close()
   }
 
   async function authorizeExtraordinary(event) {
     event.preventDefault()
+    if (state.extraordinarySubmitting) return
     const category = dom.extraordinaryCategory.value
     const reason = dom.extraordinaryReason.value.trim()
-    if (!dom.extraordinaryConfirm.checked) return toast("Confirmacion requerida", "Confirma que la urgencia no puede esperar al siguiente corte.", "warning")
-    if (!category || reason.length < 20) return toast("Datos incompletos", "Selecciona categoria y captura un motivo de al menos 20 caracteres.", "warning")
-    setLoading(dom.submitExtraordinaryBtn, true, "Autorizando...")
+    const directorId = dom.extraordinaryDirector.value
+    const externalAuthorizedAt = dom.extraordinaryAuthorizedAt.value
+    const evidenceType = dom.extraordinaryEvidenceType.value
+    const evidenceFile = dom.extraordinaryEvidenceFile.files?.[0]
+    if (!directorId) return extraordinaryFieldError(dom.extraordinaryDirector, "Selecciona al Director que emitió la autorización externa.")
+    if (!externalAuthorizedAt) return extraordinaryFieldError(dom.extraordinaryAuthorizedAt, "Captura la fecha y hora de la autorización.")
+    if (!category) return extraordinaryFieldError(dom.extraordinaryCategory, "Selecciona una categoría permitida por la política.")
+    if (reason.length < 20) return extraordinaryFieldError(dom.extraordinaryReason, "Explica el motivo operativo en al menos 20 caracteres.")
+    if (!evidenceType) return extraordinaryFieldError(dom.extraordinaryEvidenceType, "Selecciona el canal o tipo de evidencia.")
+    if (!evidenceFile) return extraordinaryFieldError(dom.extraordinaryEvidenceFile, "Selecciona la evidencia privada.")
+    if (!["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(evidenceFile.type)) {
+      return extraordinaryFieldError(dom.extraordinaryEvidenceFile, "El archivo debe ser PDF, JPG, PNG o WEBP.")
+    }
+    if (evidenceFile.size < 1 || evidenceFile.size > 5242880) {
+      return extraordinaryFieldError(dom.extraordinaryEvidenceFile, "La evidencia debe pesar entre 1 byte y 5 MB.")
+    }
+    if (!dom.extraordinaryEvidenceAttestation.checked) {
+      return extraordinaryFieldError(dom.extraordinaryEvidenceAttestation, "Confirma que la evidencia coincide con la solicitud, importe, moneda y Director.")
+    }
+    if (!dom.extraordinaryConfirm.checked) {
+      return extraordinaryFieldError(dom.extraordinaryConfirm, "Confirma la urgencia y la vigencia de la autorización externa.")
+    }
+
+    state.extraordinarySubmitting = true
+    setLoading(dom.submitExtraordinaryBtn, true, "Validando y cargando...")
+    dom.closeExtraordinaryBtn.disabled = true
+    dom.cancelExtraordinaryBtn.disabled = true
     try {
-      const { error } = await supabaseClient.rpc("authorize_payment_request_extraordinary", {
-        p_payment_request_id: state.currentRequest.id,
-        p_category: category,
-        p_reason: reason,
+      const evidenceSha256 = await sha256Hex(evidenceFile)
+      let draft = state.extraordinaryDraft
+      if (!draft) {
+        showExtraordinaryStatus("Paso 1 de 3: validando política, Director, vigencia e idempotencia.", "warning")
+        const { data, error } = await supabaseClient.rpc("begin_extraordinary_authorization", {
+          p_payment_request_id: state.currentRequest.id,
+          p_category: category,
+          p_reason: reason,
+          p_external_director_profile_id: directorId,
+          p_external_authorized_at: new Date(externalAuthorizedAt).toISOString(),
+          p_idempotency_key: state.extraordinaryIdempotencyKey,
+        })
+        if (error) throw error
+        draft = data
+        state.extraordinaryDraft = draft
+      }
+
+      if (!draft?.authorization_id || !draft?.storage_bucket || !draft?.storage_path) {
+        throw new Error("extraordinary_draft_storage_contract_missing")
+      }
+
+      showExtraordinaryStatus("Paso 2 de 3: cargando evidencia al repositorio privado.", "warning")
+      const { error: uploadError } = await supabaseClient.storage
+        .from(draft.storage_bucket)
+        .upload(draft.storage_path, evidenceFile, {
+          contentType: evidenceFile.type,
+          upsert: false,
+          metadata: { sha256: evidenceSha256 },
+        })
+      if (uploadError) throw uploadError
+
+      showExtraordinaryStatus("Paso 3 de 3: verificando metadatos y activando la vigencia.", "warning")
+      const { data: finalized, error: finalizeError } = await supabaseClient.rpc("finalize_extraordinary_authorization", {
+        p_authorization_id: draft.authorization_id,
+        p_evidence_type: evidenceType,
+        p_evidence_sha256: evidenceSha256,
+        p_evidence_mime_type: evidenceFile.type,
+        p_evidence_size_bytes: evidenceFile.size,
+        p_finance_attests_evidence_matches_request: true,
+        p_idempotency_key: `${state.extraordinaryIdempotencyKey}:finalize`,
       })
-      if (error) throw error
-      closeExtraordinaryDialog()
-      toast("Extraordinario autorizado", "El pago quedo habilitado con auditoria y sin decision de Direccion.", "success")
+      if (finalizeError) throw finalizeError
+      if (finalized?.status !== "active") throw new Error("extraordinary_authorization_not_activated")
+
+      state.extraordinaryDraft = null
+      if (dom.extraordinaryDialog?.open) dom.extraordinaryDialog.close()
+      toast("Autorización externa registrada", "La evidencia quedó privada y la solicitud estará disponible solo durante la vigencia indicada.", "success")
       await refreshCurrentState()
     } catch (error) {
-      toast("No se pudo autorizar", friendlyError(error), "danger")
+      const message = friendlyError(error)
+      showExtraordinaryStatus(message, "danger")
+      focusExtraordinaryError(error)
+      toast("No se pudo activar la contingencia", message, "danger")
+      if (state.extraordinaryDraft) await refreshCurrentState()
     } finally {
-      setLoading(dom.submitExtraordinaryBtn, false, "Autorizar extraordinario")
+      state.extraordinarySubmitting = false
+      dom.closeExtraordinaryBtn.disabled = false
+      dom.cancelExtraordinaryBtn.disabled = false
+      setLoading(dom.submitExtraordinaryBtn, false, "Guardar evidencia y activar")
     }
   }
 
@@ -317,7 +461,7 @@
   async function revokeExtraordinary(event) {
     event.preventDefault()
     const reason = dom.revokeExtraordinaryReason.value.trim()
-    if (!reason) return toast("Motivo requerido", "Explica por que se revoca la autorizacion.", "warning")
+    if (reason.length < 20) return toast("Motivo requerido", "Explica la revocación en al menos 20 caracteres.", "warning")
     setLoading(dom.submitRevokeExtraordinaryBtn, true, "Revocando...")
     try {
       const { error } = await supabaseClient.rpc("revoke_payment_request_extraordinary", {
@@ -339,6 +483,25 @@
     clearExecutionContext(state.currentRequest?.id)
     await loadExecutionContext()
     await decorateExtraordinaryRows(state.tableRequestIds)
+  }
+
+  function extraordinaryStatusLabel(status, secure) {
+    if (!secure) {
+      return ({
+        legacy_consumed_unverified: "Histórico consumido · sin verificación nueva",
+        legacy_quarantined: "Histórico en cuarentena",
+        revoked: "Histórico revocado",
+      })[status] || "Histórico contenido"
+    }
+    return ({
+      draft: "Evidencia pendiente",
+      active: "Vigente · lista para layout",
+      consumed_pending_ratification: "Consumida · ratificación pendiente",
+      ratified: "Ratificada",
+      revoked: "Revocada",
+      expired: "Vencida",
+      disputed: "En discrepancia",
+    })[status] || status || "Sin estado"
   }
 
   function categoryLabel(value) {
@@ -379,6 +542,9 @@
   function blockReasonLabel(value) {
     return ({
       finance_role_required: "Solo Finanzas puede autorizar extraordinarios.",
+      extraordinary_policy_disabled: "La contingencia extraordinaria está deshabilitada para esta empresa.",
+      external_director_not_active_for_company: "La empresa no tiene un Director activo elegible para esta contingencia.",
+      extraordinary_authorization_already_open: "La solicitud ya tiene una contingencia abierta o pendiente de ratificación.",
       payment_request_must_be_finance_approved: "La solicitud requiere validacion de presupuesto antes de continuar.",
       finance_reapproval_required: "Los datos cambiaron y requieren revalidacion de presupuesto.",
       direction_reapproval_required: "Los datos cambiaron despues de la autorizacion de Direccion. Debe enviarse nuevamente a un corte.",
@@ -395,6 +561,28 @@
     const raw = String(error?.message || error || "Error no identificado")
     const known = {
       finance_role_required: "Se requiere rol de Finanzas.",
+      extraordinary_policy_disabled: "La política extraordinaria está deshabilitada para esta empresa.",
+      extraordinary_amount_exceeds_policy: "El importe o la moneda exceden la política extraordinaria de la empresa.",
+      extraordinary_category_not_allowed: "La categoría no está permitida por la política de la empresa.",
+      extraordinary_reason_too_short: "Explica el motivo operativo en al menos 20 caracteres.",
+      external_authorization_time_invalid: "La fecha de autorización es futura, anterior al último cambio material o ya venció.",
+      external_director_not_active_for_company: "El Director seleccionado ya no está activo para la empresa.",
+      finance_actor_must_differ_from_external_director: "Finanzas y el Director externo deben ser personas distintas.",
+      invalid_idempotency_key: "No se pudo establecer la clave idempotente. Cierra y vuelve a abrir el diálogo.",
+      idempotency_key_payload_mismatch: "La clave idempotente ya corresponde a otros datos. Cierra y vuelve a abrir el diálogo.",
+      extraordinary_authorization_already_open: "Ya existe una contingencia abierta para esta solicitud.",
+      request_has_rejection_or_open_batch: "La solicitud tiene un rechazo o un corte abierto y no puede usar la contingencia.",
+      budget_revalidation_required: "El presupuesto debe revalidarse antes de registrar la contingencia.",
+      evidence_request_match_attestation_required: "Confirma que la evidencia coincide con la solicitud.",
+      invalid_evidence_type: "Selecciona un tipo de evidencia permitido.",
+      invalid_evidence_sha256: "No se pudo validar la huella SHA-256 del archivo.",
+      invalid_evidence_file: "La evidencia debe ser PDF, JPG, PNG o WEBP y pesar como máximo 5 MB.",
+      extraordinary_evidence_object_not_found: "La evidencia no quedó disponible en el repositorio privado.",
+      extraordinary_evidence_object_metadata_mismatch: "El tipo o tamaño cargado no coincide con el archivo validado.",
+      extraordinary_authorization_expired_or_stale: "La autorización externa venció o la solicitud cambió antes de activarse.",
+      extraordinary_policy_no_longer_matches: "La política cambió y esta contingencia ya no cumple sus límites.",
+      extraordinary_draft_storage_contract_missing: "El servidor no devolvió una ruta privada válida para la evidencia.",
+      extraordinary_authorization_not_activated: "La evidencia se procesó, pero la autorización no quedó activa.",
       finance_reapproval_required: "Los datos cambiaron y requieren revalidacion de presupuesto.",
       payment_request_must_be_finance_approved: "La solicitud requiere validacion de presupuesto antes de continuar.",
       payment_request_already_executed: "La solicitud ya tiene ejecucion registrada.",
@@ -407,6 +595,52 @@
     }
     const key = Object.keys(known).find((item) => raw.includes(item))
     return key ? known[key] : raw
+  }
+
+  function focusExtraordinaryError(error) {
+    const raw = String(error?.message || error || "")
+    const field = [
+      [["director", "finance_actor_must_differ"], dom.extraordinaryDirector],
+      [["authorization_time", "expired_or_stale"], dom.extraordinaryAuthorizedAt],
+      [["category"], dom.extraordinaryCategory],
+      [["reason_too_short"], dom.extraordinaryReason],
+      [["evidence_type"], dom.extraordinaryEvidenceType],
+      [["evidence", "storage", "sha256", "mime", "metadata"], dom.extraordinaryEvidenceFile],
+      [["attestation"], dom.extraordinaryEvidenceAttestation],
+    ].find(([keys]) => keys.some((key) => raw.includes(key)))?.[1]
+    field?.focus()
+  }
+
+  function extraordinaryFieldError(field, message) {
+    showExtraordinaryStatus(message, "danger")
+    field?.focus()
+    toast("Revisa la contingencia", message, "warning")
+  }
+
+  function showExtraordinaryStatus(message, tone = "warning") {
+    if (!dom.extraordinaryEvidenceStatus) return
+    dom.extraordinaryEvidenceStatus.textContent = message
+    dom.extraordinaryEvidenceStatus.classList.remove("hidden", "warning", "danger")
+    dom.extraordinaryEvidenceStatus.classList.add(tone)
+  }
+
+  function hideExtraordinaryStatus() {
+    if (!dom.extraordinaryEvidenceStatus) return
+    dom.extraordinaryEvidenceStatus.textContent = ""
+    dom.extraordinaryEvidenceStatus.classList.add("hidden")
+    dom.extraordinaryEvidenceStatus.classList.remove("warning", "danger")
+  }
+
+  async function sha256Hex(file) {
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  }
+
+  function toLocalDateTimeInput(value) {
+    const date = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    return local.toISOString().slice(0, 16)
   }
 
   function setLoading(button, loading, label) {
