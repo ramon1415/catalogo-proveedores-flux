@@ -1,0 +1,365 @@
+name: Notifications N0 DEV Read-only Evidence
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - .github/workflows/notifications-n0-dev-readonly-evidence.yml
+      - ops/notifications/n0-readonly-evidence/audit.sql
+      - ops/notifications/n0-readonly-evidence/validate_artifact.py
+      - ops/notifications/n0-readonly-evidence/README.md
+  push:
+    branches:
+      - dev
+    paths:
+      - .github/workflows/notifications-n0-dev-readonly-evidence.yml
+      - ops/notifications/n0-readonly-evidence/audit.sql
+      - ops/notifications/n0-readonly-evidence/validate_artifact.py
+      - ops/notifications/n0-readonly-evidence/README.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notifications-n0-dev-readonly-evidence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  static_checks:
+    name: Static safety contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the candidate revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Parse workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.safe_load_file(ARGV.fetch(0), aliases: true)" \
+            .github/workflows/notifications-n0-dev-readonly-evidence.yml
+
+      - name: Establish the reviewed change set
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          changed_file="${RUNNER_TEMP}/notifications-n0-r2a-changed-files.txt"
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > "${changed_file}"
+          elif [[ "${EVENT_NAME}" == "push" && "${BASE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > "${changed_file}"
+          else
+            : > "${changed_file}"
+          fi
+          echo "file=${changed_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Enforce read-only and privacy invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py static \
+            --root . \
+            --changed-files "${{ steps.changes.outputs.file }}"
+
+      - name: Publish static-only summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Notifications N0 R2A"
+            echo "- Scope: static safety contract"
+            echo "- Live DEV access: not executed for pull requests"
+            echo "- Artifact upload: not performed by this job"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  collect_dev_evidence:
+    name: Collect sanitized DEV evidence
+    needs: static_checks
+    if: >-
+      ${{
+        github.repository == 'ramon1415/catalogo-proveedores-flux' &&
+        github.ref == 'refs/heads/dev' &&
+        (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      }}
+    environment: DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+      N8N_DEV_API_URL: ${{ secrets.N8N_DEV_API_URL }}
+      N8N_DEV_API_KEY: ${{ secrets.N8N_DEV_API_KEY }}
+    steps:
+      - name: Reassert immutable execution guards
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          [[ "${REPOSITORY}" == "ramon1415/catalogo-proveedores-flux" ]]
+          [[ "${REF_NAME}" == "refs/heads/dev" ]]
+          [[ "${EVENT_NAME}" == "push" || "${EVENT_NAME}" == "workflow_dispatch" ]]
+          if [[ -z "${SUPABASE_DEV_DB_URL:-}" ]]; then
+            echo "Required DEV database credential is unavailable."
+            exit 1
+          fi
+
+      - name: Check out the exact DEV revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install the PostgreSQL read-only client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Prepare private working storage
+        id: storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          private_dir="${RUNNER_TEMP}/notifications-n0-private"
+          output_dir="${GITHUB_WORKSPACE}/.audit-output"
+          mkdir -p "${private_dir}" "${output_dir}"
+          chmod 700 "${private_dir}" "${output_dir}"
+          echo "private_dir=${private_dir}" >> "${GITHUB_OUTPUT}"
+          echo "output_dir=${output_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Read database catalog and aggregates
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+        run: |
+          set -euo pipefail
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=30000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=45000"
+          set +e
+          psql "${SUPABASE_DEV_DB_URL}" \
+            --quiet \
+            --no-align \
+            --tuples-only \
+            --set ON_ERROR_STOP=1 \
+            --file ops/notifications/n0-readonly-evidence/audit.sql \
+            > "${PRIVATE_DIR}/database.jsonl" \
+            2> "${PRIVATE_DIR}/database.stderr"
+          database_rc=$?
+          set -e
+          rm -f "${PRIVATE_DIR}/database.stderr"
+          if [[ ${database_rc} -ne 0 ]]; then
+            rm -f "${PRIVATE_DIR}/database.jsonl"
+            echo "Read-only database collection failed."
+            exit 1
+          fi
+
+      - name: Read dispatcher metadata and body
+        id: dispatcher
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+        run: |
+          set -euo pipefail
+          status="unavailable"
+          if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" && -n "${SUPABASE_DEV_PROJECT_REF:-}" ]]; then
+            set +e
+            curl --fail --silent --show-error -X GET \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions" \
+              > "${PRIVATE_DIR}/dispatcher-metadata.json" \
+              2> "${PRIVATE_DIR}/dispatcher.stderr"
+            metadata_rc=$?
+            curl --fail --silent --show-error -X GET \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions/send-notification/body" \
+              > "${PRIVATE_DIR}/dispatcher-body.bin" \
+              2>> "${PRIVATE_DIR}/dispatcher.stderr"
+            body_rc=$?
+            set -e
+            rm -f "${PRIVATE_DIR}/dispatcher.stderr"
+            if [[ ${metadata_rc} -eq 0 ]]; then
+              status="available"
+              if [[ ${body_rc} -ne 0 ]]; then
+                rm -f "${PRIVATE_DIR}/dispatcher-body.bin"
+              fi
+            else
+              rm -f "${PRIVATE_DIR}/dispatcher-metadata.json" "${PRIVATE_DIR}/dispatcher-body.bin"
+            fi
+          fi
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Read n8n workflow metadata
+        id: n8n
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+        run: |
+          set -euo pipefail
+          status="unavailable"
+          if [[ -n "${N8N_DEV_API_URL:-}" && -n "${N8N_DEV_API_KEY:-}" ]]; then
+            set +e
+            python - <<'PY' > "${PRIVATE_DIR}/n8n-base.txt" 2> "${PRIVATE_DIR}/n8n-normalize.stderr"
+          import os
+          from urllib.parse import urlsplit, urlunsplit
+
+          raw = os.environ["N8N_DEV_API_URL"].strip().rstrip("/")
+          parsed = urlsplit(raw)
+          if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+              raise SystemExit(1)
+          path = parsed.path.rstrip("/")
+          if path.endswith("/api/v1"):
+              api_path = path
+          elif path.endswith("/api"):
+              api_path = path + "/v1"
+          else:
+              api_path = path + "/api/v1"
+          print(urlunsplit((parsed.scheme, parsed.netloc, api_path, "", "")))
+          PY
+            normalize_rc=$?
+            if [[ ${normalize_rc} -eq 0 ]]; then
+              n8n_base="$(<"${PRIVATE_DIR}/n8n-base.txt")"
+              curl --fail --silent --show-error -X GET \
+                -H "X-N8N-API-KEY: ${N8N_DEV_API_KEY}" \
+                "${n8n_base}/workflows?limit=100" \
+                > "${PRIVATE_DIR}/n8n-metadata.json" \
+                2> "${PRIVATE_DIR}/n8n.stderr"
+              n8n_rc=$?
+            else
+              n8n_rc=1
+            fi
+            set -e
+            rm -f "${PRIVATE_DIR}/n8n-base.txt" "${PRIVATE_DIR}/n8n-normalize.stderr" "${PRIVATE_DIR}/n8n.stderr"
+            if [[ ${n8n_rc} -eq 0 ]]; then
+              status="available"
+            else
+              rm -f "${PRIVATE_DIR}/n8n-metadata.json"
+            fi
+          fi
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build the allowlisted artifact
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+          OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
+          DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
+          N8N_STATUS: ${{ steps.n8n.outputs.status }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          arguments=(
+            build
+            --db-jsonl "${PRIVATE_DIR}/database.jsonl"
+            --dispatcher-status "${DISPATCHER_STATUS}"
+            --n8n-status "${N8N_STATUS}"
+            --source-file "${GITHUB_WORKSPACE}/supabase/functions/send-notification/index.ts"
+            --github-head-sha "${HEAD_SHA}"
+            --output "${OUTPUT_DIR}/artifact.json"
+          )
+          if [[ "${DISPATCHER_STATUS}" == "available" ]]; then
+            arguments+=(
+              --dispatcher-metadata "${PRIVATE_DIR}/dispatcher-metadata.json"
+              --dispatcher-body "${PRIVATE_DIR}/dispatcher-body.bin"
+            )
+          fi
+          if [[ "${N8N_STATUS}" == "available" ]]; then
+            arguments+=(--n8n-metadata "${PRIVATE_DIR}/n8n-metadata.json")
+          fi
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py "${arguments[@]}"
+          rm -rf -- "${PRIVATE_DIR}"
+
+      - name: Fail-closed privacy validation
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+          set +e
+          validation_output="$(python ops/notifications/n0-readonly-evidence/validate_artifact.py validate --artifact "${OUTPUT_DIR}/artifact.json" 2>&1)"
+          validation_rc=$?
+          set -e
+          if [[ ${validation_rc} -ne 0 ]]; then
+            rm -rf -- "${OUTPUT_DIR}"
+            echo "PRIVACY_VALIDATION_FAILED"
+            exit 1
+          fi
+          mapfile -t artifact_files < <(find "${OUTPUT_DIR}" -maxdepth 1 -type f -printf '%f\n')
+          if [[ ${#artifact_files[@]} -ne 1 || "${artifact_files[0]}" != "artifact.json" ]]; then
+            rm -rf -- "${OUTPUT_DIR}"
+            echo "PRIVACY_VALIDATION_FAILED"
+            exit 1
+          fi
+
+      - name: Compute safe artifact metadata
+        id: artifact
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
+        run: |
+          set -euo pipefail
+          digest="$(sha256sum "${OUTPUT_DIR}/artifact.json" | awk '{print $1}')"
+          size="$(stat --format='%s' "${OUTPUT_DIR}/artifact.json")"
+          echo "sha256=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "bytes=${size}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload the single sanitized artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: notifications-n0-dev-readonly-evidence
+          path: .audit-output/artifact.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish safe execution summary
+        shell: bash
+        env:
+          ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
+          ARTIFACT_BYTES: ${{ steps.artifact.outputs.bytes }}
+          DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
+          N8N_STATUS: ${{ steps.n8n.outputs.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Notifications N0 sanitized evidence"
+            echo "- Environment: DEV"
+            echo "- Database mode: repeatable-read, read-only"
+            echo "- Dispatcher metadata: ${DISPATCHER_STATUS}"
+            echo "- n8n metadata: ${N8N_STATUS}"
+            echo "- SEND_MODE: UNKNOWN_BY_DESIGN"
+            echo "- Privacy validation: PASS"
+            echo "- Artifact bytes: ${ARTIFACT_BYTES}"
+            echo "- Artifact SHA-256: ${ARTIFACT_SHA256}"
+            echo "- Retention days: 7"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove private and failed-output material
+        if: always()
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+          OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PRIVATE_DIR:-}" && "${PRIVATE_DIR}" == "${RUNNER_TEMP}/notifications-n0-private" ]]; then
+            rm -rf -- "${PRIVATE_DIR}"
+          fi
+          if [[ "${JOB_STATUS}" != "success" && -n "${OUTPUT_DIR:-}" && "${OUTPUT_DIR}" == "${GITHUB_WORKSPACE}/.audit-output" ]]; then
+            rm -rf -- "${OUTPUT_DIR}"
+          fi
