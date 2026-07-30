@@ -361,15 +361,21 @@ const server = http.createServer((request, response) => {
 
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
 const { port } = server.address()
-const baseUrl = `http://127.0.0.1:${port}/provider_intakes.html`
+const previewBase = String(process.env.PAYMENT_DRAFT_PREVIEW_URL || "").trim().replace(/\/+$/, "")
+const previewOrigin = previewBase ? new URL(previewBase).origin : null
+const baseUrl = previewBase
+  ? `${previewBase}/provider_intakes.html`
+  : `http://127.0.0.1:${port}/provider_intakes.html`
 const browser = await chromium.launch({ headless: true })
 const evidence = {
   status: "PASS",
-  environment: "LOCAL_MOCK_NO_WRITE",
+  environment: previewBase ? "LIVE_PREVIEW_MOCKED_NO_WRITE" : "LOCAL_MOCK_NO_WRITE",
   screenshots: [],
   axe_states: [],
   viewports: [],
   real_mutable_requests: 0,
+  preview_get_requests: 0,
+  blocked_external_requests: 0,
   mocked_save_calls: 0,
   console_errors: [],
 }
@@ -462,6 +468,41 @@ try {
 
 async function instrumentedPage(viewport) {
   const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } })
+  if (previewOrigin) {
+    await page.route("**/*", async (route) => {
+      const request = route.request()
+      const requestUrl = new URL(request.url())
+      if (
+        requestUrl.origin === "https://cdn.jsdelivr.net" &&
+        requestUrl.pathname.includes("/@supabase/supabase-js@2")
+      ) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/javascript; charset=utf-8",
+          body: mockScript,
+        })
+        return
+      }
+      if (requestUrl.origin === previewOrigin && requestUrl.pathname === "/api/runtime-config") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/javascript; charset=utf-8",
+          body: 'window.FLUX_ENV_CONFIG=Object.freeze({env:"qa",source:"qa-harness",supabaseUrl:"https://qa.invalid",supabaseAnonKey:"synthetic-anon"});',
+        })
+        return
+      }
+      if (
+        requestUrl.origin === previewOrigin &&
+        ["GET", "HEAD"].includes(request.method())
+      ) {
+        evidence.preview_get_requests += 1
+        await route.continue()
+        return
+      }
+      evidence.blocked_external_requests += 1
+      await route.abort("blockedbyclient")
+    })
+  }
   page.on("request", (request) => {
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) evidence.real_mutable_requests += 1
   })
