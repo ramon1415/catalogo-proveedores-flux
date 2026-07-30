@@ -13,7 +13,7 @@ begin
        where n.nspname = 'public'
          and p.proname = 'save_provider_intake_payment_draft'
      ) then
-    raise exception '032_precheck: Migration 032 is already present or partially applied';
+    raise exception '041_precheck: Migration 041 is already present or partially applied';
   end if;
 
   if to_regclass('public.payment_intake') is null
@@ -22,7 +22,7 @@ begin
      or to_regclass('public.proveedores') is null
      or to_regprocedure('public.set_provider_intake_match(uuid,text,timestamptz,uuid,uuid,text,text,uuid)') is null
      or to_regprocedure('public.list_payment_request_approver_options(uuid,uuid,numeric)') is null then
-    raise exception '032_precheck: canonical prerequisites are incomplete';
+    raise exception '041_precheck: canonical prerequisites are incomplete';
   end if;
 
   if not exists (
@@ -32,17 +32,17 @@ begin
       and t.tgname = 'payment_intake_events_immutable'
       and t.tgenabled <> 'D'
   ) then
-    raise exception '032_precheck: append-only trigger is inactive';
+    raise exception '041_precheck: append-only trigger is inactive';
   end if;
 end
 $$;
 
 select jsonb_pretty(jsonb_build_object(
-  'gate', 'phase-2b1-migration-032-precheck',
+  'gate', 'phase-2b1-migration-041-precheck',
   'environment', 'DEV',
   'project_ref', 'scsirgbuqjcwoaxfacth',
   'migration_031_applied', true,
-  'migration_032_applied', false,
+  'migration_041_applied', false,
   'baseline', jsonb_build_object(
     'payment_intake', (select count(*) from public.payment_intake),
     'payment_intake_events', (select count(*) from public.payment_intake_events),

@@ -1,4 +1,4 @@
-# Aplicación controlada de Migration 032 en DEV
+# Aplicación controlada de Migration 041 en DEV
 
 Este paquete prepara el contrato de borrador interno previo a convertir un
 `payment_intake` en `payment_requests`. No crea solicitudes definitivas, no
@@ -7,9 +7,10 @@ convierte intakes y no modifica proveedores.
 ## Alcance
 
 - Entorno único futuro: Supabase DEV `scsirgbuqjcwoaxfacth`.
-- Migration: `supabase/migrations/032_provider_intake_payment_draft.sql`.
-- LOAD byte-identical: `03_LOAD_032_EXACT.sql`.
-- SHA-256: `3e7ba49752a7bcd29e10df6ad1ae1a22609a2ccc51ad4b246bd7279ec212fd19`.
+- Migration: `supabase/migrations/041_provider_intake_payment_draft.sql`.
+- LOAD byte-identical: `03_LOAD_041_EXACT.sql`.
+- SHA-256: `be4f0ade8670c7e8b26eb148eba7c38a4e05bf8954c602a8f432431f1ea0c9cc` (vigente para Migration/LOAD 041).
+- Trazabilidad histórica: el objeto congelado original fue Migration/LOAD 032, con SHA-256 histórico `3e7ba49752a7bcd29e10df6ad1ae1a22609a2ccc51ad4b246bd7279ec212fd19`; no es el digest vigente de 041.
 - No usar `db push`, `migration repair`, fragmentos manuales ni SQL editado.
 - No ejecutar este paquete hasta recibir autorización explícita para Gate 1.
 
@@ -18,7 +19,7 @@ convierte intakes y no modifica proveedores.
 - Migrations 025, 029, 030 y 031 aplicadas íntegramente.
 - `payment_intake_events_immutable` activo.
 - RPCs canónicos de identidad, empresa y aprobadores disponibles.
-- Migration 032 ausente; cualquier presencia parcial detiene la aplicación.
+- Migration 041 ausente; cualquier presencia parcial detiene la aplicación.
 - Baseline de `payment_requests`, intakes, eventos y proveedores capturado sin
   identificadores de registros.
 

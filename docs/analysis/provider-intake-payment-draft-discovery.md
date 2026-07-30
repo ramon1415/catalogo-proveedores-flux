@@ -6,7 +6,7 @@ Modo: lectura del repositorio; no se consultó ni modificó Supabase DEV.
 
 ## Dictamen
 
-No existe una tabla, vista o RPC equivalente a un borrador persistente de conversión de `payment_intake` a `payment_requests`. Las apariciones existentes de “draft/borrador” corresponden al estado de solicitudes, cortes, layouts u otros dominios. Por lo tanto, no aplica `EXISTING_PAYMENT_DRAFT_CONTRACT_FOUND` y se puede preparar Migration 032.
+No existe una tabla, vista o RPC equivalente a un borrador persistente de conversión de `payment_intake` a `payment_requests`. Las apariciones existentes de “draft/borrador” corresponden al estado de solicitudes, cortes, layouts u otros dominios. Por lo tanto, no aplica `EXISTING_PAYMENT_DRAFT_CONTRACT_FOUND` y se puede preparar Migration 041.
 
 ## Contratos canónicos encontrados
 
@@ -29,7 +29,7 @@ No existe una tabla, vista o RPC equivalente a un borrador persistente de conver
 | `created_payment_request_id` | `uuid`, FK `payment_requests(id)`, nullable |
 | `updated_at` | `timestamptz`, material de concurrencia optimista |
 
-`public.payment_intake_events` es append-only mediante `payment_intake_events_immutable`. Migration 029 agrega el índice único parcial `(payment_intake_id, metadata ->> 'action_id')`, usado por Migrations 030 y 031 para idempotencia material. El constraint de `event_type` vigente incluye eventos de triage y `provider_matched`, pero no eventos de borrador; Migration 032 debe ampliarlo.
+`public.payment_intake_events` es append-only mediante `payment_intake_events_immutable`. Migration 029 agrega el índice único parcial `(payment_intake_id, metadata ->> 'action_id')`, usado por Migrations 030 y 031 para idempotencia material. El constraint de `event_type` vigente incluye eventos de triage y `provider_matched`, pero no eventos de borrador; Migration 041 debe ampliarlo.
 
 ### Solicitud de pago definitiva
 
@@ -117,7 +117,7 @@ Fase 2B.1 no copia archivos, no crea `documents`, no crea `document_links` y no 
 5. No existe un estado lógico específico para proveedor vinculado pero inactivo. Se clasifica como `READY_PENDING_PROVIDER` con blocker `PROVIDER_INACTIVE`, nunca como listo para conversión.
 6. La evaluación presupuestal definitiva, generación de folio, creación, aprobación, notificación, batch y layout quedan explícitamente fuera de Fase 2B.1.
 
-## Objetos que Migration 032 puede agregar
+## Objetos que Migration 041 puede agregar
 
 - tabla cerrada `public.payment_intake_conversion_drafts`;
 - helper interno de fingerprint;

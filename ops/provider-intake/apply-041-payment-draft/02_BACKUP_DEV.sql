@@ -53,7 +53,7 @@ draft_metadata as (
   ) as snapshot
 )
 select jsonb_pretty(jsonb_build_object(
-  'backup', 'provider-intake-migration-032-pre-apply',
+  'backup', 'provider-intake-migration-041-pre-apply',
   'environment', 'DEV',
   'project_ref', 'scsirgbuqjcwoaxfacth',
   'source_functions', (

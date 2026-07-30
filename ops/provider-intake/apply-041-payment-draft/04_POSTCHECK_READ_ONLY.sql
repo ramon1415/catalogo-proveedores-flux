@@ -5,25 +5,25 @@ begin transaction read only;
 do $$
 begin
   if to_regclass('public.payment_intake_conversion_drafts') is null then
-    raise exception '032_postcheck: draft table is missing';
+    raise exception '041_postcheck: draft table is missing';
   end if;
   if not (
     select c.relrowsecurity
     from pg_class c
     where c.oid = 'public.payment_intake_conversion_drafts'::regclass
   ) then
-    raise exception '032_postcheck: RLS is disabled';
+    raise exception '041_postcheck: RLS is disabled';
   end if;
   if exists (
     select 1 from pg_policy
     where polrelid = 'public.payment_intake_conversion_drafts'::regclass
   ) then
-    raise exception '032_postcheck: draft table has policies';
+    raise exception '041_postcheck: draft table has policies';
   end if;
   if has_table_privilege('anon', 'public.payment_intake_conversion_drafts', 'SELECT')
      or has_table_privilege('authenticated', 'public.payment_intake_conversion_drafts', 'SELECT')
      or has_table_privilege('service_role', 'public.payment_intake_conversion_drafts', 'SELECT') then
-    raise exception '032_postcheck: direct table access is open';
+    raise exception '041_postcheck: direct table access is open';
   end if;
   if (
     select count(*)
@@ -41,7 +41,7 @@ begin
         where setting = 'search_path=public, pg_temp'
       )
   ) <> 2 then
-    raise exception '032_postcheck: RPC contracts are incomplete';
+    raise exception '041_postcheck: RPC contracts are incomplete';
   end if;
   if not exists (
     select 1
@@ -50,13 +50,13 @@ begin
       and t.tgname = 'payment_intake_events_immutable'
       and t.tgenabled <> 'D'
   ) then
-    raise exception '032_postcheck: append-only trigger is inactive';
+    raise exception '041_postcheck: append-only trigger is inactive';
   end if;
 end
 $$;
 
 select jsonb_pretty(jsonb_build_object(
-  'gate', 'phase-2b1-migration-032-postcheck',
+  'gate', 'phase-2b1-migration-041-postcheck',
   'environment', 'DEV',
   'project_ref', 'scsirgbuqjcwoaxfacth',
   'draft_table', 'PASS',

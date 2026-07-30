@@ -10,8 +10,8 @@ const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 const bytes = (relative) => fs.readFileSync(path.join(root, relative))
 
-const migrationPath = "supabase/migrations/032_provider_intake_payment_draft.sql"
-const loadPath = "ops/provider-intake/apply-032-payment-draft/03_LOAD_032_EXACT.sql"
+const migrationPath = "supabase/migrations/041_provider_intake_payment_draft.sql"
+const loadPath = "ops/provider-intake/apply-041-payment-draft/03_LOAD_041_EXACT.sql"
 const migration = read(migrationPath)
 const html = read("provider_intakes.html")
 const frontend = read("provider_intakes.js")
@@ -27,13 +27,13 @@ const functionDefinition = (name) => {
   return match[0]
 }
 
-test("Migration 032 and operational LOAD are byte-identical", () => {
+test("Migration 041 and operational LOAD are byte-identical", () => {
   assert.deepEqual(bytes(migrationPath), bytes(loadPath))
 })
 
-test("runbook records the exact Migration 032 SHA-256", () => {
+test("runbook records the exact Migration 041 SHA-256", () => {
   const digest = crypto.createHash("sha256").update(bytes(migrationPath)).digest("hex")
-  const readme = read("ops/provider-intake/apply-032-payment-draft/00_README.md")
+  const readme = read("ops/provider-intake/apply-041-payment-draft/00_README.md")
   const recorded = readme.match(/SHA-256:\s*`([0-9a-f]{64})`/i)?.[1]
   assert.equal(recorded, digest)
 })
@@ -201,7 +201,7 @@ test("one append-only sanitized event is emitted per material save", () => {
   )
 })
 
-test("Migration 032 cannot create requests convert intakes mutate providers or notify", () => {
+test("Migration 041 cannot create requests convert intakes mutate providers or notify", () => {
   assert.doesNotMatch(migration, /\bdrop\s+table\b/i)
   assert.doesNotMatch(migration, /^\s*(?:delete\s+from|truncate\s+)/im)
   assert.doesNotMatch(

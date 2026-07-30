@@ -30,7 +30,7 @@ Intake in_review
 
 ## Arquitectura
 
-Migration 032 agrega:
+Migration 041 agrega:
 
 - `public.payment_intake_conversion_drafts`;
 - `provider_intake_conversion_draft_fingerprint(jsonb)`, helper interno;
@@ -172,7 +172,7 @@ batch.
 
 ## Aplicación futura en DEV
 
-Paquete: `ops/provider-intake/apply-032-payment-draft/`.
+Paquete: `ops/provider-intake/apply-041-payment-draft/`.
 
 1. Gate 1 separado y explícito.
 2. Precheck read-only.

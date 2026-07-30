@@ -1,4 +1,4 @@
--- Flux Operadora - Migration 032
+-- Flux Operadora - Migration 041
 -- Persistent internal preparation draft before provider-intake conversion.
 -- This migration does not create payment_requests, convert intakes, or mutate providers.
 
@@ -36,13 +36,13 @@ begin
     v_missing := array_append(v_missing, 'extensions.digest');
   end if;
   if cardinality(v_missing) > 0 then
-    raise exception '032_precheck: missing required objects: %',
+    raise exception '041_precheck: missing required objects: %',
       array_to_string(v_missing, ', ');
   end if;
 
   if to_regclass('public.payment_intake_conversion_drafts') is not null
      or to_regprocedure('public.get_provider_intake_payment_draft_context(uuid)') is not null then
-    raise exception '032_precheck: payment draft contract already exists';
+    raise exception '041_precheck: payment draft contract already exists';
   end if;
 
   if not exists (
@@ -52,7 +52,7 @@ begin
       and t.tgname = 'payment_intake_events_immutable'
       and t.tgenabled <> 'D'
   ) then
-    raise exception '032_precheck: append-only intake event trigger is unavailable';
+    raise exception '041_precheck: append-only intake event trigger is unavailable';
   end if;
 end
 $$;
@@ -1126,19 +1126,19 @@ begin
     from pg_class c
     where c.oid = 'public.payment_intake_conversion_drafts'::regclass
   ) then
-    raise exception '032_postcheck: draft RLS is disabled';
+    raise exception '041_postcheck: draft RLS is disabled';
   end if;
   if exists (
     select 1
     from pg_policy
     where polrelid = 'public.payment_intake_conversion_drafts'::regclass
   ) then
-    raise exception '032_postcheck: draft table must have zero policies';
+    raise exception '041_postcheck: draft table must have zero policies';
   end if;
   if has_table_privilege('anon', 'public.payment_intake_conversion_drafts', 'SELECT')
      or has_table_privilege('authenticated', 'public.payment_intake_conversion_drafts', 'SELECT')
      or has_table_privilege('service_role', 'public.payment_intake_conversion_drafts', 'SELECT') then
-    raise exception '032_postcheck: direct draft table access is open';
+    raise exception '041_postcheck: direct draft table access is open';
   end if;
   if (
     select count(*)
@@ -1156,7 +1156,7 @@ begin
         where setting = 'search_path=public, pg_temp'
       )
   ) <> 2 then
-    raise exception '032_postcheck: RPC security attributes are incomplete';
+    raise exception '041_postcheck: RPC security attributes are incomplete';
   end if;
   if exists (
     select 1
@@ -1179,7 +1179,7 @@ begin
         )
       )
   ) then
-    raise exception '032_postcheck: RPC grants are unsafe';
+    raise exception '041_postcheck: RPC grants are unsafe';
   end if;
   if not exists (
     select 1
@@ -1188,7 +1188,7 @@ begin
       and t.tgname = 'payment_intake_events_immutable'
       and t.tgenabled <> 'D'
   ) then
-    raise exception '032_postcheck: append-only event trigger is inactive';
+    raise exception '041_postcheck: append-only event trigger is inactive';
   end if;
   if not exists (
     select 1
@@ -1198,7 +1198,7 @@ begin
       and pg_get_constraintdef(c.oid) like '%conversion_draft_created%'
       and pg_get_constraintdef(c.oid) like '%conversion_draft_updated%'
   ) then
-    raise exception '032_postcheck: draft event types are unavailable';
+    raise exception '041_postcheck: draft event types are unavailable';
   end if;
 end
 $$;
