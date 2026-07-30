@@ -1,6 +1,6 @@
 # Notifications N0 — sanitized DEV evidence
 
-This directory defines a fail-closed, read-only discovery path for the approved delivery architecture:
+This directory defines a fail-closed, read-only discovery path for the approved architecture:
 
 ```text
 notification_events
@@ -11,67 +11,80 @@ notification_events
 
 n8n is retired and out of scope. The audit does not invoke or deploy the dispatcher, call Resend, send email, read runtime secret values, change `SEND_MODE`, or enable product behavior. `SEND_MODE` remains `UNKNOWN_BY_DESIGN`.
 
-## Gate and execution boundary
+## Gate boundary
 
-Pull requests run only `static_checks`: no environment, no secrets, no DEV connection, and no artifact upload. The future live job is limited to the exact repository and `refs/heads/dev`, requires the `DEV` environment, accepts no inputs, uses three DEV credentials only, and uploads one sanitized artifact with retention of at most seven days.
+Pull requests run only `static_checks`: no environment, secrets, DEV connection, psql, Management API request, or artifact upload. The future live job remains limited to the exact repository and `refs/heads/dev`, requires the protected `DEV` environment, accepts no inputs, and can use only the three approved DEV credentials.
 
-This R2A-R2 change prepares R2B; it does not execute R2B and does not enable N1. The expected Vercel context for the Draft PR is `EXPECTED_AUTOMATIC_PREVIEW`; no manual Vercel action is part of this workflow.
+R2A-R3 prepares R2B; it does not execute R2B and does not enable N1. The expected Draft PR deployment context is `EXPECTED_AUTOMATIC_PREVIEW`; no manual Vercel action belongs to this workflow.
 
-## DEV environment identity
+## DEV identity
 
-Before any PostgreSQL command, the validator performs all of these checks:
+Before PostgreSQL, the validator binds the project-ref hash, parsed database URL, official Supabase host shape, and exact Management API project metadata. Invalid format, unsafe connection options, or any mismatch returns `DEV_IDENTITY_PRECHECK_FAILED`. Raw project headers and metadata are removed before `DEV_ENVIRONMENT_IDENTITY_VERIFIED`.
 
-1. The project ref is exactly 20 lowercase letters.
-2. `SHA-256(UTF-8("supabase-project-ref:" + ref))` matches the authorized constant using constant-time comparison.
-3. The parsed PostgreSQL URL is bound to the same ref through either the official direct host shape or the official pooler username shape.
-4. The database is `postgres`, the port is 5432 or 6543, and only safe TLS and timeout query options are accepted.
-5. A GET of the exact Supabase project resource returns metadata whose `ref` equals the same ref.
-6. Raw project response headers and body are deleted before the safe marker `DEV_ENVIRONMENT_IDENTITY_VERIFIED` is emitted.
+The artifact stores only closed booleans. It never stores or prints the project ref, DB URL, host, username, token, or raw metadata.
 
-Any failure returns `DEV_IDENTITY_PRECHECK_FAILED`. This is fail-before-connect: PostgreSQL cannot run until ref hash, DB URL, host allowlist, and Management API metadata all agree. The artifact keeps only closed booleans; it never keeps or prints the project ref, DB URL, database host, username, token, or raw metadata.
+## Receipt and Storage security evidence
 
-## Dispatcher source provenance
+The sole artifact now uses `notifications-n0-evidence/v4` and adds the closed `receipt_security_contract` section. It reports only booleans and non-negative aggregate counts for:
 
-The exact dispatcher metadata resource and its `body` resource are fetched only with GET. The body request declares `Accept: multipart/form-data`. Transport headers, metadata, and body remain in runner-private temporary storage and are removed before artifact validation.
+- presence and privacy of the exact expected receipt bucket;
+- existence of the evidence and receipt-link tables;
+- evidence inside or outside the expected bucket;
+- shareable evidence with invalid page count, missing individual attestation, or missing individual hash;
+- bucket, storage-path, single-page, and attestation constraints;
+- one-to-one uniqueness for operation, payment request, and evidence;
+- exact select and insert Storage policies;
+- policies restricted to the authenticated role, expected bucket, and guarded helper;
+- helper existence, `SECURITY DEFINER`, contract shape, and execute grants;
+- direct authenticated table `SELECT` privileges.
 
-The parser uses the standard library, validates the multipart boundary, distinguishes metadata from files, and derives each file path from `Supabase-Path` or `Content-Disposition`. It normalizes separators and rejects absolute paths, traversal, malformed or ambiguous headers, missing paths, duplicates, symlinks, non-regular files, too many parts, and size-limit violations. Source is never imported, executed, or emitted.
+The SQL may inspect constraint definitions, policy expressions, and function definitions only inside boolean predicates. Those texts never enter JSON. The artifact contains no bucket identifier, Storage object path, filename, UUID, policy expression, function definition, or individual row.
 
-### Canonical manifest
+A valid artifact is not a claim that the live contract is safe. **False is evidence** of drift or absence, positive violation counts are valid findings, and unsafe direct privileges remain reportable. Validation fails only for malformed shape, invalid types, unknown fields, negative counts, or privacy violations.
 
-Runtime files and the recursive GitHub directory `supabase/functions/notification-dispatcher/` use the same canonical manifest algorithm:
+If a source table is absent, its existence field is false, related counts are null, and related controls are false. `available` means the contract query executed; it does not mean every control passed.
 
-- normalize each relative path;
-- sort paths by their UTF-8 bytes;
-- for each path feed SHA-256 with the 8-byte big-endian path length, NUL, path bytes, NUL, 8-byte big-endian content length, NUL, and content bytes.
+## Official Supabase multipart paths
 
-Only regular files participate, symlinks are fail-closed, and the artifact records counts and digests but no source paths or source bytes.
+The dispatcher body is fetched only by GET with `Accept: multipart/form-data`. The standard-library parser supports metadata, `entrypoint_path`, `deno2_entrypoint_path`, `filename`, `filename*`, `Supabase-Path`, relative paths, absolute paths, and `file://` entrypoints.
 
-These digest types are intentionally different:
+A trusted root is derived only from multipart entrypoint metadata or the exact Function metadata response. Relative paths are normalized against that root. Absolute POSIX paths are accepted only when they remain strictly inside the derived root and are converted to canonical relative paths. The parser rejects missing roots, traversal, Windows paths, NUL or line breaks, incompatible path headers, collisions after normalization, files outside the root, symlinks, empty filesets, ambiguous metadata, and size or part-limit violations.
 
-- **transport body:** the raw multipart envelope; it is never hashed for source comparison;
-- **source manifest:** the canonical per-file digest used for runtime-to-GitHub comparison;
-- **bundle digest:** optional deployment metadata such as a valid `ezbr_sha256`; it is retained separately and never compared with a source manifest.
+No root, filename, source path, source bytes, transport headers, or multipart metadata appears in the artifact.
 
-Comparison states are `match`, `mismatch`, `metadata_only`, `body_unavailable`, `parse_failed`, `github_source_unavailable`, and `unavailable`. Unknown evidence remains null: only `match` yields `source_match=true`, only `mismatch` yields `source_match=false`, and `metadata_only` never claims source verification.
+## Canonical manifest
 
-## Artifact contract
+Runtime files and the recursive GitHub directory use the same canonical manifest:
 
-The sole artifact uses `notifications-n0-evidence/v3` and the closed root allowlist:
+- normalized relative path;
+- UTF-8 byte ordering;
+- 8-byte big-endian path length;
+- NUL and path bytes;
+- NUL and 8-byte big-endian content length;
+- NUL and content bytes.
 
-`schema_version`, `generated_at_utc`, `environment`, `github`, `environment_identity`, `delivery_architecture`, `migrations`, `database_schema`, `notification_aggregates`, `intake_aggregates`, `payment_receipt_aggregates`, `storage`, `dispatcher_runtime`, `resend_source_contract`, `send_mode`, `source_status`, `privacy_validation`, and `cleanup`.
+The transport body and boundary never participate. Runtime and GitHub source manifests are comparable; the optional bundle digest remains separate.
 
-`environment_identity` contains only verified booleans. `dispatcher_runtime` separates metadata availability, multipart parsing, runtime and GitHub manifest digests, path-set comparison, optional bundle digest, and exact comparison state. `source_status` separately reports database, project identity, dispatcher metadata, dispatcher body, dispatcher manifest, GitHub source, and Resend source-contract provenance.
+Comparison states remain `match`, `mismatch`, `metadata_only`, `body_unavailable`, `parse_failed`, `github_source_unavailable`, and `unavailable`. Only `match` produces `source_match=true`; only `mismatch` produces false. Unknown evidence remains null.
 
-The recursive privacy validator rejects unknown keys, project-ref-like values, email addresses, UUIDs, URLs, connection strings, JWTs, tokens, secrets, payloads, raw errors, storage paths, signed URLs, and SHA-256 values outside the three dispatcher digest fields. Legacy n8n names are accepted only as `LEGACY_SCHEMA_ONLY` database structure.
+## Artifact v4 privacy contract
+
+The closed root contains:
+
+`schema_version`, `generated_at_utc`, `environment`, `github`, `environment_identity`, `delivery_architecture`, `migrations`, `database_schema`, `notification_aggregates`, `intake_aggregates`, `payment_receipt_aggregates`, `receipt_security_contract`, `storage`, `dispatcher_runtime`, `resend_source_contract`, `send_mode`, `source_status`, `privacy_validation`, and `cleanup`.
+
+The recursive privacy validator rejects unknown keys, project-ref-like values, email addresses, UUIDs, URLs, connection strings, JWTs, tokens, payloads, raw errors, signed URLs, and SHA-256 values outside the three dispatcher digest fields. Legacy n8n names remain allowed only as `LEGACY_SCHEMA_ONLY` database structure.
+
+The single sanitized artifact is uploaded only after privacy validation and is retained for at most seven days.
 
 ## Static verification and cleanup
 
-In-memory self-tests cover 17 identity and DB URL cases plus 20 multipart and canonical manifest cases, including changing boundaries and part order, malformed transport, unsafe paths, duplicate paths, size limits, symlinks, unavailable-source states, and non-equivalence of bundle and source digests.
+Synthetic in-memory suites retain the 17 identity cases and 20 canonical-manifest cases, and add 13 receipt-security cases plus 16 official multipart-path cases. They prove that security drift is valid evidence while malformed or privacy-unsafe output fails closed.
 
-The SQL begins with a repeatable-read, read-only transaction, explicitly enables `default_transaction_read_only`, applies timeouts, returns only catalog metadata and sanitized aggregates, and commits. It contains no DDL, DML, RPC, claim, state transition, PII, business identifier, filename, or raw error output.
+The SQL remains `REPEATABLE READ READ ONLY`, explicitly enables `default_transaction_read_only`, uses timeouts, returns only catalogs and sanitized aggregates, and ends with `COMMIT`. It contains no DDL, DML, application RPC, claim, state transition, individual identifier, path, filename, or raw error output.
 
-Raw project metadata, request headers, dispatcher metadata, dispatcher headers, multipart body, database output, and the private directory are deleted before upload or by the always-run cleanup step. The final artifact contains no PII and only the single allowlisted JSON file.
+Raw project metadata, dispatcher metadata, response headers, multipart body, database JSONL, and private runner storage are deleted before or after artifact construction. The final artifact contains no PII.
 
 ## Remaining gate
 
-R2B remains pending and requires separate explicit authorization. Until then: no merge, no Ready transition, no live workflow dispatch, no secrets, no DEV read, no dispatcher body download, no dispatcher invocation, no Resend call, no email, no `SEND_MODE` read or change, and no N1.
+R2B remains pending and requires separate explicit authorization. Until then: no Ready transition, merge, live workflow dispatch, secret use, DEV read, dispatcher body download, dispatcher invocation, Resend call, email, `SEND_MODE` read or change, or N1.

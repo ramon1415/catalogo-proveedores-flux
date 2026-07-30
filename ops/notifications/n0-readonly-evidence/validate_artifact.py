@@ -35,7 +35,8 @@ ROOT_KEYS = {
     "schema_version", "generated_at_utc", "environment", "github",
     "environment_identity", "delivery_architecture", "migrations",
     "database_schema", "notification_aggregates", "intake_aggregates",
-    "payment_receipt_aggregates", "storage", "dispatcher_runtime",
+    "payment_receipt_aggregates", "receipt_security_contract",
+    "storage", "dispatcher_runtime",
     "resend_source_contract", "send_mode", "source_status",
     "privacy_validation", "cleanup",
 }
@@ -228,6 +229,92 @@ def validate_payment_receipt(value: Any) -> None:
     validate_count_rows(requests["by_status"], ("status",), "payment requests by status")
 
 
+
+
+RECEIPT_SECURITY_KEYS = {
+    "available",
+    "expected_bucket_exists",
+    "expected_bucket_private",
+    "evidence_table_exists",
+    "receipt_links_table_exists",
+    "evidence_rows_in_expected_bucket",
+    "evidence_rows_outside_expected_bucket",
+    "shareable_rows",
+    "shareable_invalid_page_rows",
+    "shareable_without_attestation_rows",
+    "shareable_without_individual_hash_rows",
+    "bucket_constraint_enforced",
+    "storage_path_constraint_enforced",
+    "single_page_constraint_enforced",
+    "shareable_attestation_constraint_enforced",
+    "operation_unique_enforced",
+    "request_unique_enforced",
+    "evidence_unique_enforced",
+    "select_policy_present",
+    "insert_policy_present",
+    "select_policy_authenticated_only",
+    "insert_policy_authenticated_only",
+    "select_policy_expected_bucket_scoped",
+    "insert_policy_expected_bucket_scoped",
+    "select_policy_uses_guard_helper",
+    "insert_policy_uses_guard_helper",
+    "guard_helper_exists",
+    "guard_helper_security_definer",
+    "guard_helper_contract_match",
+    "guard_helper_execute_authenticated",
+    "guard_helper_execute_service_role",
+    "guard_helper_execute_anon",
+    "evidence_authenticated_select",
+    "receipt_links_authenticated_select",
+}
+
+
+def validate_receipt_security(value: Any) -> None:
+    contract = exact_keys(value, RECEIPT_SECURITY_KEYS, "receipt_security_contract")
+    bool_keys = RECEIPT_SECURITY_KEYS - {
+        "evidence_rows_in_expected_bucket",
+        "evidence_rows_outside_expected_bucket",
+        "shareable_rows",
+        "shareable_invalid_page_rows",
+        "shareable_without_attestation_rows",
+        "shareable_without_individual_hash_rows",
+    }
+    for key in bool_keys:
+        require(isinstance(contract[key], bool), f"invalid receipt security boolean: {key}")
+    count_keys = RECEIPT_SECURITY_KEYS - bool_keys
+    for key in count_keys:
+        nullable_count(contract[key], f"receipt_security_contract.{key}")
+    if not contract["expected_bucket_exists"]:
+        require(contract["expected_bucket_private"] is False, "missing expected bucket cannot be private")
+    if not contract["evidence_table_exists"]:
+        for key in count_keys:
+            require(contract[key] is None, f"missing evidence table requires null: {key}")
+        for key in (
+            "bucket_constraint_enforced",
+            "storage_path_constraint_enforced",
+            "single_page_constraint_enforced",
+            "shareable_attestation_constraint_enforced",
+            "evidence_authenticated_select",
+        ):
+            require(contract[key] is False, f"missing evidence table requires false: {key}")
+    if not contract["receipt_links_table_exists"]:
+        for key in (
+            "operation_unique_enforced",
+            "request_unique_enforced",
+            "evidence_unique_enforced",
+            "receipt_links_authenticated_select",
+        ):
+            require(contract[key] is False, f"missing receipt links table requires false: {key}")
+    if not contract["guard_helper_exists"]:
+        for key in (
+            "guard_helper_security_definer",
+            "guard_helper_contract_match",
+            "guard_helper_execute_authenticated",
+            "guard_helper_execute_service_role",
+            "guard_helper_execute_anon",
+        ):
+            require(contract[key] is False, f"missing helper requires false: {key}")
+
 def validate_storage(value: Any) -> None:
     value = exact_keys(value, {"available", "bucket_total", "public_bucket_total", "private_bucket_total", "objects_policy_count", "objects_policies"}, "storage_metadata")
     require(isinstance(value["available"], bool), "invalid storage availability")
@@ -400,7 +487,7 @@ def validate_resend_source_contract(value: Any) -> None:
 
 def validate_artifact_object(value: Any, pending_allowed: bool) -> None:
     value = exact_keys(value, ROOT_KEYS, "artifact")
-    require(value["schema_version"] == "notifications-n0-evidence/v3", "invalid schema version")
+    require(value["schema_version"] == "notifications-n0-evidence/v4", "invalid schema version")
     require(value["environment"] == "DEV", "environment must be DEV")
     require(isinstance(value["generated_at_utc"], str) and value["generated_at_utc"].endswith("Z"), "invalid timestamp")
     github = exact_keys(value["github"], {"head_sha"}, "github")
@@ -412,6 +499,7 @@ def validate_artifact_object(value: Any, pending_allowed: bool) -> None:
     validate_notification(value["notification_aggregates"])
     validate_intake(value["intake_aggregates"])
     validate_payment_receipt(value["payment_receipt_aggregates"])
+    validate_receipt_security(value["receipt_security_contract"])
     validate_storage(value["storage"])
     validate_dispatcher_runtime(value["dispatcher_runtime"])
     validate_resend_source_contract(value["resend_source_contract"])
@@ -555,7 +643,7 @@ def parse_jsonl(path: Path) -> dict[str, Any]:
         "migrations", "database", "notification_aggregates",
         "intake_aggregates", "provider_aggregates",
         "receipt_link_aggregates", "evidence_aggregates",
-        "outbox_aggregates", "payment_request_aggregates",
+        "outbox_aggregates", "payment_request_aggregates", "receipt_security_contract",
         "storage_metadata",
     }
     require(set(sections) == expected, "database output sections differ from the contract")
@@ -588,6 +676,64 @@ def normalize_source_path(raw_path: Any) -> str:
     normalized = "/".join(path.parts)
     require(normalized == raw_path, "non-canonical source path")
     return normalized
+
+
+def parse_official_path(raw_path: Any) -> tuple[PurePosixPath, bool]:
+    require(isinstance(raw_path, str) and raw_path != "", "source path is missing")
+    require("\x00" not in raw_path and "\n" not in raw_path and "\r" not in raw_path, "source path contains control data")
+    require("\\" not in raw_path and re.match(r"^[A-Za-z]:", raw_path) is None, "Windows source path is prohibited")
+    is_file_url = raw_path.lower().startswith("file://")
+    if is_file_url:
+        parsed = urlsplit(raw_path)
+        require(parsed.scheme.lower() == "file" and parsed.netloc == "", "unsafe file URL")
+        require(parsed.query == "" and parsed.fragment == "", "file URL query or fragment is prohibited")
+        raw_path = unquote(parsed.path)
+    else:
+        require("://" not in raw_path, "unsupported source path scheme")
+    require(raw_path != "" and len(raw_path.encode("utf-8")) <= MAX_PATH_BYTES, "invalid source path length")
+    path = PurePosixPath(raw_path)
+    require(path.parts and all(part not in {"", ".", ".."} for part in path.parts), "source path traversal")
+    return path, path.is_absolute()
+
+
+def path_is_within(path: PurePosixPath, root: PurePosixPath) -> bool:
+    return len(path.parts) > len(root.parts) and path.parts[:len(root.parts)] == root.parts
+
+
+def derive_entrypoint(
+    multipart_metadata: dict[str, Any] | None,
+    fallback_metadata: dict[str, Any] | None,
+) -> tuple[PurePosixPath, bool]:
+    for metadata in (multipart_metadata, fallback_metadata):
+        if metadata is None:
+            continue
+        require(isinstance(metadata, dict), "dispatcher entrypoint metadata is not an object")
+        for key in ("deno2_entrypoint_path", "entrypoint_path"):
+            if key not in metadata:
+                continue
+            require(isinstance(metadata[key], str) and metadata[key] != "", "invalid dispatcher entrypoint")
+            return parse_official_path(metadata[key])
+    raise AuditError("trusted dispatcher entrypoint is unavailable")
+
+
+def normalize_runtime_path(
+    raw_path: str,
+    root: PurePosixPath,
+    root_is_absolute: bool,
+) -> str:
+    path, is_absolute = parse_official_path(raw_path)
+    if is_absolute:
+        require(root_is_absolute and path_is_within(path, root), "absolute source path is outside the trusted root")
+        relative_parts = path.parts[len(root.parts):]
+    else:
+        require(not raw_path.lower().startswith("file://"), "relative file URL is prohibited")
+        root_parts = root.parts
+        if root_parts and path.parts[:len(root_parts)] == root_parts:
+            relative_parts = path.parts[len(root_parts):]
+        else:
+            relative_parts = path.parts
+    require(relative_parts, "source path resolves to the trusted root")
+    return normalize_source_path("/".join(relative_parts))
 
 
 def validate_source_mode(mode: int) -> None:
@@ -631,6 +777,7 @@ def parse_multipart_files(
     content_type: str,
     body: bytes,
     *,
+    fallback_metadata: dict[str, Any] | None = None,
     max_bytes: int = MAX_MULTIPART_BYTES,
     max_parts: int = MAX_PARTS,
 ) -> dict[str, bytes]:
@@ -650,7 +797,8 @@ def parse_multipart_files(
     require(message.is_multipart(), "multipart parse failed")
     parts = list(message.iter_parts())
     require(len(parts) <= max_parts, "multipart part limit exceeded")
-    files: dict[str, bytes] = {}
+    multipart_metadata: dict[str, Any] | None = None
+    raw_files: list[tuple[list[str], bytes]] = []
     for part in parts:
         disposition = part.get_content_disposition()
         name = part.get_param("name", header="content-disposition")
@@ -658,20 +806,44 @@ def parse_multipart_files(
         require(len(header_paths) <= 1, "ambiguous source path header")
         header_path = header_paths[0] if header_paths else None
         filename = part.get_filename()
-        if name == "metadata" or (
+        is_metadata = name == "metadata" or (
             header_path is None and filename is None and part.get_content_type() == "application/json"
-        ):
+        )
+        payload = part.get_payload(decode=True)
+        require(isinstance(payload, bytes), "multipart payload is not bytes")
+        if is_metadata:
+            require(header_path is None and filename is None, "metadata part may not declare a file path")
+            require(multipart_metadata is None, "duplicate multipart metadata")
+            try:
+                metadata_value = json.loads(payload.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise AuditError("invalid multipart metadata") from exc
+            require(isinstance(metadata_value, dict), "multipart metadata is not an object")
+            multipart_metadata = metadata_value
             continue
         require(disposition in {"form-data", "attachment", "inline"}, "invalid multipart disposition")
-        require(header_path is not None or filename is not None, "file part lacks a source path")
-        if header_path is not None and filename is not None:
-            require(normalize_source_path(header_path) == normalize_source_path(filename), "ambiguous multipart source path")
-        path = normalize_source_path(header_path if header_path is not None else filename)
+        candidates = [value for value in (header_path, filename) if value is not None]
+        require(candidates, "file part lacks a source path")
+        raw_files.append((candidates, payload))
+    require(raw_files, "multipart contains no source files")
+    entrypoint, entrypoint_is_absolute = derive_entrypoint(multipart_metadata, fallback_metadata)
+    root = entrypoint.parent
+    files: dict[str, bytes] = {}
+    for candidates, payload in raw_files:
+        normalized_candidates = {
+            normalize_runtime_path(candidate, root, entrypoint_is_absolute)
+            for candidate in candidates
+        }
+        require(len(normalized_candidates) == 1, "ambiguous multipart source path")
+        path = normalized_candidates.pop()
         require(path not in files, "duplicate source path")
-        payload = part.get_payload(decode=True)
-        require(isinstance(payload, bytes), "multipart file payload is not bytes")
         files[path] = payload
-    require(files, "multipart contains no source files")
+    entrypoint_relative = normalize_runtime_path(
+        entrypoint.as_posix(),
+        root,
+        entrypoint_is_absolute,
+    )
+    require(entrypoint_relative in files, "dispatcher entrypoint is not present in multipart files")
     return files
 
 
@@ -757,7 +929,11 @@ def dispatcher_evidence(
         try:
             require(headers_path is not None, "dispatcher body headers are missing")
             content_type = read_content_type(headers_path)
-            runtime_files = parse_multipart_files(content_type, body_path.read_bytes())
+            runtime_files = parse_multipart_files(
+                content_type,
+                body_path.read_bytes(),
+                fallback_metadata=metadata if isinstance(metadata, dict) else None,
+            )
             runtime_digest, runtime_count, runtime_paths = canonical_manifest(runtime_files)
             multipart_parsed = True
         except AuditError:
@@ -855,7 +1031,7 @@ def build(args: argparse.Namespace) -> None:
     )
     remove_raw(raw_paths)
     artifact = {
-        "schema_version": "notifications-n0-evidence/v3",
+        "schema_version": "notifications-n0-evidence/v4",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "environment": "DEV",
         "github": {"head_sha": args.github_head_sha.lower()},
@@ -880,6 +1056,7 @@ def build(args: argparse.Namespace) -> None:
             "outbox": sections["outbox_aggregates"],
             "payment_requests": sections["payment_request_aggregates"],
         },
+        "receipt_security_contract": sections["receipt_security_contract"],
         "storage": sections["storage_metadata"],
         "dispatcher_runtime": runtime,
         "resend_source_contract": resend_contract,
@@ -942,7 +1119,7 @@ def static_checks(args: argparse.Namespace) -> None:
             for line in Path(args.changed_files).read_text(encoding="utf-8").splitlines()
             if line.strip()
         }
-        require(changed <= ALLOWED_FILES and len(changed) <= 4, "change set exceeds the R2A-R2 allowlist")
+        require(changed <= ALLOWED_FILES and len(changed) <= 4, "change set exceeds the R2A-R3 allowlist")
 
     sql = sql_path.read_text(encoding="utf-8")
     require(sql.startswith("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"), "SQL must begin with the read-only transaction")
@@ -955,6 +1132,24 @@ def static_checks(args: argparse.Namespace) -> None:
     ):
         require(setting in sql, f"SQL control is missing: {setting}")
     require("LEGACY_SCHEMA_ONLY" in sql, "legacy schema classification is missing")
+    for receipt_marker in (
+        "'receipt_security_contract'",
+        "payment_operation_evidence_bucket_check",
+        "payment_operation_evidence_path_check",
+        "payment_operation_evidence_pdf_check",
+        "payment_operation_evidence_attestation_check",
+        "payment_request_receipt_links_operation_key",
+        "payment_request_receipt_links_request_key",
+        "payment_request_receipt_links_evidence_key",
+        "payment_receipt_evidence_finance_select",
+        "payment_receipt_evidence_finance_insert",
+        "payment_receipt_evidence_storage_path_allowed",
+        "pg_get_constraintdef",
+        "pg_get_functiondef",
+        "has_table_privilege",
+        "has_function_privilege",
+    ):
+        require(receipt_marker in sql, f"receipt security SQL is missing: {receipt_marker}")
     normalized = strip_sql_literals(sql)
     prohibited_sql = r"\b(INSERT|UPDATE|DELETE|UPSERT|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|CALL|DO|VACUUM|ANALYZE|REFRESH|REINDEX|CLUSTER|PERFORM)\b|\bCOMMENT\s+ON\b|\bCOPY\s+(?:FROM|TO\s+PROGRAM)\b|\bEXECUTE\b|\bFOR\s+(UPDATE|SHARE)\b|\b(?:SET|RESET)\s+ROLE\b|\bSESSION\s+AUTHORIZATION\b|pg_sleep|dblink|http_"
     require(re.search(prohibited_sql, normalized, flags=re.I) is None, "SQL contains a prohibited operation")
@@ -970,7 +1165,7 @@ def static_checks(args: argparse.Namespace) -> None:
     static_block = workflow.split("static_checks:", 1)[1].split("collect_dev_evidence:", 1)[0]
     live_block = workflow.split("collect_dev_evidence:", 1)[1]
     require("environment:" not in static_block and "secrets." not in static_block, "static job may not use environment or secrets")
-    require("self-test" in static_block and "artifact v3" in static_block, "validator v3 self-tests are missing")
+    require("self-test" in static_block and "artifact v4" in static_block, "validator v4 self-tests are missing")
     require("environment: DEV" in live_block, "live job must use DEV environment")
     require(
         "github.repository == 'ramon1415/catalogo-proveedores-flux'" in live_block
@@ -1014,24 +1209,41 @@ def static_checks(args: argparse.Namespace) -> None:
         require(raw_name in live_block, f"raw cleanup coverage is missing: {raw_name}")
 
     validator_source = validator_path.read_text(encoding="utf-8")
-    require("notifications-n0-evidence/v3" in validator_source, "artifact v3 validator is missing")
+    require("notifications-n0-evidence/v4" in validator_source, "artifact v4 validator is missing")
     require(AUTHORIZED_DEV_REF_HASH in validator_source, "authorized DEV ref hash is missing")
     require("hmac.compare_digest" in validator_source, "constant-time identity comparison is missing")
     require("parse_multipart_files" in validator_source and "canonical_manifest" in validator_source, "canonical multipart manifest code is missing")
     require("runtime_manifest_digest" in validator_source and "runtime_bundle_digest" in validator_source, "digest provenance split is missing")
     require(("raw_" + "multipart_digest") not in validator_source and ("source_" + "sha256") not in validator_source, "raw transport digest comparison is prohibited")
-    require("IDENTITY_TEST_COUNT = 17" in validator_source and "MANIFEST_TEST_COUNT = 20" in validator_source, "required self-test suites are missing")
+    require(
+        "IDENTITY_TEST_COUNT = 17" in validator_source
+        and "MANIFEST_TEST_COUNT = 20" in validator_source
+        and "RECEIPT_SECURITY_TEST_COUNT = 13" in validator_source
+        and "OFFICIAL_MULTIPART_TEST_COUNT = 16" in validator_source,
+        "required self-test suites are missing",
+    )
+    for parser_marker in (
+        "deno2_entrypoint_path",
+        "entrypoint_path",
+        "file://",
+        "normalize_runtime_path",
+        "absolute source path is outside the trusted root",
+    ):
+        require(parser_marker in validator_source, f"official multipart parser is missing: {parser_marker}")
+    require("RECEIPT_SECURITY_KEYS" in validator_source, "receipt security artifact allowlist is missing")
     require('"dispatcher": "supabase_edge_function"' in validator_source and '"email_provider": "resend"' in validator_source, "canonical delivery contract is missing")
     require(("summarize_" + "n" + "8n") not in validator_source and ("--n" + "8n") not in validator_source, "runtime n8n validator code remains")
     compile(validator_source, str(validator_path), "exec")
 
     readme = readme_path.read_text(encoding="utf-8")
     for phrase in (
-        "Supabase Edge Function", "Resend", "notifications-n0-evidence/v3",
+        "Supabase Edge Function", "Resend", "notifications-n0-evidence/v4",
         "UNKNOWN_BY_DESIGN", "fail-closed", "R2B", "does not enable N1",
         "no PII", "read-only", "EXPECTED_AUTOMATIC_PREVIEW",
         "multipart/form-data", "canonical manifest", "metadata_only",
         "parse_failed", "bundle digest", "transport body",
+        "receipt_security_contract", "false is evidence", "entrypoint_path",
+        "deno2_entrypoint_path", "absolute paths",
     ):
         require(phrase.lower() in readme.lower(), f"README is missing: {phrase}")
     require("n8n" in readme.lower() and "retired" in readme.lower(), "n8n retirement statement is missing")
@@ -1039,7 +1251,7 @@ def static_checks(args: argparse.Namespace) -> None:
 
 def valid_fixture() -> dict[str, Any]:
     return {
-        "schema_version": "notifications-n0-evidence/v3",
+        "schema_version": "notifications-n0-evidence/v4",
         "generated_at_utc": "2026-01-01T00:00:00Z",
         "environment": "DEV",
         "github": {"head_sha": "a" * 40},
@@ -1091,6 +1303,42 @@ def valid_fixture() -> dict[str, Any]:
             },
             "outbox": {"available": False, "payment_receipt_linked_events": None},
             "payment_requests": {"available": False, "by_status": []},
+        },
+        "receipt_security_contract": {
+            "available": True,
+            "expected_bucket_exists": True,
+            "expected_bucket_private": True,
+            "evidence_table_exists": True,
+            "receipt_links_table_exists": True,
+            "evidence_rows_in_expected_bucket": 0,
+            "evidence_rows_outside_expected_bucket": 0,
+            "shareable_rows": 0,
+            "shareable_invalid_page_rows": 0,
+            "shareable_without_attestation_rows": 0,
+            "shareable_without_individual_hash_rows": 0,
+            "bucket_constraint_enforced": True,
+            "storage_path_constraint_enforced": True,
+            "single_page_constraint_enforced": True,
+            "shareable_attestation_constraint_enforced": True,
+            "operation_unique_enforced": True,
+            "request_unique_enforced": True,
+            "evidence_unique_enforced": True,
+            "select_policy_present": True,
+            "insert_policy_present": True,
+            "select_policy_authenticated_only": True,
+            "insert_policy_authenticated_only": True,
+            "select_policy_expected_bucket_scoped": True,
+            "insert_policy_expected_bucket_scoped": True,
+            "select_policy_uses_guard_helper": True,
+            "insert_policy_uses_guard_helper": True,
+            "guard_helper_exists": True,
+            "guard_helper_security_definer": True,
+            "guard_helper_contract_match": True,
+            "guard_helper_execute_authenticated": True,
+            "guard_helper_execute_service_role": True,
+            "guard_helper_execute_anon": False,
+            "evidence_authenticated_select": False,
+            "receipt_links_authenticated_select": False,
         },
         "storage": {
             "available": False, "bucket_total": None, "public_bucket_total": None,
@@ -1162,15 +1410,22 @@ def expect_call_failure(label: str, function, *args, **kwargs) -> None:
     raise AuditError(f"negative self-test unexpectedly passed: {label}")
 
 
-def multipart_fixture(boundary: str, parts: list[tuple[str, bytes]], include_metadata: bool = False) -> tuple[str, bytes]:
+def multipart_fixture(
+    boundary: str,
+    parts: list[tuple[str, bytes]],
+    include_metadata: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[str, bytes]:
     content_type = f'multipart/form-data; boundary="{boundary}"'
     chunks: list[bytes] = []
     if include_metadata:
+        metadata_value = metadata or {"entrypoint_path": "index.ts", "version": 1}
         chunks.extend([
             f"--{boundary}\r\n".encode(),
             b'Content-Disposition: form-data; name="metadata"\r\n',
             b"Content-Type: application/json\r\n\r\n",
-            b'{"version":1}\r\n',
+            json.dumps(metadata_value, sort_keys=True).encode(),
+            b"\r\n",
         ])
     for path, content in parts:
         chunks.extend([
@@ -1185,8 +1440,41 @@ def multipart_fixture(boundary: str, parts: list[tuple[str, bytes]], include_met
     return content_type, b"".join(chunks)
 
 
+def multipart_custom_fixture(
+    boundary: str,
+    parts: list[dict[str, Any]],
+    metadata: dict[str, Any] | None,
+) -> tuple[str, bytes]:
+    content_type = f'multipart/form-data; boundary="{boundary}"'
+    chunks: list[bytes] = []
+    if metadata is not None:
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            b'Content-Disposition: form-data; name="metadata"\r\n',
+            b"Content-Type: application/json\r\n\r\n",
+            json.dumps(metadata, sort_keys=True).encode(),
+            b"\r\n",
+        ])
+    for item in parts:
+        disposition = 'Content-Disposition: form-data; name="file"'
+        if item.get("filename") is not None:
+            disposition += f'; filename="{item["filename"]}"'
+        chunks.extend([f"--{boundary}\r\n".encode(), disposition.encode() + b"\r\n"])
+        if item.get("supabase_path") is not None:
+            chunks.append(f'Supabase-Path: {item["supabase_path"]}\r\n'.encode())
+        chunks.extend([
+            b"Content-Type: application/octet-stream\r\n\r\n",
+            item["content"],
+            b"\r\n",
+        ])
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return content_type, b"".join(chunks)
+
+
 IDENTITY_TEST_COUNT = 17
 MANIFEST_TEST_COUNT = 20
+RECEIPT_SECURITY_TEST_COUNT = 13
+OFFICIAL_MULTIPART_TEST_COUNT = 16
 
 
 def identity_self_tests() -> None:
@@ -1215,10 +1503,11 @@ def identity_self_tests() -> None:
 
 
 def manifest_self_tests() -> None:
+    fallback = {"entrypoint_path": "index.ts"}
     type_a, body_a = multipart_fixture("BoundaryA", [("index.ts", b"alpha"), ("lib/x.ts", b"beta")])
     type_b, body_b = multipart_fixture("BoundaryB", [("lib/x.ts", b"beta"), ("index.ts", b"alpha")])
-    files_a = parse_multipart_files(type_a, body_a)
-    files_b = parse_multipart_files(type_b, body_b)
+    files_a = parse_multipart_files(type_a, body_a, fallback_metadata=fallback)
+    files_b = parse_multipart_files(type_b, body_b, fallback_metadata=fallback)
     digest_a, _, paths_a = canonical_manifest(files_a)
     digest_b, _, paths_b = canonical_manifest(files_b)
     require(digest_a == digest_b, "boundary changed manifest")
@@ -1231,8 +1520,8 @@ def manifest_self_tests() -> None:
     require(canonical_manifest(removed)[0] != digest_a, "path-set change did not mismatch")
     type_meta, body_meta = multipart_fixture("BoundaryC", [("index.ts", b"alpha"), ("lib/x.ts", b"beta")], True)
     require(canonical_manifest(parse_multipart_files(type_meta, body_meta))[0] == digest_a, "metadata part altered manifest")
-    expect_call_failure("absolute path", canonical_manifest, {"/index.ts": b"x"})
-    expect_call_failure("path traversal", canonical_manifest, {"lib/../index.ts": b"x"})
+    expect_call_failure("absolute manifest path", canonical_manifest, {"/index.ts": b"x"})
+    expect_call_failure("manifest path traversal", canonical_manifest, {"lib/../index.ts": b"x"})
     expect_call_failure("duplicate normalized path", canonical_manifest, {"index.ts": b"x", "notification-dispatcher/index.ts": b"x"})
     expect_call_failure("malformed boundary", parse_multipart_files, "multipart/form-data; boundary=bad space", body_a)
     expect_call_failure("nonmultipart", parse_multipart_files, "application/octet-stream", body_a)
@@ -1247,14 +1536,188 @@ def manifest_self_tests() -> None:
     extra_runtime = dict(files_b, **{"extra.ts": b"x"})
     require(canonical_manifest(extra_runtime)[0] != digest_b, "extra runtime file did not mismatch")
     expect_call_failure("symlink mode", validate_source_mode, stat.S_IFLNK | 0o777)
-    expect_call_failure("size limit", parse_multipart_files, type_a, body_a, max_bytes=1)
-    expect_call_failure("part limit", parse_multipart_files, type_a, body_a, max_parts=1)
+    expect_call_failure("size limit", parse_multipart_files, type_a, body_a, fallback_metadata=fallback, max_bytes=1)
+    expect_call_failure("part limit", parse_multipart_files, type_a, body_a, fallback_metadata=fallback, max_parts=1)
+
+
+def official_multipart_self_tests() -> None:
+    relative_type, relative_body = multipart_fixture(
+        "OfficialRelative",
+        [("source/index.ts", b"alpha"), ("source/lib/utils.ts", b"beta")],
+        True,
+        {"entrypoint_path": "source/index.ts"},
+    )
+    relative_files = parse_multipart_files(relative_type, relative_body)
+    require(set(relative_files) == {"index.ts", "lib/utils.ts"}, "relative entrypoint normalization failed")
+
+    absolute_type, absolute_body = multipart_fixture(
+        "OfficialAbsolute",
+        [
+            ("/tmp/functions/source/index.ts", b"alpha"),
+            ("/tmp/functions/source/lib/utils.ts", b"beta"),
+        ],
+        True,
+        {"deno2_entrypoint_path": "file:///tmp/functions/source/index.ts"},
+    )
+    absolute_files = parse_multipart_files(absolute_type, absolute_body)
+    require(set(absolute_files) == {"index.ts", "lib/utils.ts"}, "absolute entrypoint normalization failed")
+
+    header_type, header_body = multipart_custom_fixture(
+        "OfficialHeader",
+        [{
+            "filename": "index.ts",
+            "supabase_path": "/tmp/functions/source/index.ts",
+            "content": b"alpha",
+        }],
+        {"entrypoint_path": "file:///tmp/functions/source/index.ts"},
+    )
+    require(set(parse_multipart_files(header_type, header_body)) == {"index.ts"}, "absolute Supabase-Path was not normalized")
+
+    outside_type, outside_body = multipart_fixture(
+        "OfficialOutside",
+        [("/tmp/functions/other/index.ts", b"alpha")],
+        True,
+        {"entrypoint_path": "file:///tmp/functions/source/index.ts"},
+    )
+    expect_call_failure("absolute path outside root", parse_multipart_files, outside_type, outside_body)
+
+    traversal_type, traversal_body = multipart_fixture(
+        "OfficialTraversal",
+        [("source/../escape.ts", b"alpha")],
+        True,
+        {"entrypoint_path": "source/index.ts"},
+    )
+    expect_call_failure("relative traversal", parse_multipart_files, traversal_type, traversal_body)
+
+    no_meta_type, no_meta_body = multipart_fixture(
+        "OfficialNoMetadata",
+        [("/tmp/functions/source/index.ts", b"alpha")],
+    )
+    expect_call_failure("absolute path without metadata", parse_multipart_files, no_meta_type, no_meta_body)
+
+    incompatible_type, incompatible_body = multipart_fixture(
+        "OfficialIncompatible",
+        [("source/other.ts", b"alpha")],
+        True,
+        {"entrypoint_path": "source/index.ts"},
+    )
+    expect_call_failure("entrypoint missing from files", parse_multipart_files, incompatible_type, incompatible_body)
+
+    collision_type, collision_body = multipart_custom_fixture(
+        "OfficialCollision",
+        [
+            {"filename": "source/index.ts", "supabase_path": None, "content": b"alpha"},
+            {"filename": "index.ts", "supabase_path": None, "content": b"beta"},
+        ],
+        {"entrypoint_path": "source/index.ts"},
+    )
+    expect_call_failure("normalized path collision", parse_multipart_files, collision_type, collision_body)
+
+    boundary2_type, boundary2_body = multipart_fixture(
+        "OfficialBoundary2",
+        [("source/index.ts", b"alpha"), ("source/lib/utils.ts", b"beta")],
+        True,
+        {"entrypoint_path": "source/index.ts"},
+    )
+    require(canonical_manifest(parse_multipart_files(boundary2_type, boundary2_body))[0] == canonical_manifest(relative_files)[0], "official boundary changed digest")
+
+    order_type, order_body = multipart_fixture(
+        "OfficialOrder",
+        [("source/lib/utils.ts", b"beta"), ("source/index.ts", b"alpha")],
+        True,
+        {"entrypoint_path": "source/index.ts"},
+    )
+    require(canonical_manifest(parse_multipart_files(order_type, order_body))[0] == canonical_manifest(relative_files)[0], "official part order changed digest")
+
+    metadata_type, metadata_body = multipart_fixture(
+        "OfficialMetadata",
+        [("source/index.ts", b"alpha"), ("source/lib/utils.ts", b"beta")],
+        True,
+        {"entrypoint_path": "source/index.ts", "version": 99},
+    )
+    require(canonical_manifest(parse_multipart_files(metadata_type, metadata_body))[0] == canonical_manifest(relative_files)[0], "metadata changed source digest")
+
+    changed_files = dict(relative_files)
+    changed_files["index.ts"] = b"changed"
+    require(canonical_manifest(changed_files)[0] != canonical_manifest(relative_files)[0], "official byte change did not mismatch")
+
+    extra_files = dict(relative_files, **{"extra.ts": b"x"})
+    require(canonical_manifest(extra_files)[0] != canonical_manifest(relative_files)[0], "official extra file did not mismatch")
+
+    expect_call_failure("official symlink mode", validate_source_mode, stat.S_IFLNK | 0o777)
+    expect_call_failure("official size limit", parse_multipart_files, relative_type, relative_body, max_bytes=1)
+    expect_call_failure("official part limit", parse_multipart_files, relative_type, relative_body, max_parts=1)
+
+
+def receipt_security_self_tests() -> None:
+    validate_artifact_object(valid_fixture(), pending_allowed=False)
+
+    bucket_absent = copy.deepcopy(valid_fixture())
+    bucket_absent["receipt_security_contract"].update({
+        "expected_bucket_exists": False,
+        "expected_bucket_private": False,
+    })
+    validate_artifact_object(bucket_absent, pending_allowed=False)
+
+    bucket_public = copy.deepcopy(valid_fixture())
+    bucket_public["receipt_security_contract"]["expected_bucket_private"] = False
+    validate_artifact_object(bucket_public, pending_allowed=False)
+
+    outside = copy.deepcopy(valid_fixture())
+    outside["receipt_security_contract"]["evidence_rows_outside_expected_bucket"] = 2
+    validate_artifact_object(outside, pending_allowed=False)
+
+    invalid_shareable = copy.deepcopy(valid_fixture())
+    invalid_shareable["receipt_security_contract"]["shareable_invalid_page_rows"] = 1
+    validate_artifact_object(invalid_shareable, pending_allowed=False)
+
+    policy_absent = copy.deepcopy(valid_fixture())
+    policy_absent["receipt_security_contract"]["select_policy_present"] = False
+    validate_artifact_object(policy_absent, pending_allowed=False)
+
+    helper_absent = copy.deepcopy(valid_fixture())
+    helper_absent["receipt_security_contract"].update({
+        "guard_helper_exists": False,
+        "guard_helper_security_definer": False,
+        "guard_helper_contract_match": False,
+        "guard_helper_execute_authenticated": False,
+        "guard_helper_execute_service_role": False,
+        "guard_helper_execute_anon": False,
+    })
+    validate_artifact_object(helper_absent, pending_allowed=False)
+
+    anon_access = copy.deepcopy(valid_fixture())
+    anon_access["receipt_security_contract"]["guard_helper_execute_anon"] = True
+    validate_artifact_object(anon_access, pending_allowed=False)
+
+    direct_select = copy.deepcopy(valid_fixture())
+    direct_select["receipt_security_contract"]["evidence_authenticated_select"] = True
+    validate_artifact_object(direct_select, pending_allowed=False)
+
+    expect_artifact_failure(
+        "negative receipt count",
+        lambda item: item["receipt_security_contract"].__setitem__("shareable_rows", -1),
+    )
+    expect_artifact_failure(
+        "unknown receipt field",
+        lambda item: item["receipt_security_contract"].__setitem__("unknown", False),
+    )
+    expect_artifact_failure(
+        "raw policy expression",
+        lambda item: item["receipt_security_contract"].__setitem__("select_policy_present", "qual = raw"),
+    )
+    expect_artifact_failure(
+        "bucket name value",
+        lambda item: item["receipt_security_contract"].__setitem__("expected_bucket_exists", "private-bucket"),
+    )
 
 
 def self_test(_: argparse.Namespace) -> None:
     validate_artifact_object(valid_fixture(), pending_allowed=False)
     identity_self_tests()
     manifest_self_tests()
+    official_multipart_self_tests()
+    receipt_security_self_tests()
     artifact_cases = (
         ("top-level unknown", lambda item: item.__setitem__("unknown", {})),
         ("wrong provider", lambda item: item["delivery_architecture"].__setitem__("email_provider", "other")),

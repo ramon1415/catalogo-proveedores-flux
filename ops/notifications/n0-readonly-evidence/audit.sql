@@ -29,6 +29,204 @@ SELECT CASE WHEN to_regclass('public.financial_outbox_events') IS NULL THEN 0 EL
 SELECT CASE WHEN to_regclass('public.payment_requests') IS NULL THEN 0 ELSE 1 END AS has_payment_requests \gset
 SELECT CASE WHEN to_regclass('storage.buckets') IS NULL THEN 0 ELSE 1 END AS has_storage_buckets \gset
 
+\if :has_storage_buckets
+  SELECT
+    (count(*) = 1)::text AS expected_bucket_exists,
+    (count(*) = 1 AND bool_and(NOT public))::text AS expected_bucket_private
+  FROM storage.buckets
+  WHERE id = 'payment-batch-documents'
+  \gset
+\else
+  \set expected_bucket_exists false
+  \set expected_bucket_private false
+\endif
+
+\if :has_payment_evidence
+  SELECT
+    count(*) FILTER (WHERE storage_bucket = 'payment-batch-documents')::integer::text
+      AS evidence_rows_in_expected_bucket,
+    count(*) FILTER (WHERE storage_bucket <> 'payment-batch-documents')::integer::text
+      AS evidence_rows_outside_expected_bucket,
+    count(*) FILTER (WHERE status = 'shareable')::integer::text
+      AS shareable_rows,
+    count(*) FILTER (WHERE status = 'shareable' AND page_count IS DISTINCT FROM 1)::integer::text
+      AS shareable_invalid_page_rows,
+    count(*) FILTER (WHERE status = 'shareable' AND single_operation_attested IS NOT TRUE)::integer::text
+      AS shareable_without_attestation_rows,
+    count(*) FILTER (WHERE status = 'shareable' AND individual_sha256 IS NULL)::integer::text
+      AS shareable_without_individual_hash_rows
+  FROM public.payment_operation_evidence
+  \gset
+\else
+  \set evidence_rows_in_expected_bucket null
+  \set evidence_rows_outside_expected_bucket null
+  \set shareable_rows null
+  \set shareable_invalid_page_rows null
+  \set shareable_without_attestation_rows null
+  \set shareable_without_individual_hash_rows null
+\endif
+
+WITH constraint_contract AS (
+  SELECT
+    conname,
+    contype,
+    pg_get_constraintdef(oid, true) AS definition
+  FROM pg_catalog.pg_constraint
+  WHERE conrelid IN (
+    to_regclass('public.payment_operation_evidence'),
+    to_regclass('public.payment_request_receipt_links')
+  )
+)
+SELECT
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_operation_evidence_bucket_check'
+      AND definition ILIKE '%storage_bucket%'
+      AND definition ILIKE '%payment-batch-documents%'
+  )::text AS bucket_constraint_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_operation_evidence_path_check'
+      AND definition ILIKE '%storage_path%'
+      AND definition ILIKE '%evidence%'
+      AND definition ILIKE '%.pdf%'
+  )::text AS storage_path_constraint_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_operation_evidence_pdf_check'
+      AND definition ILIKE '%page_count%'
+      AND definition ILIKE '%= 1%'
+  )::text AS single_page_constraint_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_operation_evidence_attestation_check'
+      AND definition ILIKE '%shareable%'
+      AND definition ILIKE '%single_operation_attested%'
+  )::text AS shareable_attestation_constraint_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_request_receipt_links_operation_key'
+      AND contype = 'u'
+      AND definition ILIKE '%operation_id%'
+  )::text AS operation_unique_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_request_receipt_links_request_key'
+      AND contype = 'u'
+      AND definition ILIKE '%payment_request_id%'
+  )::text AS request_unique_enforced,
+  EXISTS (
+    SELECT 1 FROM constraint_contract
+    WHERE conname = 'payment_request_receipt_links_evidence_key'
+      AND contype = 'u'
+      AND definition ILIKE '%evidence_id%'
+  )::text AS evidence_unique_enforced
+\gset
+
+WITH policy_contract AS (
+  SELECT policyname, cmd, roles, qual, with_check
+  FROM pg_catalog.pg_policies
+  WHERE schemaname = 'storage'
+    AND tablename = 'objects'
+)
+SELECT
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_select'
+      AND cmd = 'SELECT'
+  )::text AS select_policy_present,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_insert'
+      AND cmd = 'INSERT'
+  )::text AS insert_policy_present,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_select'
+      AND roles = ARRAY['authenticated']::name[]
+  )::text AS select_policy_authenticated_only,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_insert'
+      AND roles = ARRAY['authenticated']::name[]
+  )::text AS insert_policy_authenticated_only,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_select'
+      AND qual ILIKE '%payment-batch-documents%'
+  )::text AS select_policy_expected_bucket_scoped,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_insert'
+      AND with_check ILIKE '%payment-batch-documents%'
+  )::text AS insert_policy_expected_bucket_scoped,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_select'
+      AND qual ILIKE '%payment_receipt_evidence_storage_path_allowed%'
+  )::text AS select_policy_uses_guard_helper,
+  EXISTS (
+    SELECT 1 FROM policy_contract
+    WHERE policyname = 'payment_receipt_evidence_finance_insert'
+      AND with_check ILIKE '%payment_receipt_evidence_storage_path_allowed%'
+  )::text AS insert_policy_uses_guard_helper
+\gset
+
+WITH helper AS (
+  SELECT
+    procedure.oid,
+    procedure.prosecdef,
+    pg_get_functiondef(procedure.oid) AS definition
+  FROM pg_catalog.pg_proc procedure
+  JOIN pg_catalog.pg_namespace namespace
+    ON namespace.oid = procedure.pronamespace
+  WHERE namespace.nspname = 'public'
+    AND procedure.oid = to_regprocedure(
+      'public.payment_receipt_evidence_storage_path_allowed(text,boolean)'
+    )
+)
+SELECT
+  EXISTS (SELECT 1 FROM helper)::text AS guard_helper_exists,
+  EXISTS (
+    SELECT 1 FROM helper WHERE prosecdef
+  )::text AS guard_helper_security_definer,
+  EXISTS (
+    SELECT 1 FROM helper
+    WHERE definition ILIKE '%payment-batch-documents%'
+      AND definition ILIKE '%flux_finance_roles%'
+      AND definition ILIKE '%has_active_company_membership%'
+      AND definition ILIKE '%pending_upload%'
+      AND definition ILIKE '%created_by%'
+      AND definition ILIKE '%current_profile_id%'
+  )::text AS guard_helper_contract_match,
+  COALESCE(has_function_privilege(
+    'authenticated',
+    to_regprocedure('public.payment_receipt_evidence_storage_path_allowed(text,boolean)'),
+    'EXECUTE'
+  ), false)::text AS guard_helper_execute_authenticated,
+  COALESCE(has_function_privilege(
+    'service_role',
+    to_regprocedure('public.payment_receipt_evidence_storage_path_allowed(text,boolean)'),
+    'EXECUTE'
+  ), false)::text AS guard_helper_execute_service_role,
+  COALESCE(has_function_privilege(
+    'anon',
+    to_regprocedure('public.payment_receipt_evidence_storage_path_allowed(text,boolean)'),
+    'EXECUTE'
+  ), false)::text AS guard_helper_execute_anon,
+  COALESCE(has_table_privilege(
+    'authenticated',
+    to_regclass('public.payment_operation_evidence'),
+    'SELECT'
+  ), false)::text AS evidence_authenticated_select,
+  COALESCE(has_table_privilege(
+    'authenticated',
+    to_regclass('public.payment_request_receipt_links'),
+    'SELECT'
+  ), false)::text AS receipt_links_authenticated_select
+FROM (SELECT 1) singleton
+\gset
+
 \if :has_migrations
   \if :has_migration_name
     WITH required(version) AS (
@@ -663,5 +861,45 @@ FROM relations;
     )
   )::text;
 \endif
+
+SELECT jsonb_build_object(
+  'section', 'receipt_security_contract',
+  'data', jsonb_build_object(
+    'available', true,
+    'expected_bucket_exists', :'expected_bucket_exists'::boolean,
+    'expected_bucket_private', :'expected_bucket_private'::boolean,
+    'evidence_table_exists', :'has_payment_evidence'::integer = 1,
+    'receipt_links_table_exists', :'has_receipt_links'::integer = 1,
+    'evidence_rows_in_expected_bucket', NULLIF(:'evidence_rows_in_expected_bucket', 'null')::integer,
+    'evidence_rows_outside_expected_bucket', NULLIF(:'evidence_rows_outside_expected_bucket', 'null')::integer,
+    'shareable_rows', NULLIF(:'shareable_rows', 'null')::integer,
+    'shareable_invalid_page_rows', NULLIF(:'shareable_invalid_page_rows', 'null')::integer,
+    'shareable_without_attestation_rows', NULLIF(:'shareable_without_attestation_rows', 'null')::integer,
+    'shareable_without_individual_hash_rows', NULLIF(:'shareable_without_individual_hash_rows', 'null')::integer,
+    'bucket_constraint_enforced', :'bucket_constraint_enforced'::boolean,
+    'storage_path_constraint_enforced', :'storage_path_constraint_enforced'::boolean,
+    'single_page_constraint_enforced', :'single_page_constraint_enforced'::boolean,
+    'shareable_attestation_constraint_enforced', :'shareable_attestation_constraint_enforced'::boolean,
+    'operation_unique_enforced', :'operation_unique_enforced'::boolean,
+    'request_unique_enforced', :'request_unique_enforced'::boolean,
+    'evidence_unique_enforced', :'evidence_unique_enforced'::boolean,
+    'select_policy_present', :'select_policy_present'::boolean,
+    'insert_policy_present', :'insert_policy_present'::boolean,
+    'select_policy_authenticated_only', :'select_policy_authenticated_only'::boolean,
+    'insert_policy_authenticated_only', :'insert_policy_authenticated_only'::boolean,
+    'select_policy_expected_bucket_scoped', :'select_policy_expected_bucket_scoped'::boolean,
+    'insert_policy_expected_bucket_scoped', :'insert_policy_expected_bucket_scoped'::boolean,
+    'select_policy_uses_guard_helper', :'select_policy_uses_guard_helper'::boolean,
+    'insert_policy_uses_guard_helper', :'insert_policy_uses_guard_helper'::boolean,
+    'guard_helper_exists', :'guard_helper_exists'::boolean,
+    'guard_helper_security_definer', :'guard_helper_security_definer'::boolean,
+    'guard_helper_contract_match', :'guard_helper_contract_match'::boolean,
+    'guard_helper_execute_authenticated', :'guard_helper_execute_authenticated'::boolean,
+    'guard_helper_execute_service_role', :'guard_helper_execute_service_role'::boolean,
+    'guard_helper_execute_anon', :'guard_helper_execute_anon'::boolean,
+    'evidence_authenticated_select', :'evidence_authenticated_select'::boolean,
+    'receipt_links_authenticated_select', :'receipt_links_authenticated_select'::boolean
+  )
+)::text;
 
 COMMIT;

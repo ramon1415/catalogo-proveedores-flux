@@ -54,7 +54,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          changed_file="${RUNNER_TEMP}/notifications-n0-r2a-r2-changed-files.txt"
+          changed_file="${RUNNER_TEMP}/notifications-n0-r2a-r3-changed-files.txt"
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > "${changed_file}"
           elif [[ "${EVENT_NAME}" == "push" && "${BASE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
@@ -72,7 +72,7 @@ jobs:
             --root . \
             --changed-files "${{ steps.changes.outputs.file }}"
 
-      - name: Exercise the artifact v3 identity and manifest validators
+      - name: Exercise the artifact v4 receipt and official path validators
         shell: bash
         run: |
           set -euo pipefail
@@ -84,13 +84,15 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Notifications N0 R2A-R2"
+            echo "### Notifications N0 R2A-R3"
             echo "- Architecture: Supabase Edge Function and Resend"
-            echo "- Schema: notifications-n0-evidence/v3"
+            echo "- Schema: notifications-n0-evidence/v4"
             echo "- Scope: static safety contract"
             echo "- Live DEV access: not executed for pull requests"
             echo "- Identity fixtures: 17"
             echo "- Multipart and manifest fixtures: 20"
+            echo "- Receipt security fixtures: 13"
+            echo "- Official multipart path fixtures: 16"
             echo "- Provider API calls: 0"
             echo "- Emails sent: 0"
             echo "- Artifact upload: not performed by this job"
