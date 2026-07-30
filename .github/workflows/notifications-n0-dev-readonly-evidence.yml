@@ -54,7 +54,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          changed_file="${RUNNER_TEMP}/notifications-n0-r2a-changed-files.txt"
+          changed_file="${RUNNER_TEMP}/notifications-n0-r2a-r2-changed-files.txt"
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             git diff --name-only "${BASE_SHA}" "${HEAD_SHA}" > "${changed_file}"
           elif [[ "${EVENT_NAME}" == "push" && "${BASE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
@@ -72,7 +72,7 @@ jobs:
             --root . \
             --changed-files "${{ steps.changes.outputs.file }}"
 
-      - name: Exercise the artifact v2 validator
+      - name: Exercise the artifact v3 identity and manifest validators
         shell: bash
         run: |
           set -euo pipefail
@@ -84,10 +84,13 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Notifications N0 R2A-R1"
+            echo "### Notifications N0 R2A-R2"
             echo "- Architecture: Supabase Edge Function and Resend"
+            echo "- Schema: notifications-n0-evidence/v3"
             echo "- Scope: static safety contract"
             echo "- Live DEV access: not executed for pull requests"
+            echo "- Identity fixtures: 17"
+            echo "- Multipart and manifest fixtures: 20"
             echo "- Provider API calls: 0"
             echo "- Emails sent: 0"
             echo "- Artifact upload: not performed by this job"
@@ -110,7 +113,7 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
     steps:
-      - name: Reassert immutable execution guards
+      - name: Reassert immutable execution guards and required secrets
         shell: bash
         env:
           REPOSITORY: ${{ github.repository }}
@@ -121,8 +124,8 @@ jobs:
           [[ "${REPOSITORY}" == "ramon1415/catalogo-proveedores-flux" ]]
           [[ "${REF_NAME}" == "refs/heads/dev" ]]
           [[ "${EVENT_NAME}" == "push" || "${EVENT_NAME}" == "workflow_dispatch" ]]
-          if [[ -z "${SUPABASE_DEV_DB_URL:-}" ]]; then
-            echo "Required DEV database credential is unavailable."
+          if [[ -z "${SUPABASE_DEV_DB_URL:-}" || -z "${SUPABASE_ACCESS_TOKEN:-}" || -z "${SUPABASE_DEV_PROJECT_REF:-}" ]]; then
+            echo "DEV_IDENTITY_PRECHECK_FAILED"
             exit 1
           fi
 
@@ -131,13 +134,6 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-
-      - name: Install the PostgreSQL read-only client
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client
 
       - name: Prepare private working storage
         id: storage
@@ -150,6 +146,45 @@ jobs:
           chmod 700 "${private_dir}" "${output_dir}"
           echo "private_dir=${private_dir}" >> "${GITHUB_OUTPUT}"
           echo "output_dir=${output_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate project ref hash and database URL locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py identity-local
+
+      - name: Read and bind exact DEV project metadata
+        shell: bash
+        env:
+          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
+        run: |
+          set -euo pipefail
+          set +e
+          curl --fail --silent --show-error --max-time 30 -X GET \
+            -D "${PRIVATE_DIR}/project-headers.txt" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}" \
+            > "${PRIVATE_DIR}/project-metadata.json" \
+            2> "${PRIVATE_DIR}/project-request.stderr"
+          metadata_rc=$?
+          set -e
+          rm -f "${PRIVATE_DIR}/project-request.stderr"
+          if [[ ${metadata_rc} -ne 0 ]]; then
+            rm -f "${PRIVATE_DIR}/project-metadata.json" "${PRIVATE_DIR}/project-headers.txt"
+            echo "DEV_IDENTITY_PRECHECK_FAILED"
+            exit 1
+          fi
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py identity-metadata \
+            --project-metadata "${PRIVATE_DIR}/project-metadata.json" \
+            --project-headers "${PRIVATE_DIR}/project-headers.txt" \
+            --identity-marker "${PRIVATE_DIR}/environment-identity.json"
+
+      - name: Install the PostgreSQL read-only client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
 
       - name: Read database catalog and aggregates
         shell: bash
@@ -176,62 +211,79 @@ jobs:
             exit 1
           fi
 
-      - name: Read dispatcher metadata and body
+      - name: Read exact dispatcher metadata and multipart body
         id: dispatcher
         shell: bash
         env:
           PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
         run: |
           set -euo pipefail
-          status="unavailable"
-          if [[ -n "${SUPABASE_ACCESS_TOKEN:-}" && -n "${SUPABASE_DEV_PROJECT_REF:-}" ]]; then
+          metadata_status="unavailable"
+          body_status="not_collected"
+          set +e
+          curl --fail --silent --show-error --max-time 30 -X GET \
+            -D "${PRIVATE_DIR}/dispatcher-metadata-headers.txt" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions/notification-dispatcher" \
+            > "${PRIVATE_DIR}/dispatcher-metadata.json" \
+            2> "${PRIVATE_DIR}/dispatcher-request.stderr"
+          metadata_rc=$?
+          set -e
+          if [[ ${metadata_rc} -eq 0 ]]; then
+            metadata_status="available"
             set +e
-            curl --fail --silent --show-error -X GET \
+            curl --fail --silent --show-error --max-time 30 -X GET \
+              -D "${PRIVATE_DIR}/dispatcher-body-headers.txt" \
               -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions" \
-              > "${PRIVATE_DIR}/dispatcher-metadata.json" \
-              2> "${PRIVATE_DIR}/dispatcher.stderr"
-            metadata_rc=$?
-            curl --fail --silent --show-error -X GET \
-              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H "Accept: multipart/form-data" \
               "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions/notification-dispatcher/body" \
               > "${PRIVATE_DIR}/dispatcher-body.bin" \
-              2>> "${PRIVATE_DIR}/dispatcher.stderr"
+              2>> "${PRIVATE_DIR}/dispatcher-request.stderr"
             body_rc=$?
             set -e
-            rm -f "${PRIVATE_DIR}/dispatcher.stderr"
-            if [[ ${metadata_rc} -eq 0 ]]; then
-              status="available"
-              if [[ ${body_rc} -ne 0 ]]; then
-                rm -f "${PRIVATE_DIR}/dispatcher-body.bin"
-              fi
+            if [[ ${body_rc} -eq 0 ]]; then
+              body_status="available"
             else
-              rm -f "${PRIVATE_DIR}/dispatcher-metadata.json" "${PRIVATE_DIR}/dispatcher-body.bin"
+              body_status="unavailable"
+              rm -f "${PRIVATE_DIR}/dispatcher-body.bin" "${PRIVATE_DIR}/dispatcher-body-headers.txt"
             fi
+          else
+            rm -f "${PRIVATE_DIR}/dispatcher-metadata.json" "${PRIVATE_DIR}/dispatcher-metadata-headers.txt"
           fi
-          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+          rm -f "${PRIVATE_DIR}/dispatcher-request.stderr"
+          echo "metadata_status=${metadata_status}" >> "${GITHUB_OUTPUT}"
+          echo "body_status=${body_status}" >> "${GITHUB_OUTPUT}"
 
       - name: Build the allowlisted artifact
         shell: bash
         env:
           PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
           OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
-          DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
+          METADATA_STATUS: ${{ steps.dispatcher.outputs.metadata_status }}
+          BODY_STATUS: ${{ steps.dispatcher.outputs.body_status }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           arguments=(
             build
             --db-jsonl "${PRIVATE_DIR}/database.jsonl"
-            --dispatcher-status "${DISPATCHER_STATUS}"
-            --source-file "${GITHUB_WORKSPACE}/supabase/functions/notification-dispatcher/index.ts"
+            --identity-marker "${PRIVATE_DIR}/environment-identity.json"
+            --dispatcher-metadata-status "${METADATA_STATUS}"
+            --dispatcher-body-status "${BODY_STATUS}"
+            --source-dir "${GITHUB_WORKSPACE}/supabase/functions/notification-dispatcher"
             --github-head-sha "${HEAD_SHA}"
             --output "${OUTPUT_DIR}/artifact.json"
           )
-          if [[ "${DISPATCHER_STATUS}" == "available" ]]; then
+          if [[ "${METADATA_STATUS}" == "available" ]]; then
             arguments+=(
               --dispatcher-metadata "${PRIVATE_DIR}/dispatcher-metadata.json"
+              --dispatcher-metadata-headers "${PRIVATE_DIR}/dispatcher-metadata-headers.txt"
+            )
+          fi
+          if [[ "${BODY_STATUS}" == "available" ]]; then
+            arguments+=(
               --dispatcher-body "${PRIVATE_DIR}/dispatcher-body.bin"
+              --dispatcher-body-headers "${PRIVATE_DIR}/dispatcher-body-headers.txt"
             )
           fi
           python ops/notifications/n0-readonly-evidence/validate_artifact.py "${arguments[@]}"
@@ -284,15 +336,17 @@ jobs:
         env:
           ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
           ARTIFACT_BYTES: ${{ steps.artifact.outputs.bytes }}
-          DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
+          METADATA_STATUS: ${{ steps.dispatcher.outputs.metadata_status }}
+          BODY_STATUS: ${{ steps.dispatcher.outputs.body_status }}
         run: |
           set -euo pipefail
           {
             echo "### Notifications N0 sanitized evidence"
-            echo "- Environment: DEV"
+            echo "- Environment identity: verified before database read"
             echo "- Database mode: repeatable-read, read-only"
             echo "- Architecture: Supabase Edge Function and Resend"
-            echo "- Dispatcher metadata: ${DISPATCHER_STATUS}"
+            echo "- Dispatcher metadata: ${METADATA_STATUS}"
+            echo "- Dispatcher body: ${BODY_STATUS}"
             echo "- Provider API called by audit: false"
             echo "- Emails sent by audit: false"
             echo "- SEND_MODE: UNKNOWN_BY_DESIGN"
@@ -312,6 +366,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "${PRIVATE_DIR:-}" && "${PRIVATE_DIR}" == "${RUNNER_TEMP}/notifications-n0-private" ]]; then
+            rm -f -- \
+              "${PRIVATE_DIR}/project-metadata.json" \
+              "${PRIVATE_DIR}/project-headers.txt" \
+              "${PRIVATE_DIR}/dispatcher-metadata.json" \
+              "${PRIVATE_DIR}/dispatcher-metadata-headers.txt" \
+              "${PRIVATE_DIR}/dispatcher-body.bin" \
+              "${PRIVATE_DIR}/dispatcher-body-headers.txt"
             rm -rf -- "${PRIVATE_DIR}"
           fi
           if [[ "${JOB_STATUS}" != "success" && -n "${OUTPUT_DIR:-}" && "${OUTPUT_DIR}" == "${GITHUB_WORKSPACE}/.audit-output" ]]; then

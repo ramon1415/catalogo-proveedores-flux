@@ -1,4 +1,5 @@
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL default_transaction_read_only = on;
 SET LOCAL statement_timeout = '30s';
 SET LOCAL lock_timeout = '5s';
 SET LOCAL idle_in_transaction_session_timeout = '45s';

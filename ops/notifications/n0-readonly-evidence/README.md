@@ -1,8 +1,6 @@
-# Notifications N0 — Resend-only sanitized DEV evidence path
+# Notifications N0 — sanitized DEV evidence
 
-## Purpose and architecture
-
-This directory defines the corrected R2A-R1 observability gate created after N0-R1 ended with `STOP / READ_ONLY_DEV_EVIDENCE_PATH_UNAVAILABLE`. The canonical notification architecture is:
+This directory defines a fail-closed, read-only discovery path for the approved delivery architecture:
 
 ```text
 notification_events
@@ -11,57 +9,69 @@ notification_events
 → notification_delivery_attempts
 ```
 
-The ledger is `notification_events`, delivery history is `notification_delivery_attempts`, the dispatcher is `notification-dispatcher`, the email provider is Resend, and exactly one consumer is required. The audit never acts as a consumer: provider API calls and emails sent by the audit are always false.
+n8n is retired and out of scope. The audit does not invoke or deploy the dispatcher, call Resend, send email, read runtime secret values, change `SEND_MODE`, or enable product behavior. `SEND_MODE` remains `UNKNOWN_BY_DESIGN`.
 
-n8n is retired and outside the canonical notification architecture (RETIRED / OUT_OF_SCOPE). This audit does not query it, use its secrets, depend on its state, or treat it as a scheduler or consumer; a legacy schema name is classified `LEGACY_SCHEMA_ONLY` and does not prove active use.
+## Gate and execution boundary
 
-R2A-R1 performs static checks only. It does not connect to DEV, read runtime secrets, invoke Resend, invoke or deploy the dispatcher, execute SQL, or upload live evidence. It does not enable N1.
+Pull requests run only `static_checks`: no environment, no secrets, no DEV connection, and no artifact upload. The future live job is limited to the exact repository and `refs/heads/dev`, requires the `DEV` environment, accepts no inputs, uses three DEV credentials only, and uploads one sanitized artifact with retention of at most seven days.
 
-## Execution split
+This R2A-R2 change prepares R2B; it does not execute R2B and does not enable N1. The expected Vercel context for the Draft PR is `EXPECTED_AUTOMATIC_PREVIEW`; no manual Vercel action is part of this workflow.
 
-The workflow contains two isolated jobs:
+## DEV environment identity
 
-1. `static_checks` runs on pull requests to `dev`. It has read-only repository permissions, no environment, no secrets, and no authenticated live access. It validates the four-file allowlist, workflow and Python syntax, SQL safety, artifact schema, supply-chain pins, and in-memory positive and negative validator fixtures.
-2. `collect_dev_evidence` is implemented for a separate, expressly authorized R2B gate. It is eligible only in the exact repository on `refs/heads/dev`, after static checks, on a qualifying push or input-free manual dispatch, under the protected `DEV` environment.
+Before any PostgreSQL command, the validator performs all of these checks:
 
-The future live job may use only the minimum database and official management-plane credentials required for read-only evidence. It has no Resend credential and no dispatcher invocation credential.
+1. The project ref is exactly 20 lowercase letters.
+2. `SHA-256(UTF-8("supabase-project-ref:" + ref))` matches the authorized constant using constant-time comparison.
+3. The parsed PostgreSQL URL is bound to the same ref through either the official direct host shape or the official pooler username shape.
+4. The database is `postgres`, the port is 5432 or 6543, and only safe TLS and timeout query options are accepted.
+5. A GET of the exact Supabase project resource returns metadata whose `ref` equals the same ref.
+6. Raw project response headers and body are deleted before the safe marker `DEV_ENVIRONMENT_IDENTITY_VERIFIED` is emitted.
 
-## Read-only evidence sources
+Any failure returns `DEV_IDENTITY_PRECHECK_FAILED`. This is fail-before-connect: PostgreSQL cannot run until ref hash, DB URL, host allowlist, and Management API metadata all agree. The artifact keeps only closed booleans; it never keeps or prints the project ref, DB URL, database host, username, token, or raw metadata.
 
-The database script begins with `REPEATABLE READ READ ONLY`, applies statement, lock, and idle-transaction timeouts, and ends with `COMMIT`. The runner also sets `default_transaction_read_only`. Queries are limited to structural catalogs and sanitized aggregates; there is no DDL, DML, application RPC, queue claim, or state transition.
+## Dispatcher source provenance
 
-The dispatcher is inspected in two ways: versioned source is scanned locally in the runner for the Resend integration contract, and an official management-plane GET may later provide deployment metadata and temporary source material for a digest comparison. The function is never invoked, deployed, updated, or retained.
+The exact dispatcher metadata resource and its `body` resource are fetched only with GET. The body request declares `Accept: multipart/form-data`. Transport headers, metadata, and body remain in runner-private temporary storage and are removed before artifact validation.
 
-The Resend source contract records whether the versioned dispatcher contains a provider reference, a send-mode guard, and an idempotency header. These are read-only observations. Absence of an idempotency header is an N1 concern and does not authorize its implementation here. Resend is never called.
+The parser uses the standard library, validates the multipart boundary, distinguishes metadata from files, and derives each file path from `Supabase-Path` or `Content-Disposition`. It normalizes separators and rejects absolute paths, traversal, malformed or ambiguous headers, missing paths, duplicates, symlinks, non-regular files, too many parts, and size-limit violations. Source is never imported, executed, or emitted.
 
-`SEND_MODE` remains exactly `UNKNOWN_BY_DESIGN` because runtime secret values are not read, hashed, inferred, or tested by this audit. A separate authorized gate must establish `test_only` before any future delivery test.
+### Canonical manifest
 
-## Artifact v2
+Runtime files and the recursive GitHub directory `supabase/functions/notification-dispatcher/` use the same canonical manifest algorithm:
 
-A successful future live job uploads exactly one `artifact.json`, retained for no more than seven days. Its schema is `notifications-n0-evidence/v2` and its top-level allowlist is:
+- normalize each relative path;
+- sort paths by their UTF-8 bytes;
+- for each path feed SHA-256 with the 8-byte big-endian path length, NUL, path bytes, NUL, 8-byte big-endian content length, NUL, and content bytes.
 
-- generation metadata, environment, and GitHub revision;
-- canonical delivery architecture;
-- migrations and database schema;
-- sanitized notification, intake, payment, receipt, and Storage aggregates;
-- dispatcher runtime metadata and allowlisted SHA-256 digests;
-- the Resend source contract;
-- send mode, source status, privacy validation, and cleanup.
+Only regular files participate, symlinks are fail-closed, and the artifact records counts and digests but no source paths or source bytes.
 
-The artifact contains no PII, email addresses, UUID values, business identifiers, project references, hosts, URLs, connection strings, tokens, secret values, payloads, raw errors, paths, filenames, provider response identifiers, source code, API responses, or raw logs.
+These digest types are intentionally different:
 
-Structural column, constraint, and index names may be inventoried without values. Any historical name associated with the retired component must be marked `LEGACY_SCHEMA_ONLY`; it is not a runtime dependency.
+- **transport body:** the raw multipart envelope; it is never hashed for source comparison;
+- **source manifest:** the canonical per-file digest used for runtime-to-GitHub comparison;
+- **bundle digest:** optional deployment metadata such as a valid `ezbr_sha256`; it is retained separately and never compared with a source manifest.
 
-## Fail-closed validation and cleanup
+Comparison states are `match`, `mismatch`, `metadata_only`, `body_unavailable`, `parse_failed`, `github_source_unavailable`, and `unavailable`. Unknown evidence remains null: only `match` yields `source_match=true`, only `mismatch` yields `source_match=false`, and `metadata_only` never claims source verification.
 
-The validator uses an exact recursive allowlist and permits SHA-256 only in dispatcher digest fields. It rejects unknown keys, prohibited providers or dispatchers, unsafe architecture flags, sensitive patterns, retained runtime source, function invocation, function deployment, provider API use, email sending, and runtime secret reads.
+## Artifact contract
 
-Positive and negative in-memory fixtures exercise schema v2, provider and dispatcher invariants, SEND_MODE, sensitive patterns, unknown fields, digest placement, and legacy structural classification. Fixtures are not versioned.
+The sole artifact uses `notifications-n0-evidence/v3` and the closed root allowlist:
 
-Raw database and dispatcher responses are stored only in private runner space and removed before final artifact validation. Failed validation deletes the artifact and emits only a generic failure marker. No raw response or stderr file is uploaded.
+`schema_version`, `generated_at_utc`, `environment`, `github`, `environment_identity`, `delivery_architecture`, `migrations`, `database_schema`, `notification_aggregates`, `intake_aggregates`, `payment_receipt_aggregates`, `storage`, `dispatcher_runtime`, `resend_source_contract`, `send_mode`, `source_status`, `privacy_validation`, and `cleanup`.
 
-## Vercel and next gate
+`environment_identity` contains only verified booleans. `dispatcher_runtime` separates metadata availability, multipart parsing, runtime and GitHub manifest digests, path-set comparison, optional bundle digest, and exact comparison state. `source_status` separately reports database, project identity, dispatcher metadata, dispatcher body, dispatcher manifest, GitHub source, and Resend source-contract provenance.
 
-`EXPECTED_AUTOMATIC_PREVIEW` is the classification for a non-production Preview created automatically by the repository's existing pull-request integration. It is not a manual deployment or direct production interaction, and R2A-R1 does not cancel, redeploy, promote, configure, or clean it up. Production evidence, a productive alias, or a manual promotion would require an immediate stop.
+The recursive privacy validator rejects unknown keys, project-ref-like values, email addresses, UUIDs, URLs, connection strings, JWTs, tokens, secrets, payloads, raw errors, storage paths, signed URLs, and SHA-256 values outside the three dispatcher digest fields. Legacy n8n names are accepted only as `LEGACY_SCHEMA_ONLY` database structure.
 
-R2B requires separate human authorization to integrate and execute the read-only audit. Until then the Draft PR remains unmerged, the live job remains skipped, N0 remains open, N1 remains blocked, and this route must send zero emails.
+## Static verification and cleanup
+
+In-memory self-tests cover 17 identity and DB URL cases plus 20 multipart and canonical manifest cases, including changing boundaries and part order, malformed transport, unsafe paths, duplicate paths, size limits, symlinks, unavailable-source states, and non-equivalence of bundle and source digests.
+
+The SQL begins with a repeatable-read, read-only transaction, explicitly enables `default_transaction_read_only`, applies timeouts, returns only catalog metadata and sanitized aggregates, and commits. It contains no DDL, DML, RPC, claim, state transition, PII, business identifier, filename, or raw error output.
+
+Raw project metadata, request headers, dispatcher metadata, dispatcher headers, multipart body, database output, and the private directory are deleted before upload or by the always-run cleanup step. The final artifact contains no PII and only the single allowlisted JSON file.
+
+## Remaining gate
+
+R2B remains pending and requires separate explicit authorization. Until then: no merge, no Ready transition, no live workflow dispatch, no secrets, no DEV read, no dispatcher body download, no dispatcher invocation, no Resend call, no email, no `SEND_MODE` read or change, and no N1.
