@@ -2933,6 +2933,44 @@ function requiredEnvironmentAny(env, names) {
   throw new GateError(`MISSING_ENVIRONMENT_${names[0]}`)
 }
 
+export const MUTABLE_BASELINE_READ_ONLY_ENV_KEYS = Object.freeze([
+  "SUPABASE_DEV_DB_URL",
+  "SUPABASE_DEV_PROJECT_REF",
+  "EXPECTED_RUNNER_HEAD",
+  "EXPECTED_RUNNER_SHA256",
+  "EXPECTED_RUNNER_GIT_BLOB",
+  "GIT_EXECUTABLE",
+])
+
+export function buildMutableBaselineReadOnlyEnvironment(parentEnv = process.env) {
+  const childEnv = {
+    SUPABASE_DEV_DB_URL: requiredEnvironment(parentEnv, "SUPABASE_DEV_DB_URL"),
+    SUPABASE_DEV_PROJECT_REF: requiredEnvironmentAny(parentEnv, [
+      "SUPABASE_DEV_PROJECT_REF",
+      "CONFIRMED_DEV_PROJECT_REF",
+    ]),
+    EXPECTED_RUNNER_HEAD: requiredEnvironmentAny(parentEnv, [
+      "EXPECTED_RUNNER_HEAD",
+      "EXPECTED_V6E_HEAD",
+    ]),
+    EXPECTED_RUNNER_SHA256: requiredEnvironmentAny(parentEnv, [
+      "EXPECTED_RUNNER_SHA256",
+      "EXPECTED_V6E_RUNNER_SHA256",
+    ]),
+    EXPECTED_RUNNER_GIT_BLOB: requiredEnvironmentAny(parentEnv, [
+      "EXPECTED_RUNNER_GIT_BLOB",
+      "EXPECTED_V6E_RUNNER_GIT_BLOB",
+    ]),
+  }
+  gate(
+    childEnv.SUPABASE_DEV_PROJECT_REF === DEV_PROJECT_REF,
+    "UNAUTHORIZED_PROJECT_REF",
+  )
+  const gitExecutable = String(parentEnv.GIT_EXECUTABLE || "").trim()
+  if (gitExecutable) childEnv.GIT_EXECUTABLE = gitExecutable
+  return Object.freeze(childEnv)
+}
+
 export function currentRunnerIdentity() {
   const bytes = fs.readFileSync(runnerPath)
   const blobHeader = Buffer.from(`blob ${bytes.byteLength}\0`)
@@ -3031,7 +3069,7 @@ export async function runLiveProviderAliasReadOnly(env = process.env) {
   }
 }
 
-function assertAuthenticatedReadOnlyModeEnvironment(env = process.env) {
+export function assertAuthenticatedReadOnlyModeEnvironment(env = process.env) {
   for (const name of [
     "ALLOW_MUTABLE_UAT",
     "EPHEMERAL_LINK_AUTHORIZED",
@@ -3282,6 +3320,15 @@ async function databaseLinkInspection(client, companyId) {
 }
 
 export function createMutableDependencies(env = process.env) {
+  const options = arguments[1] && typeof arguments[1] === "object"
+    ? arguments[1]
+    : {}
+  const runBaselineDiagnostic = options.runBaselineDiagnostic ||
+    runAuthenticatedReadOnlyPrecheckDiagnostic
+  gate(
+    typeof runBaselineDiagnostic === "function",
+    "CAPABILITY_MISSING_runBaselineDiagnostic",
+  )
   const supabaseUrl = `https://${DEV_PROJECT_REF}.supabase.co`
   const configuredSupabaseUrl = String(env.SUPABASE_URL || supabaseUrl)
     .trim()
@@ -3757,7 +3804,8 @@ export function createMutableDependencies(env = process.env) {
       await credentialResolver.resolve(QA_CREDENTIAL_STAGE.READ_ONLY_BASELINE, {
         runnerIdentity: currentRunnerIdentity(),
       })
-      const diagnostic = await runAuthenticatedReadOnlyPrecheckDiagnostic(env)
+      const baselineReadOnlyEnv = buildMutableBaselineReadOnlyEnvironment(env)
+      const diagnostic = await runBaselineDiagnostic(baselineReadOnlyEnv)
       gate(
         diagnostic.status === "PASS" &&
           diagnostic.fresh_baseline_completed === true &&

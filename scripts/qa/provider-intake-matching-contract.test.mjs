@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import crypto from "node:crypto"
+import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import test from "node:test"
@@ -14,13 +15,16 @@ import {
   FIXTURE_ALIASES,
   MOCK_BASELINE,
   MUTABLE_ACCESSIBILITY_HOOKS,
+  MUTABLE_BASELINE_READ_ONLY_ENV_KEYS,
   PROVIDER_SELECTOR_ENV,
   assertSanitizedProviderEvidence,
   assertExpiredLinkNormalizationTransition,
+  assertAuthenticatedReadOnlyModeEnvironment,
   assertMutableAuthorization,
   assertPublicFixturePostBudget,
   buildLiveProviderSelectorQuery,
   buildLiveProviderTargets,
+  buildMutableBaselineReadOnlyEnvironment,
   classifyConcurrentDevEvolution,
   classifyExpiredLinkState,
   classifyExpiredLinkStateFromDatabaseFilter,
@@ -28,6 +32,7 @@ import {
   createMutableDependencies,
   createPublicFixtureSubmitAttempt,
   createLiveStartSnapshot,
+  currentRunnerIdentity,
   demoLinkProtectedSnapshot,
   identifyAuthorizedDemoLink,
   isAlreadyNormalizedSafeHistory,
@@ -3388,4 +3393,291 @@ test("CRED-A1 mocked evidence contains no protected values or internal identifie
       .test(serialized),
     false,
   )
+})
+const C1_MUTABLE_FLAGS = Object.freeze([
+  "ALLOW_MUTABLE_UAT",
+  "EPHEMERAL_LINK_AUTHORIZED",
+  "FIXTURE_PROVISIONING_AUTHORIZED",
+  "IAM_ACTIVATION_AUTHORIZED",
+  "EXPIRED_LINK_NORMALIZATION_AUTHORIZED",
+])
+const C1_PROVIDER_A_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const C1_PROVIDER_B_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+const C1_FORBIDDEN_CHILD_KEYS = Object.freeze([
+  ...C1_MUTABLE_FLAGS,
+  "CONFIRMED_DEV_PROJECT_REF",
+  "APPROVED_RUNNER_SHA256",
+  "QA_MATCH_PROVIDER_A_ID",
+  "QA_MATCH_PROVIDER_B_ID",
+  "SUPABASE_DEV_SERVICE_ROLE_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_DEV_ANON_KEY",
+  "SUPABASE_ANON_KEY",
+  "QA_CAPTCHA_TOKEN",
+  "TURNSTILE_TOKEN",
+  "RAW_INTAKE_TOKEN",
+  "QA_PASSWORD",
+  "SUPABASE_ACCESS_TOKEN",
+  "ACCESS_TOKEN",
+  "REFRESH_TOKEN",
+  "PREVIEW_URL",
+  "NOTIFICATION_SECRET",
+])
+const C1_SENSITIVE_CHILD_VALUE_KEYS = Object.freeze([
+  "QA_MATCH_PROVIDER_A_ID",
+  "QA_MATCH_PROVIDER_B_ID",
+  "SUPABASE_DEV_SERVICE_ROLE_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_DEV_ANON_KEY",
+  "SUPABASE_ANON_KEY",
+  "QA_CAPTCHA_TOKEN",
+  "TURNSTILE_TOKEN",
+  "RAW_INTAKE_TOKEN",
+  "QA_PASSWORD",
+  "SUPABASE_ACCESS_TOKEN",
+  "ACCESS_TOKEN",
+  "REFRESH_TOKEN",
+  "PREVIEW_URL",
+  "NOTIFICATION_SECRET",
+])
+
+function c1ParentEnv() {
+  const identity = currentRunnerIdentity()
+  const head = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  }).trim()
+  return {
+    SUPABASE_DEV_DB_URL: "postgresql://qa:protected@db.invalid/dev",
+    CONFIRMED_DEV_PROJECT_REF: "scsirgbuqjcwoaxfacth",
+    EXPECTED_RUNNER_HEAD: head,
+    EXPECTED_RUNNER_SHA256: identity.sha256,
+    EXPECTED_RUNNER_GIT_BLOB: identity.git_blob,
+    GIT_EXECUTABLE: "git",
+    APPROVED_RUNNER_SHA256: identity.sha256,
+    ALLOW_MUTABLE_UAT: "true",
+    EPHEMERAL_LINK_AUTHORIZED: "true",
+    FIXTURE_PROVISIONING_AUTHORIZED: "true",
+    IAM_ACTIVATION_AUTHORIZED: "true",
+    EXPIRED_LINK_NORMALIZATION_AUTHORIZED: "true",
+    QA_MATCH_PROVIDER_A_ID: C1_PROVIDER_A_ID,
+    QA_MATCH_PROVIDER_B_ID: C1_PROVIDER_B_ID,
+    SUPABASE_DEV_SERVICE_ROLE_KEY: "qa-service-role-sentinel",
+    SUPABASE_SERVICE_ROLE_KEY: "qa-service-role-alias-sentinel",
+    SUPABASE_DEV_ANON_KEY: "qa-anon-sentinel",
+    SUPABASE_ANON_KEY: "qa-anon-alias-sentinel",
+    QA_CAPTCHA_TOKEN: "qa-captcha-sentinel",
+    TURNSTILE_TOKEN: "qa-turnstile-sentinel",
+    RAW_INTAKE_TOKEN: "qa-raw-token-sentinel",
+    QA_PASSWORD: "qa-password-sentinel",
+    SUPABASE_ACCESS_TOKEN: "qa-management-token-sentinel",
+    ACCESS_TOKEN: "qa-access-token-sentinel",
+    REFRESH_TOKEN: "qa-refresh-token-sentinel",
+    PREVIEW_URL: "https://preview.invalid",
+    NOTIFICATION_SECRET: "qa-notification-sentinel",
+    UNRELATED_REF: { retained: true },
+  }
+}
+
+function c1PassDiagnostic() {
+  return {
+    status: "PASS",
+    fresh_baseline_completed: true,
+    rollback_completed: true,
+    fresh_baseline: structuredClone(MOCK_BASELINE),
+  }
+}
+
+function c1SanitizedParentDigest(env) {
+  const material = {
+    keys: Object.keys(env).sort(),
+    mutable_flags: Object.fromEntries(
+      C1_MUTABLE_FLAGS.map((name) => [name, env[name] === "true"]),
+    ),
+    selectors_present: [Boolean(env.QA_MATCH_PROVIDER_A_ID), Boolean(env.QA_MATCH_PROVIDER_B_ID)],
+    protected_values_present: C1_FORBIDDEN_CHILD_KEYS
+      .filter((name) => !C1_MUTABLE_FLAGS.includes(name))
+      .map((name) => [name, Boolean(env[name])]),
+    frozen: Object.isFrozen(env),
+    unrelated_ref_present: env.UNRELATED_REF?.retained === true,
+  }
+  return crypto.createHash("sha256").update(JSON.stringify(material)).digest("hex")
+}
+
+const c1Child = (parent = c1ParentEnv()) => buildMutableBaselineReadOnlyEnvironment(parent)
+const c1Adapter = (parent, diagnostic = c1PassDiagnostic(), observe = () => {}) =>
+  createMutableDependencies(parent, {
+    runBaselineDiagnostic: async (childEnv) => {
+      observe(childEnv)
+      return diagnostic
+    },
+  })
+
+test("A3-RUNNER-C1 01 mutable parent authorization passes", () => {
+  assert.doesNotThrow(() => assertMutableAuthorization(c1ParentEnv()))
+})
+
+test("A3-RUNNER-C1 02 read-only child is a new frozen object", () => {
+  const parent = c1ParentEnv()
+  const child = c1Child(parent)
+  assert.notEqual(child, parent)
+  assert.equal(Object.getPrototypeOf(child), Object.prototype)
+  assert.equal(Object.isFrozen(child), true)
+})
+
+test("A3-RUNNER-C1 03 mutable flags are absent from child", () => {
+  const child = c1Child()
+  for (const name of C1_MUTABLE_FLAGS) assert.equal(Object.hasOwn(child, name), false)
+})
+
+test("A3-RUNNER-C1 04 provider selectors are absent from child", () => {
+  const child = c1Child()
+  assert.equal(Object.hasOwn(child, "QA_MATCH_PROVIDER_A_ID"), false)
+  assert.equal(Object.hasOwn(child, "QA_MATCH_PROVIDER_B_ID"), false)
+})
+
+test("A3-RUNNER-C1 05 mutable-only keys and sensitive values are absent from child", () => {
+  const parent = c1ParentEnv()
+  const child = c1Child(parent)
+
+  for (const name of C1_FORBIDDEN_CHILD_KEYS) {
+    assert.equal(Object.hasOwn(child, name), false)
+  }
+
+  const serialized = JSON.stringify(child)
+
+  for (const name of C1_SENSITIVE_CHILD_VALUE_KEYS) {
+    const value = parent[name]
+    if (value) {
+      assert.equal(serialized.includes(String(value)), false)
+    }
+  }
+
+  assert.equal(child.SUPABASE_DEV_PROJECT_REF, parent.CONFIRMED_DEV_PROJECT_REF)
+  assert.equal(child.EXPECTED_RUNNER_SHA256, parent.EXPECTED_RUNNER_SHA256)
+  assert.equal(parent.APPROVED_RUNNER_SHA256, parent.EXPECTED_RUNNER_SHA256)
+  assert.equal(Object.hasOwn(child, "CONFIRMED_DEV_PROJECT_REF"), false)
+  assert.equal(Object.hasOwn(child, "APPROVED_RUNNER_SHA256"), false)
+})
+
+test("A3-RUNNER-C1 06 required read-only values are canonicalized and allowlisted", () => {
+  const parent = c1ParentEnv()
+  const child = c1Child(parent)
+  assert.deepEqual(Object.keys(child), MUTABLE_BASELINE_READ_ONLY_ENV_KEYS)
+  assert.equal(child.SUPABASE_DEV_DB_URL, parent.SUPABASE_DEV_DB_URL)
+  assert.equal(child.SUPABASE_DEV_PROJECT_REF, parent.CONFIRMED_DEV_PROJECT_REF)
+  assert.equal(child.EXPECTED_RUNNER_HEAD, parent.EXPECTED_RUNNER_HEAD)
+  assert.equal(child.EXPECTED_RUNNER_SHA256, parent.EXPECTED_RUNNER_SHA256)
+  assert.equal(child.EXPECTED_RUNNER_GIT_BLOB, parent.EXPECTED_RUNNER_GIT_BLOB)
+  assert.equal(child.GIT_EXECUTABLE, "git")
+})
+
+test("A3-RUNNER-C1 07 parent environment digest remains unchanged", () => {
+  const parent = c1ParentEnv()
+  const before = c1SanitizedParentDigest(parent)
+  c1Child(parent)
+  assert.equal(c1SanitizedParentDigest(parent), before)
+})
+
+test("A3-RUNNER-C1 08 read-only guard still rejects mutable parent", () => {
+  assert.throws(() => assertAuthenticatedReadOnlyModeEnvironment(c1ParentEnv()), /MUTABLE_UAT_NOT_EXPLICITLY_AUTHORIZED/)
+})
+
+test("A3-RUNNER-C1 09 read-only guard accepts derived child", () => {
+  assert.doesNotThrow(() => assertAuthenticatedReadOnlyModeEnvironment(c1Child()))
+})
+
+test("A3-RUNNER-C1 10 captureBaseline passes child instead of parent", async () => {
+  const parent = c1ParentEnv()
+  let observed = null
+  const deps = c1Adapter(parent, c1PassDiagnostic(), (child) => { observed = child })
+  await deps.captureBaseline()
+  assert.notEqual(observed, parent)
+  assert.deepEqual(Object.keys(observed), MUTABLE_BASELINE_READ_ONLY_ENV_KEYS)
+  assert.equal(Object.isFrozen(observed), true)
+})
+
+test("A3-RUNNER-C1 11 mutable adapter baseline passes with mutable parent", async () => {
+  const parent = c1ParentEnv()
+  const deps = c1Adapter(parent)
+  assert.deepEqual(await deps.captureBaseline(), MOCK_BASELINE)
+})
+
+test("A3-RUNNER-C1 12 parent flags remain true after baseline", async () => {
+  const parent = c1ParentEnv()
+  await c1Adapter(parent).captureBaseline()
+  for (const name of C1_MUTABLE_FLAGS) assert.equal(parent[name], "true")
+})
+
+test("A3-RUNNER-C1 13 mutable adapter remains available", () => {
+  const deps = c1Adapter(c1ParentEnv())
+  assert.equal(deps.kind, "mutable")
+  for (const name of ["resolveProviderTargets", "setProviderIntakeMatch", "submitReplaceFromPage", "cleanupStatus"]) assert.equal(typeof deps[name], "function")
+})
+
+test("A3-RUNNER-C1 14 provider runtime binding remains compatible", () => {
+  const parent = c1ParentEnv()
+  const selectedProviderIds = resolveProviderSelectorIds(parent)
+  const rows = [
+    { id: C1_PROVIDER_B_ID, alias: "QA provider beta", nombre_completo: "QA provider beta fixture", email: "qa.provider.beta@example.invalid", activo: true },
+    { id: C1_PROVIDER_A_ID, alias: "QA provider alpha", nombre_completo: "QA provider alpha fixture", email: "qa.provider.alpha@example.invalid", activo: true },
+  ]
+  const targets = buildLiveProviderTargets(rows, { selectedProviderIds })
+  assert.equal(targets.length, 2)
+  assert.equal(targets[0].internalId, C1_PROVIDER_A_ID)
+  assert.equal(targets[1].internalId, C1_PROVIDER_B_ID)
+})
+
+test("A3-RUNNER-C1 15 focused baseline invokes no mutable method or write", async () => {
+  const parent = c1ParentEnv()
+  let diagnosticCalls = 0
+  const deps = c1Adapter(parent, c1PassDiagnostic(), () => { diagnosticCalls += 1 })
+  await deps.captureBaseline()
+  assert.equal(diagnosticCalls, 1)
+  assert.equal(deps.metrics.mutableSupabaseRequests, 0)
+  assert.equal(deps.metrics.devWrites, 0)
+  assert.equal(deps.metrics.externalNetworkRequests, 0)
+  assert.equal(deps.state.providerTargets.length, 0)
+  assert.equal(deps.state.fixtures.size, 0)
+})
+
+test("A3-RUNNER-C1 16 baseline failure remains fail-closed", async () => {
+  const deps = c1Adapter(c1ParentEnv(), { status: "FAIL", fresh_baseline_completed: false, rollback_completed: true, fresh_baseline: null })
+  await assert.rejects(deps.captureBaseline(), (error) => error.code === "DB_ONLY_BASELINE_PRECHECK_FAILED")
+})
+
+test("A3-RUNNER-C1 17 read-only environment evidence stays sanitized", async () => {
+  const parent = c1ParentEnv()
+  const child = c1Child(parent)
+  const deps = c1Adapter(parent)
+  await deps.captureBaseline()
+  const evidence = {
+    child_frozen: Object.isFrozen(child),
+    allowlisted_child_keys: Object.keys(child).length,
+    mutable_flags_in_child: C1_MUTABLE_FLAGS.filter((name) => Object.hasOwn(child, name)).length,
+    provider_selectors_in_child: 0,
+    mutable_credentials_in_child: 0,
+    baseline: "PASS",
+    metrics: { ...deps.metrics },
+  }
+  const serialized = JSON.stringify(evidence)
+  for (const value of [parent.SUPABASE_DEV_DB_URL, parent.QA_MATCH_PROVIDER_A_ID, parent.QA_MATCH_PROVIDER_B_ID, parent.SUPABASE_DEV_SERVICE_ROLE_KEY, parent.SUPABASE_DEV_ANON_KEY, parent.QA_CAPTCHA_TOKEN, parent.RAW_INTAKE_TOKEN, parent.QA_PASSWORD, parent.SUPABASE_ACCESS_TOKEN, parent.ACCESS_TOKEN, parent.REFRESH_TOKEN]) assert.equal(serialized.includes(value), false)
+  assert.equal(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:postgres|postgresql):\/\/|https:\/\/[a-z0-9-]+\.supabase\.co|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/iu.test(serialized), false)
+})
+
+test("A3-RUNNER-C1 18 original environment remains releasable and unfrozen", () => {
+  const parent = c1ParentEnv()
+  const originalReference = parent.UNRELATED_REF
+  const processSentinel = process.env.A3_RUNNER_C1_PROCESS_SENTINEL
+  const child = c1Child(parent)
+  assert.equal(Object.isFrozen(parent), false)
+  assert.equal(Object.isFrozen(originalReference), false)
+  assert.equal(Object.isFrozen(child), true)
+  delete parent.QA_MATCH_PROVIDER_A_ID
+  delete parent.QA_MATCH_PROVIDER_B_ID
+  parent.UNRELATED_REF = null
+  assert.equal(Object.hasOwn(parent, "QA_MATCH_PROVIDER_A_ID"), false)
+  assert.equal(Object.hasOwn(parent, "QA_MATCH_PROVIDER_B_ID"), false)
+  assert.equal(originalReference.retained, true)
+  assert.equal(process.env.A3_RUNNER_C1_PROCESS_SENTINEL, processSentinel)
 })
