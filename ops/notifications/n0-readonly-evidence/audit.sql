@@ -482,7 +482,14 @@ SELECT jsonb_build_object(
           'name', function_info.proname,
           'identity_arguments', pg_catalog.pg_get_function_identity_arguments(function_info.oid),
           'security_definer', function_info.prosecdef,
-          'volatility', function_info.provolatile::text
+          'volatility', function_info.provolatile::text,
+          'classification', CASE
+            WHEN function_info.proname IN ('mark_notification_processed', 'mark_notification_failed')
+             AND pg_catalog.pg_get_function_identity_arguments(function_info.oid)
+                 ~ '(^|, )p_n8n_execution_id text($|, )'
+              THEN 'LEGACY_SCHEMA_ONLY'
+            ELSE 'ACTIVE_SCHEMA'
+          END
         )
         ORDER BY function_info.proname,
                  pg_catalog.pg_get_function_identity_arguments(function_info.oid)

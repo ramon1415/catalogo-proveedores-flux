@@ -72,7 +72,7 @@ jobs:
             --root . \
             --changed-files "${{ steps.changes.outputs.file }}"
 
-      - name: Exercise the artifact v4 receipt and official path validators
+      - name: Exercise diagnostic taxonomy, live shapes, artifact v4, and privacy
         shell: bash
         run: |
           set -euo pipefail
@@ -84,16 +84,20 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "### Notifications N0 R2A-R3"
+            echo "### Notifications N0 R2B-R1"
             echo "- Architecture: Supabase Edge Function and Resend"
-            echo "- Schema: notifications-n0-evidence/v4"
-            echo "- Scope: static safety contract"
+            echo "- Artifact schema: notifications-n0-evidence/v4"
+            echo "- Diagnostic schema: notifications-n0-diagnostic/v1"
+            echo "- Scope: static-only fail-closed remediation"
             echo "- Live DEV access: not executed for pull requests"
+            echo "- Diagnostic scenarios: 26"
+            echo "- Live-shape scenarios: 44"
             echo "- Identity fixtures: 17"
             echo "- Multipart and manifest fixtures: 20"
             echo "- Receipt security fixtures: 13"
             echo "- Official multipart path fixtures: 16"
             echo "- Provider API calls: 0"
+            echo "- Dispatcher invocations: 0"
             echo "- Emails sent: 0"
             echo "- Artifact upload: not performed by this job"
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -256,7 +260,7 @@ jobs:
           echo "metadata_status=${metadata_status}" >> "${GITHUB_OUTPUT}"
           echo "body_status=${body_status}" >> "${GITHUB_OUTPUT}"
 
-      - name: Build the allowlisted artifact
+      - name: Build the allowlisted artifact with safe diagnostics
         shell: bash
         env:
           PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
@@ -266,6 +270,13 @@ jobs:
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          [[ "${PRIVATE_DIR}" == "${RUNNER_TEMP}/notifications-n0-private" ]]
+          [[ "${OUTPUT_DIR}" == "${GITHUB_WORKSPACE}/.audit-output" ]]
+          diagnostic_path="${RUNNER_TEMP}/notifications-n0-diagnostic.json"
+          diagnostic_temporary="${diagnostic_path}.tmp"
+          build_stdout="${RUNNER_TEMP}/notifications-n0-build.stdout"
+          build_stderr="${RUNNER_TEMP}/notifications-n0-build.stderr"
+          rm -f -- "${diagnostic_path}" "${diagnostic_temporary}" "${build_stdout}" "${build_stderr}"
           arguments=(
             build
             --db-jsonl "${PRIVATE_DIR}/database.jsonl"
@@ -275,6 +286,7 @@ jobs:
             --source-dir "${GITHUB_WORKSPACE}/supabase/functions/notification-dispatcher"
             --github-head-sha "${HEAD_SHA}"
             --output "${OUTPUT_DIR}/artifact.json"
+            --diagnostic-output "${diagnostic_path}"
           )
           if [[ "${METADATA_STATUS}" == "available" ]]; then
             arguments+=(
@@ -288,7 +300,58 @@ jobs:
               --dispatcher-body-headers "${PRIVATE_DIR}/dispatcher-body-headers.txt"
             )
           fi
-          python ops/notifications/n0-readonly-evidence/validate_artifact.py "${arguments[@]}"
+
+          set +e
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py "${arguments[@]}" > "${build_stdout}" 2> "${build_stderr}"
+          build_rc=$?
+          set -e
+          rm -f -- "${build_stdout}" "${build_stderr}"
+
+          if [[ ${build_rc} -ne 0 ]]; then
+            set +e
+            safe_report="$(python ops/notifications/n0-readonly-evidence/validate_artifact.py diagnostic-emit --diagnostic "${diagnostic_path}" 2> /dev/null)"
+            report_rc=$?
+            set -e
+
+            cleanup_status="PASS"
+            cleanup_files=(
+              "${PRIVATE_DIR}/database.jsonl"
+              "${PRIVATE_DIR}/environment-identity.json"
+              "${PRIVATE_DIR}/project-metadata.json"
+              "${PRIVATE_DIR}/project-headers.txt"
+              "${PRIVATE_DIR}/dispatcher-metadata.json"
+              "${PRIVATE_DIR}/dispatcher-metadata-headers.txt"
+              "${PRIVATE_DIR}/dispatcher-body.bin"
+              "${PRIVATE_DIR}/dispatcher-body-headers.txt"
+              "${OUTPUT_DIR}/artifact.json"
+              "${OUTPUT_DIR}/artifact.tmp"
+              "${OUTPUT_DIR}/artifact.validated.tmp"
+              "${OUTPUT_DIR}/artifact.json.tmp"
+              "${OUTPUT_DIR}/artifact.json.validated.tmp"
+              "${diagnostic_path}"
+              "${diagnostic_temporary}"
+            )
+            rm -f -- "${cleanup_files[@]}" || cleanup_status="FAIL"
+            rm -rf -- "${PRIVATE_DIR}" "${OUTPUT_DIR}" || cleanup_status="FAIL"
+            if [[ -e "${PRIVATE_DIR}" || -e "${OUTPUT_DIR}" || -e "${diagnostic_path}" || -e "${diagnostic_temporary}" ]]; then
+              cleanup_status="FAIL"
+            fi
+
+            if [[ ${report_rc} -ne 0 ]]; then
+              fallback_report=(
+                "AUDIT_FAILURE_PHASE=UNEXPECTED_INTERNAL_CONTRACT"
+                "AUDIT_FAILURE_CODE=UNEXPECTED_EXCEPTION"
+                "AUDIT_FAILURE_RULE=DIAGNOSTIC_ENVELOPE_MISSING"
+                "AUDIT_RAW_CLEANUP=${cleanup_status}"
+              )
+              safe_report="$(printf '%s\n' "${fallback_report[@]}")"
+            fi
+            printf '%s\n' "${safe_report}"
+            printf '%s\n' "${safe_report}" >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          rm -f -- "${diagnostic_path}" "${diagnostic_temporary}" "${build_stdout}" "${build_stderr}"
           rm -rf -- "${PRIVATE_DIR}"
 
       - name: Fail-closed privacy validation
@@ -367,16 +430,36 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
+          diagnostic_path="${RUNNER_TEMP}/notifications-n0-diagnostic.json"
+          cleanup_runtime_files=(
+            "${diagnostic_path}"
+            "${diagnostic_path}.tmp"
+            "${RUNNER_TEMP}/notifications-n0-build.stdout"
+            "${RUNNER_TEMP}/notifications-n0-build.stderr"
+          )
+          rm -f -- "${cleanup_runtime_files[@]}"
           if [[ -n "${PRIVATE_DIR:-}" && "${PRIVATE_DIR}" == "${RUNNER_TEMP}/notifications-n0-private" ]]; then
-            rm -f -- \
-              "${PRIVATE_DIR}/project-metadata.json" \
-              "${PRIVATE_DIR}/project-headers.txt" \
-              "${PRIVATE_DIR}/dispatcher-metadata.json" \
-              "${PRIVATE_DIR}/dispatcher-metadata-headers.txt" \
-              "${PRIVATE_DIR}/dispatcher-body.bin" \
+            cleanup_private_files=(
+              "${PRIVATE_DIR}/database.jsonl"
+              "${PRIVATE_DIR}/environment-identity.json"
+              "${PRIVATE_DIR}/project-metadata.json"
+              "${PRIVATE_DIR}/project-headers.txt"
+              "${PRIVATE_DIR}/dispatcher-metadata.json"
+              "${PRIVATE_DIR}/dispatcher-metadata-headers.txt"
+              "${PRIVATE_DIR}/dispatcher-body.bin"
               "${PRIVATE_DIR}/dispatcher-body-headers.txt"
+            )
+            rm -f -- "${cleanup_private_files[@]}"
             rm -rf -- "${PRIVATE_DIR}"
           fi
           if [[ "${JOB_STATUS}" != "success" && -n "${OUTPUT_DIR:-}" && "${OUTPUT_DIR}" == "${GITHUB_WORKSPACE}/.audit-output" ]]; then
+            cleanup_output_files=(
+              "${OUTPUT_DIR}/artifact.json"
+              "${OUTPUT_DIR}/artifact.tmp"
+              "${OUTPUT_DIR}/artifact.validated.tmp"
+              "${OUTPUT_DIR}/artifact.json.tmp"
+              "${OUTPUT_DIR}/artifact.json.validated.tmp"
+            )
+            rm -f -- "${cleanup_output_files[@]}"
             rm -rf -- "${OUTPUT_DIR}"
           fi

@@ -88,3 +88,27 @@ Raw project metadata, dispatcher metadata, response headers, multipart body, dat
 ## Remaining gate
 
 R2B remains pending and requires separate explicit authorization. Until then: no Ready transition, merge, live workflow dispatch, secret use, DEV read, dispatcher body download, dispatcher invocation, Resend call, email, `SEND_MODE` read or change, or N1.
+
+## R2B-R1 — fail-closed diagnostic remediation
+
+Run `30584218059` (live job `91011688888`) reached the artifact builder after the immutable guards, DEV identity binding, read-only PostgreSQL collection, dispatcher metadata GET, and dispatcher multipart body GET had succeeded. The only failed step was `Build the allowlisted artifact`; privacy validation, digest generation, and upload were skipped. Cleanup passed, artifacts were zero, and no retry was performed.
+
+The exact cause remains unproven because the previous builder converted every exception to one generic code and the raw evidence was correctly removed. R2B-R1 therefore does not reinterpret that incident and does not execute DEV. It adds a closed taxonomy for the 18 build phases and a private diagnostic envelope with schema `notifications-n0-diagnostic/v1`. The envelope is written atomically with private permissions directly under `RUNNER_TEMP`, allowlist-validated, never uploaded, and deleted by the reporter.
+
+A failed build may publish only these four fixed fields:
+
+```text
+AUDIT_FAILURE_PHASE=<ENUM>
+AUDIT_FAILURE_CODE=<ENUM>
+AUDIT_FAILURE_RULE=<ENUM>
+AUDIT_RAW_CLEANUP=<PASS|FAIL>
+```
+
+The workflow privately captures and discards builder stdout and stderr. It publishes no exception text, traceback, repr, dynamic value, path, identifier, metadata, URL, source, or secret. A missing or invalid envelope maps to the fixed unexpected-internal fallback. Builder cleanup and the final `always()` cleanup both remove raw inputs, diagnostic files, private logs, and any partial artifact; later privacy, digest, and upload steps remain skipped after a build failure.
+
+Static review also proved a catalog-to-privacy incompatibility: migration 007 retains the two historical functions `mark_notification_processed` and `mark_notification_failed` with the structural argument `p_n8n_execution_id`; the catalog query emits those signatures while the previous privacy rule rejected them. The SQL now classifies only those two exact name-and-argument contracts as `LEGACY_SCHEMA_ONLY`. Every other function is `ACTIVE_SCHEMA`, and every other `n8n`-bearing function or value remains prohibited. This preserves catalog evidence without restoring n8n as a runtime dependency. It is a proven static incompatibility and a strong candidate, not proof of the historical run's exact cause.
+
+The PostgreSQL signature validator now represents long, character-allowlisted identity signatures without relaxing the character policy. Synthetic tests cover migrations, 63-byte identifiers, schema-qualified and array types, numeric precision, timestamps, roles, policy modes, enum labels, long signatures, the two exact legacy functions, aggregate boundary shapes, direct dispatcher metadata, multipart parse failures, privacy patterns, diagnostic redaction, partial artifact removal, and cleanup failure.
+
+The shareable artifact remains `notifications-n0-evidence/v4` with no semantic architecture change: Supabase Edge Function `notification-dispatcher` + Resend, `SEND_MODE=UNKNOWN_BY_DESIGN`, no dispatcher invocation, no Resend call, no email, and no runtime n8n dependency. R2B-R1 is static-only; N0 remains open and N1 remains blocked. The next gate is R2B-R2, only after explicit approval, to merge this Draft PR and authorize one separate live audit.
+

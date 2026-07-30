@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -13,6 +15,7 @@ import re
 import stat
 import struct
 import sys
+import tempfile
 from email import policy
 from email.parser import BytesParser
 from datetime import datetime, timezone
@@ -31,6 +34,10 @@ MAX_MULTIPART_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_PARTS = 128
 MAX_PATH_BYTES = 512
+LEGACY_NOTIFICATION_FUNCTIONS = frozenset({
+    "mark_notification_processed",
+    "mark_notification_failed",
+})
 ROOT_KEYS = {
     "schema_version", "generated_at_utc", "environment", "github",
     "environment_identity", "delivery_architecture", "migrations",
@@ -44,7 +51,8 @@ SENSITIVE_ENV_NAMES = (
     "SUPABASE_DEV_DB_URL", "SUPABASE_ACCESS_TOKEN", "SUPABASE_DEV_PROJECT_REF",
 )
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_. -]{1,160}$")
-SAFE_SIGNATURE = re.compile(r"^[A-Za-z0-9_ .,:()\[\]]{0,300}$")
+SAFE_SIGNATURE = re.compile(r"^[A-Za-z0-9_ .,:()\[\]]*$")
+MAX_SIGNATURE_BYTES = 16 * 1024
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 HEAD_SHA = re.compile(r"^[0-9a-f]{40}$")
 FORBIDDEN_VALUE_PATTERNS = (
@@ -61,8 +69,300 @@ FORBIDDEN_VALUE_PATTERNS = (
 )
 
 
+DIAGNOSTIC_SCHEMA_VERSION = "notifications-n0-diagnostic/v1"
+FAILURE_PHASES = frozenset({
+    "DATABASE_JSONL_PARSE",
+    "MIGRATIONS_CONTRACT",
+    "DATABASE_SCHEMA_CONTRACT",
+    "NOTIFICATION_AGGREGATES_CONTRACT",
+    "INTAKE_AGGREGATES_CONTRACT",
+    "PAYMENT_RECEIPT_AGGREGATES_CONTRACT",
+    "RECEIPT_SECURITY_CONTRACT",
+    "STORAGE_CONTRACT",
+    "ENVIRONMENT_IDENTITY_CONTRACT",
+    "DISPATCHER_METADATA_CONTRACT",
+    "DISPATCHER_MULTIPART_CONTRACT",
+    "GITHUB_SOURCE_MANIFEST_CONTRACT",
+    "RESEND_SOURCE_CONTRACT",
+    "ARTIFACT_ASSEMBLY_CONTRACT",
+    "ARTIFACT_SCHEMA_CONTRACT",
+    "ARTIFACT_PRIVACY_CONTRACT",
+    "RAW_CLEANUP_CONTRACT",
+    "UNEXPECTED_INTERNAL_CONTRACT",
+})
+FAILURE_CODES = frozenset({
+    "SOURCE_FILE_MISSING",
+    "JSONL_INVALID",
+    "SECTION_SET_MISMATCH",
+    "SECTION_DUPLICATED",
+    "ROOT_TYPE_INVALID",
+    "ENTRY_TYPE_INVALID",
+    "IDENTIFIER_FORMAT_INVALID",
+    "DIMENSION_FORMAT_INVALID",
+    "SIGNATURE_FORMAT_INVALID",
+    "COUNT_TYPE_INVALID",
+    "BOOLEAN_TYPE_INVALID",
+    "REQUIRED_KEY_MISSING",
+    "UNKNOWN_KEY_PRESENT",
+    "METADATA_SHAPE_INVALID",
+    "DISPATCHER_IDENTITY_INVALID",
+    "MULTIPART_FORMAT_INVALID",
+    "ENTRYPOINT_INVALID",
+    "SOURCE_PATH_INVALID",
+    "SOURCE_PATH_COLLISION",
+    "MANIFEST_INVALID",
+    "SOURCE_CONTRACT_INVALID",
+    "ARTIFACT_SHAPE_INVALID",
+    "ARTIFACT_WRITE_FAILED",
+    "PRIVACY_PATTERN_DETECTED",
+    "SECRET_VALUE_DETECTED",
+    "HASH_OUTSIDE_ALLOWLIST",
+    "CLEANUP_FAILED",
+    "UNEXPECTED_EXCEPTION",
+})
+FAILURE_RULES = frozenset({
+    "DATABASE_SOURCE_FILE_REQUIRED",
+    "STRICT_JSONL_REQUIRED",
+    "DATABASE_SECTION_ALLOWLIST",
+    "DATABASE_SECTION_UNIQUE",
+    "DATABASE_ENTRY_OBJECT_REQUIRED",
+    "MIGRATIONS_SECTION_INVALID",
+    "DATABASE_SCHEMA_SECTION_INVALID",
+    "NOTIFICATION_AGGREGATES_SECTION_INVALID",
+    "INTAKE_AGGREGATES_SECTION_INVALID",
+    "PAYMENT_RECEIPT_AGGREGATES_SECTION_INVALID",
+    "RECEIPT_SECURITY_SECTION_INVALID",
+    "STORAGE_SECTION_INVALID",
+    "IDENTITY_MARKER_REQUIRED",
+    "IDENTITY_MARKER_INVALID",
+    "DISPATCHER_METADATA_SHAPE",
+    "DISPATCHER_IDENTITY_REQUIRED",
+    "DISPATCHER_MULTIPART_INPUT",
+    "GITHUB_SOURCE_INPUT",
+    "RESEND_SOURCE_INSPECTION",
+    "ARTIFACT_ROOT_ALLOWLIST",
+    "ARTIFACT_CORE_INVARIANTS",
+    "SOURCE_STATUS_INVARIANTS",
+    "ARTIFACT_ATOMIC_WRITE",
+    "PRIVACY_PATTERN_ALLOWLIST",
+    "SECRET_VALUE_ALLOWLIST",
+    "DIGEST_PATH_ALLOWLIST",
+    "RUNTIME_N8N_PROHIBITED",
+    "RAW_INPUTS_REMOVAL",
+    "PARTIAL_OUTPUT_REMOVAL",
+    "DIAGNOSTIC_ENVELOPE_MISSING",
+    "DIAGNOSTIC_ENVELOPE_INVALID",
+    "UNEXPECTED_INTERNAL",
+})
+VALID_FAILURE_TRIPLES = frozenset({
+    ("DATABASE_JSONL_PARSE", "SOURCE_FILE_MISSING", "DATABASE_SOURCE_FILE_REQUIRED"),
+    ("DATABASE_JSONL_PARSE", "JSONL_INVALID", "STRICT_JSONL_REQUIRED"),
+    ("DATABASE_JSONL_PARSE", "ROOT_TYPE_INVALID", "DATABASE_ENTRY_OBJECT_REQUIRED"),
+    ("DATABASE_JSONL_PARSE", "ENTRY_TYPE_INVALID", "DATABASE_ENTRY_OBJECT_REQUIRED"),
+    ("DATABASE_JSONL_PARSE", "SECTION_DUPLICATED", "DATABASE_SECTION_UNIQUE"),
+    ("DATABASE_JSONL_PARSE", "SECTION_SET_MISMATCH", "DATABASE_SECTION_ALLOWLIST"),
+    ("MIGRATIONS_CONTRACT", "ARTIFACT_SHAPE_INVALID", "MIGRATIONS_SECTION_INVALID"),
+    ("DATABASE_SCHEMA_CONTRACT", "ARTIFACT_SHAPE_INVALID", "DATABASE_SCHEMA_SECTION_INVALID"),
+    ("NOTIFICATION_AGGREGATES_CONTRACT", "ARTIFACT_SHAPE_INVALID", "NOTIFICATION_AGGREGATES_SECTION_INVALID"),
+    ("INTAKE_AGGREGATES_CONTRACT", "ARTIFACT_SHAPE_INVALID", "INTAKE_AGGREGATES_SECTION_INVALID"),
+    ("PAYMENT_RECEIPT_AGGREGATES_CONTRACT", "ARTIFACT_SHAPE_INVALID", "PAYMENT_RECEIPT_AGGREGATES_SECTION_INVALID"),
+    ("RECEIPT_SECURITY_CONTRACT", "ARTIFACT_SHAPE_INVALID", "RECEIPT_SECURITY_SECTION_INVALID"),
+    ("STORAGE_CONTRACT", "ARTIFACT_SHAPE_INVALID", "STORAGE_SECTION_INVALID"),
+    ("ENVIRONMENT_IDENTITY_CONTRACT", "SOURCE_FILE_MISSING", "IDENTITY_MARKER_REQUIRED"),
+    ("ENVIRONMENT_IDENTITY_CONTRACT", "ARTIFACT_SHAPE_INVALID", "IDENTITY_MARKER_INVALID"),
+    ("DISPATCHER_METADATA_CONTRACT", "METADATA_SHAPE_INVALID", "DISPATCHER_METADATA_SHAPE"),
+    ("DISPATCHER_METADATA_CONTRACT", "DISPATCHER_IDENTITY_INVALID", "DISPATCHER_IDENTITY_REQUIRED"),
+    ("DISPATCHER_MULTIPART_CONTRACT", "MULTIPART_FORMAT_INVALID", "DISPATCHER_MULTIPART_INPUT"),
+    ("DISPATCHER_MULTIPART_CONTRACT", "ARTIFACT_SHAPE_INVALID", "DISPATCHER_MULTIPART_INPUT"),
+    ("GITHUB_SOURCE_MANIFEST_CONTRACT", "MANIFEST_INVALID", "GITHUB_SOURCE_INPUT"),
+    ("RESEND_SOURCE_CONTRACT", "SOURCE_CONTRACT_INVALID", "RESEND_SOURCE_INSPECTION"),
+    ("ARTIFACT_ASSEMBLY_CONTRACT", "ARTIFACT_SHAPE_INVALID", "ARTIFACT_CORE_INVARIANTS"),
+    ("ARTIFACT_ASSEMBLY_CONTRACT", "ARTIFACT_WRITE_FAILED", "ARTIFACT_ATOMIC_WRITE"),
+    ("ARTIFACT_SCHEMA_CONTRACT", "ARTIFACT_SHAPE_INVALID", "ARTIFACT_ROOT_ALLOWLIST"),
+    ("ARTIFACT_SCHEMA_CONTRACT", "ARTIFACT_SHAPE_INVALID", "ARTIFACT_CORE_INVARIANTS"),
+    ("ARTIFACT_SCHEMA_CONTRACT", "ARTIFACT_SHAPE_INVALID", "SOURCE_STATUS_INVARIANTS"),
+    ("ARTIFACT_PRIVACY_CONTRACT", "PRIVACY_PATTERN_DETECTED", "PRIVACY_PATTERN_ALLOWLIST"),
+    ("ARTIFACT_PRIVACY_CONTRACT", "SECRET_VALUE_DETECTED", "SECRET_VALUE_ALLOWLIST"),
+    ("ARTIFACT_PRIVACY_CONTRACT", "HASH_OUTSIDE_ALLOWLIST", "DIGEST_PATH_ALLOWLIST"),
+    ("ARTIFACT_PRIVACY_CONTRACT", "PRIVACY_PATTERN_DETECTED", "RUNTIME_N8N_PROHIBITED"),
+    ("RAW_CLEANUP_CONTRACT", "CLEANUP_FAILED", "RAW_INPUTS_REMOVAL"),
+    ("RAW_CLEANUP_CONTRACT", "CLEANUP_FAILED", "PARTIAL_OUTPUT_REMOVAL"),
+    ("UNEXPECTED_INTERNAL_CONTRACT", "UNEXPECTED_EXCEPTION", "UNEXPECTED_INTERNAL"),
+    ("UNEXPECTED_INTERNAL_CONTRACT", "UNEXPECTED_EXCEPTION", "DIAGNOSTIC_ENVELOPE_MISSING"),
+    ("UNEXPECTED_INTERNAL_CONTRACT", "UNEXPECTED_EXCEPTION", "DIAGNOSTIC_ENVELOPE_INVALID"),
+})
+PHASE_DEFAULTS = {
+    "DATABASE_JSONL_PARSE": ("JSONL_INVALID", "STRICT_JSONL_REQUIRED"),
+    "MIGRATIONS_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "MIGRATIONS_SECTION_INVALID"),
+    "DATABASE_SCHEMA_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "DATABASE_SCHEMA_SECTION_INVALID"),
+    "NOTIFICATION_AGGREGATES_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "NOTIFICATION_AGGREGATES_SECTION_INVALID"),
+    "INTAKE_AGGREGATES_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "INTAKE_AGGREGATES_SECTION_INVALID"),
+    "PAYMENT_RECEIPT_AGGREGATES_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "PAYMENT_RECEIPT_AGGREGATES_SECTION_INVALID"),
+    "RECEIPT_SECURITY_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "RECEIPT_SECURITY_SECTION_INVALID"),
+    "STORAGE_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "STORAGE_SECTION_INVALID"),
+    "ENVIRONMENT_IDENTITY_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "IDENTITY_MARKER_INVALID"),
+    "DISPATCHER_METADATA_CONTRACT": ("METADATA_SHAPE_INVALID", "DISPATCHER_METADATA_SHAPE"),
+    "DISPATCHER_MULTIPART_CONTRACT": ("MULTIPART_FORMAT_INVALID", "DISPATCHER_MULTIPART_INPUT"),
+    "GITHUB_SOURCE_MANIFEST_CONTRACT": ("MANIFEST_INVALID", "GITHUB_SOURCE_INPUT"),
+    "RESEND_SOURCE_CONTRACT": ("SOURCE_CONTRACT_INVALID", "RESEND_SOURCE_INSPECTION"),
+    "ARTIFACT_ASSEMBLY_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "ARTIFACT_CORE_INVARIANTS"),
+    "ARTIFACT_SCHEMA_CONTRACT": ("ARTIFACT_SHAPE_INVALID", "ARTIFACT_CORE_INVARIANTS"),
+    "ARTIFACT_PRIVACY_CONTRACT": ("PRIVACY_PATTERN_DETECTED", "PRIVACY_PATTERN_ALLOWLIST"),
+    "RAW_CLEANUP_CONTRACT": ("CLEANUP_FAILED", "RAW_INPUTS_REMOVAL"),
+    "UNEXPECTED_INTERNAL_CONTRACT": ("UNEXPECTED_EXCEPTION", "UNEXPECTED_INTERNAL"),
+}
+DIAGNOSTIC_KEYS = {
+    "schema_version", "phase", "code", "rule",
+    "database_source_present", "dispatcher_metadata_present",
+    "dispatcher_body_present", "github_source_present",
+    "artifact_written", "raw_cleanup",
+}
+
+
 class AuditError(Exception):
     pass
+
+
+class AuditFailure(Exception):
+    """Fixed-enum failure without dynamic text, args, cause, or traceback output."""
+
+    __slots__ = ("phase", "code", "rule")
+
+    def __init__(self, phase: str, code: str, rule: str):
+        if (phase, code, rule) not in VALID_FAILURE_TRIPLES:
+            phase = "UNEXPECTED_INTERNAL_CONTRACT"
+            code = "UNEXPECTED_EXCEPTION"
+            rule = "UNEXPECTED_INTERNAL"
+        self.phase = phase
+        self.code = code
+        self.rule = rule
+        super().__init__()
+
+
+def audit_failure(phase: str, code: str, rule: str) -> None:
+    raise AuditFailure(phase, code, rule) from None
+
+
+def phase_call(phase: str, code: str, rule: str, function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except AuditFailure:
+        raise
+    except Exception:
+        audit_failure(phase, code, rule)
+
+
+def coerce_failure(error: BaseException) -> AuditFailure:
+    if isinstance(error, AuditFailure):
+        return error
+    code, rule = PHASE_DEFAULTS["UNEXPECTED_INTERNAL_CONTRACT"]
+    return AuditFailure("UNEXPECTED_INTERNAL_CONTRACT", code, rule)
+
+
+def validate_diagnostic_envelope(value: Any) -> dict[str, Any]:
+    value = exact_keys(value, DIAGNOSTIC_KEYS, "diagnostic envelope")
+    require(value["schema_version"] == DIAGNOSTIC_SCHEMA_VERSION, "invalid diagnostic schema")
+    require(value["phase"] in FAILURE_PHASES, "invalid diagnostic phase")
+    require(value["code"] in FAILURE_CODES, "invalid diagnostic code")
+    require(value["rule"] in FAILURE_RULES, "invalid diagnostic rule")
+    require((value["phase"], value["code"], value["rule"]) in VALID_FAILURE_TRIPLES, "invalid diagnostic triple")
+    for key in (
+        "database_source_present", "dispatcher_metadata_present",
+        "dispatcher_body_present", "github_source_present", "artifact_written",
+    ):
+        require(isinstance(value[key], bool), "invalid diagnostic boolean")
+    require(value["raw_cleanup"] in {"PASS", "FAIL"}, "invalid diagnostic cleanup")
+    return value
+
+
+def diagnostic_envelope(
+    failure: AuditFailure,
+    *,
+    database_source_present: bool,
+    dispatcher_metadata_present: bool,
+    dispatcher_body_present: bool,
+    github_source_present: bool,
+    artifact_written: bool,
+    raw_cleanup: str,
+) -> dict[str, Any]:
+    value = {
+        "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
+        "phase": failure.phase,
+        "code": failure.code,
+        "rule": failure.rule,
+        "database_source_present": database_source_present,
+        "dispatcher_metadata_present": dispatcher_metadata_present,
+        "dispatcher_body_present": dispatcher_body_present,
+        "github_source_present": github_source_present,
+        "artifact_written": artifact_written,
+        "raw_cleanup": raw_cleanup,
+    }
+    return validate_diagnostic_envelope(value)
+
+
+def diagnostic_temporary_path(path: Path) -> Path:
+    return Path(str(path) + ".tmp")
+
+
+def validate_diagnostic_path(path: Path) -> None:
+    require(path.name == "notifications-n0-diagnostic.json", "invalid diagnostic filename")
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp:
+        require(path.parent.resolve() == Path(runner_temp).resolve(), "diagnostic must remain in RUNNER_TEMP")
+    require(not path.is_symlink(), "diagnostic may not be a symlink")
+
+
+def write_private_atomic(path: Path, value: str) -> None:
+    validate_diagnostic_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = diagnostic_temporary_path(path)
+    require(not temporary.is_symlink(), "diagnostic temporary may not be a symlink")
+    if temporary.exists():
+        temporary.unlink()
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+    except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def write_diagnostic_envelope(path: Path, value: dict[str, Any]) -> None:
+    validate_diagnostic_envelope(value)
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+    write_private_atomic(path, payload)
+
+
+def emit_diagnostic(args: argparse.Namespace) -> None:
+    path = Path(args.diagnostic)
+    validate_diagnostic_path(path)
+    try:
+        require(path.is_file() and not path.is_symlink(), "diagnostic envelope is missing")
+        value = validate_diagnostic_envelope(json.loads(path.read_text(encoding="utf-8")))
+        print(f"AUDIT_FAILURE_PHASE={value['phase']}")
+        print(f"AUDIT_FAILURE_CODE={value['code']}")
+        print(f"AUDIT_FAILURE_RULE={value['rule']}")
+        print(f"AUDIT_RAW_CLEANUP={value['raw_cleanup']}")
+    finally:
+        for target in (path, diagnostic_temporary_path(path)):
+            try:
+                if target.is_file() or target.is_symlink():
+                    target.unlink()
+            except OSError:
+                pass
 
 
 def require(condition: bool, message: str) -> None:
@@ -78,6 +378,16 @@ def exact_keys(value: Any, keys: set[str], label: str) -> dict[str, Any]:
 
 def safe_name(value: Any, label: str, pattern: re.Pattern[str] = SAFE_NAME) -> str:
     require(isinstance(value, str) and pattern.fullmatch(value) is not None, f"unsafe {label}")
+    return value
+
+
+def safe_signature(value: Any, label: str) -> str:
+    require(
+        isinstance(value, str)
+        and len(value.encode("utf-8")) <= MAX_SIGNATURE_BYTES
+        and SAFE_SIGNATURE.fullmatch(value) is not None,
+        f"unsafe {label}",
+    )
     return value
 
 
@@ -110,7 +420,11 @@ def validate_migrations(value: Any) -> None:
     for item in value["entries"]:
         item = exact_keys(item, {"version", "name"}, "migration entry")
         safe_name(item["version"], "migration version")
-        require(item["name"] is None or SAFE_NAME.fullmatch(item["name"]), "unsafe migration name")
+        require(
+            item["name"] is None
+            or (isinstance(item["name"], str) and SAFE_NAME.fullmatch(item["name"]) is not None),
+            "unsafe migration name",
+        )
     require(isinstance(value["duplicates"], list), "migrations.duplicates must be a list")
     for item in value["duplicates"]:
         item = exact_keys(item, {"version", "count"}, "migration duplicate")
@@ -135,7 +449,7 @@ def validate_database(value: Any) -> None:
         for column in entity["columns"]:
             column = exact_keys(column, {"name", "type", "nullable", "default_present", "classification"}, "column")
             safe_name(column["name"], "column name")
-            safe_name(column["type"], "column type", SAFE_SIGNATURE)
+            safe_signature(column["type"], "column type")
             require(isinstance(column["nullable"], bool) and isinstance(column["default_present"], bool), "invalid column flags")
             require(column["classification"] in {"ACTIVE_SCHEMA", "LEGACY_SCHEMA_ONLY"}, "invalid column classification")
             require(("n8n" in column["name"].lower()) == (column["classification"] == "LEGACY_SCHEMA_ONLY"), "legacy column classification mismatch")
@@ -176,11 +490,24 @@ def validate_database(value: Any) -> None:
             safe_name(trigger["function_name"], "trigger function")
     require(isinstance(value["functions"], list), "database.functions must be a list")
     for function in value["functions"]:
-        function = exact_keys(function, {"name", "identity_arguments", "security_definer", "volatility"}, "function")
+        function = exact_keys(
+            function,
+            {"name", "identity_arguments", "security_definer", "volatility", "classification"},
+            "function",
+        )
         safe_name(function["name"], "function name")
-        safe_name(function["identity_arguments"], "function signature", SAFE_SIGNATURE)
+        safe_signature(function["identity_arguments"], "function signature")
         require(isinstance(function["security_definer"], bool), "invalid function security flag")
         safe_name(function["volatility"], "function volatility")
+        require(function["classification"] in {"ACTIVE_SCHEMA", "LEGACY_SCHEMA_ONLY"}, "invalid function classification")
+        legacy_contract = (
+            function["name"] in LEGACY_NOTIFICATION_FUNCTIONS
+            and re.search(r"(?:^|, )p_n8n_execution_id text(?:$|, )", function["identity_arguments"]) is not None
+        )
+        require(
+            legacy_contract == (function["classification"] == "LEGACY_SCHEMA_ONLY"),
+            "legacy function classification mismatch",
+        )
     require(isinstance(value["enum_types"], list), "enum_types must be a list")
     for enum_type in value["enum_types"]:
         enum_type = exact_keys(enum_type, {"name", "labels"}, "enum type")
@@ -344,20 +671,29 @@ def iter_strings(value: Any, path: tuple[Any, ...] = ()):
 def validate_sensitive_values(value: dict[str, Any]) -> None:
     serialized = json.dumps(value, sort_keys=True, separators=(",", ":"))
     for pattern in FORBIDDEN_VALUE_PATTERNS:
-        require(pattern.search(serialized) is None, "forbidden value pattern")
+        if pattern.search(serialized) is not None:
+            audit_failure(
+                "ARTIFACT_PRIVACY_CONTRACT",
+                "PRIVACY_PATTERN_DETECTED",
+                "PRIVACY_PATTERN_ALLOWLIST",
+            )
     allowed_digest_paths = {
         ("dispatcher_runtime", "runtime_manifest_digest"),
         ("dispatcher_runtime", "github_manifest_digest"),
         ("dispatcher_runtime", "runtime_bundle_digest"),
     }
     for path, text_value in iter_strings(value):
-        if SHA256.fullmatch(text_value):
-            require(path in allowed_digest_paths, "SHA-256 outside its allowlist")
+        if SHA256.fullmatch(text_value) and path not in allowed_digest_paths:
+            audit_failure(
+                "ARTIFACT_PRIVACY_CONTRACT",
+                "HASH_OUTSIDE_ALLOWLIST",
+                "DIGEST_PATH_ALLOWLIST",
+            )
         if "n8n" in text_value.lower():
             parent = value
             for item in path[:-1]:
                 parent = parent[item]
-            structural_path = (
+            legacy_entity_path = (
                 len(path) == 6
                 and path[0] == "database_schema"
                 and path[1] == "entities"
@@ -366,7 +702,26 @@ def validate_sensitive_values(value: dict[str, Any]) -> None:
                 and isinstance(parent, dict)
                 and parent.get("classification") == "LEGACY_SCHEMA_ONLY"
             )
-            require(structural_path, "runtime n8n dependency is prohibited")
+            legacy_function_path = (
+                len(path) == 4
+                and path[0] == "database_schema"
+                and path[1] == "functions"
+                and path[3] in {"name", "identity_arguments"}
+                and isinstance(parent, dict)
+                and parent.get("classification") == "LEGACY_SCHEMA_ONLY"
+                and parent.get("name") in LEGACY_NOTIFICATION_FUNCTIONS
+                and isinstance(parent.get("identity_arguments"), str)
+                and re.search(
+                    r"(?:^|, )p_n8n_execution_id text(?:$|, )",
+                    parent["identity_arguments"],
+                ) is not None
+            )
+            if not (legacy_entity_path or legacy_function_path):
+                audit_failure(
+                    "ARTIFACT_PRIVACY_CONTRACT",
+                    "PRIVACY_PATTERN_DETECTED",
+                    "RUNTIME_N8N_PROHIBITED",
+                )
 
 
 def validate_architecture(value: Any) -> None:
@@ -486,48 +841,131 @@ def validate_resend_source_contract(value: Any) -> None:
 
 
 def validate_artifact_object(value: Any, pending_allowed: bool) -> None:
-    value = exact_keys(value, ROOT_KEYS, "artifact")
-    require(value["schema_version"] == "notifications-n0-evidence/v4", "invalid schema version")
-    require(value["environment"] == "DEV", "environment must be DEV")
-    require(isinstance(value["generated_at_utc"], str) and value["generated_at_utc"].endswith("Z"), "invalid timestamp")
-    github = exact_keys(value["github"], {"head_sha"}, "github")
-    require(isinstance(github["head_sha"], str) and HEAD_SHA.fullmatch(github["head_sha"]), "invalid head SHA")
-    validate_environment_identity(value["environment_identity"])
-    validate_architecture(value["delivery_architecture"])
-    validate_migrations(value["migrations"])
-    validate_database(value["database_schema"])
-    validate_notification(value["notification_aggregates"])
-    validate_intake(value["intake_aggregates"])
-    validate_payment_receipt(value["payment_receipt_aggregates"])
-    validate_receipt_security(value["receipt_security_contract"])
-    validate_storage(value["storage"])
-    validate_dispatcher_runtime(value["dispatcher_runtime"])
-    validate_resend_source_contract(value["resend_source_contract"])
-    send_mode = exact_keys(value["send_mode"], {"state", "reason"}, "send_mode")
-    require(send_mode == {"state": "UNKNOWN_BY_DESIGN", "reason": "runtime secret values are not read by this audit"}, "SEND_MODE contract mismatch")
-    statuses = {"available", "unavailable", "not_collected", "metadata_only", "parse_failed"}
-    source_status = exact_keys(
-        value["source_status"],
-        {
-            "database", "project_identity", "dispatcher_metadata",
-            "dispatcher_body", "dispatcher_manifest", "github_source",
-            "resend_source_contract",
-        },
-        "source_status",
+    value = phase_call(
+        "ARTIFACT_SCHEMA_CONTRACT",
+        "ARTIFACT_SHAPE_INVALID",
+        "ARTIFACT_ROOT_ALLOWLIST",
+        exact_keys,
+        value,
+        ROOT_KEYS,
+        "artifact",
     )
-    for key, status_value in source_status.items():
-        require(status_value in statuses, f"invalid source status: {key}")
-    require(source_status["project_identity"] == "available", "project identity must be verified")
-    runtime = value["dispatcher_runtime"]
-    if source_status["github_source"] == "available":
-        require(runtime["github_manifest_digest"] is not None, "available GitHub source lacks manifest")
-        require(value["resend_source_contract"]["dispatcher_source_inspected"] is True, "available source was not inspected")
-    else:
-        require(runtime["github_manifest_digest"] is None, "unavailable GitHub source has manifest")
-    privacy = exact_keys(value["privacy_validation"], {"status"}, "privacy_validation")
-    require(privacy["status"] in ({"PENDING", "PASS"} if pending_allowed else {"PASS"}), "privacy validation did not pass")
-    require(exact_keys(value["cleanup"], {"status"}, "cleanup") == {"status": "PASS"}, "cleanup did not pass")
-    validate_sensitive_values(value)
+
+    def validate_core() -> None:
+        require(value["schema_version"] == "notifications-n0-evidence/v4", "invalid schema version")
+        require(value["environment"] == "DEV", "environment must be DEV")
+        require(isinstance(value["generated_at_utc"], str) and value["generated_at_utc"].endswith("Z"), "invalid timestamp")
+        github = exact_keys(value["github"], {"head_sha"}, "github")
+        require(isinstance(github["head_sha"], str) and HEAD_SHA.fullmatch(github["head_sha"]), "invalid head SHA")
+        phase_call(
+            "ENVIRONMENT_IDENTITY_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "IDENTITY_MARKER_INVALID",
+            validate_environment_identity,
+            value["environment_identity"],
+        )
+        validate_architecture(value["delivery_architecture"])
+        phase_call(
+            "MIGRATIONS_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "MIGRATIONS_SECTION_INVALID",
+            validate_migrations,
+            value["migrations"],
+        )
+        phase_call(
+            "DATABASE_SCHEMA_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "DATABASE_SCHEMA_SECTION_INVALID",
+            validate_database,
+            value["database_schema"],
+        )
+        phase_call(
+            "NOTIFICATION_AGGREGATES_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "NOTIFICATION_AGGREGATES_SECTION_INVALID",
+            validate_notification,
+            value["notification_aggregates"],
+        )
+        phase_call(
+            "INTAKE_AGGREGATES_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "INTAKE_AGGREGATES_SECTION_INVALID",
+            validate_intake,
+            value["intake_aggregates"],
+        )
+        phase_call(
+            "PAYMENT_RECEIPT_AGGREGATES_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "PAYMENT_RECEIPT_AGGREGATES_SECTION_INVALID",
+            validate_payment_receipt,
+            value["payment_receipt_aggregates"],
+        )
+        phase_call(
+            "RECEIPT_SECURITY_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "RECEIPT_SECURITY_SECTION_INVALID",
+            validate_receipt_security,
+            value["receipt_security_contract"],
+        )
+        phase_call(
+            "STORAGE_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "STORAGE_SECTION_INVALID",
+            validate_storage,
+            value["storage"],
+        )
+        phase_call(
+            "DISPATCHER_MULTIPART_CONTRACT",
+            "ARTIFACT_SHAPE_INVALID",
+            "DISPATCHER_MULTIPART_INPUT",
+            validate_dispatcher_runtime,
+            value["dispatcher_runtime"],
+        )
+        phase_call(
+            "RESEND_SOURCE_CONTRACT",
+            "SOURCE_CONTRACT_INVALID",
+            "RESEND_SOURCE_INSPECTION",
+            validate_resend_source_contract,
+            value["resend_source_contract"],
+        )
+        send_mode = exact_keys(value["send_mode"], {"state", "reason"}, "send_mode")
+        require(send_mode == {"state": "UNKNOWN_BY_DESIGN", "reason": "runtime secret values are not read by this audit"}, "SEND_MODE contract mismatch")
+        statuses = {"available", "unavailable", "not_collected", "metadata_only", "parse_failed"}
+        source_status = exact_keys(
+            value["source_status"],
+            {
+                "database", "project_identity", "dispatcher_metadata",
+                "dispatcher_body", "dispatcher_manifest", "github_source",
+                "resend_source_contract",
+            },
+            "source_status",
+        )
+        for status_value in source_status.values():
+            require(status_value in statuses, "invalid source status")
+        require(source_status["project_identity"] == "available", "project identity must be verified")
+        runtime = value["dispatcher_runtime"]
+        if source_status["github_source"] == "available":
+            require(runtime["github_manifest_digest"] is not None, "available GitHub source lacks manifest")
+            require(value["resend_source_contract"]["dispatcher_source_inspected"] is True, "available source was not inspected")
+        else:
+            require(runtime["github_manifest_digest"] is None, "unavailable GitHub source has manifest")
+        privacy = exact_keys(value["privacy_validation"], {"status"}, "privacy_validation")
+        require(privacy["status"] in ({"PENDING", "PASS"} if pending_allowed else {"PASS"}), "privacy validation did not pass")
+        require(exact_keys(value["cleanup"], {"status"}, "cleanup") == {"status": "PASS"}, "cleanup did not pass")
+
+    phase_call(
+        "ARTIFACT_SCHEMA_CONTRACT",
+        "ARTIFACT_SHAPE_INVALID",
+        "ARTIFACT_CORE_INVARIANTS",
+        validate_core,
+    )
+    phase_call(
+        "ARTIFACT_PRIVACY_CONTRACT",
+        "PRIVACY_PATTERN_DETECTED",
+        "PRIVACY_PATTERN_ALLOWLIST",
+        validate_sensitive_values,
+        value,
+    )
 
 
 def compute_ref_hash(project_ref: str) -> str:
@@ -626,18 +1064,30 @@ def identity_metadata(args: argparse.Namespace) -> None:
 
 
 def parse_jsonl(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        audit_failure("DATABASE_JSONL_PARSE", "SOURCE_FILE_MISSING", "DATABASE_SOURCE_FILE_REQUIRED")
+    try:
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        audit_failure("DATABASE_JSONL_PARSE", "SOURCE_FILE_MISSING", "DATABASE_SOURCE_FILE_REQUIRED")
     sections: dict[str, Any] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in raw_lines:
         line = line.strip()
         if not line:
             continue
         try:
             item = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise AuditError("database output was not strict JSONL") from exc
-        item = exact_keys(item, {"section", "data"}, "database JSONL item")
-        section = safe_name(item["section"], "database section")
-        require(section not in sections, "duplicate database section")
+        except Exception:
+            audit_failure("DATABASE_JSONL_PARSE", "JSONL_INVALID", "STRICT_JSONL_REQUIRED")
+        if not isinstance(item, dict):
+            audit_failure("DATABASE_JSONL_PARSE", "ROOT_TYPE_INVALID", "DATABASE_ENTRY_OBJECT_REQUIRED")
+        if set(item) != {"section", "data"}:
+            audit_failure("DATABASE_JSONL_PARSE", "ENTRY_TYPE_INVALID", "DATABASE_ENTRY_OBJECT_REQUIRED")
+        section = item.get("section")
+        if not isinstance(section, str) or SAFE_NAME.fullmatch(section) is None:
+            audit_failure("DATABASE_JSONL_PARSE", "ENTRY_TYPE_INVALID", "DATABASE_ENTRY_OBJECT_REQUIRED")
+        if section in sections:
+            audit_failure("DATABASE_JSONL_PARSE", "SECTION_DUPLICATED", "DATABASE_SECTION_UNIQUE")
         sections[section] = item["data"]
     expected = {
         "migrations", "database", "notification_aggregates",
@@ -646,7 +1096,8 @@ def parse_jsonl(path: Path) -> dict[str, Any]:
         "outbox_aggregates", "payment_request_aggregates", "receipt_security_contract",
         "storage_metadata",
     }
-    require(set(sections) == expected, "database output sections differ from the contract")
+    if set(sections) != expected:
+        audit_failure("DATABASE_JSONL_PARSE", "SECTION_SET_MISMATCH", "DATABASE_SECTION_ALLOWLIST")
     return sections
 
 
@@ -936,7 +1387,7 @@ def dispatcher_evidence(
             )
             runtime_digest, runtime_count, runtime_paths = canonical_manifest(runtime_files)
             multipart_parsed = True
-        except AuditError:
+        except Exception:
             parse_failed = True
 
     github_digest = None
@@ -948,7 +1399,7 @@ def dispatcher_evidence(
             github_files = github_source_files(source_dir)
             github_digest, github_count, github_paths = canonical_manifest(github_files)
             github_available = True
-        except AuditError:
+        except Exception:
             github_available = False
 
     path_set_match = None
@@ -1004,7 +1455,134 @@ def remove_raw(paths: tuple[Path | None, ...]) -> None:
     require(all(path is None or not path.exists() for path in paths), "raw source cleanup failed")
 
 
+def _path_argument(args: argparse.Namespace, name: str) -> Path | None:
+    value = getattr(args, name, None)
+    return Path(value) if value else None
+
+
+def _build_presence(args: argparse.Namespace) -> dict[str, bool]:
+    db_path = _path_argument(args, "db_jsonl")
+    metadata_path = _path_argument(args, "dispatcher_metadata")
+    body_path = _path_argument(args, "dispatcher_body")
+    source_dir = _path_argument(args, "source_dir")
+    return {
+        "database_source_present": bool(db_path and db_path.is_file()),
+        "dispatcher_metadata_present": bool(metadata_path and metadata_path.is_file()),
+        "dispatcher_body_present": bool(body_path and body_path.is_file()),
+        "github_source_present": bool(source_dir and source_dir.is_dir() and not source_dir.is_symlink()),
+    }
+
+
+def _remove_failure_target(path: Path | None) -> bool:
+    if path is None or not path.exists():
+        return True
+    try:
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+            return not path.exists()
+        return False
+    except Exception:
+        return False
+
+
+def cleanup_failed_build(args: argparse.Namespace) -> str:
+    targets = [
+        _path_argument(args, "db_jsonl"),
+        _path_argument(args, "identity_marker"),
+        _path_argument(args, "dispatcher_metadata"),
+        _path_argument(args, "dispatcher_metadata_headers"),
+        _path_argument(args, "dispatcher_body"),
+        _path_argument(args, "dispatcher_body_headers"),
+    ]
+    output = _path_argument(args, "output")
+    if output is not None:
+        targets.extend((
+            output,
+            output.with_suffix(".tmp"),
+            output.with_suffix(".validated.tmp"),
+            Path(str(output) + ".tmp"),
+            Path(str(output) + ".validated.tmp"),
+        ))
+    diagnostic = _path_argument(args, "diagnostic_output")
+    if diagnostic is not None:
+        targets.extend((diagnostic, diagnostic_temporary_path(diagnostic)))
+    results = [_remove_failure_target(path) for path in targets]
+    return "PASS" if all(results) else "FAIL"
+
+
+def record_build_failure(args: argparse.Namespace, error: BaseException) -> None:
+    failure = coerce_failure(error)
+    presence = getattr(args, "_diagnostic_presence", _build_presence(args))
+    raw_cleanup = cleanup_failed_build(args)
+    output = _path_argument(args, "output")
+    envelope = diagnostic_envelope(
+        failure,
+        **presence,
+        artifact_written=bool(output and output.is_file()),
+        raw_cleanup=raw_cleanup,
+    )
+    diagnostic_path = _path_argument(args, "diagnostic_output")
+    if diagnostic_path is None:
+        return
+    try:
+        write_diagnostic_envelope(diagnostic_path, envelope)
+    except Exception:
+        return
+
+
+def run_build_command(args: argparse.Namespace) -> int:
+    try:
+        build(args)
+        return 0
+    except Exception as error:
+        try:
+            record_build_failure(args, error)
+        except Exception:
+            pass
+        return 1
+
+
+def _load_json_file(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_artifact_atomic(output: Path, artifact: dict[str, Any]) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    require(not output.is_symlink(), "artifact output may not be a symlink")
+    temporary = output.with_suffix(".tmp")
+    require(not temporary.is_symlink(), "artifact temporary may not be a symlink")
+    if temporary.exists():
+        temporary.unlink()
+    payload = json.dumps(artifact, sort_keys=True, separators=(",", ":")) + "\n"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output)
+        os.chmod(output, 0o600)
+    except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def build(args: argparse.Namespace) -> None:
+    args._diagnostic_presence = _build_presence(args)
+    diagnostic_path = _path_argument(args, "diagnostic_output")
+    if diagnostic_path is not None:
+        validate_diagnostic_path(diagnostic_path)
+        diagnostic_targets = (diagnostic_path, diagnostic_temporary_path(diagnostic_path))
+        diagnostic_cleanup = [_remove_failure_target(path) for path in diagnostic_targets]
+        if not all(diagnostic_cleanup):
+            audit_failure("RAW_CLEANUP_CONTRACT", "CLEANUP_FAILED", "RAW_INPUTS_REMOVAL")
     db_path = Path(args.db_jsonl)
     identity_path = Path(args.identity_marker)
     metadata_path = Path(args.dispatcher_metadata) if args.dispatcher_metadata else None
@@ -1012,11 +1590,40 @@ def build(args: argparse.Namespace) -> None:
     body_path = Path(args.dispatcher_body) if args.dispatcher_body else None
     body_headers_path = Path(args.dispatcher_body_headers) if args.dispatcher_body_headers else None
     source_dir = Path(args.source_dir) if args.source_dir else None
-    sections = parse_jsonl(db_path)
-    identity = json.loads(identity_path.read_text(encoding="utf-8"))
-    validate_environment_identity(identity)
-    metadata = load_optional_json(metadata_path, args.dispatcher_metadata_status)
-    runtime, runtime_status = dispatcher_evidence(
+    sections = phase_call(
+        "DATABASE_JSONL_PARSE",
+        "JSONL_INVALID",
+        "STRICT_JSONL_REQUIRED",
+        parse_jsonl,
+        db_path,
+    )
+    identity = phase_call(
+        "ENVIRONMENT_IDENTITY_CONTRACT",
+        "SOURCE_FILE_MISSING",
+        "IDENTITY_MARKER_REQUIRED",
+        _load_json_file,
+        identity_path,
+    )
+    phase_call(
+        "ENVIRONMENT_IDENTITY_CONTRACT",
+        "ARTIFACT_SHAPE_INVALID",
+        "IDENTITY_MARKER_INVALID",
+        validate_environment_identity,
+        identity,
+    )
+    metadata = phase_call(
+        "DISPATCHER_METADATA_CONTRACT",
+        "METADATA_SHAPE_INVALID",
+        "DISPATCHER_METADATA_SHAPE",
+        load_optional_json,
+        metadata_path,
+        args.dispatcher_metadata_status,
+    )
+    runtime, runtime_status = phase_call(
+        "DISPATCHER_METADATA_CONTRACT",
+        "DISPATCHER_IDENTITY_INVALID",
+        "DISPATCHER_IDENTITY_REQUIRED",
+        dispatcher_evidence,
         metadata,
         args.dispatcher_metadata_status,
         body_path,
@@ -1024,12 +1631,24 @@ def build(args: argparse.Namespace) -> None:
         args.dispatcher_body_status,
         source_dir,
     )
-    resend_contract = inspect_resend_source(source_dir if runtime_status["github_source"] == "available" else None)
+    resend_contract = phase_call(
+        "RESEND_SOURCE_CONTRACT",
+        "SOURCE_CONTRACT_INVALID",
+        "RESEND_SOURCE_INSPECTION",
+        inspect_resend_source,
+        source_dir if runtime_status["github_source"] == "available" else None,
+    )
     raw_paths = (
         db_path, identity_path, metadata_path, metadata_headers_path,
         body_path, body_headers_path,
     )
-    remove_raw(raw_paths)
+    phase_call(
+        "RAW_CLEANUP_CONTRACT",
+        "CLEANUP_FAILED",
+        "RAW_INPUTS_REMOVAL",
+        remove_raw,
+        raw_paths,
+    )
     artifact = {
         "schema_version": "notifications-n0-evidence/v4",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -1075,10 +1694,14 @@ def build(args: argparse.Namespace) -> None:
     }
     validate_artifact_object(artifact, pending_allowed=True)
     output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_suffix(".tmp")
-    temporary.write_text(json.dumps(artifact, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
-    temporary.replace(output)
+    phase_call(
+        "ARTIFACT_ASSEMBLY_CONTRACT",
+        "ARTIFACT_WRITE_FAILED",
+        "ARTIFACT_ATOMIC_WRITE",
+        _write_artifact_atomic,
+        output,
+        artifact,
+    )
 
 
 def validate_final(args: argparse.Namespace) -> None:
@@ -1119,7 +1742,7 @@ def static_checks(args: argparse.Namespace) -> None:
             for line in Path(args.changed_files).read_text(encoding="utf-8").splitlines()
             if line.strip()
         }
-        require(changed <= ALLOWED_FILES and len(changed) <= 4, "change set exceeds the R2A-R3 allowlist")
+        require(changed <= ALLOWED_FILES and len(changed) <= 4, "change set exceeds the R2B-R1 allowlist")
 
     sql = sql_path.read_text(encoding="utf-8")
     require(sql.startswith("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"), "SQL must begin with the read-only transaction")
@@ -1132,6 +1755,14 @@ def static_checks(args: argparse.Namespace) -> None:
     ):
         require(setting in sql, f"SQL control is missing: {setting}")
     require("LEGACY_SCHEMA_ONLY" in sql, "legacy schema classification is missing")
+    for legacy_function_marker in (
+        "'mark_notification_processed'",
+        "'mark_notification_failed'",
+        "p_n8n_execution_id text",
+        "'classification', CASE",
+        "pg_get_function_identity_arguments",
+    ):
+        require(legacy_function_marker in sql, f"legacy function serialization is missing: {legacy_function_marker}")
     for receipt_marker in (
         "'receipt_security_contract'",
         "payment_operation_evidence_bucket_check",
@@ -1207,6 +1838,28 @@ def static_checks(args: argparse.Namespace) -> None:
         "dispatcher-body.bin", "dispatcher-body-headers.txt",
     ):
         require(raw_name in live_block, f"raw cleanup coverage is missing: {raw_name}")
+    for diagnostic_marker in (
+        "notifications-n0-diagnostic.json",
+        "--diagnostic-output",
+        "diagnostic-emit",
+        "notifications-n0-build.stdout",
+        "notifications-n0-build.stderr",
+        "AUDIT_FAILURE_PHASE=UNEXPECTED_INTERNAL_CONTRACT",
+        "AUDIT_FAILURE_CODE=UNEXPECTED_EXCEPTION",
+        "AUDIT_FAILURE_RULE=DIAGNOSTIC_ENVELOPE_MISSING",
+        "AUDIT_RAW_CLEANUP=",
+    ):
+        require(diagnostic_marker in live_block, f"safe diagnostic workflow is missing: {diagnostic_marker}")
+    require('> "${build_stdout}" 2> "${build_stderr}"' in live_block, "build stdout/stderr are not privately captured")
+    require('"${safe_report}" >> "${GITHUB_STEP_SUMMARY}"' in live_block, "safe diagnostic summary is missing")
+    require('cat "${diagnostic_path}"' not in live_block and "jq " not in live_block, "raw diagnostic envelope may not be printed")
+    require(
+        live_block.find("Build the allowlisted artifact with safe diagnostics")
+        < live_block.find("Fail-closed privacy validation")
+        < live_block.find("Compute safe artifact metadata")
+        < live_block.find("Upload the single sanitized artifact"),
+        "failure-sensitive live step ordering changed",
+    )
 
     validator_source = validator_path.read_text(encoding="utf-8")
     require("notifications-n0-evidence/v4" in validator_source, "artifact v4 validator is missing")
@@ -1219,7 +1872,9 @@ def static_checks(args: argparse.Namespace) -> None:
         "IDENTITY_TEST_COUNT = 17" in validator_source
         and "MANIFEST_TEST_COUNT = 20" in validator_source
         and "RECEIPT_SECURITY_TEST_COUNT = 13" in validator_source
-        and "OFFICIAL_MULTIPART_TEST_COUNT = 16" in validator_source,
+        and "OFFICIAL_MULTIPART_TEST_COUNT = 16" in validator_source
+        and "DIAGNOSTIC_TEST_COUNT = 26" in validator_source
+        and "LIVE_SHAPE_TEST_COUNT = 44" in validator_source,
         "required self-test suites are missing",
     )
     for parser_marker in (
@@ -1233,6 +1888,27 @@ def static_checks(args: argparse.Namespace) -> None:
     require("RECEIPT_SECURITY_KEYS" in validator_source, "receipt security artifact allowlist is missing")
     require('"dispatcher": "supabase_edge_function"' in validator_source and '"email_provider": "resend"' in validator_source, "canonical delivery contract is missing")
     require(("summarize_" + "n" + "8n") not in validator_source and ("--n" + "8n") not in validator_source, "runtime n8n validator code remains")
+    for diagnostic_source_marker in (
+        'DIAGNOSTIC_SCHEMA_VERSION = "notifications-n0-diagnostic/v1"',
+        "VALID_FAILURE_TRIPLES = frozenset",
+        "class AuditFailure(Exception)",
+        "super().__init__()",
+        "write_private_atomic",
+        "os.O_EXCL",
+        "0o600",
+        "validate_diagnostic_envelope",
+        "diagnostic_temporary_path",
+        "LEGACY_NOTIFICATION_FUNCTIONS",
+        "legacy function classification mismatch",
+    ):
+        require(diagnostic_source_marker in validator_source, f"diagnostic implementation is missing: {diagnostic_source_marker}")
+    require(
+        ("import " + "trace" + "back") not in validator_source
+        and ("trace" + "back.print") not in validator_source,
+        "stack trace output is prohibited",
+    )
+    require(re.search(r"print\s*\(\s*(?:exc|error)\b", validator_source) is None, "dynamic exception printing is prohibited")
+    require(re.search(r"repr\s*\(\s*(?:exc|error)\b", validator_source) is None, "dynamic exception repr is prohibited")
     compile(validator_source, str(validator_path), "exec")
 
     readme = readme_path.read_text(encoding="utf-8")
@@ -1244,6 +1920,9 @@ def static_checks(args: argparse.Namespace) -> None:
         "parse_failed", "bundle digest", "transport body",
         "receipt_security_contract", "false is evidence", "entrypoint_path",
         "deno2_entrypoint_path", "absolute paths",
+        "notifications-n0-diagnostic/v1", "R2B-R1", "30584218059",
+        "exact cause remains unproven", "no retry", "exception text",
+        "partial artifact", "R2B-R2", "N0 remains open", "N1 remains blocked",
     ):
         require(phrase.lower() in readme.lower(), f"README is missing: {phrase}")
     require("n8n" in readme.lower() and "retired" in readme.lower(), "n8n retirement statement is missing")
@@ -1397,7 +2076,7 @@ def expect_artifact_failure(label: str, mutate) -> None:
     mutate(candidate)
     try:
         validate_artifact_object(candidate, pending_allowed=False)
-    except AuditError:
+    except (AuditError, AuditFailure):
         return
     raise AuditError(f"negative artifact self-test unexpectedly passed: {label}")
 
@@ -1405,7 +2084,7 @@ def expect_artifact_failure(label: str, mutate) -> None:
 def expect_call_failure(label: str, function, *args, **kwargs) -> None:
     try:
         function(*args, **kwargs)
-    except (AuditError, ValueError):
+    except (AuditError, AuditFailure, ValueError):
         return
     raise AuditError(f"negative self-test unexpectedly passed: {label}")
 
@@ -1469,6 +2148,445 @@ def multipart_custom_fixture(
         ])
     chunks.append(f"--{boundary}--\r\n".encode())
     return content_type, b"".join(chunks)
+
+
+DIAGNOSTIC_TEST_COUNT = 26
+LIVE_SHAPE_TEST_COUNT = 44
+
+
+@contextlib.contextmanager
+def isolated_runner_temp():
+    previous = os.environ.get("RUNNER_TEMP")
+    with tempfile.TemporaryDirectory() as directory:
+        os.environ["RUNNER_TEMP"] = directory
+        try:
+            yield Path(directory)
+        finally:
+            if previous is None:
+                os.environ.pop("RUNNER_TEMP", None)
+            else:
+                os.environ["RUNNER_TEMP"] = previous
+
+
+def fixture_sections() -> dict[str, Any]:
+    fixture = valid_fixture()
+    return {
+        "migrations": fixture["migrations"],
+        "database": fixture["database_schema"],
+        "notification_aggregates": fixture["notification_aggregates"],
+        "intake_aggregates": {
+            key: value
+            for key, value in fixture["intake_aggregates"].items()
+            if key != "providers"
+        },
+        "provider_aggregates": fixture["intake_aggregates"]["providers"],
+        "receipt_link_aggregates": fixture["payment_receipt_aggregates"]["receipt_links"],
+        "evidence_aggregates": fixture["payment_receipt_aggregates"]["evidence"],
+        "outbox_aggregates": fixture["payment_receipt_aggregates"]["outbox"],
+        "payment_request_aggregates": fixture["payment_receipt_aggregates"]["payment_requests"],
+        "receipt_security_contract": fixture["receipt_security_contract"],
+        "storage_metadata": fixture["storage"],
+    }
+
+
+def build_test_arguments(
+    root: Path,
+    *,
+    sections: dict[str, Any] | None = None,
+    invalid_jsonl: bool = False,
+    database_path_is_directory: bool = False,
+) -> argparse.Namespace:
+    database_path = root / "database.jsonl"
+    identity_path = root / "environment-identity.json"
+    source_dir = root / "notification-dispatcher"
+    output_dir = root / "output"
+    source_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(exist_ok=True)
+    (source_dir / "index.ts").write_text(
+        "const provider = 'resend'; const guard = 'notification_send_mode';\n",
+        encoding="utf-8",
+    )
+    identity_path.write_text(
+        json.dumps(valid_fixture()["environment_identity"], sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    if database_path_is_directory:
+        database_path.mkdir(exist_ok=True)
+    elif invalid_jsonl:
+        database_path.write_text("{invalid\n", encoding="utf-8")
+    else:
+        selected = sections if sections is not None else fixture_sections()
+        database_path.write_text(
+            "".join(
+                json.dumps({"section": section, "data": selected[section]}, sort_keys=True) + "\n"
+                for section in sorted(selected)
+            ),
+            encoding="utf-8",
+        )
+    return argparse.Namespace(
+        db_jsonl=str(database_path),
+        identity_marker=str(identity_path),
+        dispatcher_metadata=None,
+        dispatcher_metadata_headers=None,
+        dispatcher_body=None,
+        dispatcher_body_headers=None,
+        dispatcher_metadata_status="not_collected",
+        dispatcher_body_status="not_collected",
+        source_dir=str(source_dir),
+        github_head_sha="a" * 40,
+        output=str(output_dir / "artifact.json"),
+        diagnostic_output=str(root / "notifications-n0-diagnostic.json"),
+    )
+
+
+def safe_diagnostic_output(root: Path, dynamic_text: str) -> str:
+    path = root / "notifications-n0-diagnostic.json"
+    failure = coerce_failure(RuntimeError(dynamic_text))
+    write_diagnostic_envelope(
+        path,
+        diagnostic_envelope(
+            failure,
+            database_source_present=False,
+            dispatcher_metadata_present=False,
+            dispatcher_body_present=False,
+            github_source_present=False,
+            artifact_written=False,
+            raw_cleanup="PASS",
+        ),
+    )
+    if os.name != "nt":
+        require(stat.S_IMODE(path.stat().st_mode) == 0o600, "diagnostic permissions are not private")
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        emit_diagnostic(argparse.Namespace(diagnostic=str(path)))
+    require(stderr.getvalue() == "", "diagnostic reporter wrote stderr")
+    require(not path.exists(), "diagnostic envelope was retained")
+    rendered = stdout.getvalue()
+    lines = rendered.rstrip("\n").splitlines()
+    require(len(lines) == 4, "diagnostic reporter emitted extra lines")
+    require(lines[0].startswith("AUDIT_FAILURE_PHASE="), "diagnostic phase line missing")
+    require(lines[1].startswith("AUDIT_FAILURE_CODE="), "diagnostic code line missing")
+    require(lines[2].startswith("AUDIT_FAILURE_RULE="), "diagnostic rule line missing")
+    require(lines[3].startswith("AUDIT_RAW_CLEANUP="), "diagnostic cleanup line missing")
+    return rendered
+
+
+def diagnostic_self_tests() -> None:
+    completed = 0
+
+    def pass_case(condition: bool, label: str) -> None:
+        nonlocal completed
+        require(condition, label)
+        completed += 1
+
+    with isolated_runner_temp() as root:
+        success_args = build_test_arguments(root)
+        pass_case(run_build_command(success_args) == 0, "valid build failed")
+        artifact_path = Path(success_args.output)
+        require(artifact_path.is_file(), "valid build omitted artifact")
+        validate_final(argparse.Namespace(artifact=str(artifact_path)))
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        require(artifact["schema_version"] == "notifications-n0-evidence/v4", "valid build changed artifact schema")
+
+    phase_envelopes_valid = True
+    for phase, (code, rule) in PHASE_DEFAULTS.items():
+        envelope = diagnostic_envelope(
+            AuditFailure(phase, code, rule),
+            database_source_present=False,
+            dispatcher_metadata_present=False,
+            dispatcher_body_present=False,
+            github_source_present=False,
+            artifact_written=False,
+            raw_cleanup="PASS",
+        )
+        phase_envelopes_valid = phase_envelopes_valid and validate_diagnostic_envelope(envelope) is envelope
+    pass_case(phase_envelopes_valid and len(PHASE_DEFAULTS) == len(FAILURE_PHASES), "phase taxonomy coverage failed")
+
+    sensitive_samples = (
+        "person@example.test",
+        "postgresql://fixture:fixture@example.test/postgres",
+        "abcdefghijklmnopqrst",
+        "token=fixture-value",
+        "123e4567-e89b-12d3-a456-426614174000",
+    )
+    with isolated_runner_temp() as root:
+        rendered_samples = []
+        for sample in sensitive_samples:
+            rendered = safe_diagnostic_output(root, sample)
+            require(sample not in rendered, "dynamic exception text escaped")
+            rendered_samples.append(rendered)
+    pass_case("person@example.test" not in rendered_samples[0], "email escaped")
+    pass_case("postgresql://" not in rendered_samples[1], "database URL escaped")
+    pass_case("abcdefghijklmnopqrst" not in rendered_samples[2], "project ref escaped")
+    pass_case("fixture-value" not in rendered_samples[3], "token escaped")
+    pass_case("123e4567" not in rendered_samples[4], "UUID escaped")
+
+    unexpected = coerce_failure(RuntimeError("private"))
+    pass_case(
+        (unexpected.phase, unexpected.code, unexpected.rule)
+        == ("UNEXPECTED_INTERNAL_CONTRACT", "UNEXPECTED_EXCEPTION", "UNEXPECTED_INTERNAL"),
+        "unexpected exception mapping changed",
+    )
+
+    valid_envelope = diagnostic_envelope(
+        unexpected,
+        database_source_present=False,
+        dispatcher_metadata_present=False,
+        dispatcher_body_present=False,
+        github_source_present=False,
+        artifact_written=False,
+        raw_cleanup="PASS",
+    )
+    unknown_key = dict(valid_envelope, unexpected_key=False)
+    expect_call_failure("unknown diagnostic key", validate_diagnostic_envelope, unknown_key)
+    pass_case(True, "unknown diagnostic key passed")
+    dynamic_value = dict(valid_envelope, phase="person@example.test")
+    expect_call_failure("dynamic diagnostic value", validate_diagnostic_envelope, dynamic_value)
+    pass_case(True, "dynamic diagnostic value passed")
+    pass_case(validate_diagnostic_envelope(dict(valid_envelope)) is not None, "valid diagnostic failed")
+
+    with isolated_runner_temp() as root:
+        failed_args = build_test_arguments(root, invalid_jsonl=True)
+        pass_case(run_build_command(failed_args) == 1 and not Path(failed_args.output).exists(), "failure created artifact")
+        partial = Path(failed_args.output)
+        partial.write_text("partial", encoding="utf-8")
+        failed_args = build_test_arguments(root, invalid_jsonl=True)
+        partial.write_text("partial", encoding="utf-8")
+        pass_case(run_build_command(failed_args) == 1 and not partial.exists(), "partial artifact retained")
+        pass_case(
+            not Path(failed_args.db_jsonl).exists() and not Path(failed_args.identity_marker).exists(),
+            "raw inputs retained",
+        )
+        report = io.StringIO()
+        with contextlib.redirect_stdout(report):
+            emit_diagnostic(argparse.Namespace(diagnostic=failed_args.diagnostic_output))
+        safe_report = report.getvalue()
+        pass_case(("Trace" + "back") not in safe_report, "trace output escaped")
+        pass_case(("re" + "pr") not in safe_report.lower(), "repr output escaped")
+        pass_case("expecting property" not in safe_report.lower(), "exception message escaped")
+
+    with isolated_runner_temp() as root:
+        cleanup_args = build_test_arguments(root, database_path_is_directory=True)
+        require(run_build_command(cleanup_args) == 1, "cleanup-failure build unexpectedly passed")
+        cleanup_envelope = validate_diagnostic_envelope(
+            json.loads(Path(cleanup_args.diagnostic_output).read_text(encoding="utf-8"))
+        )
+        pass_case(cleanup_envelope["raw_cleanup"] == "FAIL", "cleanup failure was not a fixed enum")
+
+    empty_migration = {"available": True, "entries": [{"version": "001", "name": ""}], "duplicates": [], "required_versions": []}
+    expect_call_failure("empty migration name", validate_migrations, empty_migration)
+    pass_case(True, "empty migration contract changed")
+
+    long_signature = ", ".join(
+        f"p_{index:03d}_{'x' * 50} text"
+        for index in range(100)
+    )
+    long_database = {"entities": [], "enum_types": [], "functions": [{
+        "name": "long_signature_fixture",
+        "identity_arguments": long_signature,
+        "security_definer": False,
+        "volatility": "v",
+        "classification": "ACTIVE_SCHEMA",
+    }]}
+    validate_database(long_database)
+    pass_case(len(long_signature.encode("utf-8")) > 300, "long PostgreSQL signature was not exercised")
+
+    with isolated_runner_temp() as root:
+        body_type, body = multipart_fixture("LibraryException", [("index.ts", b"fixture")])
+        body_path = root / "dispatcher-body.bin"
+        headers_path = root / "dispatcher-body-headers.txt"
+        body_path.write_bytes(body)
+        headers_path.write_text(f"Content-Type: {body_type}\n", encoding="utf-8")
+        runtime, _ = dispatcher_evidence(
+            {"slug": "notification-dispatcher", "entrypoint_path": "file://["},
+            "available",
+            body_path,
+            headers_path,
+            "available",
+            None,
+        )
+        pass_case(runtime["comparison_state"] == "parse_failed", "multipart library exception escaped")
+
+    with isolated_runner_temp() as root:
+        privacy_sections = fixture_sections()
+        privacy_sections["database"] = copy.deepcopy(privacy_sections["database"])
+        privacy_sections["database"]["functions"].append({
+            "name": "unexpected_runtime_function",
+            "identity_arguments": "p_n8n_execution_id text",
+            "security_definer": False,
+            "volatility": "v",
+            "classification": "ACTIVE_SCHEMA",
+        })
+        privacy_args = build_test_arguments(root, sections=privacy_sections)
+        pass_case(run_build_command(privacy_args) == 1 and not Path(privacy_args.output).exists(), "privacy failure produced output")
+
+    success = valid_fixture()
+    pass_case(
+        set(success) == ROOT_KEYS
+        and success["schema_version"] == "notifications-n0-evidence/v4"
+        and success["send_mode"]["state"] == "UNKNOWN_BY_DESIGN",
+        "success path semantic regression",
+    )
+    pass_case(
+        all(
+            "n8n" not in json.dumps(success[key], sort_keys=True).lower()
+            for key in ("delivery_architecture", "dispatcher_runtime", "resend_source_contract")
+        ),
+        "n8n runtime dependency returned",
+    )
+    pass_case(
+        success["resend_source_contract"]["provider_api_called_by_audit"] is False
+        and success["resend_source_contract"]["email_sent_by_audit"] is False,
+        "Resend call contract changed",
+    )
+    pass_case(success["dispatcher_runtime"]["function_invoked"] is False, "dispatcher invocation contract changed")
+    require(completed == DIAGNOSTIC_TEST_COUNT, "diagnostic self-test count drift")
+
+
+def live_shape_self_tests() -> None:
+    completed = 0
+
+    def passed() -> None:
+        nonlocal completed
+        completed += 1
+
+    migrations = {"available": True, "entries": [{"version": "001", "name": None}], "duplicates": [], "required_versions": []}
+    validate_migrations(migrations); passed()
+    expect_call_failure("empty migration", validate_migrations, {"available": True, "entries": [{"version": "001", "name": ""}], "duplicates": [], "required_versions": []}); passed()
+    validate_migrations({"available": True, "entries": [{"version": "001", "name": "   "}], "duplicates": [], "required_versions": []}); passed()
+    validate_migrations({"available": True, "entries": [{"version": "7", "name": "short"}], "duplicates": [], "required_versions": []}); passed()
+    validate_migrations({"available": True, "entries": [{"version": "20260101123456", "name": "timestamp_name"}], "duplicates": [], "required_versions": []}); passed()
+    validate_migrations({"available": True, "entries": [], "duplicates": [{"version": "033", "count": 2}], "required_versions": []}); passed()
+    expect_call_failure("migration invalid character", validate_migrations, {"available": True, "entries": [{"version": "001", "name": "bad/value"}], "duplicates": [], "required_versions": []}); passed()
+
+    entity = {
+        "name": "public." + "x" * 56,
+        "exists": True,
+        "rls_enabled": True,
+        "columns": [],
+        "constraints": [],
+        "indexes": [],
+        "policies": [],
+        "grants": [],
+        "triggers": [],
+    }
+    validate_database({"entities": [entity], "functions": [], "enum_types": []}); passed()
+    for type_value in ("public.notification_status", "text[]", "numeric(18,2)", "timestamp with time zone"):
+        typed = copy.deepcopy(entity)
+        typed["columns"] = [{
+            "name": "fixture",
+            "type": type_value,
+            "nullable": True,
+            "default_present": False,
+            "classification": "ACTIVE_SCHEMA",
+        }]
+        validate_database({"entities": [typed], "functions": [], "enum_types": []}); passed()
+    signature = ", ".join(f"p_{index:03d}_{'x' * 50} text" for index in range(100))
+    validate_database({"entities": [], "functions": [{
+        "name": "long_signature_fixture",
+        "identity_arguments": signature,
+        "security_definer": False,
+        "volatility": "v",
+        "classification": "ACTIVE_SCHEMA",
+    }], "enum_types": []}); passed()
+    for roles in (["PUBLIC"], ["authenticated", "service_role"]):
+        policy_entity = copy.deepcopy(entity)
+        policy_entity["policies"] = [{"name": "fixture_policy", "command": "SELECT", "permissive": True, "roles": roles}]
+        validate_database({"entities": [policy_entity], "functions": [], "enum_types": []}); passed()
+    for mode in ("PERMISSIVE", "RESTRICTIVE"):
+        policy_entity = copy.deepcopy(entity)
+        policy_entity["policies"] = [{"name": "fixture_policy", "command": "SELECT", "permissive": mode, "roles": ["authenticated"]}]
+        validate_database({"entities": [policy_entity], "functions": [], "enum_types": []}); passed()
+    validate_database({"entities": [], "functions": [], "enum_types": [{"name": "notification_status", "labels": ["pending", "sent"]}]}); passed()
+
+    legacy_signature = "p_event_id uuid, p_n8n_execution_id text"
+    legacy_functions = []
+    for function_name in sorted(LEGACY_NOTIFICATION_FUNCTIONS):
+        legacy_function = {
+            "name": function_name,
+            "identity_arguments": legacy_signature,
+            "security_definer": True,
+            "volatility": "v",
+            "classification": "LEGACY_SCHEMA_ONLY",
+        }
+        validate_database({"entities": [], "enum_types": [], "functions": [legacy_function]}); passed()
+        legacy_functions.append(legacy_function)
+    legacy_artifact = valid_fixture()
+    legacy_artifact["database_schema"]["functions"] = legacy_functions
+    validate_artifact_object(legacy_artifact, pending_allowed=False)
+    expect_call_failure("unknown legacy function", validate_database, {"entities": [], "enum_types": [], "functions": [{
+        "name": "unexpected_function",
+        "identity_arguments": legacy_signature,
+        "security_definer": False,
+        "volatility": "v",
+        "classification": "LEGACY_SCHEMA_ONLY",
+    }]}); passed()
+    expect_call_failure("legacy classification without marker", validate_database, {"entities": [], "enum_types": [], "functions": [{
+        "name": "mark_notification_processed",
+        "identity_arguments": "p_event_id uuid",
+        "security_definer": True,
+        "volatility": "v",
+        "classification": "LEGACY_SCHEMA_ONLY",
+    }]}); passed()
+
+    aggregate = valid_fixture()
+    validate_notification(aggregate["notification_aggregates"]); passed()
+    nullable = copy.deepcopy(aggregate["notification_aggregates"])
+    nullable["total"] = None
+    nullable["available"] = False
+    validate_notification(nullable); passed()
+    empty = copy.deepcopy(aggregate["notification_aggregates"])
+    empty["by_status"] = []
+    validate_notification(empty); passed()
+    dimension = copy.deepcopy(aggregate["notification_aggregates"])
+    dimension.update({"available": True, "total": 0, "by_status": [{"status": "pending", "count": 0}]})
+    validate_notification(dimension); passed()
+    bad_null = copy.deepcopy(dimension)
+    bad_null["by_status"] = [{"status": None, "count": 0}]
+    expect_call_failure("null dimension", validate_notification, bad_null); passed()
+    bad_type = copy.deepcopy(dimension)
+    bad_type["by_status"] = [{"status": {"value": "pending"}, "count": 0}]
+    expect_call_failure("unexpected dimension", validate_notification, bad_type); passed()
+
+    runtime, _ = dispatcher_evidence({"slug": "notification-dispatcher", "verify_jwt": True}, "available", None, None, "not_collected", None)
+    require(runtime["metadata_available"] is True, "direct metadata failed"); passed()
+    runtime, _ = dispatcher_evidence({"slug": "notification-dispatcher", "verify_jwt": None}, "available", None, None, "not_collected", None)
+    require(runtime["verify_jwt"] is None, "nullable verify_jwt failed"); passed()
+    runtime, _ = dispatcher_evidence({"slug": "notification-dispatcher", "ezbr_sha256": "a" * 64}, "available", None, None, "not_collected", None)
+    require(runtime["runtime_bundle_digest"] == "a" * 64, "bundle digest failed"); passed()
+    runtime, _ = dispatcher_evidence({"slug": "notification-dispatcher"}, "available", None, None, "not_collected", None)
+    require(runtime["runtime_bundle_digest"] is None, "unavailable bundle digest failed"); passed()
+    multipart_type, multipart_body = multipart_fixture("LiveShape", [("index.ts", b"fixture")])
+    require(parse_multipart_files(multipart_type, multipart_body, fallback_metadata={"entrypoint_path": "index.ts"}), "multipart valid failed"); passed()
+    with isolated_runner_temp() as root:
+        body_path = root / "dispatcher-body.bin"
+        headers_path = root / "dispatcher-body-headers.txt"
+        body_path.write_bytes(multipart_body)
+        headers_path.write_text(f"Content-Type: {multipart_type}\n", encoding="utf-8")
+        runtime, _ = dispatcher_evidence(
+            {"slug": "notification-dispatcher", "entrypoint_path": "file://["},
+            "available", body_path, headers_path, "available", None,
+        )
+        require(runtime["comparison_state"] == "parse_failed", "parse_failed shape failed"); passed()
+
+    privacy_values = (
+        "abcdefghijklmnopqrst",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "person@example.test",
+        "https://example.test",
+        "postgresql://fixture:fixture@example.test/postgres",
+        "eyJabc.def.ghi",
+        "token=fixture",
+        "https://example.test/object?X-Amz-Signature=fixture",
+    )
+    for value in privacy_values:
+        expect_call_failure("privacy live shape", validate_sensitive_values, {"fixture": value})
+        passed()
+    validate_sensitive_values({"dispatcher_runtime": {"runtime_manifest_digest": "a" * 64}}); passed()
+    expect_call_failure("SHA outside allowlist", validate_sensitive_values, {"fixture": "a" * 64}); passed()
+
+    require(completed == LIVE_SHAPE_TEST_COUNT, "live-shape self-test count drift")
 
 
 IDENTITY_TEST_COUNT = 17
@@ -1718,6 +2836,8 @@ def self_test(_: argparse.Namespace) -> None:
     manifest_self_tests()
     official_multipart_self_tests()
     receipt_security_self_tests()
+    diagnostic_self_tests()
+    live_shape_self_tests()
     artifact_cases = (
         ("top-level unknown", lambda item: item.__setitem__("unknown", {})),
         ("wrong provider", lambda item: item["delivery_architecture"].__setitem__("email_provider", "other")),
@@ -1729,6 +2849,7 @@ def self_test(_: argparse.Namespace) -> None:
         ("UUID", lambda item: item["migrations"]["entries"].append({"version": "041", "name": "123e4567-e89b-12d3-a456-426614174000"})),
         ("URL", lambda item: item["migrations"]["entries"].append({"version": "041", "name": "https://example.test"})),
         ("SHA outside allowlist", lambda item: item["migrations"]["entries"].append({"version": "041", "name": "d" * 64})),
+        ("unexpected n8n value", lambda item: item["migrations"]["entries"].append({"version": "041", "name": "n8n_runtime"})),
         ("source retained", lambda item: item["dispatcher_runtime"].__setitem__("source_retained", True)),
         ("function invoked", lambda item: item["dispatcher_runtime"].__setitem__("function_invoked", True)),
         ("function deployed", lambda item: item["dispatcher_runtime"].__setitem__("function_deployed_by_audit", True)),
@@ -1779,11 +2900,17 @@ def main() -> int:
     build_parser.add_argument("--source-dir")
     build_parser.add_argument("--github-head-sha", required=True)
     build_parser.add_argument("--output", required=True)
+    build_parser.add_argument("--diagnostic-output", required=True)
     build_parser.set_defaults(func=build)
+    diagnostic_parser = subparsers.add_parser("diagnostic-emit")
+    diagnostic_parser.add_argument("--diagnostic", required=True)
+    diagnostic_parser.set_defaults(func=emit_diagnostic)
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--artifact", required=True)
     validate_parser.set_defaults(func=validate_final)
     args = parser.parse_args()
+    if args.command == "build":
+        return run_build_command(args)
     try:
         args.func(args)
         if args.command == "static":
