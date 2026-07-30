@@ -1,54 +1,67 @@
-# Notifications N0 — sanitized DEV evidence path
+# Notifications N0 — Resend-only sanitized DEV evidence path
 
-## Purpose
+## Purpose and architecture
 
-This directory defines the R2A observability gate for Notifications N0. It exists because N0-R1 ended with `STOP / READ_ONLY_DEV_EVIDENCE_PATH_UNAVAILABLE`. It creates a reviewable, read-only route for future collection of sanitized DEV evidence. The pull request phase performs static checks only: it does not connect to DEV, run n8n, invoke or deploy the dispatcher, send email, or upload a live artifact.
+This directory defines the corrected R2A-R1 observability gate created after N0-R1 ended with `STOP / READ_ONLY_DEV_EVIDENCE_PATH_UNAVAILABLE`. The canonical notification architecture is:
 
-R2A does not enable N1. It does not change product behavior, database objects, migrations, notification state, provider data, or external services.
+```text
+notification_events
+→ Supabase Edge Function notification-dispatcher
+→ Resend
+→ notification_delivery_attempts
+```
+
+The ledger is `notification_events`, delivery history is `notification_delivery_attempts`, the dispatcher is `notification-dispatcher`, the email provider is Resend, and exactly one consumer is required. The audit never acts as a consumer: provider API calls and emails sent by the audit are always false.
+
+n8n is retired and outside the canonical notification architecture (RETIRED / OUT_OF_SCOPE). This audit does not query it, use its secrets, depend on its state, or treat it as a scheduler or consumer; a legacy schema name is classified `LEGACY_SCHEMA_ONLY` and does not prove active use.
+
+R2A-R1 performs static checks only. It does not connect to DEV, read runtime secrets, invoke Resend, invoke or deploy the dispatcher, execute SQL, or upload live evidence. It does not enable N1.
 
 ## Execution split
 
-The workflow has two independent jobs:
+The workflow contains two isolated jobs:
 
-1. `static_checks` runs for pull requests to `dev`. It has read-only repository permissions, no GitHub environment, no secrets, and no live-system access. It verifies the four-file R2A allowlist, workflow syntax, immutable action pins, trigger guards, SQL read-only controls, artifact retention, and this contract.
-2. `collect_dev_evidence` is a future live job. It is eligible only for this exact repository on `refs/heads/dev`, after static checks, on a `push` to `dev` or an input-free manual dispatch, and under the protected `DEV` environment. It is intentionally not eligible on a pull request.
+1. `static_checks` runs on pull requests to `dev`. It has read-only repository permissions, no environment, no secrets, and no authenticated live access. It validates the four-file allowlist, workflow and Python syntax, SQL safety, artifact schema, supply-chain pins, and in-memory positive and negative validator fixtures.
+2. `collect_dev_evidence` is implemented for a separate, expressly authorized R2B gate. It is eligible only in the exact repository on `refs/heads/dev`, after static checks, on a qualifying push or input-free manual dispatch, under the protected `DEV` environment.
 
-The live job requires the PostgreSQL command-line client, installed from the runner's operating-system package repository. Runtime credentials are scoped only to that job and are never printed or copied into the artifact.
+The future live job may use only the minimum database and official management-plane credentials required for read-only evidence. It has no Resend credential and no dispatcher invocation credential.
 
-## Read-only sources
+## Read-only evidence sources
 
-The database script starts a `REPEATABLE READ READ ONLY` transaction, applies statement, lock, and idle-transaction timeouts, and ends with `COMMIT`. It reads catalog structure and aggregate counts only. It contains no data-definition, data-modification, lock-taking, or function-invocation statement.
+The database script begins with `REPEATABLE READ READ ONLY`, applies statement, lock, and idle-transaction timeouts, and ends with `COMMIT`. The runner also sets `default_transaction_read_only`. Queries are limited to structural catalogs and sanitized aggregates; there is no DDL, DML, application RPC, queue claim, or state transition.
 
-Dispatcher inspection uses only the official management plane with authenticated `GET` requests for function metadata and body. The body is held in private runner storage only long enough to compute a SHA-256 digest. The route never invokes, deploys, updates, or deletes a function.
+The dispatcher is inspected in two ways: versioned source is scanned locally in the runner for the Resend integration contract, and an official management-plane GET may later provide deployment metadata and temporary source material for a digest comparison. The function is never invoked, deployed, updated, or retained.
 
-n8n inspection uses a `GET` request for workflow metadata. Raw responses remain in private runner storage and are summarized into boolean capabilities and counts. The route never activates, deactivates, creates, updates, deletes, or executes a workflow.
+The Resend source contract records whether the versioned dispatcher contains a provider reference, a send-mode guard, and an idempotency header. These are read-only observations. Absence of an idempotency header is an N1 concern and does not authorize its implementation here. Resend is never called.
 
-## Artifact contract
+`SEND_MODE` remains exactly `UNKNOWN_BY_DESIGN` because runtime secret values are not read, hashed, inferred, or tested by this audit. A separate authorized gate must establish `test_only` before any future delivery test.
 
-A successful live job uploads exactly one file named `artifact.json`, retained for at most seven days. The JSON has an exact recursive allowlist and may contain only:
+## Artifact v2
 
-- repository revision and UTC generation time;
-- migration versions, sanitized migration names, duplicate counts, and required-version presence;
-- table, column, constraint, index, policy, grant, trigger, function, and enum metadata;
-- aggregate notification, intake, provider, payment-receipt, evidence, outbox, request, and storage counts;
-- dispatcher presence, deployment/JWT flags, and SHA-256 digests;
-- n8n workflow counts and boolean trigger/capability summaries;
-- source availability, cleanup, and privacy-validation states.
+A successful future live job uploads exactly one `artifact.json`, retained for no more than seven days. Its schema is `notifications-n0-evidence/v2` and its top-level allowlist is:
 
-The artifact contains no PII, email addresses, provider or payment identifiers, UUIDs, project references, hosts, URLs, connection strings, credentials, secret values, payloads, error text, stack traces, database row samples, storage object names or paths, signed links, dispatcher source, or raw n8n data.
+- generation metadata, environment, and GitHub revision;
+- canonical delivery architecture;
+- migrations and database schema;
+- sanitized notification, intake, payment, receipt, and Storage aggregates;
+- dispatcher runtime metadata and allowlisted SHA-256 digests;
+- the Resend source contract;
+- send mode, source status, privacy validation, and cleanup.
 
-`SEND_MODE` is exactly `UNKNOWN_BY_DESIGN`. The audit does not read a runtime secret merely to classify its value; doing so would expand exposure without being necessary for this gate.
+The artifact contains no PII, email addresses, UUID values, business identifiers, project references, hosts, URLs, connection strings, tokens, secret values, payloads, raw errors, paths, filenames, provider response identifiers, source code, API responses, or raw logs.
 
-## Fail-closed behavior
+Structural column, constraint, and index names may be inventoried without values. Any historical name associated with the retired component must be marked `LEGACY_SCHEMA_ONLY`; it is not a runtime dependency.
 
-The validator is fail-closed. It checks the complete schema, every allowed nested key, value types, safe-name patterns, digest shapes, and forbidden sensitive patterns. It also compares the final serialization against any sensitive runtime value available to the job without printing that value. A parse error, unknown key, unexpected file, prohibited pattern, failed source read, or cleanup problem prevents upload. On privacy-validation failure, the artifact is deleted and only the generic failure marker is emitted.
+## Fail-closed validation and cleanup
 
-Private database, dispatcher, and n8n responses are removed before final validation. An always-run cleanup step removes remaining private material and removes output after any failed job. Logs and the step summary contain status, byte count, digest, retention, and validation result only.
+The validator uses an exact recursive allowlist and permits SHA-256 only in dispatcher digest fields. It rejects unknown keys, prohibited providers or dispatchers, unsafe architecture flags, sensitive patterns, retained runtime source, function invocation, function deployment, provider API use, email sending, and runtime secret reads.
 
-## Unknowns and the R2B gate
+Positive and negative in-memory fixtures exercise schema v2, provider and dispatcher invariants, SEND_MODE, sensitive patterns, unknown fields, digest placement, and legacy structural classification. Fixtures are not versioned.
 
-`UNKNOWN` or `unavailable` means that a supported read-only source or fact could not be established; it remains open and is never converted into a guessed true or false result. `CONTRACT_CONFLICT` means that a source response cannot be represented by the allowlisted schema or violates the expected shape; collection fails and no artifact is uploaded. Uncertain sanitization is also a hard failure. Database evidence is mandatory because it is the core of this audit path.
+Raw database and dispatcher responses are stored only in private runner space and removed before final artifact validation. Failed validation deletes the artifact and emits only a generic failure marker. No raw response or stderr file is uploaded.
 
-Even after a future successful run, this audit does not prove notification delivery correctness, recipient authorization, template suitability, link isolation, or readiness for external email. Those remain product and security decisions outside R2A.
+## Vercel and next gate
 
-R2B is a separate approval gate. Reviewers must approve the branch protections, `DEV` environment controls, secret placement, SQL scope, JSON allowlist, GET-only integrations, cleanup behavior, and static-check result before anyone manually dispatches the live job or relies on a post-merge run. Passing R2A means only that the sanitized read-only audit pull request is ready for review; it is not authorization to merge, execute live collection, send notifications, or proceed to N1.
+`EXPECTED_AUTOMATIC_PREVIEW` is the classification for a non-production Preview created automatically by the repository's existing pull-request integration. It is not a manual deployment or direct production interaction, and R2A-R1 does not cancel, redeploy, promote, configure, or clean it up. Production evidence, a productive alias, or a manual promotion would require an immediate stop.
+
+R2B requires separate human authorization to integrate and execute the read-only audit. Until then the Draft PR remains unmerged, the live job remains skipped, N0 remains open, N1 remains blocked, and this route must send zero emails.

@@ -175,7 +175,11 @@ SELECT jsonb_build_object(
               'name', attribute_info.attname,
               'type', pg_catalog.format_type(attribute_info.atttypid, attribute_info.atttypmod),
               'nullable', NOT attribute_info.attnotnull,
-              'default_present', default_info.adbin IS NOT NULL
+              'default_present', default_info.adbin IS NOT NULL,
+              'classification', CASE
+                WHEN attribute_info.attname ILIKE '%n8n%' THEN 'LEGACY_SCHEMA_ONLY'
+                ELSE 'ACTIVE_SCHEMA'
+              END
             )
             ORDER BY attribute_info.attnum
           )
@@ -199,7 +203,11 @@ SELECT jsonb_build_object(
                 WHEN 'x' THEN 'exclusion'
                 ELSE 'other'
               END,
-              'validated', constraint_info.convalidated
+              'validated', constraint_info.convalidated,
+              'classification', CASE
+                WHEN constraint_info.conname ILIKE '%n8n%' THEN 'LEGACY_SCHEMA_ONLY'
+                ELSE 'ACTIVE_SCHEMA'
+              END
             )
             ORDER BY constraint_info.conname
           )
@@ -212,7 +220,11 @@ SELECT jsonb_build_object(
               'name', index_relation.relname,
               'unique', index_info.indisunique,
               'primary', index_info.indisprimary,
-              'valid', index_info.indisvalid
+              'valid', index_info.indisvalid,
+              'classification', CASE
+                WHEN index_relation.relname ILIKE '%n8n%' THEN 'LEGACY_SCHEMA_ONLY'
+                ELSE 'ACTIVE_SCHEMA'
+              END
             )
             ORDER BY index_relation.relname
           )

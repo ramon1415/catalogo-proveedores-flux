@@ -1,4 +1,4 @@
-name: Notifications N0 DEV Read-only Evidence
+name: Notifications N0 DEV Read-only Evidence — Edge and Resend
 
 on:
   pull_request:
@@ -72,15 +72,24 @@ jobs:
             --root . \
             --changed-files "${{ steps.changes.outputs.file }}"
 
+      - name: Exercise the artifact v2 validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/notifications/n0-readonly-evidence/validate_artifact.py self-test
+
       - name: Publish static-only summary
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           {
-            echo "### Notifications N0 R2A"
+            echo "### Notifications N0 R2A-R1"
+            echo "- Architecture: Supabase Edge Function and Resend"
             echo "- Scope: static safety contract"
             echo "- Live DEV access: not executed for pull requests"
+            echo "- Provider API calls: 0"
+            echo "- Emails sent: 0"
             echo "- Artifact upload: not performed by this job"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -100,8 +109,6 @@ jobs:
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
-      N8N_DEV_API_URL: ${{ secrets.N8N_DEV_API_URL }}
-      N8N_DEV_API_KEY: ${{ secrets.N8N_DEV_API_KEY }}
     steps:
       - name: Reassert immutable execution guards
         shell: bash
@@ -187,7 +194,7 @@ jobs:
             metadata_rc=$?
             curl --fail --silent --show-error -X GET \
               -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions/send-notification/body" \
+              "https://api.supabase.com/v1/projects/${SUPABASE_DEV_PROJECT_REF}/functions/notification-dispatcher/body" \
               > "${PRIVATE_DIR}/dispatcher-body.bin" \
               2>> "${PRIVATE_DIR}/dispatcher.stderr"
             body_rc=$?
@@ -204,62 +211,12 @@ jobs:
           fi
           echo "status=${status}" >> "${GITHUB_OUTPUT}"
 
-      - name: Read n8n workflow metadata
-        id: n8n
-        shell: bash
-        env:
-          PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
-        run: |
-          set -euo pipefail
-          status="unavailable"
-          if [[ -n "${N8N_DEV_API_URL:-}" && -n "${N8N_DEV_API_KEY:-}" ]]; then
-            set +e
-            python - <<'PY' > "${PRIVATE_DIR}/n8n-base.txt" 2> "${PRIVATE_DIR}/n8n-normalize.stderr"
-          import os
-          from urllib.parse import urlsplit, urlunsplit
-
-          raw = os.environ["N8N_DEV_API_URL"].strip().rstrip("/")
-          parsed = urlsplit(raw)
-          if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-              raise SystemExit(1)
-          path = parsed.path.rstrip("/")
-          if path.endswith("/api/v1"):
-              api_path = path
-          elif path.endswith("/api"):
-              api_path = path + "/v1"
-          else:
-              api_path = path + "/api/v1"
-          print(urlunsplit((parsed.scheme, parsed.netloc, api_path, "", "")))
-          PY
-            normalize_rc=$?
-            if [[ ${normalize_rc} -eq 0 ]]; then
-              n8n_base="$(<"${PRIVATE_DIR}/n8n-base.txt")"
-              curl --fail --silent --show-error -X GET \
-                -H "X-N8N-API-KEY: ${N8N_DEV_API_KEY}" \
-                "${n8n_base}/workflows?limit=100" \
-                > "${PRIVATE_DIR}/n8n-metadata.json" \
-                2> "${PRIVATE_DIR}/n8n.stderr"
-              n8n_rc=$?
-            else
-              n8n_rc=1
-            fi
-            set -e
-            rm -f "${PRIVATE_DIR}/n8n-base.txt" "${PRIVATE_DIR}/n8n-normalize.stderr" "${PRIVATE_DIR}/n8n.stderr"
-            if [[ ${n8n_rc} -eq 0 ]]; then
-              status="available"
-            else
-              rm -f "${PRIVATE_DIR}/n8n-metadata.json"
-            fi
-          fi
-          echo "status=${status}" >> "${GITHUB_OUTPUT}"
-
       - name: Build the allowlisted artifact
         shell: bash
         env:
           PRIVATE_DIR: ${{ steps.storage.outputs.private_dir }}
           OUTPUT_DIR: ${{ steps.storage.outputs.output_dir }}
           DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
-          N8N_STATUS: ${{ steps.n8n.outputs.status }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -267,8 +224,7 @@ jobs:
             build
             --db-jsonl "${PRIVATE_DIR}/database.jsonl"
             --dispatcher-status "${DISPATCHER_STATUS}"
-            --n8n-status "${N8N_STATUS}"
-            --source-file "${GITHUB_WORKSPACE}/supabase/functions/send-notification/index.ts"
+            --source-file "${GITHUB_WORKSPACE}/supabase/functions/notification-dispatcher/index.ts"
             --github-head-sha "${HEAD_SHA}"
             --output "${OUTPUT_DIR}/artifact.json"
           )
@@ -277,9 +233,6 @@ jobs:
               --dispatcher-metadata "${PRIVATE_DIR}/dispatcher-metadata.json"
               --dispatcher-body "${PRIVATE_DIR}/dispatcher-body.bin"
             )
-          fi
-          if [[ "${N8N_STATUS}" == "available" ]]; then
-            arguments+=(--n8n-metadata "${PRIVATE_DIR}/n8n-metadata.json")
           fi
           python ops/notifications/n0-readonly-evidence/validate_artifact.py "${arguments[@]}"
           rm -rf -- "${PRIVATE_DIR}"
@@ -332,15 +285,16 @@ jobs:
           ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
           ARTIFACT_BYTES: ${{ steps.artifact.outputs.bytes }}
           DISPATCHER_STATUS: ${{ steps.dispatcher.outputs.status }}
-          N8N_STATUS: ${{ steps.n8n.outputs.status }}
         run: |
           set -euo pipefail
           {
             echo "### Notifications N0 sanitized evidence"
             echo "- Environment: DEV"
             echo "- Database mode: repeatable-read, read-only"
+            echo "- Architecture: Supabase Edge Function and Resend"
             echo "- Dispatcher metadata: ${DISPATCHER_STATUS}"
-            echo "- n8n metadata: ${N8N_STATUS}"
+            echo "- Provider API called by audit: false"
+            echo "- Emails sent by audit: false"
             echo "- SEND_MODE: UNKNOWN_BY_DESIGN"
             echo "- Privacy validation: PASS"
             echo "- Artifact bytes: ${ARTIFACT_BYTES}"
