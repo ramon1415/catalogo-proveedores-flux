@@ -1,7 +1,7 @@
 -- Flux Operadora - Migration 041
 -- N1-A candidate: same-ledger isolation for future external provider notifications.
 -- Reconciled against dev 2deae2cddf8ebb22fffd76e7a648483e2b3cc609 after Migration 031.
--- DRAFT ONLY. This migration is not applied by this gate and creates no external events.
+-- DRAFT ONLY. Hardened by NOTIFICATIONS-N1-A-R1; still unapplied and creates no external events.
 
 begin;
 
@@ -174,6 +174,53 @@ begin
     raise exception '041_precheck: Matching 031 helper grants differ';
   end if;
 
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('anon', policy_role::text, 'MEMBER')
+        )
+      )
+  ) then
+    raise exception '041_precheck: anon/public notification SELECT policy exists';
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+        )
+      )
+      and (
+        (p.tablename = 'notification_events'
+         and p.policyname <> 'notification_events_select_self_or_admin')
+        or
+        (p.tablename = 'notification_delivery_attempts'
+         and p.policyname <> 'notification_delivery_attempts_select_self_or_admin')
+      )
+  ) then
+    raise exception '041_precheck: additional authenticated permissive notification policy exists';
+  end if;
+
   if to_regclass('public.notification_external_rollouts') is not null then
     v_conflicts := array_append(v_conflicts, 'public.notification_external_rollouts');
   end if;
@@ -213,6 +260,7 @@ begin
     where n.nspname = 'public'
       and p.proname in (
         'notification_external_event_type_allowed',
+        'notification_external_event_mode_allowed',
         'notification_external_field_codes_valid',
         'notification_external_rollout_event_types_valid',
         'notification_external_hashes_valid',
@@ -270,6 +318,25 @@ as $$
   ]::text[])
 $$;
 
+create function public.notification_external_event_mode_allowed(
+  p_event_type text,
+  p_mode text
+)
+returns boolean
+language sql
+immutable
+parallel safe
+set search_path = pg_catalog, public
+as $$
+  select
+    public.notification_external_event_type_allowed(p_event_type)
+    and p_mode in ('test_only', 'pilot')
+    and (
+      p_event_type <> 'provider_intake.correction_requested'
+      or p_mode = 'test_only'
+    )
+$$;
+
 create function public.notification_external_field_codes_valid(p_field_codes text[])
 returns boolean
 language sql
@@ -325,7 +392,8 @@ as $$
     and p_message !~* '(https?://|www\.|mailto:)'
     and p_message !~* '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}'
     and p_message !~* '(^|[^[:alpha:]])(aprobador|aprobadores|presupuesto|cuenta|cuentas|clabe|regla[[:space:]]+interna|tercero|terceros|matching|match[_ -]?score|match[_ -]?confidence|reason[_ -]?code|previous[_ -]?proveedor[_ -]?id|new[_ -]?proveedor[_ -]?id)([^[:alpha:]]|$)'
-    and p_message !~ '[0-9]{18}'
+    and regexp_replace(p_message, '[-[:space:]]', '', 'g') !~ '[0-9]{10,}'
+    and p_message !~* '(^|[^[:alnum:]&Ñ])([A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3})([^[:alnum:]]|$)'
 $$;
 
 create function public.notification_external_json_keys_match(
@@ -529,6 +597,10 @@ create table public.notification_external_rollouts (
   constraint notification_external_rollouts_event_types_check check (
     public.notification_external_rollout_event_types_valid(enabled_event_types)
   ),
+  constraint notification_external_rollouts_correction_pilot_check check (
+    mode <> 'pilot'
+    or not ('provider_intake.correction_requested' = any (enabled_event_types))
+  ),
   constraint notification_external_rollouts_allowlist_check check (
     public.notification_external_hashes_valid(recipient_allowlist_hashes)
   ),
@@ -642,6 +714,7 @@ alter table public.notification_events
       and source_id is not null
       and public.notification_external_event_type_allowed(event_type)
       and event_version = 1
+      and max_attempts = 3
       and subject is null
       and public.notification_external_idempotency_valid(
         event_type,
@@ -878,6 +951,23 @@ begin
     raise exception 'notification_audience_immutable';
   end if;
 
+  if tg_op = 'INSERT' and new.audience = 'external' then
+    if new.max_attempts is distinct from 3
+       or new.attempt_count is distinct from 0
+       or new.locked_at is not null
+       or new.locked_by is not null
+       or new.processed_at is not null
+       or new.last_attempt_at is not null
+       or new.status not in ('pending', 'no_recipient')
+       or exists (
+         select 1
+         from public.notification_delivery_attempts attempt
+         where attempt.notification_event_id = new.id
+       ) then
+      raise exception 'external_notification_initial_attempt_state_invalid';
+    end if;
+  end if;
+
   if tg_op = 'UPDATE' and old.audience = 'external' then
     if old.status = 'no_recipient' then
       raise exception 'no_recipient_terminal';
@@ -896,6 +986,7 @@ begin
        or new.payload is distinct from old.payload
        or new.idempotency_key is distinct from old.idempotency_key
        or new.event_version is distinct from old.event_version
+       or new.max_attempts is distinct from old.max_attempts
        or new.rollout_id is distinct from old.rollout_id
        or new.external_subject_type is distinct from old.external_subject_type
        or new.external_subject_id is distinct from old.external_subject_id
@@ -1248,27 +1339,99 @@ declare
     coalesce(nullif(btrim(p_worker_id), ''), 'external-notification-dispatcher'),
     120
   );
+  v_rollout record;
+  v_daily_count integer;
 begin
+  select r.*
+    into v_rollout
+  from public.notification_external_rollouts r
+  where r.mode in ('test_only', 'pilot')
+    and r.cutoff_at is not null
+    and cardinality(r.enabled_event_types) > 0
+    and cardinality(r.recipient_allowlist_hashes) > 0
+    and r.batch_size = 1
+    and r.daily_cap > 0
+    and exists (
+      select 1
+      from public.notification_events e
+      join public.payment_intake_events pie on pie.id = e.source_id
+      where e.rollout_id = r.id
+        and e.audience = 'external'
+        and e.status = 'pending'
+        and e.event_type in (
+          'provider_intake.received',
+          'provider_intake.correction_requested',
+          'provider_intake.rejected'
+        )
+        and public.notification_external_event_mode_allowed(e.event_type, r.mode)
+        and e.event_type = any (r.enabled_event_types)
+        and e.created_at >= r.cutoff_at
+        and pie.created_at >= r.cutoff_at
+        and coalesce(e.next_attempt_at, now()) <= now()
+        and e.attempt_count < e.max_attempts
+        and e.max_attempts = 3
+        and e.recipient_email = lower(btrim(e.recipient_email))
+        and e.recipient_email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+        and encode(
+          extensions.digest(
+            convert_to(lower(btrim(e.recipient_email)), 'UTF8'),
+            'sha256'
+          ),
+          'hex'
+        ) = any (r.recipient_allowlist_hashes)
+    )
+  order by r.id
+  for update of r skip locked
+  limit 1;
+
+  if not found then
+    return;
+  end if;
+
+  select count(*)::integer
+    into v_daily_count
+  from public.notification_events daily_event
+  where daily_event.audience = 'external'
+    and daily_event.rollout_id = v_rollout.id
+    and daily_event.status in ('processing', 'sent')
+    and coalesce(
+      daily_event.processed_at,
+      daily_event.last_attempt_at,
+      daily_event.created_at
+    ) >= (
+      date_trunc(
+        'day',
+        now() at time zone 'America/Mexico_City'
+      ) at time zone 'America/Mexico_City'
+    );
+
+  if v_daily_count >= v_rollout.daily_cap then
+    return;
+  end if;
+
   return query
   with candidate as (
     select e.id
     from public.notification_events e
-    join public.notification_external_rollouts r on r.id = e.rollout_id
     join public.payment_intake_events pie on pie.id = e.source_id
-    where e.audience = 'external'
+    where e.rollout_id = v_rollout.id
+      and e.audience = 'external'
       and e.status = 'pending'
       and e.event_type in (
         'provider_intake.received',
         'provider_intake.correction_requested',
         'provider_intake.rejected'
       )
-      and r.mode in ('test_only', 'pilot')
-      and r.cutoff_at is not null
-      and e.event_type = any (r.enabled_event_types)
-      and e.created_at >= r.cutoff_at
-      and pie.created_at >= r.cutoff_at
+      and public.notification_external_event_mode_allowed(
+        e.event_type,
+        v_rollout.mode
+      )
+      and e.event_type = any (v_rollout.enabled_event_types)
+      and e.created_at >= v_rollout.cutoff_at
+      and pie.created_at >= v_rollout.cutoff_at
       and coalesce(e.next_attempt_at, now()) <= now()
       and e.attempt_count < e.max_attempts
+      and e.max_attempts = 3
       and e.recipient_email = lower(btrim(e.recipient_email))
       and e.recipient_email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
       and encode(
@@ -1277,22 +1440,7 @@ begin
           'sha256'
         ),
         'hex'
-      ) = any (r.recipient_allowlist_hashes)
-      and r.daily_cap > 0
-      and (
-        select count(*)
-        from public.notification_events daily_event
-        where daily_event.audience = 'external'
-          and daily_event.rollout_id = r.id
-          and daily_event.status in ('processing', 'sent')
-          and coalesce(daily_event.processed_at, daily_event.last_attempt_at, daily_event.created_at)
-              >= (
-                date_trunc(
-                  'day',
-                  now() at time zone 'America/Mexico_City'
-                ) at time zone 'America/Mexico_City'
-              )
-      ) < r.daily_cap
+      ) = any (v_rollout.recipient_allowlist_hashes)
     order by e.created_at, e.id
     for update of e skip locked
     limit v_limit
@@ -1373,10 +1521,23 @@ begin
       and e.locked_at is not null
       and e.locked_at <= now() - make_interval(mins => v_lease_minutes)
       and e.attempt_count < e.max_attempts
+      and e.max_attempts = 3
       and r.mode in ('test_only', 'pilot')
       and r.cutoff_at is not null
       and e.created_at >= r.cutoff_at
       and e.event_type = any (r.enabled_event_types)
+      and public.notification_external_event_mode_allowed(e.event_type, r.mode)
+      and not exists (
+        select 1
+        from public.notification_delivery_attempts attempt
+        where attempt.notification_event_id = e.id
+          and (
+            attempt.provider_request_started_at is not null
+            or attempt.provider_request_completed_at is not null
+            or attempt.provider_message_id is not null
+            or attempt.status = 'sent'
+          )
+      )
     order by e.locked_at, e.id
     for update of e skip locked
     limit v_limit
@@ -1439,6 +1600,8 @@ create policy notification_delivery_attempts_select_self_or_admin
 
 revoke all on function public.notification_external_event_type_allowed(text)
   from public, anon, authenticated;
+revoke all on function public.notification_external_event_mode_allowed(text, text)
+  from public, anon, authenticated;
 revoke all on function public.notification_external_field_codes_valid(text[])
   from public, anon, authenticated;
 revoke all on function public.notification_external_rollout_event_types_valid(text[])
@@ -1467,6 +1630,8 @@ revoke all on function public.recover_stale_external_notification_events(integer
   from public, anon, authenticated;
 
 grant execute on function public.notification_external_event_type_allowed(text)
+  to service_role, postgres;
+grant execute on function public.notification_external_event_mode_allowed(text, text)
   to service_role, postgres;
 grant execute on function public.notification_external_field_codes_valid(text[])
   to service_role, postgres;
@@ -1502,7 +1667,7 @@ comment on column public.notification_events.audience is
 comment on column public.payment_intake.expected_file_count is
   'Known by the public submission handler before intake creation; populated only by a future authorized producer.';
 comment on column public.payment_intake.submission_completed_at is
-  'Future atomic submission completion marker. Migration 041 performs no historical backfill.';
+  'Future atomic submission completion marker. Migration 041 performs no historical backfill; current upload issues are terminal for the intake until a separately authorized correction flow exists.';
 comment on column public.payment_intake_events.external_message is
   'Sanitized plain-text provider copy, distinct from internal notes.';
 comment on column public.payment_intake_events.external_field_codes is

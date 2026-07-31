@@ -1,5 +1,6 @@
 -- N1-A postcheck for migration 041.
--- Read-only, sanitized aggregates only. Run only after a separately authorized apply.
+-- Hardened by NOTIFICATIONS-N1-A-R1.
+-- Read-only, sanitized aggregates only. Run only in the separately authorized N1-A-R2 dry-run.
 
 \set ON_ERROR_STOP on
 begin transaction isolation level repeatable read read only;
@@ -10,8 +11,12 @@ declare
   v_legacy_claim text;
   v_external_claim text;
   v_recovery text;
-  v_event_policy text;
-  v_attempt_policy text;
+  v_event_guard text;
+  v_mode_helper text;
+  v_rollout_constraint text;
+  v_lane_constraint text;
+  v_rollout_lock_position integer;
+  v_daily_count_position integer;
 begin
   if not exists (
     select 1
@@ -56,6 +61,8 @@ begin
       and pg_get_constraintdef(oid) like '%external_provider%'
       and pg_get_constraintdef(oid) like '%no_recipient%'
       and pg_get_constraintdef(oid) like '%payment_intake_events%'
+      and pg_get_constraintdef(oid) like '%max_attempts%'
+      and pg_get_constraintdef(oid) like '%3%'
   ) then
     raise exception 'n1a_postcheck_external_lane_contract_missing';
   end if;
@@ -106,6 +113,20 @@ begin
          and daily_cap = 0
      ) then
     raise exception 'n1a_postcheck_rollout_not_fail_closed';
+  end if;
+
+  select pg_get_constraintdef(oid)
+    into v_rollout_constraint
+  from pg_constraint
+  where conrelid = 'public.notification_external_rollouts'::regclass
+    and conname = 'notification_external_rollouts_correction_pilot_check';
+
+  if position('pilot' in lower(coalesce(v_rollout_constraint, ''))) = 0
+     or position(
+       'provider_intake.correction_requested'
+       in lower(coalesce(v_rollout_constraint, ''))
+     ) = 0 then
+    raise exception 'n1a_postcheck_correction_pilot_rollout_gate_missing';
   end if;
 
   if not exists (
@@ -200,6 +221,42 @@ begin
 
   if public.notification_external_event_type_allowed('provider_matched') then
     raise exception 'n1a_postcheck_provider_matched_external_eligibility';
+  end if;
+
+  if not public.notification_external_event_mode_allowed(
+       'provider_intake.correction_requested',
+       'test_only'
+     )
+     or public.notification_external_event_mode_allowed(
+       'provider_intake.correction_requested',
+       'pilot'
+     )
+     or not public.notification_external_event_mode_allowed(
+       'provider_intake.received',
+       'pilot'
+     )
+     or not public.notification_external_event_mode_allowed(
+       'provider_intake.rejected',
+       'pilot'
+     ) then
+    raise exception 'n1a_postcheck_correction_n2_mode_gate_invalid';
+  end if;
+
+  if public.notification_external_message_valid('Corrige 1234567890 ahora.')
+     or public.notification_external_message_valid('Corrige 1234567890123456 ahora.')
+     or public.notification_external_message_valid('Corrige 123456789012345678 ahora.')
+     or public.notification_external_message_valid('Corrige 1234 5678 9012 3456 78 ahora.')
+     or public.notification_external_message_valid('Corrige 1234-5678-9012-3456-78 ahora.')
+     or public.notification_external_message_valid('Corrige ABCD010101XXX ahora.')
+     or public.notification_external_message_valid('Corrige ABC010101XX1 ahora.')
+     or public.notification_external_message_valid('Escribe a persona@example.com ahora.')
+     or public.notification_external_message_valid('Visita https://example.com ahora.')
+     or public.notification_external_message_valid('Comparte el matching interno ahora.')
+     or public.notification_external_message_valid('<b>Corrige este dato</b>')
+     or not public.notification_external_message_valid('Corrige el RFC registrado.')
+     or not public.notification_external_message_valid('Adjunta nuevamente el documento bancario.')
+     or not public.notification_external_message_valid('Verifica el nombre o razón social.') then
+    raise exception 'n1a_postcheck_external_message_privacy_invalid';
   end if;
 
   if to_regprocedure('public.normalize_provider_match_text(text)') is null
@@ -404,6 +461,17 @@ begin
   select pg_get_functiondef(
     'public.recover_stale_external_notification_events(integer,integer,text)'::regprocedure
   ) into v_recovery;
+  select pg_get_functiondef(
+    'public.protect_external_notification_contract()'::regprocedure
+  ) into v_event_guard;
+  select pg_get_functiondef(
+    'public.notification_external_event_mode_allowed(text,text)'::regprocedure
+  ) into v_mode_helper;
+  select pg_get_constraintdef(oid)
+    into v_lane_constraint
+  from pg_constraint
+  where conrelid = 'public.notification_events'::regclass
+    and conname = 'notification_events_lane_contract_check';
 
   if position('e.audience = ''internal''' in lower(v_internal_claim)) = 0
      or position('for update skip locked' in lower(v_internal_claim)) = 0
@@ -416,6 +484,15 @@ begin
     raise exception 'n1a_postcheck_legacy_claim_isolation_missing';
   end if;
 
+  v_rollout_lock_position := position(
+    'for update of r skip locked'
+    in lower(v_external_claim)
+  );
+  v_daily_count_position := position(
+    'into v_daily_count'
+    in lower(v_external_claim)
+  );
+
   if position('e.audience = ''external''' in lower(v_external_claim)) = 0
      or position('e.status = ''pending''' in lower(v_external_claim)) = 0
      or position('r.cutoff_at is not null' in lower(v_external_claim)) = 0
@@ -423,15 +500,37 @@ begin
      or position('pie.created_at >= r.cutoff_at' in lower(v_external_claim)) = 0
      or position('recipient_allowlist_hashes' in lower(v_external_claim)) = 0
      or position('r.daily_cap > 0' in lower(v_external_claim)) = 0
+     or position('v_daily_count >= v_rollout.daily_cap' in lower(v_external_claim)) = 0
+     or position('notification_external_event_mode_allowed' in lower(v_external_claim)) = 0
      or position('least(greatest(coalesce(p_limit, 1), 1), 1)' in lower(v_external_claim)) = 0
      or position('for update of e skip locked' in lower(v_external_claim)) = 0
+     or v_rollout_lock_position = 0
+     or v_daily_count_position <= v_rollout_lock_position
      or position('provider_matched' in lower(v_external_claim)) > 0 then
     raise exception 'n1a_postcheck_external_claim_not_fail_closed';
+  end if;
+
+  if position('provider_intake.correction_requested' in lower(v_mode_helper)) = 0
+     or position('p_mode = ''test_only''' in lower(v_mode_helper)) = 0
+     or position('max_attempts = 3' in lower(v_lane_constraint)) = 0
+     or position('new.max_attempts is distinct from 3' in lower(v_event_guard)) = 0
+     or position('new.attempt_count is distinct from 0' in lower(v_event_guard)) = 0
+     or position('new.locked_at is not null' in lower(v_event_guard)) = 0
+     or position('new.locked_by is not null' in lower(v_event_guard)) = 0
+     or position('new.processed_at is not null' in lower(v_event_guard)) = 0
+     or position('new.last_attempt_at is not null' in lower(v_event_guard)) = 0 then
+    raise exception 'n1a_postcheck_external_initial_attempt_contract_invalid';
   end if;
 
   if position('e.audience = ''external''' in lower(v_recovery)) = 0
      or position('e.status = ''processing''' in lower(v_recovery)) = 0
      or position('greatest(coalesce(p_lease_minutes, 10), 10)' in lower(v_recovery)) = 0
+     or position('not exists' in lower(v_recovery)) = 0
+     or position('provider_request_started_at is not null' in lower(v_recovery)) = 0
+     or position('provider_request_completed_at is not null' in lower(v_recovery)) = 0
+     or position('provider_message_id is not null' in lower(v_recovery)) = 0
+     or position('attempt.status = ''sent''' in lower(v_recovery)) = 0
+     or position('notification_external_event_mode_allowed' in lower(v_recovery)) = 0
      or position('insert into' in lower(v_recovery)) > 0
      or position('attempt_count =' in lower(v_recovery)) > 0
      or position('idempotency_key =' in lower(v_recovery)) > 0 then
@@ -456,25 +555,104 @@ begin
     raise exception 'n1a_postcheck_external_claim_grants_invalid';
   end if;
 
-  select qual
-    into v_event_policy
-  from pg_policies
-  where schemaname = 'public'
-    and tablename = 'notification_events'
-    and policyname = 'notification_events_select_self_or_admin';
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('anon', policy_role::text, 'MEMBER')
+        )
+      )
+  ) then
+    raise exception 'n1a_postcheck_anon_or_public_select_policy_present';
+  end if;
 
-  select qual
-    into v_attempt_policy
-  from pg_policies
-  where schemaname = 'public'
-    and tablename = 'notification_delivery_attempts'
-    and policyname = 'notification_delivery_attempts_select_self_or_admin';
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+        )
+      )
+      and (
+        (p.tablename = 'notification_events'
+         and p.policyname <> 'notification_events_select_self_or_admin')
+        or
+        (p.tablename = 'notification_delivery_attempts'
+         and p.policyname <> 'notification_delivery_attempts_select_self_or_admin')
+        or position('audience' in lower(coalesce(p.qual, ''))) = 0
+        or position('internal' in lower(coalesce(p.qual, ''))) = 0
+      )
+  ) then
+    raise exception 'n1a_postcheck_authenticated_permissive_policy_not_internal';
+  end if;
 
-  if position('audience' in lower(coalesce(v_event_policy, ''))) = 0
-     or position('internal' in lower(coalesce(v_event_policy, ''))) = 0
-     or position('audience' in lower(coalesce(v_attempt_policy, ''))) = 0
-     or position('internal' in lower(coalesce(v_attempt_policy, ''))) = 0 then
-    raise exception 'n1a_postcheck_authenticated_rls_not_isolated';
+  if (
+    select count(*)
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd = 'SELECT'
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+        )
+      )
+  ) <> 2 then
+    raise exception 'n1a_postcheck_authenticated_policy_inventory_unexpected';
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename = 'notification_external_rollouts'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and (
+              pg_has_role('anon', policy_role::text, 'MEMBER')
+              or pg_has_role('authenticated', policy_role::text, 'MEMBER')
+            )
+        )
+      )
+  ) then
+    raise exception 'n1a_postcheck_rollout_policy_exposes_non_service_role';
+  end if;
+
+  if has_table_privilege('anon', 'public.notification_events', 'SELECT')
+     or has_table_privilege('anon', 'public.notification_delivery_attempts', 'SELECT')
+     or not has_table_privilege('authenticated', 'public.notification_events', 'SELECT')
+     or not has_table_privilege('authenticated', 'public.notification_delivery_attempts', 'SELECT')
+     or not has_table_privilege('service_role', 'public.notification_events', 'SELECT')
+     or not has_table_privilege('service_role', 'public.notification_delivery_attempts', 'SELECT') then
+    raise exception 'n1a_postcheck_notification_table_grants_invalid';
   end if;
 
   if exists (
@@ -493,6 +671,47 @@ begin
   end if;
 end
 $$;
+
+select
+  tablename,
+  permissive,
+  cmd,
+  count(*)::bigint as policy_count,
+  count(*) filter (
+    where (
+      'public'::name = any (roles)
+      or exists (
+        select 1
+        from unnest(roles) policy_role
+        where policy_role <> 'public'::name
+          and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+      )
+    )
+  )::bigint as authenticated_or_public_count,
+  count(*) filter (
+    where (
+      'public'::name = any (roles)
+      or exists (
+        select 1
+        from unnest(roles) policy_role
+        where policy_role <> 'public'::name
+          and pg_has_role('anon', policy_role::text, 'MEMBER')
+      )
+    )
+  )::bigint as anon_or_public_count,
+  count(*) filter (
+    where position('audience' in lower(coalesce(qual, ''))) > 0
+      and position('internal' in lower(coalesce(qual, ''))) > 0
+  )::bigint as explicitly_internal_count
+from pg_policies
+where schemaname = 'public'
+  and tablename in (
+    'notification_events',
+    'notification_delivery_attempts',
+    'notification_external_rollouts'
+  )
+group by tablename, permissive, cmd
+order by tablename, permissive, cmd;
 
 select
   'notification_events_total' as metric,

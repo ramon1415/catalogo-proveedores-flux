@@ -1,7 +1,8 @@
 -- N1-A precheck for migration 041.
 -- Git prerequisite: dev=2deae2cddf8ebb22fffd76e7a648483e2b3cc609 and
 -- supabase/migrations/031_provider_intake_matching.sql present and unchanged.
--- Read-only, sanitized aggregates only. Run only in a separately authorized apply gate.
+-- Hardened by NOTIFICATIONS-N1-A-R1. Read-only, sanitized aggregates only.
+-- Run only in the separately authorized N1-A-R2 dry-run gate.
 
 \set ON_ERROR_STOP on
 begin transaction isolation level repeatable read read only;
@@ -39,6 +40,9 @@ begin
   end if;
   if to_regprocedure('public.protect_payment_intake_events_immutable()') is null then
     v_missing := array_append(v_missing, 'protect_payment_intake_events_immutable()');
+  end if;
+  if to_regprocedure('public.mark_provider_intake_upload_issue_internal(uuid,text)') is null then
+    v_missing := array_append(v_missing, 'mark_provider_intake_upload_issue_internal(uuid,text)');
   end if;
   if to_regprocedure('public.normalize_provider_match_text(text)') is null then
     v_missing := array_append(v_missing, 'normalize_provider_match_text(text)');
@@ -166,6 +170,21 @@ begin
     raise exception 'n1a_precheck_matching_set_contract_changed';
   end if;
 
+  if position(
+       '''needs_correction'''
+       in lower(pg_get_functiondef(
+         'public.mark_provider_intake_upload_issue_internal(uuid,text)'::regprocedure
+       ))
+     ) = 0
+     or position(
+       'status_changed'
+       in lower(pg_get_functiondef(
+         'public.mark_provider_intake_upload_issue_internal(uuid,text)'::regprocedure
+       ))
+     ) = 0 then
+    raise exception 'n1a_precheck_upload_issue_terminal_contract_changed';
+  end if;
+
   if exists (
     select 1
     from pg_proc p
@@ -251,6 +270,53 @@ begin
     raise exception 'n1a_precheck_notification_rls_missing';
   end if;
 
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('anon', policy_role::text, 'MEMBER')
+        )
+      )
+  ) then
+    raise exception 'n1a_precheck_anon_or_public_notification_select_policy';
+  end if;
+
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+        )
+      )
+      and (
+        (p.tablename = 'notification_events'
+         and p.policyname <> 'notification_events_select_self_or_admin')
+        or
+        (p.tablename = 'notification_delivery_attempts'
+         and p.policyname <> 'notification_delivery_attempts_select_self_or_admin')
+      )
+  ) then
+    raise exception 'n1a_precheck_additional_authenticated_permissive_policy';
+  end if;
+
   if not has_table_privilege('authenticated', 'public.notification_events', 'SELECT')
      or has_table_privilege('authenticated', 'public.notification_events', 'INSERT')
      or has_table_privilege('authenticated', 'public.notification_events', 'UPDATE')
@@ -294,6 +360,31 @@ begin
 
   if exists (
     select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in (
+        'notification_external_event_type_allowed',
+        'notification_external_event_mode_allowed',
+        'notification_external_field_codes_valid',
+        'notification_external_rollout_event_types_valid',
+        'notification_external_hashes_valid',
+        'notification_external_message_valid',
+        'notification_external_json_keys_match',
+        'notification_external_payload_valid',
+        'notification_external_idempotency_valid',
+        'protect_payment_intake_submission_completed',
+        'protect_external_notification_contract',
+        'protect_notification_delivery_attempt_contract',
+        'claim_external_notification_events_for_dispatcher',
+        'recover_stale_external_notification_events'
+      )
+  ) then
+    raise exception 'n1a_precheck_candidate_functions_already_exist';
+  end if;
+
+  if exists (
+    select 1
     from (
       select notification_event_id, attempt_number
       from public.notification_delivery_attempts
@@ -332,6 +423,39 @@ begin
   end if;
 end
 $$;
+
+select
+  tablename,
+  permissive,
+  cmd,
+  count(*)::bigint as policy_count,
+  count(*) filter (
+    where (
+      'public'::name = any (roles)
+      or exists (
+        select 1
+        from unnest(roles) policy_role
+        where policy_role <> 'public'::name
+          and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+      )
+    )
+  )::bigint as authenticated_or_public_count,
+  count(*) filter (
+    where (
+      'public'::name = any (roles)
+      or exists (
+        select 1
+        from unnest(roles) policy_role
+        where policy_role <> 'public'::name
+          and pg_has_role('anon', policy_role::text, 'MEMBER')
+      )
+    )
+  )::bigint as anon_or_public_count
+from pg_policies
+where schemaname = 'public'
+  and tablename in ('notification_events', 'notification_delivery_attempts')
+group by tablename, permissive, cmd
+order by tablename, permissive, cmd;
 
 select
   'notification_events_total' as metric,

@@ -1,5 +1,6 @@
 -- N1-A contract tests for migration 041 after Matching baseline 031.
--- Synthetic transaction only. Never run against DEV in gate N1-A-C1-R1.
+-- Hardened by NOTIFICATIONS-N1-A-R1.
+-- Synthetic transaction only. Never run against DEV in this gate.
 -- Mutable claims are inspected through pg_get_functiondef and are never invoked.
 
 \set ON_ERROR_STOP on
@@ -27,6 +28,16 @@ create temporary table n1a_submission_model (
   payment_intake_key text primary key
 ) on commit drop;
 
+create temporary table n1a_policy_model (
+  policy_name text not null,
+  table_name text not null,
+  permissive boolean not null,
+  command text not null,
+  targets_authenticated boolean not null,
+  expression_mentions_audience boolean not null,
+  expression_mentions_internal boolean not null
+) on commit drop;
+
 do $$
 declare
   v_internal_claim text;
@@ -34,6 +45,12 @@ declare
   v_external_claim text;
   v_recovery text;
   v_matching_set text;
+  v_event_guard text;
+  v_rollout_constraint text;
+  v_lane_constraint text;
+  v_policy_violation boolean;
+  v_rollout_lock_position integer;
+  v_daily_count_position integer;
   v_duplicate_blocked boolean;
   v_valid_received jsonb := jsonb_build_object(
     'event_version', 1,
@@ -58,6 +75,19 @@ begin
   select pg_get_functiondef(
     'public.set_provider_intake_match(uuid,text,timestamptz,uuid,uuid,text,text,uuid)'::regprocedure
   ) into v_matching_set;
+  select pg_get_functiondef(
+    'public.protect_external_notification_contract()'::regprocedure
+  ) into v_event_guard;
+  select pg_get_constraintdef(oid)
+    into v_rollout_constraint
+  from pg_constraint
+  where conrelid = 'public.notification_external_rollouts'::regclass
+    and conname = 'notification_external_rollouts_correction_pilot_check';
+  select pg_get_constraintdef(oid)
+    into v_lane_constraint
+  from pg_constraint
+  where conrelid = 'public.notification_events'::regclass
+    and conname = 'notification_events_lane_contract_check';
 
   -- 01. Legacy notification rows remain internal.
   if exists (
@@ -350,6 +380,258 @@ begin
   ) or position('insert into' in lower(v_recovery)) > 0 then
     raise exception 'N1A_TEST_24_FAILED';
   end if;
+
+  -- 25. correction_requested remains structurally eligible only in test_only.
+  if not public.notification_external_event_mode_allowed(
+    'provider_intake.correction_requested',
+    'test_only'
+  ) then
+    raise exception 'N1A_TEST_25_FAILED';
+  end if;
+
+  -- 26. correction_requested is structurally blocked in pilot and by rollout constraint.
+  if public.notification_external_event_mode_allowed(
+       'provider_intake.correction_requested',
+       'pilot'
+     )
+     or position('pilot' in lower(coalesce(v_rollout_constraint, ''))) = 0
+     or position(
+       'provider_intake.correction_requested'
+       in lower(coalesce(v_rollout_constraint, ''))
+     ) = 0 then
+    raise exception 'N1A_TEST_26_FAILED';
+  end if;
+
+  -- 27. received can remain structurally eligible in pilot.
+  if not public.notification_external_event_mode_allowed(
+    'provider_intake.received',
+    'pilot'
+  ) then
+    raise exception 'N1A_TEST_27_FAILED';
+  end if;
+
+  -- 28. rejected can remain structurally eligible in pilot.
+  if not public.notification_external_event_mode_allowed(
+    'provider_intake.rejected',
+    'pilot'
+  ) then
+    raise exception 'N1A_TEST_28_FAILED';
+  end if;
+
+  -- 29. Initial rollout remains disabled and empty.
+  if not exists (
+    select 1
+    from public.notification_external_rollouts
+    where id = 'provider-intake-v1'
+      and mode = 'disabled'
+      and cutoff_at is null
+      and cardinality(enabled_event_types) = 0
+      and cardinality(recipient_allowlist_hashes) = 0
+      and batch_size = 1
+      and daily_cap = 0
+  ) then
+    raise exception 'N1A_TEST_29_FAILED';
+  end if;
+
+  -- 30. The exact rollout row is locked before the daily count is evaluated.
+  v_rollout_lock_position := position(
+    'for update of r skip locked'
+    in lower(v_external_claim)
+  );
+  v_daily_count_position := position(
+    'into v_daily_count'
+    in lower(v_external_claim)
+  );
+  if v_rollout_lock_position = 0
+     or v_daily_count_position <= v_rollout_lock_position then
+    raise exception 'N1A_TEST_30_FAILED';
+  end if;
+
+  -- 31. Daily-cap claim remains batch-one and compares under the rollout lock.
+  if position('v_daily_count >= v_rollout.daily_cap' in lower(v_external_claim)) = 0
+     or position('least(greatest(coalesce(p_limit, 1), 1), 1)' in lower(v_external_claim)) = 0
+     or position('for update of e skip locked' in lower(v_external_claim)) = 0 then
+    raise exception 'N1A_TEST_31_FAILED';
+  end if;
+
+  -- 32. Every external event is constrained to exactly three attempts.
+  if position('max_attempts = 3' in lower(coalesce(v_lane_constraint, ''))) = 0 then
+    raise exception 'N1A_TEST_32_FAILED';
+  end if;
+
+  -- 33. External inserts start unclaimed with attempt_count zero.
+  if position('new.max_attempts is distinct from 3' in lower(v_event_guard)) = 0
+     or position('new.attempt_count is distinct from 0' in lower(v_event_guard)) = 0
+     or position('new.locked_at is not null' in lower(v_event_guard)) = 0
+     or position('new.locked_by is not null' in lower(v_event_guard)) = 0
+     or position('new.processed_at is not null' in lower(v_event_guard)) = 0
+     or position('new.last_attempt_at is not null' in lower(v_event_guard)) = 0 then
+    raise exception 'N1A_TEST_33_FAILED';
+  end if;
+
+  -- 34. Expired processing leases without provider interaction remain structurally recoverable.
+  if position('e.status = ''processing''' in lower(v_recovery)) = 0
+     or position('e.locked_at <=' in lower(v_recovery)) = 0
+     or position('not exists' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_34_FAILED';
+  end if;
+
+  -- 35. Provider request start blocks automatic recovery.
+  if position('provider_request_started_at is not null' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_35_FAILED';
+  end if;
+
+  -- 36. Provider request completion blocks automatic recovery.
+  if position('provider_request_completed_at is not null' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_36_FAILED';
+  end if;
+
+  -- 37. Provider message acceptance/unknown result blocks automatic recovery.
+  if position('provider_message_id is not null' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_37_FAILED';
+  end if;
+
+  -- 38. A sent delivery attempt blocks automatic recovery.
+  if position('attempt.status = ''sent''' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_38_FAILED';
+  end if;
+
+  -- 39. Internal events are never recoverable through the external recovery RPC.
+  if position('e.audience = ''external''' in lower(v_recovery)) = 0 then
+    raise exception 'N1A_TEST_39_FAILED';
+  end if;
+
+  -- 40. Ten contiguous digits are rejected.
+  if public.notification_external_message_valid('Corrige 1234567890 ahora.') then
+    raise exception 'N1A_TEST_40_FAILED';
+  end if;
+
+  -- 41. Sixteen contiguous digits are rejected.
+  if public.notification_external_message_valid('Corrige 1234567890123456 ahora.') then
+    raise exception 'N1A_TEST_41_FAILED';
+  end if;
+
+  -- 42. Eighteen contiguous digits are rejected.
+  if public.notification_external_message_valid('Corrige 123456789012345678 ahora.') then
+    raise exception 'N1A_TEST_42_FAILED';
+  end if;
+
+  -- 43. A spaced CLABE-equivalent sequence is rejected.
+  if public.notification_external_message_valid(
+    'Corrige 1234 5678 9012 3456 78 ahora.'
+  ) then
+    raise exception 'N1A_TEST_43_FAILED';
+  end if;
+
+  -- 44. A hyphenated CLABE-equivalent sequence is rejected.
+  if public.notification_external_message_valid(
+    'Corrige 1234-5678-9012-3456-78 ahora.'
+  ) then
+    raise exception 'N1A_TEST_44_FAILED';
+  end if;
+
+  -- 45. Persona física RFC values are rejected.
+  if public.notification_external_message_valid('Corrige ABCD010101XXX ahora.') then
+    raise exception 'N1A_TEST_45_FAILED';
+  end if;
+
+  -- 46. Persona moral RFC values are rejected.
+  if public.notification_external_message_valid('Corrige ABC010101XX1 ahora.') then
+    raise exception 'N1A_TEST_46_FAILED';
+  end if;
+
+  -- 47. Email values are rejected.
+  if public.notification_external_message_valid('Escribe a persona@example.com ahora.') then
+    raise exception 'N1A_TEST_47_FAILED';
+  end if;
+
+  -- 48. URL values are rejected.
+  if public.notification_external_message_valid('Visita https://example.com ahora.') then
+    raise exception 'N1A_TEST_48_FAILED';
+  end if;
+
+  -- 49. Matching terms are rejected.
+  if public.notification_external_message_valid('Comparte el matching interno ahora.') then
+    raise exception 'N1A_TEST_49_FAILED';
+  end if;
+
+  -- 50. HTML is rejected.
+  if public.notification_external_message_valid('<b>Corrige este dato</b>') then
+    raise exception 'N1A_TEST_50_FAILED';
+  end if;
+
+  -- 51. A safe RFC instruction without the RFC value is accepted.
+  if not public.notification_external_message_valid('Corrige el RFC registrado.') then
+    raise exception 'N1A_TEST_51_FAILED';
+  end if;
+
+  -- 52. A safe bank-document instruction is accepted.
+  if not public.notification_external_message_valid(
+    'Adjunta nuevamente el documento bancario.'
+  ) then
+    raise exception 'N1A_TEST_52_FAILED';
+  end if;
+
+  -- 53. A safe legal-name instruction is accepted.
+  if not public.notification_external_message_valid(
+    'Verifica el nombre o razón social.'
+  ) then
+    raise exception 'N1A_TEST_53_FAILED';
+  end if;
+
+  -- 54. The policy audit predicate detects an additional permissive policy.
+  insert into n1a_policy_model values
+    ('notification_events_select_self_or_admin', 'notification_events',
+     true, 'SELECT', true, true, true),
+    ('notification_delivery_attempts_select_self_or_admin',
+     'notification_delivery_attempts', true, 'SELECT', true, true, true),
+    ('unexpected_external_visibility', 'notification_events',
+     true, 'SELECT', true, false, false);
+
+  select exists (
+    select 1
+    from n1a_policy_model
+    where permissive
+      and command in ('SELECT', 'ALL')
+      and targets_authenticated
+      and (
+        policy_name not in (
+          'notification_events_select_self_or_admin',
+          'notification_delivery_attempts_select_self_or_admin'
+        )
+        or not expression_mentions_audience
+        or not expression_mentions_internal
+      )
+  ) into v_policy_violation;
+
+  if not v_policy_violation then
+    raise exception 'N1A_TEST_54_FAILED';
+  end if;
+
+  -- 55. Every real permissive authenticated SELECT policy is explicitly internal.
+  if exists (
+    select 1
+    from pg_policies p
+    where p.schemaname = 'public'
+      and p.tablename in ('notification_events', 'notification_delivery_attempts')
+      and p.permissive = 'PERMISSIVE'
+      and p.cmd in ('SELECT', 'ALL')
+      and (
+        'public'::name = any (p.roles)
+        or exists (
+          select 1
+          from unnest(p.roles) policy_role
+          where policy_role <> 'public'::name
+            and pg_has_role('authenticated', policy_role::text, 'MEMBER')
+        )
+      )
+      and (
+        position('audience' in lower(coalesce(p.qual, ''))) = 0
+        or position('internal' in lower(coalesce(p.qual, ''))) = 0
+      )
+  ) then
+    raise exception 'N1A_TEST_55_FAILED';
+  end if;
 end
 $$;
 
@@ -379,7 +661,38 @@ from (
     (21, 'matching_rpc_signatures_preserved', 'PASS'),
     (22, 'external_rows_zero', 'PASS'),
     (23, 'no_backfill', 'PASS'),
-    (24, 'no_external_producer', 'PASS')
+    (24, 'no_external_producer', 'PASS'),
+    (25, 'correction_test_only_allowed', 'PASS'),
+    (26, 'correction_pilot_blocked', 'PASS'),
+    (27, 'received_pilot_allowed', 'PASS'),
+    (28, 'rejected_pilot_allowed', 'PASS'),
+    (29, 'rollout_still_disabled', 'PASS'),
+    (30, 'rollout_locked_before_daily_count', 'PASS'),
+    (31, 'daily_cap_structurally_atomic', 'PASS'),
+    (32, 'external_max_attempts_three', 'PASS'),
+    (33, 'external_initial_attempt_state', 'PASS'),
+    (34, 'recovery_without_provider_start', 'PASS'),
+    (35, 'recovery_blocks_provider_start', 'PASS'),
+    (36, 'recovery_blocks_provider_completion', 'PASS'),
+    (37, 'recovery_blocks_provider_message_id', 'PASS'),
+    (38, 'recovery_blocks_sent_attempt', 'PASS'),
+    (39, 'recovery_excludes_internal', 'PASS'),
+    (40, 'message_blocks_ten_digits', 'PASS'),
+    (41, 'message_blocks_sixteen_digits', 'PASS'),
+    (42, 'message_blocks_eighteen_digits', 'PASS'),
+    (43, 'message_blocks_spaced_clabe', 'PASS'),
+    (44, 'message_blocks_hyphenated_clabe', 'PASS'),
+    (45, 'message_blocks_person_rfc', 'PASS'),
+    (46, 'message_blocks_company_rfc', 'PASS'),
+    (47, 'message_blocks_email', 'PASS'),
+    (48, 'message_blocks_url', 'PASS'),
+    (49, 'message_blocks_matching_term', 'PASS'),
+    (50, 'message_blocks_html', 'PASS'),
+    (51, 'message_allows_safe_rfc_instruction', 'PASS'),
+    (52, 'message_allows_safe_bank_document_instruction', 'PASS'),
+    (53, 'message_allows_safe_name_instruction', 'PASS'),
+    (54, 'additional_permissive_policy_detected', 'PASS'),
+    (55, 'authenticated_policies_internal_only', 'PASS')
 ) result(test_number, contract, result)
 order by test_number;
 
