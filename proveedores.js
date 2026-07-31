@@ -6,6 +6,7 @@ let currentProfileId = null
 let currentCsfPath = null
 let providerCsfUpload = null
 let providerSaveInProgress = false
+const providerReadOnlyMode = new URLSearchParams(window.location.search).get("mode") === "readonly"
 
 const rootElement = document.documentElement
 const tableBody = document.getElementById("suppliersTableBody")
@@ -40,7 +41,9 @@ async function init() {
     rootElement.dataset.theme = next
     localStorage.setItem("flux-theme", next)
   })
-  document.getElementById("newSupplierBtn").addEventListener("click", openCreateModal)
+  const newSupplierBtn = document.getElementById("newSupplierBtn")
+  newSupplierBtn.addEventListener("click", openCreateModal)
+  if (providerReadOnlyMode) newSupplierBtn.hidden = true
   document.getElementById("closeModalBtn").addEventListener("click", closeModal)
   document.getElementById("cancelBtn").addEventListener("click", closeModal)
   document.getElementById("metodo_pago").addEventListener("change", handlePaymentMethodChange)
@@ -64,6 +67,18 @@ function openProviderFromQuery() {
     return
   }
   window.openEditModal(providerId)
+  if (providerReadOnlyMode) applyProviderReadOnlyMode()
+}
+
+function applyProviderReadOnlyMode() {
+  document.getElementById("modalTitle").textContent = "Consultar proveedor"
+  form.querySelectorAll("input, select, textarea").forEach((control) => {
+    control.disabled = true
+  })
+  const submit = form.querySelector('button[type="submit"]')
+  if (submit) submit.hidden = true
+  document.getElementById("cancelBtn").textContent = "Cerrar"
+  document.getElementById("providerCsfLink")?.setAttribute("hidden", "")
 }
 
 function setupTheme() {
@@ -128,7 +143,7 @@ async function loadSuppliers() {
 function renderTable() {
   const query = normalize(searchInput.value)
   const filter = statusFilter.value
-  const canManage = canManageProviders()
+  const canManage = canManageProviders() && !providerReadOnlyMode
 
   const rows = proveedores.filter((p) => {
     const haystack = normalize([p.alias, p.nombre_completo, p.rfc, p.banco, p.email, p.telefono, p.metodo_pago].join(" "))
@@ -280,6 +295,7 @@ function inferDestinationType() {
 
 async function saveSupplier(event) {
   event.preventDefault()
+  if (providerReadOnlyMode) return
   if (providerSaveInProgress) return
 
   providerSaveInProgress = true

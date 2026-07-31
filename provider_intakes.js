@@ -29,6 +29,19 @@ const FILE_KIND_LABELS = Object.freeze({
   other: "Otro",
 })
 
+const MATCH_CONFIDENCE = Object.freeze({
+  high: "Confianza alta",
+  medium: "Confianza media",
+  low: "Confianza baja",
+  none: "Sin puntuación",
+})
+
+const COMPARISON_RESULT = Object.freeze({
+  match: "Coincide",
+  different: "Difiere",
+  not_reported: "No informado",
+})
+
 const state = {
   page: 1,
   pageSize: 25,
@@ -40,6 +53,11 @@ const state = {
   loadVersion: 0,
   detailTrigger: null,
   actionTrigger: null,
+  matchData: null,
+  matchLoading: false,
+  matchSearch: "",
+  matchAction: null,
+  matchTrigger: null,
 }
 
 const dom = {}
@@ -86,6 +104,10 @@ function bindDom() {
     "actionDialog", "actionForm", "actionTitle", "actionDescription", "actionNotes",
     "actionRequiredLabel", "actionNotesHint", "actionCounter", "actionError",
     "closeActionBtn", "cancelActionBtn", "confirmActionBtn",
+    "matchDialog", "matchForm", "matchTitle", "matchDescription", "comparisonContent",
+    "matchReasonFields", "matchReasonCode", "matchReason", "matchReasonRequired",
+    "matchReasonHint", "matchReasonCounter", "matchError", "closeMatchBtn",
+    "cancelMatchBtn", "confirmMatchBtn",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -102,8 +124,13 @@ function bindEvents() {
   dom.cancelActionBtn.addEventListener("click", closeActionDialog)
   dom.actionForm.addEventListener("submit", submitAction)
   dom.actionNotes.addEventListener("input", updateActionCounter)
+  dom.matchForm.addEventListener("submit", submitMatch)
+  dom.closeMatchBtn.addEventListener("click", closeMatchDialog)
+  dom.cancelMatchBtn.addEventListener("click", closeMatchDialog)
+  dom.matchReason.addEventListener("input", updateMatchReasonCounter)
   dom.detailDialog.addEventListener("close", restoreDetailFocus)
   dom.actionDialog.addEventListener("close", restoreActionFocus)
+  dom.matchDialog.addEventListener("close", restoreMatchFocus)
 
   ;[dom.folioFilter, dom.providerFilter].forEach((input) => {
     input.addEventListener("input", () => {
@@ -374,6 +401,7 @@ function updateKpiState() {
 async function openDetail(intakeId, trigger) {
   state.detailTrigger = trigger
   state.detail = null
+  state.matchData = null
   dom.detailTitle.textContent = "Cargando solicitud…"
   dom.detailSubtitle.textContent = "Consultando información autorizada"
   dom.detailContent.replaceChildren(element("div", "detail-loading", "Cargando detalle…"))
@@ -392,6 +420,7 @@ async function openDetail(intakeId, trigger) {
   }
 
   state.detail = data
+  await loadMatchState()
   renderDetail()
 }
 
@@ -440,6 +469,7 @@ function renderDetail() {
       ["Cuenta", intake.bank_account_masked, "sensitive-value"],
       ["CLABE", intake.bank_clabe_masked, "sensitive-value"],
     ]),
+    providerMatchSection(intake),
     filesSection(state.detail.files || [], intake),
     eventsSection(state.detail.events || []),
   )
@@ -461,6 +491,463 @@ function detailSection(title, rows) {
   })
   section.append(list)
   return section
+}
+
+async function loadMatchState(search = state.matchSearch) {
+  const intake = state.detail?.intake
+  if (!intake) return
+  const intakeId = intake.id
+  state.matchLoading = true
+  state.matchSearch = String(search || "").trim()
+
+  const { data, error } = await supabaseClient.rpc("find_provider_intake_candidates", {
+    p_payment_intake_id: intakeId,
+    p_search: state.matchSearch || null,
+    p_limit: 12,
+  })
+  if (state.detail?.intake?.id !== intakeId) return
+
+  state.matchLoading = false
+  state.matchData = error ? { error: friendlyError(error) } : data
+}
+
+function providerMatchSection(intake) {
+  const section = element("section", "detail-section full provider-match-section")
+  const heading = element("div", "provider-match-heading")
+  const headingText = document.createElement("div")
+  headingText.append(
+    element("h3", "", "Proveedor maestro"),
+    element("p", "provider-match-helper", "El dato declarado permanece intacto. El vínculo requiere confirmación explícita de Finanzas."),
+  )
+  heading.append(headingText)
+  section.append(heading)
+
+  if (state.matchLoading) {
+    section.append(element("p", "empty-inline", "Buscando coincidencias de forma segura…"))
+    return section
+  }
+
+  const matchData = state.matchData
+  if (!matchData || matchData.error) {
+    section.append(element("p", "match-error-inline", matchData?.error || "No fue posible consultar el matching."))
+    return section
+  }
+
+  const current = matchData.current_match
+  const eligible = Boolean(matchData.eligible)
+  const candidates = Array.isArray(matchData.candidates) ? matchData.candidates : []
+  const stateRow = element("div", "match-state-row")
+  const stateBadge = element("span", matchStateClass(current, eligible, candidates), matchStateLabel(current, eligible, candidates))
+  stateRow.append(stateBadge)
+  if (!eligible) {
+    stateRow.append(element("span", "match-readonly-note", matchReadonlyMessage(intake.status)))
+  }
+  section.append(stateRow)
+
+  if (current) section.append(currentMatchCard(current, eligible))
+
+  if (Number(matchData.duplicate_rfc_count || 0) > 1) {
+    section.append(element(
+      "p",
+      "match-warning",
+      "Se detectaron múltiples registros con el RFC declarado. Ninguno se seleccionará automáticamente; revisa cada candidato.",
+    ))
+  }
+
+  if (eligible) {
+    section.append(candidateSearchForm())
+    if (candidates.length) {
+      const list = element("div", "candidate-list")
+      candidates.forEach((candidate) => list.append(candidateCard(candidate, current)))
+      section.append(list)
+    } else {
+      section.append(element(
+        "p",
+        "empty-inline",
+        state.matchSearch
+          ? "Sin coincidencias para la búsqueda indicada."
+          : "Sin coincidencias deterministas. Puedes buscar por nombre, alias o RFC.",
+      ))
+    }
+  }
+
+  section.append(matchHistory(matchData.history || []))
+  section.append(element("p", "phase-two-inline", "Conversión disponible en Fase 2B. Esta fase no crea una solicitud de pago."))
+  return section
+}
+
+function matchStateClass(current, eligible, candidates) {
+  const base = "match-state-badge"
+  if (current && !current.active) return `${base} match-state-inactive`
+  if (current) return `${base} match-state-linked`
+  if (!eligible) return `${base} match-state-review`
+  if (candidates.length) return `${base} match-state-candidates`
+  return `${base} match-state-empty`
+}
+
+function matchStateLabel(current, eligible, candidates) {
+  if (current && !current.active) return "Proveedor inactivo"
+  if (current) return "Vinculado"
+  if (!eligible) return "Revisión requerida"
+  if (candidates.length) return "Candidatos encontrados"
+  return state.matchSearch ? "Sin coincidencias" : "Sin vincular"
+}
+
+function matchReadonlyMessage(status) {
+  return ({
+    received: "Inicia revisión para confirmar un vínculo.",
+    needs_correction: "El vínculo se conserva en solo lectura; retoma revisión para modificarlo.",
+    rejected: "Solicitud terminal en modo solo lectura.",
+    converted: "Solicitud convertida en modo solo lectura.",
+    cancelled: "Solicitud cancelada en modo solo lectura.",
+  })[status] || "El estado actual no permite modificar el vínculo."
+}
+
+function currentMatchCard(current, eligible) {
+  const card = element("article", `current-match-card${current.active ? "" : " inactive"}`)
+  const body = element("div", "current-match-body")
+  body.append(
+    element("strong", "", current.alias || "Proveedor maestro"),
+    element("span", "", current.legal_name || "Razón social no informada"),
+    element("span", "match-bank-summary", `${displayValue(current.bank)} · CLABE ${displayValue(current.clabe_masked)} · Cuenta ${displayValue(current.account_masked)}`),
+  )
+  const actions = element("div", "current-match-actions")
+  const view = element("a", "secondary-btn provider-master-link", "Abrir proveedor maestro")
+  view.href = `./proveedores.html?provider_id=${encodeURIComponent(current.proveedor_id)}&mode=readonly`
+  view.target = "_blank"
+  view.rel = "noopener"
+  const compare = element("button", "secondary-btn", "Comparar")
+  compare.type = "button"
+  compare.addEventListener("click", () => openMatchComparison(current.proveedor_id, compare))
+  actions.append(view, compare)
+  if (eligible) {
+    const change = element("button", "secondary-btn", "Cambiar vínculo")
+    change.type = "button"
+    change.addEventListener("click", () => {
+      document.getElementById("providerMatchSearch")?.focus()
+    })
+    const clear = element("button", "secondary-btn danger-action", "Retirar vínculo")
+    clear.type = "button"
+    clear.addEventListener("click", () => openClearMatch(clear))
+    actions.append(change, clear)
+  }
+  card.append(body, actions)
+  return card
+}
+
+function candidateSearchForm() {
+  const form = element("form", "provider-candidate-search")
+  form.setAttribute("aria-label", "Buscar proveedores maestros")
+  const label = document.createElement("label")
+  label.htmlFor = "providerMatchSearch"
+  label.textContent = "Nombre, alias o RFC"
+  const controls = element("div", "candidate-search-controls")
+  const input = document.createElement("input")
+  input.id = "providerMatchSearch"
+  input.type = "search"
+  input.autocomplete = "off"
+  input.maxLength = 120
+  input.value = state.matchSearch
+  input.placeholder = "Buscar coincidencias"
+  const button = element("button", "secondary-btn", "Buscar coincidencias")
+  button.type = "submit"
+  controls.append(input, button)
+  form.append(label, controls)
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    button.disabled = true
+    button.textContent = "Buscando…"
+    await loadMatchState(input.value)
+    renderDetail()
+    document.getElementById("providerMatchSearch")?.focus()
+  })
+  return form
+}
+
+function candidateCard(candidate, current) {
+  const card = element("article", `candidate-card${candidate.active ? "" : " inactive"}`)
+  const header = element("div", "candidate-card-header")
+  const identity = document.createElement("div")
+  identity.append(
+    element("strong", "", candidate.alias || "Proveedor maestro"),
+    element("span", "", candidate.legal_name || "Razón social no informada"),
+  )
+  const confidence = element(
+    "span",
+    `confidence-badge confidence-${candidate.confidence || "low"}`,
+    `${MATCH_CONFIDENCE[candidate.confidence] || "Confianza baja"} · ${Number(candidate.score || 0)}/100`,
+  )
+  header.append(identity, confidence)
+
+  const summary = element(
+    "p",
+    "candidate-summary",
+    `${displayValue(candidate.bank)} · CLABE ${displayValue(candidate.clabe_masked)} · Cuenta ${displayValue(candidate.account_masked)}`,
+  )
+  const reasons = matchTagList("Señales", candidate.reasons || [], "reason")
+  const differences = matchTagList("Diferencias", candidate.differences || [], "difference")
+  const actions = element("div", "candidate-actions")
+  const compare = element("button", "secondary-btn", "Comparar")
+  compare.type = "button"
+  compare.addEventListener("click", () => openMatchComparison(candidate.proveedor_id, compare))
+  actions.append(compare)
+
+  const alreadyLinked = current?.proveedor_id === candidate.proveedor_id
+  const select = element(
+    "button",
+    "primary-btn",
+    alreadyLinked ? "Vínculo actual" : current ? "Seleccionar para cambio" : "Seleccionar proveedor",
+  )
+  select.type = "button"
+  select.disabled = !candidate.selectable || alreadyLinked
+  if (!candidate.active) {
+    select.textContent = "Proveedor inactivo"
+    select.setAttribute("aria-describedby", `inactive-${candidate.proveedor_id}`)
+    const warning = element("p", "match-warning", "Coincidencia crítica con un proveedor inactivo; no es seleccionable.")
+    warning.id = `inactive-${candidate.proveedor_id}`
+    card.append(warning)
+  }
+  select.addEventListener("click", () => openMatchComparison(candidate.proveedor_id, select))
+  actions.append(select)
+  card.append(header, summary, reasons, differences, actions)
+  return card
+}
+
+function matchTagList(label, values, type) {
+  const wrapper = element("div", "match-tag-group")
+  wrapper.append(element("span", "match-tag-label", label))
+  const list = element("ul", "match-tag-list")
+  if (!values.length) {
+    list.append(element("li", "match-tag neutral", type === "reason" ? "Búsqueda manual" : "Sin diferencias informadas"))
+  } else {
+    values.forEach((value) => list.append(element("li", `match-tag ${type}`, value)))
+  }
+  wrapper.append(list)
+  return wrapper
+}
+
+function matchHistory(history) {
+  const wrapper = element("div", "match-history")
+  wrapper.append(element("h4", "", "Historial de matching"))
+  if (!history.length) {
+    wrapper.append(element("p", "empty-inline", "Aún no hay operaciones de matching."))
+    return wrapper
+  }
+  const list = element("ol", "match-history-list")
+  history.forEach((entry) => {
+    const item = element("li", "match-history-item")
+    const action = ({
+      match_set: "Vínculo confirmado",
+      match_replace: "Vínculo reemplazado",
+      match_clear: "Vínculo retirado",
+    })[entry.action_kind] || "Matching actualizado"
+    item.append(
+      element("strong", "", action),
+      element("span", "", `${displayValue(entry.previous_provider)} → ${displayValue(entry.new_provider)}`),
+      element("span", "event-meta", `${actorLabel(entry.actor_type)} · ${formatDateTime(entry.created_at)}`),
+    )
+    if (entry.reason) item.append(element("p", "event-note", entry.reason))
+    list.append(item)
+  })
+  wrapper.append(list)
+  return wrapper
+}
+
+async function openMatchComparison(providerId, trigger) {
+  const intake = state.detail?.intake
+  const matchData = state.matchData
+  if (!intake || !matchData) return
+
+  state.matchTrigger = trigger
+  state.matchAction = null
+  dom.matchTitle.textContent = "Comparar proveedor"
+  dom.matchDescription.textContent = "Revisa los datos declarados y maestros campo por campo."
+  dom.comparisonContent.replaceChildren(element("p", "empty-inline", "Preparando comparación…"))
+  dom.matchReasonFields.hidden = true
+  dom.confirmMatchBtn.hidden = true
+  dom.matchError.textContent = ""
+  dom.matchDialog.showModal()
+
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_match_comparison", {
+    p_payment_intake_id: intake.id,
+    p_proveedor_id: providerId,
+  })
+  if (error) {
+    dom.comparisonContent.replaceChildren(element("p", "match-error-inline", friendlyError(error)))
+    return
+  }
+
+  const currentId = matchData.current_match?.proveedor_id || null
+  const readonly = !matchData.eligible || !data.provider_active || currentId === providerId
+  const kind = currentId ? "replace" : "set"
+  state.matchAction = {
+    kind,
+    providerId,
+    providerAlias: data.provider_alias,
+    readonly,
+    actionId: createUuid(),
+  }
+  renderMatchComparison(data)
+  configureMatchConfirmation(kind, readonly)
+}
+
+function renderMatchComparison(comparison) {
+  const wrapper = element("div", "comparison-wrapper")
+  const summary = element("div", "comparison-summary")
+  summary.append(
+    element("strong", "", comparison.provider_alias || "Proveedor maestro"),
+    element("span", comparison.provider_active ? "status-text active" : "status-text inactive", comparison.provider_active ? "Proveedor activo" : "Proveedor inactivo"),
+  )
+  wrapper.append(summary)
+
+  const tableWrap = element("div", "comparison-table-wrap")
+  const table = element("table", "comparison-table")
+  const caption = element("caption", "sr-only", "Comparación entre datos declarados y proveedor maestro")
+  const thead = document.createElement("thead")
+  const headRow = document.createElement("tr")
+  ;["Dato", "Declarado en portal", "Proveedor maestro", "Resultado"].forEach((label) => {
+    const th = element("th", "", label)
+    th.scope = "col"
+    headRow.append(th)
+  })
+  thead.append(headRow)
+  const tbody = document.createElement("tbody")
+  ;(comparison.rows || []).forEach((row) => {
+    const tr = document.createElement("tr")
+    const field = element("th", "", row.field || "Dato")
+    field.scope = "row"
+    const declared = element("td", "", displayValue(row.declared))
+    const master = element("td", "", displayValue(row.master))
+    const result = element("td", `comparison-result result-${row.result || "not_reported"}`, COMPARISON_RESULT[row.result] || "No informado")
+    tr.append(field, declared, master, result)
+    tbody.append(tr)
+  })
+  table.append(caption, thead, tbody)
+  tableWrap.append(table)
+  wrapper.append(tableWrap)
+  dom.comparisonContent.replaceChildren(wrapper)
+}
+
+function configureMatchConfirmation(kind, readonly) {
+  dom.matchReason.value = ""
+  dom.matchError.textContent = ""
+  dom.matchReasonFields.hidden = readonly
+  dom.confirmMatchBtn.hidden = readonly
+  dom.matchReasonCode.value = kind === "replace" ? "match_corrected" : "candidate_selected"
+  dom.matchReasonRequired.textContent = kind === "replace" ? "(obligatoria, mínimo 10 caracteres)" : "(opcional)"
+  dom.matchReason.placeholder = kind === "replace"
+    ? "Explica por qué se reemplaza el vínculo, sin incluir datos sensibles"
+    : "Contexto opcional, sin incluir datos sensibles"
+  dom.confirmMatchBtn.textContent = kind === "replace" ? "Confirmar cambio" : "Confirmar vínculo"
+  updateMatchReasonCounter()
+  if (!readonly) window.setTimeout(() => dom.matchReasonCode.focus(), 0)
+}
+
+function openClearMatch(trigger) {
+  const current = state.matchData?.current_match
+  if (!current || !state.matchData?.eligible) return
+  state.matchTrigger = trigger
+  state.matchAction = {
+    kind: "clear",
+    providerId: null,
+    providerAlias: current.alias,
+    readonly: false,
+    actionId: createUuid(),
+  }
+  dom.matchTitle.textContent = "Retirar vínculo"
+  dom.matchDescription.textContent = "La solicitud quedará sin proveedor maestro. El historial se conservará."
+  dom.comparisonContent.replaceChildren(element(
+    "p",
+    "clear-match-warning",
+    `Vas a retirar el vínculo con ${current.alias || "el proveedor maestro"}. Esta acción no modifica ni elimina al proveedor.`,
+  ))
+  dom.matchReasonFields.hidden = false
+  dom.confirmMatchBtn.hidden = false
+  dom.matchReasonCode.value = "no_longer_matches"
+  dom.matchReason.value = ""
+  dom.matchReasonRequired.textContent = "(obligatoria, mínimo 10 caracteres)"
+  dom.matchReason.placeholder = "Explica por qué el vínculo ya no corresponde, sin incluir datos sensibles"
+  dom.confirmMatchBtn.textContent = "Retirar vínculo"
+  dom.matchError.textContent = ""
+  updateMatchReasonCounter()
+  dom.matchDialog.showModal()
+  window.setTimeout(() => dom.matchReason.focus(), 0)
+}
+
+async function submitMatch(event) {
+  event.preventDefault()
+  const intake = state.detail?.intake
+  const action = state.matchAction
+  const currentId = state.matchData?.current_match?.proveedor_id || null
+  if (!intake || !action || action.readonly) return
+
+  const reason = dom.matchReason.value.trim()
+  if (["replace", "clear"].includes(action.kind) && (reason.length < 10 || reason.length > 500)) {
+    dom.matchError.textContent = "La razón obligatoria debe tener entre 10 y 500 caracteres."
+    dom.matchReason.focus()
+    return
+  }
+  if (/@|[0-9]{8,}|<[^>]*>/.test(reason)) {
+    dom.matchError.textContent = "Retira datos sensibles, números extensos o etiquetas del motivo."
+    dom.matchReason.focus()
+    return
+  }
+
+  dom.matchError.textContent = ""
+  dom.confirmMatchBtn.disabled = true
+  const originalLabel = dom.confirmMatchBtn.textContent
+  dom.confirmMatchBtn.textContent = "Guardando…"
+
+  const { error } = await supabaseClient.rpc("set_provider_intake_match", {
+    p_payment_intake_id: intake.id,
+    p_expected_status: intake.status,
+    p_expected_updated_at: intake.updated_at,
+    p_expected_current_match: currentId,
+    p_proveedor_id: action.providerId,
+    p_reason: reason || null,
+    p_reason_code: dom.matchReasonCode.value,
+    p_action_id: action.actionId,
+  })
+
+  dom.confirmMatchBtn.disabled = false
+  dom.confirmMatchBtn.textContent = originalLabel
+  if (error) {
+    dom.matchError.textContent = friendlyError(error)
+    return
+  }
+
+  closeMatchDialog()
+  showToast(
+    action.kind === "clear" ? "Vínculo retirado" : action.kind === "replace" ? "Vínculo actualizado" : "Proveedor vinculado",
+    "La operación quedó registrada en el historial append-only.",
+    "success",
+  )
+  await refreshOpenDetail()
+  await loadList()
+}
+
+async function refreshOpenDetail() {
+  const intakeId = state.detail?.intake?.id
+  if (!intakeId) return
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_detail", {
+    p_payment_intake_id: intakeId,
+  })
+  if (error) {
+    showToast("No fue posible recargar", friendlyError(error), "error")
+    return
+  }
+  state.detail = data
+  state.matchSearch = ""
+  await loadMatchState()
+  renderDetail()
+}
+
+function closeMatchDialog() {
+  if (dom.matchDialog.open) dom.matchDialog.close()
+}
+
+function updateMatchReasonCounter() {
+  dom.matchReasonCounter.textContent = `${dom.matchReason.value.length} / 500`
 }
 
 function filesSection(files, intake) {
@@ -740,6 +1227,19 @@ const ERROR_MESSAGES = Object.freeze({
   provider_intake_note_length: "La nota debe tener entre 3 y 2000 caracteres.",
   provider_intake_note_invalid: "La nota contiene caracteres o etiquetas no permitidos.",
   provider_intake_action_id_conflict: "La acción no pudo validarse de forma idempotente. Actualiza el detalle.",
+  provider_intake_action_id_material_conflict: "La acción cambió después de iniciarse. Actualiza el detalle.",
+  provider_intake_action_id_legacy_conflict: "La acción no cumple el contrato vigente. Actualiza el detalle.",
+  provider_intake_search_too_short: "Escribe al menos dos caracteres para buscar.",
+  provider_intake_comparison_fields_required: "Selecciona un proveedor para comparar.",
+  provider_intake_match_fields_required: "Faltan datos de confirmación. Actualiza el detalle.",
+  provider_intake_match_unchanged: "El proveedor seleccionado ya es el vínculo actual.",
+  provider_intake_match_reason_code_invalid: "Selecciona un motivo válido.",
+  provider_intake_match_reason_required: "La razón obligatoria debe tener entre 10 y 500 caracteres.",
+  provider_intake_match_reason_sensitive: "Retira datos sensibles del motivo.",
+  provider_intake_match_status_invalid: "El matching solo puede modificarse mientras la solicitud está en revisión.",
+  provider_intake_match_converted: "La solicitud ya fue convertida y el vínculo es de solo lectura.",
+  provider_intake_provider_not_found: "El proveedor maestro ya no está disponible.",
+  provider_intake_provider_inactive: "El proveedor maestro está inactivo y no puede seleccionarse.",
   file_service_unavailable: "El servicio de documentos temporales aún no está configurado en este ambiente.",
   signed_url_unavailable: "No se pudo generar el enlace temporal. Inténtalo de nuevo.",
 })
@@ -773,6 +1273,8 @@ function restoreDetailFocus() {
   const trigger = state.detailTrigger
   state.detailTrigger = null
   state.detail = null
+  state.matchData = null
+  state.matchSearch = ""
   if (trigger?.isConnected) trigger.focus()
 }
 
@@ -780,6 +1282,13 @@ function restoreActionFocus() {
   const trigger = state.actionTrigger
   state.actionTrigger = null
   state.action = null
+  if (trigger?.isConnected) trigger.focus()
+}
+
+function restoreMatchFocus() {
+  const trigger = state.matchTrigger
+  state.matchTrigger = null
+  state.matchAction = null
   if (trigger?.isConnected) trigger.focus()
 }
 

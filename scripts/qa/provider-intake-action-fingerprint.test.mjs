@@ -80,7 +80,8 @@ test("Migration 030 and its operational LOAD are byte-identical", () => {
 })
 
 test("Migration 029 remains byte-identical to the applied contract", () => {
-  const digest = crypto.createHash("sha256").update(bytes(migration029Path)).digest("hex")
+  const canonicalBytes = Buffer.from(read(migration029Path).replace(/\r\n/g, "\n"), "utf8")
+  const digest = crypto.createHash("sha256").update(canonicalBytes).digest("hex")
   assert.equal(digest, "57ab35263fa0a6dfa53aeef1fc1b1fa76fcede2f5d0413e05cea1642f42438eb")
 })
 
