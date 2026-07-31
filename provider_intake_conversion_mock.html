@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  >
+  <title>Conversión de intake — Preview MOCKED</title>
+  <link rel="stylesheet" href="provider_intake_conversion_mock.css">
+  <script src="provider_intake_conversion_mock.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Saltar al contenido</a>
+
+  <header class="topbar">
+    <div class="brand" aria-label="Flux Operadora">
+      <span class="brand-mark" aria-hidden="true">F</span>
+      <span>
+        <strong>Flux Operadora</strong>
+        <small>Contrato 2B.2 · Preview aislado</small>
+      </span>
+    </div>
+
+    <div class="safety-badges" aria-label="Restricciones del preview">
+      <strong>MOCKED</strong>
+      <strong>NO DEV</strong>
+      <strong>NO UAT</strong>
+      <strong>NO REAL PAYMENT REQUEST</strong>
+    </div>
+  </header>
+
+  <main id="main-content" class="shell">
+    <aside class="scenario-panel" aria-labelledby="scenario-title">
+      <div>
+        <p class="eyebrow">Fixture lab</p>
+        <h1 id="scenario-title">Conversión contractual</h1>
+        <p>
+          Explora estados sintéticos. Esta página no autentica, no consulta datos
+          y no crea solicitudes.
+        </p>
+      </div>
+
+      <label for="scenario-select">Estado visual</label>
+      <select id="scenario-select">
+        <option value="ready">Ready</option>
+        <option value="confirmation">Confirmation</option>
+        <option value="processing">Processing</option>
+        <option value="success">Success mocked</option>
+        <option value="replay">Idempotent replay</option>
+        <option value="conflict">Conflict</option>
+        <option value="stale-intake">Stale intake</option>
+        <option value="stale-draft">Stale draft</option>
+        <option value="fx-required">FX required</option>
+        <option value="account-mismatch">Account mismatch</option>
+        <option value="concept-too-long">Concept too long</option>
+        <option value="already-converted">Already converted</option>
+        <option value="rollback-error">Rollback error</option>
+        <option value="invariant-conflict">Invariant conflict</option>
+      </select>
+
+      <div class="fixture-proof">
+        <span aria-hidden="true">◇</span>
+        <p>
+          <strong>Fuente local sintética</strong>
+          Sin SDK, configuración, credenciales ni clientes de red.
+        </p>
+      </div>
+
+      <dl class="mini-ledger">
+        <div>
+          <dt>payment_requests reales</dt>
+          <dd>0</dd>
+        </div>
+        <div>
+          <dt>intakes modificados</dt>
+          <dd>0</dd>
+        </div>
+        <div>
+          <dt>notificaciones</dt>
+          <dd>0</dd>
+        </div>
+      </dl>
+    </aside>
+
+    <section class="workspace" aria-labelledby="workspace-title">
+      <div class="workspace-heading">
+        <div>
+          <p class="eyebrow">INT-2026-MOCK-0142</p>
+          <h2 id="workspace-title">Confirmar solicitud de pago</h2>
+          <p>Revisión contractual antes de una conversión exclusivamente simulada.</p>
+        </div>
+        <span id="state-pill" class="state-pill" data-tone="ready">Ready</span>
+      </div>
+
+      <section id="state-banner" class="state-banner" data-tone="ready" aria-labelledby="state-title">
+        <span class="state-icon" aria-hidden="true">✓</span>
+        <div>
+          <h3 id="state-title">Listo para confirmar</h3>
+          <p id="state-message">
+            El fixture cumple readiness, routing, FX y cuenta origen.
+          </p>
+        </div>
+      </section>
+
+      <div class="summary-grid">
+        <article class="card card-wide" aria-labelledby="intake-heading">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">Intake</p>
+              <h3 id="intake-heading">Resumen recibido</h3>
+            </div>
+            <span class="tag">in_review</span>
+          </div>
+          <dl class="detail-grid">
+            <div>
+              <dt>Proveedor</dt>
+              <dd>Producciones Horizonte · MOCK</dd>
+            </div>
+            <div>
+              <dt>RFC declarado</dt>
+              <dd>PHO••••••M•</dd>
+            </div>
+            <div>
+              <dt>Monto declarado</dt>
+              <dd>$12,300.00 MXN</dd>
+            </div>
+            <div>
+              <dt>Descripción</dt>
+              <dd>Servicio de producción para evento privado</dd>
+            </div>
+            <div>
+              <dt>Documentos</dt>
+              <dd>2 conservados en el intake · no copiados</dd>
+            </div>
+            <div>
+              <dt>Última actualización</dt>
+              <dd>31 jul 2026 · 06:00</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card" aria-labelledby="draft-heading">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">Draft v7</p>
+              <h3 id="draft-heading">Solicitud preparada</h3>
+            </div>
+            <span class="tag tag-good">READY_FOR_CONVERSION</span>
+          </div>
+          <dl class="stacked-details">
+            <div>
+              <dt>Concepto interno</dt>
+              <dd id="concept-value">Pago de producción agosto</dd>
+            </div>
+            <div>
+              <dt>Centro / partida</dt>
+              <dd>Producción · Servicios externos</dd>
+            </div>
+            <div>
+              <dt>Fecha programada</dt>
+              <dd>7 ago 2026</dd>
+            </div>
+            <div>
+              <dt>Método</dt>
+              <dd>Transferencia</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card" aria-labelledby="routing-heading">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">Snapshot</p>
+              <h3 id="routing-heading">Routing preservado</h3>
+            </div>
+            <span class="tag tag-neutral">No es aprobación</span>
+          </div>
+          <dl class="stacked-details">
+            <div>
+              <dt>Requester</dt>
+              <dd>Finance Fixture 01</dd>
+            </div>
+            <div>
+              <dt>Approver snapshot</dt>
+              <dd>Direction Fixture 01</dd>
+            </div>
+            <div>
+              <dt>Assignment</dt>
+              <dd>assignment-mock-001</dd>
+            </div>
+          </dl>
+          <p class="callout">
+            La solicitud simulada nace <strong>submitted</strong>. Direction y
+            Finance conservan los gates single_direction.
+          </p>
+        </article>
+
+        <article class="card money-card" aria-labelledby="amount-heading">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">Importe final</p>
+              <h3 id="amount-heading">$12,500.00 MXN</h3>
+            </div>
+            <span class="delta">+$200.00</span>
+          </div>
+          <dl class="stacked-details">
+            <div>
+              <dt>Tipo de cambio</dt>
+              <dd id="fx-value">1.0000</dd>
+            </div>
+            <div>
+              <dt>Cuenta origen</dt>
+              <dd id="account-value">BBVA Operación · •••• 2468</dd>
+            </div>
+            <div>
+              <dt>Compatibilidad</dt>
+              <dd>Empresa, moneda y método validados · MOCKED</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card budget-card" aria-labelledby="budget-heading">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">Presupuesto MOCKED</p>
+              <h3 id="budget-heading">Aprobable</h3>
+            </div>
+            <span class="budget-ring" aria-label="75 por ciento disponible">75%</span>
+          </div>
+          <dl class="budget-values">
+            <div>
+              <dt>Disponible antes</dt>
+              <dd>$50,000.00</dd>
+            </div>
+            <div>
+              <dt>Solicitud</dt>
+              <dd>− $12,500.00</dd>
+            </div>
+            <div>
+              <dt>Disponible después</dt>
+              <dd>$37,500.00</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+
+      <section class="action-bar" aria-labelledby="action-heading">
+        <div>
+          <h3 id="action-heading">Confirmación explícita requerida</h3>
+          <p id="action-copy">
+            El resultado solo modificará este fixture en memoria.
+          </p>
+        </div>
+        <button id="open-confirmation" class="button button-primary" type="button">
+          Revisar confirmación
+        </button>
+      </section>
+
+      <section
+        id="result-panel"
+        class="result-panel"
+        aria-live="polite"
+        aria-atomic="true"
+        tabindex="-1"
+      >
+        <div>
+          <p class="eyebrow">Resultado mocked</p>
+          <h3 id="result-title">Sin ejecución</h3>
+          <p id="result-message">Selecciona un estado o abre la confirmación.</p>
+        </div>
+        <dl>
+          <div>
+            <dt>Request real</dt>
+            <dd>NO CREADO</dd>
+          </div>
+          <div>
+            <dt>Writes DEV</dt>
+            <dd>0</dd>
+          </div>
+          <div>
+            <dt>Draft</dt>
+            <dd>PRESERVADO</dd>
+          </div>
+        </dl>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="confirmation-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <form method="dialog">
+      <div class="dialog-icon" aria-hidden="true">◇</div>
+      <p class="eyebrow">Confirmación MOCKED</p>
+      <h2 id="dialog-title">¿Simular la conversión?</h2>
+      <p id="dialog-description">
+        Se generará un resultado local con status submitted. No se crea una
+        solicitud real, no se modifica DEV y no se envía ninguna notificación.
+      </p>
+
+      <label class="confirmation-check">
+        <input id="explicit-confirmation" type="checkbox">
+        <span>
+          Entiendo que este Preview es MOCKED, NO DEV, NO UAT y no crea un
+          payment request real.
+        </span>
+      </label>
+
+      <div class="dialog-summary">
+        <span>Importe final</span>
+        <strong>$12,500.00 MXN</strong>
+        <span>Cuenta</span>
+        <strong>•••• 2468</strong>
+      </div>
+
+      <p id="confirmation-help" class="validation-message" aria-live="polite"></p>
+
+      <div class="dialog-actions">
+        <button id="cancel-confirmation" class="button button-secondary" value="cancel" type="submit">
+          Cancelar
+        </button>
+        <button id="confirm-conversion" class="button button-primary" value="default" type="button">
+          Confirmar simulación
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <footer>
+    <p>
+      2B2-C1 · Contract-only candidate · Mock fixture · No certification implied
+    </p>
+  </footer>
+</body>
+</html>
