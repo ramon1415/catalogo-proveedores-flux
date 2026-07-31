@@ -4,7 +4,10 @@
 -- Mutable claims are inspected through pg_get_functiondef and are never invoked.
 
 \set ON_ERROR_STOP on
+\set VERBOSITY terse
 begin;
+\echo N1A_SAFE_STAGE=TRANSACTION_STARTED
+\echo N1A_SAFE_STAGE=TEMP_SETUP_STARTED
 
 create temporary table n1a_external_event_model (
   id integer generated always as identity primary key,
@@ -38,8 +41,12 @@ create temporary table n1a_policy_model (
   expression_mentions_internal boolean not null
 ) on commit drop;
 
+\echo N1A_SAFE_STAGE=TEMP_SETUP_COMPLETED
+\echo N1A_SAFE_STAGE=DO_BLOCK_STARTED
 do $$
 declare
+  v_current_phase text;
+  v_current_test integer;
   v_internal_claim text;
   v_legacy_claim text;
   v_external_claim text;
@@ -60,6 +67,9 @@ declare
     'occurred_on', '2026-07-30'
   );
 begin
+  v_current_phase := 'CATALOG_BINDING';
+  v_current_test := 0;
+
   select pg_get_functiondef(
     'public.claim_notification_events_for_dispatcher(integer,text)'::regprocedure
   ) into v_internal_claim;
@@ -89,12 +99,18 @@ begin
   where conrelid = 'public.notification_events'::regclass
     and conname = 'notification_events_lane_contract_check';
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 1;
+
   -- 01. Legacy notification rows remain internal.
   if exists (
     select 1 from public.notification_events where audience <> 'internal'
   ) then
     raise exception 'N1A_TEST_01_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 2;
 
   -- 02. provider_matched source evidence remains internal-only.
   if exists (
@@ -115,11 +131,17 @@ begin
     raise exception 'N1A_TEST_02_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 3;
+
   -- 03. provider_matched is absent from the external claim allowlist.
   if public.notification_external_event_type_allowed('provider_matched')
      or position('provider_matched' in lower(v_external_claim)) > 0 then
     raise exception 'N1A_TEST_03_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 4;
 
   -- 04. Matching metadata cannot pass the external payload validator.
   if public.notification_external_payload_valid(
@@ -137,6 +159,9 @@ begin
     raise exception 'N1A_TEST_04_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 5;
+
   -- 05. External claim cannot see internal.
   if position('e.audience = ''external''' in lower(v_external_claim)) = 0
      or position(
@@ -148,11 +173,17 @@ begin
     raise exception 'N1A_TEST_05_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 6;
+
   -- 06. Every existing internal claim excludes external.
   if position('e.audience = ''internal''' in lower(v_internal_claim)) = 0
      or position('e.audience = ''internal''' in lower(v_legacy_claim)) = 0 then
     raise exception 'N1A_TEST_06_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 7;
 
   -- 07. Disabled rollout is structurally ineligible.
   if not exists (
@@ -164,6 +195,9 @@ begin
     raise exception 'N1A_TEST_07_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 8;
+
   -- 08. NULL cutoff is structurally ineligible.
   if not exists (
     select 1
@@ -173,6 +207,9 @@ begin
   ) or position('r.cutoff_at is not null' in lower(v_external_claim)) = 0 then
     raise exception 'N1A_TEST_08_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 9;
 
   -- 09. Daily cap zero is structurally ineligible.
   if not exists (
@@ -184,6 +221,9 @@ begin
     raise exception 'N1A_TEST_09_FAILED';
   end if;
 
+  v_current_phase := 'PAYLOAD_BASELINE';
+  v_current_test := 0;
+
   -- Positive payload baseline for the following negative cases.
   if not public.notification_external_payload_valid(
     'provider_intake.received',
@@ -193,10 +233,16 @@ begin
     raise exception 'N1A_TEST_PAYLOAD_BASELINE_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 10;
+
   -- 10. Unknown event type fails closed.
   if public.notification_external_event_type_allowed('provider_intake.unknown') then
     raise exception 'N1A_TEST_10_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 11;
 
   -- 11. provider_matched cannot be validated as an external event.
   if public.notification_external_payload_valid(
@@ -207,6 +253,9 @@ begin
     raise exception 'N1A_TEST_11_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 12;
+
   -- 12. Internal notes are forbidden in an external payload.
   if public.notification_external_payload_valid(
     'provider_intake.received',
@@ -216,6 +265,9 @@ begin
     raise exception 'N1A_TEST_12_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 13;
+
   -- 13. match_score is forbidden in an external payload.
   if public.notification_external_payload_valid(
     'provider_intake.received',
@@ -224,6 +276,9 @@ begin
   ) then
     raise exception 'N1A_TEST_13_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 14;
 
   -- 14. RFC values are forbidden in an external payload.
   if public.notification_external_payload_valid(
@@ -244,6 +299,9 @@ begin
     ('external', 'provider_intake.rejected', 'intake-a', 1,
      'external:provider_intake.rejected:intake-a:v1');
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 15;
+
   -- 15. Duplicate received for one intake/version fails.
   v_duplicate_blocked := false;
   begin
@@ -259,6 +317,9 @@ begin
      or to_regclass('public.notification_events_external_subject_version_uidx') is null then
     raise exception 'N1A_TEST_15_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 16;
 
   -- 16. Duplicate correction for one intake/version fails.
   v_duplicate_blocked := false;
@@ -276,6 +337,9 @@ begin
     raise exception 'N1A_TEST_16_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 17;
+
   -- 17. Duplicate rejected for one intake/version fails.
   v_duplicate_blocked := false;
   begin
@@ -291,6 +355,9 @@ begin
     raise exception 'N1A_TEST_17_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 18;
+
   -- 18. no_recipient is terminal and not claimable.
   if position('e.status = ''pending''' in lower(v_external_claim)) = 0
      or position('no_recipient' in pg_get_functiondef(
@@ -298,6 +365,9 @@ begin
      )) = 0 then
     raise exception 'N1A_TEST_18_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 19;
 
   -- 19. Duplicate attempt number fails.
   insert into n1a_attempt_model values ('event-a', 1);
@@ -312,6 +382,9 @@ begin
     raise exception 'N1A_TEST_19_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 20;
+
   -- 20. Duplicate submission_completed fails.
   insert into n1a_submission_model values ('intake-a');
   v_duplicate_blocked := false;
@@ -324,6 +397,9 @@ begin
      or to_regclass('public.payment_intake_events_submission_completed_uidx') is null then
     raise exception 'N1A_TEST_20_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 21;
 
   -- 21. Matching 031 RPC signatures and material contract remain present.
   if to_regprocedure('public.find_provider_intake_candidates(uuid,text,integer)') is null
@@ -346,12 +422,18 @@ begin
     raise exception 'N1A_TEST_21_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 22;
+
   -- 22. Migration creates zero external notification rows.
   if exists (
     select 1 from public.notification_events where audience = 'external'
   ) then
     raise exception 'N1A_TEST_22_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 23;
 
   -- 23. No completion or external-field backfill is present.
   if exists (
@@ -364,6 +446,9 @@ begin
   ) then
     raise exception 'N1A_TEST_23_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 24;
 
   -- 24. No external producer exists.
   if exists (
@@ -381,6 +466,9 @@ begin
     raise exception 'N1A_TEST_24_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 25;
+
   -- 25. correction_requested remains structurally eligible only in test_only.
   if not public.notification_external_event_mode_allowed(
     'provider_intake.correction_requested',
@@ -388,6 +476,9 @@ begin
   ) then
     raise exception 'N1A_TEST_25_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 26;
 
   -- 26. correction_requested is structurally blocked in pilot and by rollout constraint.
   if public.notification_external_event_mode_allowed(
@@ -402,6 +493,9 @@ begin
     raise exception 'N1A_TEST_26_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 27;
+
   -- 27. received can remain structurally eligible in pilot.
   if not public.notification_external_event_mode_allowed(
     'provider_intake.received',
@@ -410,6 +504,9 @@ begin
     raise exception 'N1A_TEST_27_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 28;
+
   -- 28. rejected can remain structurally eligible in pilot.
   if not public.notification_external_event_mode_allowed(
     'provider_intake.rejected',
@@ -417,6 +514,9 @@ begin
   ) then
     raise exception 'N1A_TEST_28_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 29;
 
   -- 29. Initial rollout remains disabled and empty.
   if not exists (
@@ -433,6 +533,9 @@ begin
     raise exception 'N1A_TEST_29_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 30;
+
   -- 30. The exact rollout row is locked before the daily count is evaluated.
   v_rollout_lock_position := position(
     'for update of r skip locked'
@@ -447,6 +550,9 @@ begin
     raise exception 'N1A_TEST_30_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 31;
+
   -- 31. Daily-cap claim remains batch-one and compares under the rollout lock.
   if position('v_daily_count >= v_rollout.daily_cap' in lower(v_external_claim)) = 0
      or position('least(greatest(coalesce(p_limit, 1), 1), 1)' in lower(v_external_claim)) = 0
@@ -454,10 +560,16 @@ begin
     raise exception 'N1A_TEST_31_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 32;
+
   -- 32. Every external event is constrained to exactly three attempts.
   if position('max_attempts = 3' in lower(coalesce(v_lane_constraint, ''))) = 0 then
     raise exception 'N1A_TEST_32_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 33;
 
   -- 33. External inserts start unclaimed with attempt_count zero.
   if position('new.max_attempts is distinct from 3' in lower(v_event_guard)) = 0
@@ -469,6 +581,9 @@ begin
     raise exception 'N1A_TEST_33_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 34;
+
   -- 34. Expired processing leases without provider interaction remain structurally recoverable.
   if position('e.status = ''processing''' in lower(v_recovery)) = 0
      or position('e.locked_at <=' in lower(v_recovery)) = 0
@@ -476,45 +591,72 @@ begin
     raise exception 'N1A_TEST_34_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 35;
+
   -- 35. Provider request start blocks automatic recovery.
   if position('provider_request_started_at is not null' in lower(v_recovery)) = 0 then
     raise exception 'N1A_TEST_35_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 36;
 
   -- 36. Provider request completion blocks automatic recovery.
   if position('provider_request_completed_at is not null' in lower(v_recovery)) = 0 then
     raise exception 'N1A_TEST_36_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 37;
+
   -- 37. Provider message acceptance/unknown result blocks automatic recovery.
   if position('provider_message_id is not null' in lower(v_recovery)) = 0 then
     raise exception 'N1A_TEST_37_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 38;
 
   -- 38. A sent delivery attempt blocks automatic recovery.
   if position('attempt.status = ''sent''' in lower(v_recovery)) = 0 then
     raise exception 'N1A_TEST_38_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 39;
+
   -- 39. Internal events are never recoverable through the external recovery RPC.
   if position('e.audience = ''external''' in lower(v_recovery)) = 0 then
     raise exception 'N1A_TEST_39_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 40;
 
   -- 40. Ten contiguous digits are rejected.
   if public.notification_external_message_valid('Corrige 1234567890 ahora.') then
     raise exception 'N1A_TEST_40_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 41;
+
   -- 41. Sixteen contiguous digits are rejected.
   if public.notification_external_message_valid('Corrige 1234567890123456 ahora.') then
     raise exception 'N1A_TEST_41_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 42;
+
   -- 42. Eighteen contiguous digits are rejected.
   if public.notification_external_message_valid('Corrige 123456789012345678 ahora.') then
     raise exception 'N1A_TEST_42_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 43;
 
   -- 43. A spaced CLABE-equivalent sequence is rejected.
   if public.notification_external_message_valid(
@@ -523,6 +665,9 @@ begin
     raise exception 'N1A_TEST_43_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 44;
+
   -- 44. A hyphenated CLABE-equivalent sequence is rejected.
   if public.notification_external_message_valid(
     'Corrige 1234-5678-9012-3456-78 ahora.'
@@ -530,40 +675,64 @@ begin
     raise exception 'N1A_TEST_44_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 45;
+
   -- 45. Persona física RFC values are rejected.
   if public.notification_external_message_valid('Corrige ABCD010101XXX ahora.') then
     raise exception 'N1A_TEST_45_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 46;
 
   -- 46. Persona moral RFC values are rejected.
   if public.notification_external_message_valid('Corrige ABC010101XX1 ahora.') then
     raise exception 'N1A_TEST_46_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 47;
+
   -- 47. Email values are rejected.
   if public.notification_external_message_valid('Escribe a persona@example.com ahora.') then
     raise exception 'N1A_TEST_47_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 48;
 
   -- 48. URL values are rejected.
   if public.notification_external_message_valid('Visita https://example.com ahora.') then
     raise exception 'N1A_TEST_48_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 49;
+
   -- 49. Matching terms are rejected.
   if public.notification_external_message_valid('Comparte el matching interno ahora.') then
     raise exception 'N1A_TEST_49_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 50;
 
   -- 50. HTML is rejected.
   if public.notification_external_message_valid('<b>Corrige este dato</b>') then
     raise exception 'N1A_TEST_50_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 51;
+
   -- 51. A safe RFC instruction without the RFC value is accepted.
   if not public.notification_external_message_valid('Corrige el RFC registrado.') then
     raise exception 'N1A_TEST_51_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 52;
 
   -- 52. A safe bank-document instruction is accepted.
   if not public.notification_external_message_valid(
@@ -572,12 +741,18 @@ begin
     raise exception 'N1A_TEST_52_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 53;
+
   -- 53. A safe legal-name instruction is accepted.
   if not public.notification_external_message_valid(
     'Verifica el nombre o razón social.'
   ) then
     raise exception 'N1A_TEST_53_FAILED';
   end if;
+
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 54;
 
   -- 54. The policy audit predicate detects an additional permissive policy.
   insert into n1a_policy_model values
@@ -608,6 +783,9 @@ begin
     raise exception 'N1A_TEST_54_FAILED';
   end if;
 
+  v_current_phase := 'TEST_EXECUTION';
+  v_current_test := 55;
+
   -- 55. Every real permissive authenticated SELECT policy is explicitly internal.
   if exists (
     select 1
@@ -632,9 +810,199 @@ begin
   ) then
     raise exception 'N1A_TEST_55_FAILED';
   end if;
+
+  v_current_phase := 'FINAL_ASSERTIONS';
+  v_current_test := 0;
+exception
+  when others then
+    if sqlerrm = any (array[
+      'N1A_TEST_01_FAILED',
+      'N1A_TEST_02_FAILED',
+      'N1A_TEST_03_FAILED',
+      'N1A_TEST_04_FAILED',
+      'N1A_TEST_05_FAILED',
+      'N1A_TEST_06_FAILED',
+      'N1A_TEST_07_FAILED',
+      'N1A_TEST_08_FAILED',
+      'N1A_TEST_09_FAILED',
+      'N1A_TEST_10_FAILED',
+      'N1A_TEST_11_FAILED',
+      'N1A_TEST_12_FAILED',
+      'N1A_TEST_13_FAILED',
+      'N1A_TEST_14_FAILED',
+      'N1A_TEST_15_FAILED',
+      'N1A_TEST_16_FAILED',
+      'N1A_TEST_17_FAILED',
+      'N1A_TEST_18_FAILED',
+      'N1A_TEST_19_FAILED',
+      'N1A_TEST_20_FAILED',
+      'N1A_TEST_21_FAILED',
+      'N1A_TEST_22_FAILED',
+      'N1A_TEST_23_FAILED',
+      'N1A_TEST_24_FAILED',
+      'N1A_TEST_25_FAILED',
+      'N1A_TEST_26_FAILED',
+      'N1A_TEST_27_FAILED',
+      'N1A_TEST_28_FAILED',
+      'N1A_TEST_29_FAILED',
+      'N1A_TEST_30_FAILED',
+      'N1A_TEST_31_FAILED',
+      'N1A_TEST_32_FAILED',
+      'N1A_TEST_33_FAILED',
+      'N1A_TEST_34_FAILED',
+      'N1A_TEST_35_FAILED',
+      'N1A_TEST_36_FAILED',
+      'N1A_TEST_37_FAILED',
+      'N1A_TEST_38_FAILED',
+      'N1A_TEST_39_FAILED',
+      'N1A_TEST_40_FAILED',
+      'N1A_TEST_41_FAILED',
+      'N1A_TEST_42_FAILED',
+      'N1A_TEST_43_FAILED',
+      'N1A_TEST_44_FAILED',
+      'N1A_TEST_45_FAILED',
+      'N1A_TEST_46_FAILED',
+      'N1A_TEST_47_FAILED',
+      'N1A_TEST_48_FAILED',
+      'N1A_TEST_49_FAILED',
+      'N1A_TEST_50_FAILED',
+      'N1A_TEST_51_FAILED',
+      'N1A_TEST_52_FAILED',
+      'N1A_TEST_53_FAILED',
+      'N1A_TEST_54_FAILED',
+      'N1A_TEST_55_FAILED',
+      'N1A_TEST_PAYLOAD_BASELINE_FAILED'
+    ]) then
+      raise;
+    end if;
+
+    if v_current_phase = 'CATALOG_BINDING' then
+      raise exception 'N1A_NATIVE_CATALOG_BINDING_FAILED';
+    elsif v_current_phase = 'PAYLOAD_BASELINE' then
+      raise exception 'N1A_NATIVE_PAYLOAD_BASELINE_FAILED';
+    elsif v_current_phase = 'TEST_EXECUTION' then
+      case v_current_test
+        when 1 then
+          raise exception 'N1A_NATIVE_TEST_01_FAILED';
+        when 2 then
+          raise exception 'N1A_NATIVE_TEST_02_FAILED';
+        when 3 then
+          raise exception 'N1A_NATIVE_TEST_03_FAILED';
+        when 4 then
+          raise exception 'N1A_NATIVE_TEST_04_FAILED';
+        when 5 then
+          raise exception 'N1A_NATIVE_TEST_05_FAILED';
+        when 6 then
+          raise exception 'N1A_NATIVE_TEST_06_FAILED';
+        when 7 then
+          raise exception 'N1A_NATIVE_TEST_07_FAILED';
+        when 8 then
+          raise exception 'N1A_NATIVE_TEST_08_FAILED';
+        when 9 then
+          raise exception 'N1A_NATIVE_TEST_09_FAILED';
+        when 10 then
+          raise exception 'N1A_NATIVE_TEST_10_FAILED';
+        when 11 then
+          raise exception 'N1A_NATIVE_TEST_11_FAILED';
+        when 12 then
+          raise exception 'N1A_NATIVE_TEST_12_FAILED';
+        when 13 then
+          raise exception 'N1A_NATIVE_TEST_13_FAILED';
+        when 14 then
+          raise exception 'N1A_NATIVE_TEST_14_FAILED';
+        when 15 then
+          raise exception 'N1A_NATIVE_TEST_15_FAILED';
+        when 16 then
+          raise exception 'N1A_NATIVE_TEST_16_FAILED';
+        when 17 then
+          raise exception 'N1A_NATIVE_TEST_17_FAILED';
+        when 18 then
+          raise exception 'N1A_NATIVE_TEST_18_FAILED';
+        when 19 then
+          raise exception 'N1A_NATIVE_TEST_19_FAILED';
+        when 20 then
+          raise exception 'N1A_NATIVE_TEST_20_FAILED';
+        when 21 then
+          raise exception 'N1A_NATIVE_TEST_21_FAILED';
+        when 22 then
+          raise exception 'N1A_NATIVE_TEST_22_FAILED';
+        when 23 then
+          raise exception 'N1A_NATIVE_TEST_23_FAILED';
+        when 24 then
+          raise exception 'N1A_NATIVE_TEST_24_FAILED';
+        when 25 then
+          raise exception 'N1A_NATIVE_TEST_25_FAILED';
+        when 26 then
+          raise exception 'N1A_NATIVE_TEST_26_FAILED';
+        when 27 then
+          raise exception 'N1A_NATIVE_TEST_27_FAILED';
+        when 28 then
+          raise exception 'N1A_NATIVE_TEST_28_FAILED';
+        when 29 then
+          raise exception 'N1A_NATIVE_TEST_29_FAILED';
+        when 30 then
+          raise exception 'N1A_NATIVE_TEST_30_FAILED';
+        when 31 then
+          raise exception 'N1A_NATIVE_TEST_31_FAILED';
+        when 32 then
+          raise exception 'N1A_NATIVE_TEST_32_FAILED';
+        when 33 then
+          raise exception 'N1A_NATIVE_TEST_33_FAILED';
+        when 34 then
+          raise exception 'N1A_NATIVE_TEST_34_FAILED';
+        when 35 then
+          raise exception 'N1A_NATIVE_TEST_35_FAILED';
+        when 36 then
+          raise exception 'N1A_NATIVE_TEST_36_FAILED';
+        when 37 then
+          raise exception 'N1A_NATIVE_TEST_37_FAILED';
+        when 38 then
+          raise exception 'N1A_NATIVE_TEST_38_FAILED';
+        when 39 then
+          raise exception 'N1A_NATIVE_TEST_39_FAILED';
+        when 40 then
+          raise exception 'N1A_NATIVE_TEST_40_FAILED';
+        when 41 then
+          raise exception 'N1A_NATIVE_TEST_41_FAILED';
+        when 42 then
+          raise exception 'N1A_NATIVE_TEST_42_FAILED';
+        when 43 then
+          raise exception 'N1A_NATIVE_TEST_43_FAILED';
+        when 44 then
+          raise exception 'N1A_NATIVE_TEST_44_FAILED';
+        when 45 then
+          raise exception 'N1A_NATIVE_TEST_45_FAILED';
+        when 46 then
+          raise exception 'N1A_NATIVE_TEST_46_FAILED';
+        when 47 then
+          raise exception 'N1A_NATIVE_TEST_47_FAILED';
+        when 48 then
+          raise exception 'N1A_NATIVE_TEST_48_FAILED';
+        when 49 then
+          raise exception 'N1A_NATIVE_TEST_49_FAILED';
+        when 50 then
+          raise exception 'N1A_NATIVE_TEST_50_FAILED';
+        when 51 then
+          raise exception 'N1A_NATIVE_TEST_51_FAILED';
+        when 52 then
+          raise exception 'N1A_NATIVE_TEST_52_FAILED';
+        when 53 then
+          raise exception 'N1A_NATIVE_TEST_53_FAILED';
+        when 54 then
+          raise exception 'N1A_NATIVE_TEST_54_FAILED';
+        when 55 then
+          raise exception 'N1A_NATIVE_TEST_55_FAILED';
+        else
+          raise exception 'N1A_NATIVE_DO_BLOCK_FAILED';
+      end case;
+    else
+      raise exception 'N1A_NATIVE_DO_BLOCK_FAILED';
+    end if;
 end
 $$;
 
+\echo N1A_SAFE_STAGE=DO_BLOCK_COMPLETED
+\echo N1A_SAFE_STAGE=FINAL_OUTPUT_STARTED
 select *
 from (
   values
@@ -696,4 +1064,7 @@ from (
 ) result(test_number, contract, result)
 order by test_number;
 
+\echo N1A_SAFE_STAGE=FINAL_OUTPUT_COMPLETED
+\echo N1A_SAFE_STAGE=ROLLBACK_STARTED
 rollback;
+\echo N1A_SAFE_STAGE=ROLLBACK_COMPLETED
