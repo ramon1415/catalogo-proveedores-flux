@@ -27,10 +27,10 @@ Finance does not provide a separate human approval for each regular request. Dir
 
 | Phase 0 assumption | Reconciled decision |
 | --- | --- |
-| Triage selects an individual approver. | Triage never selects an individual approver for a regular request. |
-| Conversion depends on `list_payment_request_approver_options`. | Regular conversion must not depend on that legacy individual-approver path. |
+| Triage selects an individual approver. | A prepared draft may preserve requester, approver, and assignment IDs only as a routing snapshot; that snapshot is not an approval. |
+| Conversion depends on `list_payment_request_approver_options`. | Conversion revalidates the stored routing snapshot for target compatibility but cannot use it as the regular approval decision. |
 | An intake without an approver cannot convert. | A future conversion requires internal classification and a valid requester, then creates a submitted request that passes budget validation and may become batch-eligible. |
-| The conversion wireframe includes an approver control. | The control is removed from the future regular conversion contract. |
+| The conversion wireframe includes an approver control. | Conversion may display the immutable routing snapshot for confirmation, but it offers no approval action or approver mutation. |
 | Approval is attached directly to the request during intake conversion. | Direction decides only after the converted request is added to the applicable company batch. |
 
 ## Impact of migration 023
@@ -75,9 +75,11 @@ Phase 2 may convert an intake only after internal triage has resolved:
 
 The conversion must be idempotent, set `created_payment_request_id` once, and leave the resulting request submitted and eligible for the normal company batch only when the canonical batch RPC says it is eligible.
 
+For 2B.2, `requested_by`, `approver_id`, and `approver_assignment_id` are preserved as an immutable routing snapshot required by the current target schema. The snapshot does not create a row in `payment_request_approvals`, does not mark the request approved, and does not replace Direction's later company-batch decision. The request is born `submitted`; Finance and Direction retain every `single_direction` gate. No batch is created during conversion.
+
 The future conversion must not:
 
-- assign an individual approver for a regular request;
+- interpret the routing snapshot as an individual approval or use it to bypass `single_direction`;
 - add `payment_intake` itself to a batch;
 - mark a request approved;
 - update canonical provider banking data automatically;

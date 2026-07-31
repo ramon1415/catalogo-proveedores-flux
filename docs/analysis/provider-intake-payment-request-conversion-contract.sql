@@ -1,0 +1,667 @@
+-- NON_DEPLOYMENT_REFERENCE
+-- DO_NOT_APPLY
+-- CONTRACT_ONLY
+-- NO_SUPABASE_DEV
+--
+-- Governance: 2B2-C1-CONTRACT-ONLY-2026-07-31
+-- Pinned source: dev ce590aca9f291cd27f92e8b1de64f07b0de229a8
+-- Draft source: PR #283 candidate 2255574774065ae29a43c6c7a0b5835d71da3a28
+--
+-- Every statement below is commented intentionally. This file is a reviewable
+-- SQL contract, not an executable migration or deployment script.
+--
+-- Target signature
+--
+-- create function public.convert_provider_intake_payment_draft(
+--   p_payment_intake_id uuid,
+--   p_expected_intake_status text,
+--   p_expected_intake_updated_at timestamptz,
+--   p_expected_draft_version integer,
+--   p_exchange_rate numeric,
+--   p_action_id uuid
+-- ) returns jsonb
+-- language plpgsql
+-- security definer
+-- set search_path = public, pg_temp
+-- as $contract$
+--
+-- declare
+--   v_actor_profile_id uuid;
+--   v_actor_context jsonb;
+--   v_intake public.payment_intake%rowtype;
+--   v_draft public.payment_intake_conversion_drafts%rowtype;
+--   v_provider public.proveedores%rowtype;
+--   v_account public.company_bank_accounts%rowtype;
+--   v_existing_event public.payment_intake_events%rowtype;
+--   v_action_event_found boolean := false;
+--   v_existing_request public.payment_requests%rowtype;
+--   v_payment_request_id uuid;
+--   v_request_number text;
+--   v_approver_selection_source text;
+--   v_currency text;
+--   v_payment_method text;
+--   v_concept text;
+--   v_notes text;
+--   v_exchange_rate numeric(18,4);
+--   v_budget_amount numeric;
+--   v_budget_result jsonb;
+--   v_budget_decision text;
+--   v_budget_block_reason text;
+--   v_budget_available_before numeric;
+--   v_budget_available_after numeric;
+--   v_budget_shortfall numeric;
+--   v_material jsonb;
+--   v_fingerprint text;
+--   v_converted_event_count integer;
+--   v_linked_request_exists boolean;
+--   v_row_count integer;
+-- begin
+--
+--   -------------------------------------------------------------------------
+--   -- 1. Authentication and authority. The actor is never caller supplied.
+--   -------------------------------------------------------------------------
+--
+--   v_actor_profile_id := public.current_profile_id();
+--   if v_actor_profile_id is null then
+--     raise exception 'not_authenticated';
+--   end if;
+--
+--   v_actor_context := public.provider_intake_actor_context();
+--   if not (
+--     public.current_user_has_role(public.flux_finance_roles())
+--     or public.current_user_has_role(array['admin']::text[])
+--     or public.current_user_has_role(public.flux_sysadmin_roles())
+--   ) then
+--     raise exception 'provider_intake_conversion_role_required';
+--   end if;
+--
+--   if p_payment_intake_id is null then
+--     raise exception 'payment_intake_id_required';
+--   end if;
+--   if p_expected_intake_status is null then
+--     raise exception 'expected_intake_status_required';
+--   end if;
+--   if p_expected_intake_updated_at is null then
+--     raise exception 'expected_intake_updated_at_required';
+--   end if;
+--   if p_expected_draft_version is null or p_expected_draft_version < 1 then
+--     raise exception 'expected_draft_version_required';
+--   end if;
+--   if p_action_id is null then
+--     raise exception 'action_id_required';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 2. Fixed lock order: intake first, draft second.
+--   -------------------------------------------------------------------------
+--
+--   select *
+--     into v_intake
+--   from public.payment_intake
+--   where id = p_payment_intake_id
+--   for update;
+--
+--   if not found then
+--     raise exception 'payment_intake_not_found';
+--   end if;
+--
+--   perform public.provider_intake_assert_company_access(v_intake.company_id);
+--
+--   select *
+--     into v_draft
+--   from public.payment_intake_conversion_drafts
+--   where payment_intake_id = v_intake.id
+--   for update;
+--
+--   if not found then
+--     raise exception 'conversion_draft_not_found';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 3. Canonical command values and material fingerprint.
+--   --    This calculation is possible for replay before live-validity checks.
+--   -------------------------------------------------------------------------
+--
+--   v_currency := upper(nullif(btrim(coalesce(v_draft.currency, '')), ''));
+--   v_payment_method := lower(nullif(btrim(coalesce(v_draft.payment_method, '')), ''));
+--   v_concept := nullif(btrim(coalesce(v_draft.internal_concept, '')), '');
+--   v_notes := nullif(btrim(coalesce(v_draft.internal_notes, '')), '');
+--
+--   if v_currency = 'MXN' then
+--     if p_exchange_rate is not null and p_exchange_rate <> 1 then
+--       raise exception 'fx_invalid_for_mxn';
+--     end if;
+--     v_exchange_rate := 1.0000;
+--   else
+--     if p_exchange_rate is null then
+--       raise exception 'fx_required';
+--     end if;
+--     if p_exchange_rate < 0.0001
+--        or p_exchange_rate > 99999999999999.9999
+--        or scale(p_exchange_rate) > 4 then
+--       raise exception 'fx_invalid';
+--     end if;
+--     v_exchange_rate := p_exchange_rate::numeric(18,4);
+--   end if;
+--
+--   v_approver_selection_source :=
+--     case
+--       when v_draft.approver_assignment_id is null then 'approval_rules'
+--       else 'assigned'
+--     end;
+--
+--   v_material := jsonb_build_object(
+--     'contract_version', 1,
+--     'action_kind', 'convert_provider_intake_payment_draft',
+--     'payment_intake_id', v_intake.id,
+--     'expected_intake_status', p_expected_intake_status,
+--     'expected_intake_updated_at',
+--       to_char(p_expected_intake_updated_at at time zone 'UTC',
+--               'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+--     'draft_id', v_draft.id,
+--     'expected_draft_version', p_expected_draft_version,
+--     'locked_draft_version', v_draft.version,
+--     'actor_profile_id', v_actor_profile_id,
+--     'matched_proveedor_id', v_intake.matched_proveedor_id,
+--     'company_id', v_draft.company_id,
+--     'cost_center_id', v_draft.cost_center_id,
+--     'budget_category_id', v_draft.budget_category_id,
+--     'budget_month', v_draft.budget_month,
+--     'requested_by', v_draft.requested_by_profile_id,
+--     'approver_id', v_draft.approver_profile_id,
+--     'approver_assignment_id', v_draft.approver_assignment_id,
+--     'approver_selection_source', v_approver_selection_source,
+--     'amount_requested', v_draft.final_amount,
+--     'currency', v_currency,
+--     'exchange_rate', to_char(v_exchange_rate, 'FM99999999999999.0000'),
+--     'company_bank_account_id', v_draft.company_bank_account_id,
+--     'payment_method', v_payment_method,
+--     'scheduled_payment_date', v_draft.scheduled_payment_date,
+--     'concept', v_concept,
+--     'description', v_intake.description,
+--     'notes', v_notes,
+--     'request_type', 'provider_payment',
+--     'status', 'submitted',
+--     'is_extraordinary_adjustment', false
+--   );
+--
+--   v_fingerprint := encode(
+--     extensions.digest(convert_to(v_material::text, 'UTF8'), 'sha256'),
+--     'hex'
+--   );
+--
+--   -------------------------------------------------------------------------
+--   -- 4. Existing action, replay, already-converted, and invariant checks.
+--   --    The unique index is:
+--   --    payment_intake_events_action_id_uidx
+--   --    (payment_intake_id, metadata ->> 'action_id')
+--   --    where metadata ? 'action_id'.
+--   -------------------------------------------------------------------------
+--
+--   select *
+--     into v_existing_event
+--   from public.payment_intake_events
+--   where payment_intake_id = v_intake.id
+--     and metadata ->> 'action_id' = p_action_id::text
+--   order by created_at
+--   limit 1;
+--   v_action_event_found := found;
+--
+--   select count(*)
+--     into v_converted_event_count
+--   from public.payment_intake_events
+--   where payment_intake_id = v_intake.id
+--     and event_type = 'converted';
+--
+--   v_linked_request_exists := false;
+--   if v_intake.created_payment_request_id is not null then
+--     select *
+--       into v_existing_request
+--     from public.payment_requests
+--     where id = v_intake.created_payment_request_id;
+--     v_linked_request_exists := found;
+--   end if;
+--
+--   if (
+--     (v_intake.status = 'converted')
+--     <> (v_intake.created_payment_request_id is not null)
+--   ) or (
+--     (v_intake.created_payment_request_id is not null)
+--     <> v_linked_request_exists
+--   ) or (
+--     (v_intake.status = 'converted')
+--     <> (v_converted_event_count = 1)
+--   ) then
+--     raise exception 'invariant_conflict';
+--   end if;
+--
+--   if v_action_event_found then
+--     if v_intake.status <> 'converted'
+--        or v_existing_event.event_type <> 'converted'
+--        or v_existing_event.actor_profile_id is distinct from v_actor_profile_id
+--        or v_existing_event.metadata ->> 'action_kind'
+--             is distinct from 'convert_provider_intake_payment_draft'
+--        or v_existing_event.metadata ->> 'contract_version'
+--             is distinct from '1'
+--        or v_existing_event.metadata ->> 'action_fingerprint'
+--             is distinct from v_fingerprint
+--        or v_existing_event.metadata ->> 'payment_request_id'
+--             is distinct from v_intake.created_payment_request_id::text then
+--       raise exception 'action_material_conflict';
+--     end if;
+--
+--     return jsonb_build_object(
+--       'status', 'idempotent_replay',
+--       'idempotent', true,
+--       'writes', 0,
+--       'payment_intake_id', v_intake.id,
+--       'payment_request_id', v_intake.created_payment_request_id,
+--       'action_id', p_action_id,
+--       'action_fingerprint', v_fingerprint
+--     );
+--   end if;
+--
+--   if v_intake.status = 'converted' then
+--     return jsonb_build_object(
+--       'status', 'already_converted',
+--       'idempotent', false,
+--       'writes', 0,
+--       'payment_intake_id', v_intake.id,
+--       'payment_request_id', v_intake.created_payment_request_id
+--     );
+--   end if;
+--
+--   if v_converted_event_count <> 0
+--      or v_intake.created_payment_request_id is not null then
+--     raise exception 'invariant_conflict';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 5. Optimistic concurrency and strong readiness recalculation.
+--   -------------------------------------------------------------------------
+--
+--   if v_intake.status is distinct from p_expected_intake_status then
+--     raise exception 'stale_intake_status';
+--   end if;
+--   if p_expected_intake_status <> 'in_review'
+--      or v_intake.status <> 'in_review' then
+--     raise exception 'payment_intake_not_in_review';
+--   end if;
+--   if v_intake.updated_at is distinct from p_expected_intake_updated_at then
+--     raise exception 'stale_intake_updated_at';
+--   end if;
+--   if v_draft.version is distinct from p_expected_draft_version then
+--     raise exception 'stale_draft_version';
+--   end if;
+--   if v_draft.company_id is distinct from v_intake.company_id then
+--     raise exception 'company_mismatch';
+--   end if;
+--
+--   if not exists (
+--     select 1
+--     from public.companies company
+--     where company.id = v_intake.company_id
+--       and coalesce(company.active, true)
+--   ) then
+--     raise exception 'company_invalid';
+--   end if;
+--
+--   select *
+--     into v_provider
+--   from public.proveedores provider
+--   where provider.id = v_intake.matched_proveedor_id
+--     and coalesce(provider.activo, true);
+--   if not found then
+--     raise exception 'provider_invalid';
+--   end if;
+--
+--   if not exists (
+--     select 1
+--     from public.company_cost_centers company_center
+--     join public.cost_centers center
+--       on center.id = company_center.cost_center_id
+--     where company_center.company_id = v_intake.company_id
+--       and company_center.cost_center_id = v_draft.cost_center_id
+--       and company_center.active
+--       and coalesce(center.active, true)
+--   ) then
+--     raise exception 'catalog_invalid';
+--   end if;
+--
+--   if not exists (
+--     select 1
+--     from public.company_cost_center_budget_categories company_category
+--     join public.budget_categories category
+--       on category.id = company_category.budget_category_id
+--     where company_category.company_id = v_intake.company_id
+--       and company_category.cost_center_id = v_draft.cost_center_id
+--       and company_category.budget_category_id = v_draft.budget_category_id
+--       and company_category.active
+--       and coalesce(category.active, true)
+--   ) then
+--     raise exception 'catalog_invalid';
+--   end if;
+--
+--   if v_draft.budget_month is null
+--      or v_draft.budget_month
+--           <> date_trunc('month', v_draft.budget_month)::date then
+--     raise exception 'budget_month_invalid';
+--   end if;
+--
+--   if v_draft.requested_by_profile_id is null
+--      or not public.has_active_company_membership(
+--        v_draft.requested_by_profile_id,
+--        v_intake.company_id
+--      ) then
+--     raise exception 'requester_invalid';
+--   end if;
+--
+--   if v_draft.approver_profile_id is null
+--      or v_draft.approver_profile_id = v_draft.requested_by_profile_id
+--      or not public.is_payment_request_approver_for_company(
+--        v_draft.approver_profile_id,
+--        v_intake.company_id
+--      ) then
+--     raise exception 'approver_invalid';
+--   end if;
+--
+--   if public.payment_request_has_active_approver_pool(
+--     v_draft.requested_by_profile_id,
+--     v_intake.company_id
+--   ) then
+--     if v_draft.approver_assignment_id is null
+--        or not exists (
+--          select 1
+--          from public.approver_assignments assignment
+--          where assignment.id = v_draft.approver_assignment_id
+--            and assignment.company_id = v_intake.company_id
+--            and assignment.requester_id = v_draft.requested_by_profile_id
+--            and assignment.approver_id = v_draft.approver_profile_id
+--            and assignment.active
+--        ) then
+--       raise exception 'routing_invalid';
+--     end if;
+--   else
+--     if v_draft.approver_assignment_id is not null
+--        or not public.payment_request_rule_allows(
+--          v_draft.approver_profile_id,
+--          v_intake.company_id,
+--          v_draft.cost_center_id,
+--          v_draft.final_amount,
+--          'approved'
+--        ) then
+--       raise exception 'routing_invalid';
+--     end if;
+--   end if;
+--
+--   if v_draft.final_amount is null
+--      or v_draft.final_amount <= 0
+--      or v_draft.final_amount > 9999999999999999.99
+--      or scale(v_draft.final_amount) > 2 then
+--     raise exception 'amount_invalid';
+--   end if;
+--
+--   if v_currency is null or v_currency !~ '^[A-Z]{3}$' then
+--     raise exception 'currency_invalid';
+--   end if;
+--
+--   if v_payment_method not in ('transfer', 'cash', 'check', 'other') then
+--     raise exception 'payment_method_invalid';
+--   end if;
+--
+--   if v_payment_method = 'transfer' then
+--     if v_draft.company_bank_account_id is null then
+--       raise exception 'account_required';
+--     end if;
+--
+--     select *
+--       into v_account
+--     from public.company_bank_accounts account
+--     where account.id = v_draft.company_bank_account_id;
+--
+--     if not found or not coalesce(v_account.active, false) then
+--       raise exception 'account_inactive';
+--     end if;
+--     if v_account.company_id is distinct from v_intake.company_id then
+--       raise exception 'account_company_mismatch';
+--     end if;
+--     if upper(btrim(v_account.currency)) is distinct from v_currency then
+--       raise exception 'account_currency_mismatch';
+--     end if;
+--     if v_account.account_type::text <> 'bank'
+--        or nullif(btrim(coalesce(v_account.account_number, '')), '') is null then
+--       raise exception 'account_method_mismatch';
+--     end if;
+--   elsif v_draft.company_bank_account_id is not null then
+--     raise exception 'origin_account_not_allowed_for_method';
+--   end if;
+--
+--   if v_draft.scheduled_payment_date is null then
+--     raise exception 'scheduled_date_invalid';
+--   end if;
+--
+--   if v_concept is null
+--      or char_length(v_concept) < 3
+--      or v_concept ~ '[[:cntrl:]]'
+--      or v_concept ~ '<[^>]*>' then
+--     raise exception 'concept_invalid';
+--   end if;
+--   if char_length(v_concept) > 120 then
+--     raise exception 'concept_too_long';
+--   end if;
+--
+--   if v_notes is not null and (
+--     char_length(v_notes) > 2000
+--     or v_notes ~ '[[:cntrl:]]'
+--     or v_notes ~ '<[^>]*>'
+--   ) then
+--     raise exception 'notes_invalid';
+--   end if;
+--
+--   if public.provider_intake_payment_draft_state(v_intake.id)
+--        ->> 'state' <> 'READY_FOR_CONVERSION' then
+--     raise exception 'draft_not_ready_for_conversion';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 6. Budget snapshot and exactly-one request insertion.
+--   -------------------------------------------------------------------------
+--
+--   v_budget_amount := round(v_draft.final_amount * v_exchange_rate, 2);
+--   v_budget_result := public.verify_budget_availability(
+--     v_intake.company_id,
+--     v_draft.cost_center_id,
+--     v_draft.budget_category_id,
+--     v_draft.budget_month,
+--     v_budget_amount,
+--     false
+--   );
+--   v_budget_decision := coalesce(v_budget_result ->> 'status', 'bloqueado');
+--   if v_budget_decision not in ('aprobable', 'bloqueado') then
+--     v_budget_decision := 'bloqueado';
+--   end if;
+--   v_budget_block_reason := v_budget_result ->> 'motivo';
+--   v_budget_available_before :=
+--     nullif(v_budget_result ->> 'disponible_actual', '')::numeric;
+--   v_budget_available_after :=
+--     nullif(v_budget_result ->> 'disponible_despues', '')::numeric;
+--   v_budget_shortfall :=
+--     nullif(v_budget_result ->> 'faltante', '')::numeric;
+--   v_request_number := public.generate_payment_request_number(
+--     extract(year from v_draft.budget_month)::integer
+--   );
+--
+--   -- Integration prerequisite:
+--   -- payment_request_created_notification_event currently writes internal
+--   -- notification_events after this insert and has no safe per-call bypass.
+--   -- This reference does not disable the trigger. Integration must stop unless
+--   -- that side effect is explicitly authorized or safely isolated.
+--
+--   insert into public.payment_requests (
+--     provider_id,
+--     proveedor_id,
+--     company_id,
+--     cost_center_id,
+--     budget_category_id,
+--     budget_month,
+--     request_type,
+--     requested_by,
+--     approver_id,
+--     approver_assignment_id,
+--     approver_selection_source,
+--     amount_requested,
+--     currency,
+--     exchange_rate,
+--     company_bank_account_id,
+--     payment_method,
+--     scheduled_payment_date,
+--     requires_invoice,
+--     invoice_received,
+--     status,
+--     concept,
+--     description,
+--     notes,
+--     submitted_at,
+--     request_number,
+--     budget_decision,
+--     budget_block_reason,
+--     budget_available_before,
+--     budget_available_after,
+--     budget_shortfall,
+--     budget_checked_at,
+--     budget_result,
+--     is_extraordinary_adjustment,
+--     created_at,
+--     updated_at
+--   ) values (
+--     null,
+--     v_intake.matched_proveedor_id,
+--     v_intake.company_id,
+--     v_draft.cost_center_id,
+--     v_draft.budget_category_id,
+--     v_draft.budget_month,
+--     'provider_payment'::public.payment_request_type,
+--     v_draft.requested_by_profile_id,
+--     v_draft.approver_profile_id,
+--     v_draft.approver_assignment_id,
+--     v_approver_selection_source,
+--     v_draft.final_amount,
+--     v_currency,
+--     v_exchange_rate,
+--     v_draft.company_bank_account_id,
+--     v_payment_method,
+--     v_draft.scheduled_payment_date,
+--     false,
+--     false,
+--     'submitted'::public.payment_request_status,
+--     v_concept,
+--     v_intake.description,
+--     v_notes,
+--     transaction_timestamp(),
+--     v_request_number,
+--     v_budget_decision,
+--     v_budget_block_reason,
+--     v_budget_available_before,
+--     v_budget_available_after,
+--     v_budget_shortfall,
+--     transaction_timestamp(),
+--     v_budget_result,
+--     false,
+--     transaction_timestamp(),
+--     transaction_timestamp()
+--   )
+--   returning id into v_payment_request_id;
+--
+--   if v_payment_request_id is null then
+--     raise exception 'exactly_one_request_invariant_failed';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 7. Exactly-one intake link/status transition.
+--   -------------------------------------------------------------------------
+--
+--   update public.payment_intake
+--   set status = 'converted',
+--       created_payment_request_id = v_payment_request_id
+--   where id = v_intake.id
+--     and status = 'in_review'
+--     and created_payment_request_id is null;
+--
+--   get diagnostics v_row_count = row_count;
+--   if v_row_count <> 1 then
+--     raise exception 'exactly_one_link_invariant_failed';
+--   end if;
+--
+--   -------------------------------------------------------------------------
+--   -- 8. Exactly-one append-only converted event. Draft is untouched.
+--   -------------------------------------------------------------------------
+--
+--   insert into public.payment_intake_events (
+--     payment_intake_id,
+--     event_type,
+--     actor_profile_id,
+--     actor_type,
+--     from_status,
+--     to_status,
+--     notes,
+--     metadata
+--   ) values (
+--     v_intake.id,
+--     'converted',
+--     v_actor_profile_id,
+--     case
+--       when public.current_user_has_role(public.flux_sysadmin_roles())
+--         then 'sysadmin'
+--       when public.current_user_has_role(array['admin']::text[])
+--         then 'admin'
+--       else 'finance'
+--     end,
+--     'in_review',
+--     'converted',
+--     null,
+--     jsonb_build_object(
+--       'contract_version', 1,
+--       'action_kind', 'convert_provider_intake_payment_draft',
+--       'action_id', p_action_id,
+--       'action_fingerprint', v_fingerprint,
+--       'actor_profile_id', v_actor_profile_id,
+--       'payment_request_id', v_payment_request_id,
+--       'draft_version', v_draft.version,
+--       'contains_sensitive_fields', false
+--     )
+--   );
+--
+--   get diagnostics v_row_count = row_count;
+--   if v_row_count <> 1 then
+--     raise exception 'exactly_one_event_invariant_failed';
+--   end if;
+--
+--   -- No UPDATE or DELETE of payment_intake_conversion_drafts.
+--   -- No INSERT into payment_request_approvals.
+--   -- No INSERT into approval_batches or approval_batch_items.
+--   -- No layout, payment, receipt, provider, document, file, or Storage write.
+--   -- No direct notification_events write and no external-provider notification.
+--   -- Any exception aborts the containing transaction and rolls back request,
+--   -- link, status transition, and event together.
+--
+--   return jsonb_build_object(
+--     'status', 'converted',
+--     'idempotent', false,
+--     'payment_intake_id', v_intake.id,
+--     'payment_request_id', v_payment_request_id,
+--     'request_status', 'submitted',
+--     'action_id', p_action_id,
+--     'action_fingerprint', v_fingerprint,
+--     'draft_preserved', true,
+--     'files_preserved', true,
+--     'payment_request_approvals_created', 0,
+--     'approval_batches_created', 0
+--   );
+-- end
+-- $contract$;
+--
+-- Future ACL requirement: PUBLIC, anon, and service_role must not execute
+-- the signature; authenticated is the only runtime grantee after a separately
+-- authorized integration migration.
+--
+-- End of non-deployment reference.
