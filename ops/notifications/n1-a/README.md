@@ -326,3 +326,29 @@ The immediate next gate is NOTIFICATIONS-N1-A-R2 only with Ramón's express auth
 That gate may perform a transactional dry-run with ROLLBACK and zero persistent change.
 N1-B, rollout activation, any dispatcher consumer, any provider call, and any email remain
 outside this PR.
+
+## R3-R3 safe native diagnostics
+
+Run `30651839076`, attempt 1, executed the contract suite after Migration 041 had been
+applied and both structural postchecks had passed. The suite returned code 3 with zero PASS
+rows and none of the 56 controlled assertion IDs. Its pre-test and post-test controlled-state
+snapshots were equal, so the result is classified as an unlocalized native harness failure,
+not as evidence that Migration 041 or the installed schema is defective. Migration 041 is
+therefore unchanged.
+
+The harness now emits only nine fixed `N1A_SAFE_STAGE` markers. They delimit transaction
+start, temporary setup, the DO block, final output, and rollback without including live
+values. Inside the DO block, `v_current_phase` and `v_current_test` track catalog binding,
+tests 01 through 55, the payload baseline, and final assertions. Existing controlled
+assertions are rethrown unchanged. Unexpected failures are reduced to fixed catalog,
+payload-baseline, DO-block, or test-specific `N1A_NATIVE_*` identifiers.
+
+Raw PostgreSQL messages, SQLSTATE, context, query text, values, rows, paths, and dynamic
+diagnostic output remain prohibited. The suite still uses one transaction, four temporary
+tables, zero COMMIT, terminal ROLLBACK, temporary-table DML only, and zero persistent writes.
+The companion pull-request workflow uses only Python standard-library static analysis; it
+does not execute SQL, access an environment, use secrets, or generate evidence artifacts.
+
+The next gate is `NOTIFICATIONS-N1-A-R3-R4`: merge of the test-only harness followed by one
+separately authorized live certification. Until that authorization, N1-B remains blocked,
+rollout remains disabled, and Resend calls and emails remain zero.
