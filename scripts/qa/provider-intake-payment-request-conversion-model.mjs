@@ -226,7 +226,7 @@ function buildMaterial(state, command, normalized) {
     draftId: draft.id,
     expectedDraftVersion: command.expectedDraftVersion,
     actorProfileId: actor.profileId,
-    matchedProveedorId: intake.matchedProveedorId,
+    proveedorId: intake.matchedProveedorId,
     companyId: draft.companyId,
     costCenterId: draft.costCenterId,
     budgetCategoryId: draft.budgetCategoryId,

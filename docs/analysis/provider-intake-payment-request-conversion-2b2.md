@@ -241,13 +241,15 @@ The SHA-256 fingerprint is computed from a stable, versioned JSON object contain
 - intake ID plus the caller's expected status and expected updated_at optimistic tokens;
 - draft ID and expected/current version;
 - actor profile ID;
-- matched provider ID;
+- canonical target key `proveedor_id` sourced from `intake.matched_proveedor_id`;
 - every required mapping source;
 - description and notes;
 - request_type and submitted status constants;
 - approver_selection_source;
 - normalized currency, payment method, concept, and FX;
 - budget inputs and the extraordinary=false constant.
+
+The provider material uses exactly one canonical key: `TARGET_KEY = proveedor_id`, with `SOURCE_PATH = intake.matched_proveedor_id`. The source name is not emitted as a second fingerprint key.
 
 Generated request number, generated payment request ID, and transaction timestamps are excluded because they are outputs.
 

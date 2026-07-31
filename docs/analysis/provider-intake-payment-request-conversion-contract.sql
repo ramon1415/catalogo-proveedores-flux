@@ -162,7 +162,7 @@
 --     'expected_draft_version', p_expected_draft_version,
 --     'locked_draft_version', v_draft.version,
 --     'actor_profile_id', v_actor_profile_id,
---     'matched_proveedor_id', v_intake.matched_proveedor_id,
+--     'proveedor_id', v_intake.matched_proveedor_id,
 --     'company_id', v_draft.company_id,
 --     'cost_center_id', v_draft.cost_center_id,
 --     'budget_category_id', v_draft.budget_category_id,

@@ -15,8 +15,9 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..', '..')
+const normalizeNewlines = (text) => text.replace(/\r\n?/g, '\n')
 const read = (relativePath) =>
-  readFileSync(resolve(root, relativePath), 'utf8')
+  normalizeNewlines(readFileSync(resolve(root, relativePath), 'utf8'))
 
 const sql = read(
   'docs/analysis/provider-intake-payment-request-conversion-contract.sql',
@@ -75,6 +76,10 @@ test('documentary SQL has the exact non-deployment warning and no executable lin
     '-- CONTRACT_ONLY',
     '-- NO_SUPABASE_DEV',
   ])
+  assert.equal(
+    normalizeNewlines('alpha\r\nbeta\rgamma'),
+    'alpha\nbeta\ngamma',
+  )
 
   const nonCommentLines = sql
     .split(/\r?\n/)
@@ -163,6 +168,14 @@ test('mapping, FX, account, concept, and fingerprint contracts are complete', ()
   ]) {
     assert.ok(sql.includes(token), 'missing fingerprint mapping: ' + token)
   }
+
+  assert.match(sql, /'proveedor_id',\s*v_intake\.matched_proveedor_id/)
+  assert.doesNotMatch(sql, /'matched_proveedor_id',/)
+  assert.match(modelSource, /proveedorId:\s*intake\.matchedProveedorId/)
+  assert.doesNotMatch(
+    modelSource,
+    /matchedProveedorId:\s*intake\.matchedProveedorId/,
+  )
 
   assert.match(sql, /numeric\(18,4\)/)
   assert.match(sql, /0\.0001/)
