@@ -172,6 +172,95 @@ const fixtures = Object.freeze({
     actionLabel: 'Intervención requerida',
     actionDisabled: true,
   },
+  'provider-invalid': {
+    state: 'provider-invalid',
+    label: 'Provider invalid',
+    tone: 'danger',
+    icon: '!',
+    title: 'Proveedor vinculado no disponible',
+    summary: 'Proveedor ausente o inactivo en la revalidación live simulada.',
+    severity: 'blocking',
+    message: 'El proveedor vinculado ya no está disponible o activo. Actualiza el matching antes de convertir.',
+    syntheticData: Object.freeze({
+      providerStatus: 'inactive',
+      source: 'local_fixture',
+    }),
+    simulatedWrites: Object.freeze({
+      committedRequests: 0,
+      committedLinks: 0,
+      committedEvents: 0,
+      draftPreserved: true,
+    }),
+    expectedResult: 'conversion_blocked_draft_preserved',
+    resultTitle: 'PROVIDER INVALID',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    resultTone: 'danger',
+    actionLabel: 'Proveedor inválido',
+    actionDisabled: true,
+    provider: 'Proveedor no disponible · MOCKED',
+  },
+  'budget-unavailable': {
+    state: 'budget-unavailable',
+    label: 'Budget unavailable',
+    tone: 'warning',
+    icon: '!',
+    title: 'Presupuesto MOCKED no disponible',
+    summary: 'Presupuesto sintético no disponible o no aprobable.',
+    severity: 'blocking',
+    message: 'El presupuesto MOCKED no está disponible o no es aprobable para esta conversión.',
+    syntheticData: Object.freeze({
+      budgetStatus: 'unavailable',
+      source: 'local_fixture',
+    }),
+    simulatedWrites: Object.freeze({
+      committedRequests: 0,
+      committedLinks: 0,
+      committedEvents: 0,
+      draftPreserved: true,
+    }),
+    expectedResult: 'conversion_blocked_draft_preserved',
+    resultTitle: 'BUDGET UNAVAILABLE',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    resultTone: 'warning',
+    actionLabel: 'Presupuesto bloqueado',
+    actionDisabled: true,
+    budgetHeading: 'No disponible · MOCKED',
+    budgetPercent: '0%',
+    budgetAriaLabel: 'Presupuesto mocked no disponible',
+    budgetValues: Object.freeze([
+      'NO DISPONIBLE · MOCKED',
+      '− $12,500.00',
+      'NO CALCULADO · MOCKED',
+    ]),
+  },
+  'fx-invalid': {
+    state: 'fx-invalid',
+    label: 'FX invalid',
+    tone: 'danger',
+    icon: '!',
+    title: 'Tipo de cambio inválido',
+    summary: 'USD con tipo de cambio presente, pero inválido.',
+    severity: 'blocking',
+    message: 'USD tiene un tipo de cambio presente, pero inválido; no se asume 1 ni se normaliza.',
+    syntheticData: Object.freeze({
+      currency: 'USD',
+      exchangeRate: 0,
+      source: 'local_fixture',
+    }),
+    simulatedWrites: Object.freeze({
+      committedRequests: 0,
+      committedLinks: 0,
+      committedEvents: 0,
+      draftPreserved: true,
+    }),
+    expectedResult: 'conversion_blocked_draft_preserved',
+    resultTitle: 'FX INVALID',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    resultTone: 'danger',
+    actionLabel: 'FX inválido',
+    actionDisabled: true,
+    fx: '0.0000 · INVÁLIDO PARA USD',
+  },
 })
 
 const elements = {
@@ -194,6 +283,10 @@ const elements = {
   concept: document.querySelector('#concept-value'),
   fx: document.querySelector('#fx-value'),
   account: document.querySelector('#account-value'),
+  provider: document.querySelector('.detail-grid dd'),
+  budgetHeading: document.querySelector('#budget-heading'),
+  budgetRing: document.querySelector('.budget-ring'),
+  budgetValues: document.querySelectorAll('.budget-values dd'),
 }
 
 let returnFocus = elements.openButton
@@ -229,6 +322,22 @@ function render(key, options = {}) {
   elements.fx.textContent = fixture.fx || '1.0000'
   elements.account.textContent =
     fixture.account || 'BBVA Operación · •••• 2468'
+  elements.provider.textContent =
+    fixture.provider || 'Producciones Horizonte · MOCK'
+  elements.budgetHeading.textContent = fixture.budgetHeading || 'Aprobable'
+  elements.budgetRing.textContent = fixture.budgetPercent || '75%'
+  elements.budgetRing.setAttribute(
+    'aria-label',
+    fixture.budgetAriaLabel || '75 por ciento disponible',
+  )
+  const budgetValues = fixture.budgetValues || [
+    '$50,000.00',
+    '− $12,500.00',
+    '$37,500.00',
+  ]
+  elements.budgetValues.forEach((element, index) => {
+    element.textContent = budgetValues[index]
+  })
 
   if (fixture.openDialog && options.openDialog !== false) {
     openDialog()

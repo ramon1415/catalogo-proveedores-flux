@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import { readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 // 2B2 mocked visual validation contract.
 // CONTRACT_ONLY: this runner is prepared for a later C2 authorization.
 // C1 must not invoke --run, authenticate users, or perform UAT.
@@ -19,6 +23,9 @@ const STATES = Object.freeze([
   'already-converted',
   'rollback-error',
   'invariant-conflict',
+  'provider-invalid',
+  'budget-unavailable',
+  'fx-invalid',
 ])
 
 const VIEWPORTS = Object.freeze([
@@ -33,6 +40,36 @@ const REQUIRED_LABELS = Object.freeze([
   'NO UAT',
   'NO REAL PAYMENT REQUEST',
 ])
+
+const STATE_EXPECTATIONS = Object.freeze({
+  'provider-invalid': Object.freeze({
+    title: 'Proveedor vinculado no disponible',
+    message: 'El proveedor vinculado ya no está disponible o activo. Actualiza el matching antes de convertir.',
+    resultTitle: 'PROVIDER INVALID',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    actionDisabled: true,
+    provider: 'Proveedor no disponible · MOCKED',
+  }),
+  'budget-unavailable': Object.freeze({
+    title: 'Presupuesto MOCKED no disponible',
+    message: 'El presupuesto MOCKED no está disponible o no es aprobable para esta conversión.',
+    resultTitle: 'BUDGET UNAVAILABLE',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    actionDisabled: true,
+    budgetHeading: 'No disponible · MOCKED',
+  }),
+  'fx-invalid': Object.freeze({
+    title: 'Tipo de cambio inválido',
+    message: 'USD tiene un tipo de cambio presente, pero inválido; no se asume 1 ni se normaliza.',
+    resultTitle: 'FX INVALID',
+    resultMessage: 'Conversión bloqueada · 0 request · 0 vínculo · 0 evento · draft intacto.',
+    actionDisabled: true,
+    fx: '0.0000 · INVÁLIDO PARA USD',
+  }),
+})
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const SAFE_PREVIEW_METHODS = new Set(['GET', 'HEAD'])
 
 const MUTABLE_METHODS = new Set([
   'POST',
@@ -49,7 +86,118 @@ function argument(name) {
   return item ? item.slice(prefix.length) : null
 }
 
-function printPlan() {
+function duplicateValues(values) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))]
+}
+
+function difference(left, right) {
+  const rightSet = new Set(right)
+  return left.filter((value) => !rightSet.has(value))
+}
+
+function sameOrder(left, right) {
+  return left.length === right.length &&
+    left.every((value, index) => value === right[index])
+}
+
+async function auditStateMatrixSources() {
+  const [htmlSource, fixtureSource] = await Promise.all([
+    readFile(resolve(REPO_ROOT, 'provider_intake_conversion_mock.html'), 'utf8'),
+    readFile(resolve(REPO_ROOT, 'provider_intake_conversion_mock.js'), 'utf8'),
+  ])
+
+  const htmlStates = [
+    ...htmlSource.matchAll(/<option\s+value="([^"]+)"/g),
+  ].map((match) => match[1])
+
+  const fixtureStart = fixtureSource.indexOf(
+    'const fixtures = Object.freeze({',
+  )
+  const fixtureEnd = fixtureSource.indexOf(
+    '\n})\n\nconst elements =',
+    fixtureStart,
+  )
+  assert(
+    fixtureStart >= 0 && fixtureEnd > fixtureStart,
+    'fixture root could not be parsed',
+  )
+  const fixtureRoot = fixtureSource.slice(fixtureStart, fixtureEnd)
+  const fixtureStates = [
+    ...fixtureRoot.matchAll(
+      /^ {2}(?:'([^']+)'|([a-z][a-z0-9-]*)):\s*\{/gm,
+    ),
+  ].map((match) => match[1] || match[2])
+
+  const runnerStates = [...STATES]
+  const duplicateStateKeys = {
+    runner: duplicateValues(runnerStates),
+    html: duplicateValues(htmlStates),
+    fixtures: duplicateValues(fixtureStates),
+  }
+  const missingRequiredStates = {
+    html: difference(runnerStates, htmlStates),
+    fixtures: difference(runnerStates, fixtureStates),
+  }
+  const unexpectedStates = {
+    html: difference(htmlStates, runnerStates),
+    fixtures: difference(fixtureStates, runnerStates),
+  }
+
+  assert(runnerStates.length === 17, 'runner state count mismatch', {
+    expected: 17,
+    actual: runnerStates.length,
+  })
+  assert(htmlStates.length === 17, 'HTML state count mismatch', {
+    expected: 17,
+    actual: htmlStates.length,
+  })
+  assert(fixtureStates.length === 17, 'fixture state count mismatch', {
+    expected: 17,
+    actual: fixtureStates.length,
+  })
+  assert(
+    Object.values(duplicateStateKeys).every((values) => values.length === 0),
+    'duplicate visual state keys found',
+    { duplicateStateKeys },
+  )
+  assert(
+    Object.values(missingRequiredStates).every((values) => values.length === 0),
+    'required visual states are missing',
+    { missingRequiredStates },
+  )
+  assert(
+    Object.values(unexpectedStates).every((values) => values.length === 0),
+    'unexpected visual states found',
+    { unexpectedStates },
+  )
+  assert(
+    sameOrder(runnerStates, htmlStates) &&
+      sameOrder(runnerStates, fixtureStates),
+    'visual state order mismatch',
+    { runnerStates, htmlStates, fixtureStates },
+  )
+
+  return {
+    status: 'PASS',
+    exactSetParity: true,
+    exactOrderParity: true,
+    counts: {
+      runner: runnerStates.length,
+      html: htmlStates.length,
+      fixtures: fixtureStates.length,
+    },
+    states: {
+      runner: runnerStates,
+      html: htmlStates,
+      fixtures: fixtureStates,
+    },
+    duplicateStateKeys,
+    missingRequiredStates,
+    unexpectedStates,
+  }
+}
+
+function printPlan(stateMatrixAudit) {
   process.stdout.write(
     JSON.stringify(
       {
@@ -60,6 +208,8 @@ function printPlan() {
         states: STATES,
         viewports: VIEWPORTS,
         zoom: '200%',
+        visualStateMatrixParity: 'PASS',
+        stateMatrixAudit,
         checks: [
           'keyboard',
           'focus',
@@ -186,6 +336,70 @@ async function assertAria(page) {
   await page.getByLabel('Estado visual').waitFor({ state: 'visible' })
 }
 
+async function textOf(page, selector) {
+  return ((await page.locator(selector).textContent()) || '').trim()
+}
+
+async function assertSpecificState(page, state) {
+  const expected = STATE_EXPECTATIONS[state]
+  if (!expected) return
+
+  const actual = {
+    title: await textOf(page, '#state-title'),
+    message: await textOf(page, '#state-message'),
+    resultTitle: await textOf(page, '#result-title'),
+    resultMessage: await textOf(page, '#result-message'),
+    actionDisabled: await page.locator('#open-confirmation').isDisabled(),
+  }
+
+  for (const field of [
+    'title',
+    'message',
+    'resultTitle',
+    'resultMessage',
+    'actionDisabled',
+  ]) {
+    assert(actual[field] === expected[field], 'visual state expectation mismatch', {
+      state,
+      field,
+      expected: expected[field],
+      actual: actual[field],
+    })
+  }
+
+  if (expected.provider) {
+    const provider = await textOf(page, '.detail-grid dd')
+    assert(provider === expected.provider, 'provider fixture value mismatch', {
+      state,
+      expected: expected.provider,
+      actual: provider,
+    })
+  }
+  if (expected.budgetHeading) {
+    const budgetHeading = await textOf(page, '#budget-heading')
+    assert(
+      budgetHeading === expected.budgetHeading,
+      'budget fixture value mismatch',
+      { state, expected: expected.budgetHeading, actual: budgetHeading },
+    )
+  }
+  if (expected.fx) {
+    const fx = await textOf(page, '#fx-value')
+    assert(fx === expected.fx, 'FX invalid fixture value mismatch', {
+      state,
+      expected: expected.fx,
+      actual: fx,
+    })
+  }
+
+  assert(
+    !(await page.locator('#confirmation-dialog').evaluate((node) => node.open)),
+    'blocked visual state opened the confirmation modal',
+    { state },
+  )
+  await assertLabels(page)
+}
+
 async function auditState(page, state) {
   await page.locator('#scenario-select').selectOption(state)
   await page.waitForFunction(
@@ -209,6 +423,7 @@ async function auditState(page, state) {
   assert(bannerVisible && resultVisible, 'state regions are not visible', {
     state,
   })
+  await assertSpecificState(page, state)
 
   const image = await page.screenshot({ fullPage: true })
   assert(image.byteLength > 1000, 'in-memory screenshot is unexpectedly empty', {
@@ -239,7 +454,7 @@ async function axeAudit(page, AxeBuilder) {
   }
 }
 
-async function run() {
+async function run(stateMatrixAudit) {
   const url = argument('url')
   assert(url, '--url is required for the later authorized visual run')
   assert(
@@ -252,6 +467,7 @@ async function run() {
     import('@axe-core/playwright'),
   ])
 
+  const previewOrigin = new URL(url).origin
   const browser = await chromium.launch({ headless: true })
   const consoleErrors = []
   const pageErrors = []
@@ -300,12 +516,19 @@ async function run() {
         })
       })
       await page.route('**/*', async (route) => {
-        if (MUTABLE_METHODS.has(route.request().method())) {
+        const request = route.request()
+        const method = request.method()
+        const requestOrigin = new URL(request.url()).origin
+        if (
+          MUTABLE_METHODS.has(method) ||
+          !SAFE_PREVIEW_METHODS.has(method) ||
+          requestOrigin !== previewOrigin
+        ) {
           mutableRequests.push({
             viewport: viewport.name,
-            method: route.request().method(),
-            resourceType: route.request().resourceType(),
-            url: route.request().url(),
+            method,
+            resourceType: request.resourceType(),
+            url: request.url(),
             blocked: true,
           })
           await route.abort('blockedbyclient')
@@ -401,6 +624,8 @@ async function run() {
         executed: true,
         contractOnly: true,
         mockedOnly: true,
+        visualStateMatrixParity: 'PASS',
+        stateMatrixAudit,
         statesAudited: STATES.length,
         viewportsAudited: VIEWPORTS.length,
         labels: REQUIRED_LABELS,
@@ -408,6 +633,7 @@ async function run() {
         pageErrors: 0,
         mutableRequests: 0,
         requestMethods: [...new Set(requests.map((item) => item.method))],
+        requestOrigins: [...new Set(requests.map((item) => new URL(item.url).origin))],
         matrices,
       },
       null,
@@ -416,21 +642,26 @@ async function run() {
   )
 }
 
-if (!process.argv.includes('--run')) {
-  printPlan()
-} else {
-  run().catch((error) => {
-    process.stderr.write(
-      JSON.stringify(
-        {
-          status: 'FAIL',
-          message: error.message,
-          details: error.details || {},
-        },
-        null,
-        2,
-      ) + '\n',
-    )
-    process.exitCode = 1
-  })
+async function main() {
+  const stateMatrixAudit = await auditStateMatrixSources()
+  if (!process.argv.includes('--run')) {
+    printPlan(stateMatrixAudit)
+    return
+  }
+  await run(stateMatrixAudit)
 }
+
+main().catch((error) => {
+  process.stderr.write(
+    JSON.stringify(
+      {
+        status: 'FAIL',
+        message: error.message,
+        details: error.details || {},
+      },
+      null,
+      2,
+    ) + '\n',
+  )
+  process.exitCode = 1
+})
