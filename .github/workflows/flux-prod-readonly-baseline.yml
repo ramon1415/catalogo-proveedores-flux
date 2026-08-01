@@ -1,0 +1,369 @@
+name: Flux PROD read-only baseline
+
+on:
+  push:
+    branches: [dev]
+    paths: [.github/workflows/flux-prod-readonly-baseline.yml]
+  workflow_dispatch:
+    inputs:
+      target_git_sha:
+        description: Exact deployed commit to audit
+        required: false
+        type: string
+      release_slice:
+        description: Release slice identifier
+        required: false
+        type: string
+      expected_prod_deployment_sha:
+        description: Expected active Production deployment SHA
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flux-prod-readonly-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Targeted Slice 01 PROD metadata baseline
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: supabase-production
+    env:
+      EVIDENCE_DIR: ${{ runner.temp }}/flux-prod-readonly-baseline
+    steps:
+      - name: Initialize contractual evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['EVIDENCE_DIR'])
+          names=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
+          for name in names: (root/name).write_text(json.dumps({'status':'NOT_RUN'},indent=2)+'\n')
+          (root/'gate-report.md').write_text('# FLUX PROD Slice 01 baseline\n\nStatus: NOT_RUN\n')
+          (root/'cleanup.txt').write_text('PENDING\n')
+          PY
+
+      - name: Resolve immutable GitHub and Production identities
+        id: identity
+        shell: bash
+        env:
+          DISPATCH_TARGET: ${{ inputs.target_git_sha }}
+          DISPATCH_SLICE: ${{ inputs.release_slice }}
+          DISPATCH_EXPECTED: ${{ inputs.expected_prod_deployment_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib,re,time,urllib.parse,urllib.request
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); repo=os.environ['GITHUB_REPOSITORY']; base='https://api.github.com'
+          def api(path):
+            req=urllib.request.Request(base+path,headers={'Accept':'application/vnd.github+json','User-Agent':'flux-readonly-baseline-r2'})
+            for n in range(3):
+              try:
+                with urllib.request.urlopen(req,timeout=20) as r:return json.load(r)
+              except Exception:
+                if n==2: raise
+                time.sleep(2**n)
+          try:
+            if os.environ['GITHUB_REF']!='refs/heads/dev': raise RuntimeError('WORKFLOW_REF_NOT_DEV')
+            meta=api(f'/repos/{repo}'); main=api(f'/repos/{repo}/git/ref/heads/main')['object']['sha']; dev=api(f'/repos/{repo}/git/ref/heads/dev')['object']['sha']
+            main_tree=api(f'/repos/{repo}/git/commits/{main}')['tree']['sha']; dev_tree=api(f'/repos/{repo}/git/commits/{dev}')['tree']['sha']
+            deployments=api(f'/repos/{repo}/deployments?environment=Production&per_page=100')
+            active=None
+            for d in deployments:
+              sts=api(f"/repos/{repo}/deployments/{d['id']}/statuses?per_page=1")
+              if sts and sts[0].get('state')=='success': active={'id':d['id'],'sha':d['sha'],'status_id':sts[0]['id']}; break
+            if not active: raise RuntimeError('ACTIVE_PRODUCTION_DEPLOYMENT_NOT_FOUND')
+            if main!=active['sha']: raise RuntimeError('PROD_MAIN_IDENTITY_CHANGED')
+            if os.environ['GITHUB_SHA']!=dev: raise RuntimeError('STATE_RACE')
+            event=os.environ['GITHUB_EVENT_NAME']; payload=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text()); inventory_dev=dev
+            if event=='push':
+              target,expected,slice_id=main,active['sha'],'SLICE_01'; inventory_dev=payload.get('before','')
+              if not re.fullmatch(r'[0-9a-f]{40}',inventory_dev) or inventory_dev=='0'*40 or payload.get('after')!=dev: raise RuntimeError('UNBLOCKER_SCOPE_VIOLATION')
+            elif event=='workflow_dispatch':
+              target=os.environ.get('DISPATCH_TARGET','').strip(); expected=os.environ.get('DISPATCH_EXPECTED','').strip(); slice_id=os.environ.get('DISPATCH_SLICE','').strip()
+              if not target or not expected or not slice_id: raise RuntimeError('DISPATCH_INPUT_REQUIRED')
+              if not re.fullmatch(r'[0-9a-f]{40}',target) or not re.fullmatch(r'[0-9a-f]{40}',expected): raise RuntimeError('DISPATCH_SHA_INVALID')
+              if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',slice_id): raise RuntimeError('DISPATCH_SLICE_INVALID')
+              resolved=api(f'/repos/{repo}/commits/{target}')['sha']
+              if resolved!=target: raise RuntimeError('TARGET_SHA_NOT_FOUND')
+            else: raise RuntimeError('UNSUPPORTED_TRIGGER')
+            if target!=expected or expected!=active['sha']: raise RuntimeError('PROD_DATABASE_IDENTITY_MISMATCH')
+            data={'status':'PASS','captured_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'repository':repo,'default_branch':meta['default_branch'],'current_main_sha':main,'current_main_tree':main_tree,'current_dev_sha':inventory_dev,'bootstrap_result_dev_sha':dev,'bootstrap_result_dev_tree':dev_tree,'current_prod_deployment_sha':active['sha'],'current_prod_deployment_id':active['id'],'target_git_sha':target,'expected_prod_sha':expected,'release_slice':slice_id}
+            (root/'github-identities.json').write_text(json.dumps(data,indent=2)+'\n')
+            boot={'status':'PASS','event':event,'ref':os.environ['GITHUB_REF'],'event_sha':os.environ['GITHUB_SHA'],'push_bootstrap':event=='push','future_dispatch':event=='workflow_dispatch','one_job':True,'environment':'supabase-production'}
+            (root/'workflow-bootstrap-audit.json').write_text(json.dumps(boot,indent=2)+'\n')
+            out=os.environ['GITHUB_OUTPUT']; short=main[:7]
+            with open(out,'a') as f:
+              for k,v in {'target_git_sha':target,'current_dev_sha':inventory_dev,'bootstrap_result_dev_sha':dev,'expected_prod_sha':expected,'release_slice':slice_id,'artifact_name':f'flux-prod-readonly-baseline-slice-01-{short}'}.items(): f.write(f'{k}={v}\n')
+          except Exception as e:
+            raw=str(e); allowed={'PROD_MAIN_IDENTITY_CHANGED','STATE_RACE','PROD_DATABASE_IDENTITY_MISMATCH'}; code=raw if raw in allowed else 'BASELINE_AUTOMATION_FAILURE'; (root/'identity-error.json').write_text(json.dumps({'status':'STOP','assertion':code,'internal_assertion':raw},indent=2)+'\n'); raise
+          PY
+
+      - name: Checkout exact PROD target
+        if: steps.identity.outcome == 'success'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.identity.outputs.target_git_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Derive focal migration inventory from captured dev
+        id: inventory
+        if: steps.identity.outcome == 'success'
+        shell: bash
+        env:
+          DEV_SHA: ${{ steps.identity.outputs.current_dev_sha }}
+          DEV_AFTER_SHA: ${{ steps.identity.outputs.bootstrap_result_dev_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,subprocess
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); sha=os.environ['DEV_SHA']; after=os.environ['DEV_AFTER_SHA']; versions=['016','017','020','021','022','023','024','025','026','028']
+          if os.environ['GITHUB_EVENT_NAME']=='push':
+            changed=subprocess.check_output(['git','diff','--name-only',sha,after],text=True).splitlines()
+            if changed!=['.github/workflows/flux-prod-readonly-baseline.yml']: raise RuntimeError('UNBLOCKER_SCOPE_VIOLATION:'+','.join(changed))
+          paths=subprocess.check_output(['git','ls-tree','-r','--name-only',sha,'supabase/migrations'],text=True).splitlines(); items=[]; sources={}
+          def names(sql,pat): return sorted(set(re.findall(pat,sql,re.I|re.M)))
+          for v in versions:
+            hits=[p for p in paths if re.search(rf'/{v}_[^/]+\.sql$',p)]
+            if len(hits)!=1: raise RuntimeError(f'MIGRATION_{v}_PATH_COUNT_{len(hits)}')
+            p=hits[0]; raw=subprocess.check_output(['git','show',f'{sha}:{p}']); sql=raw.decode(); sources[v]=sql
+            blob=subprocess.check_output(['git','rev-parse',f'{sha}:{p}'],text=True).strip(); clean=re.sub(r'--[^\n]*|/\*.*?\*/',' ',sql,flags=re.S)
+            objs={'tables':names(clean,r'\bcreate\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?"?([a-z_]\w*)'),'columns':names(clean,r'\badd\s+column(?:\s+if\s+not\s+exists)?\s+"?([a-z_]\w*)'),'constraints':names(clean,r'\badd\s+constraint\s+"?([a-z_]\w*)'),'indexes':names(clean,r'\bcreate\s+(?:unique\s+)?index(?:\s+if\s+not\s+exists)?\s+"?([a-z_]\w*)'),'sequences':names(clean,r'\bcreate\s+sequence(?:\s+if\s+not\s+exists)?\s+(?:public\.)?"?([a-z_]\w*)'),'functions':names(clean,r'\bcreate(?:\s+or\s+replace)?\s+function\s+(?:public\.)?"?([a-z_]\w*)'),'triggers':names(clean,r'\bcreate\s+trigger\s+"?([a-z_]\w*)'),'policies':names(clean,r'\bcreate\s+policy\s+(?:"([^"]+)"|([a-z_]\w*))'),'grant_targets':names(clean,r'\bgrant\s+[\s\S]*?\bon\s+(?:table\s+|function\s+|sequence\s+)?(?:public\.)?"?([a-z_]\w*)'),'grant_roles':names(clean,r'\bgrant\s+[\s\S]*?\bto\s+"?([a-z_]\w*)')}
+            objs['policies']=sorted({x[0] or x[1] for x in objs['policies']}); dml={x:len(re.findall(rf'\b{x}\s+',clean,re.I)) for x in ['insert','update','delete','merge']}
+            effects=sorted([k for k,val in objs.items() if val]+[k for k,val in dml.items() if val])
+            items.append({'version':v,'dependency_only':v=='025','filename':p,'git_blob_sha':blob,'sha256':hashlib.sha256(raw).hexdigest(),'bytes':len(raw),'top_level_statement_count':clean.count(';'),'expected_objects':objs,'dml_statement_counts':dml,'material_effect_categories':effects})
+          combined='\n'.join(sources.values()).lower(); external=['net.http','http_post','cron.schedule','webhook','n8n','notification_dispatcher','041_notifications','042_notifications']
+          overlap={'status':'PASS','internal_notification_event_producers_present':'notification_events' in combined,'internal_producer_migrations':[v for v,s in sources.items() if 'notification_events' in s.lower()],'external_runtime_overlap':any(x in combined for x in external),'external_runtime_markers':[x for x in external if x in combined],'protected_scope':'PROTECTED_OUT_OF_SCOPE'}
+          (root/'local-migration-inventory.json').write_text(json.dumps({'status':'PASS','source_dev_sha':sha,'unit_count':len(items),'units':items},indent=2)+'\n')
+          (root/'slice-01-notification-overlap-audit.json').write_text(json.dumps(overlap,indent=2)+'\n')
+          PY
+
+      - name: Build and statically guard read-only catalog query
+        id: sql_guard
+        if: steps.inventory.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/flux-audit.sql" <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SHOW default_transaction_read_only;
+          SHOW transaction_read_only;
+          WITH wanted_tables(s,t) AS (VALUES
+            ('public','proveedores'),('public','company_directors'),('public','approval_batches'),('public','approval_batch_items'),('public','approval_batch_company_settings'),('public','approval_batch_company_setting_events'),('public','payment_request_extraordinary_authorizations'),('public','payment_requests'),('public','payment_layouts'),('public','payment_layout_lines'),('public','cash_funds'),('public','intake_links'),('public','payment_intake'),('public','payment_intake_files'),('public','payment_intake_events')),
+          wanted_functions(n) AS (VALUES ('normalize_proveedores_canonical'),('set_approval_batch_updated_at'),('approval_batch_require_actor'),('approval_batch_require_finance'),('approval_batch_direction_roles'),('approval_batch_request_base_eligible'),('approval_batch_request_open_elsewhere'),('validate_approval_batch_item'),('approval_batch_assert_execution_authorized'),('validate_approval_batch_final_status'),('list_company_directors'),('list_approval_batch_director_candidates'),('set_company_director'),('create_approval_batch'),('list_batch_eligible_requests'),('add_request_to_approval_batch'),('remove_request_from_approval_batch'),('submit_approval_batch'),('approve_entire_batch'),('decide_approval_batch_items'),('close_approval_batch'),('release_rejected_batch_item_for_rebatch'),('get_approval_batch_detail'),('approval_batch_totals_by_currency'),('list_finance_approval_batches'),('list_director_approval_batches'),('set_approval_batch_company_enforcement'),('set_company_batch_configuration'),('authorize_payment_request_extraordinary'),('revoke_payment_request_extraordinary'),('release_and_rebatch_rejected_request'),('approval_batch_payment_layout_candidates'),('preview_payment_layout_eligibility'),('create_payment_layout'),('approval_batch_budget_validation'),('approval_batch_request_eligibility'),('complete_payment_request_layout_data'),('approval_batch_request_has_current_direction_approval'),('approval_batch_request_has_active_extraordinary'),('approval_batch_request_has_any_execution_record'),('create_cash_fund'),('get_payment_request_execution_readiness'),('get_payment_request_execution_context'),('next_payment_intake_public_folio'),('current_user_has_role'),('flux_finance_roles'),('insert_approval_batch_notification'),('enqueue_approval_batch_status_notifications'),('enqueue_approval_batch_item_notification'),('enqueue_extraordinary_payment_notification'),('enqueue_rebatched_item_notification'))
+          SELECT jsonb_build_object('kind','catalog','database',jsonb_build_object('database_fingerprint_md5',md5(current_database()),'database_oid',pg_database.oid,'server_version_num',current_setting('server_version_num'),'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only')),
+            'tables',COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',n.nspname,'table',c.relname,'rls',c.relrowsecurity,'force_rls',c.relforcerowsecurity) ORDER BY n.nspname,c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN wanted_tables w ON w.s=n.nspname AND w.t=c.relname WHERE c.relkind IN ('r','p')),'[]'::jsonb),
+            'columns',COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',c.table_schema,'table',c.table_name,'column',c.column_name,'type',c.data_type,'nullable',c.is_nullable,'default_md5',md5(COALESCE(c.column_default,''))) ORDER BY c.table_name,c.ordinal_position) FROM information_schema.columns c JOIN wanted_tables w ON w.s=c.table_schema AND w.t=c.table_name),'[]'::jsonb),
+            'constraints',COALESCE((SELECT jsonb_agg(jsonb_build_object('table',r.relname,'name',c.conname,'type',c.contype,'definition',pg_get_constraintdef(c.oid,true)) ORDER BY r.relname,c.conname) FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace JOIN wanted_tables w ON w.s=n.nspname AND w.t=r.relname),'[]'::jsonb),
+            'indexes',COALESCE((SELECT jsonb_agg(jsonb_build_object('table',i.tablename,'name',i.indexname,'definition',i.indexdef) ORDER BY i.tablename,i.indexname) FROM pg_indexes i JOIN wanted_tables w ON w.s=i.schemaname AND w.t=i.tablename),'[]'::jsonb),
+            'functions',COALESCE((SELECT jsonb_agg(jsonb_build_object('name',p.proname,'argument_types',oidvectortypes(p.proargtypes),'volatility',p.provolatile,'security_definer',p.prosecdef,'definition',pg_get_functiondef(p.oid)) ORDER BY p.proname,oidvectortypes(p.proargtypes)) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN wanted_functions w ON w.n=p.proname WHERE n.nspname='public'),'[]'::jsonb),
+            'triggers',COALESCE((SELECT jsonb_agg(jsonb_build_object('table',r.relname,'name',t.tgname,'enabled',t.tgenabled,'function',p.proname,'definition',pg_get_triggerdef(t.oid,true)) ORDER BY r.relname,t.tgname) FROM pg_trigger t JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace n ON n.oid=r.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid JOIN wanted_tables w ON w.s=n.nspname AND w.t=r.relname WHERE NOT t.tgisinternal),'[]'::jsonb),
+            'policies',COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',p.schemaname,'table',p.tablename,'name',p.policyname,'command',p.cmd,'roles',p.roles,'using_expression',p.qual,'with_check_expression',p.with_check) ORDER BY p.tablename,p.policyname) FROM pg_policies p LEFT JOIN wanted_tables w ON w.s=p.schemaname AND w.t=p.tablename WHERE w.t IS NOT NULL OR (p.schemaname='storage' AND p.tablename='objects' AND lower(COALESCE(p.policyname,'')||' '||COALESCE(p.qual,'')||' '||COALESCE(p.with_check,'')) LIKE '%csf%')),'[]'::jsonb),
+            'grants',COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',g.table_schema,'table',g.table_name,'grantee',g.grantee,'privilege',g.privilege_type) ORDER BY g.table_name,g.grantee,g.privilege_type) FROM information_schema.table_privileges g JOIN wanted_tables w ON w.s=g.table_schema AND w.t=g.table_name),'[]'::jsonb),
+            'sequences',COALESCE((SELECT jsonb_agg(jsonb_build_object('schema',n.nspname,'name',c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S' AND c.relname='payment_intake_public_folio_seq'),'[]'::jsonb),
+            'history_exists',to_regclass('supabase_migrations.schema_migrations') IS NOT NULL)
+          FROM pg_database WHERE datname=current_database();
+          SELECT to_regclass('storage.buckets') IS NOT NULL AS storage_exists \gset
+          \if :storage_exists
+          SELECT jsonb_build_object('kind','storage','bucket',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'public',public,'file_size_limit',file_size_limit,'allowed_mime_types',allowed_mime_types)) FROM storage.buckets WHERE id='payment-receipts'),'[]'::jsonb));
+          \else
+          SELECT jsonb_build_object('kind','storage','bucket','[]'::jsonb);
+          \endif
+          SELECT to_regclass('supabase_migrations.schema_migrations') IS NOT NULL AS history_exists \gset
+          \if :history_exists
+          SELECT jsonb_build_object('kind','history','exists',true,'row_count',(SELECT count(*) FROM supabase_migrations.schema_migrations),'columns',(SELECT jsonb_agg(jsonb_build_object('name',column_name,'type',data_type) ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='supabase_migrations' AND table_name='schema_migrations'),'focused',COALESCE((SELECT jsonb_agg(jsonb_build_object('version',to_jsonb(m)->>'version','name',to_jsonb(m)->>'name','statements_count',CASE WHEN jsonb_typeof(to_jsonb(m)->'statements')='array' THEN jsonb_array_length(to_jsonb(m)->'statements') ELSE 0 END,'statements_md5',md5(COALESCE((to_jsonb(m)->'statements')::text,''))) ORDER BY to_jsonb(m)->>'version') FROM supabase_migrations.schema_migrations m WHERE COALESCE(to_jsonb(m)->>'version','') ~ '^(016|017|020|021|022|023|024|025|026|028)([^0-9]|$)' OR COALESCE(to_jsonb(m)->>'name','') ~ '^(016|017|020|021|022|023|024|025|026|028)([^0-9]|$)'),'[]'::jsonb));
+          \else
+          SELECT jsonb_build_object('kind','history','exists',false,'row_count',0,'columns','[]'::jsonb,'focused','[]'::jsonb);
+          \endif
+          ROLLBACK;
+          SQL
+          python3 - <<'PY'
+          import os,pathlib,re
+          p=pathlib.Path(os.environ['RUNNER_TEMP'])/'flux-audit.sql'; s=p.read_text(); clean=re.sub(r'--[^\n]*|/\*.*?\*/',' ',s,flags=re.S)
+          deny=r'(?im)^\s*(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|VACUUM|ANALYZE|REFRESH|CALL)\b|\bCOPY\b[\s\S]*?\bPROGRAM\b|\bpublic\.[a-z_]\w*\s*\('
+          hit=re.search(deny,clean)
+          if hit: raise SystemExit('MUTABLE_OR_PRODUCT_CALL_DENYLIST:'+hit.group(0).strip())
+          required=['BEGIN TRANSACTION READ ONLY;','SHOW default_transaction_read_only;','SHOW transaction_read_only;','ROLLBACK;']
+          if any(x not in s for x in required): raise SystemExit('READONLY_SQL_CONTRACT_MISSING')
+          PY
+          echo "static_scan_ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Execute the single PROD metadata transaction
+        id: db
+        if: steps.sql_guard.outputs.static_scan_ok == 'true'
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_PROD_AUDIT_DB_URL }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+          PGOPTIONS: -c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=60000 -c application_name=flux_prod_slice01_readonly_baseline
+          PGCONNECT_TIMEOUT: "15"
+          PGSSLMODE: require
+        run: |
+          set -u
+          command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+          python3 - <<'PY'
+          import os,urllib.parse
+          u=urllib.parse.urlparse(os.environ.get('DATABASE_URL','')); ref=os.environ.get('PROJECT_REF','')
+          direct=bool(u.hostname==f'db.{ref}.supabase.co')
+          pooler=bool(u.hostname and u.hostname.endswith('.pooler.supabase.com') and u.username and u.username.endswith('.'+ref))
+          if not u.hostname or not ref or not (direct or pooler): raise SystemExit('PROD_PROJECT_REF_MISMATCH')
+          for value in [os.environ.get('DATABASE_URL',''),u.hostname,u.username or '',u.password or '',ref]:
+            if value: print('::add-mask::'+value)
+          PY
+          rc=0; psql "$DATABASE_URL" -X -q -A -t -v ON_ERROR_STOP=1 -f "$RUNNER_TEMP/flux-audit.sql" > "$RUNNER_TEMP/flux-db.raw" 2> "$RUNNER_TEMP/flux-db.err" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            rm -f "$RUNNER_TEMP/flux-db.err" "$RUNNER_TEMP/flux-db.raw"
+            echo "query_ok=false" >> "$GITHUB_OUTPUT"
+          else
+            rm -f "$RUNNER_TEMP/flux-db.err"
+            echo "query_ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Classify focal baseline and build sanitized evidence
+        id: classify
+        if: steps.db.outputs.query_ok == 'true'
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_git_sha }}
+          EXPECTED_SHA: ${{ steps.identity.outputs.expected_prod_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); lines=[x for x in (pathlib.Path(os.environ['RUNNER_TEMP'])/'flux-db.raw').read_text().splitlines() if x.strip()]
+          if len(lines)<5 or lines[0]!='on' or lines[1]!='on': raise RuntimeError('PROD_READONLY_PROOF_FAILED')
+          docs=[json.loads(x) for x in lines[2:]]; by={d['kind']:d for d in docs}; cat=by['catalog']; storage=by['storage']; history=by['history']
+          if cat['database']['default_transaction_read_only']!='on' or cat['database']['transaction_read_only']!='on': raise RuntimeError('PROD_READONLY_PROOF_FAILED')
+          (root/'prod-database-identity.json').write_text(json.dumps({'status':'PASS',**cat['database'],'project_ref_verified_without_disclosure':True,'target_sha':os.environ['TARGET_SHA'],'expected_prod_sha':os.environ['EXPECTED_SHA']},indent=2)+'\n')
+          (root/'transaction-readonly-proof.json').write_text(json.dumps({'status':'PASS','pgoptions_default_transaction_read_only':'on','show_default_transaction_read_only':'on','show_transaction_read_only':'on','transaction_end':'ROLLBACK','schema_writes':0,'data_writes':0,'history_writes':0,'storage_writes':0,'http_writes':0},indent=2)+'\n')
+          tables={x['table'] for x in cat['tables']}; cols={f"{x['table']}.{x['column']}" for x in cat['columns']}; cons={x['name'] for x in cat['constraints']}; idx={x['name'] for x in cat['indexes']}; trig={x['name'] for x in cat['triggers']}; pol={f"{x['table']}:{x['name']}" for x in cat['policies']}|{f"{x['schema']}.{x['table']}:{x['name']}" for x in cat['policies']}; seq={x['name'] for x in cat['sequences']}
+          funcs={x['name']:[] for x in cat['functions']}
+          for x in cat['functions']: funcs[x['name']].append(x)
+          def body(n): return '\n'.join(x['definition'].lower() for x in funcs.get(n,[]))
+          def sem(n,tokens): return bool(funcs.get(n)) and all(t.lower() in body(n) for t in tokens)
+          S=lambda *x:list(x)
+          markers={
+           '016':[('c',x) for x in S('proveedores.csf_file_path','proveedores.csf_uploaded_at','proveedores.csf_uploaded_by')]+[('k','proveedores_csf_uploaded_by_fkey'),('i','proveedores_csf_uploaded_by_idx')],
+           '017':[('p','storage.objects:Authenticated can upload provider CSF'),('p','storage.objects:Authenticated can read provider CSF')],
+           '020':[('c','proveedores.persona_tipo'),('k','proveedores_persona_tipo_check'),('i','proveedores_rfc_normalized_uidx'),('i','proveedores_clabe_normalized_uidx'),('f','normalize_proveedores_canonical'),('g','normalize_proveedores_canonical_before_write'),('p','proveedores:proveedores_select_members')],
+           '021':[('t',x) for x in S('company_directors','approval_batches','approval_batch_items')]+[('i','approval_batch_items_active_uidx'),('f','create_approval_batch'),('f','decide_approval_batch_items'),('g','require_batch_for_cash_fund'),('p','approval_batches:approval_batches_read_authorized')],
+           '022':[('t',x) for x in S('approval_batch_company_settings','approval_batch_company_setting_events','payment_request_extraordinary_authorizations')]+[('c','payment_requests.approval_material_updated_at'),('f','get_payment_request_execution_context'),('f','authorize_payment_request_extraordinary'),('g','mark_payment_request_material_change')],
+           '023':[('c',f'approval_batch_items.{x}') for x in S('previous_item_id','review_sequence','resubmitted_at','resubmitted_by','resubmission_note')]+[('i','approval_batch_items_request_review_uidx'),('i','approval_batch_items_one_pending_review_uidx'),('i','approval_batch_items_previous_item_idx')],
+           '024':[('s',('validate_approval_batch_final_status',["new.status = 'partially_approved'","v_rejected = 0"])),('s',('decide_approval_batch_items',['v_final_status','v_rejected','partially_approved','else','approved']))],
+           '025':[('t',x) for x in S('intake_links','payment_intake','payment_intake_files','payment_intake_events')]+[('q','payment_intake_public_folio_seq'),('f','next_payment_intake_public_folio')],
+           '026':[('s',('create_cash_fund',['v_request.payment_method','insert into public.cash_funds','approval_batch_require_finance']))],
+           '028':[('s',('get_payment_request_execution_readiness',['closed_batch','extraordinary','legacy_approved','material_change_requires_reapproval','flux_finance_roles'])),('s',('approval_batch_assert_execution_authorized',['get_payment_request_execution_readiness'])),('s',('get_payment_request_execution_context',['get_payment_request_execution_readiness','payment_method'])),('s',('create_cash_fund',['get_payment_request_execution_readiness','insert into public.cash_funds']))]}
+          def present(m):
+            typ,val=m
+            return {'c':val in cols,'k':val in cons,'i':val in idx,'f':val in funcs,'g':val in trig,'p':val in pol,'t':val in tables,'q':val in seq,'s':sem(val[0],val[1])}[typ]
+          hist_rows=history.get('focused',[]); hist=lambda v:any(str(x.get('version','')).startswith(v) or str(x.get('name','')).startswith(v) for x in hist_rows)
+          classes=[]
+          for v,ms in markers.items():
+            hits=sum(present(x) for x in ms); total=len(ms)
+            if hits==total: cls='APPLIED_EQUIVALENT'
+            elif hits==0: cls='CONFLICTING' if hist(v) else 'PENDING'
+            else: cls='PARTIAL'
+            classes.append({'version':v,'dependency_only':v=='025','classification':cls,'markers_present':hits,'markers_total':total,'history_recorded':hist(v)})
+          policy_by={f"{x['schema']}.{x['table']}:{x['name']}":x for x in cat['policies']}
+          upload=policy_by.get('storage.objects:Authenticated can upload provider CSF',{}); read=policy_by.get('storage.objects:Authenticated can read provider CSF',{})
+          def policy_text(p): return ' '.join([p.get('using_expression') or '',p.get('with_check_expression') or '']).lower()
+          csf_policy_semantics=(upload.get('command')=='INSERT' and read.get('command')=='SELECT' and 'authenticated' in upload.get('roles',[]) and 'authenticated' in read.get('roles',[]) and all(token in policy_text(upload) for token in ['payment-receipts','csf/%','flux_approver_roles']) and all(token in policy_text(read) for token in ['payment-receipts','csf/%','flux_approver_roles']))
+          unit017=next(x for x in classes if x['version']=='017'); unit017['policy_semantics_match']=csf_policy_semantics
+          if unit017['classification']=='APPLIED_EQUIVALENT' and not csf_policy_semantics: unit017['classification']='CONFLICTING'
+          (root/'focal-migration-history.json').write_text(json.dumps({'status':'PASS','exists':history['exists'],'structure':history.get('columns',[]),'row_count':history.get('row_count',0),'focused':hist_rows,'evidence_role':'COMPLEMENTARY'},indent=2)+'\n')
+          (root/'focal-migration-classification.json').write_text(json.dumps({'status':'PASS','taxonomy':['APPLIED_EXACT','APPLIED_EQUIVALENT','PENDING','PARTIAL','CONFLICTING','UNKNOWN'],'units':classes,'counts':{x:sum(y['classification']==x for y in classes) for x in ['APPLIED_EXACT','APPLIED_EQUIVALENT','PENDING','PARTIAL','CONFLICTING','UNKNOWN']}},indent=2)+'\n')
+          def fp(kind,rows): return [{'type':kind,'object':x.get('name') or x.get('column') or x.get('table'),'sha256':hashlib.sha256((x.get('definition') or x.get('using_expression') or json.dumps(x,sort_keys=True)).encode()).hexdigest()} for x in rows]
+          (root/'focal-object-fingerprints.json').write_text(json.dumps({'status':'PASS','objects':fp('constraint',cat['constraints'])+fp('index',cat['indexes'])+fp('function',cat['functions'])+fp('trigger',cat['triggers'])+fp('policy',cat['policies'])},indent=2)+'\n')
+          csf_cols=[x for x in cat['columns'] if x['table']=='proveedores' and (x['column'].startswith('csf_') or x['column']=='persona_tipo')]; csf_cons=[x for x in cat['constraints'] if x['table']=='proveedores']; csf_idx=[x for x in cat['indexes'] if x['table']=='proveedores']
+          (root/'csf-schema-audit.json').write_text(json.dumps({'status':'PASS','columns':csf_cols,'constraints':fp('constraint',csf_cons),'indexes':fp('index',csf_idx),'normalization_function_present':'normalize_proveedores_canonical' in funcs,'normalization_trigger_present':'normalize_proveedores_canonical_before_write' in trig,'provider_policies':[x['name'] for x in cat['policies'] if x['table']=='proveedores']},indent=2)+'\n')
+          storage_p=[x for x in cat['policies'] if x['table']=='objects' and ('csf' in (x.get('using_expression') or '').lower() or 'csf' in (x.get('with_check_expression') or '').lower() or 'provider csf' in x['name'].lower())]
+          (root/'csf-storage-policy-audit.json').write_text(json.dumps({'status':'PASS','bucket':storage['bucket'],'object_rows_read':0,'csf_policies':storage_p},indent=2)+'\n')
+          approval_tables={'company_directors','approval_batches','approval_batch_items','approval_batch_company_settings','approval_batch_company_setting_events','payment_request_extraordinary_authorizations'}
+          (root/'approval-batches-schema-audit.json').write_text(json.dumps({'status':'PASS','tables':[x for x in cat['tables'] if x['table'] in approval_tables],'columns':[x for x in cat['columns'] if x['table'] in approval_tables],'constraints':fp('constraint',[x for x in cat['constraints'] if x['table'] in approval_tables]),'indexes':fp('index',[x for x in cat['indexes'] if x['table'] in approval_tables]),'functions':sorted(n for n in funcs if 'approval_batch' in n or n in ['authorize_payment_request_extraordinary','get_payment_request_execution_context']),'triggers':[x['name'] for x in cat['triggers'] if x['table'] in approval_tables],'policies':[x['name'] for x in cat['policies'] if x['table'] in approval_tables],'grants':[x for x in cat['grants'] if x['table'] in approval_tables],'product_functions_executed':0},indent=2)+'\n')
+          cashp=[x for x in cat['policies'] if x['table']=='cash_funds' and x['command'] in ['SELECT','ALL']]; q=' '.join((x.get('using_expression') or '') for x in cashp).lower()
+          if not cashp: pc='MISSING'
+          elif 'flux_finance_roles' in q and 'current_user_has_role' in q: pc='CANONICAL'
+          elif 'current_user_has_role' in q and any(x in q for x in ['finance','finanzas','approver_2','responsible_profile_id']): pc='NON_CANONICAL_BUT_FUNCTIONAL'
+          else: pc='CONFLICTING'
+          cash={'status':'PASS','table_present':'cash_funds' in tables,'function_present':'create_cash_fund' in funcs,'readiness_present':'get_payment_request_execution_readiness' in funcs,'context_present':'get_payment_request_execution_context' in funcs,'creation_gate_trigger':'require_batch_for_cash_fund' in trig,'select_policy_classification':pc,'select_policies':cashp,'flux_finance_roles_helper_present':'flux_finance_roles' in funcs}
+          (root/'cash-funds-schema-audit.json').write_text(json.dumps(cash,indent=2)+'\n')
+          plan={'status':'PASS','required':pc!='CANONICAL','current_definition':cashp,'target_definition':'SELECT policy delegates finance-role membership to public.flux_finance_roles() while preserving the responsible owner path','proposed_forward_only_migration':['create replacement policy under a new migration','verify grants and RLS','do not repair history'],'positive_tests':['responsible owner can read','canonical finance role can read'],'negative_tests':['unrelated authenticated member cannot read','anon cannot read'],'logical_rollback':'new forward migration restoring the fingerprinted prior policy','impact':'RLS policy metadata only; no row rewrite'}
+          (root/'cash-funds-forward-fix-plan.json').write_text(json.dumps(plan,indent=2)+'\n')
+          dep=next(x for x in classes if x['version']=='025'); depcls='SATISFIED' if dep['markers_present']==dep['markers_total'] else ('MISSING' if dep['markers_present']==0 and not dep['history_recorded'] else 'CONFLICTING')
+          (root/'dependency-025-audit.json').write_text(json.dumps({'status':'PASS','release_inclusion':False,'classification':depcls,'required_by':['026','028'],'markers_present':dep['markers_present'],'markers_total':dep['markers_total']},indent=2)+'\n')
+          overlap=json.loads((root/'slice-01-notification-overlap-audit.json').read_text()); db_external=['net.http','http_post','cron.schedule','webhook','n8n','notification_dispatcher']; defs=' '.join(x['definition'].lower() for x in cat['functions'] if x['name'].startswith('enqueue_approval_batch') or x['name'].startswith('enqueue_extraordinary') or x['name'].startswith('enqueue_rebatched'))
+          overlap['database_external_runtime_markers']=[x for x in db_external if x in defs]; overlap['external_runtime_overlap']=overlap['external_runtime_overlap'] or bool(overlap['database_external_runtime_markers']); overlap['SLICE_01_TOUCHES_NOTIFICATION_RUNTIME']=overlap['external_runtime_overlap']; (root/'slice-01-notification-overlap-audit.json').write_text(json.dumps(overlap,indent=2)+'\n')
+          bad=[x for x in classes if x['version']!='025' and x['classification'] in ['PARTIAL','CONFLICTING','UNKNOWN']]; ready=not bad and depcls in ['SATISFIED','NOT_REQUIRED'] and not overlap['external_runtime_overlap']
+          (root/'c1-fasttrack-inputs.json').write_text(json.dumps({'status':'PASS','SLICE_01_C1_FASTTRACK_READY':ready,'target_git_sha':os.environ['TARGET_SHA'],'expected_prod_sha':os.environ['EXPECTED_SHA'],'pending_migrations':[x['version'] for x in classes if x['version']!='025' and x['classification']=='PENDING'],'dependency_025':depcls,'cash_funds_policy':pc},indent=2)+'\n')
+          PY
+
+      - name: Finalize, sanitize, and assert gate
+        if: always()
+        shell: bash
+        env:
+          IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
+          INVENTORY_OUTCOME: ${{ steps.inventory.outcome }}
+          STATIC_OUTCOME: ${{ steps.sql_guard.outcome }}
+          DB_OK: ${{ steps.db.outputs.query_ok }}
+          CLASSIFY_OUTCOME: ${{ steps.classify.outcome }}
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/flux-audit.sql" "$RUNNER_TEMP/flux-db.raw" "$RUNNER_TEMP/flux-db.err"
+          echo PASS > "$EVIDENCE_DIR/cleanup.txt"
+          python3 - <<'PY'
+          import json,os,pathlib,re,time
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); code=None
+          if os.environ.get('IDENTITY_OUTCOME')!='success':
+            p=root/'identity-error.json'; code=json.loads(p.read_text()).get('assertion','BASELINE_AUTOMATION_FAILURE') if p.exists() else 'BASELINE_AUTOMATION_FAILURE'
+          elif os.environ.get('INVENTORY_OUTCOME')!='success' or os.environ.get('STATIC_OUTCOME')!='success': code='BASELINE_AUTOMATION_FAILURE'
+          elif os.environ.get('DB_OK')!='true': code='PROD_READONLY_PROOF_FAILED'
+          elif os.environ.get('CLASSIFY_OUTCOME')!='success': code='BASELINE_AUTOMATION_FAILURE'
+          else:
+            cls=json.loads((root/'focal-migration-classification.json').read_text()); units=cls['units']
+            focal=[x for x in units if x['version']!='025']
+            if any(x['classification']=='PARTIAL' for x in focal): code='FOCAL_MIGRATION_PARTIAL_STATE'
+            elif any(x['classification']=='CONFLICTING' for x in focal): code='FOCAL_MIGRATION_CONFLICT'
+            elif any(x['classification']=='UNKNOWN' for x in focal): code='FOCAL_MIGRATION_UNKNOWN'
+            elif json.loads((root/'dependency-025-audit.json').read_text())['classification'] not in ['SATISFIED','NOT_REQUIRED']: code='DEPENDENCY_025_UNRESOLVED'
+            elif json.loads((root/'slice-01-notification-overlap-audit.json').read_text())['external_runtime_overlap']: code='SLICE_01_NOTIFICATION_OVERLAP_DETECTED'
+          findings=[]; patterns=[('database_url',r'postgres(?:ql)?://'),('token',r'github_pat_|gh[pousr]_[A-Za-z0-9_]'),('email',r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'),('uuid_value',r'\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b'),('clabe_value',r'(?<!\d)\d{18}(?!\d)'),('supabase_host',r'[a-z0-9-]+\.supabase\.(?:co|com)')]
+          for p in root.iterdir():
+            if p.name=='sanitization-audit.json': continue
+            s=p.read_text(errors='replace')
+            for label,rx in patterns:
+              if re.search(rx,s,re.I): findings.append({'file':p.name,'category':label})
+          sanit={'status':'PASS' if not findings else 'FAIL','files_scanned':len(list(root.iterdir())),'findings':findings,'prohibited_operational_rows':0,'documents_read':0,'host_disclosed':False}
+          (root/'sanitization-audit.json').write_text(json.dumps(sanit,indent=2)+'\n')
+          if findings and code is None: code='EVIDENCE_ARTIFACT_INVALID'
+          identities=json.loads((root/'github-identities.json').read_text()); c1=json.loads((root/'c1-fasttrack-inputs.json').read_text())
+          result='STOP / '+code if code else 'PASS / SHARED_PROD_READONLY_WORKFLOW_MERGED_TO_DEV / PUSH_BOOTSTRAP_RUN_SUCCESS / SLICE_01_TARGETED_PROD_BASELINE_CAPTURED / SLICE_01_MIGRATIONS_CLASSIFIED / NO_PROD_CHANGES / SLICE_01_C1_FASTTRACK_READY'
+          report={'status':'STOP' if code else 'PASS','result':result,'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2-2026-08-01','target_git_sha':identities.get('target_git_sha'),'c1_fasttrack_ready':False if code else c1.get('SLICE_01_C1_FASTTRACK_READY'),'prod_mutations':{'schema':0,'data':0,'migration_history':0,'storage':0,'runtime':0,'http':0},'completed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+          (root/'gate-report.json').write_text(json.dumps(report,indent=2)+'\n'); (root/'gate-report.md').write_text(f"# FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2\n\n{result}\n\nPROD schema/data/history/storage/runtime/HTTP writes: 0.\n")
+          ledger={'status':'PASS','workflow_runs_created_by_workflow':0,'reruns':0,'dispatches_created_by_workflow':0,'git_writes':0,'prod_schema_writes':0,'prod_data_writes':0,'prod_history_writes':0,'prod_storage_writes':0,'prod_runtime_mutations':0,'http_writes':0}
+          (root/'mutation-ledger.json').write_text(json.dumps(ledger,indent=2)+'\n')
+          required=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
+          for n in required:
+            p=root/n
+            if not p.exists() or not p.stat().st_size: raise SystemExit('EVIDENCE_ARTIFACT_INVALID:'+n)
+            json.loads(p.read_text())
+          if code: raise SystemExit(result)
+          PY
+
+      - name: Upload sanitized baseline artifact
+        if: always()
+        id: artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.identity.outputs.artifact_name || 'flux-prod-readonly-baseline-slice-01-diagnostic' }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
