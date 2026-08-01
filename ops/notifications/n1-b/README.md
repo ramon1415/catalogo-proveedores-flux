@@ -40,17 +40,22 @@ The integration job starts Supabase local with PostgreSQL 17 and applies this ex
 2. `supabase/migrations/002_enums_triggers_indexes.sql`
 3. `supabase/migrations/003_functions_rpcs.sql`
 4. `supabase/migrations/007_notifications.sql`
-5. `supabase/migrations/011_notification_dispatcher_service_rpcs.sql`
-6. `supabase/migrations/018_payment_request_approver_routing.sql`
-7. `supabase/migrations/020_normalize_proveedores_canonical.sql`
-8. `supabase/migrations/025_provider_intake_foundation.sql`
-9. `supabase/migrations/027_provider_intake_edge_support.sql`
-10. `supabase/migrations/029_provider_intake_triage.sql`
-11. `supabase/migrations/030_provider_intake_action_fingerprint.sql`
-12. `supabase/migrations/031_provider_intake_matching.sql`
-13. `supabase/migrations/041_notifications_external_isolation.sql`
+5. `supabase/migrations/010_payment_request_notification_events.sql`
+6. `supabase/migrations/011_notification_dispatcher_service_rpcs.sql`
+7. `supabase/migrations/012_notification_decision_comments_payload.sql`
+8. `supabase/migrations/013_notification_decision_event_dedupe.sql`
+9. `supabase/migrations/014_notification_decision_event_dedupe_v2.sql`
+10. `supabase/migrations/015_disable_legacy_direct_payment_notification_enqueue.sql`
+11. `supabase/migrations/018_payment_request_approver_routing.sql`
+12. `supabase/migrations/020_normalize_proveedores_canonical.sql`
+13. `supabase/migrations/025_provider_intake_foundation.sql`
+14. `supabase/migrations/027_provider_intake_edge_support.sql`
+15. `supabase/migrations/029_provider_intake_triage.sql`
+16. `supabase/migrations/030_provider_intake_action_fingerprint.sql`
+17. `supabase/migrations/031_provider_intake_matching.sql`
+18. `supabase/migrations/041_notifications_external_isolation.sql`
 
-The first three files are atomic canonical foundations for the required companies, profiles, providers, payments, helpers, triggers and indexes. Migrations 007 and 011 provide the ledger and both internal claim RPCs. Migration 018 provides company membership, 020 provides the canonical provider shape, 025/027/029/030/031 provide the intake, triage, action-id and Matching dependencies, and 041 leaves the certified N1-A contract installed. Migration 042, unrelated 033/034 files, unmerged PR migrations and all wildcards are excluded.
+The first three files are atomic canonical foundations for the required companies, profiles, providers, payments, helpers, triggers and indexes. Migrations 007 and 010-015 provide the ledger, both internal claim RPCs, and the notification helper chain referenced by Migration 018. Migration 018 provides company membership, 020 provides the canonical provider shape, 025/027/029/030/031 provide the intake, triage, action-id and Matching dependencies, and 041 leaves the certified N1-A contract installed. Migration 042, unrelated 033/034 files, unmerged PR migrations and all wildcards are excluded.
 
 The job then runs, in order:
 
@@ -82,7 +87,7 @@ Fingerprints, fingerprint self-tests, live schema clones, anonymous GitHub API c
 
 The workflow calculates `PRODUCT / (PRODUCT + TEST + WORKFLOW + DOCS_OPS)` from added lines relative to `origin/dev`.
 
-Current consolidated result: `51.2%` (`2972 / 5810` added lines).
+Current consolidated result: `51.1%` (`2972 / 5821` added lines).
 
 `PRODUCT_RATIO_EXCEPTION: DOCUMENTED`
 

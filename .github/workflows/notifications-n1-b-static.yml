@@ -164,8 +164,8 @@ jobs:
             grep -Fq "PRODUCT_RATIO_EXCEPTION: DOCUMENTED" ops/notifications/n1-b/README.md
           fi
 
-          test "$(rg -c '^Deno\.test\(' supabase/functions/notification-dispatcher-external/notification-dispatcher-external_test.ts supabase/functions/provider-intake/provider-intake_test.ts | awk -F: '{sum += $2} END {print sum}')" -ge 55
-          test "$(rg -c '^test\(' scripts/qa/provider-intake-triage-contract.test.mjs scripts/qa/provider-intake-action-fingerprint.test.mjs | awk -F: '{sum += $2} END {print sum}')" -eq 34
+          test "$(grep -hEc '^Deno\.test\(' supabase/functions/notification-dispatcher-external/notification-dispatcher-external_test.ts supabase/functions/provider-intake/provider-intake_test.ts | awk '{sum += $1} END {print sum}')" -ge 55
+          test "$(grep -hEc '^test\(' scripts/qa/provider-intake-triage-contract.test.mjs scripts/qa/provider-intake-action-fingerprint.test.mjs | awk '{sum += $1} END {print sum}')" -eq 34
           printf 'source_commit=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
           printf 'migration_slot=%s\n' "$MIGRATION_SLOT" >> "$GITHUB_OUTPUT"
           printf 'product_ratio=%s%%\n' "$ratio" >> "$GITHUB_OUTPUT"
@@ -247,6 +247,7 @@ jobs:
         run: |
           set -euo pipefail
           sandbox="$RUNNER_TEMP/n1b-sandbox"
+          mkdir -p "$sandbox"
           supabase init --workdir "$sandbox" --yes
           sed -i -E 's/^major_version = [0-9]+/major_version = 17/' "$sandbox/supabase/config.toml"
           grep -Eq '^major_version = 17$' "$sandbox/supabase/config.toml"
@@ -286,7 +287,12 @@ jobs:
             supabase/migrations/002_enums_triggers_indexes.sql
             supabase/migrations/003_functions_rpcs.sql
             supabase/migrations/007_notifications.sql
+            supabase/migrations/010_payment_request_notification_events.sql
             supabase/migrations/011_notification_dispatcher_service_rpcs.sql
+            supabase/migrations/012_notification_decision_comments_payload.sql
+            supabase/migrations/013_notification_decision_event_dedupe.sql
+            supabase/migrations/014_notification_decision_event_dedupe_v2.sql
+            supabase/migrations/015_disable_legacy_direct_payment_notification_enqueue.sql
             supabase/migrations/018_payment_request_approver_routing.sql
             supabase/migrations/020_normalize_proveedores_canonical.sql
             supabase/migrations/025_provider_intake_foundation.sql
