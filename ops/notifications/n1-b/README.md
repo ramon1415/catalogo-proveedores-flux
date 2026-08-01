@@ -1,6 +1,8 @@
-# Notifications N1-B — hardened disabled external intake runtime candidate
+# Notifications N1-B — reconciled disabled external intake runtime candidate
 
-Status: hardened candidate only. This directory documents `NOTIFICATIONS-N1-B-R1`; it does not authorize applying SQL, running a live dry-run, deploying an Edge Function, changing secrets, invoking a dispatcher or sending email.
+Status: reconciled candidate only. This directory documents `NOTIFICATIONS-N1-B-R1-R1`; it does not authorize applying SQL, running a live dry-run, deploying an Edge Function, changing secrets, invoking a dispatcher or sending email.
+
+R1-R1 restores the terminal `no_recipient` ledger contract, expires stale pending work after 24 hours, treats ambiguous finalization HTTP responses as `RPC_OUTCOME_UNKNOWN`, and makes the provider-intake Supabase URL host-bound before a service-role key can be attached.
 
 ## Certified baseline
 
@@ -50,20 +52,22 @@ There is no automatic producer trigger. Received is produced only by an atomic s
 
 ## Zero backlog
 
-The producer inserts an external ledger row only when all of these are true at fact time:
+The producer evaluates gates in this order at fact time:
 
-1. rollout `provider-intake-v1` exists;
+1. lock the exact rollout `provider-intake-v1`;
 2. mode is `test_only` or `pilot`;
 3. cutoff is non-null;
-4. source and notification timestamps are at or after cutoff;
-5. the event type is enabled;
-6. `notification_external_event_mode_allowed` accepts the event and mode;
-7. the normalized recipient hash is allowlisted;
-8. payload and idempotency validators pass.
-9. `batch_size=1`;
-10. `daily_cap>0` and the current Mexico City day still has capacity.
+4. source timestamp is at or after cutoff;
+5. `batch_size=1`;
+6. `daily_cap>0`;
+7. the event type is enabled;
+8. `notification_external_event_mode_allowed` accepts the event and mode;
+9. payload validation passes;
+10. business idempotency validation passes;
+11. stale pending expiry completes and daily capacity remains;
+12. recipient resolution and, for valid recipients, allowlist validation.
 
-The producer locks the single `provider-intake-v1` rollout row with `FOR UPDATE` and holds that lock through the decision and insert. The claim uses the same rollout row, so producer/producer and producer/claim activity is serialized. The producer counts every pending row plus processing/sent consumption for the current Mexico City day, so historical pending work blocks new enqueue instead of creating next-day backlog. Cap exhaustion returns `daily_cap_reached` and creates neither event nor attempt. If any gate is closed, the domain fact may exist but no pending external row or attempt is created. The migration contains no scan, backfill, replay, top-level producer call, active rollout, cutoff, event enablement or recipient hash.
+The producer locks the single `provider-intake-v1` rollout row with `FOR UPDATE` and holds that lock through the decision and insert. The claim uses the same rollout row, so producer/producer and producer/claim activity is serialized. The producer first expires pending external rows older than 24 hours, then counts only fresh pending rows plus processing/sent consumption for the current Mexico City day. Expiry changes the row to `cancelled`, clears claim fields, writes `external_dispatch_window_expired`, creates no attempt and never deletes or reactivates it. The replacement external claim repeats expiry under the same rollout lock and requires `created_at >= now() - interval '24 hours'`, providing no historical replay when rollout is reactivated. Cap exhaustion returns `daily_cap_reached` and creates neither event nor attempt. If any gate is closed, the domain fact may exist but no claimable external row or attempt is created. The migration contains no scan that produces new events, backfill, replay, top-level producer call, active rollout, cutoff, event enablement or recipient hash.
 
 Correction remains `test_only`-only because Migration 041 prohibits it in pilot until N2. A second correction returns `manual_follow_up_required` and creates no second notification.
 
@@ -77,7 +81,7 @@ Supported events and exact keys are:
 
 `payment_intake_id` is the business subject; the append-only domain-event ID is only `source_id`. Template changes and retries cannot create a new business event.
 
-The only recipient source is `lower(trim(payment_intake.provider_email))`. `proveedores.email` is never queried and email is never included in the payload. A missing or invalid recipient returns `no_recipient` without creating an external ledger row or attempt.
+The only recipient source is `lower(trim(payment_intake.provider_email))`. `proveedores.email` is never queried and email is never included in the payload. Once all rollout, payload, idempotency and daily-cap gates pass, a missing or invalid recipient creates exactly one terminal ledger row with `status=no_recipient`, `terminal_reason=no_recipient`, a null recipient and zero delivery attempts. It is excluded from claim and daily send consumption, has no retry time, and identical material returns `already_exists`. A closed rollout or exhausted cap creates no `no_recipient` row.
 
 ## Atomic submission completion
 
@@ -93,7 +97,7 @@ The only recipient source is `lower(trim(payment_intake.provider_email))`. `prov
 - one `submission_completed` fact;
 - conditional received producer call.
 
-A confirmed rejected RPC rolls back file metadata, completion and any notification row, after which the Edge cleanup path may remove the uploaded objects. A transport failure or lost response is `RPC_OUTCOME_UNKNOWN`: the handler retries the same RPC once with the same intake, count and metadata. Exact repetition returns `already_completed` only when file IDs, paths, names, MIME types, sizes, kinds, hashes, Storage objects and the single completion fact all match. Two unknown outcomes preserve Storage and return the generic safe failure `submission_outcome_unknown` for operational reconciliation.
+A confirmed rejected RPC rolls back file metadata, completion and any notification row, after which the Edge cleanup path may remove the uploaded objects. Rejection is confirmed only when a non-ok JSON response contains exactly one of the eight allowlisted finalization business codes. A transport failure, abort, ten-second timeout, 429, any 5xx, HTML, malformed JSON, unknown code, unsafe non-ok body or invalid 2xx body is `RPC_OUTCOME_UNKNOWN`: the handler retries the same RPC once with the same intake, count and metadata. Cleanup is allowed only for the exact allowlisted business rejection. Exact repetition returns `already_completed` only when file IDs, paths, names, MIME types, sizes, kinds, hashes, Storage objects and the single completion fact all match. Two unknown outcomes preserve Storage and return the generic safe failure `submission_outcome_unknown` for operational reconciliation.
 
 Duplicate intake creation is followed by the service-only `provider_intake_submission_state_v1`. A complete duplicate returns its canonical current intake status. An incomplete or inconsistent duplicate never returns a false `received` success and instead fails safely for reconciliation.
 
@@ -115,7 +119,7 @@ The UI states: “Envío externo deshabilitado hasta que el rollout sea autoriza
 
 The external function accepts POST only, has no CORS response, requires `application/json` with optional UTF-8 charset, reads at most 64 bytes and enforces the exact canonical body `{"limit":1}`. Method, content type, size and body are validated before the disabled-mode short circuit; disabled still returns before HMAC, DB, claim or Resend.
 
-Future runtime configuration is referenced but not created or read in this gate:
+Future runtime configuration is referenced but not created or read in this gate. Provider-intake independently accepts only an exact HTTPS origin matching a 20-character lowercase project reference under `.supabase.co`; credentials, ports, paths, query, fragment, whitespace and arbitrary HTTPS hosts are rejected before service-role headers are available:
 
 - `NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY`
 - `NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY_ID`
@@ -161,7 +165,7 @@ HTTP responses and logs contain only aggregate counts, safe codes and a duration
 
 - `precheck.sql`: future read-only baseline and collision check.
 - `postcheck.sql`: future immediate post-apply zero-row, grant and contract check.
-- `contract-tests.sql`: a numbered 60-case catalog plus executable synthetic fixtures that call the real finalization, producer, claim, reserve, started, sent, failed, replay and capability functions. It proves zero backlog, idempotent completion/sent, circuit pause and 5/30 retry scheduling, then terminates with `ROLLBACK`.
+- `contract-tests.sql`: a numbered 60-case catalog plus executable synthetic fixtures that call the real finalization, producer, expiry, claim, reserve, started, sent, failed, replay and capability functions. It proves the terminal no-recipient row, zero attempts, stale cancellation, no replay, fresh claim, zero backlog, idempotent completion/sent, circuit pause and 5/30 retry scheduling, then terminates with `ROLLBACK`.
 - `notification-dispatcher-external_test.ts`: deterministic HMAC, parser, mode, replay, renderer, privacy, safe-error and Resend-header tests with synthetic keys, a fake repository and no network.
 - provider-intake tests: verify confirmed rejection cleanup, unknown-outcome retry, no destructive cleanup, duplicate incomplete/reconciliation handling and repository outcome classification.
 - triage QA: the remote workflow runs both existing suites with `node --test`; their exact inventory is 19 + 15 = `34/34` tests.
@@ -170,6 +174,12 @@ HTTP responses and logs contain only aggregate counts, safe codes and a duration
 ## Gate boundary
 
 This candidate does not apply Migration 042, query DEV, deploy Edge Functions, configure secrets, activate rollout, define a cutoff, enable events, populate an allowlist, invoke either dispatcher, call Resend, send email, start UAT, or implement N2/N3.
+
+- Migration apply: false
+- Edge deploy: false
+- DEV reads/writes: 0 / 0
+- Resend calls: 0
+- Emails: 0
 
 ## Future deployment order
 

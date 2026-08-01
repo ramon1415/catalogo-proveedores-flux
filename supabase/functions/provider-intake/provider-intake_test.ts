@@ -1049,7 +1049,7 @@ Deno.test("duplicate completed submission returns its canonical current status",
   assertEquals(body.duplicate, true);
 });
 
-Deno.test("repository distinguishes confirmed rejection from unknown finalization outcome", async () => {
+Deno.test("repository confirms only allowlisted business finalization rejections", async () => {
   const base = {
     supabaseUrl: "https://abcdefghijklmnopqrst.supabase.co",
     serviceRoleKey: "service-role-test",
@@ -1092,6 +1092,69 @@ Deno.test("repository distinguishes confirmed rejection from unknown finalizatio
     },
   );
 
+  for (
+    const [status, body] of [
+      [400, JSON.stringify({ message: "unknown_business_code" })],
+      [
+        409,
+        JSON.stringify({
+          message: "prefix provider_intake_finalization_conflict suffix",
+        }),
+      ],
+      [
+        429,
+        JSON.stringify({ message: "provider_intake_finalization_conflict" }),
+      ],
+      [
+        502,
+        JSON.stringify({ message: "provider_intake_finalization_conflict" }),
+      ],
+      [
+        503,
+        JSON.stringify({ message: "provider_intake_finalization_conflict" }),
+      ],
+      [
+        504,
+        JSON.stringify({ message: "provider_intake_finalization_conflict" }),
+      ],
+      [400, "<html>upstream error</html>"],
+      [400, "not-json"],
+    ] as const
+  ) {
+    const ambiguous = new SupabaseIntakeRepository({
+      ...base,
+      fetchImpl: (() =>
+        Promise.resolve(new Response(body, { status }))) as typeof fetch,
+    });
+    assertEquals(
+      await ambiguous.finalizeSubmission(
+        "33333333-3333-4333-8333-333333333333",
+        0,
+        material,
+      ),
+      { kind: "RPC_OUTCOME_UNKNOWN" },
+      `ambiguous_http_status:${status}`,
+    );
+  }
+
+  let signalWasAttached = false;
+  const aborted = new SupabaseIntakeRepository({
+    ...base,
+    fetchImpl: ((_input: string | URL | Request, init?: RequestInit) => {
+      signalWasAttached = init?.signal instanceof AbortSignal;
+      return Promise.reject(new DOMException("timed out", "AbortError"));
+    }) as typeof fetch,
+  });
+  assertEquals(
+    await aborted.finalizeSubmission(
+      "33333333-3333-4333-8333-333333333333",
+      0,
+      material,
+    ),
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+  );
+  assert(signalWasAttached, "finalization_abort_signal_missing");
+
   const invalidSuccess = new SupabaseIntakeRepository({
     ...base,
     fetchImpl: (() =>
@@ -1107,6 +1170,43 @@ Deno.test("repository distinguishes confirmed rejection from unknown finalizatio
     ),
     { kind: "RPC_OUTCOME_UNKNOWN" },
   );
+});
+
+Deno.test("repository accepts only an exact official Supabase project origin", () => {
+  const valid = new SupabaseIntakeRepository({
+    supabaseUrl: "https://abcdefghijklmnopqrst.supabase.co/",
+    serviceRoleKey: "service-role-test",
+    fetchImpl: (() => Promise.reject(new Error("unused"))) as typeof fetch,
+  });
+  assert(valid instanceof SupabaseIntakeRepository);
+
+  for (
+    const invalid of [
+      "https://example.test",
+      "https://user:pass@abcdefghijklmnopqrst.supabase.co",
+      "https://abcdefghijklmnopqrst.supabase.co/rest/v1",
+      "https://abcdefghijklmnopqrst.supabase.co?key=value",
+      "https://abcdefghijklmnopqrst.supabase.co#fragment",
+      "https://abcdefghijklmnopqrst.supabase.co:443",
+      "http://abcdefghijklmnopqrst.supabase.co",
+      " https://abcdefghijklmnopqrst.supabase.co",
+      "https://abcdefghijklmnopqrst.supabase.co ",
+      "https://extra.abcdefghijklmnopqrst.supabase.co",
+    ]
+  ) {
+    let failed = false;
+    try {
+      new SupabaseIntakeRepository({
+        supabaseUrl: invalid,
+        serviceRoleKey: "service-role-test",
+        fetchImpl: (() => Promise.reject(new Error("unused"))) as typeof fetch,
+      });
+    } catch (error) {
+      failed = error instanceof Error &&
+        error.message === "invalid_configuration:SUPABASE_URL";
+    }
+    assert(failed, `supabase_url_should_fail:${invalid}`);
+  }
 });
 
 Deno.test("preflight and JSON responses include restrictive security headers", async () => {

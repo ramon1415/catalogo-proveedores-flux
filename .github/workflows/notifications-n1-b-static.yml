@@ -76,6 +76,8 @@ jobs:
               "daily_cap_reached",
               "already_sent",
               "external_sent_material_conflict",
+              "expire_stale_external_notification_events_v1",
+              "external_dispatch_window_expired",
           ]
           for token in required:
               assert token in lower, token
@@ -102,9 +104,50 @@ jobs:
           producer = definition("enqueue_provider_intake_external_notification_v1")
           assert "where r.id = 'provider-intake-v1'\n  for update" in producer
           assert "batch_size <> 1" in producer and "daily_cap <= 0" in producer
-          assert "daily_event.status in ('pending', 'processing', 'sent')" in producer
+          assert "daily_event.status = 'pending'" in producer
+          assert "daily_event.status in ('processing', 'sent')" in producer
+          assert "daily_event.created_at >= now() - interval '24 hours'" in producer
+          assert "expire_stale_external_notification_events_v1(v_rollout.id)" in producer
           assert producer.index("for update") < producer.index("insert into public.notification_events")
           assert "daily_cap_reached" in producer
+          assert producer.index("daily_cap_reached") < producer.index("v_recipient :=")
+          producer_gate_order = [
+              "for update;",
+              "v_rollout.mode not in ('test_only', 'pilot')",
+              "v_rollout.cutoff_at is null",
+              "v_source.created_at < v_rollout.cutoff_at",
+              "v_rollout.batch_size <> 1",
+              "v_rollout.daily_cap <= 0",
+              "v_event_type = any (v_rollout.enabled_event_types)",
+              "notification_external_event_mode_allowed",
+              "notification_external_payload_valid",
+              "notification_external_idempotency_valid",
+              "select count(*)::integer",
+              "v_recipient :=",
+          ]
+          assert [producer.index(token) for token in producer_gate_order] == sorted(
+              producer.index(token) for token in producer_gate_order
+          )
+          assert "'no_recipient',\n      0,\n      3,\n      null" in producer
+          assert "'no_recipient'\n    )\n    on conflict (idempotency_key) do nothing" in producer
+
+          expiry = definition("expire_stale_external_notification_events_v1")
+          claim = definition("claim_external_notification_events_for_dispatcher")
+          assert "p_rollout_id is distinct from 'provider-intake-v1'" in expiry
+          assert "status = 'cancelled'" in expiry and "status = 'pending'" in expiry
+          assert "created_at < now() - interval '24 hours'" in expiry
+          assert "last_error = 'external_dispatch_window_expired'" in expiry
+          assert "expire_stale_external_notification_events_v1(v_rollout.id)" in claim
+          assert "e.created_at >= now() - interval '24 hours'" in claim
+          assert "where r.id = 'provider-intake-v1'\n  for update" in claim
+          assert re.search(
+              r"revoke all on function public\.expire_stale_external_notification_events_v1\(text\)\s+from public, anon, authenticated, service_role",
+              lower,
+          )
+          assert re.search(
+              r"grant execute on function public\.expire_stale_external_notification_events_v1\(text\)\s+to postgres",
+              lower,
+          )
 
           finalize = definition("finalize_provider_intake_submission_v1")
           assert "v_persisted_files is distinct from v_expected_files" in finalize
@@ -138,14 +181,75 @@ jobs:
               "n1b_behavior_retry_5_minutes_failed",
               "n1b_behavior_retry_30_minutes_failed",
               "n1b_behavior_replay_ledger_failed",
+              "n1b_behavior_no_recipient_null_failed",
+              "n1b_behavior_no_recipient_invalid_failed",
+              "n1b_behavior_no_recipient_terminal_row_no_attempt_failed",
+              "n1b_behavior_no_recipient_idempotence_failed",
+              "n1b_behavior_no_recipient_disabled_failed",
+              "n1b_behavior_no_recipient_cap_precedence_failed",
+              "n1b_behavior_stale_pending_expiry_failed",
+              "n1b_behavior_stale_pending_reactivation_failed",
+              "n1b_behavior_stale_pending_capacity_failed",
+              "n1b_behavior_fresh_pending_claim_failed",
               "finalize_provider_intake_submission_v1(",
               "enqueue_provider_intake_external_notification_v1(",
               "mark_external_notification_sent(",
               "mark_external_notification_failed(",
           ]:
               assert token in contract_lower, token
+          assert "no_recipient_terminal_row_no_attempt" in contract_lower
+          assert "no_recipient" + "_no_enqueue" not in contract_lower
+          assert "alter column provider_email drop not null" in contract_lower
           assert "insert into public.profiles" in contract_lower
           assert "insert into public.payment_intake" in contract_lower
+
+          repository = Path("supabase/functions/provider-intake/repository.ts").read_text(encoding="utf-8")
+          repository_tests = Path("supabase/functions/provider-intake/provider-intake_test.ts").read_text(encoding="utf-8")
+          rejection_block = repository.split("const FINALIZATION_REJECTION_CODES", 1)[1].split("]);", 1)[0]
+          rejection_codes = set(re.findall(r'"(provider_intake_[a-z0-9_]+)"', rejection_block))
+          assert rejection_codes == {
+              "provider_intake_not_finalizable",
+              "provider_intake_finalization_fields_invalid",
+              "provider_intake_finalization_conflict",
+              "provider_intake_finalization_file_count_mismatch",
+              "provider_intake_storage_object_missing",
+              "provider_intake_upload_issue_present",
+              "provider_intake_invalid_file_metadata",
+              "provider_intake_file_metadata_conflict",
+          }
+          assert "FINALIZATION_REJECTION_CODES.has(message)" in repository
+          assert "response.status === 429 || response.status >= 500" in repository
+          assert "new AbortController()" in repository and "FINALIZE_TIMEOUT_MS = 10_000" in repository
+          assert "signal: controller.signal" in repository and "clearTimeout(timeout)" in repository
+          finalize_repository = repository.split("async finalizeSubmission", 1)[1].split("getSubmissionState", 1)[0]
+          assert "knownRpcError" not in finalize_repository
+          assert "confirmedFinalizationRejection(body)" in finalize_repository
+          assert "OFFICIAL_SUPABASE_HOST = /^[a-z0-9]{20}\\.supabase\\.co$/" in repository
+          for token in [
+              'url.protocol !== "https:"', 'url.username !== ""', 'url.password !== ""',
+              'url.port !== ""', 'url.search !== ""', 'url.hash !== ""',
+              'return url.origin', 'value !== value.trim()', 'hasExplicitPort',
+          ]:
+              assert token in repository, token
+          for token in [
+              "unknown_business_code", "status: 409", "429,", "502,", "503,", "504,",
+              'new DOMException("timed out", "AbortError")', "https://example.test",
+              "https://user:pass@abcdefghijklmnopqrst.supabase.co",
+              "https://abcdefghijklmnopqrst.supabase.co/rest/v1",
+              "https://abcdefghijklmnopqrst.supabase.co?key=value",
+              "https://abcdefghijklmnopqrst.supabase.co#fragment",
+          ]:
+              assert token in repository_tests, token
+
+          readme = Path("ops/notifications/n1-b/README.md").read_text(encoding="utf-8").lower()
+          for token in [
+              "no_recipient", "terminal ledger row", "zero delivery attempts",
+              "24 hours", "external_dispatch_window_expired", "no historical replay",
+              "429", "5xx", "rpc_outcome_unknown", "host-bound",
+              "migration apply: false", "edge deploy: false", "resend calls: 0", "emails: 0",
+          ]:
+              assert token in readme, token
+          assert "no_recipient without creating an external ledger row" not in readme
 
           config = Path("supabase/config.toml").read_text(encoding="utf-8")
           assert config.count("[functions.notification-dispatcher-external]") == 1

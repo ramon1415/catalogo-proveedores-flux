@@ -1,4 +1,4 @@
--- NOTIFICATIONS-N1-B-R1 future postcheck. Read-only and sanitized.
+-- NOTIFICATIONS-N1-B-R1-R1 future postcheck. Read-only and sanitized.
 -- Run only immediately after an separately authorized migration apply.
 
 \set ON_ERROR_STOP on
@@ -10,6 +10,9 @@ declare
   v_producer text;
   v_sent text;
   v_failed text;
+  v_claim text;
+  v_expiry text;
+  v_internal_claim text;
   v_n1a_tables integer;
   v_n1a_columns integer;
   v_n1a_indexes integer;
@@ -27,7 +30,8 @@ begin
      or to_regprocedure('public.reserve_external_notification_attempt(uuid,text)') is null
      or to_regprocedure('public.mark_external_provider_request_started(uuid,integer,text)') is null
      or to_regprocedure('public.mark_external_notification_sent(uuid,integer,text,text)') is null
-     or to_regprocedure('public.mark_external_notification_failed(uuid,integer,text,text)') is null then
+     or to_regprocedure('public.mark_external_notification_failed(uuid,integer,text,text)') is null
+     or to_regprocedure('public.expire_stale_external_notification_events_v1(text)') is null then
     raise exception 'n1b_postcheck_candidate_objects_missing';
   end if;
 
@@ -140,12 +144,31 @@ begin
      or position('for update' in v_producer) = 0
      or position('batch_size <> 1' in v_producer) = 0
      or position('daily_cap_reached' in v_producer) = 0
-     or position('daily_event.status in (''pending'', ''processing'', ''sent'')' in v_producer) = 0
+     or position('daily_event.status = ''pending''' in v_producer) = 0
+     or position('daily_event.status in (''processing'', ''sent'')' in v_producer) = 0
+     or position('expire_stale_external_notification_events_v1' in v_producer) = 0
+     or position('status = ''no_recipient''' in v_producer) = 0
+     or position('terminal_reason' in v_producer) = 0
      or position('notification_external_event_mode_allowed' in v_producer) = 0
      or position('provider_intake.correction_requested' in v_producer) = 0
      or position('manual_follow_up_required' in v_producer) = 0
      or position('proveedores' in v_producer) > 0 then
     raise exception 'n1b_postcheck_zero_backlog_or_recipient_contract_missing';
+  end if;
+
+  select lower(pg_get_functiondef(
+    'public.expire_stale_external_notification_events_v1(text)'::regprocedure
+  )) into v_expiry;
+  select lower(pg_get_functiondef(
+    'public.claim_external_notification_events_for_dispatcher(integer,text)'::regprocedure
+  )) into v_claim;
+  if position('status = ''cancelled''' in v_expiry) = 0
+     or position('status = ''pending''' in v_expiry) = 0
+     or position('interval ''24 hours''' in v_expiry) = 0
+     or position('external_dispatch_window_expired' in v_expiry) = 0
+     or position('expire_stale_external_notification_events_v1' in v_claim) = 0
+     or position('e.created_at >= now() - interval ''24 hours''' in v_claim) = 0 then
+    raise exception 'n1b_postcheck_stale_pending_replay_guard_missing';
   end if;
 
   select lower(pg_get_functiondef(
@@ -186,6 +209,16 @@ begin
        'authenticated',
        'public.provider_intake_external_transition_capability_v1()',
        'EXECUTE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.expire_stale_external_notification_events_v1(text)',
+       'EXECUTE'
+     )
+     or not has_function_privilege(
+       'service_role',
+       'public.claim_external_notification_events_for_dispatcher(integer,text)',
+       'EXECUTE'
      ) then
     raise exception 'n1b_postcheck_rpc_grants_invalid';
   end if;
@@ -205,6 +238,14 @@ begin
 
   if not public.provider_intake_external_transition_capability_v1() then
     raise exception 'n1b_postcheck_ui_capability_missing';
+  end if;
+
+  select lower(pg_get_functiondef(
+    'public.claim_notification_events_for_dispatcher(integer,text)'::regprocedure
+  )) into v_internal_claim;
+  if position('audience = ''internal''' in v_internal_claim) = 0
+     or position('audience = ''external''' in v_internal_claim) > 0 then
+    raise exception 'n1b_postcheck_internal_claim_lane_changed';
   end if;
 
   if exists (

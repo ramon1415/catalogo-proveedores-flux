@@ -1,4 +1,4 @@
--- NOTIFICATIONS-N1-B-R1 precheck. Read-only and sanitized.
+-- NOTIFICATIONS-N1-B-R1-R1 precheck. Read-only and sanitized.
 -- Run only in a separately authorized apply gate; this candidate gate does not run SQL.
 
 \set ON_ERROR_STOP on
@@ -138,7 +138,8 @@ begin
      or to_regprocedure('public.reserve_external_notification_attempt(uuid,text)') is not null
      or to_regprocedure('public.mark_external_provider_request_started(uuid,integer,text)') is not null
      or to_regprocedure('public.mark_external_notification_sent(uuid,integer,text,text)') is not null
-     or to_regprocedure('public.mark_external_notification_failed(uuid,integer,text,text)') is not null then
+     or to_regprocedure('public.mark_external_notification_failed(uuid,integer,text,text)') is not null
+     or to_regprocedure('public.expire_stale_external_notification_events_v1(text)') is not null then
     raise exception 'n1b_precheck_candidate_object_collision';
   end if;
 

@@ -51,9 +51,46 @@ begin
      ) is not null
      or to_regprocedure(
        'public.mark_external_notification_failed(uuid,integer,text,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.expire_stale_external_notification_events_v1(text)'
      ) is not null then
     raise exception 'notifications_n1_b_object_collision';
   end if;
+end
+$$;
+
+create function public.expire_stale_external_notification_events_v1(
+  p_rollout_id text
+)
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_expired integer;
+begin
+  if p_rollout_id is distinct from 'provider-intake-v1' then
+    raise exception 'external_rollout_invalid';
+  end if;
+
+  update public.notification_events
+     set status = 'cancelled',
+         processed_at = now(),
+         next_attempt_at = null,
+         locked_at = null,
+         locked_by = null,
+         last_error = 'external_dispatch_window_expired',
+         updated_at = now()
+   where rollout_id = p_rollout_id
+     and audience = 'external'
+     and status = 'pending'
+     and created_at < now() - interval '24 hours';
+
+  get diagnostics v_expired = row_count;
+  return v_expired;
 end
 $$;
 
@@ -98,40 +135,6 @@ begin
     raise exception 'external_source_event_not_found';
   end if;
 
-  v_event_type := case v_source.event_type
-    when 'submission_completed' then 'provider_intake.received'
-    when 'correction_requested' then 'provider_intake.correction_requested'
-    when 'rejected' then 'provider_intake.rejected'
-    else null
-  end;
-
-  if v_event_type is null then
-    return jsonb_build_object('result', 'event_not_enabled');
-  end if;
-
-  if v_event_type = 'provider_intake.received'
-     and v_source.submission_completed_at is null then
-    raise exception 'external_received_requires_submission_completed';
-  end if;
-
-  if v_event_type = 'provider_intake.correction_requested'
-     and exists (
-       select 1
-       from public.payment_intake_events earlier
-       where earlier.payment_intake_id = v_source.payment_intake_id
-         and earlier.event_type = 'correction_requested'
-         and earlier.id <> v_source.id
-         and (earlier.created_at, earlier.id) < (v_source.created_at, v_source.id)
-     ) then
-    return jsonb_build_object('result', 'manual_follow_up_required');
-  end if;
-
-  v_key := format(
-    'external:%s:%s:v1',
-    v_event_type,
-    v_source.payment_intake_id
-  );
-
   select r.*
     into v_rollout
   from public.notification_external_rollouts r
@@ -158,6 +161,17 @@ begin
     return jsonb_build_object('result', 'daily_cap_reached');
   end if;
 
+  v_event_type := case v_source.event_type
+    when 'submission_completed' then 'provider_intake.received'
+    when 'correction_requested' then 'provider_intake.correction_requested'
+    when 'rejected' then 'provider_intake.rejected'
+    else null
+  end;
+
+  if v_event_type is null then
+    return jsonb_build_object('result', 'event_not_enabled');
+  end if;
+
   if not (v_event_type = any (v_rollout.enabled_event_types))
      or not public.notification_external_event_mode_allowed(
        v_event_type,
@@ -165,6 +179,29 @@ begin
      ) then
     return jsonb_build_object('result', 'event_not_enabled');
   end if;
+
+  if v_event_type = 'provider_intake.received'
+     and v_source.submission_completed_at is null then
+    raise exception 'external_received_requires_submission_completed';
+  end if;
+
+  if v_event_type = 'provider_intake.correction_requested'
+     and exists (
+       select 1
+       from public.payment_intake_events earlier
+       where earlier.payment_intake_id = v_source.payment_intake_id
+         and earlier.event_type = 'correction_requested'
+         and earlier.id <> v_source.id
+         and (earlier.created_at, earlier.id) < (v_source.created_at, v_source.id)
+     ) then
+    return jsonb_build_object('result', 'manual_follow_up_required');
+  end if;
+
+  v_key := format(
+    'external:%s:%s:v1',
+    v_event_type,
+    v_source.payment_intake_id
+  );
 
   v_payload := jsonb_build_object(
     'event_version', 1,
@@ -209,19 +246,7 @@ begin
     return jsonb_build_object('result', 'already_exists');
   end if;
 
-  v_recipient := lower(btrim(v_source.provider_email));
-  if v_recipient is null
-     or v_recipient !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
-    return jsonb_build_object('result', 'no_recipient');
-  end if;
-
-  v_recipient_hash := encode(
-    extensions.digest(convert_to(v_recipient, 'UTF8'), 'sha256'),
-    'hex'
-  );
-  if not (v_recipient_hash = any (v_rollout.recipient_allowlist_hashes)) then
-    return jsonb_build_object('result', 'recipient_not_allowlisted');
-  end if;
+  perform public.expire_stale_external_notification_events_v1(v_rollout.id);
 
   v_day_start := date_trunc(
     'day',
@@ -233,18 +258,87 @@ begin
   from public.notification_events daily_event
   where daily_event.audience = 'external'
     and daily_event.rollout_id = v_rollout.id
-    and daily_event.status in ('pending', 'processing', 'sent')
     and (
-      daily_event.status = 'pending'
-      or coalesce(
-        daily_event.processed_at,
-        daily_event.last_attempt_at,
-        daily_event.created_at
-      ) >= v_day_start
+      (
+        daily_event.status = 'pending'
+        and daily_event.created_at >= now() - interval '24 hours'
+      )
+      or (
+        daily_event.status in ('processing', 'sent')
+        and coalesce(
+          daily_event.processed_at,
+          daily_event.last_attempt_at,
+          daily_event.created_at
+        ) >= v_day_start
+      )
     );
 
   if v_daily_count >= v_rollout.daily_cap then
     return jsonb_build_object('result', 'daily_cap_reached');
+  end if;
+
+  v_recipient := lower(btrim(v_source.provider_email));
+  if v_recipient is null
+     or v_recipient !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+    insert into public.notification_events (
+      event_type,
+      source_table,
+      source_id,
+      source_folio,
+      recipient_type,
+      recipient_email,
+      channel,
+      priority,
+      subject,
+      payload,
+      idempotency_key,
+      status,
+      attempt_count,
+      max_attempts,
+      next_attempt_at,
+      audience,
+      event_version,
+      rollout_id,
+      external_subject_type,
+      external_subject_id,
+      terminal_reason
+    ) values (
+      v_event_type,
+      'payment_intake_events',
+      v_source.id,
+      v_source.public_folio,
+      'external_provider',
+      null,
+      'email',
+      'normal',
+      null,
+      v_payload,
+      v_key,
+      'no_recipient',
+      0,
+      3,
+      null,
+      'external',
+      1,
+      v_rollout.id,
+      'payment_intake',
+      v_source.payment_intake_id,
+      'no_recipient'
+    )
+    on conflict (idempotency_key) do nothing;
+
+    if not found then
+      return jsonb_build_object('result', 'already_exists');
+    end if;
+    return jsonb_build_object('result', 'no_recipient');
+  end if;
+
+  v_recipient_hash := encode(
+    extensions.digest(convert_to(v_recipient, 'UTF8'), 'sha256'),
+    'hex'
+  );
+  if not (v_recipient_hash = any (v_rollout.recipient_allowlist_hashes)) then
+    return jsonb_build_object('result', 'recipient_not_allowlisted');
   end if;
 
   insert into public.notification_events (
@@ -299,6 +393,157 @@ begin
   end if;
 
   return jsonb_build_object('result', 'enqueued');
+end
+$$;
+
+create or replace function public.claim_external_notification_events_for_dispatcher(
+  p_limit integer default 1,
+  p_worker_id text default 'external-notification-dispatcher'
+)
+returns table (
+  id uuid,
+  event_type text,
+  source_table text,
+  source_id uuid,
+  source_folio text,
+  recipient_type text,
+  recipient_profile_id uuid,
+  recipient_email text,
+  channel text,
+  priority text,
+  subject text,
+  payload jsonb,
+  attempt_count integer
+)
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_limit integer := least(greatest(coalesce(p_limit, 1), 1), 1);
+  v_worker_id text := left(
+    coalesce(nullif(btrim(p_worker_id), ''), 'external-notification-dispatcher'),
+    120
+  );
+  v_rollout public.notification_external_rollouts%rowtype;
+  v_daily_count integer;
+begin
+  select r.*
+    into v_rollout
+  from public.notification_external_rollouts r
+  where r.id = 'provider-intake-v1'
+  for update;
+
+  if not found
+     or v_rollout.mode not in ('test_only', 'pilot')
+     or v_rollout.cutoff_at is null
+     or cardinality(v_rollout.enabled_event_types) = 0
+     or cardinality(v_rollout.recipient_allowlist_hashes) = 0
+     or v_rollout.batch_size <> 1
+     or v_rollout.daily_cap <= 0 then
+    return;
+  end if;
+
+  perform public.expire_stale_external_notification_events_v1(v_rollout.id);
+
+  select count(*)::integer
+    into v_daily_count
+  from public.notification_events daily_event
+  where daily_event.audience = 'external'
+    and daily_event.rollout_id = v_rollout.id
+    and daily_event.status in ('processing', 'sent')
+    and coalesce(
+      daily_event.processed_at,
+      daily_event.last_attempt_at,
+      daily_event.created_at
+    ) >= (
+      date_trunc(
+        'day',
+        now() at time zone 'America/Mexico_City'
+      ) at time zone 'America/Mexico_City'
+    );
+
+  if v_daily_count >= v_rollout.daily_cap then
+    return;
+  end if;
+
+  return query
+  with candidate as (
+    select e.id
+    from public.notification_events e
+    join public.payment_intake_events pie on pie.id = e.source_id
+    where e.rollout_id = v_rollout.id
+      and e.audience = 'external'
+      and e.status = 'pending'
+      and e.event_type in (
+        'provider_intake.received',
+        'provider_intake.correction_requested',
+        'provider_intake.rejected'
+      )
+      and public.notification_external_event_mode_allowed(
+        e.event_type,
+        v_rollout.mode
+      )
+      and e.event_type = any (v_rollout.enabled_event_types)
+      and e.created_at >= v_rollout.cutoff_at
+      and e.created_at >= now() - interval '24 hours'
+      and pie.created_at >= v_rollout.cutoff_at
+      and coalesce(e.next_attempt_at, now()) <= now()
+      and e.attempt_count < e.max_attempts
+      and e.max_attempts = 3
+      and e.recipient_email = lower(btrim(e.recipient_email))
+      and e.recipient_email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
+      and encode(
+        extensions.digest(
+          convert_to(lower(btrim(e.recipient_email)), 'UTF8'),
+          'sha256'
+        ),
+        'hex'
+      ) = any (v_rollout.recipient_allowlist_hashes)
+    order by e.created_at, e.id
+    for update of e skip locked
+    limit v_limit
+  ),
+  claimed as (
+    update public.notification_events e
+       set status = 'processing',
+           locked_at = now(),
+           locked_by = v_worker_id,
+           last_attempt_at = now(),
+           updated_at = now()
+      from candidate c
+     where e.id = c.id
+     returning
+       e.id,
+       e.event_type,
+       e.source_table,
+       e.source_id,
+       e.source_folio,
+       e.recipient_type,
+       e.recipient_profile_id,
+       e.recipient_email,
+       e.channel,
+       e.priority,
+       e.subject,
+       e.payload,
+       e.attempt_count
+  )
+  select
+    claimed.id,
+    claimed.event_type,
+    claimed.source_table,
+    claimed.source_id,
+    claimed.source_folio,
+    claimed.recipient_type,
+    claimed.recipient_profile_id,
+    claimed.recipient_email,
+    claimed.channel,
+    claimed.priority,
+    claimed.subject,
+    claimed.payload,
+    claimed.attempt_count
+  from claimed
+  order by claimed.id;
 end
 $$;
 
@@ -1429,6 +1674,10 @@ revoke all on function public.mark_external_notification_sent(uuid, integer, tex
   from public, anon, authenticated, service_role;
 revoke all on function public.mark_external_notification_failed(uuid, integer, text, text)
   from public, anon, authenticated, service_role;
+revoke all on function public.expire_stale_external_notification_events_v1(text)
+  from public, anon, authenticated, service_role;
+revoke all on function public.claim_external_notification_events_for_dispatcher(integer, text)
+  from public, anon, authenticated, service_role;
 
 grant execute on function public.finalize_provider_intake_submission_v1(uuid, smallint, jsonb)
   to service_role;
@@ -1452,13 +1701,19 @@ grant execute on function public.mark_external_notification_sent(uuid, integer, 
   to service_role;
 grant execute on function public.mark_external_notification_failed(uuid, integer, text, text)
   to service_role;
+grant execute on function public.claim_external_notification_events_for_dispatcher(integer, text)
+  to service_role;
 grant execute on function public.enqueue_provider_intake_external_notification_v1(uuid)
+  to postgres;
+grant execute on function public.expire_stale_external_notification_events_v1(text)
   to postgres;
 
 comment on table public.notification_external_dispatch_invocations is
   'HMAC replay ledger. It stores no signature, secret, request body, recipient or payload.';
 comment on function public.enqueue_provider_intake_external_notification_v1(uuid) is
-  'Explicit N1 producer with cutoff, event, mode and recipient allowlist gates for one supplied source event.';
+  'Explicit N1 producer with locked rollout/cap gates, terminal no-recipient ledger rows and 24-hour pending expiry.';
+comment on function public.expire_stale_external_notification_events_v1(text) is
+  'Owner-only 24-hour expiry for pending external events; no attempts, replay or deletes.';
 comment on function public.finalize_provider_intake_submission_v1(uuid, smallint, jsonb) is
   'Service-only atomic file attachment, submission completion and conditional received producer.';
 comment on function public.provider_intake_submission_state_v1(uuid) is

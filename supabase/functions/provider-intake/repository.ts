@@ -15,12 +15,44 @@ type RepositoryOptions = {
   fetchImpl?: typeof fetch;
 };
 
+const FINALIZE_TIMEOUT_MS = 10_000;
+const OFFICIAL_SUPABASE_HOST = /^[a-z0-9]{20}\.supabase\.co$/;
+const FINALIZATION_REJECTION_CODES = new Set([
+  "provider_intake_not_finalizable",
+  "provider_intake_finalization_fields_invalid",
+  "provider_intake_finalization_conflict",
+  "provider_intake_finalization_file_count_mismatch",
+  "provider_intake_storage_object_missing",
+  "provider_intake_upload_issue_present",
+  "provider_intake_invalid_file_metadata",
+  "provider_intake_file_metadata_conflict",
+]);
+
 function safeBaseUrl(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "https:") {
+  if (!value || value !== value.trim()) {
     throw new Error("invalid_configuration:SUPABASE_URL");
   }
-  return url.toString().replace(/\/$/, "");
+  const hasExplicitPort = /^https:\/\/[^/?#]+:\d+(?:[/?#]|$)/.test(value);
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.port !== "" ||
+    hasExplicitPort ||
+    (url.pathname !== "" && url.pathname !== "/") ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    !OFFICIAL_SUPABASE_HOST.test(url.hostname)
+  ) {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
+  return url.origin;
 }
 
 function knownRpcError(message: string): string {
@@ -67,17 +99,26 @@ function confirmedFinalizationResult(
     notifications.includes(String(result.notification));
 }
 
+function confirmedFinalizationRejection(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const message = (value as Record<string, unknown>).message;
+  return typeof message === "string" &&
+      FINALIZATION_REJECTION_CODES.has(message)
+    ? message
+    : null;
+}
+
 export class SupabaseIntakeRepository implements IntakeRepository {
   private readonly options: RepositoryOptions;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: RepositoryOptions) {
-    this.options = options;
     this.baseUrl = safeBaseUrl(options.supabaseUrl);
     if (!options.serviceRoleKey.trim()) {
       throw new Error("missing_required_secret:SUPABASE_SERVICE_ROLE_KEY");
     }
+    this.options = options;
     this.fetchImpl = options.fetchImpl || fetch;
   }
 
@@ -168,9 +209,10 @@ export class SupabaseIntakeRepository implements IntakeRepository {
     expectedFileCount: number,
     files: StoredFileMetadata[],
   ): Promise<FinalizeSubmissionOutcome> {
-    let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FINALIZE_TIMEOUT_MS);
     try {
-      response = await this.fetchImpl(
+      const response = await this.fetchImpl(
         `${this.baseUrl}/rest/v1/rpc/finalize_provider_intake_submission_v1`,
         {
           method: "POST",
@@ -180,33 +222,33 @@ export class SupabaseIntakeRepository implements IntakeRepository {
             p_expected_file_count: expectedFileCount,
             p_files: files,
           }),
+          signal: controller.signal,
         },
       );
-    } catch {
-      return { kind: "RPC_OUTCOME_UNKNOWN" };
-    }
 
-    if (!response.ok) {
-      let message = "";
-      try {
-        const parsed = await response.json() as { message?: string };
-        message = parsed.message || "";
-      } catch {
-        message = "";
+      if (!response.ok) {
+        if (response.status === 429 || response.status >= 500) {
+          return { kind: "RPC_OUTCOME_UNKNOWN" };
+        }
+        const body = await response.json();
+        const safeCode = confirmedFinalizationRejection(body);
+        if (!safeCode) {
+          return { kind: "RPC_OUTCOME_UNKNOWN" };
+        }
+        return {
+          kind: "RPC_REJECTED_CONFIRMED",
+          safeCode,
+        };
       }
-      return {
-        kind: "RPC_REJECTED_CONFIRMED",
-        safeCode: knownRpcError(message),
-      };
-    }
 
-    try {
       const result = await response.json();
       return confirmedFinalizationResult(result)
         ? { kind: "RPC_COMPLETED_CONFIRMED", result }
         : { kind: "RPC_OUTCOME_UNKNOWN" };
     } catch {
       return { kind: "RPC_OUTCOME_UNKNOWN" };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

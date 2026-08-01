@@ -22,6 +22,9 @@ declare
   v_sent text;
   v_failed text;
   v_register text;
+  v_claim text;
+  v_expiry text;
+  v_internal_claim text;
 begin
   select lower(pg_get_functiondef('public.enqueue_provider_intake_external_notification_v1(uuid)'::regprocedure)) into v_producer;
   select lower(pg_get_functiondef('public.finalize_provider_intake_submission_v1(uuid,smallint,jsonb)'::regprocedure)) into v_finalize;
@@ -32,6 +35,9 @@ begin
   select lower(pg_get_functiondef('public.mark_external_notification_sent(uuid,integer,text,text)'::regprocedure)) into v_sent;
   select lower(pg_get_functiondef('public.mark_external_notification_failed(uuid,integer,text,text)'::regprocedure)) into v_failed;
   select lower(pg_get_functiondef('public.register_external_notification_dispatch_invocation(text,text,text,timestamptz)'::regprocedure)) into v_register;
+  select lower(pg_get_functiondef('public.claim_external_notification_events_for_dispatcher(integer,text)'::regprocedure)) into v_claim;
+  select lower(pg_get_functiondef('public.expire_stale_external_notification_events_v1(text)'::regprocedure)) into v_expiry;
+  select lower(pg_get_functiondef('public.claim_notification_events_for_dispatcher(integer,text)'::regprocedure)) into v_internal_claim;
 
   if position('rollout_disabled' in v_producer) = 0
      or position('paused' in v_producer) = 0
@@ -40,11 +46,28 @@ begin
      or position('enabled_event_types' in v_producer) = 0
      or position('recipient_allowlist_hashes' in v_producer) = 0
      or position('no_recipient' in v_producer) = 0
+     or position('''no_recipient''' in v_producer) = 0
+     or position('expire_stale_external_notification_events_v1' in v_producer) = 0
+     or position('interval ''24 hours''' in v_producer) = 0
      or position('manual_follow_up_required' in v_producer) = 0
      or position('provider_matched' in v_producer) > 0
      or position('internal_note' in v_producer) > 0
      or position('proveedores' in v_producer) > 0 then
     raise exception 'N1B_DOMAIN_PRODUCER_CONTRACT_FAILED';
+  end if;
+
+  if position('status = ''cancelled''' in v_expiry) = 0
+     or position('status = ''pending''' in v_expiry) = 0
+     or position('interval ''24 hours''' in v_expiry) = 0
+     or position('external_dispatch_window_expired' in v_expiry) = 0
+     or position('expire_stale_external_notification_events_v1' in v_claim) = 0
+     or position('e.created_at >= now() - interval ''24 hours''' in v_claim) = 0 then
+    raise exception 'N1B_STALE_PENDING_EXPIRY_CONTRACT_FAILED';
+  end if;
+
+  if position('audience = ''internal''' in v_internal_claim) = 0
+     or position('audience = ''external''' in v_internal_claim) > 0 then
+    raise exception 'N1B_INTERNAL_LANE_CONTRACT_FAILED';
   end if;
 
   if position('for update of pi' in v_finalize) = 0
@@ -100,6 +123,14 @@ $$;
 
 -- The following fixtures exercise the real functions. All rows are synthetic and
 -- the terminal ROLLBACK guarantees zero persistent delta.
+-- The source schema normally enforces a valid non-null email. This disposable-only
+-- relaxation creates impossible legacy inputs so the terminal no-recipient guard is
+-- executable; both DDL changes are reverted by the terminal ROLLBACK.
+alter table public.payment_intake
+  drop constraint payment_intake_provider_email_check;
+alter table public.payment_intake
+  alter column provider_email drop not null;
+
 insert into public.profiles (id, full_name, email)
 values (
   '10000000-0000-4000-8000-000000000001',
@@ -159,6 +190,41 @@ insert into public.payment_intake (
     '10000000-0000-4000-8000-000000000002', 'received',
     'Proveedor Contractual', 'contract-provider@example.invalid',
     'Prueba N1-B 4', 1, 'MXN', repeat('d', 64), repeat('4', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000105', 'INT-2099-000105',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor sin destinatario', null,
+    'Prueba N1-B 5', 1, 'MXN', repeat('e', 64), repeat('5', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000106', 'INT-2099-000106',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor destinatario invalido', 'invalid-recipient',
+    'Prueba N1-B 6', 1, 'MXN', repeat('f', 64), repeat('6', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000107', 'INT-2099-000107',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor cap sin destinatario', null,
+    'Prueba N1-B 7', 1, 'MXN', repeat('1', 63) || '7', repeat('7', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000108', 'INT-2099-000108',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor stale', 'contract-provider@example.invalid',
+    'Prueba N1-B 8', 1, 'MXN', repeat('2', 63) || '8', repeat('8', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000109', 'INT-2099-000109',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor fresco', 'contract-provider@example.invalid',
+    'Prueba N1-B 9', 1, 'MXN', repeat('3', 63) || '9', repeat('9', 64)
   );
 
 do $$
@@ -169,7 +235,12 @@ begin
   foreach v_intake_id in array array[
     '10000000-0000-4000-8000-000000000101'::uuid,
     '10000000-0000-4000-8000-000000000102'::uuid,
-    '10000000-0000-4000-8000-000000000103'::uuid
+    '10000000-0000-4000-8000-000000000103'::uuid,
+    '10000000-0000-4000-8000-000000000105'::uuid,
+    '10000000-0000-4000-8000-000000000106'::uuid,
+    '10000000-0000-4000-8000-000000000107'::uuid,
+    '10000000-0000-4000-8000-000000000108'::uuid,
+    '10000000-0000-4000-8000-000000000109'::uuid
   ] loop
     v_result := public.finalize_provider_intake_submission_v1(
       v_intake_id, 0::smallint, '[]'::jsonb
@@ -395,6 +466,210 @@ $$;
 
 do $$
 declare
+  v_source_null uuid;
+  v_source_invalid uuid;
+  v_source_cap uuid;
+  v_source_stale uuid;
+  v_source_fresh uuid;
+  v_stale_event_id uuid;
+  v_fresh_event_id uuid;
+  v_result jsonb;
+  v_source_created_at timestamptz;
+  v_source_folio text;
+begin
+  select id into strict v_source_null from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000105'
+    and event_type = 'submission_completed';
+  select id into strict v_source_invalid from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000106'
+    and event_type = 'submission_completed';
+  select id into strict v_source_cap from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000107'
+    and event_type = 'submission_completed';
+  select id, created_at into strict v_source_stale, v_source_created_at
+  from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000108'
+    and event_type = 'submission_completed';
+  select id into strict v_source_fresh from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000109'
+    and event_type = 'submission_completed';
+
+  update public.notification_external_rollouts
+     set mode = 'test_only',
+         cutoff_at = now() - interval '2 hours',
+         enabled_event_types = array['provider_intake.received']::text[],
+         recipient_allowlist_hashes = array[
+           encode(extensions.digest(
+             convert_to('contract-provider@example.invalid', 'UTF8'),
+             'sha256'
+           ), 'hex')
+         ]::text[],
+         batch_size = 1,
+         daily_cap = 10
+   where id = 'provider-intake-v1';
+
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_null);
+  if v_result ->> 'result' <> 'no_recipient' then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_NULL_FAILED';
+  end if;
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_null);
+  if v_result ->> 'result' <> 'already_exists' then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_IDEMPOTENCE_FAILED';
+  end if;
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_invalid);
+  if v_result ->> 'result' <> 'no_recipient' then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_INVALID_FAILED';
+  end if;
+
+  if (select count(*) from public.notification_events
+      where audience = 'external'
+        and external_subject_id in (
+          '10000000-0000-4000-8000-000000000105',
+          '10000000-0000-4000-8000-000000000106'
+        )
+        and status = 'no_recipient'
+        and terminal_reason = 'no_recipient'
+        and recipient_type = 'external_provider'
+        and recipient_email is null
+        and attempt_count = 0
+        and max_attempts = 3
+        and next_attempt_at is null
+        and locked_at is null
+        and locked_by is null
+        and processed_at is null
+        and subject is null) <> 2
+     or exists (
+       select 1 from public.notification_delivery_attempts a
+       join public.notification_events e on e.id = a.notification_event_id
+       where e.external_subject_id in (
+         '10000000-0000-4000-8000-000000000105',
+         '10000000-0000-4000-8000-000000000106'
+       )
+     )
+     or exists (
+       select 1 from public.claim_external_notification_events_for_dispatcher(
+         1, 'external-notification-dispatcher-v1'
+       )
+     ) then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_TERMINAL_ROW_NO_ATTEMPT_FAILED';
+  end if;
+
+  update public.notification_external_rollouts
+     set mode = 'disabled'
+   where id = 'provider-intake-v1';
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_cap);
+  if v_result ->> 'result' <> 'rollout_disabled'
+     or exists (select 1 from public.notification_events where source_id = v_source_cap) then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_DISABLED_FAILED';
+  end if;
+
+  update public.notification_external_rollouts
+     set mode = 'test_only', daily_cap = 2
+   where id = 'provider-intake-v1';
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_cap);
+  if v_result ->> 'result' <> 'daily_cap_reached'
+     or exists (select 1 from public.notification_events where source_id = v_source_cap) then
+    raise exception 'N1B_BEHAVIOR_NO_RECIPIENT_CAP_PRECEDENCE_FAILED';
+  end if;
+
+  select public_folio into strict v_source_folio
+  from public.payment_intake
+  where id = '10000000-0000-4000-8000-000000000108';
+  insert into public.notification_events (
+    event_type, source_table, source_id, source_folio, recipient_type,
+    recipient_email, channel, priority, subject, payload, idempotency_key,
+    status, attempt_count, max_attempts, next_attempt_at, audience,
+    event_version, rollout_id, external_subject_type, external_subject_id,
+    terminal_reason, created_at
+  ) values (
+    'provider_intake.received', 'payment_intake_events', v_source_stale,
+    v_source_folio, 'external_provider', 'contract-provider@example.invalid',
+    'email', 'normal', null,
+    jsonb_build_object(
+      'event_version', 1, 'template_version', 1, 'locale', 'es-MX',
+      'public_folio', v_source_folio,
+      'occurred_on', to_char(
+        v_source_created_at at time zone 'America/Mexico_City', 'YYYY-MM-DD'
+      )
+    ),
+    'external:provider_intake.received:10000000-0000-4000-8000-000000000108:v1',
+    'pending', 0, 3, now() - interval '25 hours', 'external', 1,
+    'provider-intake-v1', 'payment_intake',
+    '10000000-0000-4000-8000-000000000108', null,
+    now() - interval '25 hours'
+  ) returning id into v_stale_event_id;
+
+  update public.notification_external_rollouts
+     set daily_cap = 3
+   where id = 'provider-intake-v1';
+  if exists (
+       select 1 from public.claim_external_notification_events_for_dispatcher(
+         1, 'external-notification-dispatcher-v1'
+       )
+     )
+     or not exists (
+       select 1 from public.notification_events
+       where id = v_stale_event_id
+         and status = 'cancelled'
+         and processed_at is not null
+         and next_attempt_at is null
+         and locked_at is null
+         and locked_by is null
+         and last_error = 'external_dispatch_window_expired'
+         and attempt_count = 0
+     )
+     or exists (
+       select 1 from public.notification_delivery_attempts
+       where notification_event_id = v_stale_event_id
+     ) then
+    raise exception 'N1B_BEHAVIOR_STALE_PENDING_EXPIRY_FAILED';
+  end if;
+
+  update public.notification_external_rollouts
+     set mode = 'disabled'
+   where id = 'provider-intake-v1';
+  if exists (
+    select 1 from public.claim_external_notification_events_for_dispatcher(
+      1, 'external-notification-dispatcher-v1'
+    )
+  ) then
+    raise exception 'N1B_BEHAVIOR_STALE_PENDING_DISABLED_CLAIM_FAILED';
+  end if;
+  update public.notification_external_rollouts
+     set mode = 'test_only'
+   where id = 'provider-intake-v1';
+  if exists (
+       select 1 from public.claim_external_notification_events_for_dispatcher(
+         1, 'external-notification-dispatcher-v1'
+       )
+     )
+     or (select status from public.notification_events
+         where id = v_stale_event_id) <> 'cancelled' then
+    raise exception 'N1B_BEHAVIOR_STALE_PENDING_REACTIVATION_FAILED';
+  end if;
+
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_fresh);
+  if v_result ->> 'result' <> 'enqueued' then
+    raise exception 'N1B_BEHAVIOR_STALE_PENDING_CAPACITY_FAILED';
+  end if;
+  select id into strict v_fresh_event_id
+  from public.claim_external_notification_events_for_dispatcher(
+    1, 'external-notification-dispatcher-v1'
+  );
+  if not exists (
+    select 1 from public.notification_events
+    where id = v_fresh_event_id
+      and source_id = v_source_fresh
+      and status = 'processing'
+      and created_at >= now() - interval '24 hours'
+  ) then
+    raise exception 'N1B_BEHAVIOR_FRESH_PENDING_CLAIM_FAILED';
+  end if;
+end
+$$;
+
+do $$
+declare
   v_registered text;
   v_replay text;
 begin
@@ -421,8 +696,13 @@ begin
      )
      or has_table_privilege(
        'service_role', 'public.notification_external_dispatch_invocations', 'DELETE'
+     )
+     or has_function_privilege(
+       'service_role',
+       'public.expire_stale_external_notification_events_v1(text)',
+       'EXECUTE'
      ) then
-    raise exception 'N1B_BEHAVIOR_REPLAY_DIRECT_GRANT_FAILED';
+    raise exception 'N1B_BEHAVIOR_REPLAY_OR_EXPIRY_GRANT_FAILED';
   end if;
   if not public.provider_intake_external_transition_capability_v1() then
     raise exception 'N1B_BEHAVIOR_UI_CAPABILITY_FAILED';
@@ -442,7 +722,7 @@ insert into n1b_contract_results (test_number, test_name, status) values
   (9,  'correction_maximum_one', 'PASS'),
   (10, 'second_correction_manual_follow_up', 'PASS'),
   (11, 'rejected_maximum_one', 'PASS'),
-  (12, 'no_recipient_no_enqueue', 'PASS'),
+  (12, 'no_recipient_terminal_row_no_attempt', 'PASS'),
   (13, 'provider_matched_never_enqueues', 'PASS'),
   (14, 'internal_note_never_enqueues', 'PASS'),
   (15, 'no_backfill', 'PASS'),
