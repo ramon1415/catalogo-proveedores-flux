@@ -1,188 +1,130 @@
-# Notifications N1-B — reconciled disabled external intake runtime candidate
+# Notifications N1-B release candidate path
 
-Status: reconciled candidate only. This directory documents `NOTIFICATIONS-N1-B-R1-R1`; it does not authorize applying SQL, running a live dry-run, deploying an Edge Function, changing secrets, invoking a dispatcher or sending email.
+Status: `IN_DEVELOPMENT`. This slice prepares a disabled external notification path and its DEV/UAT/PROD release plan. It does not authorize a merge, a DEV apply, an Edge deployment, UAT, a rollout change, Resend, email, or PROD activity.
 
-R1-R1 restores the terminal `no_recipient` ledger contract, expires stale pending work after 24 hours, treats ambiguous finalization HTTP responses as `RPC_OUTCOME_UNKNOWN`, and makes the provider-intake Supabase URL host-bound before a service-role key can be attached.
+## Product outcome
 
-## Certified baseline
+N1-B adds an explicit, isolated external path for two provider-intake facts:
 
-- `dev`: `8aab86b85255957b899556327b0f93eb2c093df0`
-- `main`: `85ec304ba45b9e0531e2cbd1437ba620c7e2ea24`
-- PR #282: merged
-- PR #284: merged
-- PR #285: merged
-- N1-A certification: run `30677188504`, attempt 1, `55/55 PASS`
-- N1-A artifact: `8810896652`
-- N1-A artifact digest: `sha256:2d5c9c09a64e72b15ed9359132160f2db90780959cffa0f988a072bda0b06f32`
-- Migration 041: applied once and unchanged
-- N1-A object contract: 38 objects
-- external events: 0
-- external producers: 0 before this candidate
-- rollout: `disabled`
-- cutoff: `NULL`
-- enabled events: 0
-- recipient allowlist: 0
-- daily cap: 0
-- Resend calls in this gate: 0
-- emails in this gate: 0
+- `provider_intake.received` after atomic submission completion;
+- `provider_intake.rejected` after an authenticated triage transition.
 
-Migration `042_notifications_n1_b_external_runtime.sql` is the next number that is actually free across `dev` and open PRs. Open PR #283 already introduces a different `041`, so this candidate does not reuse that number.
+`provider_intake.correction_requested` remains `test_only` and blocked from pilot until N2. `provider_matched` remains internal. The PR alone cannot enable email: rollout defaults to `disabled`, cutoff is null, event types and recipient hashes are empty, daily cap is zero, and batch size is one.
 
-## Surface inventory
+The external dispatcher is separate from the internal dispatcher. It is POST-only, HMAC-authenticated, replay-protected, idempotent at the provider boundary, has no CORS path and sends no attachments. n8n remains retired.
 
-Provider intake uses the existing handler, repository, types and unit-test files. Uploads create the intake, write private Storage objects and then call `finalize_provider_intake_submission_v1`. The repository classifies finalization as confirmed completed, confirmed rejected or outcome unknown. Cleanup is permitted only after a confirmed rejection; an unknown result is retried once with identical material and never deletes Storage or marks an upload issue automatically. CAPTCHA, CORS, validation and file-limit sources are unchanged.
+## User value and release slice
 
-The real triage client is `provider_intakes.html` plus `provider_intakes.js`. It is the only application caller of `transition_provider_intake` in scope. A read-only capability RPC makes the UI fail closed across deployment order: before Migration 042 it retains the legacy internal behavior and hides external fields; after the capability is visible it routes correction/rejection through `transition_provider_intake_external_v1`. External copy is never copied into internal notes as a fallback.
+Release slice: `NOTIFICATIONS-N1-INTAKE-EMAILS`.
 
-Migration 041 already provides the external lane, payload and idempotency validators, rollout table, external claim, recovery isolation, delivery-attempt columns, RLS and grants. The internal dispatcher source is byte-identical to the baseline and continues to claim only `audience='internal'`.
+The provider can eventually receive timely confirmation without manual Finance follow-up. Finance can reduce repetitive status emails while retaining a terminal ledger for missing or invalid recipients.
 
-The new dispatcher is independent and lives in `supabase/functions/notification-dispatcher-external`. n8n remains retired.
+Proposed PROD week: `2026-W33 / 10-16 August 2026`, subject to Ramon and Carlos approving the release after DEV validation and UAT.
 
-## Architecture
+## Functional contract
 
-The internal lane remains:
+- Producers are explicit RPC calls; Migration 042 creates no producer trigger, backfill, replay scan, reminder, or top-level enqueue.
+- Business idempotency permits at most one material external event per supported intake fact.
+- A missing or invalid recipient creates one terminal `no_recipient` ledger row and zero delivery attempts after all earlier rollout and cap gates pass.
+- Pending external work expires after 24 hours with `external_dispatch_window_expired`; it is never reactivated or replayed.
+- Provider retries retain the same Resend `Idempotency-Key`.
+- Ambiguous provider acknowledgement requires manual review and never causes a second provider send.
+- Provider authentication failure must validate the circuit-breaker pause result.
+- Raw provider errors, payloads, email addresses and business UUIDs are not release evidence.
 
-`notification_events (internal) → internal claim → notification-dispatcher`
+## Minimal disposable baseline
 
-The candidate external lane is:
+The integration job starts Supabase local with PostgreSQL 17 and applies this exact ordered `BASELINE_MIGRATIONS` allowlist from canonical `origin/dev`:
 
-`payment_intake_events → explicit producer → notification_events (external) → external claim → notification-dispatcher-external → Resend`
+1. `supabase/migrations/001_schema.sql`
+2. `supabase/migrations/002_enums_triggers_indexes.sql`
+3. `supabase/migrations/003_functions_rpcs.sql`
+4. `supabase/migrations/007_notifications.sql`
+5. `supabase/migrations/011_notification_dispatcher_service_rpcs.sql`
+6. `supabase/migrations/018_payment_request_approver_routing.sql`
+7. `supabase/migrations/020_normalize_proveedores_canonical.sql`
+8. `supabase/migrations/025_provider_intake_foundation.sql`
+9. `supabase/migrations/027_provider_intake_edge_support.sql`
+10. `supabase/migrations/029_provider_intake_triage.sql`
+11. `supabase/migrations/030_provider_intake_action_fingerprint.sql`
+12. `supabase/migrations/031_provider_intake_matching.sql`
+13. `supabase/migrations/041_notifications_external_isolation.sql`
 
-There is no automatic producer trigger. Received is produced only by an atomic submission-completion RPC. Correction and rejection are produced only by the authenticated versioned triage RPC.
+The first three files are atomic canonical foundations for the required companies, profiles, providers, payments, helpers, triggers and indexes. Migrations 007 and 011 provide the ledger and both internal claim RPCs. Migration 018 provides company membership, 020 provides the canonical provider shape, 025/027/029/030/031 provide the intake, triage, action-id and Matching dependencies, and 041 leaves the certified N1-A contract installed. Migration 042, unrelated 033/034 files, unmerged PR migrations and all wildcards are excluded.
 
-## Zero backlog
+The job then runs, in order:
 
-The producer evaluates gates in this order at fact time:
+1. N1-B precheck;
+2. local Migration 042 with exactly one `BEGIN` and one `COMMIT`;
+3. N1-B postcheck;
+4. a focused controlled-state snapshot;
+5. all 60 SQL contract cases inside their terminal rollback;
+6. the postcheck and snapshot comparison again;
+7. unconditional sandbox cleanup.
 
-1. lock the exact rollout `provider-intake-v1`;
-2. mode is `test_only` or `pilot`;
-3. cutoff is non-null;
-4. source timestamp is at or after cutoff;
-5. `batch_size=1`;
-6. `daily_cap>0`;
-7. the event type is enabled;
-8. `notification_external_event_mode_allowed` accepts the event and mode;
-9. payload validation passes;
-10. business idempotency validation passes;
-11. stale pending expiry completes and daily capacity remains;
-12. recipient resolution and, for valid recipients, allowlist validation.
+It never links to Supabase, dumps or restores DEV, pushes migrations, uses project secrets, calls Resend or deploys an Edge Function.
 
-The producer locks the single `provider-intake-v1` rollout row with `FOR UPDATE` and holds that lock through the decision and insert. The claim uses the same rollout row, so producer/producer and producer/claim activity is serialized. The producer first expires pending external rows older than 24 hours, then counts only fresh pending rows plus processing/sent consumption for the current Mexico City day. Expiry changes the row to `cancelled`, clears claim fields, writes `external_dispatch_window_expired`, creates no attempt and never deletes or reactivates it. The replacement external claim repeats expiry under the same rollout lock and requires `created_at >= now() - interval '24 hours'`, providing no historical replay when rollout is reactivated. Cap exhaustion returns `daily_cap_reached` and creates neither event nor attempt. If any gate is closed, the domain fact may exist but no claimable external row or attempt is created. The migration contains no scan that produces new events, backfill, replay, top-level producer call, active rollout, cutoff, event enablement or recipient hash.
+## Source validation
 
-Correction remains `test_only`-only because Migration 041 prohibits it in pilot until N2. A second correction returns `manual_follow_up_required` and creates no second notification.
+The same focal workflow performs:
 
-## Producers and business idempotency
+- an authenticated open-PR inventory proving migration slot 042 has one owner;
+- byte-level protection of Migration 041 and the internal dispatcher relative to `origin/dev`;
+- minimal product safety checks and `git diff --check`;
+- 34/34 triage tests;
+- Deno type-checking and the current 55/55 deterministic tests;
+- the disposable PostgreSQL integration;
+- one sanitized release-readiness artifact retained for three days.
 
-Supported events and exact keys are:
+Fingerprints, fingerprint self-tests, live schema clones, anonymous GitHub API calls, temporary runners, per-phase artifacts and R2 taxonomies are outside the critical path.
 
-- `provider_intake.received`: `external:provider_intake.received:{payment_intake_id}:v1`
-- `provider_intake.correction_requested`: `external:provider_intake.correction_requested:{payment_intake_id}:v1`
-- `provider_intake.rejected`: `external:provider_intake.rejected:{payment_intake_id}:v1`
+## Product ratio
 
-`payment_intake_id` is the business subject; the append-only domain-event ID is only `source_id`. Template changes and retries cannot create a new business event.
+The workflow calculates `PRODUCT / (PRODUCT + TEST + WORKFLOW + DOCS_OPS)` from added lines relative to `origin/dev`.
 
-The only recipient source is `lower(trim(payment_intake.provider_email))`. `proveedores.email` is never queried and email is never included in the payload. Once all rollout, payload, idempotency and daily-cap gates pass, a missing or invalid recipient creates exactly one terminal ledger row with `status=no_recipient`, `terminal_reason=no_recipient`, a null recipient and zero delivery attempts. It is excluded from claim and daily send consumption, has no retry time, and identical material returns `already_exists`. A closed rollout or exhausted cap creates no `no_recipient` row.
+Current consolidated result: `51.2%` (`2972 / 5810` added lines).
 
-## Atomic submission completion
+`PRODUCT_RATIO_EXCEPTION: DOCUMENTED`
 
-`finalize_provider_intake_submission_v1` is service-only and performs in one transaction:
+The expected result remains between 50% and 60% because this is an integration-sensitive database and external-delivery slice with Deno tests, 60 transactional SQL contracts, three SQL checks and one disposable workflow. The release-candidate consolidation removes prior ceremony without deleting product tests. Ramon approval is required before the PR can be marked Ready.
 
-- intake lock and received-state validation;
-- closed metadata validation;
-- private Storage-object existence checks;
-- exact expected and actual file counts;
-- upload-issue exclusion;
-- file metadata and append-only `file_uploaded` facts;
-- `expected_file_count` and `submission_completed_at` update;
-- one `submission_completed` fact;
-- conditional received producer call.
+## DEV plan
 
-A confirmed rejected RPC rolls back file metadata, completion and any notification row, after which the Edge cleanup path may remove the uploaded objects. Rejection is confirmed only when a non-ok JSON response contains exactly one of the eight allowlisted finalization business codes. A transport failure, abort, ten-second timeout, 429, any 5xx, HTML, malformed JSON, unknown code, unsafe non-ok body or invalid 2xx body is `RPC_OUTCOME_UNKNOWN`: the handler retries the same RPC once with the same intake, count and metadata. Cleanup is allowed only for the exact allowlisted business rejection. Exact repetition returns `already_completed` only when file IDs, paths, names, MIME types, sizes, kinds, hashes, Storage objects and the single completion fact all match. Two unknown outcomes preserve Storage and return the generic safe failure `submission_outcome_unknown` for operational reconciliation.
+1. Revalidate slot 042 and run the DEV precheck.
+2. Merge PR #286 only when separately authorized.
+3. Apply Migration 042 once in DEV and run the postcheck.
+4. Prove external rows remain zero and rollout remains disabled.
+5. Deploy provider-intake and certify source/runtime.
+6. Deploy the external dispatcher disabled and certify source/runtime.
+7. Configure the HMAC and send-mode secrets with sending disabled.
 
-Duplicate intake creation is followed by the service-only `provider_intake_submission_state_v1`. A complete duplicate returns its canonical current intake status. An incomplete or inconsistent duplicate never returns a false `received` success and instead fails safely for reconciliation.
+## Preview and UAT plan
 
-## Triage contract
+Preview is technically available but is not functional UAT. UAT remains `NOT_EXECUTED`.
 
-The UI separates:
+Future `test_only` UAT covers received, rejected, idempotency, `no_recipient`, cutoff, allowlist, daily cap, retry/ACK, circuit breaker and zero replay. Correction remains blocked until N2.
 
-- optional internal notes, visible only to Flux;
-- mandatory 10–1000 character plain-text external message;
-- canonical correction field-code checkboxes.
+## PROD plan and smoke
 
-The external message rejects HTML, URLs, email addresses, RFC-like values, long account/CLABE-like digits and control characters. It is never prefilled from notes. Correction requires one or more canonical codes; rejection accepts no field codes.
+Promote only the approved `NOTIFICATIONS-N1-INTAKE-EMAILS` slice after DEV validation, UAT, P0=0, P1=0, and Ramon/Carlos approval. PROD smoke covers one received, one rejected, no duplicates, `no_recipient`, daily cap, circuit breaker and safe observability.
 
-After Migration 042, the legacy RPC supports only `received → in_review` and `needs_correction → in_review`. Any legacy attempt to reach `needs_correction` or `rejected` fails with `provider_intake_external_transition_requires_v1`, closing the bypass. Before the migration, capability detection fails closed and the already-deployed UI continues the existing legacy flow without external fields or notification claims. Schema-cache lag produces a maintenance error and never copies external text into notes.
+## Rollback and observability
 
-The UI states: “Envío externo deshabilitado hasta que el rollout sea autorizado.” It never claims that a message was sent. A second correction is shown as requiring manual follow-up.
+Rollback order:
 
-## Dispatcher authentication and modes
+1. pause or disable rollout;
+2. redeploy the previous application code;
+3. preserve the ledger;
+4. do not replay or resend events;
+5. forward-fix the additive migration;
+6. use a down migration only under separate approval.
 
-The external function accepts POST only, has no CORS response, requires `application/json` with optional UTF-8 charset, reads at most 64 bytes and enforces the exact canonical body `{"limit":1}`. Method, content type, size and body are validated before the disabled-mode short circuit; disabled still returns before HMAC, DB, claim or Resend.
+Observe event status, attempts, terminal `no_recipient`, retries, manual review, circuit-breaker state and duplicate count. Never expose raw payloads or provider responses.
 
-Future runtime configuration is referenced but not created or read in this gate. Provider-intake independently accepts only an exact HTTPS origin matching a 20-character lowercase project reference under `.supabase.co`; credentials, ports, paths, query, fragment, whitespace and arbitrary HTTPS hosts are rejected before service-role headers are available:
+## Readiness and scope
 
-- `NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY`
-- `NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY_ID`
-- `NOTIFICATION_EXTERNAL_SEND_MODE`
+Definition of Ready is `NOT_READY`; Definition of Done is `NOT_DONE`. Dependencies still include disposable integration PASS, authorized DEV apply, disabled deploys, secrets, UAT and Ramon/Carlos approval.
 
-The default external send mode is `disabled`; allowed active values are only `test_only` and `pilot`. `NOTIFICATION_SEND_MODE` is not referenced. Disabled returns before authentication, replay registration, claim, attempt or Resend. Active execution requires exact environment/DB rollout agreement.
+Out of scope: correction before N2, reminders, backfill, replay, `provider_matched`, converted, payment receipts, N2, N3 and an external portal.
 
-HMAC headers are `x-flux-key-id`, `x-flux-timestamp`, `x-flux-invocation-id` and `x-flux-signature`. The canonical value is:
-
-```text
-METHOD
-PATHNAME
-TIMESTAMP
-INVOCATION_ID
-SHA256_RAW_BODY
-```
-
-Verification uses HMAC-SHA256, constant-time comparison, a 32-byte-minimum key, a closed 3–64 character key ID, lowercase 64-hex signatures, UUID-v4 invocation IDs and a ±300 second timestamp window. Active configuration accepts only an HTTPS `*.supabase.co` project origin without credentials, port, path, query or fragment before attaching the service-role key. The service-only replay RPC registers the key/invocation pair before claim. Its table stores no signature, key, request body, recipient or payload, and `service_role` has no direct table privileges; access is only through the SECURITY DEFINER RPC.
-
-## Renderer and privacy
-
-The external renderer is independent from the internal renderer. Subjects and text are derived from fixed Spanish templates; ledger `subject` is ignored. Allowed payload data is limited to public folio, event date, sanitized external message and canonical field labels.
-
-Templates contain no internal note, amount, company, provider name, requester, RFC, cost center, budget, approval, internal ID, URL or attachment. HTML is generated by code with strict escaping. Correction has no link in N1.
-
-## Attempts and provider delivery
-
-The external lifecycle is service-only and separates provider delivery from persistence:
-
-1. reserve one attempt for the claimed external event;
-2. mark the provider request started;
-3. send once to Resend;
-4. mark sent with a persisted provider message ID; or
-5. mark failed with an allowlisted safe error only when the provider phase failed.
-
-The provider idempotency key is always the event business idempotency key and is reused across retries. Resend receives it in `Idempotency-Key`; attempts do not derive new keys. There are no attachments. After Resend returns an ID, a DB acknowledgement failure retries only `mark_external_notification_sent` once. The sent RPC returns `already_sent` for identical material and rejects a different provider ID. If both acknowledgements remain unknown, the provider is not called again, the failed RPC is not called, and the started marker blocks automatic recovery pending manual review.
-
-Allowlisted errors are `provider_rate_limited`, `provider_server_error`, `provider_timeout_unknown`, `provider_auth_failed`, `provider_contract_rejected`, `provider_network_unavailable`, `provider_response_invalid`, `renderer_contract_failed` and `manual_review_required`. Raw SQL errors and provider bodies are not persisted or returned. A 2xx response with invalid JSON/ID is terminal manual review because delivery may have been accepted. A 401/403 marks the attempt/event terminal and pauses `provider-intake-v1` in the same transaction without clearing cutoff, enabled events or allowlist; subsequent producer, claim and recovery calls fail closed. Retryable 429/network/5xx failures use 5 minutes after attempt 1, 30 minutes after attempt 2 and terminate after attempt 3.
-
-HTTP responses and logs contain only aggregate counts, safe codes and a duration bucket. They contain no event ID, source ID, folio, recipient, provider message ID or raw body.
-
-## Static verification
-
-- `precheck.sql`: future read-only baseline and collision check.
-- `postcheck.sql`: future immediate post-apply zero-row, grant and contract check.
-- `contract-tests.sql`: a numbered 60-case catalog plus executable synthetic fixtures that call the real finalization, producer, expiry, claim, reserve, started, sent, failed, replay and capability functions. It proves the terminal no-recipient row, zero attempts, stale cancellation, no replay, fresh claim, zero backlog, idempotent completion/sent, circuit pause and 5/30 retry scheduling, then terminates with `ROLLBACK`.
-- `notification-dispatcher-external_test.ts`: deterministic HMAC, parser, mode, replay, renderer, privacy, safe-error and Resend-header tests with synthetic keys, a fake repository and no network.
-- provider-intake tests: verify confirmed rejection cleanup, unknown-outcome retry, no destructive cleanup, duplicate incomplete/reconciliation handling and repository outcome classification.
-- triage QA: the remote workflow runs both existing suites with `node --test`; their exact inventory is 19 + 15 = `34/34` tests.
-- static workflow: PR-only, contents-read, no environment, secrets, Supabase, Resend, deploy, dispatch or artifacts.
-
-## Gate boundary
-
-This candidate does not apply Migration 042, query DEV, deploy Edge Functions, configure secrets, activate rollout, define a cutoff, enable events, populate an allowlist, invoke either dispatcher, call Resend, send email, start UAT, or implement N2/N3.
-
-- Migration apply: false
-- Edge deploy: false
-- DEV reads/writes: 0 / 0
-- Resend calls: 0
-- Emails: 0
-
-## Future deployment order
-
-A later, separately authorized gate must use this order: disposable dry-run of Migration 042; apply; DB certification; PostgREST schema readiness; capability certification; provider-intake deploy/digest; external-dispatcher deploy/digest while disabled; rollout remains disabled. UI activation must not precede capability readiness.
-
-The next gate is `NOTIFICATIONS-N1-B-R2`, only with Ramón’s explicit authorization. R1 does not execute any step in that deployment order.
+Next action after a passing release-candidate workflow: `NOTIFICATIONS-N1-B-DEV-VALIDATION`.
