@@ -283,7 +283,7 @@ const elements = {
   concept: document.querySelector('#concept-value'),
   fx: document.querySelector('#fx-value'),
   account: document.querySelector('#account-value'),
-  provider: document.querySelector('.detail-grid dd'),
+  provider: document.querySelector('[data-testid="provider-validation-status"]'),
   budgetHeading: document.querySelector('#budget-heading'),
   budgetRing: document.querySelector('.budget-ring'),
   budgetValues: document.querySelectorAll('.budget-values dd'),
@@ -291,6 +291,109 @@ const elements = {
 
 let returnFocus = elements.openButton
 let completionTimer = null
+let focusTrapAttached = false
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+const focusTrapDiagnostics = {
+  attachments: 0,
+  detachments: 0,
+  activeHandlers: 0,
+  maximumConcurrentHandlers: 0,
+}
+
+Object.defineProperty(globalThis, '__PROVIDER_INTAKE_MOCK_A11Y_AUDIT__', {
+  configurable: false,
+  enumerable: false,
+  get() {
+    return Object.freeze({
+      ...focusTrapDiagnostics,
+      duplicateFocusHandlers: Math.max(
+        0,
+        focusTrapDiagnostics.maximumConcurrentHandlers - 1,
+      ),
+      focusTrapAttached,
+    })
+  },
+})
+
+function visibleFocusableElements() {
+  return [...elements.dialog.querySelectorAll(FOCUSABLE_SELECTOR)].filter(
+    (element) => {
+      if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+        return false
+      }
+      const style = getComputedStyle(element)
+      return (
+        style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        element.getClientRects().length > 0
+      )
+    },
+  )
+}
+
+function handleDialogKeydown(event) {
+  if (event.key !== 'Tab' || !elements.dialog.open) return
+
+  const focusable = visibleFocusableElements()
+  if (focusable.length === 0) {
+    event.preventDefault()
+    elements.dialog.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  const active = document.activeElement
+
+  if (focusable.length === 1) {
+    event.preventDefault()
+    first.focus()
+    return
+  }
+
+  if (event.shiftKey && (active === first || !elements.dialog.contains(active))) {
+    event.preventDefault()
+    last.focus()
+  } else if (
+    !event.shiftKey &&
+    (active === last || !elements.dialog.contains(active))
+  ) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+function attachFocusTrap() {
+  if (focusTrapAttached) return
+  elements.dialog.addEventListener('keydown', handleDialogKeydown)
+  focusTrapAttached = true
+  focusTrapDiagnostics.attachments += 1
+  focusTrapDiagnostics.activeHandlers += 1
+  focusTrapDiagnostics.maximumConcurrentHandlers = Math.max(
+    focusTrapDiagnostics.maximumConcurrentHandlers,
+    focusTrapDiagnostics.activeHandlers,
+  )
+}
+
+function detachFocusTrap() {
+  if (!focusTrapAttached) return
+  elements.dialog.removeEventListener('keydown', handleDialogKeydown)
+  focusTrapAttached = false
+  focusTrapDiagnostics.detachments += 1
+  focusTrapDiagnostics.activeHandlers = Math.max(
+    0,
+    focusTrapDiagnostics.activeHandlers - 1,
+  )
+}
 
 function fixtureFor(key) {
   return fixtures[key] || fixtures.ready
@@ -345,13 +448,15 @@ function render(key, options = {}) {
 }
 
 function openDialog() {
-  returnFocus = document.activeElement || elements.openButton
   elements.confirmation.checked = false
   elements.confirmationHelp.textContent = ''
   if (!elements.dialog.open) {
+    returnFocus = document.activeElement || elements.openButton
     elements.dialog.showModal()
   }
-  elements.confirmation.focus()
+  attachFocusTrap()
+  const [initialFocus] = visibleFocusableElements()
+  ;(initialFocus || elements.dialog).focus()
 }
 
 function closeDialog() {
@@ -400,9 +505,22 @@ elements.confirmButton.addEventListener('click', () => {
 })
 
 elements.dialog.addEventListener('close', () => {
+  detachFocusTrap()
   elements.confirmationHelp.textContent = ''
-  if (returnFocus && typeof returnFocus.focus === 'function') {
-    returnFocus.focus()
+  const focusTarget = returnFocus
+  returnFocus = null
+  if (
+    focusTarget &&
+    focusTarget.isConnected &&
+    !focusTarget.hidden &&
+    !focusTarget.disabled &&
+    typeof focusTarget.focus === 'function'
+  ) {
+    focusTarget.focus()
+  } else if (!elements.openButton.disabled) {
+    elements.openButton.focus()
+  } else {
+    elements.resultPanel.focus()
   }
 })
 

@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
   >
+  <!-- frame-ancestors must be delivered as an HTTP response header in a real integration. -->
   <title>Conversión de intake — Preview MOCKED</title>
   <link rel="stylesheet" href="provider_intake_conversion_mock.css">
   <script src="provider_intake_conversion_mock.js" defer></script>
@@ -119,7 +120,7 @@
           <dl class="detail-grid">
             <div>
               <dt>Proveedor</dt>
-              <dd>Producciones Horizonte · MOCK</dd>
+              <dd data-testid="provider-validation-status">Producciones Horizonte · MOCK</dd>
             </div>
             <div>
               <dt>RFC declarado</dt>
@@ -291,7 +292,13 @@
     </section>
   </main>
 
-  <dialog id="confirmation-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+  <dialog
+    id="confirmation-dialog"
+    aria-labelledby="dialog-title"
+    aria-describedby="dialog-description"
+    aria-modal="true"
+    tabindex="-1"
+  >
     <form method="dialog">
       <div class="dialog-icon" aria-hidden="true">◇</div>
       <p class="eyebrow">Confirmación MOCKED</p>
