@@ -34,18 +34,32 @@ jobs:
     timeout-minutes: 35
     environment: supabase-production
     env:
-      EVIDENCE_DIR: ${{ runner.temp }}/flux-prod-readonly-baseline
+      EVIDENCE_SUBDIR: flux-prod-readonly-baseline
     steps:
       - name: Initialize contractual evidence
         shell: bash
         run: |
           set -euo pipefail
+          export EVIDENCE_DIR="${RUNNER_TEMP}/${EVIDENCE_SUBDIR}"
           mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
           python3 - <<'PY'
-          import json,os,pathlib
+          import json,os,pathlib,re,urllib.request
           root=pathlib.Path(os.environ['EVIDENCE_DIR'])
-          names=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
+          names=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','workflow-context-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
           for name in names: (root/name).write_text(json.dumps({'status':'NOT_RUN'},indent=2)+'\n')
+          workflow_url=f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/{os.environ['GITHUB_SHA']}/.github/workflows/flux-prod-readonly-baseline.yml"
+          request=urllib.request.Request(workflow_url,headers={'User-Agent':'flux-readonly-baseline-r4'}); workflow=urllib.request.urlopen(request,timeout=20).read().decode()
+          matches=list(re.finditer(r'\$\{\{\s*(.*?)\s*\}\}',workflow)); id_positions={m.group(1):m.start() for m in re.finditer(r'(?m)^\s+id:\s*([A-Za-z_][\w-]*)\s*$',workflow)}; rows=[]
+          for m in matches:
+            start=workflow.rfind('\n',0,m.start())+1; end=workflow.find('\n',m.end()); line=workflow[start:end if end>=0 else len(workflow)]; expr=m.group(1).strip()
+            root_match=re.match(r'([A-Za-z_][A-Za-z0-9_]*)',expr); step_match=re.match(r'steps\.([A-Za-z_][\w-]*)\.',expr); rows.append({'root':root_match.group(1) if root_match else '', 'step':step_match.group(1) if step_match else None,'position':m.start(),'indent':len(line)-len(line.lstrip()),'step_with_path':line.lstrip().startswith('path:')})
+          allowed={'github','inputs','vars','secrets','env','runner','steps','needs','matrix'}; unrecognized=sum(r['root'] not in allowed for r in rows); runner_workflow=sum(r['root']=='runner' and r['indent']==2 for r in rows); runner_job=sum(r['root']=='runner' and r['indent']==6 for r in rows); runner_step=sum(r['root']=='runner' and r['indent']>=10 and r['step_with_path'] for r in rows); steps_before=sum(bool(r['step']) and id_positions.get(r['step'],len(workflow))>=r['position'] for r in rows)
+          invalid=sum(r['root'] not in allowed or (r['root']=='runner' and not (r['indent']>=10 and r['step_with_path'])) or (bool(r['step']) and id_positions.get(r['step'],len(workflow))>=r['position']) for r in rows); runtime_path='export EVIDENCE_DIR="${RUNNER_TEMP}/${EVIDENCE_SUBDIR}"' in workflow; github_env="EVIDENCE_DIR=%s\\n' \"$EVIDENCE_DIR\" >> \"$GITHUB_ENV\"" in workflow
+          checks=len(rows)==17 and invalid==0 and runner_workflow==0 and runner_job==0 and runner_step==1 and steps_before==0 and unrecognized==0 and runtime_path and github_env
+          context_audit={'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','status':'PASS' if checks else 'FAIL','total_expressions':len(rows),'valid_expressions':len(rows)-invalid,'invalid_expressions':invalid,'runner_context_in_workflow_env':runner_workflow,'runner_context_in_job_env':runner_job,'runner_context_in_step_with':runner_step,'steps_context_before_execution':steps_before,'unrecognized_context_references':unrecognized,'runtime_path_initialized_with_runner_temp':runtime_path,'evidence_dir_exported_to_github_env':github_env,'functional_baseline_logic_changed':False,'runtime_path_initialization_changed':True,'evidence_schema_changed':True,'evidence_schema_delta':['workflow-context-audit.json'],'internal_artifact_identifiers_changed':True}
+          (root/'workflow-context-audit.json').write_text(json.dumps(context_audit,indent=2)+'\n')
+          if not checks: raise SystemExit('WORKFLOW_CONTEXT_AUDIT_FAILED')
           (root/'gate-report.md').write_text('# FLUX PROD Slice 01 baseline\n\nStatus: NOT_RUN\n')
           (root/'cleanup.txt').write_text('PENDING\n')
           PY
@@ -63,7 +77,7 @@ jobs:
           import json,os,pathlib,re,time,urllib.parse,urllib.request
           root=pathlib.Path(os.environ['EVIDENCE_DIR']); repo=os.environ['GITHUB_REPOSITORY']; base='https://api.github.com'
           def api(path):
-            req=urllib.request.Request(base+path,headers={'Accept':'application/vnd.github+json','User-Agent':'flux-readonly-baseline-r2'})
+            req=urllib.request.Request(base+path,headers={'Accept':'application/vnd.github+json','User-Agent':'flux-readonly-baseline-r4'})
             for n in range(3):
               try:
                 with urllib.request.urlopen(req,timeout=20) as r:return json.load(r)
@@ -97,7 +111,7 @@ jobs:
             if target!=expected or expected!=active['sha']: raise RuntimeError('PROD_DATABASE_IDENTITY_MISMATCH')
             data={'status':'PASS','captured_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'repository':repo,'default_branch':meta['default_branch'],'current_main_sha':main,'current_main_tree':main_tree,'current_dev_sha':inventory_dev,'bootstrap_result_dev_sha':dev,'bootstrap_result_dev_tree':dev_tree,'current_prod_deployment_sha':active['sha'],'current_prod_deployment_id':active['id'],'target_git_sha':target,'expected_prod_sha':expected,'release_slice':slice_id}
             (root/'github-identities.json').write_text(json.dumps(data,indent=2)+'\n')
-            boot={'status':'PASS','event':event,'ref':os.environ['GITHUB_REF'],'event_sha':os.environ['GITHUB_SHA'],'push_bootstrap':event=='push','future_dispatch':event=='workflow_dispatch','one_job':True,'environment':'supabase-production'}
+            boot={'status':'PASS','gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4-2026-08-01','run_purpose':'corrected reusable read-only PROD baseline','event':event,'ref':os.environ['GITHUB_REF'],'event_sha':os.environ['GITHUB_SHA'],'push_bootstrap':event=='push','future_dispatch':event=='workflow_dispatch','one_job':True,'environment':'supabase-production'}
             (root/'workflow-bootstrap-audit.json').write_text(json.dumps(boot,indent=2)+'\n')
             out=os.environ['GITHUB_OUTPUT']; short=main[:7]
             with open(out,'a') as f:
@@ -343,17 +357,18 @@ jobs:
           sanit={'status':'PASS' if not findings else 'FAIL','files_scanned':len(list(root.iterdir())),'findings':findings,'prohibited_operational_rows':0,'documents_read':0,'host_disclosed':False}
           (root/'sanitization-audit.json').write_text(json.dumps(sanit,indent=2)+'\n')
           if findings and code is None: code='EVIDENCE_ARTIFACT_INVALID'
-          identities=json.loads((root/'github-identities.json').read_text()); c1=json.loads((root/'c1-fasttrack-inputs.json').read_text())
-          result='STOP / '+code if code else 'PASS / SHARED_PROD_READONLY_WORKFLOW_MERGED_TO_DEV / PUSH_BOOTSTRAP_RUN_SUCCESS / SLICE_01_TARGETED_PROD_BASELINE_CAPTURED / SLICE_01_MIGRATIONS_CLASSIFIED / NO_PROD_CHANGES / SLICE_01_C1_FASTTRACK_READY'
-          report={'status':'STOP' if code else 'PASS','result':result,'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2-2026-08-01','target_git_sha':identities.get('target_git_sha'),'c1_fasttrack_ready':False if code else c1.get('SLICE_01_C1_FASTTRACK_READY'),'prod_mutations':{'schema':0,'data':0,'migration_history':0,'storage':0,'runtime':0,'http':0},'completed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
-          (root/'gate-report.json').write_text(json.dumps(report,indent=2)+'\n'); (root/'gate-report.md').write_text(f"# FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R2\n\n{result}\n\nPROD schema/data/history/storage/runtime/HTTP writes: 0.\n")
+          ctx=json.loads((root/'workflow-context-audit.json').read_text()); code='EVIDENCE_ARTIFACT_INVALID' if ctx.get('status')!='PASS' or ctx.get('invalid_expressions')!=0 else code; identities=json.loads((root/'github-identities.json').read_text()); c1=json.loads((root/'c1-fasttrack-inputs.json').read_text())
+          result='STOP / '+code if code else 'PASS / SHARED_PROD_READONLY_WORKFLOW_CORRECTED / CORRECTIVE_PR_MERGED_TO_DEV / PUSH_BOOTSTRAP_RUN_SUCCESS / SLICE_01_TARGETED_PROD_BASELINE_CAPTURED / SLICE_01_MIGRATIONS_CLASSIFIED / NO_PROD_CHANGES / SLICE_01_C1_FASTTRACK_READY'
+          report={'status':'STOP' if code else 'PASS','result':result,'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4-2026-08-01','run_purpose':'corrected reusable read-only PROD baseline','workflow_context_audit':ctx.get('status'),'evidence_schema_changed':True,'evidence_schema_delta':['workflow-context-audit.json'],'internal_artifact_identifiers_changed':True,'target_git_sha':identities.get('target_git_sha'),'c1_fasttrack_ready':False if code else c1.get('SLICE_01_C1_FASTTRACK_READY'),'prod_mutations':{'schema':0,'data':0,'migration_history':0,'storage':0,'runtime':0,'http':0},'completed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+          (root/'gate-report.json').write_text(json.dumps(report,indent=2)+'\n'); (root/'gate-report.md').write_text(f"# FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4\n\n{result}\n\nPROD schema/data/history/storage/runtime/HTTP writes: 0.\n")
           ledger={'status':'PASS','workflow_runs_created_by_workflow':0,'reruns':0,'dispatches_created_by_workflow':0,'git_writes':0,'prod_schema_writes':0,'prod_data_writes':0,'prod_history_writes':0,'prod_storage_writes':0,'prod_runtime_mutations':0,'http_writes':0}
           (root/'mutation-ledger.json').write_text(json.dumps(ledger,indent=2)+'\n')
-          required=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
+          required=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','workflow-context-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
           for n in required:
             p=root/n
             if not p.exists() or not p.stat().st_size: raise SystemExit('EVIDENCE_ARTIFACT_INVALID:'+n)
             json.loads(p.read_text())
+          if not (root/'gate-report.md').stat().st_size or (root/'cleanup.txt').read_text().strip()!='PASS': raise SystemExit('EVIDENCE_ARTIFACT_INVALID:non_json_evidence')
           if code: raise SystemExit(result)
           PY
 
@@ -363,7 +378,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.identity.outputs.artifact_name || 'flux-prod-readonly-baseline-slice-01-diagnostic' }}
-          path: ${{ env.EVIDENCE_DIR }}
+          path: ${{ runner.temp }}/flux-prod-readonly-baseline
           if-no-files-found: error
           retention-days: 14
           compression-level: 9
