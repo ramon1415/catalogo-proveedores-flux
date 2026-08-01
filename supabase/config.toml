@@ -1,5 +1,8 @@
 [functions.notification-dispatcher]
 verify_jwt = false
 
+[functions.notification-dispatcher-external]
+verify_jwt = false
+
 [functions.provider-intake]
 verify_jwt = false

@@ -103,6 +103,8 @@ function bindDom() {
     "detailTitle", "detailSubtitle", "detailContent", "detailActions", "closeDetailBtn",
     "actionDialog", "actionForm", "actionTitle", "actionDescription", "actionNotes",
     "actionRequiredLabel", "actionNotesHint", "actionCounter", "actionError",
+    "externalMessageFields", "externalMessage", "externalMessageHint",
+    "externalMessageCounter", "externalFieldCodes",
     "closeActionBtn", "cancelActionBtn", "confirmActionBtn",
     "matchDialog", "matchForm", "matchTitle", "matchDescription", "comparisonContent",
     "matchReasonFields", "matchReasonCode", "matchReason", "matchReasonRequired",
@@ -124,6 +126,7 @@ function bindEvents() {
   dom.cancelActionBtn.addEventListener("click", closeActionDialog)
   dom.actionForm.addEventListener("submit", submitAction)
   dom.actionNotes.addEventListener("input", updateActionCounter)
+  dom.externalMessage.addEventListener("input", updateExternalMessageCounter)
   dom.matchForm.addEventListener("submit", submitMatch)
   dom.closeMatchBtn.addEventListener("click", closeMatchDialog)
   dom.cancelMatchBtn.addEventListener("click", closeMatchDialog)
@@ -1033,8 +1036,13 @@ function openActionDialog({ kind, toStatus, trigger }) {
   state.actionTrigger = trigger
   state.action = { kind, toStatus, actionId: createUuid() }
   dom.actionNotes.value = ""
+  dom.externalMessage.value = ""
+  dom.externalFieldCodes.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false })
   dom.actionError.textContent = ""
   dom.confirmActionBtn.disabled = false
+  const externalTransition = kind === "transition" && ["needs_correction", "rejected"].includes(toStatus)
+  dom.externalMessageFields.hidden = !externalTransition
+  dom.externalFieldCodes.hidden = toStatus !== "needs_correction"
 
   if (kind === "note") {
     dom.actionTitle.textContent = "Agregar nota interna"
@@ -1046,13 +1054,15 @@ function openActionDialog({ kind, toStatus, trigger }) {
     const config = transitionCopy(toStatus)
     dom.actionTitle.textContent = config.title
     dom.actionDescription.textContent = `${config.description} Estado actual: ${STATUS[intake.status]?.label || intake.status}.`
-    dom.actionRequiredLabel.textContent = config.required ? "(obligatorio, mínimo 10 caracteres)" : "(opcional)"
-    dom.actionNotes.placeholder = config.placeholder
+    dom.actionRequiredLabel.textContent = "(opcional; nunca se envía)"
+    dom.actionNotes.placeholder = "Contexto operativo opcional para el equipo interno"
+    dom.externalMessage.placeholder = config.placeholder
     dom.confirmActionBtn.textContent = config.button
   }
   updateActionCounter()
+  updateExternalMessageCounter()
   dom.actionDialog.showModal()
-  window.setTimeout(() => dom.actionNotes.focus(), 0)
+  window.setTimeout(() => (externalTransition ? dom.externalMessage : dom.actionNotes).focus(), 0)
 }
 
 function closeActionDialog() {
@@ -1066,10 +1076,13 @@ async function submitAction(event) {
   if (!intake || !action) return
 
   const notes = dom.actionNotes.value.trim()
-  const validation = validateAction(action, notes)
+  const externalMessage = dom.externalMessage.value.trim()
+  const fieldCodes = [...dom.externalFieldCodes.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((input) => input.value)
+  const validation = validateAction(action, notes, externalMessage, fieldCodes)
   if (validation) {
     dom.actionError.textContent = validation
-    dom.actionNotes.focus()
+    ;(["needs_correction", "rejected"].includes(action.toStatus) ? dom.externalMessage : dom.actionNotes).focus()
     return
   }
 
@@ -1078,11 +1091,23 @@ async function submitAction(event) {
   const originalLabel = dom.confirmActionBtn.textContent
   dom.confirmActionBtn.textContent = "Guardando…"
 
+  const usesExternalContract = action.kind === "transition" && ["needs_correction", "rejected"].includes(action.toStatus)
   const request = action.kind === "note"
     ? supabaseClient.rpc("add_provider_intake_note", {
         p_payment_intake_id: intake.id,
         p_expected_updated_at: intake.updated_at,
         p_notes: notes,
+        p_action_id: action.actionId,
+      })
+    : usesExternalContract
+    ? supabaseClient.rpc("transition_provider_intake_external_v1", {
+        p_payment_intake_id: intake.id,
+        p_expected_status: intake.status,
+        p_expected_updated_at: intake.updated_at,
+        p_to_status: action.toStatus,
+        p_internal_notes: notes || null,
+        p_external_message: externalMessage,
+        p_external_field_codes: action.toStatus === "needs_correction" ? fieldCodes : [],
         p_action_id: action.actionId,
       })
     : supabaseClient.rpc("transition_provider_intake", {
@@ -1094,7 +1119,7 @@ async function submitAction(event) {
         p_action_id: action.actionId,
       })
 
-  const { error } = await request
+  const { data, error } = await request
   dom.confirmActionBtn.disabled = false
   dom.confirmActionBtn.textContent = originalLabel
 
@@ -1104,22 +1129,47 @@ async function submitAction(event) {
   }
 
   closeActionDialog()
+  const manualFollowUp = data?.notification === "manual_follow_up_required"
   showToast(
-    action.kind === "note" ? "Nota agregada" : "Estado actualizado",
-    action.kind === "note" ? "El historial conserva la nueva nota interna." : "Se registró un único evento de auditoría.",
-    "success",
+    action.kind === "note" ? "Nota agregada" : manualFollowUp ? "Seguimiento manual requerido" : "Estado actualizado",
+    action.kind === "note"
+      ? "El historial conserva la nueva nota interna."
+      : manualFollowUp
+      ? "La segunda corrección no genera otra notificación automática."
+      : "Se registró un único evento de auditoría. El envío externo permanece sujeto al rollout.",
+    manualFollowUp ? "info" : "success",
   )
   await Promise.all([reloadOpenDetail(), loadList()])
 }
 
-function validateAction(action, notes) {
+function validateAction(action, notes, externalMessage, fieldCodes) {
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(notes) || /<[^>]*>/.test(notes)) {
     return "El comentario contiene caracteres o etiquetas no permitidos."
   }
   if (notes.length > 2000) return "El comentario no puede exceder 2000 caracteres."
   if (action.kind === "note" && notes.length < 3) return "Escribe una nota de al menos 3 caracteres."
-  if (["needs_correction", "rejected"].includes(action.toStatus) && notes.length < 10) {
-    return "Explica el motivo operativo en al menos 10 caracteres."
+  if (["needs_correction", "rejected"].includes(action.toStatus)) {
+    if (externalMessage.length < 10 || externalMessage.length > 1000) {
+      return "El mensaje al proveedor debe tener entre 10 y 1000 caracteres."
+    }
+    if (notes && notes.toLocaleLowerCase("es-MX") === externalMessage.toLocaleLowerCase("es-MX")) {
+      return "La nota interna y el mensaje al proveedor deben ser distintos."
+    }
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(externalMessage) || /<[^>]*>/.test(externalMessage)) {
+      return "El mensaje al proveedor contiene caracteres o etiquetas no permitidos."
+    }
+    if (/(https?:\/\/|www\.|mailto:)|[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}/i.test(externalMessage)) {
+      return "El mensaje al proveedor no puede contener enlaces ni correos."
+    }
+    if (/\d{10,}/.test(externalMessage.replace(/[\s-]/g, "")) || /\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b/i.test(externalMessage)) {
+      return "Retira RFC, cuentas o CLABE del mensaje al proveedor."
+    }
+    if (action.toStatus === "needs_correction" && fieldCodes.length === 0) {
+      return "Selecciona al menos un campo por corregir."
+    }
+    if (action.toStatus === "rejected" && fieldCodes.length !== 0) {
+      return "Un rechazo no acepta campos por corregir."
+    }
   }
   return ""
 }
@@ -1185,15 +1235,15 @@ function transitionCopy(toStatus) {
     },
     needs_correction: {
       title: "Pedir corrección",
-      description: "Registra exactamente qué información debe corregirse. Esta fase no envía notificaciones externas.",
-      placeholder: "Describe la corrección requerida",
+      description: "Separa el contexto interno del mensaje de texto plano destinado al proveedor.",
+      placeholder: "Describe al proveedor qué debe corregir, sin datos sensibles",
       button: "Solicitar corrección",
       required: true,
     },
     rejected: {
       title: "Rechazar solicitud",
-      description: "Explica el motivo operativo. La solicitud quedará sin transiciones disponibles en esta fase.",
-      placeholder: "Motivo del rechazo",
+      description: "La solicitud quedará terminal y el mensaje externo se conservará separado de la nota interna.",
+      placeholder: "Comunica el resultado al proveedor, sin datos internos ni sensibles",
       button: "Rechazar solicitud",
       required: true,
     },
@@ -1222,6 +1272,12 @@ const ERROR_MESSAGES = Object.freeze({
   file_not_found: "El documento no existe o no pertenece a esta solicitud.",
   provider_intake_conflict: "Esta solicitud fue actualizada por otro usuario. Recarga el detalle.",
   provider_intake_invalid_transition: "El estado actual no permite esta transición.",
+  provider_intake_external_transition_requires_v1: "Esta acción requiere el contrato externo versionado.",
+  provider_intake_external_transition_invalid: "El estado actual no permite esta transición externa.",
+  provider_intake_external_message_invalid: "El mensaje al proveedor debe ser texto plano de 10 a 1000 caracteres, sin enlaces ni datos sensibles.",
+  provider_intake_external_message_matches_internal_notes: "La nota interna y el mensaje al proveedor deben ser distintos.",
+  provider_intake_external_field_codes_invalid: "Selecciona uno o más campos válidos por corregir.",
+  provider_intake_rejected_field_codes_forbidden: "Un rechazo no acepta campos por corregir.",
   provider_intake_comment_length: "El comentario obligatorio debe tener entre 10 y 2000 caracteres.",
   provider_intake_comment_invalid: "El comentario contiene caracteres o etiquetas no permitidos.",
   provider_intake_note_length: "La nota debe tener entre 3 y 2000 caracteres.",
@@ -1294,6 +1350,10 @@ function restoreMatchFocus() {
 
 function updateActionCounter() {
   dom.actionCounter.textContent = `${dom.actionNotes.value.length} / 2000`
+}
+
+function updateExternalMessageCounter() {
+  dom.externalMessageCounter.textContent = `${dom.externalMessage.value.length} / 1000`
 }
 
 function element(tag, className = "", text = null) {

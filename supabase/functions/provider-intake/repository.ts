@@ -1,6 +1,7 @@
 import type {
   CreateIntakeInput,
   CreateIntakeResult,
+  FinalizeSubmissionResult,
   IntakeRepository,
   LinkResolution,
   PreparedFile,
@@ -32,6 +33,12 @@ function knownRpcError(message: string): string {
     "provider_intake_invalid_file_metadata",
     "provider_intake_file_metadata_conflict",
     "provider_intake_not_attachable",
+    "provider_intake_not_finalizable",
+    "provider_intake_finalization_fields_invalid",
+    "provider_intake_finalization_conflict",
+    "provider_intake_finalization_file_count_mismatch",
+    "provider_intake_storage_object_missing",
+    "provider_intake_upload_issue_present",
   ];
   return known.find((code) => message.includes(code)) ||
     "provider_intake_repository_error";
@@ -133,12 +140,14 @@ export class SupabaseIntakeRepository implements IntakeRepository {
     if (!response.ok) throw new Error("provider_intake_storage_cleanup_failed");
   }
 
-  async attachFiles(
+  finalizeSubmission(
     intakeId: string,
+    expectedFileCount: number,
     files: StoredFileMetadata[],
-  ): Promise<void> {
-    await this.rpc("attach_provider_intake_files_internal", {
+  ): Promise<FinalizeSubmissionResult> {
+    return this.rpc("finalize_provider_intake_submission_v1", {
       p_payment_intake_id: intakeId,
+      p_expected_file_count: expectedFileCount,
       p_files: files,
     });
   }

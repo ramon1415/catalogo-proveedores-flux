@@ -196,12 +196,40 @@
         <button class="icon-btn" id="closeActionBtn" type="button" aria-label="Cerrar acción">✕</button>
       </header>
       <div class="action-body">
-        <label for="actionNotes">Comentario <span id="actionRequiredLabel"></span></label>
+        <label for="actionNotes">Nota interna <span id="actionRequiredLabel"></span></label>
         <textarea id="actionNotes" rows="5" maxlength="2000" aria-describedby="actionNotesHint actionError"></textarea>
         <div class="field-meta">
-          <small id="actionNotesHint">No incluyas datos bancarios, tokens ni información sensible innecesaria.</small>
+          <small id="actionNotesHint">Solo personal de Flux puede verla. Nunca se envía al proveedor.</small>
           <small id="actionCounter">0 / 2000</small>
         </div>
+        <section id="externalMessageFields" hidden>
+          <p><strong>Envío externo deshabilitado hasta que el rollout sea autorizado.</strong></p>
+          <label for="externalMessage">Mensaje al proveedor <span>(obligatorio)</span></label>
+          <textarea id="externalMessage" rows="5" minlength="10" maxlength="1000" aria-describedby="externalMessageHint externalMessageCounter actionError"></textarea>
+          <div class="field-meta">
+            <small id="externalMessageHint">Texto plano, sin enlaces, correos, RFC, cuentas, CLABE ni información interna.</small>
+            <small id="externalMessageCounter">0 / 1000</small>
+          </div>
+          <fieldset id="externalFieldCodes">
+            <legend>Campos por corregir <span>(selecciona uno o más)</span></legend>
+            <label><input type="checkbox" value="provider_name"> Nombre o razón social</label>
+            <label><input type="checkbox" value="provider_rfc"> RFC</label>
+            <label><input type="checkbox" value="provider_email"> Correo electrónico</label>
+            <label><input type="checkbox" value="provider_phone"> Teléfono</label>
+            <label><input type="checkbox" value="concept"> Concepto</label>
+            <label><input type="checkbox" value="description"> Descripción</label>
+            <label><input type="checkbox" value="amount_requested"> Importe solicitado</label>
+            <label><input type="checkbox" value="currency"> Moneda</label>
+            <label><input type="checkbox" value="requested_payment_date"> Fecha solicitada de pago</label>
+            <label><input type="checkbox" value="invoice_folio"> Folio de factura</label>
+            <label><input type="checkbox" value="invoice_uuid"> UUID de factura</label>
+            <label><input type="checkbox" value="invoice_date"> Fecha de factura</label>
+            <label><input type="checkbox" value="invoice_pdf"> Factura PDF</label>
+            <label><input type="checkbox" value="invoice_xml"> Factura XML</label>
+            <label><input type="checkbox" value="bank_document"> Documento bancario</label>
+            <label><input type="checkbox" value="beneficiary_name"> Nombre del beneficiario</label>
+          </fieldset>
+        </section>
         <p class="field-error" id="actionError" role="alert"></p>
       </div>
       <footer class="dialog-footer action-footer">

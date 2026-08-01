@@ -258,7 +258,7 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
       });
       duplicate = created.duplicate;
 
-      if (!created.duplicate && validatedFiles.length) {
+      if (!created.duplicate) {
         const storageFiles = prepareStorageFiles(
           validatedFiles,
           created.payment_intake_id,
@@ -280,8 +280,9 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
         }
 
         try {
-          await dependencies.repository.attachFiles(
+          await dependencies.repository.finalizeSubmission(
             created.payment_intake_id,
+            storageFiles.length,
             storedMetadata(storageFiles),
           );
         } catch {
@@ -291,7 +292,11 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
             uploadedPaths,
             "file_metadata_failed",
           );
-          throw new IntakeError("submit_failed", 503, "file_metadata_failed");
+          throw new IntakeError(
+            "submit_failed",
+            503,
+            "submission_finalization_failed",
+          );
         }
       }
 

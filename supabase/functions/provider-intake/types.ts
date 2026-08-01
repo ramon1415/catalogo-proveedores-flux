@@ -98,6 +98,18 @@ export type StoredFileMetadata = {
   sha256: string;
 };
 
+export type FinalizeSubmissionResult = {
+  completion: "completed" | "already_completed";
+  notification:
+    | "enqueued"
+    | "no_recipient"
+    | "rollout_disabled"
+    | "event_not_enabled"
+    | "source_before_cutoff"
+    | "recipient_not_allowlisted"
+    | "already_exists";
+};
+
 export type SubmitEnvelope = {
   payload: unknown;
   captchaToken: string;
@@ -121,7 +133,11 @@ export type IntakeRepository = {
   createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult>;
   uploadFile(file: PreparedFile): Promise<void>;
   removeUploadedFiles(paths: string[]): Promise<void>;
-  attachFiles(intakeId: string, files: StoredFileMetadata[]): Promise<void>;
+  finalizeSubmission(
+    intakeId: string,
+    expectedFileCount: number,
+    files: StoredFileMetadata[],
+  ): Promise<FinalizeSubmissionResult>;
   markUploadIssue(intakeId: string, issueCode: string): Promise<void>;
 };
 

@@ -8,6 +8,7 @@ import type {
   CaptchaVerifier,
   CreateIntakeInput,
   CreateIntakeResult,
+  FinalizeSubmissionResult,
   IntakeConfig,
   IntakeRepository,
   LinkResolution,
@@ -68,12 +69,16 @@ class FakeRepository implements IntakeRepository {
   resolveCalls = 0;
   createCalls: CreateIntakeInput[] = [];
   uploads: PreparedFile[] = [];
-  attached: StoredFileMetadata[] = [];
+  finalized: Array<{
+    intakeId: string;
+    expectedFileCount: number;
+    files: StoredFileMetadata[];
+  }> = [];
   removed: string[] = [];
   issues: string[] = [];
   duplicate = false;
   uploadFails = false;
-  attachFails = false;
+  finalizeFails = false;
   resolveError: string | null = null;
 
   resolveLink(): Promise<LinkResolution> {
@@ -107,15 +112,19 @@ class FakeRepository implements IntakeRepository {
     return Promise.resolve();
   }
 
-  attachFiles(
-    _intakeId: string,
+  finalizeSubmission(
+    intakeId: string,
+    expectedFileCount: number,
     files: StoredFileMetadata[],
-  ): Promise<void> {
-    if (this.attachFails) {
-      return Promise.reject(new Error("attach_failed"));
+  ): Promise<FinalizeSubmissionResult> {
+    if (this.finalizeFails) {
+      return Promise.reject(new Error("finalization_failed"));
     }
-    this.attached.push(...files);
-    return Promise.resolve();
+    this.finalized.push({ intakeId, expectedFileCount, files });
+    return Promise.resolve({
+      completion: "completed",
+      notification: "rollout_disabled",
+    });
   }
 
   markUploadIssue(_intakeId: string, issueCode: string): Promise<void> {
@@ -307,7 +316,7 @@ Deno.test("Idempotency-Key retry returns the existing folio and skips files", as
   assertEquals(response.status, 200);
   assertEquals(body.duplicate, true);
   assertEquals(repository.uploads.length, 0);
-  assertEquals(repository.attached.length, 0);
+  assertEquals(repository.finalized.length, 0);
 });
 
 Deno.test("internal payload fields are rejected before insertion", async () => {
@@ -832,9 +841,9 @@ Deno.test("prepared Storage paths contain only opaque IDs", async () => {
   assert(!prepared.storagePath.includes("ABC010203XYZ"));
 });
 
-Deno.test("metadata failure removes only uploaded paths and marks correction", async () => {
+Deno.test("finalization failure removes only uploaded paths and marks correction", async () => {
   const repository = new FakeRepository();
-  repository.attachFails = true;
+  repository.finalizeFails = true;
   const handler = createProviderIntakeHandler({
     config,
     repository,
@@ -859,6 +868,43 @@ Deno.test("metadata failure removes only uploaded paths and marks correction", a
   assertEquals(repository.uploads.length, 1);
   assertEquals(repository.removed, [repository.uploads[0].storagePath]);
   assertEquals(repository.issues, ["file_metadata_failed"]);
+});
+
+Deno.test("zero-file submission is finalized exactly once", async () => {
+  const repository = new FakeRepository();
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: () => undefined,
+  });
+
+  const response = await handler(submitRequest());
+
+  assertEquals(response.status, 201);
+  assertEquals(repository.finalized, [{
+    intakeId: "33333333-3333-4333-8333-333333333333",
+    expectedFileCount: 0,
+    files: [],
+  }]);
+});
+
+Deno.test("duplicate submission never finalizes again", async () => {
+  const repository = new FakeRepository();
+  repository.duplicate = true;
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: () => undefined,
+  });
+
+  const response = await handler(submitRequest());
+
+  assertEquals(response.status, 200);
+  assertEquals(repository.finalized.length, 0);
 });
 
 Deno.test("preflight and JSON responses include restrictive security headers", async () => {

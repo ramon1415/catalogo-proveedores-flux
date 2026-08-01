@@ -1,0 +1,144 @@
+name: Notifications N1-B static safety
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - "supabase/migrations/042_notifications_n1_b_external_runtime.sql"
+      - "ops/notifications/n1-b/**"
+      - "supabase/config.toml"
+      - "supabase/functions/notification-dispatcher-external/**"
+      - "supabase/functions/provider-intake/handler.ts"
+      - "supabase/functions/provider-intake/repository.ts"
+      - "supabase/functions/provider-intake/types.ts"
+      - "supabase/functions/provider-intake/provider-intake_test.ts"
+      - "provider_intakes.html"
+      - "provider_intakes.js"
+      - ".github/workflows/notifications-n1-b-static.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate scope and immutable baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin dev
+          mapfile -t changed < <(git diff --name-only origin/dev...HEAD)
+          test "${#changed[@]}" -le 18
+          allowed='^(supabase/migrations/042_notifications_n1_b_external_runtime\.sql|ops/notifications/n1-b/(precheck|postcheck|contract-tests)\.sql|ops/notifications/n1-b/README\.md|supabase/config\.toml|supabase/functions/notification-dispatcher-external/(index|auth|renderer|notification-dispatcher-external_test)\.ts|supabase/functions/provider-intake/(handler|repository|types|provider-intake_test)\.ts|provider_intakes\.(html|js)|\.github/workflows/notifications-n1-b-static\.yml)$'
+          for path in "${changed[@]}"; do
+            [[ "$path" =~ $allowed ]] || { echo "scope_violation:$path"; exit 1; }
+          done
+          test "$(printf '%s\n' "${changed[@]}" | grep -c '^supabase/migrations/042_notifications_n1_b_external_runtime.sql$')" -eq 1
+          ! git cat-file -e origin/dev:supabase/migrations/042_notifications_n1_b_external_runtime.sql 2>/dev/null
+          test "$(git hash-object supabase/migrations/041_notifications_external_isolation.sql)" = "aaf9c2561365e1c99744bd487668961dbf8a6444"
+          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" = "23ec9b995b506eac57cf05a852c6c7720afefc74"
+          git diff --exit-code origin/dev -- supabase/migrations/041_notifications_external_isolation.sql
+          git diff --exit-code origin/dev -- supabase/functions/notification-dispatcher
+
+      - name: Validate SQL, UI and dispatcher contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          migration = Path("supabase/migrations/042_notifications_n1_b_external_runtime.sql").read_text()
+          lower = migration.lower()
+          required = [
+              "enqueue_provider_intake_external_notification_v1",
+              "finalize_provider_intake_submission_v1",
+              "transition_provider_intake_external_v1",
+              "provider_intake_external_transition_requires_v1",
+              "notification_external_dispatch_invocations",
+              "register_external_notification_dispatch_invocation",
+              "reserve_external_notification_attempt",
+              "mark_external_provider_request_started",
+              "mark_external_notification_sent",
+              "mark_external_notification_failed",
+              "manual_follow_up_required",
+              "recipient_not_allowlisted",
+              "source_before_cutoff",
+              "provider_timeout_unknown",
+              "provider_auth_failed",
+          ]
+          for token in required:
+              assert token in lower, token
+          assert "proveedores.email" not in lower
+          assert "create trigger" not in lower
+          assert not re.search(r"insert\s+into\s+public\.notification_external_rollouts", lower)
+          assert not re.search(r"update\s+public\.notification_external_rollouts", lower)
+          executable_sql = re.sub(r"--[^\n]*", "", lower)
+          assert "backfill" not in executable_sql and "reminder" not in executable_sql
+          preamble = executable_sql.split("create function public.enqueue_provider_intake_external_notification_v1", 1)[0]
+          assert "insert into public.notification_events" not in preamble
+          assert "insert into public.notification_delivery_attempts" not in preamble
+          assert "commit;" in lower and lower.rstrip().endswith("commit;")
+
+          contract = Path("ops/notifications/n1-b/contract-tests.sql").read_text()
+          cases = re.findall(r"^\s*\((\d+),\s*'[^']+',\s*'PASS'\)", contract, re.M)
+          assert list(map(int, cases)) == list(range(1, 61))
+          assert contract.lower().rstrip().endswith("rollback;")
+
+          config = Path("supabase/config.toml").read_text()
+          assert config.count("[functions.notification-dispatcher-external]") == 1
+          section = config.split("[functions.notification-dispatcher-external]", 1)[1].split("[", 1)[0]
+          assert "verify_jwt = false" in section
+
+          ui = Path("provider_intakes.js").read_text()
+          html = Path("provider_intakes.html").read_text()
+          assert 'rpc("transition_provider_intake_external_v1"' in ui
+          assert "p_internal_notes" in ui and "p_external_message" in ui and "p_external_field_codes" in ui
+          assert "Envío externo deshabilitado hasta que el rollout sea autorizado." in html
+          assert html.count('type="checkbox"') == 16
+
+          index = Path("supabase/functions/notification-dispatcher-external/index.ts").read_text()
+          auth = Path("supabase/functions/notification-dispatcher-external/auth.ts").read_text()
+          renderer = Path("supabase/functions/notification-dispatcher-external/renderer.ts").read_text()
+          combined = index + auth
+          for token in [
+              "NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY",
+              "NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY_ID",
+              "NOTIFICATION_EXTERNAL_SEND_MODE",
+              "x-flux-key-id", "x-flux-timestamp", "x-flux-invocation-id", "x-flux-signature",
+              "HMAC", "sha256Hex", "registerInvocation", "Idempotency-Key",
+              "claim_external_notification_events_for_dispatcher",
+          ]:
+              assert token in combined, token
+          assert "NOTIFICATION_SEND_MODE" not in combined
+          assert "Access-Control-Allow" not in combined
+          assert "safeResponseText" not in combined
+          assert "n8n" not in combined + renderer
+          assert '"real"' not in index and '"general"' not in index
+          assert "claim_notification_events_for_dispatcher\"" not in index
+          assert "attachments" not in index
+          assert "notification_events.subject" not in renderer
+          assert "http://" not in renderer and "https://" not in renderer
+          assert "provider_matched" not in renderer
+          PY
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check and run deterministic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          deno check \
+            supabase/functions/notification-dispatcher-external/index.ts \
+            supabase/functions/provider-intake/handler.ts
+          deno test \
+            supabase/functions/notification-dispatcher-external/notification-dispatcher-external_test.ts \
+            supabase/functions/provider-intake/provider-intake_test.ts
