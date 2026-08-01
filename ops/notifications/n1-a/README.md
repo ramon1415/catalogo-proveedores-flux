@@ -352,3 +352,32 @@ does not execute SQL, access an environment, use secrets, or generate evidence a
 The next gate is `NOTIFICATIONS-N1-A-R3-R4`: merge of the test-only harness followed by one
 separately authorized live certification. Until that authorization, N1-B remains blocked,
 rollout remains disabled, and Resend calls and emails remain zero.
+
+## R3-R5 smallint payload-validator binding correction
+
+Run `30672943982`, attempt 1, reached test 04 and stopped with the safe identifier
+`N1A_NATIVE_TEST_04_FAILED`. The functional assertion that Matching metadata must be rejected
+was not evaluated. The failure occurred while PostgreSQL was resolving the harness call to
+`public.notification_external_payload_valid(text, smallint, jsonb)`: the numeric literal `1`
+was initially resolved as `integer`, while the function's version parameter is `smallint`.
+This is a contract-harness type-binding defect, not a demonstrated defect in Migration 041,
+the installed schema, Matching, RLS, or the payload validator.
+
+The harness has exactly six call sites that require the explicit `1::smallint` version:
+
+1. Test 04, which rejects Matching metadata.
+2. The positive payload baseline.
+3. Test 11, which rejects `provider_matched` as an external event.
+4. Test 12, which rejects `notes`.
+5. Test 13, which rejects `match_score`.
+6. Test 14, which rejects `provider_rfc`.
+
+R3-R5 changes only the second argument of those six calls from `1` to `1::smallint`. It does
+not change payloads, assertions, diagnostic IDs, stage markers, expected values, or the
+function signature, and it does not add an `integer` overload. Migration 041 remains applied
+once and unchanged. This draft-only static gate performs zero DEV access, executes zero SQL,
+uses no secrets, changes no database state, and makes zero Resend calls and zero email sends.
+
+After the static checks pass, the next gate is `NOTIFICATIONS-N1-A-R3-R6` for a separately
+authorized merge and live one-shot certification. N1-B remains blocked and rollout remains
+disabled until a later explicit authorization.

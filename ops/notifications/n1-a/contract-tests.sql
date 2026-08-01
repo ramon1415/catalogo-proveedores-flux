@@ -146,7 +146,7 @@ begin
   -- 04. Matching metadata cannot pass the external payload validator.
   if public.notification_external_payload_valid(
     'provider_intake.received',
-    1,
+    1::smallint,
     v_valid_received || jsonb_build_object(
       'matching_metadata',
       jsonb_build_object(
@@ -227,7 +227,7 @@ begin
   -- Positive payload baseline for the following negative cases.
   if not public.notification_external_payload_valid(
     'provider_intake.received',
-    1,
+    1::smallint,
     v_valid_received
   ) then
     raise exception 'N1A_TEST_PAYLOAD_BASELINE_FAILED';
@@ -247,7 +247,7 @@ begin
   -- 11. provider_matched cannot be validated as an external event.
   if public.notification_external_payload_valid(
     'provider_matched',
-    1,
+    1::smallint,
     v_valid_received
   ) then
     raise exception 'N1A_TEST_11_FAILED';
@@ -259,7 +259,7 @@ begin
   -- 12. Internal notes are forbidden in an external payload.
   if public.notification_external_payload_valid(
     'provider_intake.received',
-    1,
+    1::smallint,
     v_valid_received || jsonb_build_object('notes', 'internal')
   ) then
     raise exception 'N1A_TEST_12_FAILED';
@@ -271,7 +271,7 @@ begin
   -- 13. match_score is forbidden in an external payload.
   if public.notification_external_payload_valid(
     'provider_intake.received',
-    1,
+    1::smallint,
     v_valid_received || jsonb_build_object('match_score', 100)
   ) then
     raise exception 'N1A_TEST_13_FAILED';
@@ -283,7 +283,7 @@ begin
   -- 14. RFC values are forbidden in an external payload.
   if public.notification_external_payload_valid(
     'provider_intake.received',
-    1,
+    1::smallint,
     v_valid_received || jsonb_build_object('provider_rfc', 'VALUE')
   ) then
     raise exception 'N1A_TEST_14_FAILED';
