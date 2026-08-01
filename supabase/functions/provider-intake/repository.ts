@@ -1,11 +1,12 @@
 import type {
   CreateIntakeInput,
   CreateIntakeResult,
-  FinalizeSubmissionResult,
+  FinalizeSubmissionOutcome,
   IntakeRepository,
   LinkResolution,
   PreparedFile,
   StoredFileMetadata,
+  SubmissionStateResult,
 } from "./types.ts";
 
 type RepositoryOptions = {
@@ -42,6 +43,28 @@ function knownRpcError(message: string): string {
   ];
   return known.find((code) => message.includes(code)) ||
     "provider_intake_repository_error";
+}
+
+function confirmedFinalizationResult(
+  value: unknown,
+): value is Extract<FinalizeSubmissionOutcome, {
+  kind: "RPC_COMPLETED_CONFIRMED";
+}>["result"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  const completions = ["completed", "already_completed"];
+  const notifications = [
+    "enqueued",
+    "no_recipient",
+    "rollout_disabled",
+    "event_not_enabled",
+    "source_before_cutoff",
+    "recipient_not_allowlisted",
+    "daily_cap_reached",
+    "already_exists",
+  ];
+  return completions.includes(String(result.completion)) &&
+    notifications.includes(String(result.notification));
 }
 
 export class SupabaseIntakeRepository implements IntakeRepository {
@@ -140,15 +163,56 @@ export class SupabaseIntakeRepository implements IntakeRepository {
     if (!response.ok) throw new Error("provider_intake_storage_cleanup_failed");
   }
 
-  finalizeSubmission(
+  async finalizeSubmission(
     intakeId: string,
     expectedFileCount: number,
     files: StoredFileMetadata[],
-  ): Promise<FinalizeSubmissionResult> {
-    return this.rpc("finalize_provider_intake_submission_v1", {
+  ): Promise<FinalizeSubmissionOutcome> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/rest/v1/rpc/finalize_provider_intake_submission_v1`,
+        {
+          method: "POST",
+          headers: this.headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            p_payment_intake_id: intakeId,
+            p_expected_file_count: expectedFileCount,
+            p_files: files,
+          }),
+        },
+      );
+    } catch {
+      return { kind: "RPC_OUTCOME_UNKNOWN" };
+    }
+
+    if (!response.ok) {
+      let message = "";
+      try {
+        const parsed = await response.json() as { message?: string };
+        message = parsed.message || "";
+      } catch {
+        message = "";
+      }
+      return {
+        kind: "RPC_REJECTED_CONFIRMED",
+        safeCode: knownRpcError(message),
+      };
+    }
+
+    try {
+      const result = await response.json();
+      return confirmedFinalizationResult(result)
+        ? { kind: "RPC_COMPLETED_CONFIRMED", result }
+        : { kind: "RPC_OUTCOME_UNKNOWN" };
+    } catch {
+      return { kind: "RPC_OUTCOME_UNKNOWN" };
+    }
+  }
+
+  getSubmissionState(intakeId: string): Promise<SubmissionStateResult> {
+    return this.rpc("provider_intake_submission_state_v1", {
       p_payment_intake_id: intakeId,
-      p_expected_file_count: expectedFileCount,
-      p_files: files,
     });
   }
 

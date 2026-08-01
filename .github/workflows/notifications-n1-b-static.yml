@@ -33,7 +33,7 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin dev
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD)
-          test "${#changed[@]}" -le 18
+          test "${#changed[@]}" -eq 17
           allowed='^(supabase/migrations/042_notifications_n1_b_external_runtime\.sql|ops/notifications/n1-b/(precheck|postcheck|contract-tests)\.sql|ops/notifications/n1-b/README\.md|supabase/config\.toml|supabase/functions/notification-dispatcher-external/(index|auth|renderer|notification-dispatcher-external_test)\.ts|supabase/functions/provider-intake/(handler|repository|types|provider-intake_test)\.ts|provider_intakes\.(html|js)|\.github/workflows/notifications-n1-b-static\.yml)$'
           for path in "${changed[@]}"; do
             [[ "$path" =~ $allowed ]] || { echo "scope_violation:$path"; exit 1; }
@@ -53,11 +53,13 @@ jobs:
           from pathlib import Path
           import re
 
-          migration = Path("supabase/migrations/042_notifications_n1_b_external_runtime.sql").read_text()
+          migration = Path("supabase/migrations/042_notifications_n1_b_external_runtime.sql").read_text(encoding="utf-8")
           lower = migration.lower()
           required = [
               "enqueue_provider_intake_external_notification_v1",
               "finalize_provider_intake_submission_v1",
+              "provider_intake_submission_state_v1",
+              "provider_intake_external_transition_capability_v1",
               "transition_provider_intake_external_v1",
               "provider_intake_external_transition_requires_v1",
               "notification_external_dispatch_invocations",
@@ -71,13 +73,17 @@ jobs:
               "source_before_cutoff",
               "provider_timeout_unknown",
               "provider_auth_failed",
+              "daily_cap_reached",
+              "already_sent",
+              "external_sent_material_conflict",
           ]
           for token in required:
               assert token in lower, token
           assert "proveedores.email" not in lower
           assert "create trigger" not in lower
           assert not re.search(r"insert\s+into\s+public\.notification_external_rollouts", lower)
-          assert not re.search(r"update\s+public\.notification_external_rollouts", lower)
+          assert len(re.findall(r"update\s+public\.notification_external_rollouts", lower)) == 1
+          assert "set mode = 'paused'" in lower
           executable_sql = re.sub(r"--[^\n]*", "", lower)
           assert "backfill" not in executable_sql and "reminder" not in executable_sql
           preamble = executable_sql.split("create function public.enqueue_provider_intake_external_notification_v1", 1)[0]
@@ -85,26 +91,81 @@ jobs:
           assert "insert into public.notification_delivery_attempts" not in preamble
           assert "commit;" in lower and lower.rstrip().endswith("commit;")
 
-          contract = Path("ops/notifications/n1-b/contract-tests.sql").read_text()
+          def definition(name):
+              match = re.search(
+                  rf"create (?:or replace )?function public\.{name}\([\s\S]*?\n\$\$;",
+                  lower,
+              )
+              assert match, name
+              return match.group(0)
+
+          producer = definition("enqueue_provider_intake_external_notification_v1")
+          assert "where r.id = 'provider-intake-v1'\n  for update" in producer
+          assert "batch_size <> 1" in producer and "daily_cap <= 0" in producer
+          assert "daily_event.status in ('pending', 'processing', 'sent')" in producer
+          assert producer.index("for update") < producer.index("insert into public.notification_events")
+          assert "daily_cap_reached" in producer
+
+          finalize = definition("finalize_provider_intake_submission_v1")
+          assert "v_persisted_files is distinct from v_expected_files" in finalize
+          assert "v_completion_count <> 1" in finalize
+          assert "provider_intake_finalization_conflict" in finalize
+          assert "provider_intake_storage_object_missing" in finalize
+
+          sent = definition("mark_external_notification_sent")
+          failed = definition("mark_external_notification_failed")
+          assert "already_sent" in sent and "external_sent_material_conflict" in sent
+          assert "provider_response_invalid" in failed
+          assert "mode = 'paused'" in failed
+          assert "when 1 then 5 else 30" in failed
+          assert not re.search(
+              r"grant\s+(?:select|insert|delete|all)[\s\S]{0,120}notification_external_dispatch_invocations[\s\S]{0,80}service_role",
+              lower,
+          )
+
+          contract = Path("ops/notifications/n1-b/contract-tests.sql").read_text(encoding="utf-8")
           cases = re.findall(r"^\s*\((\d+),\s*'[^']+',\s*'PASS'\)", contract, re.M)
           assert list(map(int, cases)) == list(range(1, 61))
           assert contract.lower().rstrip().endswith("rollback;")
+          contract_lower = contract.lower()
+          for token in [
+              "n1b_behavior_zero_backlog_daily_cap_failed",
+              "n1b_behavior_finalize_idempotent_failed",
+              "n1b_behavior_duplicate_incomplete_state_failed",
+              "n1b_behavior_sent_idempotence_failed",
+              "n1b_behavior_auth_circuit_breaker_failed",
+              "n1b_behavior_paused_producer_failed",
+              "n1b_behavior_retry_5_minutes_failed",
+              "n1b_behavior_retry_30_minutes_failed",
+              "n1b_behavior_replay_ledger_failed",
+              "finalize_provider_intake_submission_v1(",
+              "enqueue_provider_intake_external_notification_v1(",
+              "mark_external_notification_sent(",
+              "mark_external_notification_failed(",
+          ]:
+              assert token in contract_lower, token
+          assert "insert into public.profiles" in contract_lower
+          assert "insert into public.payment_intake" in contract_lower
 
-          config = Path("supabase/config.toml").read_text()
+          config = Path("supabase/config.toml").read_text(encoding="utf-8")
           assert config.count("[functions.notification-dispatcher-external]") == 1
           section = config.split("[functions.notification-dispatcher-external]", 1)[1].split("[", 1)[0]
           assert "verify_jwt = false" in section
 
-          ui = Path("provider_intakes.js").read_text()
-          html = Path("provider_intakes.html").read_text()
+          ui = Path("provider_intakes.js").read_text(encoding="utf-8")
+          html = Path("provider_intakes.html").read_text(encoding="utf-8")
           assert 'rpc("transition_provider_intake_external_v1"' in ui
+          assert '"provider_intake_external_transition_capability_v1"' in ui
+          assert "externalTransitionV1Available" in ui
+          assert "legacyDescription" in ui and "legacyPlaceholder" in ui
           assert "p_internal_notes" in ui and "p_external_message" in ui and "p_external_field_codes" in ui
+          assert "externalMessage: notes" not in ui
           assert "Envío externo deshabilitado hasta que el rollout sea autorizado." in html
           assert html.count('type="checkbox"') == 16
 
-          index = Path("supabase/functions/notification-dispatcher-external/index.ts").read_text()
-          auth = Path("supabase/functions/notification-dispatcher-external/auth.ts").read_text()
-          renderer = Path("supabase/functions/notification-dispatcher-external/renderer.ts").read_text()
+          index = Path("supabase/functions/notification-dispatcher-external/index.ts").read_text(encoding="utf-8")
+          auth = Path("supabase/functions/notification-dispatcher-external/auth.ts").read_text(encoding="utf-8")
+          renderer = Path("supabase/functions/notification-dispatcher-external/renderer.ts").read_text(encoding="utf-8")
           combined = index + auth
           for token in [
               "NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY",
@@ -121,11 +182,34 @@ jobs:
           assert "n8n" not in combined + renderer
           assert '"real"' not in index and '"general"' not in index
           assert "claim_notification_events_for_dispatcher\"" not in index
+          assert "MAX_DISPATCHER_BODY_BYTES = 64" in index
+          assert "request.text()" not in index
+          assert "validDispatcherContentType" in index
+          assert "readBoundedBody" in index
+          assert "normalizeSupabaseUrl" in index
+          assert "supabase\\.co" in index
+          assert "validHmacConfiguration" in combined
+          assert "encoder.encode(key).byteLength >= 32" in auth
+          assert index.count("dependencies.send({") == 1
+          acknowledgement = index.split("let sentAcknowledged", 1)[1].split(
+              "if (!sentAcknowledged)", 1
+          )[0]
+          assert "repository.sent" in acknowledgement
+          assert "repository.failed" not in acknowledgement
+          assert 'codes.push("manual_review_required")' in index
           assert "attachments" not in index
           assert "notification_events.subject" not in renderer
           assert "http://" not in renderer and "https://" not in renderer
           assert "provider_matched" not in renderer
           PY
+
+      - name: Run triage QA (34 tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            scripts/qa/provider-intake-triage-contract.test.mjs \
+            scripts/qa/provider-intake-action-fingerprint.test.mjs
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2

@@ -58,6 +58,7 @@ const state = {
   matchSearch: "",
   matchAction: null,
   matchTrigger: null,
+  externalTransitionV1Available: false,
 }
 
 const dom = {}
@@ -89,7 +90,15 @@ async function init() {
 
   dom.accessState.hidden = true
   dom.triageWorkspace.hidden = false
+  await detectExternalTransitionCapability()
   await loadList()
+}
+
+async function detectExternalTransitionCapability() {
+  const { data, error } = await supabaseClient.rpc(
+    "provider_intake_external_transition_capability_v1",
+  )
+  state.externalTransitionV1Available = !error && data === true
 }
 
 function bindDom() {
@@ -1040,7 +1049,8 @@ function openActionDialog({ kind, toStatus, trigger }) {
   dom.externalFieldCodes.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false })
   dom.actionError.textContent = ""
   dom.confirmActionBtn.disabled = false
-  const externalTransition = kind === "transition" && ["needs_correction", "rejected"].includes(toStatus)
+  const externalStatus = kind === "transition" && ["needs_correction", "rejected"].includes(toStatus)
+  const externalTransition = externalStatus && state.externalTransitionV1Available
   dom.externalMessageFields.hidden = !externalTransition
   dom.externalFieldCodes.hidden = toStatus !== "needs_correction"
 
@@ -1053,10 +1063,18 @@ function openActionDialog({ kind, toStatus, trigger }) {
   } else {
     const config = transitionCopy(toStatus)
     dom.actionTitle.textContent = config.title
-    dom.actionDescription.textContent = `${config.description} Estado actual: ${STATUS[intake.status]?.label || intake.status}.`
-    dom.actionRequiredLabel.textContent = "(opcional; nunca se envía)"
-    dom.actionNotes.placeholder = "Contexto operativo opcional para el equipo interno"
-    dom.externalMessage.placeholder = config.placeholder
+    dom.actionDescription.textContent = `${
+      externalStatus && !state.externalTransitionV1Available
+        ? config.legacyDescription
+        : config.description
+    } Estado actual: ${STATUS[intake.status]?.label || intake.status}.`
+    dom.actionRequiredLabel.textContent = externalStatus && !state.externalTransitionV1Available
+      ? "(obligatorio; flujo legacy sin notificación)"
+      : "(opcional; nunca se envía)"
+    dom.actionNotes.placeholder = externalStatus && !state.externalTransitionV1Available
+      ? config.legacyPlaceholder
+      : "Contexto operativo opcional para el equipo interno"
+    dom.externalMessage.placeholder = externalTransition ? config.placeholder : ""
     dom.confirmActionBtn.textContent = config.button
   }
   updateActionCounter()
@@ -1082,7 +1100,9 @@ async function submitAction(event) {
   const validation = validateAction(action, notes, externalMessage, fieldCodes)
   if (validation) {
     dom.actionError.textContent = validation
-    ;(["needs_correction", "rejected"].includes(action.toStatus) ? dom.externalMessage : dom.actionNotes).focus()
+    ;(["needs_correction", "rejected"].includes(action.toStatus) && state.externalTransitionV1Available
+      ? dom.externalMessage
+      : dom.actionNotes).focus()
     return
   }
 
@@ -1091,7 +1111,8 @@ async function submitAction(event) {
   const originalLabel = dom.confirmActionBtn.textContent
   dom.confirmActionBtn.textContent = "Guardando…"
 
-  const usesExternalContract = action.kind === "transition" && ["needs_correction", "rejected"].includes(action.toStatus)
+  const usesExternalContract = state.externalTransitionV1Available &&
+    action.kind === "transition" && ["needs_correction", "rejected"].includes(action.toStatus)
   const request = action.kind === "note"
     ? supabaseClient.rpc("add_provider_intake_note", {
         p_payment_intake_id: intake.id,
@@ -1124,7 +1145,10 @@ async function submitAction(event) {
   dom.confirmActionBtn.textContent = originalLabel
 
   if (error) {
-    dom.actionError.textContent = friendlyError(error)
+    const rawError = String(error?.message || error || "")
+    dom.actionError.textContent = usesExternalContract && /PGRST202|schema cache|Could not find the function/i.test(rawError)
+      ? "El contrato externo está en mantenimiento mientras se actualiza el esquema. No se ejecutó ninguna transición."
+      : friendlyError(error)
     return
   }
 
@@ -1148,7 +1172,10 @@ function validateAction(action, notes, externalMessage, fieldCodes) {
   }
   if (notes.length > 2000) return "El comentario no puede exceder 2000 caracteres."
   if (action.kind === "note" && notes.length < 3) return "Escribe una nota de al menos 3 caracteres."
-  if (["needs_correction", "rejected"].includes(action.toStatus)) {
+  if (["needs_correction", "rejected"].includes(action.toStatus) && !state.externalTransitionV1Available) {
+    if (notes.length < 10) return "Explica el motivo operativo en al menos 10 caracteres."
+  }
+  if (["needs_correction", "rejected"].includes(action.toStatus) && state.externalTransitionV1Available) {
     if (externalMessage.length < 10 || externalMessage.length > 1000) {
       return "El mensaje al proveedor debe tener entre 10 y 1000 caracteres."
     }
@@ -1236,6 +1263,8 @@ function transitionCopy(toStatus) {
     needs_correction: {
       title: "Pedir corrección",
       description: "Separa el contexto interno del mensaje de texto plano destinado al proveedor.",
+      legacyDescription: "Registra la corrección con el flujo interno vigente. El contrato externo aún no está disponible y no se enviará notificación.",
+      legacyPlaceholder: "Describe la corrección requerida",
       placeholder: "Describe al proveedor qué debe corregir, sin datos sensibles",
       button: "Solicitar corrección",
       required: true,
@@ -1243,6 +1272,8 @@ function transitionCopy(toStatus) {
     rejected: {
       title: "Rechazar solicitud",
       description: "La solicitud quedará terminal y el mensaje externo se conservará separado de la nota interna.",
+      legacyDescription: "Registra el rechazo con el flujo interno vigente. El contrato externo aún no está disponible y no se enviará notificación.",
+      legacyPlaceholder: "Motivo del rechazo",
       placeholder: "Comunica el resultado al proveedor, sin datos internos ni sensibles",
       button: "Rechazar solicitud",
       required: true,
@@ -1272,7 +1303,8 @@ const ERROR_MESSAGES = Object.freeze({
   file_not_found: "El documento no existe o no pertenece a esta solicitud.",
   provider_intake_conflict: "Esta solicitud fue actualizada por otro usuario. Recarga el detalle.",
   provider_intake_invalid_transition: "El estado actual no permite esta transición.",
-  provider_intake_external_transition_requires_v1: "Esta acción requiere el contrato externo versionado.",
+  provider_intake_external_transition_requires_v1: "El contrato externo está temporalmente en mantenimiento. No se ejecutó ninguna transición.",
+  provider_intake_external_transition_capability_unavailable: "El contrato externo está temporalmente en mantenimiento. No se ejecutó ninguna transición.",
   provider_intake_external_transition_invalid: "El estado actual no permite esta transición externa.",
   provider_intake_external_message_invalid: "El mensaje al proveedor debe ser texto plano de 10 a 1000 caracteres, sin enlaces ni datos sensibles.",
   provider_intake_external_message_matches_internal_notes: "La nota interna y el mensaje al proveedor deben ser distintos.",

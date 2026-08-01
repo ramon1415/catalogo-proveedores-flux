@@ -1,7 +1,12 @@
-import { type VerifiedInvocation, verifyInvocation } from "./auth.ts";
+import {
+  validHmacConfiguration,
+  type VerifiedInvocation,
+  verifyInvocation,
+} from "./auth.ts";
 import { renderExternalEmail } from "./renderer.ts";
 
 export const EXTERNAL_WORKER_ID = "external-notification-dispatcher-v1";
+export const MAX_DISPATCHER_BODY_BYTES = 64;
 export const SAFE_CODES = Object.freeze(
   [
     "external_disabled",
@@ -36,6 +41,13 @@ type AttemptReservation = {
   provider_idempotency_key: string;
 };
 
+export type ExternalFailureResult = {
+  result: "pending" | "dead_letter";
+  retryable: boolean;
+  manual_review_required: boolean;
+  circuit_breaker_required: boolean;
+};
+
 export type ExternalRepository = {
   rolloutMode(): Promise<string>;
   registerInvocation(
@@ -48,12 +60,12 @@ export type ExternalRepository = {
     eventId: string,
     attemptNumber: number,
     providerMessageId: string,
-  ): Promise<void>;
+  ): Promise<"sent" | "already_sent">;
   failed(
     eventId: string,
     attemptNumber: number,
     safeCode: SafeCode,
-  ): Promise<void>;
+  ): Promise<ExternalFailureResult>;
 };
 
 export type SendInput = {
@@ -89,11 +101,49 @@ function json(body: Record<string, unknown>, status = 200): Response {
 }
 
 export function parseDispatcherBody(rawBody: string): boolean {
+  return rawBody === '{"limit":1}';
+}
+
+export function validDispatcherContentType(value: string | null): boolean {
+  return value !== null &&
+    /^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(value);
+}
+
+export async function readBoundedBody(
+  request: Request,
+  maximumBytes = MAX_DISPATCHER_BODY_BYTES,
+): Promise<string | null> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null) {
+    if (!/^\d+$/.test(declared)) return null;
+    const length = Number(declared);
+    if (!Number.isSafeInteger(length) || length > maximumBytes) return null;
+  }
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximumBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   try {
-    const value = JSON.parse(rawBody) as Record<string, unknown>;
-    return Object.keys(value).length === 1 && value.limit === 1;
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -117,6 +167,23 @@ export function classifyProviderFailure(
   if (status >= 500) return "provider_server_error";
   if (status >= 400) return "provider_contract_rejected";
   return "provider_response_invalid";
+}
+
+export function validateFailureResult(
+  safeCode: SafeCode,
+  result: ExternalFailureResult,
+): boolean {
+  const manualReviewExpected = [
+    "provider_timeout_unknown",
+    "provider_response_invalid",
+    "manual_review_required",
+  ].includes(safeCode);
+  const circuitBreakerExpected = safeCode === "provider_auth_failed";
+  return ["pending", "dead_letter"].includes(result.result) &&
+    typeof result.retryable === "boolean" &&
+    result.manual_review_required === manualReviewExpected &&
+    result.circuit_breaker_required === circuitBreakerExpected &&
+    (!circuitBreakerExpected || result.result === "dead_letter");
 }
 
 export function createExternalDispatcherHandler(dependencies: Dependencies) {
@@ -143,17 +210,29 @@ export function createExternalDispatcherHandler(dependencies: Dependencies) {
       return response;
     };
 
+    if (request.method !== "POST") {
+      codes.push("request_contract_invalid");
+      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 405));
+    }
+    if (!validDispatcherContentType(request.headers.get("content-type"))) {
+      codes.push("request_contract_invalid");
+      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 415));
+    }
+    const rawBody = await readBoundedBody(request);
+    if (rawBody === null) {
+      codes.push("request_contract_invalid");
+      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 413));
+    }
+    if (!parseDispatcherBody(rawBody)) {
+      codes.push("request_contract_invalid");
+      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 400));
+    }
     if (dependencies.mode === "disabled") {
       codes.push("external_disabled");
       return finish(json({ processed: 0, sent: 0, failed: 0, codes }));
     }
 
     const url = new URL(request.url);
-    if (request.method !== "POST") {
-      codes.push("request_contract_invalid");
-      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 405));
-    }
-    const rawBody = await request.text();
     const invocation = await verifyInvocation({
       method: request.method,
       pathname: url.pathname,
@@ -166,10 +245,6 @@ export function createExternalDispatcherHandler(dependencies: Dependencies) {
     if (!invocation) {
       codes.push("request_not_authorized");
       return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 401));
-    }
-    if (!parseDispatcherBody(rawBody)) {
-      codes.push("request_contract_invalid");
-      return finish(json({ processed: 0, sent: 0, failed: 0, codes }, 400));
     }
 
     let dbMode: string;
@@ -209,11 +284,14 @@ export function createExternalDispatcherHandler(dependencies: Dependencies) {
       } catch {
         codes.push("renderer_contract_failed");
         failed = 1;
-        await dependencies.repository.failed(
+        const failureResult = await dependencies.repository.failed(
           event.id,
           reservation.attempt_number,
           "renderer_contract_failed",
         );
+        if (!validateFailureResult("renderer_contract_failed", failureResult)) {
+          throw new Error("failure_result_contract_invalid");
+        }
         return finish(json({ processed, sent, failed, codes }));
       }
 
@@ -221,32 +299,58 @@ export function createExternalDispatcherHandler(dependencies: Dependencies) {
         event.id,
         reservation.attempt_number,
       );
+      let providerMessageId: string;
       try {
-        const providerMessageId = await dependencies.send({
+        providerMessageId = await dependencies.send({
           to: event.recipient_email,
           subject: rendered.subject,
           text: rendered.text,
           html: rendered.html,
           idempotencyKey: reservation.provider_idempotency_key,
         });
-        await dependencies.repository.sent(
-          event.id,
-          reservation.attempt_number,
-          providerMessageId,
-        );
-        sent = 1;
       } catch (error) {
         const safeCode = error instanceof ProviderError
           ? error.safeCode
           : classifyProviderFailure(0, error);
         codes.push(safeCode);
         failed = 1;
-        await dependencies.repository.failed(
+        const failureResult = await dependencies.repository.failed(
           event.id,
           reservation.attempt_number,
           safeCode,
         );
+        if (!validateFailureResult(safeCode, failureResult)) {
+          throw new Error("failure_result_contract_invalid");
+        }
+        if (failureResult.manual_review_required) {
+          codes.push("manual_review_required");
+        }
+        return finish(json({ processed, sent, failed, codes }));
       }
+
+      let sentAcknowledged = false;
+      for (let acknowledgement = 0; acknowledgement < 2; acknowledgement += 1) {
+        try {
+          const result = await dependencies.repository.sent(
+            event.id,
+            reservation.attempt_number,
+            providerMessageId,
+          );
+          if (result !== "sent" && result !== "already_sent") {
+            throw new Error("sent_result_contract_invalid");
+          }
+          sentAcknowledged = true;
+          break;
+        } catch {
+          // Retry only the same DB acknowledgement. Resend is never called again.
+        }
+      }
+      if (!sentAcknowledged) {
+        codes.push("manual_review_required");
+        failed = 1;
+        return finish(json({ processed, sent, failed, codes }, 503));
+      }
+      sent = 1;
       return finish(json({ processed, sent, failed, codes }));
     } catch {
       codes.push("manual_review_required");
@@ -256,7 +360,7 @@ export function createExternalDispatcherHandler(dependencies: Dependencies) {
   };
 }
 
-class ProviderError extends Error {
+export class ProviderError extends Error {
   constructor(readonly safeCode: SafeCode) {
     super(safeCode);
   }
@@ -266,6 +370,34 @@ function required(name: string): string {
   const value = Deno.env.get(name)?.trim();
   if (!value) throw new Error(`missing_configuration:${name}`);
   return value;
+}
+
+function requiredExact(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value || value !== value.trim()) {
+    throw new Error(`invalid_configuration:${name}`);
+  }
+  return value;
+}
+
+export function normalizeSupabaseUrl(value: string): string {
+  if (!value || value !== value.trim()) {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
+  if (
+    url.protocol !== "https:" || url.username || url.password || url.port ||
+    url.search || url.hash || !["", "/"].includes(url.pathname) ||
+    !/^[a-z0-9]{20}\.supabase\.co$/.test(url.hostname)
+  ) {
+    throw new Error("invalid_configuration:SUPABASE_URL");
+  }
+  return url.origin;
 }
 
 function externalMode(): ExternalMode {
@@ -283,7 +415,7 @@ function supabaseRepository(
     body: Record<string, unknown> = {},
   ): Promise<T> => {
     const response = await fetch(
-      `${url.replace(/\/$/, "")}/rest/v1/rpc/${name}`,
+      `${url}/rest/v1/rpc/${name}`,
       {
         method: "POST",
         headers: {
@@ -323,22 +455,20 @@ function supabaseRepository(
         p_worker_id: EXTERNAL_WORKER_ID,
       });
     },
-    sent: async (eventId, attemptNumber, providerMessageId) => {
-      await rpc("mark_external_notification_sent", {
+    sent: (eventId, attemptNumber, providerMessageId) =>
+      rpc("mark_external_notification_sent", {
         p_notification_event_id: eventId,
         p_attempt_number: attemptNumber,
         p_worker_id: EXTERNAL_WORKER_ID,
         p_provider_message_id: providerMessageId,
-      });
-    },
-    failed: async (eventId, attemptNumber, safeCode) => {
-      await rpc("mark_external_notification_failed", {
+      }),
+    failed: (eventId, attemptNumber, safeCode) =>
+      rpc("mark_external_notification_failed", {
         p_notification_event_id: eventId,
         p_attempt_number: attemptNumber,
         p_worker_id: EXTERNAL_WORKER_ID,
         p_safe_error_code: safeCode,
-      });
-    },
+      }),
   };
 }
 
@@ -399,23 +529,33 @@ async function resendSender(input: SendInput): Promise<string> {
 
 if (import.meta.main) {
   const mode = externalMode();
-  const handler = mode === "disabled"
-    ? createExternalDispatcherHandler({
+  let handler: (request: Request) => Promise<Response>;
+  if (mode === "disabled") {
+    handler = createExternalDispatcherHandler({
       mode,
       keyId: "",
       hmacKey: "",
       repository: {} as ExternalRepository,
       send: resendSender,
-    })
-    : createExternalDispatcherHandler({
+    });
+  } else {
+    const keyId = requiredExact("NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY_ID");
+    const hmacKey = requiredExact("NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY");
+    if (!validHmacConfiguration(keyId, hmacKey)) {
+      throw new Error(
+        "invalid_configuration:NOTIFICATION_EXTERNAL_DISPATCHER_HMAC",
+      );
+    }
+    handler = createExternalDispatcherHandler({
       mode,
-      keyId: required("NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY_ID"),
-      hmacKey: required("NOTIFICATION_EXTERNAL_DISPATCHER_HMAC_KEY"),
+      keyId,
+      hmacKey,
       repository: supabaseRepository(
-        required("SUPABASE_URL"),
+        normalizeSupabaseUrl(requiredExact("SUPABASE_URL")),
         required("SUPABASE_SERVICE_ROLE_KEY"),
       ),
       send: resendSender,
     });
+  }
   Deno.serve(handler);
 }

@@ -11,6 +11,12 @@ const encoder = new TextEncoder();
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
+const KEY_ID = /^[A-Za-z0-9_-]{3,64}$/;
+
+export function validHmacConfiguration(keyId: string, key: string): boolean {
+  return keyId === keyId.trim() && KEY_ID.test(keyId) &&
+    key === key.trim() && encoder.encode(key).byteLength >= 32;
+}
 
 function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((value) =>
@@ -77,12 +83,15 @@ export async function verifyInvocation(input: {
   key: string;
   nowMs: number;
 }): Promise<VerifiedInvocation | null> {
-  const keyId = input.headers.get("x-flux-key-id")?.trim() || "";
-  const timestamp = input.headers.get("x-flux-timestamp")?.trim() || "";
-  const invocationId = input.headers.get("x-flux-invocation-id")?.trim() || "";
-  const signature =
-    input.headers.get("x-flux-signature")?.trim().toLowerCase() || "";
-  if (!input.expectedKeyId || keyId !== input.expectedKeyId || !input.key) {
+  const keyId = input.headers.get("x-flux-key-id") || "";
+  const timestamp = input.headers.get("x-flux-timestamp") || "";
+  const invocationId = input.headers.get("x-flux-invocation-id") || "";
+  const signature = input.headers.get("x-flux-signature") || "";
+  if (
+    !validHmacConfiguration(input.expectedKeyId, input.key) ||
+    keyId !== input.expectedKeyId ||
+    !KEY_ID.test(keyId)
+  ) {
     return null;
   }
   if (!UUID_V4.test(invocationId) || !/^\d{10}$/.test(timestamp)) return null;

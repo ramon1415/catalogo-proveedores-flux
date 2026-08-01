@@ -1,4 +1,4 @@
--- NOTIFICATIONS-N1-B synthetic contract suite.
+-- NOTIFICATIONS-N1-B behavioral contract suite and numbered catalog.
 -- No DEV dependency, no secrets, no network and no permanent writes.
 -- Execute only in a separately authorized disposable database after migration 042.
 
@@ -98,6 +98,338 @@ begin
 end
 $$;
 
+-- The following fixtures exercise the real functions. All rows are synthetic and
+-- the terminal ROLLBACK guarantees zero persistent delta.
+insert into public.profiles (id, full_name, email)
+values (
+  '10000000-0000-4000-8000-000000000001',
+  'N1-B Contract Actor',
+  'n1b-contract-actor@example.invalid'
+);
+
+insert into public.companies (id, name, legal_name, active)
+values (
+  '10000000-0000-4000-8000-000000000002',
+  'N1-B Contract Company',
+  'N1-B Contract Company',
+  true
+);
+
+insert into public.intake_links (
+  id, company_id, label, token_hash, token_prefix, status, created_by
+) values (
+  '10000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000002',
+  'N1-B contract link',
+  repeat('f', 64),
+  'n1br1001',
+  'active',
+  '10000000-0000-4000-8000-000000000001'
+);
+
+insert into public.payment_intake (
+  id, public_folio, intake_link_id, company_id, status, provider_name,
+  provider_email, concept, amount_requested, currency,
+  submission_fingerprint, idempotency_key
+) values
+  (
+    '10000000-0000-4000-8000-000000000101', 'INT-2099-000101',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor Contractual', 'contract-provider@example.invalid',
+    'Prueba N1-B 1', 1, 'MXN', repeat('a', 64), repeat('1', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000102', 'INT-2099-000102',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor Contractual', 'contract-provider@example.invalid',
+    'Prueba N1-B 2', 1, 'MXN', repeat('b', 64), repeat('2', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000103', 'INT-2099-000103',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor Contractual', 'contract-provider@example.invalid',
+    'Prueba N1-B 3', 1, 'MXN', repeat('c', 64), repeat('3', 64)
+  ),
+  (
+    '10000000-0000-4000-8000-000000000104', 'INT-2099-000104',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000002', 'received',
+    'Proveedor Contractual', 'contract-provider@example.invalid',
+    'Prueba N1-B 4', 1, 'MXN', repeat('d', 64), repeat('4', 64)
+  );
+
+do $$
+declare
+  v_intake_id uuid;
+  v_result jsonb;
+begin
+  foreach v_intake_id in array array[
+    '10000000-0000-4000-8000-000000000101'::uuid,
+    '10000000-0000-4000-8000-000000000102'::uuid,
+    '10000000-0000-4000-8000-000000000103'::uuid
+  ] loop
+    v_result := public.finalize_provider_intake_submission_v1(
+      v_intake_id, 0::smallint, '[]'::jsonb
+    );
+    if v_result ->> 'completion' <> 'completed'
+       or v_result ->> 'notification' <> 'rollout_disabled' then
+      raise exception 'N1B_BEHAVIOR_FINALIZE_COMPLETED_FAILED';
+    end if;
+  end loop;
+
+  v_result := public.finalize_provider_intake_submission_v1(
+    '10000000-0000-4000-8000-000000000101', 0::smallint, '[]'::jsonb
+  );
+  if v_result ->> 'completion' <> 'already_completed'
+     or (select count(*) from public.payment_intake_events
+         where payment_intake_id = '10000000-0000-4000-8000-000000000101'
+           and event_type = 'submission_completed') <> 1 then
+    raise exception 'N1B_BEHAVIOR_FINALIZE_IDEMPOTENT_FAILED';
+  end if;
+
+  v_result := public.provider_intake_submission_state_v1(
+    '10000000-0000-4000-8000-000000000101'
+  );
+  if v_result ->> 'submission_state' <> 'completed'
+     or v_result ->> 'intake_status' <> 'received' then
+    raise exception 'N1B_BEHAVIOR_DUPLICATE_COMPLETED_STATE_FAILED';
+  end if;
+
+  v_result := public.provider_intake_submission_state_v1(
+    '10000000-0000-4000-8000-000000000104'
+  );
+  if v_result ->> 'submission_state' <> 'incomplete' then
+    raise exception 'N1B_BEHAVIOR_DUPLICATE_INCOMPLETE_STATE_FAILED';
+  end if;
+end
+$$;
+
+do $$
+declare
+  v_source_1 uuid;
+  v_source_2 uuid;
+  v_source_3 uuid;
+  v_event_id uuid;
+  v_attempt jsonb;
+  v_result jsonb;
+  v_sent_result text;
+  v_next_attempt timestamptz;
+begin
+  select id into strict v_source_1 from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000101'
+    and event_type = 'submission_completed';
+  select id into strict v_source_2 from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000102'
+    and event_type = 'submission_completed';
+  select id into strict v_source_3 from public.payment_intake_events
+  where payment_intake_id = '10000000-0000-4000-8000-000000000103'
+    and event_type = 'submission_completed';
+
+  update public.notification_external_rollouts
+     set mode = 'test_only',
+         cutoff_at = now() - interval '1 minute',
+         enabled_event_types = array['provider_intake.received']::text[],
+         recipient_allowlist_hashes = array[
+           encode(extensions.digest(
+             convert_to('contract-provider@example.invalid', 'UTF8'),
+             'sha256'
+           ), 'hex')
+         ]::text[],
+         batch_size = 1,
+         daily_cap = 1
+   where id = 'provider-intake-v1';
+
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_1);
+  if v_result ->> 'result' <> 'enqueued' then
+    raise exception 'N1B_BEHAVIOR_FIRST_ENQUEUE_FAILED';
+  end if;
+
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_2);
+  if v_result ->> 'result' <> 'daily_cap_reached'
+     or (select count(*) from public.notification_events
+         where audience = 'external') <> 1
+     or exists (
+       select 1 from public.notification_delivery_attempts a
+       join public.notification_events e on e.id = a.notification_event_id
+       where e.audience = 'external'
+     ) then
+    raise exception 'N1B_BEHAVIOR_ZERO_BACKLOG_DAILY_CAP_FAILED';
+  end if;
+
+  select id into strict v_event_id
+  from public.claim_external_notification_events_for_dispatcher(
+    1, 'external-notification-dispatcher-v1'
+  );
+  v_attempt := public.reserve_external_notification_attempt(
+    v_event_id, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_provider_request_started(
+    v_event_id, (v_attempt ->> 'attempt_number')::integer,
+    'external-notification-dispatcher-v1'
+  );
+  v_sent_result := public.mark_external_notification_sent(
+    v_event_id, (v_attempt ->> 'attempt_number')::integer,
+    'external-notification-dispatcher-v1', 'provider-message-contract-1'
+  );
+  if v_sent_result <> 'sent' then
+    raise exception 'N1B_BEHAVIOR_SENT_FAILED';
+  end if;
+  v_sent_result := public.mark_external_notification_sent(
+    v_event_id, (v_attempt ->> 'attempt_number')::integer,
+    'external-notification-dispatcher-v1', 'provider-message-contract-1'
+  );
+  if v_sent_result <> 'already_sent' then
+    raise exception 'N1B_BEHAVIOR_SENT_IDEMPOTENCE_FAILED';
+  end if;
+  begin
+    perform public.mark_external_notification_sent(
+      v_event_id, (v_attempt ->> 'attempt_number')::integer,
+      'external-notification-dispatcher-v1', 'provider-message-conflict'
+    );
+    raise exception 'N1B_BEHAVIOR_SENT_CONFLICT_NOT_REJECTED';
+  exception
+    when others then
+      if sqlerrm not like '%external_sent_material_conflict%' then
+        raise;
+      end if;
+  end;
+
+  update public.notification_external_rollouts
+     set daily_cap = 2
+   where id = 'provider-intake-v1';
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_2);
+  if v_result ->> 'result' <> 'enqueued' then
+    raise exception 'N1B_BEHAVIOR_AUTH_FIXTURE_ENQUEUE_FAILED';
+  end if;
+  select id into strict v_event_id
+  from public.claim_external_notification_events_for_dispatcher(
+    1, 'external-notification-dispatcher-v1'
+  );
+  v_attempt := public.reserve_external_notification_attempt(
+    v_event_id, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_provider_request_started(
+    v_event_id, (v_attempt ->> 'attempt_number')::integer,
+    'external-notification-dispatcher-v1'
+  );
+  v_result := public.mark_external_notification_failed(
+    v_event_id, (v_attempt ->> 'attempt_number')::integer,
+    'external-notification-dispatcher-v1', 'provider_auth_failed'
+  );
+  if not coalesce((v_result ->> 'circuit_breaker_required')::boolean, false)
+     or (select mode from public.notification_external_rollouts
+         where id = 'provider-intake-v1') <> 'paused'
+     or exists (
+       select 1 from public.claim_external_notification_events_for_dispatcher(
+         1, 'external-notification-dispatcher-v1'
+       )
+     )
+     or public.recover_stale_external_notification_events(
+       1, 10, 'external-notification-recovery-contract'
+     ) <> 0 then
+    raise exception 'N1B_BEHAVIOR_AUTH_CIRCUIT_BREAKER_FAILED';
+  end if;
+
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_3);
+  if v_result ->> 'result' <> 'rollout_disabled' then
+    raise exception 'N1B_BEHAVIOR_PAUSED_PRODUCER_FAILED';
+  end if;
+
+  update public.notification_external_rollouts
+     set mode = 'test_only', daily_cap = 3
+   where id = 'provider-intake-v1';
+  v_result := public.enqueue_provider_intake_external_notification_v1(v_source_3);
+  if v_result ->> 'result' <> 'enqueued' then
+    raise exception 'N1B_BEHAVIOR_RETRY_FIXTURE_ENQUEUE_FAILED';
+  end if;
+  select id into strict v_event_id
+  from public.claim_external_notification_events_for_dispatcher(
+    1, 'external-notification-dispatcher-v1'
+  );
+  v_attempt := public.reserve_external_notification_attempt(
+    v_event_id, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_provider_request_started(
+    v_event_id, 1, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_notification_failed(
+    v_event_id, 1, 'external-notification-dispatcher-v1',
+    'provider_server_error'
+  );
+  select next_attempt_at into v_next_attempt
+  from public.notification_events where id = v_event_id;
+  if v_next_attempt is null
+     or v_next_attempt not between now() + interval '4 minutes 50 seconds'
+      and now() + interval '5 minutes 10 seconds' then
+    raise exception 'N1B_BEHAVIOR_RETRY_5_MINUTES_FAILED';
+  end if;
+
+  update public.notification_events
+     set next_attempt_at = now() - interval '1 second'
+   where id = v_event_id;
+  perform id from public.claim_external_notification_events_for_dispatcher(
+    1, 'external-notification-dispatcher-v1'
+  );
+  v_attempt := public.reserve_external_notification_attempt(
+    v_event_id, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_provider_request_started(
+    v_event_id, 2, 'external-notification-dispatcher-v1'
+  );
+  perform public.mark_external_notification_failed(
+    v_event_id, 2, 'external-notification-dispatcher-v1',
+    'provider_server_error'
+  );
+  select next_attempt_at into v_next_attempt
+  from public.notification_events where id = v_event_id;
+  if v_next_attempt is null
+     or v_next_attempt not between now() + interval '29 minutes 50 seconds'
+      and now() + interval '30 minutes 10 seconds' then
+    raise exception 'N1B_BEHAVIOR_RETRY_30_MINUTES_FAILED';
+  end if;
+end
+$$;
+
+do $$
+declare
+  v_registered text;
+  v_replay text;
+begin
+  v_registered := public.register_external_notification_dispatch_invocation(
+    'n1b_contract',
+    '10000000-0000-4000-8000-000000000201',
+    repeat('e', 64),
+    now()
+  );
+  v_replay := public.register_external_notification_dispatch_invocation(
+    'n1b_contract',
+    '10000000-0000-4000-8000-000000000201',
+    repeat('e', 64),
+    now()
+  );
+  if v_registered <> 'registered' or v_replay <> 'replay_detected' then
+    raise exception 'N1B_BEHAVIOR_REPLAY_LEDGER_FAILED';
+  end if;
+  if has_table_privilege(
+       'service_role', 'public.notification_external_dispatch_invocations', 'SELECT'
+     )
+     or has_table_privilege(
+       'service_role', 'public.notification_external_dispatch_invocations', 'INSERT'
+     )
+     or has_table_privilege(
+       'service_role', 'public.notification_external_dispatch_invocations', 'DELETE'
+     ) then
+    raise exception 'N1B_BEHAVIOR_REPLAY_DIRECT_GRANT_FAILED';
+  end if;
+  if not public.provider_intake_external_transition_capability_v1() then
+    raise exception 'N1B_BEHAVIOR_UI_CAPABILITY_FAILED';
+  end if;
+end
+$$;
+
 insert into n1b_contract_results (test_number, test_name, status) values
   (1,  'rollout_disabled_no_enqueue', 'PASS'),
   (2,  'paused_no_enqueue', 'PASS'),
@@ -110,7 +442,7 @@ insert into n1b_contract_results (test_number, test_name, status) values
   (9,  'correction_maximum_one', 'PASS'),
   (10, 'second_correction_manual_follow_up', 'PASS'),
   (11, 'rejected_maximum_one', 'PASS'),
-  (12, 'no_recipient_terminal', 'PASS'),
+  (12, 'no_recipient_no_enqueue', 'PASS'),
   (13, 'provider_matched_never_enqueues', 'PASS'),
   (14, 'internal_note_never_enqueues', 'PASS'),
   (15, 'no_backfill', 'PASS'),

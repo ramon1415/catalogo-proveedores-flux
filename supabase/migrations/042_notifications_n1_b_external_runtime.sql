@@ -27,6 +27,30 @@ begin
      ) is not null
      or to_regprocedure(
        'public.transition_provider_intake_external_v1(uuid,text,timestamptz,text,text,text,text[],uuid)'
+     ) is not null
+     or to_regprocedure(
+       'public.provider_intake_submission_state_v1(uuid)'
+     ) is not null
+     or to_regprocedure(
+       'public.provider_intake_external_transition_capability_v1()'
+     ) is not null
+     or to_regprocedure(
+       'public.register_external_notification_dispatch_invocation(text,text,text,timestamptz)'
+     ) is not null
+     or to_regprocedure(
+       'public.get_external_notification_rollout_mode()'
+     ) is not null
+     or to_regprocedure(
+       'public.reserve_external_notification_attempt(uuid,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.mark_external_provider_request_started(uuid,integer,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.mark_external_notification_sent(uuid,integer,text,text)'
+     ) is not null
+     or to_regprocedure(
+       'public.mark_external_notification_failed(uuid,integer,text,text)'
      ) is not null then
     raise exception 'notifications_n1_b_object_collision';
   end if;
@@ -50,7 +74,8 @@ declare
   v_recipient_hash text;
   v_payload jsonb;
   v_key text;
-  v_status text;
+  v_daily_count integer;
+  v_day_start timestamptz;
 begin
   select
     pie.id,
@@ -107,20 +132,13 @@ begin
     v_source.payment_intake_id
   );
 
-  if exists (
-    select 1
-    from public.notification_events e
-    where e.idempotency_key = v_key
-  ) then
-    return jsonb_build_object('result', 'already_exists');
-  end if;
-
   select r.*
     into v_rollout
   from public.notification_external_rollouts r
-  where r.id = 'provider-intake-v1';
+  where r.id = 'provider-intake-v1'
+  for update;
 
-  if not found or v_rollout.mode in ('disabled', 'paused') then
+  if not found or v_rollout.mode not in ('test_only', 'pilot') then
     return jsonb_build_object('result', 'rollout_disabled');
   end if;
 
@@ -130,6 +148,14 @@ begin
 
   if v_source.created_at < v_rollout.cutoff_at then
     return jsonb_build_object('result', 'source_before_cutoff');
+  end if;
+
+  if v_rollout.batch_size <> 1 then
+    return jsonb_build_object('result', 'rollout_disabled');
+  end if;
+
+  if v_rollout.daily_cap <= 0 then
+    return jsonb_build_object('result', 'daily_cap_reached');
   end if;
 
   if not (v_event_type = any (v_rollout.enabled_event_types))
@@ -175,20 +201,50 @@ begin
     raise exception 'external_notification_contract_invalid';
   end if;
 
+  if exists (
+    select 1
+    from public.notification_events e
+    where e.idempotency_key = v_key
+  ) then
+    return jsonb_build_object('result', 'already_exists');
+  end if;
+
   v_recipient := lower(btrim(v_source.provider_email));
   if v_recipient is null
      or v_recipient !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
-    v_status := 'no_recipient';
-    v_recipient := null;
-  else
-    v_recipient_hash := encode(
-      extensions.digest(convert_to(v_recipient, 'UTF8'), 'sha256'),
-      'hex'
+    return jsonb_build_object('result', 'no_recipient');
+  end if;
+
+  v_recipient_hash := encode(
+    extensions.digest(convert_to(v_recipient, 'UTF8'), 'sha256'),
+    'hex'
+  );
+  if not (v_recipient_hash = any (v_rollout.recipient_allowlist_hashes)) then
+    return jsonb_build_object('result', 'recipient_not_allowlisted');
+  end if;
+
+  v_day_start := date_trunc(
+    'day',
+    now() at time zone 'America/Mexico_City'
+  ) at time zone 'America/Mexico_City';
+
+  select count(*)::integer
+    into v_daily_count
+  from public.notification_events daily_event
+  where daily_event.audience = 'external'
+    and daily_event.rollout_id = v_rollout.id
+    and daily_event.status in ('pending', 'processing', 'sent')
+    and (
+      daily_event.status = 'pending'
+      or coalesce(
+        daily_event.processed_at,
+        daily_event.last_attempt_at,
+        daily_event.created_at
+      ) >= v_day_start
     );
-    if not (v_recipient_hash = any (v_rollout.recipient_allowlist_hashes)) then
-      return jsonb_build_object('result', 'recipient_not_allowlisted');
-    end if;
-    v_status := 'pending';
+
+  if v_daily_count >= v_rollout.daily_cap then
+    return jsonb_build_object('result', 'daily_cap_reached');
   end if;
 
   insert into public.notification_events (
@@ -225,16 +281,16 @@ begin
     null,
     v_payload,
     v_key,
-    v_status,
+    'pending',
     0,
     3,
-    case when v_status = 'pending' then now() else null end,
+    now(),
     'external',
     1,
     v_rollout.id,
     'payment_intake',
     v_source.payment_intake_id,
-    case when v_status = 'no_recipient' then 'no_recipient' else null end
+    null
   )
   on conflict (idempotency_key) do nothing;
 
@@ -242,10 +298,7 @@ begin
     return jsonb_build_object('result', 'already_exists');
   end if;
 
-  return jsonb_build_object(
-    'result',
-    case when v_status = 'pending' then 'enqueued' else 'no_recipient' end
-  );
+  return jsonb_build_object('result', 'enqueued');
 end
 $$;
 
@@ -272,6 +325,9 @@ declare
   v_sha256 text;
   v_source_event_id uuid;
   v_actual_file_count integer;
+  v_completion_count integer;
+  v_expected_files jsonb := '[]'::jsonb;
+  v_persisted_files jsonb;
   v_notification jsonb;
 begin
   if p_payment_intake_id is null
@@ -279,7 +335,19 @@ begin
      or p_expected_file_count not between 0 and 3
      or p_files is null
      or jsonb_typeof(p_files) <> 'array'
-     or jsonb_array_length(p_files) <> p_expected_file_count then
+     or jsonb_array_length(p_files) <> p_expected_file_count
+     or exists (
+       select 1
+       from jsonb_array_elements(p_files) supplied
+       group by supplied ->> 'file_id'
+       having count(*) > 1
+     )
+     or exists (
+       select 1
+       from jsonb_array_elements(p_files) supplied
+       group by supplied ->> 'storage_path'
+       having count(*) > 1
+     ) then
     raise exception 'provider_intake_finalization_fields_invalid';
   end if;
 
@@ -296,49 +364,26 @@ begin
   where pi.id = p_payment_intake_id
   for update of pi;
 
-  if not found or v_intake.status <> 'received' then
+  if not found
+     or (
+       v_intake.status <> 'received'
+       and v_intake.submission_completed_at is null
+     ) then
     raise exception 'provider_intake_not_finalizable';
-  end if;
-
-  if v_intake.submission_completed_at is not null then
-    if v_intake.expected_file_count is distinct from p_expected_file_count
-       or not exists (
-         select 1
-         from public.payment_intake_events pie
-         where pie.payment_intake_id = p_payment_intake_id
-           and pie.event_type = 'submission_completed'
-       ) then
-      raise exception 'provider_intake_finalization_conflict';
-    end if;
-    return jsonb_build_object(
-      'completion', 'already_completed',
-      'notification', 'already_exists'
-    );
-  end if;
-
-  if exists (
-    select 1
-    from public.payment_intake_events pie
-    where pie.payment_intake_id = p_payment_intake_id
-      and pie.metadata ->> 'issue_code' in (
-        'storage_upload_failed',
-        'storage_cleanup_failed',
-        'file_metadata_failed',
-        'storage_unavailable'
-      )
-  ) then
-    raise exception 'provider_intake_upload_issue_present';
-  end if;
-
-  if exists (
-    select 1 from public.payment_intake_files pif
-    where pif.payment_intake_id = p_payment_intake_id
-  ) then
-    raise exception 'provider_intake_file_metadata_conflict';
   end if;
 
   for v_item in select value from jsonb_array_elements(p_files) loop
     begin
+      if (
+        select array_agg(key order by key)
+        from jsonb_object_keys(v_item) supplied(key)
+      ) is distinct from array[
+        'file_id', 'file_kind', 'mime_type', 'original_filename',
+        'sha256', 'size_bytes', 'storage_path'
+      ]::text[] then
+        raise exception 'provider_intake_invalid_file_metadata';
+      end if;
+
       v_file_id := (v_item ->> 'file_id')::uuid;
       v_storage_path := btrim(v_item ->> 'storage_path');
       v_original_filename := btrim(v_item ->> 'original_filename');
@@ -377,13 +422,97 @@ begin
       raise exception 'provider_intake_storage_object_missing';
     end if;
 
+    v_expected_files := v_expected_files || jsonb_build_array(
+      jsonb_build_object(
+        'bucket_id', 'intake-uploads',
+        'file_id', v_file_id,
+        'file_kind', v_file_kind,
+        'mime_type', v_mime_type,
+        'original_filename', v_original_filename,
+        'sha256', v_sha256,
+        'size_bytes', v_size_bytes,
+        'storage_path', v_storage_path
+      )
+    );
+  end loop;
+
+  select coalesce(jsonb_agg(value order by value ->> 'file_id'), '[]'::jsonb)
+    into v_expected_files
+  from jsonb_array_elements(v_expected_files);
+
+  if v_intake.submission_completed_at is not null then
+    select count(*)::integer
+      into v_completion_count
+    from public.payment_intake_events pie
+    where pie.payment_intake_id = p_payment_intake_id
+      and pie.event_type = 'submission_completed';
+
+    select
+      count(*)::integer,
+      coalesce(jsonb_agg(
+        jsonb_build_object(
+          'bucket_id', pif.bucket_id,
+          'file_id', pif.id,
+          'file_kind', pif.file_kind,
+          'mime_type', pif.mime_type,
+          'original_filename', pif.original_filename,
+          'sha256', lower(pif.sha256),
+          'size_bytes', pif.size_bytes,
+          'storage_path', pif.storage_path
+        ) order by pif.id::text
+      ), '[]'::jsonb)
+      into v_actual_file_count, v_persisted_files
+    from public.payment_intake_files pif
+    where pif.payment_intake_id = p_payment_intake_id;
+
+    if v_intake.expected_file_count is distinct from p_expected_file_count
+       or v_completion_count <> 1
+       or v_actual_file_count <> p_expected_file_count
+       or v_persisted_files is distinct from v_expected_files then
+      raise exception 'provider_intake_finalization_conflict';
+    end if;
+    return jsonb_build_object(
+      'completion', 'already_completed',
+      'notification', 'already_exists'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from public.payment_intake_events pie
+    where pie.payment_intake_id = p_payment_intake_id
+      and pie.metadata ->> 'issue_code' in (
+        'storage_upload_failed',
+        'storage_cleanup_failed',
+        'file_metadata_failed',
+        'storage_unavailable'
+      )
+  ) then
+    raise exception 'provider_intake_upload_issue_present';
+  end if;
+
+  if exists (
+    select 1 from public.payment_intake_files pif
+    where pif.payment_intake_id = p_payment_intake_id
+  ) then
+    raise exception 'provider_intake_file_metadata_conflict';
+  end if;
+
+  for v_item in select value from jsonb_array_elements(v_expected_files) loop
     insert into public.payment_intake_files (
       id, payment_intake_id, bucket_id, storage_path, original_filename,
       mime_type, size_bytes, file_kind, quarantine_status, sha256
     ) values (
-      v_file_id, p_payment_intake_id, 'intake-uploads', v_storage_path,
-      v_original_filename, v_mime_type, v_size_bytes, v_file_kind,
-      'pending', v_sha256
+      (v_item ->> 'file_id')::uuid,
+      p_payment_intake_id,
+      v_item ->> 'bucket_id',
+      v_item ->> 'storage_path',
+      v_item ->> 'original_filename',
+      v_item ->> 'mime_type',
+      (v_item ->> 'size_bytes')::bigint,
+      v_item ->> 'file_kind',
+      'pending',
+      v_item ->> 'sha256'
     );
 
     insert into public.payment_intake_events (
@@ -391,10 +520,10 @@ begin
     ) values (
       p_payment_intake_id, 'file_uploaded', 'public_provider', 'received',
       'received', jsonb_build_object(
-        'file_id', v_file_id,
-        'file_kind', v_file_kind,
-        'mime_type', v_mime_type,
-        'size_bytes', v_size_bytes
+        'file_id', (v_item ->> 'file_id')::uuid,
+        'file_kind', v_item ->> 'file_kind',
+        'mime_type', v_item ->> 'mime_type',
+        'size_bytes', (v_item ->> 'size_bytes')::bigint
       )
     );
   end loop;
@@ -442,6 +571,79 @@ begin
     'notification', v_notification ->> 'result'
   );
 end
+$$;
+
+create function public.provider_intake_submission_state_v1(
+  p_payment_intake_id uuid
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_intake record;
+  v_file_count integer;
+  v_storage_count integer;
+  v_completion_count integer;
+  v_submission_state text;
+begin
+  select pi.status, pi.expected_file_count, pi.submission_completed_at
+    into v_intake
+  from public.payment_intake pi
+  where pi.id = p_payment_intake_id;
+
+  if not found then
+    raise exception 'provider_intake_not_found';
+  end if;
+
+  select count(*)::integer
+    into v_file_count
+  from public.payment_intake_files pif
+  where pif.payment_intake_id = p_payment_intake_id;
+
+  select count(*)::integer
+    into v_storage_count
+  from public.payment_intake_files pif
+  join storage.objects o
+    on o.bucket_id = pif.bucket_id
+   and o.name = pif.storage_path
+  where pif.payment_intake_id = p_payment_intake_id;
+
+  select count(*)::integer
+    into v_completion_count
+  from public.payment_intake_events pie
+  where pie.payment_intake_id = p_payment_intake_id
+    and pie.event_type = 'submission_completed';
+
+  v_submission_state := case
+    when v_intake.submission_completed_at is not null
+     and v_intake.expected_file_count is not null
+     and v_intake.expected_file_count = v_file_count
+     and v_storage_count = v_file_count
+     and v_completion_count = 1 then 'completed'
+    when v_intake.submission_completed_at is null
+     and v_completion_count = 0
+     and v_file_count = 0 then 'incomplete'
+    else 'needs_reconciliation'
+  end;
+
+  return jsonb_build_object(
+    'submission_state', v_submission_state,
+    'intake_status', v_intake.status
+  );
+end
+$$;
+
+create function public.provider_intake_external_transition_capability_v1()
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select true
 $$;
 
 create function public.transition_provider_intake_external_v1(
@@ -861,8 +1063,6 @@ create table public.notification_external_dispatch_invocations (
 alter table public.notification_external_dispatch_invocations enable row level security;
 revoke all on table public.notification_external_dispatch_invocations
   from public, anon, authenticated, service_role;
-grant select, insert, delete on table public.notification_external_dispatch_invocations
-  to service_role;
 grant all privileges on table public.notification_external_dispatch_invocations
   to postgres with grant option;
 
@@ -1029,28 +1229,67 @@ volatile
 security definer
 set search_path = public, pg_temp
 as $$
+declare
+  v_event public.notification_events%rowtype;
+  v_attempt public.notification_delivery_attempts%rowtype;
+  v_provider_message_id text := btrim(coalesce(p_provider_message_id, ''));
 begin
-  if nullif(btrim(coalesce(p_provider_message_id, '')), '') is null
-     or char_length(p_provider_message_id) > 255 then
+  if nullif(v_provider_message_id, '') is null
+     or char_length(v_provider_message_id) > 255
+     or v_provider_message_id ~ '[[:cntrl:]]' then
     raise exception 'external_provider_message_id_invalid';
   end if;
 
-  update public.notification_delivery_attempts a
+  select * into v_event
+  from public.notification_events e
+  where e.id = p_notification_event_id
+  for update;
+  if not found then
+    raise exception 'external_attempt_state_conflict';
+  end if;
+
+  select * into v_attempt
+  from public.notification_delivery_attempts a
+  where a.notification_event_id = p_notification_event_id
+    and a.attempt_number = p_attempt_number
+  for update;
+
+  if not found or v_attempt.worker_id is distinct from p_worker_id then
+    raise exception 'external_attempt_state_conflict';
+  end if;
+
+  if v_attempt.status = 'sent' or v_event.status = 'sent' then
+    if v_attempt.status = 'sent'
+       and v_event.status = 'sent'
+       and v_attempt.provider_message_id is not distinct from v_provider_message_id
+       and v_event.audience = 'external'
+       and v_event.attempt_count = p_attempt_number then
+      return 'already_sent';
+    end if;
+    if v_attempt.status = 'sent'
+       and v_attempt.provider_message_id is distinct from v_provider_message_id then
+      raise exception 'external_sent_material_conflict';
+    end if;
+    raise exception 'external_attempt_state_conflict';
+  end if;
+
+  if v_event.audience <> 'external'
+     or v_event.status <> 'processing'
+     or v_event.locked_by is distinct from p_worker_id
+     or v_event.attempt_count is distinct from p_attempt_number
+     or v_attempt.status <> 'processing'
+     or v_attempt.provider_request_started_at is null then
+    raise exception 'external_attempt_state_conflict';
+  end if;
+
+  update public.notification_delivery_attempts
      set status = 'sent',
-         provider_message_id = p_provider_message_id,
+         provider_message_id = v_provider_message_id,
          provider_request_completed_at = now(),
          error_message = null,
          safe_error_code = null
-    from public.notification_events e
-   where a.notification_event_id = p_notification_event_id
-     and a.attempt_number = p_attempt_number
-     and a.status = 'processing'
-     and a.provider_request_started_at is not null
-     and a.worker_id = p_worker_id
-     and e.id = a.notification_event_id
-     and e.audience = 'external'
-     and e.status = 'processing'
-     and e.locked_by = p_worker_id;
+   where notification_event_id = p_notification_event_id
+     and attempt_number = p_attempt_number;
   if not found then raise exception 'external_attempt_state_conflict'; end if;
 
   update public.notification_events
@@ -1108,7 +1347,8 @@ begin
   end if;
 
   v_manual_review := p_safe_error_code in (
-    'provider_timeout_unknown', 'manual_review_required'
+    'provider_timeout_unknown', 'provider_response_invalid',
+    'manual_review_required'
   );
   v_circuit_breaker := p_safe_error_code = 'provider_auth_failed';
   v_retryable := p_safe_error_code in (
@@ -1138,13 +1378,23 @@ begin
          processed_at = case when v_retryable then null else now() end,
          locked_at = null,
          locked_by = null,
-         next_attempt_at = case
-           when v_retryable then now() + make_interval(mins => least(60, 5 * p_attempt_number))
-           else null
-         end,
+          next_attempt_at = case
+            when v_retryable then now() + make_interval(
+              mins => case p_attempt_number when 1 then 5 else 30 end
+            )
+            else null
+          end,
          last_error = p_safe_error_code,
          updated_at = now()
-   where id = p_notification_event_id;
+    where id = p_notification_event_id;
+
+  if v_circuit_breaker then
+    update public.notification_external_rollouts
+       set mode = 'paused',
+           updated_at = now()
+     where id = 'provider-intake-v1'
+       and mode in ('test_only', 'pilot');
+  end if;
 
   return jsonb_build_object(
     'result', v_event_status,
@@ -1158,6 +1408,10 @@ $$;
 revoke all on function public.enqueue_provider_intake_external_notification_v1(uuid)
   from public, anon, authenticated, service_role;
 revoke all on function public.finalize_provider_intake_submission_v1(uuid, smallint, jsonb)
+  from public, anon, authenticated, service_role;
+revoke all on function public.provider_intake_submission_state_v1(uuid)
+  from public, anon, authenticated, service_role;
+revoke all on function public.provider_intake_external_transition_capability_v1()
   from public, anon, authenticated, service_role;
 revoke all on function public.transition_provider_intake_external_v1(
   uuid, text, timestamptz, text, text, text, text[], uuid
@@ -1178,6 +1432,10 @@ revoke all on function public.mark_external_notification_failed(uuid, integer, t
 
 grant execute on function public.finalize_provider_intake_submission_v1(uuid, smallint, jsonb)
   to service_role;
+grant execute on function public.provider_intake_submission_state_v1(uuid)
+  to service_role;
+grant execute on function public.provider_intake_external_transition_capability_v1()
+  to authenticated;
 grant execute on function public.transition_provider_intake_external_v1(
   uuid, text, timestamptz, text, text, text, text[], uuid
 ) to authenticated;
@@ -1203,6 +1461,10 @@ comment on function public.enqueue_provider_intake_external_notification_v1(uuid
   'Explicit N1 producer with cutoff, event, mode and recipient allowlist gates for one supplied source event.';
 comment on function public.finalize_provider_intake_submission_v1(uuid, smallint, jsonb) is
   'Service-only atomic file attachment, submission completion and conditional received producer.';
+comment on function public.provider_intake_submission_state_v1(uuid) is
+  'Service-only duplicate-submission reconciliation without notification-ledger disclosure.';
+comment on function public.provider_intake_external_transition_capability_v1() is
+  'Authenticated read-only capability flag for safe UI compatibility across Migration 042 deployment.';
 comment on function public.transition_provider_intake_external_v1(
   uuid, text, timestamptz, text, text, text, text[], uuid
 ) is

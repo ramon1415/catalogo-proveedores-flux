@@ -2,15 +2,21 @@ import {
   canonicalInvocation,
   hmacSha256Hex,
   sha256Hex,
+  validHmacConfiguration,
   verifyInvocation,
 } from "./auth.ts";
 import {
   classifyProviderFailure,
   createExternalDispatcherHandler,
+  type ExternalFailureResult,
   type ExternalRepository,
+  normalizeSupabaseUrl,
   parseDispatcherBody,
+  ProviderError,
+  readBoundedBody,
   resendRequestInit,
   type SendInput,
+  validDispatcherContentType,
 } from "./index.ts";
 import { FIELD_LABELS, renderExternalEmail } from "./renderer.ts";
 
@@ -114,6 +120,33 @@ Deno.test("HMAC rejects modified body, unknown key, malformed signature and stal
   }
 });
 
+Deno.test("HMAC configuration rejects short keys, malformed IDs and whitespace", async () => {
+  assert(validHmacConfiguration(keyId, key));
+  for (
+    const [candidateId, candidateKey] of [
+      ["ab", key],
+      ["bad key", key],
+      [` ${keyId}`, key],
+      [keyId, "short-key"],
+      [keyId, `${key} `],
+    ]
+  ) {
+    assert(!validHmacConfiguration(candidateId, candidateKey));
+    assertEquals(
+      await verifyInvocation({
+        method: "POST",
+        pathname,
+        rawBody: '{"limit":1}',
+        headers: await signedHeaders(),
+        expectedKeyId: candidateId,
+        key: candidateKey,
+        nowMs: now,
+      }),
+      null,
+    );
+  }
+});
+
 Deno.test("closed parser allows only the fixed one-event body", () => {
   assert(parseDispatcherBody('{"limit":1}'));
   for (
@@ -121,6 +154,8 @@ Deno.test("closed parser allows only the fixed one-event body", () => {
       "{}",
       '{"limit":2}',
       '{"limit":1,"lane":"external"}',
+      '{"limit":1,"limit":1}',
+      '{ "limit": 1 }',
       "not-json",
     ]
   ) {
@@ -208,6 +243,9 @@ class FakeRepository implements ExternalRepository {
   calls: string[] = [];
   mode = "test_only";
   registration: "registered" | "replay_detected" = "registered";
+  sentOutcomes: Array<"sent" | "already_sent" | Error> = [];
+  failedResults: ExternalFailureResult[] = [];
+  failedCodes: string[] = [];
   event = {
     id: "33333333-3333-4333-8333-333333333333",
     event_type: "provider_intake.received",
@@ -240,11 +278,34 @@ class FakeRepository implements ExternalRepository {
   }
   sent() {
     this.calls.push("sent");
-    return Promise.resolve();
+    const outcome = this.sentOutcomes.shift() || "sent";
+    return outcome instanceof Error
+      ? Promise.reject(outcome)
+      : Promise.resolve(outcome);
   }
-  failed() {
+  failed(
+    _eventId: string,
+    _attemptNumber: number,
+    safeCode: Parameters<ExternalRepository["failed"]>[2],
+  ) {
     this.calls.push("failed");
-    return Promise.resolve();
+    this.failedCodes.push(safeCode);
+    const retryable = [
+      "provider_rate_limited",
+      "provider_server_error",
+      "provider_network_unavailable",
+    ].includes(safeCode);
+    const result: ExternalFailureResult = this.failedResults.shift() || {
+      result: retryable ? "pending" : "dead_letter",
+      retryable,
+      manual_review_required: [
+        "provider_timeout_unknown",
+        "provider_response_invalid",
+        "manual_review_required",
+      ].includes(safeCode),
+      circuit_breaker_required: safeCode === "provider_auth_failed",
+    };
+    return Promise.resolve(result);
   }
 }
 
@@ -347,15 +408,159 @@ Deno.test("dispatcher reserves, marks started, sends and completes exactly one e
   }
 });
 
+Deno.test("sent acknowledgement retries once without a second provider send", async () => {
+  const repository = new FakeRepository();
+  repository.sentOutcomes = [new Error("response_lost"), "already_sent"];
+  let sendCalls = 0;
+  const response = await dispatcher(repository, {
+    send: () => {
+      sendCalls += 1;
+      return Promise.resolve("provider-message-test");
+    },
+  })(await dispatchRequest());
+
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), {
+    processed: 1,
+    sent: 1,
+    failed: 0,
+    codes: [],
+  });
+  assertEquals(sendCalls, 1);
+  assertEquals(repository.calls.filter((call) => call === "sent").length, 2);
+  assertEquals(repository.calls.includes("failed"), false);
+});
+
+Deno.test("two unknown sent acknowledgements require manual review without provider failure or resend", async () => {
+  const repository = new FakeRepository();
+  repository.sentOutcomes = [
+    new Error("ack_unknown_1"),
+    new Error("ack_unknown_2"),
+  ];
+  let sendCalls = 0;
+  const response = await dispatcher(repository, {
+    send: () => {
+      sendCalls += 1;
+      return Promise.resolve("provider-message-test");
+    },
+  })(await dispatchRequest());
+
+  assertEquals(response.status, 503);
+  assertEquals((await response.json()).codes, ["manual_review_required"]);
+  assertEquals(sendCalls, 1);
+  assertEquals(repository.calls.filter((call) => call === "sent").length, 2);
+  assertEquals(repository.calls.includes("failed"), false);
+});
+
+Deno.test("provider 2xx response ambiguity is terminal manual review", async () => {
+  const repository = new FakeRepository();
+  const response = await dispatcher(repository, {
+    send: () => Promise.reject(new ProviderError("provider_response_invalid")),
+  })(await dispatchRequest());
+
+  assertEquals((await response.json()).codes, [
+    "provider_response_invalid",
+    "manual_review_required",
+  ]);
+  assertEquals(repository.failedCodes, ["provider_response_invalid"]);
+  assertEquals(repository.calls.filter((call) => call === "failed").length, 1);
+});
+
+Deno.test("provider authentication failure requires and validates the circuit breaker result", async () => {
+  const repository = new FakeRepository();
+  const response = await dispatcher(repository, {
+    send: () => Promise.reject(new ProviderError("provider_auth_failed")),
+  })(await dispatchRequest());
+
+  assertEquals((await response.json()).codes, ["provider_auth_failed"]);
+  assertEquals(repository.failedCodes, ["provider_auth_failed"]);
+  assertEquals(repository.calls.filter((call) => call === "claim").length, 1);
+});
+
 Deno.test("POST-only endpoint rejects GET and OPTIONS without CORS", async () => {
   for (const method of ["GET", "OPTIONS"]) {
     const repository = new FakeRepository();
-    const response = await dispatcher(repository)(
+    const response = await dispatcher(repository, { mode: "disabled" })(
       await dispatchRequest(method),
     );
     assertEquals(response.status, 405);
     assertEquals(response.headers.get("access-control-allow-origin"), null);
     assertEquals(repository.calls, []);
+  }
+});
+
+Deno.test("disabled endpoint validates content type, canonical body and bounded size before short-circuit", async () => {
+  const cases = [
+    {
+      request: new Request(`https://example.test${pathname}`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: '{"limit":1}',
+      }),
+      status: 415,
+    },
+    {
+      request: new Request(`https://example.test${pathname}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"limit":1,"limit":1}',
+      }),
+      status: 400,
+    },
+    {
+      request: new Request(`https://example.test${pathname}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(65),
+      }),
+      status: 413,
+    },
+  ];
+  for (const item of cases) {
+    const repository = new FakeRepository();
+    const response = await dispatcher(repository, { mode: "disabled" })(
+      item.request,
+    );
+    assertEquals(response.status, item.status);
+    assertEquals(repository.calls, []);
+  }
+
+  assert(validDispatcherContentType("application/json"));
+  assert(validDispatcherContentType("application/json; charset=UTF-8"));
+  assert(!validDispatcherContentType("application/json; charset=latin1"));
+  assertEquals(
+    await readBoundedBody(
+      new Request("https://example.test", {
+        method: "POST",
+        body: "x".repeat(65),
+      }),
+    ),
+    null,
+  );
+});
+
+Deno.test("Supabase service-role target accepts only an official HTTPS project origin", () => {
+  assertEquals(
+    normalizeSupabaseUrl("https://abcdefghijklmnopqrst.supabase.co"),
+    "https://abcdefghijklmnopqrst.supabase.co",
+  );
+  for (
+    const invalid of [
+      "http://abcdefghijklmnopqrst.supabase.co",
+      "https://user:pass@abcdefghijklmnopqrst.supabase.co",
+      "https://abcdefghijklmnopqrst.supabase.co?redirect=evil",
+      "https://abcdefghijklmnopqrst.supabase.co/path",
+      "https://evil.example",
+      " https://abcdefghijklmnopqrst.supabase.co",
+    ]
+  ) {
+    let failed = false;
+    try {
+      normalizeSupabaseUrl(invalid);
+    } catch {
+      failed = true;
+    }
+    assert(failed, invalid);
   }
 });
 
@@ -393,6 +598,7 @@ Deno.test("provider errors map only to safe codes", () => {
   assertEquals(classifyProviderFailure(429, null), "provider_rate_limited");
   assertEquals(classifyProviderFailure(503, null), "provider_server_error");
   assertEquals(classifyProviderFailure(401, null), "provider_auth_failed");
+  assertEquals(classifyProviderFailure(403, null), "provider_auth_failed");
   assertEquals(
     classifyProviderFailure(422, null),
     "provider_contract_rejected",

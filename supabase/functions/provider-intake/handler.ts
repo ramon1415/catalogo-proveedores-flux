@@ -4,6 +4,7 @@ import { prepareStorageFiles, validateIncomingFiles } from "./files.ts";
 import { jsonResponse, mapError, publicError } from "./responses.ts";
 import {
   type CaptchaVerifier,
+  type FinalizeSubmissionOutcome,
   type IntakeConfig,
   IntakeError,
   type IntakePayload,
@@ -112,6 +113,30 @@ async function cleanupBestEffort(
     issue = "storage_cleanup_failed";
   }
   await markIssueBestEffort(repository, intakeId, issue);
+}
+
+async function finalizeWithOneRetry(
+  repository: IntakeRepository,
+  intakeId: string,
+  expectedFileCount: number,
+  files: StoredFileMetadata[],
+): Promise<FinalizeSubmissionOutcome> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let outcome: FinalizeSubmissionOutcome;
+    try {
+      outcome = await repository.finalizeSubmission(
+        intakeId,
+        expectedFileCount,
+        files,
+      );
+    } catch {
+      outcome = { kind: "RPC_OUTCOME_UNKNOWN" };
+    }
+    if (outcome.kind !== "RPC_OUTCOME_UNKNOWN" || attempt === 1) {
+      return outcome;
+    }
+  }
+  return { kind: "RPC_OUTCOME_UNKNOWN" };
 }
 
 export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
@@ -257,8 +282,37 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
         fingerprintWindowSeconds: dependencies.config.fingerprintWindowSeconds,
       });
       duplicate = created.duplicate;
+      let publicStatus = created.status;
 
-      if (!created.duplicate) {
+      if (created.duplicate) {
+        let duplicateState;
+        try {
+          duplicateState = await dependencies.repository.getSubmissionState(
+            created.payment_intake_id,
+          );
+        } catch {
+          throw new IntakeError(
+            "submit_failed",
+            503,
+            "submission_reconciliation_required",
+          );
+        }
+        publicStatus = duplicateState.intake_status;
+        if (duplicateState.submission_state === "incomplete") {
+          throw new IntakeError(
+            "submit_failed",
+            409,
+            "submission_incomplete",
+          );
+        }
+        if (duplicateState.submission_state !== "completed") {
+          throw new IntakeError(
+            "submit_failed",
+            503,
+            "submission_reconciliation_required",
+          );
+        }
+      } else {
         const storageFiles = prepareStorageFiles(
           validatedFiles,
           created.payment_intake_id,
@@ -279,13 +333,13 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
           throw new IntakeError("submit_failed", 503, "storage_upload_failed");
         }
 
-        try {
-          await dependencies.repository.finalizeSubmission(
-            created.payment_intake_id,
-            storageFiles.length,
-            storedMetadata(storageFiles),
-          );
-        } catch {
+        const finalization = await finalizeWithOneRetry(
+          dependencies.repository,
+          created.payment_intake_id,
+          storageFiles.length,
+          storedMetadata(storageFiles),
+        );
+        if (finalization.kind === "RPC_REJECTED_CONFIRMED") {
           await cleanupBestEffort(
             dependencies.repository,
             created.payment_intake_id,
@@ -298,6 +352,13 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
             "submission_finalization_failed",
           );
         }
+        if (finalization.kind === "RPC_OUTCOME_UNKNOWN") {
+          throw new IntakeError(
+            "submit_failed",
+            503,
+            "submission_outcome_unknown",
+          );
+        }
       }
 
       statusCode = created.duplicate ? 200 : 201;
@@ -306,7 +367,7 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
         {
           ok: true,
           public_folio: created.public_folio,
-          status: "received",
+          status: publicStatus,
           duplicate: created.duplicate,
           message: created.duplicate
             ? "Esta solicitud ya habia sido recibida."

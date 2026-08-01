@@ -73,7 +73,13 @@ export type CreateIntakeInput = {
 export type CreateIntakeResult = {
   payment_intake_id: string;
   public_folio: string;
-  status: "received";
+  status:
+    | "received"
+    | "in_review"
+    | "needs_correction"
+    | "rejected"
+    | "converted"
+    | "cancelled";
   duplicate: boolean;
 };
 
@@ -107,7 +113,26 @@ export type FinalizeSubmissionResult = {
     | "event_not_enabled"
     | "source_before_cutoff"
     | "recipient_not_allowlisted"
+    | "daily_cap_reached"
     | "already_exists";
+};
+
+export type FinalizeSubmissionOutcome =
+  | {
+    kind: "RPC_COMPLETED_CONFIRMED";
+    result: FinalizeSubmissionResult;
+  }
+  | {
+    kind: "RPC_REJECTED_CONFIRMED";
+    safeCode: string;
+  }
+  | {
+    kind: "RPC_OUTCOME_UNKNOWN";
+  };
+
+export type SubmissionStateResult = {
+  submission_state: "completed" | "incomplete" | "needs_reconciliation";
+  intake_status: CreateIntakeResult["status"];
 };
 
 export type SubmitEnvelope = {
@@ -137,7 +162,8 @@ export type IntakeRepository = {
     intakeId: string,
     expectedFileCount: number,
     files: StoredFileMetadata[],
-  ): Promise<FinalizeSubmissionResult>;
+  ): Promise<FinalizeSubmissionOutcome>;
+  getSubmissionState(intakeId: string): Promise<SubmissionStateResult>;
   markUploadIssue(intakeId: string, issueCode: string): Promise<void>;
 };
 

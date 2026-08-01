@@ -1,4 +1,5 @@
 import { createProviderIntakeHandler } from "./handler.ts";
+import { SupabaseIntakeRepository } from "./repository.ts";
 import { TurnstileVerifier } from "./captcha.ts";
 import { parseAllowedOrigins } from "./cors.ts";
 import { prepareStorageFiles, validateIncomingFiles } from "./files.ts";
@@ -8,12 +9,13 @@ import type {
   CaptchaVerifier,
   CreateIntakeInput,
   CreateIntakeResult,
-  FinalizeSubmissionResult,
+  FinalizeSubmissionOutcome,
   IntakeConfig,
   IntakeRepository,
   LinkResolution,
   PreparedFile,
   StoredFileMetadata,
+  SubmissionStateResult,
 } from "./types.ts";
 
 function assert(
@@ -79,6 +81,12 @@ class FakeRepository implements IntakeRepository {
   duplicate = false;
   uploadFails = false;
   finalizeFails = false;
+  finalizeOutcomes: FinalizeSubmissionOutcome[] = [];
+  submissionState: SubmissionStateResult = {
+    submission_state: "completed",
+    intake_status: "received",
+  };
+  submissionStateFails = false;
   resolveError: string | null = null;
 
   resolveLink(): Promise<LinkResolution> {
@@ -116,15 +124,30 @@ class FakeRepository implements IntakeRepository {
     intakeId: string,
     expectedFileCount: number,
     files: StoredFileMetadata[],
-  ): Promise<FinalizeSubmissionResult> {
-    if (this.finalizeFails) {
-      return Promise.reject(new Error("finalization_failed"));
-    }
+  ): Promise<FinalizeSubmissionOutcome> {
     this.finalized.push({ intakeId, expectedFileCount, files });
+    if (this.finalizeOutcomes.length) {
+      return Promise.resolve(this.finalizeOutcomes.shift()!);
+    }
+    if (this.finalizeFails) {
+      return Promise.resolve({
+        kind: "RPC_REJECTED_CONFIRMED",
+        safeCode: "provider_intake_finalization_conflict",
+      });
+    }
     return Promise.resolve({
-      completion: "completed",
-      notification: "rollout_disabled",
+      kind: "RPC_COMPLETED_CONFIRMED",
+      result: {
+        completion: "completed",
+        notification: "rollout_disabled",
+      },
     });
+  }
+
+  getSubmissionState(): Promise<SubmissionStateResult> {
+    return this.submissionStateFails
+      ? Promise.reject(new Error("submission_state_unavailable"))
+      : Promise.resolve(this.submissionState);
   }
 
   markUploadIssue(_intakeId: string, issueCode: string): Promise<void> {
@@ -870,6 +893,71 @@ Deno.test("finalization failure removes only uploaded paths and marks correction
   assertEquals(repository.issues, ["file_metadata_failed"]);
 });
 
+Deno.test("two unknown finalization outcomes preserve Storage and do not mark an issue", async () => {
+  const repository = new FakeRepository();
+  repository.finalizeOutcomes = [
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+  ];
+  const logs: Record<string, unknown>[] = [];
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: (entry) => logs.push(entry),
+  });
+  const form = new FormData();
+  form.set("payload", JSON.stringify(payload()));
+  form.set("captcha_token", "captcha-test-token");
+  form.set("honeypot", "");
+  form.set("file_kinds", JSON.stringify(["invoice_pdf"]));
+  form.append(
+    "files",
+    new File(["%PDF-1.7\n"], "invoice.pdf", { type: "application/pdf" }),
+  );
+
+  const response = await handler(
+    request("submit", { method: "POST", body: form }),
+  );
+
+  assertEquals(response.status, 503);
+  assertEquals((await response.json()).error, "submit_failed");
+  assertEquals(repository.finalized.length, 2);
+  assertEquals(repository.removed, []);
+  assertEquals(repository.issues, []);
+  assert(JSON.stringify(logs).includes("submission_outcome_unknown"));
+});
+
+Deno.test("unknown finalization retries once with identical material and reconciles completion", async () => {
+  const repository = new FakeRepository();
+  repository.finalizeOutcomes = [
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+    {
+      kind: "RPC_COMPLETED_CONFIRMED",
+      result: {
+        completion: "already_completed",
+        notification: "already_exists",
+      },
+    },
+  ];
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: () => undefined,
+  });
+
+  const response = await handler(submitRequest());
+
+  assertEquals(response.status, 201);
+  assertEquals(repository.finalized.length, 2);
+  assertEquals(repository.finalized[0], repository.finalized[1]);
+  assertEquals(repository.removed, []);
+  assertEquals(repository.issues, []);
+});
+
 Deno.test("zero-file submission is finalized exactly once", async () => {
   const repository = new FakeRepository();
   const handler = createProviderIntakeHandler({
@@ -905,6 +993,120 @@ Deno.test("duplicate submission never finalizes again", async () => {
 
   assertEquals(response.status, 200);
   assertEquals(repository.finalized.length, 0);
+});
+
+Deno.test("duplicate incomplete and reconciliation-required submissions never return false success", async () => {
+  for (
+    const submissionState of ["incomplete", "needs_reconciliation"] as const
+  ) {
+    const repository = new FakeRepository();
+    repository.duplicate = true;
+    repository.submissionState = {
+      submission_state: submissionState,
+      intake_status: submissionState === "incomplete"
+        ? "received"
+        : "needs_correction",
+    };
+    const handler = createProviderIntakeHandler({
+      config,
+      repository,
+      captcha,
+      hashPepper: "pepper-test",
+      logger: () => undefined,
+    });
+
+    const response = await handler(submitRequest());
+    const body = await response.json();
+
+    assertEquals(response.status, submissionState === "incomplete" ? 409 : 503);
+    assertEquals(body.error, "submit_failed");
+    assert(!JSON.stringify(body).includes('"status":"received"'));
+    assertEquals(repository.uploads.length, 0);
+    assertEquals(repository.finalized.length, 0);
+  }
+});
+
+Deno.test("duplicate completed submission returns its canonical current status", async () => {
+  const repository = new FakeRepository();
+  repository.duplicate = true;
+  repository.submissionState = {
+    submission_state: "completed",
+    intake_status: "needs_correction",
+  };
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: () => undefined,
+  });
+
+  const response = await handler(submitRequest());
+  const body = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(body.status, "needs_correction");
+  assertEquals(body.duplicate, true);
+});
+
+Deno.test("repository distinguishes confirmed rejection from unknown finalization outcome", async () => {
+  const base = {
+    supabaseUrl: "https://abcdefghijklmnopqrst.supabase.co",
+    serviceRoleKey: "service-role-test",
+  };
+  const material: StoredFileMetadata[] = [];
+  const unknown = new SupabaseIntakeRepository({
+    ...base,
+    fetchImpl: (() => Promise.reject(new TypeError("network"))) as typeof fetch,
+  });
+  assertEquals(
+    await unknown.finalizeSubmission(
+      "33333333-3333-4333-8333-333333333333",
+      0,
+      material,
+    ),
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+  );
+
+  const rejected = new SupabaseIntakeRepository({
+    ...base,
+    fetchImpl: (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            message: "provider_intake_finalization_conflict",
+          }),
+          { status: 409 },
+        ),
+      )) as typeof fetch,
+  });
+  assertEquals(
+    await rejected.finalizeSubmission(
+      "33333333-3333-4333-8333-333333333333",
+      0,
+      material,
+    ),
+    {
+      kind: "RPC_REJECTED_CONFIRMED",
+      safeCode: "provider_intake_finalization_conflict",
+    },
+  );
+
+  const invalidSuccess = new SupabaseIntakeRepository({
+    ...base,
+    fetchImpl: (() =>
+      Promise.resolve(
+        new Response("not-json", { status: 200 }),
+      )) as typeof fetch,
+  });
+  assertEquals(
+    await invalidSuccess.finalizeSubmission(
+      "33333333-3333-4333-8333-333333333333",
+      0,
+      material,
+    ),
+    { kind: "RPC_OUTCOME_UNKNOWN" },
+  );
 });
 
 Deno.test("preflight and JSON responses include restrictive security headers", async () => {
