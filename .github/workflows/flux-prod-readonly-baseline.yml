@@ -48,8 +48,9 @@ jobs:
           root=pathlib.Path(os.environ['EVIDENCE_DIR'])
           names=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','workflow-context-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
           for name in names: (root/name).write_text(json.dumps({'status':'NOT_RUN'},indent=2)+'\n')
+          (root/'transaction-readonly-proof.json').write_text(json.dumps({'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5','status':'NOT_RUN','failure_code':None,'psql_exit_code':None,'query_ok':None,'proof_version':None,'marker_count':0,'default_transaction_read_only':None,'transaction_read_only':None,'read_only_contract_pass':False,'stdout_line_count':0,'stdout_nonempty_line_count':0,'marker_line_index':None,'ignored_blank_lines':0,'ignored_command_tags':0,'unknown_line_count':0,'raw_stdout_sha256':None,'parser':'labeled_json_marker','positional_parsing_used':False,'parser_self_test':None},indent=2)+'\n')
           workflow_url=f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/{os.environ['GITHUB_SHA']}/.github/workflows/flux-prod-readonly-baseline.yml"
-          request=urllib.request.Request(workflow_url,headers={'User-Agent':'flux-readonly-baseline-r4'}); workflow=urllib.request.urlopen(request,timeout=20).read().decode()
+          request=urllib.request.Request(workflow_url,headers={'User-Agent':'flux-readonly-baseline-r5'}); workflow=urllib.request.urlopen(request,timeout=20).read().decode()
           matches=list(re.finditer(r'\$\{\{\s*(.*?)\s*\}\}',workflow)); id_positions={m.group(1):m.start() for m in re.finditer(r'(?m)^\s+id:\s*([A-Za-z_][\w-]*)\s*$',workflow)}; rows=[]
           for m in matches:
             start=workflow.rfind('\n',0,m.start())+1; end=workflow.find('\n',m.end()); line=workflow[start:end if end>=0 else len(workflow)]; expr=m.group(1).strip()
@@ -57,7 +58,7 @@ jobs:
           allowed={'github','inputs','vars','secrets','env','runner','steps','needs','matrix'}; unrecognized=sum(r['root'] not in allowed for r in rows); runner_workflow=sum(r['root']=='runner' and r['indent']==2 for r in rows); runner_job=sum(r['root']=='runner' and r['indent']==6 for r in rows); runner_step=sum(r['root']=='runner' and r['indent']>=10 and r['step_with_path'] for r in rows); steps_before=sum(bool(r['step']) and id_positions.get(r['step'],len(workflow))>=r['position'] for r in rows)
           invalid=sum(r['root'] not in allowed or (r['root']=='runner' and not (r['indent']>=10 and r['step_with_path'])) or (bool(r['step']) and id_positions.get(r['step'],len(workflow))>=r['position']) for r in rows); runtime_path='export EVIDENCE_DIR="${RUNNER_TEMP}/${EVIDENCE_SUBDIR}"' in workflow; github_env="EVIDENCE_DIR=%s\\n' \"$EVIDENCE_DIR\" >> \"$GITHUB_ENV\"" in workflow
           checks=len(rows)==17 and invalid==0 and runner_workflow==0 and runner_job==0 and runner_step==1 and steps_before==0 and unrecognized==0 and runtime_path and github_env
-          context_audit={'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','status':'PASS' if checks else 'FAIL','total_expressions':len(rows),'valid_expressions':len(rows)-invalid,'invalid_expressions':invalid,'runner_context_in_workflow_env':runner_workflow,'runner_context_in_job_env':runner_job,'runner_context_in_step_with':runner_step,'steps_context_before_execution':steps_before,'unrecognized_context_references':unrecognized,'runtime_path_initialized_with_runner_temp':runtime_path,'evidence_dir_exported_to_github_env':github_env,'functional_baseline_logic_changed':False,'runtime_path_initialization_changed':True,'evidence_schema_changed':True,'evidence_schema_delta':['workflow-context-audit.json'],'internal_artifact_identifiers_changed':True}
+          context_audit={'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5','status':'PASS' if checks else 'FAIL','total_expressions':len(rows),'valid_expressions':len(rows)-invalid,'invalid_expressions':invalid,'runner_context_in_workflow_env':runner_workflow,'runner_context_in_job_env':runner_job,'runner_context_in_step_with':runner_step,'steps_context_before_execution':steps_before,'unrecognized_context_references':unrecognized,'runtime_path_initialized_with_runner_temp':runtime_path,'evidence_dir_exported_to_github_env':github_env,'functional_baseline_logic_changed':False,'runtime_path_initialization_changed':False,'evidence_schema_changed':True,'evidence_schema_delta':['transaction-readonly-proof.json','gate-report.json','gate-report.md'],'internal_artifact_identifiers_changed':True}
           (root/'workflow-context-audit.json').write_text(json.dumps(context_audit,indent=2)+'\n')
           if not checks: raise SystemExit('WORKFLOW_CONTEXT_AUDIT_FAILED')
           (root/'gate-report.md').write_text('# FLUX PROD Slice 01 baseline\n\nStatus: NOT_RUN\n')
@@ -77,7 +78,7 @@ jobs:
           import json,os,pathlib,re,time,urllib.parse,urllib.request
           root=pathlib.Path(os.environ['EVIDENCE_DIR']); repo=os.environ['GITHUB_REPOSITORY']; base='https://api.github.com'
           def api(path):
-            req=urllib.request.Request(base+path,headers={'Accept':'application/vnd.github+json','User-Agent':'flux-readonly-baseline-r4'})
+            req=urllib.request.Request(base+path,headers={'Accept':'application/vnd.github+json','User-Agent':'flux-readonly-baseline-r5'})
             for n in range(3):
               try:
                 with urllib.request.urlopen(req,timeout=20) as r:return json.load(r)
@@ -111,7 +112,7 @@ jobs:
             if target!=expected or expected!=active['sha']: raise RuntimeError('PROD_DATABASE_IDENTITY_MISMATCH')
             data={'status':'PASS','captured_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'repository':repo,'default_branch':meta['default_branch'],'current_main_sha':main,'current_main_tree':main_tree,'current_dev_sha':inventory_dev,'bootstrap_result_dev_sha':dev,'bootstrap_result_dev_tree':dev_tree,'current_prod_deployment_sha':active['sha'],'current_prod_deployment_id':active['id'],'target_git_sha':target,'expected_prod_sha':expected,'release_slice':slice_id}
             (root/'github-identities.json').write_text(json.dumps(data,indent=2)+'\n')
-            boot={'status':'PASS','gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4-2026-08-01','run_purpose':'corrected reusable read-only PROD baseline','event':event,'ref':os.environ['GITHUB_REF'],'event_sha':os.environ['GITHUB_SHA'],'push_bootstrap':event=='push','future_dispatch':event=='workflow_dispatch','one_job':True,'environment':'supabase-production'}
+            boot={'status':'PASS','gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5-2026-08-01','run_purpose':'hardened reusable read-only PROD proof','event':event,'ref':os.environ['GITHUB_REF'],'event_sha':os.environ['GITHUB_SHA'],'push_bootstrap':event=='push','future_dispatch':event=='workflow_dispatch','one_job':True,'environment':'supabase-production'}
             (root/'workflow-bootstrap-audit.json').write_text(json.dumps(boot,indent=2)+'\n')
             out=os.environ['GITHUB_OUTPUT']; short=main[:7]
             with open(out,'a') as f:
@@ -168,8 +169,7 @@ jobs:
           set -euo pipefail
           cat > "$RUNNER_TEMP/flux-audit.sql" <<'SQL'
           BEGIN TRANSACTION READ ONLY;
-          SHOW default_transaction_read_only;
-          SHOW transaction_read_only;
+          SELECT '__FLUX_READONLY_PROOF__' || json_build_object('proof_version',1,'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only'))::text;
           WITH wanted_tables(s,t) AS (VALUES
             ('public','proveedores'),('public','company_directors'),('public','approval_batches'),('public','approval_batch_items'),('public','approval_batch_company_settings'),('public','approval_batch_company_setting_events'),('public','payment_request_extraordinary_authorizations'),('public','payment_requests'),('public','payment_layouts'),('public','payment_layout_lines'),('public','cash_funds'),('public','intake_links'),('public','payment_intake'),('public','payment_intake_files'),('public','payment_intake_events')),
           wanted_functions(n) AS (VALUES ('normalize_proveedores_canonical'),('set_approval_batch_updated_at'),('approval_batch_require_actor'),('approval_batch_require_finance'),('approval_batch_direction_roles'),('approval_batch_request_base_eligible'),('approval_batch_request_open_elsewhere'),('validate_approval_batch_item'),('approval_batch_assert_execution_authorized'),('validate_approval_batch_final_status'),('list_company_directors'),('list_approval_batch_director_candidates'),('set_company_director'),('create_approval_batch'),('list_batch_eligible_requests'),('add_request_to_approval_batch'),('remove_request_from_approval_batch'),('submit_approval_batch'),('approve_entire_batch'),('decide_approval_batch_items'),('close_approval_batch'),('release_rejected_batch_item_for_rebatch'),('get_approval_batch_detail'),('approval_batch_totals_by_currency'),('list_finance_approval_batches'),('list_director_approval_batches'),('set_approval_batch_company_enforcement'),('set_company_batch_configuration'),('authorize_payment_request_extraordinary'),('revoke_payment_request_extraordinary'),('release_and_rebatch_rejected_request'),('approval_batch_payment_layout_candidates'),('preview_payment_layout_eligibility'),('create_payment_layout'),('approval_batch_budget_validation'),('approval_batch_request_eligibility'),('complete_payment_request_layout_data'),('approval_batch_request_has_current_direction_approval'),('approval_batch_request_has_active_extraordinary'),('approval_batch_request_has_any_execution_record'),('create_cash_fund'),('get_payment_request_execution_readiness'),('get_payment_request_execution_context'),('next_payment_intake_public_folio'),('current_user_has_role'),('flux_finance_roles'),('insert_approval_batch_notification'),('enqueue_approval_batch_status_notifications'),('enqueue_approval_batch_item_notification'),('enqueue_extraordinary_payment_notification'),('enqueue_rebatched_item_notification'))
@@ -205,7 +205,7 @@ jobs:
           deny=r'(?im)^\s*(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|VACUUM|ANALYZE|REFRESH|CALL)\b|\bCOPY\b[\s\S]*?\bPROGRAM\b|\bpublic\.[a-z_]\w*\s*\('
           hit=re.search(deny,clean)
           if hit: raise SystemExit('MUTABLE_OR_PRODUCT_CALL_DENYLIST:'+hit.group(0).strip())
-          required=['BEGIN TRANSACTION READ ONLY;','SHOW default_transaction_read_only;','SHOW transaction_read_only;','ROLLBACK;']
+          required=['BEGIN TRANSACTION READ ONLY;','__FLUX_READONLY_PROOF__',"current_setting('default_transaction_read_only')","current_setting('transaction_read_only')",'ROLLBACK;']
           if any(x not in s for x in required): raise SystemExit('READONLY_SQL_CONTRACT_MISSING')
           PY
           echo "static_scan_ok=true" >> "$GITHUB_OUTPUT"
@@ -221,8 +221,47 @@ jobs:
           PGCONNECT_TIMEOUT: "15"
           PGSSLMODE: require
         run: |
-          set -u
+          set -Eeuo pipefail
           command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+          cat > "$RUNNER_TEMP/flux-readonly-proof.py" <<'PY'
+          import hashlib,json,os,pathlib,re,sys
+          MARKER='__FLUX_READONLY_PROOF__'; GATE='FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5'; TAG=re.compile(r'(BEGIN|ROLLBACK|COMMIT|SET|SELECT \d+)(?:\s.*)?',re.I); META={'catalog','storage','history'}
+          def parse(raw,rc):
+            normalized=raw.replace('\r\n','\n').replace('\r','\n'); lines=[] if normalized=='' else normalized.split('\n'); clean=[x.strip() for x in lines]; marks=[i for i,x in enumerate(clean) if x.startswith(MARKER)]; unknown=0
+            for line in clean:
+              if not line or line.startswith(MARKER) or TAG.fullmatch(line): continue
+              try: metadata=json.loads(line)
+              except json.JSONDecodeError: metadata=None
+              if not isinstance(metadata,dict) or metadata.get('kind') not in META: unknown+=1
+            out={'gate':GATE,'status':'FAIL','failure_code':None,'psql_exit_code':rc,'query_ok':rc==0,'proof_version':None,'marker_count':len(marks),'default_transaction_read_only':None,'transaction_read_only':None,'read_only_contract_pass':False,'stdout_line_count':len(lines),'stdout_nonempty_line_count':sum(bool(x) for x in clean),'marker_line_index':marks[0] if marks else None,'ignored_blank_lines':sum(not x for x in clean),'ignored_command_tags':sum(bool(TAG.fullmatch(x)) for x in clean if x),'unknown_line_count':unknown,'raw_stdout_sha256':hashlib.sha256(raw.encode()).hexdigest(),'parser':'labeled_json_marker','positional_parsing_used':False}
+            code=None; payload=None
+            if rc!=0: code='PROD_READONLY_QUERY_FAILED'
+            elif not marks: code='PROD_READONLY_PROOF_MARKER_MISSING'
+            elif len(marks)>1: code='PROD_READONLY_PROOF_MARKER_DUPLICATED'
+            else:
+              try: payload=json.loads(clean[marks[0]][len(MARKER):])
+              except json.JSONDecodeError: code='PROD_READONLY_PROOF_JSON_INVALID'
+            if isinstance(payload,dict): out.update({k:payload.get(k) for k in ['proof_version','default_transaction_read_only','transaction_read_only']})
+            if code is None:
+              if not isinstance(payload,dict) or type(out['proof_version']) is not int or out['proof_version']!=1 or not isinstance(out['default_transaction_read_only'],str) or not isinstance(out['transaction_read_only'],str) or unknown: code='PROD_READONLY_PROOF_SCHEMA_INVALID'
+              elif out['default_transaction_read_only']!='on': code='PROD_DEFAULT_TRANSACTION_NOT_READONLY'
+              elif out['transaction_read_only']!='on': code='PROD_TRANSACTION_NOT_READONLY'
+            out['failure_code']=code; out['status']='PASS' if code is None else 'FAIL'; out['read_only_contract_pass']=code is None
+            return out
+          def self_test():
+            def row(default='on',transaction='on',reordered=False):
+              payload={'transaction_read_only':transaction,'default_transaction_read_only':default,'proof_version':1} if reordered else {'proof_version':1,'default_transaction_read_only':default,'transaction_read_only':transaction}
+              return MARKER+json.dumps(payload,separators=(',',':'))
+            ok=row(); cases=[('A',ok,0,'PASS'),('B','BEGIN\n'+ok+'\nROLLBACK',0,'PASS'),('C',' \n  '+ok+'  \n\n',0,'PASS'),('D','SELECT 1\n{"kind":"catalog"}\n'+ok+'\n{"kind":"history"}\nCOMMIT',0,'PASS'),('E',row(reordered=True),0,'PASS'),('F','BEGIN\n{"kind":"catalog"}\nROLLBACK',0,'PROD_READONLY_PROOF_MARKER_MISSING'),('G',ok+'\n'+ok,0,'PROD_READONLY_PROOF_MARKER_DUPLICATED'),('H',MARKER+'{',0,'PROD_READONLY_PROOF_JSON_INVALID'),('I',row(default='off'),0,'PROD_DEFAULT_TRANSACTION_NOT_READONLY'),('J',row(transaction='off'),0,'PROD_TRANSACTION_NOT_READONLY'),('K',ok,7,'PROD_READONLY_QUERY_FAILED'),('L','BEGIN\r\n'+ok+'\r\nROLLBACK\r\n',0,'PASS')]
+            scenarios=[]
+            for name,raw,rc,expected in cases:
+              proof=parse(raw,rc); actual='PASS' if proof['status']=='PASS' else proof['failure_code']; scenarios.append({'scenario':name,'expected':expected,'actual':actual,'result':'PASS' if actual==expected else 'FAIL'})
+            passed=sum(x['result']=='PASS' for x in scenarios); return {'status':'PASS' if passed==12 else 'FAIL','passed':passed,'total':12,'positional_parsing_used':False,'raw_secrets_persisted':False,'scenarios':scenarios}
+          if sys.argv[1]=='self-test':
+            summary=self_test(); pathlib.Path(os.environ['SELF_TEST_OUT']).write_text(json.dumps(summary,indent=2)+'\n'); raise SystemExit(0 if summary['status']=='PASS' else 1)
+          raw_path=pathlib.Path(os.environ['RUNNER_TEMP'])/'flux-db.raw'; proof=parse(raw_path.read_bytes().decode(errors='replace') if raw_path.exists() else '',int(os.environ['PSQL_RC'])); proof['parser_self_test']=json.loads(pathlib.Path(os.environ['SELF_TEST_OUT']).read_text()); (pathlib.Path(os.environ['EVIDENCE_DIR'])/'transaction-readonly-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+          PY
+          SELF_TEST_OUT="$RUNNER_TEMP/flux-parser-self-test.json" python3 "$RUNNER_TEMP/flux-readonly-proof.py" self-test
           python3 - <<'PY'
           import os,urllib.parse
           u=urllib.parse.urlparse(os.environ.get('DATABASE_URL','')); ref=os.environ.get('PROJECT_REF','')
@@ -232,32 +271,40 @@ jobs:
           for value in [os.environ.get('DATABASE_URL',''),u.hostname,u.username or '',u.password or '',ref]:
             if value: print('::add-mask::'+value)
           PY
-          rc=0; psql "$DATABASE_URL" -X -q -A -t -v ON_ERROR_STOP=1 -f "$RUNNER_TEMP/flux-audit.sql" > "$RUNNER_TEMP/flux-db.raw" 2> "$RUNNER_TEMP/flux-db.err" || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            rm -f "$RUNNER_TEMP/flux-db.err" "$RUNNER_TEMP/flux-db.raw"
-            echo "query_ok=false" >> "$GITHUB_OUTPUT"
-          else
-            rm -f "$RUNNER_TEMP/flux-db.err"
-            echo "query_ok=true" >> "$GITHUB_OUTPUT"
+          set +e
+          psql "$DATABASE_URL" -X -q -A -t -v ON_ERROR_STOP=1 -f "$RUNNER_TEMP/flux-audit.sql" > "$RUNNER_TEMP/flux-db.raw" 2> "$RUNNER_TEMP/flux-db.err"
+          rc=$?
+          set -e
+          PSQL_RC="$rc" SELF_TEST_OUT="$RUNNER_TEMP/flux-parser-self-test.json" python3 "$RUNNER_TEMP/flux-readonly-proof.py" parse
+          rm -f "$RUNNER_TEMP/flux-db.err"
+          if [ "$rc" -eq 0 ]; then echo "query_ok=true" >> "$GITHUB_OUTPUT"; else echo "query_ok=false" >> "$GITHUB_OUTPUT"; fi
+          proof_status="$(python3 -c "import json,os; print(json.load(open(os.path.join(os.environ['EVIDENCE_DIR'],'transaction-readonly-proof.json')))['status'])")"
+          if [ "$proof_status" = PASS ]; then echo "proof_ok=true" >> "$GITHUB_OUTPUT"; else
+            echo "proof_ok=false" >> "$GITHUB_OUTPUT"; failure_code="$(python3 -c "import json,os; print(json.load(open(os.path.join(os.environ['EVIDENCE_DIR'],'transaction-readonly-proof.json')))['failure_code'])")"
+            printf '::error title=PROD read-only proof::%s\n' "$failure_code"; rm -f "$RUNNER_TEMP/flux-db.raw"; exit 1
           fi
 
       - name: Classify focal baseline and build sanitized evidence
         id: classify
-        if: steps.db.outputs.query_ok == 'true'
+        if: steps.db.outputs.proof_ok == 'true'
         shell: bash
         env:
           TARGET_SHA: ${{ steps.identity.outputs.target_git_sha }}
           EXPECTED_SHA: ${{ steps.identity.outputs.expected_prod_sha }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           python3 - <<'PY'
           import hashlib,json,os,pathlib,re
-          root=pathlib.Path(os.environ['EVIDENCE_DIR']); lines=[x for x in (pathlib.Path(os.environ['RUNNER_TEMP'])/'flux-db.raw').read_text().splitlines() if x.strip()]
-          if len(lines)<5 or lines[0]!='on' or lines[1]!='on': raise RuntimeError('PROD_READONLY_PROOF_FAILED')
-          docs=[json.loads(x) for x in lines[2:]]; by={d['kind']:d for d in docs}; cat=by['catalog']; storage=by['storage']; history=by['history']
-          if cat['database']['default_transaction_read_only']!='on' or cat['database']['transaction_read_only']!='on': raise RuntimeError('PROD_READONLY_PROOF_FAILED')
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); raw=(pathlib.Path(os.environ['RUNNER_TEMP'])/'flux-db.raw').read_text().replace('\r\n','\n').replace('\r','\n'); docs=[]
+          for line in raw.split('\n'):
+            try: doc=json.loads(line.strip())
+            except json.JSONDecodeError: continue
+            if isinstance(doc,dict) and doc.get('kind') in {'catalog','storage','history'}: docs.append(doc)
+          proof=json.loads((root/'transaction-readonly-proof.json').read_text())
+          if proof.get('status')!='PASS': raise RuntimeError(proof.get('failure_code') or 'PROD_READONLY_PROOF_SCHEMA_INVALID')
+          if sorted(d.get('kind') for d in docs)!=['catalog','history','storage']: proof.update({'status':'FAIL','failure_code':'PROD_READONLY_PROOF_SCHEMA_INVALID','read_only_contract_pass':False}); (root/'transaction-readonly-proof.json').write_text(json.dumps(proof,indent=2)+'\n'); raise RuntimeError('PROD_READONLY_PROOF_SCHEMA_INVALID')
+          by={d['kind']:d for d in docs}; cat=by['catalog']; storage=by['storage']; history=by['history']
           (root/'prod-database-identity.json').write_text(json.dumps({'status':'PASS',**cat['database'],'project_ref_verified_without_disclosure':True,'target_sha':os.environ['TARGET_SHA'],'expected_prod_sha':os.environ['EXPECTED_SHA']},indent=2)+'\n')
-          (root/'transaction-readonly-proof.json').write_text(json.dumps({'status':'PASS','pgoptions_default_transaction_read_only':'on','show_default_transaction_read_only':'on','show_transaction_read_only':'on','transaction_end':'ROLLBACK','schema_writes':0,'data_writes':0,'history_writes':0,'storage_writes':0,'http_writes':0},indent=2)+'\n')
           tables={x['table'] for x in cat['tables']}; cols={f"{x['table']}.{x['column']}" for x in cat['columns']}; cons={x['name'] for x in cat['constraints']}; idx={x['name'] for x in cat['indexes']}; trig={x['name'] for x in cat['triggers']}; pol={f"{x['table']}:{x['name']}" for x in cat['policies']}|{f"{x['schema']}.{x['table']}:{x['name']}" for x in cat['policies']}; seq={x['name'] for x in cat['sequences']}
           funcs={x['name']:[] for x in cat['functions']}
           for x in cat['functions']: funcs[x['name']].append(x)
@@ -330,17 +377,18 @@ jobs:
           CLASSIFY_OUTCOME: ${{ steps.classify.outcome }}
         run: |
           set -euo pipefail
-          rm -f "$RUNNER_TEMP/flux-audit.sql" "$RUNNER_TEMP/flux-db.raw" "$RUNNER_TEMP/flux-db.err"
+          rm -f "$RUNNER_TEMP/flux-audit.sql" "$RUNNER_TEMP/flux-db.raw" "$RUNNER_TEMP/flux-db.err" "$RUNNER_TEMP/flux-readonly-proof.py" "$RUNNER_TEMP/flux-parser-self-test.json"
           echo PASS > "$EVIDENCE_DIR/cleanup.txt"
           python3 - <<'PY'
           import json,os,pathlib,re,time
-          root=pathlib.Path(os.environ['EVIDENCE_DIR']); code=None
-          if os.environ.get('IDENTITY_OUTCOME')!='success':
+          root=pathlib.Path(os.environ['EVIDENCE_DIR']); code=None; proof_path=root/'transaction-readonly-proof.json'; proof=json.loads(proof_path.read_text()) if proof_path.exists() else {}
+          if proof.get('status')=='FAIL' and proof.get('failure_code'): code=proof['failure_code']
+          if code is None and os.environ.get('IDENTITY_OUTCOME')!='success':
             p=root/'identity-error.json'; code=json.loads(p.read_text()).get('assertion','BASELINE_AUTOMATION_FAILURE') if p.exists() else 'BASELINE_AUTOMATION_FAILURE'
-          elif os.environ.get('INVENTORY_OUTCOME')!='success' or os.environ.get('STATIC_OUTCOME')!='success': code='BASELINE_AUTOMATION_FAILURE'
-          elif os.environ.get('DB_OK')!='true': code='PROD_READONLY_PROOF_FAILED'
-          elif os.environ.get('CLASSIFY_OUTCOME')!='success': code='BASELINE_AUTOMATION_FAILURE'
-          else:
+          elif code is None and (os.environ.get('INVENTORY_OUTCOME')!='success' or os.environ.get('STATIC_OUTCOME')!='success'): code='BASELINE_AUTOMATION_FAILURE'
+          elif code is None and os.environ.get('DB_OK')!='true': code='PROD_READONLY_QUERY_FAILED'
+          elif code is None and os.environ.get('CLASSIFY_OUTCOME')!='success': code='BASELINE_AUTOMATION_FAILURE'
+          elif code is None:
             cls=json.loads((root/'focal-migration-classification.json').read_text()); units=cls['units']
             focal=[x for x in units if x['version']!='025']
             if any(x['classification']=='PARTIAL' for x in focal): code='FOCAL_MIGRATION_PARTIAL_STATE'
@@ -356,11 +404,12 @@ jobs:
               if re.search(rx,s,re.I): findings.append({'file':p.name,'category':label})
           sanit={'status':'PASS' if not findings else 'FAIL','files_scanned':len(list(root.iterdir())),'findings':findings,'prohibited_operational_rows':0,'documents_read':0,'host_disclosed':False}
           (root/'sanitization-audit.json').write_text(json.dumps(sanit,indent=2)+'\n')
-          if findings and code is None: code='EVIDENCE_ARTIFACT_INVALID'
-          ctx=json.loads((root/'workflow-context-audit.json').read_text()); code='EVIDENCE_ARTIFACT_INVALID' if ctx.get('status')!='PASS' or ctx.get('invalid_expressions')!=0 else code; identities=json.loads((root/'github-identities.json').read_text()); c1=json.loads((root/'c1-fasttrack-inputs.json').read_text())
-          result='STOP / '+code if code else 'PASS / SHARED_PROD_READONLY_WORKFLOW_CORRECTED / CORRECTIVE_PR_MERGED_TO_DEV / PUSH_BOOTSTRAP_RUN_SUCCESS / SLICE_01_TARGETED_PROD_BASELINE_CAPTURED / SLICE_01_MIGRATIONS_CLASSIFIED / NO_PROD_CHANGES / SLICE_01_C1_FASTTRACK_READY'
-          report={'status':'STOP' if code else 'PASS','result':result,'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4-2026-08-01','run_purpose':'corrected reusable read-only PROD baseline','workflow_context_audit':ctx.get('status'),'evidence_schema_changed':True,'evidence_schema_delta':['workflow-context-audit.json'],'internal_artifact_identifiers_changed':True,'target_git_sha':identities.get('target_git_sha'),'c1_fasttrack_ready':False if code else c1.get('SLICE_01_C1_FASTTRACK_READY'),'prod_mutations':{'schema':0,'data':0,'migration_history':0,'storage':0,'runtime':0,'http':0},'completed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
-          (root/'gate-report.json').write_text(json.dumps(report,indent=2)+'\n'); (root/'gate-report.md').write_text(f"# FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R4\n\n{result}\n\nPROD schema/data/history/storage/runtime/HTTP writes: 0.\n")
+          if findings and code in [None,'BASELINE_AUTOMATION_FAILURE']: code='EVIDENCE_ARTIFACT_INVALID'
+          ctx=json.loads((root/'workflow-context-audit.json').read_text()); code='EVIDENCE_ARTIFACT_INVALID' if (ctx.get('status')!='PASS' or ctx.get('invalid_expressions')!=0) and code in [None,'BASELINE_AUTOMATION_FAILURE'] else code; identities=json.loads((root/'github-identities.json').read_text()); c1=json.loads((root/'c1-fasttrack-inputs.json').read_text())
+          proof_codes={'PROD_READONLY_QUERY_FAILED','PROD_READONLY_PROOF_MARKER_MISSING','PROD_READONLY_PROOF_MARKER_DUPLICATED','PROD_READONLY_PROOF_JSON_INVALID','PROD_DEFAULT_TRANSACTION_NOT_READONLY','PROD_TRANSACTION_NOT_READONLY','PROD_READONLY_PROOF_SCHEMA_INVALID'}; phase=('read_only_proof' if code in proof_codes else 'migration_classification' if code and code.startswith('FOCAL_MIGRATION_') else 'dependency_025' if code=='DEPENDENCY_025_UNRESOLVED' else 'artifact_validation' if code=='EVIDENCE_ARTIFACT_INVALID' else 'notification_overlap' if code=='SLICE_01_NOTIFICATION_OVERLAP_DETECTED' else 'identity' if code and 'IDENTITY' in code else 'automation' if code else None); source=('transaction-readonly-proof.json' if phase=='read_only_proof' else 'focal-migration-classification.json' if phase=='migration_classification' else 'dependency-025-audit.json' if phase=='dependency_025' else ('sanitization-audit.json' if findings else 'workflow-context-audit.json') if phase=='artifact_validation' else 'slice-01-notification-overlap-audit.json' if phase=='notification_overlap' else 'identity-error.json' if phase=='identity' else 'workflow-step-outcomes' if phase else None); expected=({'psql_exit_code':0,'marker_count':1,'default_transaction_read_only':'on','transaction_read_only':'on'} if phase=='read_only_proof' else 'accepted gate state' if code else None); actual=({k:proof.get(k) for k in ['psql_exit_code','marker_count','default_transaction_read_only','transaction_read_only']} if phase=='read_only_proof' else code)
+          result='STOP / '+code if code else 'PASS / SHARED_PROD_READONLY_PROOF_HARDENED / CORRECTIVE_PR_MERGED_TO_DEV / PUSH_BOOTSTRAP_RUN_SUCCESS / SLICE_01_TARGETED_PROD_BASELINE_CAPTURED / SLICE_01_MIGRATIONS_CLASSIFIED / NO_PROD_CHANGES / SLICE_01_C1_FASTTRACK_READY'
+          report={'status':'STOP' if code else 'PASS','result':result,'gate':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5','manifest':'FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5-2026-08-01','run_purpose':'hardened reusable read-only PROD proof','workflow_context_audit':ctx.get('status'),'evidence_schema_changed':True,'evidence_schema_delta':['transaction-readonly-proof.json','gate-report.json','gate-report.md'],'internal_artifact_identifiers_changed':True,'exact_failure_code':code,'exact_failure_phase':phase,'expected':expected,'actual':actual,'source_evidence_file':source,'target_git_sha':identities.get('target_git_sha'),'c1_fasttrack_ready':False if code else c1.get('SLICE_01_C1_FASTTRACK_READY'),'prod_mutations':{'schema':0,'data':0,'migration_history':0,'storage':0,'runtime':0,'http':0},'completed_at_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+          (root/'gate-report.json').write_text(json.dumps(report,indent=2)+'\n'); (root/'gate-report.md').write_text(f"# FLUX-PROD-SLICE-01-BASELINE-UNBLOCKER-R5\n\n{result}\n\nExact failure code: {code or 'none'}\nExact failure phase: {phase or 'none'}\nExpected: {json.dumps(expected,sort_keys=True)}\nActual: {json.dumps(actual,sort_keys=True)}\nSource evidence: {source or 'none'}\n\nPROD schema/data/history/storage/runtime/HTTP writes: 0.\n")
           ledger={'status':'PASS','workflow_runs_created_by_workflow':0,'reruns':0,'dispatches_created_by_workflow':0,'git_writes':0,'prod_schema_writes':0,'prod_data_writes':0,'prod_history_writes':0,'prod_storage_writes':0,'prod_runtime_mutations':0,'http_writes':0}
           (root/'mutation-ledger.json').write_text(json.dumps(ledger,indent=2)+'\n')
           required=['gate-report.json','github-identities.json','prod-database-identity.json','transaction-readonly-proof.json','workflow-bootstrap-audit.json','workflow-context-audit.json','local-migration-inventory.json','focal-migration-history.json','focal-migration-classification.json','focal-object-fingerprints.json','csf-schema-audit.json','csf-storage-policy-audit.json','approval-batches-schema-audit.json','cash-funds-schema-audit.json','cash-funds-forward-fix-plan.json','dependency-025-audit.json','slice-01-notification-overlap-audit.json','c1-fasttrack-inputs.json','sanitization-audit.json','mutation-ledger.json']
