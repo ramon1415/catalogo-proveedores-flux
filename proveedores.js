@@ -374,12 +374,11 @@ async function persistSupplier() {
       if (csfError) throw csfError
     } catch (error) {
       csfUploadFailed = true
-      console.error("[Flux] Provider CSF upload failed", {
+      console.warn("[Flux] Provider CSF upload failed", {
         code: error?.code || null,
         message: error?.message || "unknown_error",
         status: error?.statusCode || error?.status || null,
       })
-      showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
     }
   }
 
@@ -389,7 +388,11 @@ async function persistSupplier() {
   currentCsfPath = null
   if (dialog.open) dialog.close()
   await loadSuppliers()
-  if (!csfUploadFailed) showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
+  if (csfUploadFailed) {
+    showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
+  } else {
+    showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
+  }
 }
 
 function validateDestination(payload) {
@@ -514,4 +517,19 @@ function escapeHtml(value) {
 function showToast(title, message, type = "success") {
   const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" }
   Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 })
+  const stack = document.getElementById("toastStack")
+  const toast = stack?.lastElementChild
+  if (!toast) return
+
+  const assertive = type === "error" || type === "warning"
+  toast.setAttribute("role", assertive ? "alert" : "status")
+  toast.setAttribute("aria-live", assertive ? "assertive" : "polite")
+  toast.setAttribute("aria-atomic", "true")
+  toast.setAttribute("aria-label", [title, message].filter(Boolean).join(". "))
+
+  const closeButton = toast.querySelector(".toast-v2-close")
+  if (closeButton) {
+    closeButton.type = "button"
+    closeButton.setAttribute("aria-label", `Cerrar notificación: ${title}`)
+  }
 }

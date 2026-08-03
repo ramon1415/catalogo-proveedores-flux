@@ -19,9 +19,34 @@
     .form-grid textarea { min-height: 72px; padding: 8px 10px; resize: vertical; }
     .field-disabled { opacity: .55; cursor: not-allowed !important; }
     .form-grid input:disabled, .form-grid select:disabled { background: var(--bg-hover); color: var(--text-3); cursor: not-allowed; }
+    .provider-csf-page { --provider-muted-accessible: #8888a8; }
+    [data-theme="light"] .provider-csf-page { --provider-muted-accessible: #666680; }
+    .provider-csf-page .brand-subtitle,
+    .provider-csf-page .nav-link:not(.active),
+    .provider-csf-page #userEmail,
+    .provider-csf-page .topbar-kicker,
+    .provider-csf-page .page-header > div > p,
+    .provider-csf-page thead th,
+    .provider-csf-page #supplierDialog .modal-header p,
+    .provider-csf-page #supplierDialog .form-grid label,
+    .provider-csf-page #supplierDialog .field-hint,
+    .provider-csf-page #supplierDialog .fase2-field-help { color: var(--provider-muted-accessible) !important; }
+    .provider-csf-page #supplierDialog { color: var(--text-1); }
+    .provider-csf-page #supplierDialog :is(input, select, textarea, button):focus-visible,
+    .provider-csf-page #searchInput:focus-visible,
+    .provider-csf-page #statusFilter:focus-visible,
+    .provider-csf-page #newSupplierBtn:focus-visible,
+    .provider-csf-page .row-actions .small-btn:focus-visible {
+      outline: 2px solid var(--accent-text) !important;
+      outline-offset: 2px;
+    }
+    .provider-csf-page .table-card tbody tr:focus-within .row-actions { opacity: 1; }
+    @media (hover: none) {
+      .provider-csf-page .row-actions { opacity: 1; }
+    }
   </style>
 </head>
-<body>
+<body class="provider-csf-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -78,8 +103,8 @@
 
 <section class="table-card">
           <div class="table-toolbar">
-            <input id="searchInput" type="search" placeholder="Buscar alias, razon social, RFC, banco...">
-            <select id="statusFilter">
+            <input id="searchInput" type="search" aria-label="Buscar proveedores" placeholder="Buscar alias, razon social, RFC, banco...">
+            <select id="statusFilter" aria-label="Filtrar proveedores por estatus">
               <option value="todos">Estatus: Todos</option>
               <option value="activos">Activos</option>
               <option value="inactivos">Inactivos</option>
@@ -110,14 +135,14 @@
   </div>
 
   <!-- Modal proveedor -->
-  <dialog id="supplierDialog">
+  <dialog id="supplierDialog" aria-labelledby="modalTitle" aria-describedby="supplierDialogDescription">
     <form id="supplierForm" class="modal-content">
       <div class="modal-header">
         <div>
           <h2 id="modalTitle">Nuevo proveedor</h2>
-          <p>Completa los datos principales del proveedor.</p>
+          <p id="supplierDialogDescription">Completa los datos principales del proveedor.</p>
         </div>
-        <button type="button" id="closeModalBtn" class="icon-btn">✕</button>
+        <button type="button" id="closeModalBtn" class="icon-btn" aria-label="Cerrar formulario de proveedor">✕</button>
       </div>
       <div class="modal-scroll">
         <input type="hidden" id="supplierId">
@@ -170,7 +195,7 @@
           <label>Correo<input id="email" type="email" placeholder="correo@dominio.com"></label>
           <label>Telefono<input id="telefono" placeholder="+52 ..."></label>
           <label class="full-row">Constancia de Situacion Fiscal (CSF)
-            <input type="file" id="providerCsfFile" accept="application/pdf,image/*">
+            <input type="file" id="providerCsfFile" accept="application/pdf,image/*" aria-describedby="providerCsfHint">
             <span id="providerCsfHint" class="field-hint" data-default="CSF en PDF (max 10 MB)" data-restricted="La Constancia de Situacion Fiscal sera administrada por Finanzas.">CSF en PDF (max 10 MB)</span>
             <button id="providerCsfLink" class="small-btn hidden" type="button">Ver CSF</button>
           </label>
@@ -186,13 +211,13 @@
     </form>
   </dialog>
 
-  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+  <div id="toastStack" class="toast-stack-v2"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js?v=20260709-provider-csf"></script>
-  <script src="./proveedores.js?v=20260712-provider-person-type"></script>
+  <script src="./proveedores.js?v=20260803-csf-accessible-feedback"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>
