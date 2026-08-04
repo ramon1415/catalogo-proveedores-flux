@@ -302,7 +302,9 @@ function matchSearch(r, q) {
 function renderCard(r, colKey) {
   const provider = byId(state.providers, r.proveedor_id)
   const company = byId(state.companies, r.company_id)
-  const canAct = state.canApprove && colKey === "pending"
+  const canAct = state.canApprove
+    && colKey === "pending"
+    && (!r.approver_id || r.approver_id === state.profile?.id)
 
   return `
     <article class="approval-card">
@@ -390,6 +392,7 @@ function openDetail(requestId) {
   dom.detailContent.innerHTML = renderDetail(request)
   dom.decisionActions.innerHTML = renderDecisionActions(request)
   dom.detailDialog.showModal()
+  loadDetailApprover(request.id)
 }
 
 function closeDetail() {
@@ -438,6 +441,10 @@ function renderDetail(request) {
           <span class="ref-label">Mes presupuestal</span>
           <span class="ref-value">${escapeHtml(formatMonth(request.budget_month))}</span>
         </div>
+        <div class="ref-cell" style="grid-column:1/-1">
+          <span class="ref-label">Aprobador seleccionado</span>
+          <span class="ref-value" id="approvalDetailApprover">Cargando...</span>
+        </div>
       </div>
       ${(layoutLine || fund || request.is_extraordinary_adjustment) ? `
       <div class="data-section">
@@ -451,8 +458,35 @@ function renderDetail(request) {
   `
 }
 
+async function loadDetailApprover(paymentRequestId) {
+  const target = document.getElementById("approvalDetailApprover")
+  if (!target) return
+  const { data, error } = await supabaseClient.rpc("get_payment_request_approver_details", {
+    p_payment_request_id: paymentRequestId,
+  })
+  if (error) {
+    target.textContent = "No disponible"
+    return
+  }
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row?.profile_id) {
+    target.textContent = "Sin revisor asignado"
+    return
+  }
+  const roles = Array.isArray(row.eligible_roles) && row.eligible_roles.length ? ` · ${row.eligible_roles.join(", ")}` : ""
+  const source = row.source === "assigned"
+    ? " · Configurado por administración"
+    : row.source === "approval_rules"
+      ? " · Elegible por reglas"
+      : ""
+  target.textContent = `${row.display_name || "Sin nombre"}${roles}${source}`
+}
+
 function renderDecisionActions(request) {
   if (!state.canApprove) return `<span style="color:var(--text-3);font-size:12px">Sin permisos de aprobacion</span>`
+  if (request.approver_id && request.approver_id !== state.profile?.id) {
+    return `<span style="color:var(--text-3);font-size:12px">Asignada a otro aprobador</span>`
+  }
   if (["approved", "rejected", "paid", "cancelled"].includes(request.status) && !isException(request)) {
     return `<span style="color:var(--text-3);font-size:12px">Esta solicitud ya tiene una decision registrada</span>`
   }
@@ -562,7 +596,7 @@ function formatMonth(value) {
 
 function friendlyDecisionError(error) {
   const msg = error?.message || String(error || "")
-  const map = { actor_cannot_approve: "Tu rol no tiene permiso para aprobar.", actor_cannot_reject: "Tu rol no tiene permiso para rechazar.", comments_required_for_changes_requested: "El comentario es obligatorio para solicitar cambios.", comments_required_for_exception_action: "El comentario es obligatorio para decisiones de excepcion." }
+  const map = { actor_cannot_approve: "Tu rol no tiene permiso para aprobar.", actor_cannot_reject: "Tu rol no tiene permiso para rechazar.", comments_required_for_changes_requested: "El comentario es obligatorio para solicitar cambios.", comments_required_for_exception_action: "El comentario es obligatorio para decisiones de excepcion.", selected_approver_only: "Solo el aprobador seleccionado para esta solicitud puede registrar la decisión.", approver_assignment_snapshot_invalid: "No se pudo validar el origen administrativo del aprobador seleccionado.", selected_approver_cannot_approve: "El aprobador seleccionado ya no cumple la regla para aprobar.", selected_approver_cannot_approve_exception: "El aprobador seleccionado no puede autorizar esta excepción.", selected_approver_cannot_reject: "El aprobador seleccionado ya no cumple la regla para rechazar.", selected_approver_cannot_request_changes: "El aprobador seleccionado ya no cumple la regla para solicitar cambios.", selected_approver_cannot_request_budget_adjustment: "El aprobador seleccionado no puede solicitar este ajuste.", actor_profile_must_match_current_profile: "La sesión no coincide con el perfil que intenta decidir." }
   return map[msg] || friendlyError(error)
 }
 
