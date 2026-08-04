@@ -2,16 +2,14 @@
 
 ## Scope
 
-P3 removes unscoped financial approval authority and prepares explicit,
-company-scoped requester-to-approver routing in Supabase DEV.
+P3 removes unscoped financial approval authority and preserves explicit,
+scoped requester-to-approver routing. Migrations 018 and 019 are not reapplied.
 
-The gate must not reapply migrations 018 or 019. Their material objects are
-verified before any DEV mutation.
-
-## Forward-only migration
+## Migration 044
 
 `supabase/migrations/044_harden_approval_rules_for_explicit_routing.sql`
-disables active catch-all rules only when all of the following are true:
+was applied exactly once to Supabase DEV. It disables active catch-all rules
+only when all of the following are true:
 
 - the normalized role is `administracion`, `finance`, `finanzas`,
   `tesoreria` or `treasury`;
@@ -22,55 +20,68 @@ disables active catch-all rules only when all of the following are true:
 Specific company, cost-center or bounded rules remain untouched. Roles are
 preserved. Privileged roles are outside this migration.
 
-## DEV operational seed
+## Release-specific identity decision
 
-The controlled DEV transaction, executed separately from the migration, must
-resolve real profiles and the canonical live company without publishing UUIDs
-or complete email addresses.
+Por decisión operativa de este release, los usuarios nominales no se crearán
+en DEV. La validación funcional fue realizada con usuarios equivalentes. Los
+usuarios reales y sus configuraciones serán dados de alta por Ramón
+directamente en PROD mediante el módulo web de Permisos y Asignación de
+Roles.
 
-The intended routing is:
+This is a release-specific operational decision. It is not a general security
+policy prohibiting named users in DEV.
 
-- FRANCISCO → ALFREDO
-- ALFREDO → YANIN
-- FELIPE → no profile, role, membership or assignment created by this gate
+### DEV
 
-ADMIN_TEMPORAL loses only `sysadmin`. The Auth user and profile remain, and no
-replacement role is invented.
+- Migration 044 was applied once.
+- The active financial catch-all count is zero.
+- Manual UAT passed with equivalent existing users.
+- Named users are not required for this release.
+- No nominal configuration remains pending in DEV.
+- No identity SQL seed is executed.
+- No nominal memberships are created.
+- No nominal approval routing is configured.
+
+### PROD
+
+- Ramón will create or enable the real users through the web platform.
+- Ramón will assign company, roles, permissions and assignments through the
+  web platform.
+- Ramón will configure the correct approval routes through the platform.
+- No SQL identity seed will be used.
+- No UUID, email address or person will be hardcoded.
+- PROD remains unchanged until a separately authorized release gate.
 
 ## Directors and future changes
 
-CÉSAR is the only currently designated cut director. This is an operational
-snapshot, not a permanent product constraint.
-
 P3 does not write `company_directors`. Director configuration belongs to
-Cortes/P4 and must remain data-driven:
+Cortes/P4 and remains data-driven:
 
-- no person name or identifier may be hardcoded;
-- zero, one or multiple active directors must be representable according to the
-  live business decision;
-- adding, deactivating or replacing a director in DEV or PROD must be a
-  controlled data/configuration change with auditability;
-- the application must derive active directors from `company_directors`, not
-  from a fixed assumption that César is always the only director.
+- no person name or identifier is hardcoded;
+- zero, one or multiple active directors are representable;
+- future additions, deactivations or replacements are controlled,
+  auditable configuration changes;
+- the application derives active directors from `company_directors`.
 
 The existing migration
-`034_support_multiple_active_company_directors.sql` is preserved. P3 neither
-applies migration 021/034 nor materializes César.
+`034_support_multiple_active_company_directors.sql` is preserved. P3 does
+not apply migration 021/034 or materialize a director identity.
 
-## Required execution order
+## Final state
 
-1. Capture sanitized counts and alias state from DEV.
-2. Run the full P3 transaction as a dry-run and roll it back.
-3. Confirm no business-data deltas.
-4. Apply migration 044 and the approved operational seed once.
-5. Execute authenticated DEV UAT with real sessions.
-6. Clean synthetic QA records while preserving mandatory audit evidence.
-7. Stop for Ramón review before any PROD action.
+- `M044=APPLIED_ONCE`
+- `M044_HISTORY_VERSION=20260804210918`
+- `FINANCIAL_CATCH_ALL_ACTIVE=0`
+- `MANUAL_DEV_UAT=PASS`
+- `UAT_MODE=EQUIVALENT_EXISTING_USERS`
+- `DEV_NAMED_USER_CONFIGURATION=NOT_REQUIRED`
+- `PROD_NAMED_USER_CONFIGURATION=PENDING_RAMON`
+- `PROD_MUTATIONS=0`
+- `P4_CORTES=NOT_STARTED`
 
-## Current state
+## Boundaries
 
-- migration 044: VERSIONED / NOT_APPLIED
-- DEV seed: NOT_APPLIED
-- authenticated UAT: NOT_EXECUTED
-- PROD changes: 0
-- P4/Cortes: NOT_STARTED
+No migration is reapplied by this documentation gate. No user, profile,
+membership, role, permission, assignment, routing or director record is
+created or modified. P3 remains stopped for Ramón's decision before any PROD
+action.
