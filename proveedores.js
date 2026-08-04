@@ -2,6 +2,10 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 let proveedores = []
 let currentEditingId = null
+let currentProfileId = null
+let currentCsfPath = null
+let providerCsfUpload = null
+let providerSaveInProgress = false
 
 const rootElement = document.documentElement
 const tableBody = document.getElementById("suppliersTableBody")
@@ -19,6 +23,8 @@ async function init() {
   if (window.FluxAuth?.ready) await window.FluxAuth.ready()
   const profile = window.FluxAuth?.getProfile?.()
   const session = window.FluxAuth?.state?.session
+  currentProfileId = profile?.id || null
+  providerCsfUpload = window.FluxUpload?.initFileUpload("providerCsf") || { getFile: () => null, reset: () => {} }
 
   if (!session) {
     window.location.href = "./index.html"
@@ -39,6 +45,7 @@ async function init() {
   document.getElementById("cancelBtn").addEventListener("click", closeModal)
   document.getElementById("metodo_pago").addEventListener("change", handlePaymentMethodChange)
   document.getElementById("destination_type")?.addEventListener("change", handleDestinationTypeChange)
+  document.getElementById("providerCsfLink")?.addEventListener("click", openCurrentCsf)
 
   searchInput.addEventListener("input", renderTable)
   statusFilter.addEventListener("change", renderTable)
@@ -59,8 +66,8 @@ function prepareSupplierFormUx() {
   const orderedControls = [
     "alias", "nombre_completo", "tipo_proveedor", "destination_type",
     "metodo_pago", "tipo_cuenta", "beneficiary_name", "banco", "clabe",
-    "cuenta_bancaria", "convenio_number", "rfc", "email", "telefono",
-    "es_personal_eventual", "activo", "notas",
+    "cuenta_bancaria", "convenio_number", "rfc", "persona_tipo", "email", "telefono",
+    "providerCsfFile", "es_personal_eventual", "activo", "notas",
   ]
 
   orderedControls.map(labelForControl).filter(Boolean).forEach((label) => grid.appendChild(label))
@@ -96,7 +103,8 @@ async function loadSuppliers() {
 
   if (error) {
     tableBody.innerHTML = `<tr><td colspan="8" style="padding:44px;text-align:center;color:var(--ruby)">No fue posible cargar proveedores.</td></tr>`
-    showToast("Error al cargar", error.message, "error")
+    logSupplierSaveDiagnostic(error, { stage: "load", operation: "select" })
+    showToast("No fue posible cargar proveedores.", "", "error")
     return
   }
 
@@ -109,6 +117,7 @@ async function loadSuppliers() {
 function renderTable() {
   const query = normalize(searchInput.value)
   const filter = statusFilter.value
+  const canManage = canManageProviders()
 
   const rows = proveedores.filter((p) => {
     const haystack = normalize([p.alias, p.nombre_completo, p.rfc, p.banco, p.email, p.telefono, p.metodo_pago].join(" "))
@@ -137,12 +146,14 @@ function renderTable() {
       <td>${escapeHtml(p.rfc || "")}</td>
       <td>${Components.badge(p.activo ? "Activo" : "Inactivo", p.activo ? "success" : "neutral")}</td>
       <td>
-        <div class="actions row-actions">
-          <button class="small-btn" type="button" onclick="openEditModal('${escapeHtml(p.id)}')">Editar</button>
-          ${p.activo
-            ? `<button class="small-btn danger" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', false)">Desactivar</button>`
-            : `<button class="small-btn" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', true)">Reactivar</button>`}
-        </div>
+        ${canManage
+          ? `<div class="actions row-actions">
+              <button class="small-btn" type="button" onclick="openEditModal('${escapeHtml(p.id)}')">Editar</button>
+              ${p.activo
+                ? `<button class="small-btn danger" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', false)">Desactivar</button>`
+                : `<button class="small-btn" type="button" onclick="toggleSupplier('${escapeHtml(p.id)}', true)">Reactivar</button>`}
+            </div>`
+          : '<span class="field-hint">Solo lectura</span>'}
       </td>
     </tr>
   `).join("")
@@ -152,17 +163,25 @@ function renderTable() {
 
 function openCreateModal() {
   currentEditingId = null
+  currentCsfPath = null
   document.getElementById("modalTitle").textContent = "Nuevo proveedor"
   form.reset()
   document.getElementById("activo").checked = true
+  resetCsfControls()
+  updateCsfPermissionState()
   handlePaymentMethodChange()
   dialog.showModal()
 }
 
 window.openEditModal = function(id) {
+  if (!canManageProviders()) {
+    showToast("Sin permiso", "La administracion de proveedores corresponde a Finanzas, Direccion o Sysadmin.", "warning")
+    return
+  }
   const p = proveedores.find((item) => item.id === id)
   if (!p) return
   currentEditingId = id
+  currentCsfPath = p.csf_file_path || null
   document.getElementById("modalTitle").textContent = "Editar proveedor"
   setValue("supplierId", p.id)
   setValue("alias", p.alias)
@@ -176,12 +195,16 @@ window.openEditModal = function(id) {
   setValue("cuenta_bancaria", p.cuenta_bancaria)
   setValue("convenio_number", p.convenio_number)
   setValue("rfc", p.rfc)
+  setValue("persona_tipo", p.persona_tipo)
   setValue("email", p.email)
   setValue("telefono", p.telefono)
   setValue("tipo_proveedor", p.tipo_proveedor)
   setValue("notas", p.notas)
   document.getElementById("es_personal_eventual").checked = Boolean(p.es_personal_eventual)
   document.getElementById("activo").checked = Boolean(p.activo)
+  resetCsfControls()
+  updateCsfPermissionState()
+  renderCsfLink()
   handlePaymentMethodChange()
   handleDestinationTypeChange()
   dialog.showModal()
@@ -246,6 +269,39 @@ function inferDestinationType() {
 
 async function saveSupplier(event) {
   event.preventDefault()
+  if (providerSaveInProgress) return
+
+  const operation = currentEditingId ? "update" : "insert"
+  providerSaveInProgress = true
+  const submitButton = form.querySelector('button[type="submit"]')
+  const submitButtonLabel = submitButton?.textContent || "Guardar proveedor"
+  if (submitButton) {
+    submitButton.disabled = true
+    submitButton.textContent = "Guardando..."
+  }
+
+  try {
+    await persistSupplier(operation)
+  } catch (error) {
+    showSupplierSaveError(error, { stage: "unexpected", operation })
+  } finally {
+    providerSaveInProgress = false
+    if (submitButton) {
+      submitButton.disabled = false
+      submitButton.textContent = submitButtonLabel
+    }
+  }
+}
+
+async function persistSupplier(operation) {
+  const csfFile = providerCsfUpload?.getFile?.() || null
+  const canUploadCsf = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
+
+  if (csfFile && !canUploadCsf) {
+    showToast("Sin permiso", "Tu usuario no tiene permiso para cargar CSF de proveedores.", "error")
+    return
+  }
+
   const payload = {
     alias: getValue("alias"),
     nombre_completo: getValue("nombre_completo"),
@@ -258,6 +314,7 @@ async function saveSupplier(event) {
     cuenta_bancaria: getValue("cuenta_bancaria"),
     convenio_number: getValue("convenio_number"),
     rfc: getValue("rfc"),
+    persona_tipo: getValue("persona_tipo"),
     email: getValue("email"),
     telefono: getValue("telefono"),
     tipo_proveedor: getValue("tipo_proveedor"),
@@ -288,23 +345,79 @@ async function saveSupplier(event) {
   if (payload.destination_type === "cuenta") payload.tipo_cuenta = "Cuenta"
   if (payload.destination_type === "convenio") payload.tipo_cuenta = null
 
-  const result = currentEditingId
-    ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId)
-    : await supabaseClient.from("proveedores").insert(payload)
-
-  if (result.error) {
-    const msg = result.error.message?.toLowerCase().includes("row-level security") || result.error.code === "42501"
-      ? "No se pudo guardar. Puede faltar permiso update sobre proveedores."
-      : `Error guardando proveedor: ${result.error.message}`
-    showToast("Error al guardar", msg, "error")
+  if (isPreviewEnvironment()) {
+    showToast("Este entorno es una vista previa. Los cambios no se guardan.", "", "error")
     return
   }
 
+  const result = currentEditingId
+    ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId).select("id").single()
+    : await supabaseClient.from("proveedores").insert(payload).select("id").single()
+
+  if (result.error) {
+    showSupplierSaveError(result.error, { stage: "persist", operation })
+    return
+  }
+
+  const providerId = result.data?.id || currentEditingId
+  let csfUploadFailed = false
+
+  if (csfFile && providerId) {
+    try {
+      const storagePath = await window.FluxUpload.uploadReceipt(csfFile, `csf/${providerId}`)
+      const { error: csfError } = await supabaseClient
+        .from("proveedores")
+        .update({
+          csf_file_path: storagePath,
+          csf_uploaded_at: new Date().toISOString(),
+          csf_uploaded_by: currentProfileId,
+        })
+        .eq("id", providerId)
+      if (csfError) throw csfError
+    } catch (error) {
+      csfUploadFailed = true
+      logSupplierSaveDiagnostic(error, { stage: "csf_upload", operation })
+    }
+  }
+
   form.reset()
+  resetCsfControls()
   currentEditingId = null
+  currentCsfPath = null
   if (dialog.open) dialog.close()
   await loadSuppliers()
-  showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
+  if (csfUploadFailed) {
+    showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
+  } else {
+    showToast("Proveedor guardado correctamente.", "", "success")
+  }
+}
+
+function isPreviewEnvironment() {
+  return String(window.FLUX_CONFIG?.env || "").trim().toLowerCase() === "preview"
+}
+
+function logSupplierSaveDiagnostic(error, { stage, operation }) {
+  const codeCandidate = String(error?.code || "").trim().toLowerCase()
+  const knownCodes = new Set(["provider_payment_execution_rpc_required"])
+  const code = knownCodes.has(codeCandidate) || /^pgrst\d{3}$/.test(codeCandidate) || /^[0-9a-z]{5}$/.test(codeCandidate)
+    ? codeCandidate
+    : "unclassified_save_error"
+  const statusCandidate = Number(error?.statusCode || error?.status)
+  const diagnostic = { stage, operation, code }
+  if (Number.isInteger(statusCandidate) && statusCandidate >= 100 && statusCandidate <= 599) {
+    diagnostic.status = statusCandidate
+  }
+  console.warn("[Flux] Provider save failed", diagnostic)
+}
+
+function showSupplierSaveError(error, { stage, operation }) {
+  logSupplierSaveDiagnostic(error, { stage, operation })
+
+  const message = isPreviewEnvironment()
+    ? "Este entorno es una vista previa. Los cambios no se guardan."
+    : "No fue posible guardar el proveedor. Verifica la información e inténtalo nuevamente."
+  showToast(message, "", "error")
 }
 
 function validateDestination(payload) {
@@ -318,10 +431,18 @@ function validateDestination(payload) {
 }
 
 window.toggleSupplier = async function(id, activo) {
+  if (!canManageProviders()) {
+    showToast("Sin permiso", "La administracion de proveedores corresponde a Finanzas, Direccion o Sysadmin.", "warning")
+    return
+  }
   const confirmed = confirm(activo ? "Seguro que deseas reactivar este proveedor?" : "Seguro que deseas desactivar este proveedor?")
   if (!confirmed) return
   const { error } = await supabaseClient.from("proveedores").update({ activo, updated_at: new Date().toISOString() }).eq("id", id)
-  if (error) { showToast("Error al actualizar", error.message, "error"); return }
+  if (error) {
+    logSupplierSaveDiagnostic(error, { stage: "status_update", operation: "update" })
+    showToast("No fue posible actualizar el proveedor. Inténtalo nuevamente.", "", "error")
+    return
+  }
   await loadSuppliers()
   showToast(activo ? "Proveedor reactivado" : "Proveedor desactivado", "", "success")
 }
@@ -334,6 +455,72 @@ async function logout() {
 function closeModal() {
   if (dialog.open) dialog.close()
   currentEditingId = null
+  currentCsfPath = null
+  resetCsfControls()
+}
+
+function resetCsfControls() {
+  providerCsfUpload?.reset?.()
+  const link = document.getElementById("providerCsfLink")
+  if (link) {
+    link.classList.add("hidden")
+    link.removeAttribute("data-path")
+  }
+  const hint = document.getElementById("providerCsfHint")
+  if (hint) {
+    hint.textContent = hint.dataset.default || "CSF en PDF (max 10 MB)"
+    hint.style.color = ""
+  }
+}
+
+function updateCsfPermissionState() {
+  const input = document.getElementById("providerCsfFile")
+  if (!input) return
+  const allowed = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
+  input.disabled = !allowed
+  input.classList.toggle("field-disabled", !allowed)
+  const hint = document.getElementById("providerCsfHint")
+  if (hint) {
+    hint.textContent = allowed
+      ? hint.dataset.default || "CSF en PDF (max 10 MB)"
+      : hint.dataset.restricted || "La Constancia de Situacion Fiscal sera administrada por Finanzas."
+    hint.style.color = allowed ? "" : "var(--text-3)"
+  }
+}
+
+function renderCsfLink() {
+  const link = document.getElementById("providerCsfLink")
+  if (!link) return
+  if (!currentCsfPath) {
+    link.classList.add("hidden")
+    link.removeAttribute("data-path")
+    return
+  }
+  link.dataset.path = currentCsfPath
+  link.classList.remove("hidden")
+}
+
+async function openCurrentCsf() {
+  if (!currentCsfPath) return
+  try {
+    const url = await window.FluxUpload?.getReceiptUrl?.(currentCsfPath)
+    if (!url) throw new Error("signed_url_unavailable")
+    window.open(url, "_blank", "noopener,noreferrer")
+  } catch (error) {
+    showToast("CSF no disponible", "No se pudo generar el link temporal de la CSF.", "error")
+  }
+}
+
+function canCreateProviderCsf() {
+  return canManageProviders()
+}
+
+function canManageProviderCsf() {
+  return canManageProviders()
+}
+
+function canManageProviders() {
+  return Boolean(window.FluxAuth?.canManageProviders?.())
 }
 
 // ── Utilidades ────────────────────────────────────────────────
@@ -359,4 +546,19 @@ function escapeHtml(value) {
 function showToast(title, message, type = "success") {
   const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" }
   Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 })
+  const stack = document.getElementById("toastStack")
+  const toast = stack?.lastElementChild
+  if (!toast) return
+
+  const assertive = type === "error" || type === "warning"
+  toast.setAttribute("role", assertive ? "alert" : "status")
+  toast.setAttribute("aria-live", assertive ? "assertive" : "polite")
+  toast.setAttribute("aria-atomic", "true")
+  toast.setAttribute("aria-label", [title, message].filter(Boolean).join(". "))
+
+  const closeButton = toast.querySelector(".toast-v2-close")
+  if (closeButton) {
+    closeButton.type = "button"
+    closeButton.setAttribute("aria-label", `Cerrar notificación: ${title}`)
+  }
 }
