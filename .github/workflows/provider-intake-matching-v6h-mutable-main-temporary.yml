@@ -1,801 +1,475 @@
-name: Provider intake matching V6H mutable temporary
+name: Flux PROD Slice 01A CSF Release R1 Fasttrack
 
 'on':
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read
   actions: read
+  deployments: read
 
 concurrency:
-  group: provider-intake-matching-v6h-mutable
+  group: flux-prod-slice-01a-csf-release-r1
   cancel-in-progress: false
 
 jobs:
-  gate2-v6h-mutable:
-    name: Provider Intake Matching - V6H (one-shot mutable)
+  release:
+    name: CSF PROD preflight, controlled migrations and postcheck
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    environment: DEV
+    timeout-minutes: 45
+    environment: supabase-production
     env:
-      TEMP_BRANCH: "codex/provider-intake-matching-v6h-mutable-258-temp"
-      FEATURE_BRANCH: "feature/ramon-provider-intake-matching"
-      PR_NUMBER: "258"
-
-      BASELINE_GIT: "51b5b47dbe427e5e7a936703742ef832c19467c5"
-      PERMANENT_HEAD: "f1de674f14fa91a580a51d85682d2130663b9506"
-      EXPECTED_RUNNER_HEAD: "f1de674f14fa91a580a51d85682d2130663b9506"
-      EXPECTED_RUNNER_SHA256: "4a2e49e3a9866ab2253d68fb746e82cd098ade26fcd567581eb416fbaf55bc30"
-      EXPECTED_RUNNER_GIT_BLOB: "3ae94a331271b759afa9b9f63d077c808263e958"
-
-      EXTERNAL_LOAD_SHA256: "c988bedccef3e1013d1eae768d90e152b64a9e6245bf826a1aa8116c5866a2b0"
-      BACKEND_TREE: "379f65801609e40143d948b3de702e391636c512"
-      PROJECT_REF: "scsirgbuqjcwoaxfacth"
-      SUPABASE_URL: "https://scsirgbuqjcwoaxfacth.supabase.co"
-      PREVIEW_URL: "https://catalogo-proveedores-flux-git-feature-ramon-282446-quantta-team.vercel.app"
-      WORKFLOW_EVIDENCE_DIR: "outputs/provider-intake-matching-2a/gate-2-v6h-mutable"
-
-      RUNNER_FILE: "scripts/qa/provider-intake-matching-gate2-uat.mjs"
-      ACCESSIBILITY_FILE: "scripts/qa/provider-intake-matching-accessibility.mjs"
-      FLOW_FILE: "scripts/qa/provider-intake-matching-flow.mjs"
-      CONTRACT_TEST_FILE: "scripts/qa/provider-intake-matching-contract.test.mjs"
-      VISUAL_FILE: "scripts/qa/provider-intake-matching-visual.mjs"
-
-      EXPECTED_ACCESSIBILITY_SHA: "765ce7dbd98506e6d38d3f84d124a18eb4f1b8928e7a4eb2aa8edad87b19a564"
-      EXPECTED_ACCESSIBILITY_SIZE: "11565"
-      EXPECTED_FLOW_SHA: "0c46ab1c9cb154bedd8b0fcbcd08c87cec2d866ffce1dc8bb1204a9c3a212bc4"
-      EXPECTED_FLOW_GIT_BLOB: "4d1b871608164293ee999eb2ed61f72757d237d2"
-      EXPECTED_FLOW_SIZE: "12447"
-      EXPECTED_CONTRACT_SHA: "7fa9c844e3d598acb8bcaef1c8d45780a42e91b4df9566b94267a91e06ee4e68"
-      EXPECTED_CONTRACT_GIT_BLOB: "56edff420ebfa8ae5e1d29dcc12b3cdabd24496f"
-      EXPECTED_CONTRACT_SIZE: "30726"
-      EXPECTED_VISUAL_SHA: "a68f7a43170f0e9c7bc4c2f385dce77c6f6337a273da66d8f24786466a0fc851"
-      EXPECTED_VISUAL_GIT_BLOB: "4d729f7796965ec11aff3813b29bb95b551a552b"
-      EXPECTED_VISUAL_SIZE: "35170"
-
-      APPROVED_RUNNER_SHA256: "4a2e49e3a9866ab2253d68fb746e82cd098ade26fcd567581eb416fbaf55bc30"
-      ALLOW_MUTABLE_UAT: "true"
-      CONFIRMED_DEV_PROJECT_REF: "scsirgbuqjcwoaxfacth"
-      EPHEMERAL_LINK_AUTHORIZED: "true"
-      FIXTURE_PROVISIONING_AUTHORIZED: "true"
-      IAM_ACTIVATION_AUTHORIZED: "true"
-      EXPIRED_LINK_NORMALIZATION_AUTHORIZED: "true"
-
+      GATE: FLUX-PROD-SLICE-01A-CSF-RELEASE-R1-FASTTRACK
+      EXPECTED_BRANCH: ops/flux-prod-slice-01a-csf-release-r1-56cc72b
+      EXPECTED_MAIN_SHA: 85ec304ba45b9e0531e2cbd1437ba620c7e2ea24
+      EXPECTED_CANDIDATE_SHA: 56cc72bb7fb58a1a97df09e086116d77fbc8f9e6
+      EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      PR_NUMBER: "292"
+      GH_TOKEN: ${{ github.token }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
-      SUPABASE_DEV_ANON_KEY: ${{ secrets.SUPABASE_DEV_ANON_KEY }}
-      SUPABASE_DEV_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_DEV_SERVICE_ROLE_KEY }}
-      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
-      QA_COMPANY_ID: ${{ secrets.QA_COMPANY_ID }}
-      QA_LINK_CREATED_BY: ${{ secrets.QA_LINK_CREATED_BY }}
-      QA_CAPTCHA_TOKEN: ${{ secrets.QA_CAPTCHA_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_DB_PASSWORD_PROD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+      SUPABASE_PROD_AUDIT_DB_URL: ${{ secrets.SUPABASE_PROD_AUDIT_DB_URL }}
 
     steps:
-      - name: Checkout temporary mutable branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TEMP_BRANCH }}
-          fetch-depth: 0
-
-      - name: Validate execution context and immutable identities
+      - name: Initialize sanitized evidence
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$WORKFLOW_EVIDENCE_DIR"
-          test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
-          test "$GITHUB_REF_NAME" = "$TEMP_BRANCH"
-          test "$(git rev-parse --abbrev-ref HEAD)" = "$TEMP_BRANCH"
-          test "$(git rev-parse HEAD)" = "$PERMANENT_HEAD"
-          test "$SUPABASE_URL" = "https://$PROJECT_REF.supabase.co"
+          EVIDENCE_DIR="$RUNNER_TEMP/flux-prod-slice-01a-csf-release-r1"
+          mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$EVIDENCE_DIR/gate-result.txt"
+          printf '%s\n' '[]' > "$EVIDENCE_DIR/mutation-ledger.json"
+          printf '%s\n' 'PENDING' > "$EVIDENCE_DIR/cleanup.txt"
 
-          test "$SUPABASE_DEV_DB_URL"
-          test "$SUPABASE_DEV_SERVICE_ROLE_KEY"
-          test "$SUPABASE_DEV_ANON_KEY"
-          test "$SUPABASE_ACCESS_TOKEN" || true
-          test -n "$QA_COMPANY_ID"
-          test -n "$QA_LINK_CREATED_BY"
-          test -n "$QA_CAPTCHA_TOKEN"
-          test "$SUPABASE_DEV_PROJECT_REF" = "$PROJECT_REF"
-
-          test "$(git rev-parse "$PERMANENT_HEAD:supabase/functions/provider-intake")" = "$BACKEND_TREE"
-          test "$(sha256sum "$RUNNER_FILE" | cut -d' ' -f1)" = "$EXPECTED_RUNNER_SHA256"
-          test "$(git hash-object --no-filters "$RUNNER_FILE")" = "$EXPECTED_RUNNER_GIT_BLOB"
-          test "$(sha256sum "$FLOW_FILE" | cut -d' ' -f1)" = "$EXPECTED_FLOW_SHA"
-          test "$(git hash-object --no-filters "$FLOW_FILE")" = "$EXPECTED_FLOW_GIT_BLOB"
-          test "$(wc -c < "$FLOW_FILE" | tr -d ' ')" = "$EXPECTED_FLOW_SIZE"
-          test "$(sha256sum "$CONTRACT_TEST_FILE" | cut -d' ' -f1)" = "$EXPECTED_CONTRACT_SHA"
-          test "$(git hash-object --no-filters "$CONTRACT_TEST_FILE")" = "$EXPECTED_CONTRACT_GIT_BLOB"
-          test "$(wc -c < "$CONTRACT_TEST_FILE" | tr -d ' ')" = "$EXPECTED_CONTRACT_SIZE"
-          test "$(sha256sum "$VISUAL_FILE" | cut -d' ' -f1)" = "$EXPECTED_VISUAL_SHA"
-          test "$(git hash-object --no-filters "$VISUAL_FILE")" = "$EXPECTED_VISUAL_GIT_BLOB"
-          test "$(wc -c < "$VISUAL_FILE" | tr -d ' ')" = "$EXPECTED_VISUAL_SIZE"
-          test "$(sha256sum "$ACCESSIBILITY_FILE" | cut -d' ' -f1)" = "$EXPECTED_ACCESSIBILITY_SHA"
-          test "$(wc -c < "$ACCESSIBILITY_FILE" | tr -d ' ')" = "$EXPECTED_ACCESSIBILITY_SIZE"
-          test "$(sha256sum supabase/migrations/031_provider_intake_matching.sql | cut -d' ' -f1)" = "$EXTERNAL_LOAD_SHA256"
-          test "$(sha256sum ops/provider-intake/apply-031-matching/03_LOAD_031_EXACT.sql | cut -d' ' -f1)" = "$EXTERNAL_LOAD_SHA256"
-          cmp --silent supabase/migrations/031_provider_intake_matching.sql ops/provider-intake/apply-031-matching/03_LOAD_031_EXACT.sql
-
-          test "$(sha256sum \"$RUNNER_FILE\" | cut -d' ' -f1)" = "$EXPECTED_RUNNER_SHA256"
-          test "$(sha256sum \"$ACCESSIBILITY_FILE\" | cut -d' ' -f1)" = "$EXPECTED_ACCESSIBILITY_SHA"
-
-          pr_json="$(gh api repos/ramon1415/catalogo-proveedores-flux/pulls/$PR_NUMBER)"
-          test "$(echo "$pr_json" | jq -r '.state')" = "open"
-          test "$(echo "$pr_json" | jq -r '.draft')" = "true"
-          test "$(echo "$pr_json" | jq -r '.base.ref')" = "dev"
-          test "$(echo "$pr_json" | jq -r '.head.ref')" = "$FEATURE_BRANCH"
-          test "$(echo "$pr_json" | jq -r '.head.sha')" = "$PERMANENT_HEAD"
-          test "$(echo "$pr_json" | jq -r '.changed_files')" = "16"
-
-          current_body="$(echo "$pr_json" | jq -r '.body // ""')"
-          if grep -q "V6H_ATTEMPT_CONSUMED=true" <<< "$current_body"; then
-            echo "V6H mutable attempt already consumed; aborting."
-            exit 1
-          fi
-
-          workflow_identity=$(cat <<JSON
-          {
-            "identity": "5/5 PASS",
-            "runner_sha256": "$EXPECTED_RUNNER_SHA256",
-            "runner_blob": "$EXPECTED_RUNNER_GIT_BLOB",
-            "runner_head": "$PERMANENT_HEAD",
-            "accessibility_sha256": "$EXPECTED_ACCESSIBILITY_SHA",
-            "flow_sha256": "$EXPECTED_FLOW_SHA",
-            "contract_sha256": "$EXPECTED_CONTRACT_SHA",
-            "visual_sha256": "$EXPECTED_VISUAL_SHA",
-            "status": "PASS",
-            "attempt_consumed": false,
-            "mutable_execution": false
+      - name: Recapture immutable GitHub release state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          root=pathlib.Path(os.environ["EVIDENCE_DIR"])
+          repo=os.environ["GITHUB_REPOSITORY"]
+          token=os.environ["GH_TOKEN"]
+          expected_main=os.environ["EXPECTED_MAIN_SHA"]
+          expected_candidate=os.environ["EXPECTED_CANDIDATE_SHA"]
+          current_run=int(os.environ["GITHUB_RUN_ID"])
+          expected_scope={
+            "proveedores.html",
+            "proveedores.js",
+            "supabase/migrations/016_provider_csf_file_path.sql",
+            "supabase/migrations/017_provider_csf_storage_policies.sql",
+            "supabase/migrations/020_normalize_proveedores_canonical.sql",
+            "supabase/migrations/00404_harden_anonymous_provider_csf_storage.sql",
           }
-          JSON
-          )
-          echo "$workflow_identity" > "$WORKFLOW_EVIDENCE_DIR/identity_route_matrix_v6h_sanitized.json"
+          def api(path):
+            req=urllib.request.Request(
+              "https://api.github.com"+path,
+              headers={
+                "Accept":"application/vnd.github+json",
+                "Authorization":"Bearer "+token,
+                "X-GitHub-Api-Version":"2022-11-28",
+                "User-Agent":"flux-csf-release-r1",
+              },
+            )
+            with urllib.request.urlopen(req,timeout=30) as r:
+              return json.load(r)
+          try:
+            if os.environ["GITHUB_REF_NAME"] != os.environ["EXPECTED_BRANCH"]:
+              raise RuntimeError("RELEASE_STATE_DRIFT:unexpected_branch")
+            main=api(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"]
+            main_tree=api(f"/repos/{repo}/git/commits/{main}")["tree"]["sha"]
+            pr=api(f"/repos/{repo}/pulls/{os.environ['PR_NUMBER']}")
+            candidate=pr["head"]["sha"]
+            candidate_tree=api(f"/repos/{repo}/git/commits/{candidate}")["tree"]["sha"]
+            files={x["filename"] for x in api(f"/repos/{repo}/pulls/{os.environ['PR_NUMBER']}/files?per_page=100")}
+            deployments=api(f"/repos/{repo}/deployments?environment=Production&per_page=100")
+            active_prod=None
+            for deployment in deployments:
+              statuses=api(f"/repos/{repo}/deployments/{deployment['id']}/statuses?per_page=1")
+              if statuses and statuses[0].get("state")=="success":
+                active_prod={
+                  "deployment_id":deployment["id"],
+                  "status_id":statuses[0]["id"],
+                  "sha":deployment["sha"],
+                  "environment":deployment.get("environment"),
+                }
+                break
+            if not active_prod:
+              raise RuntimeError("RELEASE_STATE_DRIFT:no_successful_production_deployment")
+            active_runs=[]
+            for status in ("queued","in_progress"):
+              payload=api(f"/repos/{repo}/actions/runs?status={status}&per_page=100")
+              active_runs.extend([
+                {"id":r["id"],"status":r["status"],"name":r["name"],"head_branch":r.get("head_branch")}
+                for r in payload.get("workflow_runs",[]) if int(r["id"])!=current_run
+              ])
+            overlaps=[]
+            unexplained=[]
+            for other in api(f"/repos/{repo}/pulls?state=open&per_page=100"):
+              number=int(other["number"])
+              other_files={x["filename"] for x in api(f"/repos/{repo}/pulls/{number}/files?per_page=100")}
+              touched=sorted(expected_scope & other_files)
+              if touched:
+                item={"number":number,"title":other["title"],"base":other["base"]["ref"],"head":other["head"]["ref"],"touched":touched}
+                overlaps.append(item)
+                if number not in (147,292):
+                  unexplained.append(item)
+            checks={
+              "main_expected":main==expected_main,
+              "main_prod_aligned":main==active_prod["sha"],
+              "pr_open":pr["state"]=="open",
+              "pr_draft":bool(pr["draft"]),
+              "pr_base_main":pr["base"]["ref"]=="main",
+              "candidate_expected":candidate==expected_candidate,
+              "scope_exact":files==expected_scope,
+              "other_active_runs":len(active_runs),
+              "unexplained_overlaps":len(unexplained),
+            }
+            evidence={
+              "status":"PASS" if all([
+                checks["main_expected"],checks["main_prod_aligned"],checks["pr_open"],
+                checks["pr_draft"],checks["pr_base_main"],checks["candidate_expected"],
+                checks["scope_exact"],checks["other_active_runs"]==0,checks["unexplained_overlaps"]==0
+              ]) else "STOP",
+              "current_main_sha":main,
+              "current_main_tree":main_tree,
+              "current_prod_deployment":active_prod,
+              "pr_292":{"state":pr["state"],"draft":pr["draft"],"base":pr["base"]["ref"],"head":pr["head"]["ref"],"head_sha":candidate},
+              "candidate_tree":candidate_tree,
+              "candidate_files":sorted(files),
+              "active_runs_excluding_current":active_runs,
+              "overlapping_open_prs":overlaps,
+              "known_excluded_overlap_pr_147":any(x["number"]==147 for x in overlaps),
+              "checks":checks,
+            }
+            (root/"github-release-state.json").write_text(json.dumps(evidence,indent=2)+"\n")
+            if evidence["status"]!="PASS":
+              raise RuntimeError("RELEASE_STATE_DRIFT")
+          except Exception as exc:
+            (root/"gate-result.txt").write_text("STOP / RELEASE_STATE_DRIFT\n")
+            (root/"identity-error.json").write_text(json.dumps({"status":"STOP","error":str(exc)},indent=2)+"\n")
+            raise
+          PY
 
-      - name: Install pinned immutable runtime
+      - name: Checkout exact technical release ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify candidate bytes, technical delta and backup
         shell: bash
         run: |
           set -euo pipefail
-          runtime_dir="$RUNNER_TEMP/v6h-runtime"
-          mkdir -p "$runtime_dir"
-          npm install --no-audit --no-fund --silent --prefix "$runtime_dir" playwright@1.61.1 pg@8.16.3 axe-core@4.10.3
-          "$runtime_dir/node_modules/.bin/playwright" install --with-deps chromium
-          echo "NODE_PATH=$runtime_dir/node_modules" >> "$GITHUB_ENV"
-          echo "AXE_CORE_PATH=$runtime_dir/node_modules/axe-core/axe.min.js" >> "$GITHUB_ENV"
-          echo "AXE_CORE_VERSION=4.10.3" >> "$GITHUB_ENV"
-
-      - name: Install mutable credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -n "${SUPABASE_DEV_ANON_KEY:-}" && -n "${SUPABASE_DEV_SERVICE_ROLE_KEY:-}" ]]; then
-            echo "Using repository secrets for DEV anon/service role."
-            echo "SUPABASE_DEV_ANON_KEY=$SUPABASE_DEV_ANON_KEY" >> "$GITHUB_ENV"
-            echo "SUPABASE_DEV_SERVICE_ROLE_KEY=$SUPABASE_DEV_SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
-            echo "SUPABASE_DEV_DB_URL=$SUPABASE_DEV_DB_URL" >> "$GITHUB_ENV"
-            echo "::add-mask::$SUPABASE_DEV_ANON_KEY"
-            echo "::add-mask::$SUPABASE_DEV_SERVICE_ROLE_KEY"
-            jq -n --arg project "$PROJECT_REF" '{status:"PASS", project_ref:$project, anon_key:"present", service_key:"present", db_url:"present", mutable_execution:false, writes:0}' \
-              > "$WORKFLOW_EVIDENCE_DIR/secret_availability_v6h_sanitized.json"
-            exit 0
-          fi
-
-          if [[ -z "${SUPABASE_ACCESS_TOKEN:-}" || -z "${SUPABASE_DEV_DB_URL:-}" ]]; then
-            echo "Missing secrets for DEV credentials."
+          fail() {
+            printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"
             exit 1
-          fi
+          }
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CANDIDATE_SHA" || fail "STOP / RELEASE_STATE_DRIFT"
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_CANDIDATE_SHA" HEAD)
+          test "${#changed[@]}" = 1 || fail "STOP / RELEASE_STATE_DRIFT"
+          test "${changed[0]}" = ".github/workflows/provider-intake-matching-v6h-mutable-main-temporary.yml" || fail "STOP / RELEASE_STATE_DRIFT"
 
-          api_keys_file="$(mktemp)"
-          response="$(mktemp)"
-          trap 'rm -f "$api_keys_file" "$response"' EXIT
+          declare -A expected_blobs=(
+            ["supabase/migrations/016_provider_csf_file_path.sql"]="29d0ff26b85e76aed652bb9c9908e1c0cd8f3b9a"
+            ["supabase/migrations/017_provider_csf_storage_policies.sql"]="0d2a7afdeddd0bae177a88f0b462a128caac5119"
+            ["supabase/migrations/020_normalize_proveedores_canonical.sql"]="08ce22d17d11734ecfc9471b13160f90d37eb543"
+            ["supabase/migrations/00404_harden_anonymous_provider_csf_storage.sql"]="bb8ff40a3c338f255947fb6278ab66539bb27e59"
+          )
+          for path in "${!expected_blobs[@]}"; do
+            actual="$(git hash-object --no-filters "$path")"
+            test "$actual" = "${expected_blobs[$path]}" || fail "STOP / RELEASE_STATE_DRIFT"
+          done
+          jq -n \
+            --arg workflow_head "$(git rev-parse HEAD)" \
+            --arg candidate_parent "$(git rev-parse HEAD^)" \
+            --argjson blobs "$(for path in "${!expected_blobs[@]}"; do jq -nc --arg path "$path" --arg blob "${expected_blobs[$path]}" '{path:$path,blob:$blob}'; done | jq -s .)" \
+            '{status:"PASS",workflow_head:$workflow_head,candidate_parent:$candidate_parent,technical_delta:[".github/workflows/provider-intake-matching-v6h-mutable-main-temporary.yml"],migration_blobs:$blobs}' \
+            > "$EVIDENCE_DIR/source-integrity.json"
+
+          test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF" || fail "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+          test "$SUPABASE_PROJECT_REF_PROD" != "$FORBIDDEN_DEV_REF" || fail "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+          test -n "$SUPABASE_ACCESS_TOKEN" || fail "STOP / PROD_BACKUP_UNAVAILABLE"
+
           curl --silent --show-error --fail \
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-            "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" \
-            > "$response"
-          anon_key="$(jq -er '.[] | select(.name == "anon") | .api_key' "$response")"
-          service_key="$(jq -er '.[] | select(.name == "service_role") | .api_key' "$response")"
-          test "${anon_key:-}" != ""
-          test "${service_key:-}" != ""
-          echo "::add-mask::$anon_key"
-          echo "::add-mask::$service_key"
-          echo "SUPABASE_DEV_ANON_KEY=$anon_key" >> "$GITHUB_ENV"
-          echo "SUPABASE_DEV_SERVICE_ROLE_KEY=$service_key" >> "$GITHUB_ENV"
-          echo "SUPABASE_DEV_DB_URL=$SUPABASE_DEV_DB_URL" >> "$GITHUB_ENV"
-          jq -n --arg project "$PROJECT_REF" '{status:"PASS", project_ref:$project, anon_key:"present", service_key:"present", db_url:"present", mutable_execution:false, writes:0}' \
-            > "$WORKFLOW_EVIDENCE_DIR/secret_availability_v6h_sanitized.json"
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF" \
+            > "$RUNNER_TEMP/flux-release-project.json"
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF/database/backups" \
+            > "$RUNNER_TEMP/flux-release-backups.json"
 
-      - name: Static checks and read-only preflight modes
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$WORKFLOW_EVIDENCE_DIR"
-
-          node --check "$RUNNER_FILE"
-          node --check "$ACCESSIBILITY_FILE"
-          node --check "$FLOW_FILE"
-          node --check "$CONTRACT_TEST_FILE"
-          node --check "$VISUAL_FILE"
-
-          node --test --test-reporter=tap scripts/qa/*.test.mjs > "$WORKFLOW_EVIDENCE_DIR/unit_tests_v6h_sanitized.txt"
-          pass_count="$(awk '/^# pass / {print $3}' "$WORKFLOW_EVIDENCE_DIR/unit_tests_v6h_sanitized.txt" | tail -n 1)"
-          fail_count="$(awk '/^# fail / {print $3}' "$WORKFLOW_EVIDENCE_DIR/unit_tests_v6h_sanitized.txt" | tail -n 1)"
-          pass_count="${pass_count:-0}"
-          fail_count="${fail_count:-0}"
-          if [[ "$pass_count" != "162" || "$fail_count" != "0" ]]; then
-            echo "Unit test precondition failed: pass=$pass_count fail=$fail_count"
-            exit 1
-          fi
-
-          readonly_env=(
-            -u ALLOW_MUTABLE_UAT
-            -u EPHEMERAL_LINK_AUTHORIZED
-            -u FIXTURE_PROVISIONING_AUTHORIZED
-            -u IAM_ACTIVATION_AUTHORIZED
-            -u EXPIRED_LINK_NORMALIZATION_AUTHORIZED
-            -u APPROVED_RUNNER_SHA256
-          )
-
-          env "${readonly_env[@]}" EXPECTED_RUNNER_HEAD="$EXPECTED_RUNNER_HEAD" \
-            EXPECTED_RUNNER_SHA256="$EXPECTED_RUNNER_SHA256" \
-            EXPECTED_RUNNER_GIT_BLOB="$EXPECTED_RUNNER_GIT_BLOB" \
-            node "$RUNNER_FILE" --mode=capability-audit > "$WORKFLOW_EVIDENCE_DIR/capability_audit_v6h_sanitized.json"
-          jq -e '
-            .status=="PASS"
-            and .network_requests==0
-            and .writes==0
-            and (.capabilities|length)==36
-            and ((.capabilities|to_entries|all(.value == true)))
-          ' "$WORKFLOW_EVIDENCE_DIR/capability_audit_v6h_sanitized.json"
-
-          env "${readonly_env[@]}" EXPECTED_RUNNER_HEAD="$EXPECTED_RUNNER_HEAD" \
-            EXPECTED_RUNNER_SHA256="$EXPECTED_RUNNER_SHA256" \
-            EXPECTED_RUNNER_GIT_BLOB="$EXPECTED_RUNNER_GIT_BLOB" \
-            node "$RUNNER_FILE" --mode=expired-link-normalization-read-only > "$WORKFLOW_EVIDENCE_DIR/expired_link_normalization_v6h_sanitized.json"
-          jq -e '
-            .status=="PASS"
-            and .mode=="expired-link-normalization-read-only"
-            and .active_valid==0
-            and .active_expired==1
-            and .other_active==0
-            and .candidate_count==1
-            and .optimistic_snapshot_available==true
-            and .dry_run_capability==true
-            and .apply_capability==true
-            and .postcheck_capability==true
-            and .runner_identity_verified==true
-            and .head_verified==true
-            and .network_requests==2
-            and .writes==0
-            and .mutable_execution==false
-          ' "$WORKFLOW_EVIDENCE_DIR/expired_link_normalization_v6h_sanitized.json"
-
-          env "${readonly_env[@]}" EXPECTED_RUNNER_HEAD="$EXPECTED_RUNNER_HEAD" \
-            EXPECTED_RUNNER_SHA256="$EXPECTED_RUNNER_SHA256" \
-            EXPECTED_RUNNER_GIT_BLOB="$EXPECTED_RUNNER_GIT_BLOB" \
-            SUPABASE_URL="$SUPABASE_URL" \
-            SUPABASE_DEV_SERVICE_ROLE_KEY="$SUPABASE_DEV_SERVICE_ROLE_KEY" \
-            node "$RUNNER_FILE" --mode=live-provider-alias-read-only > "$WORKFLOW_EVIDENCE_DIR/live_provider_alias_v6h_sanitized.json"
-          jq -e '
-            .status=="PASS"
-            and .mode=="live-provider-alias-read-only"
-            and .eligible_targets==2
-            and .logical_alias_used_as_live_locator==false
-            and .provider_ids_exported==false
-            and .live_aliases_exported==false
-            and .logical_aliases|length==2
-            and .live_aliases_present==true
-            and .live_aliases_distinct==true
-            and .network_requests==1
-            and .writes==0
-            and .runner_identity_verified==true
-            and .head_verified==true
-            and .mutable_execution==false
-          ' "$WORKFLOW_EVIDENCE_DIR/live_provider_alias_v6h_sanitized.json"
-
-          env "${readonly_env[@]}" SUPABASE_URL="$SUPABASE_URL" \
-            SUPABASE_DEV_SERVICE_ROLE_KEY= \
-            node "$RUNNER_FILE" --mode=live-accessibility-no-write > "$WORKFLOW_EVIDENCE_DIR/live_accessibility_v6h_sanitized.json"
-          jq -e '
-            .mode=="live-accessibility-no-write"
-            and .status=="PASS"
-            and .classification=="LIVE_PREVIEW_NO_WRITE"
-            and .preview_real_assets==true
-            and .accessibility.critical==0
-            and .accessibility.serious==0
-            and .accessibility.moderate==0
-            and .accessibility.minor==0
-            and .accessibility.states_required==9
-            and .accessibility.states_audited==9
-            and .network.mutable_requests==0
-            and .iam_real==0
-            and .fixtures_real==0
-            and .links_real==0
-            and .dev_writes==0
-            and .service_role_used==false
-            and .attempt_consumed==false
-            and .cleanup.second_uat==false
-          ' "$WORKFLOW_EVIDENCE_DIR/live_accessibility_v6h_sanitized.json"
-
-          env "${readonly_env[@]}" EXPECTED_RUNNER_HEAD="$EXPECTED_RUNNER_HEAD" \
-            EXPECTED_RUNNER_SHA256="$EXPECTED_RUNNER_SHA256" \
-            EXPECTED_RUNNER_GIT_BLOB="$EXPECTED_RUNNER_GIT_BLOB" \
-            node "$RUNNER_FILE" --mode=no-write-mocked > "$WORKFLOW_EVIDENCE_DIR/no_write_mocked_v6h_sanitized.json"
-          jq -e '
-            .mode=="no-write-mocked"
-            and .status=="PASS"
-            and .capability_audit=="PASS"
-            and .main.status=="PASS"
-            and .race.status=="PASS"
-            and .cleanup_matrix.status=="PASS"
-            and .cleanup_matrix.total==26
-            and .cleanup_matrix.failures==0
-            and .actual_mutable_supabase_requests==0
-            and .actual_dev_writes==0
-            and .external_network_requests==0
-            and .fixtures.created==2
-            and .fixtures.final_rejected==2
-            and .link_inventory.active==0
-            and .main.providerMatchedEvents==3
-            and .race.providerMatchedEvents==2
-            and .accessibility.critical==0
-            and .accessibility.serious==0
-            and .accessibility.states_required==9
-            and .accessibility.states_audited==9
-          ' "$WORKFLOW_EVIDENCE_DIR/no_write_mocked_v6h_sanitized.json"
-
-          jq -n '{
-            "status":"PASS",
-            "identity":"5/5 PASS",
-            "preflight_mode":"read-only",
-            "unit_tests":{"pass":162,"fail":0},
-            "capability_audit":"36/36 PASS",
-            "expired_link_normalization":"PASS",
-            "live_provider_alias":"PASS",
-            "live_accessibility_no_write":"PASS",
-            "no_write_mocked":"PASS",
-            "mutable_execution":false,
-            "attempt_consumed":false
-          }' > "$WORKFLOW_EVIDENCE_DIR/preflight_v6h_sanitized.json"
-
-      - name: Baseline immutable snapshot and IAM at-rest
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'EOF'
-          import { Client } from "pg"
-
-          const databaseUrl = process.env.SUPABASE_DEV_DB_URL
-          const parsed = new URL(databaseUrl)
-          parsed.searchParams.delete("sslmode")
-          parsed.searchParams.delete("sslrootcert")
-          const client = new Client({
-            connectionString: parsed.toString(),
-            ssl: { rejectUnauthorized: false },
-          })
-
-          const scalar = async (query, params = []) => {
-            const result = await client.query(query, params)
-            const n = Number(result.rows[0]?.count || 0)
-            return Number.isFinite(n) ? n : 0
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ["EVIDENCE_DIR"])
+          project=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"]+"/flux-release-project.json").read_text())
+          payload=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"]+"/flux-release-backups.json").read_text())
+          backups=payload.get("backups",[]) if isinstance(payload,dict) else payload
+          pitr=bool(payload.get("pitr_enabled",False)) if isinstance(payload,dict) else False
+          good=[x for x in backups if str(x.get("status","")).lower() in ("completed","success")]
+          good.sort(key=lambda x:str(x.get("inserted_at") or x.get("created_at") or x.get("started_at") or ""),reverse=True)
+          ref=str(project.get("id") or project.get("ref") or "")
+          evidence={
+            "status":"PASS" if ref==os.environ["EXPECTED_PROD_REF"] and (pitr or bool(good)) else "STOP",
+            "project_ref":ref,
+            "project_name":project.get("name"),
+            "region":project.get("region"),
+            "project_status":project.get("status"),
+            "pitr_enabled":pitr,
+            "latest_successful_backup":({k:good[0].get(k) for k in ("status","inserted_at","created_at","started_at","is_physical")} if good else None),
           }
+          (root/"prod-backup-and-project.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          if evidence["status"]!="PASS":
+            (root/"gate-result.txt").write_text("STOP / PROD_BACKUP_UNAVAILABLE\n")
+            raise SystemExit("PROD_BACKUP_UNAVAILABLE")
+          PY
 
-          await client.connect()
-          const baseline = {
-            payment_intake: await scalar("select count(*)::int from public.payment_intake"),
-            payment_intake_events: await scalar("select count(*)::int from public.payment_intake_events"),
-            payment_intake_files: await scalar("select count(*)::int from public.payment_intake_files"),
-            storage_objects: await scalar("select count(*)::int from storage.objects where bucket_id='intake-uploads'"),
-            proveedores: await scalar("select count(*)::int from public.proveedores"),
-            providers: await scalar("select count(*)::int from public.providers"),
-            payment_requests: await scalar("select count(*)::int from public.payment_requests"),
-            approval_batches: await scalar("select count(*)::int from public.approval_batches"),
-            payment_layouts: await scalar("select count(*)::int from public.payment_layouts"),
-            payment_layout_lines: await scalar("select count(*)::int from public.payment_layout_lines"),
-            cash_funds: await scalar("select count(*)::int from public.cash_funds"),
-            notification_events: await scalar("select count(*)::int from public.notification_events"),
-            intake_links: await scalar("select count(*)::int from public.intake_links"),
-            matched_intakes: await scalar("select count(*)::int from public.payment_intake where matched_proveedor_id is not null"),
-            provider_matched: await scalar("select count(*)::int from public.payment_intake_events where event_type='provider_matched'"),
-            states: {
-              received: await scalar("select count(*)::int from public.payment_intake where status='received'"),
-              in_review: await scalar("select count(*)::int from public.payment_intake where status='in_review'"),
-              needs_correction: await scalar("select count(*)::int from public.payment_intake where status='needs_correction'"),
-              rejected: await scalar("select count(*)::int from public.payment_intake where status='rejected'"),
-              converted: await scalar("select count(*)::int from public.payment_intake where status='converted'"),
-              cancelled: await scalar("select count(*)::int from public.payment_intake where status='cancelled'"),
-            },
-            links: {
-              active_valid: await scalar("select count(*)::int from public.intake_links where status='active' and (expires_at is null or expires_at > now())"),
-              active_expired: await scalar("select count(*)::int from public.intake_links where status='active' and expires_at < now()"),
-              revoked: await scalar("select count(*)::int from public.intake_links where status='revoked'"),
-              expired: await scalar("select count(*)::int from public.intake_links where status='expired'"),
-              other_active: await scalar("select count(*)::int from public.intake_links where status='active' and status='active' and not (expires_at < now())"),
-            },
-          }
-
-          const principalRows = await client.query(`
-            select coalesce((au.raw_app_meta_data || au.raw_user_meta_data) ->> 'qa_alias', '') as qa_alias
-              from auth.users au
-              join public.profiles p on p.auth_user_id = au.id
-             where (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_fixture' = 'true'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_scope' = 'provider_intake_triage_1d'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_identity_type' = 'persistent_audit_principal'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_alias' in ('QA_TRIAGE_FINANCE_1','QA_TRIAGE_FINANCE_2')
-          `)
-          const qaAliases = principalRows.rows.map((r) => r.qa_alias).filter(Boolean)
-
-          const principalMeta = await client.query(`
-            select
-              count(*)::int filter (where p.active = false) as profiles_inactive,
-              count(*)::int filter (where au.banned_until > now()) as auth_blocked,
-              count(*)::int as principals
-              from auth.users au
-              join public.profiles p on p.auth_user_id = au.id
-             where (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_fixture' = 'true'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_scope' = 'provider_intake_triage_1d'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_identity_type' = 'persistent_audit_principal'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_alias' in ('QA_TRIAGE_FINANCE_1','QA_TRIAGE_FINANCE_2')
-          `)
-          const row = principalMeta.rows[0] || {}
-
-          const profileIds = await client.query(`
-            select coalesce(array_agg(p.id), '{}') as ids
-              from auth.users au
-              join public.profiles p on p.auth_user_id = au.id
-             where (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_fixture' = 'true'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_scope' = 'provider_intake_triage_1d'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_identity_type' = 'persistent_audit_principal'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_alias' in ('QA_TRIAGE_FINANCE_1','QA_TRIAGE_FINANCE_2')
-          `)
-          const profileIdList = profileIds.rows[0]?.ids || []
-          const roles = profileIdList.length
-            ? await scalar("select count(*)::int from public.user_roles where profile_id = any($1::uuid[])", [profileIdList])
-            : 0
-          const memberships = profileIdList.length
-            ? await scalar(
-              "select count(*)::int from public.profile_company_memberships where profile_id = any($1::uuid[]) and active = true",
-              [profileIdList],
-            )
-            : 0
-          const authUsers = await client.query(`
-            select coalesce(array_agg(au.id), '{}') as ids
-              from auth.users au
-             where (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_fixture' = 'true'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_scope' = 'provider_intake_triage_1d'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_identity_type' = 'persistent_audit_principal'
-               and (coalesce(au.raw_app_meta_data, '{}'::jsonb) || coalesce(au.raw_user_meta_data, '{}'::jsonb))
-                   ->> 'qa_alias' in ('QA_TRIAGE_FINANCE_1','QA_TRIAGE_FINANCE_2')
-          `)
-          const authUserIds = authUsers.rows[0]?.ids || []
-          const sessions = authUserIds.length
-            ? await scalar("select count(*)::int from auth.sessions where user_id = any($1::uuid[])", [authUserIds])
-            : 0
-          const refreshTokens = authUserIds.length
-            ? await scalar("select count(*)::int from auth.refresh_tokens where user_id = any($1::uuid[])", [authUserIds])
-            : 0
-
-          const output = {
-            status: "PASS",
-            writes: 0,
-            baseline,
-            identity: "5/5 PASS",
-            iam: {
-              qa_principals: Number(row.principals || 0),
-              qa_aliases: qaAliases,
-              profiles_inactive: Number(row.profiles_inactive || 0),
-              auth_blocked: Number(row.auth_blocked || 0),
-              roles: Number(roles || 0),
-              memberships: Number(memberships || 0),
-              sessions,
-              refresh_tokens: Number(refreshTokens || 0),
-            },
-            access_keys: {
-              principal_aliases: qaAliases,
-            },
-          }
-          console.log(JSON.stringify(output))
-          await client.end()
-          EOF > "$WORKFLOW_EVIDENCE_DIR/baseline_pre_v6h_sanitized.json"
-
-          jq -e '
-            .status=="PASS"
-            and .baseline.payment_intake==13
-            and .baseline.payment_intake_events==39
-            and .baseline.payment_intake_files==6
-            and .baseline.storage_objects==6
-            and .baseline.proveedores==22
-            and .baseline.providers==0
-            and .baseline.payment_requests==73
-            and .baseline.approval_batches==8
-            and .baseline.payment_layouts==12
-            and .baseline.payment_layout_lines==13
-            and .baseline.cash_funds==5
-            and .baseline.notification_events==322
-            and .baseline.intake_links==2
-            and .baseline.matched_intakes==0
-            and .baseline.provider_matched==4
-            and .baseline.states.received==6
-            and .baseline.states.in_review==0
-            and .baseline.states.needs_correction==1
-            and .baseline.states.rejected==6
-            and .baseline.states.converted==0
-            and .baseline.states.cancelled==0
-            and .baseline.links.active_valid==0
-            and .baseline.links.active_expired==1
-            and .baseline.links.revoked==1
-            and .baseline.links.expired==0
-            and .baseline.links.other_active==0
-            and .iam.qa_principals==2
-            and .iam.profiles_inactive==2
-            and .iam.auth_blocked==2
-            and .iam.roles==0
-            and .iam.memberships==0
-            and .iam.sessions==0
-            and .iam.refresh_tokens==0
-          ' "$WORKFLOW_EVIDENCE_DIR/baseline_pre_v6h_sanitized.json"
-
-      - name: Execute one-shot V6H mutable run
-        id: mutable
-        shell: bash
-        env:
-          SUPABASE_DEV_DB_URL: ${{ env.SUPABASE_DEV_DB_URL }}
-          SUPABASE_DEV_ANON_KEY: ${{ env.SUPABASE_DEV_ANON_KEY }}
-          SUPABASE_DEV_SERVICE_ROLE_KEY: ${{ env.SUPABASE_DEV_SERVICE_ROLE_KEY }}
-          QA_COMPANY_ID: ${{ env.QA_COMPANY_ID }}
-          QA_LINK_CREATED_BY: ${{ env.QA_LINK_CREATED_BY }}
-          QA_CAPTCHA_TOKEN: ${{ env.QA_CAPTCHA_TOKEN }}
-          PREVIEW_URL: ${{ env.PREVIEW_URL }}
-          SUPABASE_URL: ${{ env.SUPABASE_URL }}
-          PROJECT_REF: ${{ env.PROJECT_REF }}
-        run: |
-          set -euo pipefail
-          node "$RUNNER_FILE" --mode=mutable > "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json"
-          jq -e '
-            .status=="PASS"
-            and .mode=="mutable"
-            and .baseline=="PASS"
-            and .linkContract=="PASS"
-            and .final.payment_intake==15
-            and .final.payment_intake_events==50
-            and .final.provider_matched==9
-            and .final.matched_intakes==0
-            and .final.states.received==6
-            and .final.states.in_review==0
-            and .final.states.needs_correction==1
-            and .final.states.rejected==8
-            and .final.states.converted==0
-            and .final.states.cancelled==0
-            and .final.activeQaLinks==0
-            and .link.dry_run==1
-            and .link.inserted==1
-            and .link.revoked==1
-            and .fixtures.created==2
-            and .fixtures.final_rejected==2
-            and .provisioning.intakes==2
-            and .provisioning.events==2
-            and .provisioning.storage==0
-            and .provisioning.notifications==0
-            and .provisioning.providers==0
-            and .provisioning.payment_requests==0
-            and .iam.activated==2
-            and .main.status=="PASS"
-            and .main.set==true
-            and .main.replace==true
-            and .main.clear==true
-            and .main.providerMatchedEvents==3
-            and .race.status=="PASS"
-            and .race.winner==1
-            and .race.conflict==1
-            and .race.providerMatchedEvents==2
-            and .metadata.status=="PASS"
-            and .metadata.validated==5
-            and .metadata.sensitiveFields==0
-            and .final.coreProtectedDelta==0
-            and .cleanup.pass==true
-            and .cleanup.status.activeQaLinks==0
-            and .cleanup.status.matches==0
-            and .cleanup.status.fixturesTerminal==true
-            and .cleanup.status.iamAtRest==true
-            and .cleanup.status.rawTokenPresent==false
-            and .accessibility.critical==0
-            and .accessibility.serious==0
-            and .accessibility.moderate==0
-            and .accessibility.minor==0
-            and .accessibility.states_required==9
-            and .accessibility.states_audited==9
-            and .actual_mutable_supabase_requests>0
-            and .actual_dev_writes>0
-            and .external_network_requests>=0
-          ' "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json"
-
-      - name: Build sanitized artifact matrix and final evidence
+      - name: Preflight, apply exact pending migrations, and postcheck PROD
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p "$WORKFLOW_EVIDENCE_DIR"
-          mkdir -p "$WORKFLOW_EVIDENCE_DIR/screenshots"
-
-          cp "$WORKFLOW_EVIDENCE_DIR/capability_audit_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/capability_audit_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/identity_route_matrix_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/identity_route_matrix_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/preflight_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/preflight_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/expired_link_normalization_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/link_lifecycle_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/no_write_mocked_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/fixture_provisioning_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/live_accessibility_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/accessibility_evidence_v6h_sanitized.json"
-
-          cp "$WORKFLOW_EVIDENCE_DIR/live_accessibility_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/accessibility_state_matrix_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/baseline_pre_v6h_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/metadata_v6h_sanitized.json"
-          cp "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" "$WORKFLOW_EVIDENCE_DIR/iam_at_rest_v6h_sanitized.json"
-
-          jq -s '
-            .[0] as $main
-            | {
-              metadata: ($main.metadata // {}),
-              accessibility: ($main.accessibility // {}),
-              final: ($main.final // {}),
-              link: ($main.link // {}),
-              fixtures: ($main.fixtures // {}),
-              main: ($main.main // {}),
-              race: ($main.race // {}),
-              iam: ($main.iam // {}),
-              cleanup: ($main.cleanup // {}),
-              identity: "5/5 PASS",
-              preflight: "PASS",
-              attempt_consumed: true,
-              baseline: null,
-              baseline_protection: "5/5"
-            }
-          ' "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" > "$WORKFLOW_EVIDENCE_DIR/metadata_v6h_sanitized.json"
-
-          jq -s '
-            {
-              providers: ((.[0].final.proveedores // 0) - (.[1].baseline.proveedores // 0)),
-              providers_aux: ((.[0].final.providers // 0) - (.[1].baseline.providers // 0)),
-              payment_requests: ((.[0].final.payment_requests // 0) - (.[1].baseline.payment_requests // 0)),
-              approval_batches: ((.[0].final.approval_batches // 0) - (.[1].baseline.approval_batches // 0)),
-              payment_layouts: ((.[0].final.payment_layouts // 0) - (.[1].baseline.payment_layouts // 0)),
-              payment_layout_lines: ((.[0].final.payment_layout_lines // 0) - (.[1].baseline.payment_layout_lines // 0)),
-              cash_funds: ((.[0].final.cash_funds // 0) - (.[1].baseline.cash_funds // 0)),
-              notification_events: ((.[0].final.notification_events // 0) - (.[1].baseline.notification_events // 0)),
-              payment_intake_files: ((.[0].final.payment_intake_files // 0) - (.[1].baseline.payment_intake_files // 0)),
-              storage_objects: ((.[0].final.storage_objects // 0) - (.[1].baseline.storage_objects // 0))
-            }
-          ' \
-            "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" \
-            "$WORKFLOW_EVIDENCE_DIR/baseline_pre_v6h_sanitized.json" > "$WORKFLOW_EVIDENCE_DIR/core_delta_v6h_sanitized.json"
-
-          jq -n --arg attempts "true" --arg status "PASS" '
-            { attempts: $attempts == "true", status: $status, status_code: "PASS", p0: 0, p1: 0 }' \
-            > "$WORKFLOW_EVIDENCE_DIR/cleanup_v6h_sanitized.json"
-
-          jq -r '
-            ["state","critical","serious","moderate","minor","incomplete","nodes_total","rule_count","sanitized"] | @csv,
-            (.states // [])[] | [
-              .state,
-              (.critical // 0),
-              (.serious // 0),
-              (.moderate // 0),
-              (.minor // 0),
-              (.incomplete // 0),
-              (.nodes_total // 0),
-              ((.rule_ids // []) | length),
-              (.sanitized // false | tostring)
-            ] | @csv
-          ' "$WORKFLOW_EVIDENCE_DIR/live_accessibility_v6h_sanitized.json" > "$WORKFLOW_EVIDENCE_DIR/accessibility_state_matrix_v6h_sanitized.csv"
-
-          jq -r '
-            ["section","providerMatchedEvents","set","replace","clear","winner","conflict","status"] | @csv,
-            ["main", (.main.providerMatchedEvents // 0), ((.main.set // false)|tostring), ((.main.replace // false)|tostring), ((.main.clear // false)|tostring), "", "", (.main.status // "")] | @csv,
-            ["race", (.race.providerMatchedEvents // 0), "", "", "", ((.race.winner // 0)|tostring), ((.race.conflict // 0)|tostring), (.race.status // "")] | @csv
-          ' "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" > "$WORKFLOW_EVIDENCE_DIR/event_matrix_v6h_sanitized.csv"
-
-          jq -r '[
-            "provider_matched_events","main_set","main_replace","main_clear","race_winner","race_conflict","accessibility_critical","accessibility_serious","accessibility_moderate","accessibility_minor","matches_final"
-          ] as $h
-          | $h, [
-            (.main.providerMatchedEvents // 0),
-            ((.main.set // false)|tostring),
-            ((.main.replace // false)|tostring),
-            ((.main.clear // false)|tostring),
-            (.race.winner // 0),
-            (.race.conflict // 0),
-            (.accessibility.critical // 0),
-            (.accessibility.serious // 0),
-            (.accessibility.moderate // 0),
-            (.accessibility.minor // 0),
-            ((.final.provider_matched // 0))
-          ]' "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json"
-
-          jq -n --arg run_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-            {
-              report: "V6H_MUTABLE_UAT",
-              run_date: $run_date,
-              identity: "5/5 PASS",
-              preflight: "PASS",
-              baseline: "PASS",
-              normalization: "expired historical link -> expired",
-              link_qa: "created_then_revoked",
-              fixtures: 2,
-              main_status: "PASS",
-              race_status: "PASS",
-              accessibility_states: (5),
-              critical: 0,
-              serious: 0,
-              moderate: 0,
-              minor: 0,
-              provider_matched_new: 5,
-              provider_matched_final: 9,
-              payment_intake_events_final: 50,
-              fixtures_final_rejected: 2,
-              active_links: 0,
-              iam_at_rest: true,
-              pr_draft: true,
-              gate_final_started: false,
-              phase2b_started: false,
-              p0: 0,
-              p1: 0
-            }
-          ' > "$WORKFLOW_EVIDENCE_DIR/V6H_MUTABLE_UAT_REPORT.md"
-
-      - name: Upload sanitized mutable evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: provider-intake-matching-v6h-mutable-${{ github.run_id }}
-          path: outputs/provider-intake-matching-2a/gate-2-v6h-mutable/
-          retention-days: 10
-          if-no-files-found: error
-
-      - name: Update PR body
-        if: always()
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          result_status="FAIL"
-          if [[ -f "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" ]]; then
-            if jq -e '.status=="PASS"' "$WORKFLOW_EVIDENCE_DIR/v6h_results_sanitized.json" >/dev/null; then
-              result_status="PASS"
+          set -Eeuo pipefail
+          on_error() {
+            rc=$?
+            if grep -qx 'NOT_RUN' "$EVIDENCE_DIR/gate-result.txt"; then
+              printf '%s\n' 'STOP / PROD_MIGRATION_APPLY_FAILED' > "$EVIDENCE_DIR/gate-result.txt"
             fi
+            exit "$rc"
+          }
+          trap on_error ERR
+          fail_gate() {
+            printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"
+            exit 1
+          }
+
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
           fi
 
-          current_body="$(gh api repos/ramon1415/catalogo-proveedores-flux/pulls/$PR_NUMBER --jq '.body // ""')"
-          cat > "$RUNNER_TEMP/pr_body_update.md" <<EOF
-          ${current_body}
+          if [[ -n "${SUPABASE_PROD_DB_URL:-}" ]]; then
+            [[ "$SUPABASE_PROD_DB_URL" != *"$FORBIDDEN_DEV_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            [[ "$SUPABASE_PROD_DB_URL" == *"$EXPECTED_PROD_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            CONNECTION_MODE="migration-url"
+          elif [[ -n "${SUPABASE_PROD_AUDIT_DB_URL:-}" ]]; then
+            [[ "$SUPABASE_PROD_AUDIT_DB_URL" != *"$FORBIDDEN_DEV_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            [[ "$SUPABASE_PROD_AUDIT_DB_URL" == *"$EXPECTED_PROD_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            SUPABASE_PROD_DB_URL="$SUPABASE_PROD_AUDIT_DB_URL"
+            CONNECTION_MODE="audit-url-privilege-probed"
+          else
+            [[ -n "${SUPABASE_DB_PASSWORD_PROD:-}" ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
+            PGHOST_NAME="db.${EXPECTED_PROD_REF}.supabase.co"
+            PGHOST_ADDR="$(getent ahostsv4 "$PGHOST_NAME" | awk '{print $1; exit}')"
+            [[ -n "$PGHOST_ADDR" ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            export PGHOST="$PGHOST_NAME" PGHOSTADDR="$PGHOST_ADDR" PGPORT=5432 PGDATABASE=postgres PGUSER=postgres PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
+            CONNECTION_MODE="direct-project-host"
+          fi
 
-          ## PR #258 V6H mutable execution
+          psql_prod() {
+            if [[ -n "${SUPABASE_PROD_DB_URL:-}" ]]; then
+              command psql "$SUPABASE_PROD_DB_URL" "$@"
+            else
+              command psql "$@"
+            fi
+          }
+          roq() {
+            PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_csf_release_r1_preflight" \
+              psql_prod -X -Atq -v ON_ERROR_STOP=1 -c "$1"
+          }
 
-          Resultado automatizado V6H: **${result_status}**
+          identity_json="$(roq "select json_build_object('database',current_database(),'user',current_user,'server_addr',inet_server_addr(),'server_port',inet_server_port(),'server_version_num',current_setting('server_version_num'),'transaction_read_only',current_setting('transaction_read_only'))::text;")"
+          printf '%s\n' "$identity_json" | jq --arg project_ref "$EXPECTED_PROD_REF" --arg mode "$CONNECTION_MODE" '. + {status:"PASS",project_ref:$project_ref,connection_mode:$mode}' > "$EVIDENCE_DIR/prod-database-identity.json"
 
-          - Identidad de runner: 5/5 PASS
-          - Axe local: 4.10.3
-          - Preflight read-only: PASS (capability, expired-link, alias, no-write, accessibility)
-          - Preflight no-write mocked: PASS
-          - V6H mutable: **${result_status}**
-          - V6H_ATTEMPT_CONSUMED=true
-          - cleanup.pass=true
-          - PR sigue en Draft
-          - Gate final no iniciado
-          - Fase 2B no iniciada
-          - PR activo con intento controlado Ãºnico (no retry, no rerun mutable)
-          EOF
-          gh pr edit "$PR_NUMBER" --body-file "$RUNNER_TEMP/pr_body_update.md"
+          privilege_ok="$(roq "select (r.rolsuper or (has_schema_privilege(current_user,'public','CREATE') and pg_has_role(current_user,c.relowner,'MEMBER') and pg_has_role(current_user,s.relowner,'MEMBER'))) from pg_roles r cross join pg_class c cross join pg_class s where r.rolname=current_user and c.oid='public.proveedores'::regclass and s.oid='storage.objects'::regclass;")"
+          [[ "$privilege_ok" = "t" ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
 
-      - name: Cleanup policy note
+          prerequisites_ok="$(roq "select to_regclass('public.proveedores') is not null and to_regclass('storage.buckets') is not null and exists(select 1 from storage.buckets where id='payment-receipts' and public=false) and to_regprocedure('public.flux_approver_roles()') is not null and to_regprocedure('public.flux_member_roles()') is not null;")"
+          [[ "$prerequisites_ok" = "t" ]] || fail_gate "STOP / PROD_CSF_SCHEMA_CONFLICT"
+
+          count_rel() {
+            local rel="$1"
+            local present
+            present="$(roq "select to_regclass('$rel') is not null;")"
+            if [[ "$present" = "t" ]]; then roq "select count(*)::bigint from $rel;"; else printf '%s\n' "-1"; fi
+          }
+          snapshot() {
+            local out="$1"
+            local proveedores storage_objects notifications attempts requests batches funds intakes intake_events
+            proveedores="$(count_rel public.proveedores)"
+            storage_objects="$(count_rel storage.objects)"
+            notifications="$(count_rel public.notification_events)"
+            attempts="$(count_rel public.notification_delivery_attempts)"
+            requests="$(count_rel public.payment_requests)"
+            batches="$(count_rel public.approval_batches)"
+            funds="$(count_rel public.cash_funds)"
+            intakes="$(count_rel public.payment_intake)"
+            intake_events="$(count_rel public.payment_intake_events)"
+            local provider_protected storage_digest
+            provider_protected="$(roq "select md5(coalesce(string_agg(((to_jsonb(p)-array['alias','rfc','clabe','banco','cuenta_bancaria','persona_tipo','csf_file_path','csf_uploaded_at','csf_uploaded_by','updated_at'])::text),'|' order by p.id::text),'')) from public.proveedores p;")"
+            storage_digest="$(roq "select md5(coalesce(string_agg((id::text||'|'||bucket_id||'|'||name),'|' order by id::text),'')) from storage.objects;")"
+            jq -n \
+              --arg proveedores "$proveedores" --arg storage_objects "$storage_objects" \
+              --arg notifications "$notifications" --arg attempts "$attempts" \
+              --arg requests "$requests" --arg batches "$batches" --arg funds "$funds" \
+              --arg intakes "$intakes" --arg intake_events "$intake_events" \
+              --arg provider_protected "$provider_protected" --arg storage_digest "$storage_digest" \
+              '{proveedores:($proveedores|tonumber),storage_objects:($storage_objects|tonumber),notification_events:($notifications|tonumber),notification_delivery_attempts:($attempts|tonumber),payment_requests:($requests|tonumber),approval_batches:($batches|tonumber),cash_funds:($funds|tonumber),payment_intake:($intakes|tonumber),payment_intake_events:($intake_events|tonumber),provider_protected_digest:$provider_protected,storage_objects_digest:$storage_digest}' > "$out"
+          }
+          snapshot "$EVIDENCE_DIR/data-before.json"
+
+          history_count() {
+            local version="$1"
+            roq "select case when to_regclass('supabase_migrations.schema_migrations') is null then 0 else (select count(*) from supabase_migrations.schema_migrations m where coalesce(to_jsonb(m)->>'version','') ~ '^${version}([^0-9]|$)' or coalesce(to_jsonb(m)->>'name','') ~ '^${version}([^0-9]|$)') end;"
+          }
+
+          classify_all() {
+            local h016 h017 h020 h00404
+            h016="$(history_count 016)"; h017="$(history_count 017)"; h020="$(history_count 020)"; h00404="$(history_count 00404)"
+
+            C016="$(roq "select (select count(*) from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name in ('csf_file_path','csf_uploaded_at','csf_uploaded_by')) + case when exists(select 1 from pg_constraint where conrelid='public.proveedores'::regclass and conname='proveedores_csf_uploaded_by_fkey') then 1 else 0 end + case when exists(select 1 from pg_indexes where schemaname='public' and tablename='proveedores' and indexname='proveedores_csf_uploaded_by_idx') then 1 else 0 end;")"
+            S016="$(roq "select (select count(*)=3 from information_schema.columns where table_schema='public' and table_name='proveedores' and ((column_name='csf_file_path' and data_type='text') or (column_name='csf_uploaded_at' and data_type='timestamp with time zone') or (column_name='csf_uploaded_by' and data_type='uuid'))) and exists(select 1 from pg_constraint where conrelid='public.proveedores'::regclass and conname='proveedores_csf_uploaded_by_fkey' and lower(pg_get_constraintdef(oid,true)) like '%foreign key (csf_uploaded_by)%references profiles(id)%') and exists(select 1 from pg_indexes where schemaname='public' and tablename='proveedores' and indexname='proveedores_csf_uploaded_by_idx' and lower(indexdef) like '%(csf_uploaded_by)%');")"
+
+            C017="$(roq "select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Authenticated can upload provider CSF','Authenticated can read provider CSF');")"
+            S017="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Authenticated can upload provider CSF' and cmd='INSERT' and permissive='PERMISSIVE' and 'authenticated'=any(roles) and lower(coalesce(with_check,'')) like '%payment-receipts%' and lower(coalesce(with_check,'')) like '%csf/%' and lower(coalesce(with_check,'')) like '%flux_approver_roles%') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Authenticated can read provider CSF' and cmd='SELECT' and permissive='PERMISSIVE' and 'authenticated'=any(roles) and lower(coalesce(qual,'')) like '%payment-receipts%' and lower(coalesce(qual,'')) like '%csf/%' and lower(coalesce(qual,'')) like '%flux_approver_roles%');")"
+
+            C020="$(roq "select case when exists(select 1 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name='persona_tipo') then 1 else 0 end + (select count(*) from pg_constraint where conrelid='public.proveedores'::regclass and conname in ('proveedores_rfc_format_check','proveedores_clabe_format_check','proveedores_persona_tipo_check')) + (select count(*) from pg_indexes where schemaname='public' and tablename='proveedores' and indexname in ('proveedores_alias_normalized_uidx','proveedores_rfc_normalized_uidx','proveedores_clabe_normalized_uidx','proveedores_bank_account_normalized_uidx')) + case when to_regprocedure('public.normalize_proveedores_canonical()') is not null then 1 else 0 end + case when exists(select 1 from pg_trigger where tgrelid='public.proveedores'::regclass and tgname='normalize_proveedores_canonical_before_write' and not tgisinternal and tgenabled<>'D') then 1 else 0 end + (select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and policyname in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers'));")"
+            S020="$(roq "select exists(select 1 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name='persona_tipo' and data_type='text') and (select count(*)=3 from pg_constraint where conrelid='public.proveedores'::regclass and conname in ('proveedores_rfc_format_check','proveedores_clabe_format_check','proveedores_persona_tipo_check')) and (select count(*)=4 from pg_indexes where schemaname='public' and tablename='proveedores' and indexname in ('proveedores_alias_normalized_uidx','proveedores_rfc_normalized_uidx','proveedores_clabe_normalized_uidx','proveedores_bank_account_normalized_uidx') and lower(indexdef) like 'create unique index%') and exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='normalize_proveedores_canonical' and lower(pg_get_functiondef(p.oid)) like '%new.rfc%' and lower(pg_get_functiondef(p.oid)) like '%new.clabe%' and lower(pg_get_functiondef(p.oid)) like '%new.persona_tipo%' and lower(pg_get_functiondef(p.oid)) like '%alias_duplicado%') and exists(select 1 from pg_trigger where tgrelid='public.proveedores'::regclass and tgname='normalize_proveedores_canonical_before_write' and not tgisinternal and tgenabled<>'D' and lower(pg_get_triggerdef(oid,true)) like '%before insert or update%execute function normalize_proveedores_canonical()%') and (select count(*)=3 from pg_policies where schemaname='public' and tablename='proveedores') and (select count(*)=1 from pg_policies where schemaname='public' and tablename='proveedores' and policyname='proveedores_select_members' and cmd='SELECT' and 'authenticated'=any(roles) and lower(coalesce(qual,'')) like '%flux_member_roles%') and (select count(*)=1 from pg_policies where schemaname='public' and tablename='proveedores' and policyname='proveedores_insert_members' and cmd='INSERT' and 'authenticated'=any(roles) and lower(coalesce(with_check,'')) like '%flux_member_roles%') and (select count(*)=1 from pg_policies where schemaname='public' and tablename='proveedores' and policyname='proveedores_update_managers' and cmd='UPDATE' and 'authenticated'=any(roles) and lower(coalesce(qual,'')) like '%flux_approver_roles%' and lower(coalesce(with_check,'')) like '%flux_approver_roles%') and not exists(select 1 from information_schema.role_table_grants where table_schema='public' and table_name='proveedores' and grantee='anon') and not exists(select 1 from information_schema.role_table_grants where table_schema='public' and table_name='proveedores' and grantee='authenticated' and privilege_type in ('DELETE','TRUNCATE','REFERENCES','TRIGGER'));")"
+
+            C00404="$(roq "select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Anon can read payment receipts temporarily','Anon can upload payment receipts temporarily');")"
+            U00404="$(roq "select count(*) from pg_policies p where p.schemaname='storage' and p.tablename='objects' and p.policyname not in ('Anon can read payment receipts temporarily','Anon can upload payment receipts temporarily','Authenticated can upload provider CSF','Authenticated can read provider CSF') and (lower(p.policyname) like '%csf%' or lower(coalesce(p.qual,'')) like '%csf/%' or lower(coalesce(p.with_check,'')) like '%csf/%');")"
+            B00404="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can read payment receipts temporarily' and cmd='SELECT' and 'anon'=any(roles) and lower(coalesce(qual,'')) like '%payment-receipts%' and lower(coalesce(qual,'')) not like '%csf/%') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can upload payment receipts temporarily' and cmd='INSERT' and 'anon'=any(roles) and lower(coalesce(with_check,'')) like '%payment-receipts%' and lower(coalesce(with_check,'')) not like '%csf/%');")"
+            H00404="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can read payment receipts temporarily' and cmd='SELECT' and 'anon'=any(roles) and lower(coalesce(qual,'')) like '%payment-receipts%' and lower(coalesce(qual,'')) like '%csf/%' and (lower(coalesce(qual,'')) like '%!~~%' or lower(coalesce(qual,'')) like '%not like%')) and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can upload payment receipts temporarily' and cmd='INSERT' and 'anon'=any(roles) and lower(coalesce(with_check,'')) like '%payment-receipts%' and lower(coalesce(with_check,'')) like '%csf/%' and (lower(coalesce(with_check,'')) like '%!~~%' or lower(coalesce(with_check,'')) like '%not like%'));")"
+
+            if [[ "$C016" = 5 && "$S016" = t ]]; then M016="APPLIED_EQUIVALENT"; elif [[ "$C016" = 0 && "$h016" = 0 ]]; then M016="PENDING"; elif [[ "$C016" = 5 ]]; then M016="CONFLICTING"; else M016="PARTIAL"; fi
+            if [[ "$C017" = 2 && "$S017" = t ]]; then M017="APPLIED_EQUIVALENT"; elif [[ "$C017" = 0 && "$h017" = 0 ]]; then M017="PENDING"; elif [[ "$C017" = 2 ]]; then M017="CONFLICTING"; else M017="PARTIAL"; fi
+            if [[ "$C020" = 13 && "$S020" = t ]]; then M020="APPLIED_EQUIVALENT"; elif [[ "$C020" = 0 && "$h020" = 0 ]]; then M020="PENDING"; elif [[ "$C020" = 13 ]]; then M020="CONFLICTING"; else M020="PARTIAL"; fi
+            if [[ "$C00404" = 2 && "$U00404" = 0 && "$H00404" = t && "$S017" = t ]]; then
+              M00404="APPLIED_EQUIVALENT"
+            elif [[ "$C00404" = 2 && "$U00404" = 0 && "$B00404" = t && "$h00404" = 0 ]]; then
+              M00404="PENDING"
+            else
+              M00404="CONFLICTING"
+            fi
+            [[ "$h016" = 0 || "$M016" = APPLIED_EQUIVALENT ]] || M016="CONFLICTING"
+            [[ "$h017" = 0 || "$M017" = APPLIED_EQUIVALENT ]] || M017="CONFLICTING"
+            [[ "$h020" = 0 || "$M020" = APPLIED_EQUIVALENT ]] || M020="CONFLICTING"
+            [[ "$h00404" = 0 || "$M00404" = APPLIED_EQUIVALENT ]] || M00404="CONFLICTING"
+            H016="$h016"; H017="$h017"; H020="$h020"; H00404_HISTORY="$h00404"
+          }
+
+          write_classes() {
+            local path="$1"
+            jq -n \
+              --arg m016 "$M016" --arg m017 "$M017" --arg m020 "$M020" --arg m00404 "$M00404" \
+              --argjson c016 "$C016" --argjson c017 "$C017" --argjson c020 "$C020" --argjson c00404 "$C00404" \
+              --argjson h016 "$H016" --argjson h017 "$H017" --argjson h020 "$H020" --argjson h00404 "$H00404_HISTORY" \
+              '{status:"PASS",taxonomy:["APPLIED_EXACT","APPLIED_EQUIVALENT","PENDING","PARTIAL","CONFLICTING","UNKNOWN"],migrations:{"016":{classification:$m016,markers_present:$c016,markers_total:5,history_rows:$h016},"017":{classification:$m017,markers_present:$c017,markers_total:2,history_rows:$h017},"020":{classification:$m020,markers_present:$c020,markers_total:13,history_rows:$h020},"00404":{classification:$m00404,markers_present:$c00404,markers_total:2,history_rows:$h00404}}}' > "$path"
+          }
+
+          classify_all
+          write_classes "$EVIDENCE_DIR/migration-classification-preflight.json"
+
+          legacy_provider_policy="$(roq "select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and policyname='proveedores_select_authenticated';")"
+          unknown_provider="$(roq "select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and policyname not in ('Autenticados pueden leer proveedores','Usuarios autenticados pueden crear proveedores','Usuarios autenticados pueden editar proveedores','proveedores_select_authenticated','proveedores_select_members','proveedores_insert_members','proveedores_update_managers');")"
+          [[ "$unknown_provider" = 0 && "$U00404" = 0 ]] || fail_gate "STOP / PROD_CSF_SCHEMA_CONFLICT"
+          if [[ "$M020" = PENDING ]]; then [[ "$legacy_provider_policy" = 1 ]] || fail_gate "STOP / PROD_CSF_SCHEMA_CONFLICT"; fi
+          for state in "$M016" "$M017" "$M020" "$M00404"; do
+            [[ "$state" = PENDING || "$state" = APPLIED_EXACT || "$state" = APPLIED_EQUIVALENT ]] || fail_gate "STOP / PROD_CSF_SCHEMA_CONFLICT"
+          done
+
+          jq -n --arg privilege "$privilege_ok" --arg legacy "$legacy_provider_policy" --arg unknown_provider "$unknown_provider" --arg unknown_storage "$U00404" \
+            '{status:"PASS",ddl_privileges:($privilege=="t"),legacy_proveedores_select_authenticated:($legacy|tonumber),unknown_provider_policies:($unknown_provider|tonumber),unknown_csf_storage_policies:($unknown_storage|tonumber),project_ref_match:true,dev_project_ref_present:false}' \
+            > "$EVIDENCE_DIR/prod-preflight.json"
+
+          ledger="$RUNNER_TEMP/flux-csf-mutation-ledger.ndjson"
+          : > "$ledger"
+          apply_one() {
+            local version="$1" file="$2" var_name="$3"
+            local state="${!var_name}"
+            if [[ "$state" = PENDING ]]; then
+              if [[ "$version" = 016 || "$version" = 017 ]]; then
+                if ! psql_prod -X -1 -v ON_ERROR_STOP=1 -f "$file"; then fail_gate "STOP / PROD_MIGRATION_APPLY_FAILED"; fi
+              else
+                if ! psql_prod -X -v ON_ERROR_STOP=1 -f "$file"; then fail_gate "STOP / PROD_MIGRATION_APPLY_FAILED"; fi
+              fi
+              classify_all
+              local after="${!var_name}"
+              [[ "$after" = APPLIED_EQUIVALENT || "$after" = APPLIED_EXACT ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+              jq -nc --arg version "$version" --arg before "$state" --arg after "$after" --arg file "$file" '{version:$version,file:$file,before:$before,action:"APPLIED_EXACT_BYTES",after:$after,status:"PASS"}' >> "$ledger"
+            else
+              jq -nc --arg version "$version" --arg state "$state" --arg file "$file" '{version:$version,file:$file,before:$state,action:"SKIPPED_EQUIVALENT",after:$state,status:"PASS"}' >> "$ledger"
+            fi
+          }
+
+          apply_one 016 "supabase/migrations/016_provider_csf_file_path.sql" M016
+          apply_one 017 "supabase/migrations/017_provider_csf_storage_policies.sql" M017
+          apply_one 020 "supabase/migrations/020_normalize_proveedores_canonical.sql" M020
+          apply_one 00404 "supabase/migrations/00404_harden_anonymous_provider_csf_storage.sql" M00404
+          jq -s '.' "$ledger" > "$EVIDENCE_DIR/mutation-ledger.json"
+
+          classify_all
+          write_classes "$EVIDENCE_DIR/migration-classification-postcheck.json"
+          for state in "$M016" "$M017" "$M020" "$M00404"; do
+            [[ "$state" = APPLIED_EXACT || "$state" = APPLIED_EQUIVALENT ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+          done
+
+          provider_delete="$(roq "select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and cmd='DELETE';")"
+          csf_update_delete="$(roq "select count(*) from pg_policies where schemaname='storage' and tablename='objects' and (lower(policyname) like '%provider csf%' or lower(coalesce(qual,'')) like '%csf/%' or lower(coalesce(with_check,'')) like '%csf/%') and cmd in ('UPDATE','DELETE','ALL');")"
+          provider_unknown_post="$(roq "select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and policyname not in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers');")"
+          csf_unknown_post="$(roq "select count(*) from pg_policies p where p.schemaname='storage' and p.tablename='objects' and p.policyname not in ('Anon can read payment receipts temporarily','Anon can upload payment receipts temporarily','Authenticated can upload provider CSF','Authenticated can read provider CSF') and (lower(p.policyname) like '%csf%' or lower(coalesce(p.qual,'')) like '%csf/%' or lower(coalesce(p.with_check,'')) like '%csf/%');")"
+          bucket_private="$(roq "select count(*)=1 from storage.buckets where id='payment-receipts' and public=false;")"
+          roles="$(roq "select public.flux_approver_roles()::text;")"
+          roles_lc="$(printf '%s' "$roles" | tr '[:upper:]' '[:lower:]')"
+          manager_authorized=false
+          operation_denied=false
+          [[ "$roles_lc" == *manager* ]] && manager_authorized=true
+          if [[ ! "$roles_lc" =~ operator|operation|operacion|operación ]]; then operation_denied=true; fi
+
+          snapshot "$EVIDENCE_DIR/data-after.json"
+          unexpected_delta="$(jq -n --slurpfile before "$EVIDENCE_DIR/data-before.json" --slurpfile after "$EVIDENCE_DIR/data-after.json" '
+            ($before[0]) as $b | ($after[0]) as $a |
+            [($b.proveedores==$a.proveedores),($b.storage_objects==$a.storage_objects),($b.notification_events==$a.notification_events),($b.notification_delivery_attempts==$a.notification_delivery_attempts),($b.payment_requests==$a.payment_requests),($b.approval_batches==$a.approval_batches),($b.cash_funds==$a.cash_funds),($b.payment_intake==$a.payment_intake),($b.payment_intake_events==$a.payment_intake_events),($b.provider_protected_digest==$a.provider_protected_digest),($b.storage_objects_digest==$a.storage_objects_digest)] | map(select(.==false)) | length
+          ')"
+          notification_delta="$(jq -n --slurpfile before "$EVIDENCE_DIR/data-before.json" --slurpfile after "$EVIDENCE_DIR/data-after.json" '($after[0].notification_events-$before[0].notification_events)')"
+          email_delta="$(jq -n --slurpfile before "$EVIDENCE_DIR/data-before.json" --slurpfile after "$EVIDENCE_DIR/data-after.json" '($after[0].notification_delivery_attempts-$before[0].notification_delivery_attempts)')"
+
+          [[ "$provider_delete" = 0 && "$csf_update_delete" = 0 && "$provider_unknown_post" = 0 && "$csf_unknown_post" = 0 ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+          [[ "$bucket_private" = t && "$S016" = t && "$S017" = t && "$S020" = t && "$H00404" = t ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+          [[ "$manager_authorized" = true && "$operation_denied" = true ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+          [[ "$unexpected_delta" = 0 && "$notification_delta" = 0 && "$email_delta" = 0 ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+
+          jq -n \
+            --argjson provider_delete "$provider_delete" --argjson csf_update_delete "$csf_update_delete" \
+            --argjson provider_unknown "$provider_unknown_post" --argjson csf_unknown "$csf_unknown_post" \
+            --arg bucket_private "$bucket_private" --arg roles "$roles" \
+            --argjson unexpected_delta "$unexpected_delta" --argjson notification_delta "$notification_delta" --argjson email_delta "$email_delta" \
+            --arg manager_authorized "$manager_authorized" --arg operation_denied "$operation_denied" \
+            '{status:"PASS",csf_columns:true,persona_tipo_restricted:true,normalization_trigger_and_function:true,provider_policies_canonical:3,provider_delete_policies:$provider_delete,csf_insert_authorized:true,csf_select_authorized:true,csf_update_delete_policies:$csf_update_delete,bucket_private:($bucket_private=="t"),anon_insert_csf:"DENIED",anon_select_csf:"DENIED",manager_authorized:($manager_authorized=="true"),operation_csf_admin_denied:($operation_denied=="true"),approver_roles:$roles,unknown_provider_policies:$provider_unknown,unknown_csf_policies:$csf_unknown,PROD_DATA_UNEXPECTED_DELTA:$unexpected_delta,PROD_NOTIFICATIONS_SENT:$notification_delta,EXTERNAL_EMAILS:$email_delta}' \
+            > "$EVIDENCE_DIR/prod-schema-postcheck.json"
+
+          printf '%s\n' 'PASS / PROD_PREFLIGHT_PASS / PROD_MIGRATIONS_APPLIED_OR_VERIFIED / PROD_SCHEMA_POSTCHECK_PASS / NO_UNEXPECTED_PROD_CHANGES' > "$EVIDENCE_DIR/gate-result.txt"
+          trap - ERR
+
+      - name: Upload sanitized release evidence
         if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flux-prod-slice-01a-csf-release-r1
+          path: ${{ runner.temp }}/flux-prod-slice-01a-csf-release-r1
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup runner
+        if: always()
+        shell: bash
         run: |
-          echo "POSTPROCESS note: evidence was generated in artifact and on workspace path $WORKFLOW_EVIDENCE_DIR."
+          set +e
+          unset PGPASSWORD SUPABASE_DB_PASSWORD_PROD SUPABASE_PROD_DB_URL SUPABASE_PROD_AUDIT_DB_URL SUPABASE_ACCESS_TOKEN
+          rm -f "$RUNNER_TEMP/flux-release-project.json" "$RUNNER_TEMP/flux-release-backups.json" "$RUNNER_TEMP/flux-csf-mutation-ledger.ndjson"
+          printf '%s\n' 'PASS' > "$EVIDENCE_DIR/cleanup.txt"
