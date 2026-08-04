@@ -165,7 +165,7 @@
         layouts,
         cashFunds,
       ] = await Promise.all([
-        client.from("payment_requests").select("id,request_number,request_type,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
+        client.from("payment_requests").select("id,request_number,request_type,payment_method,status,budget_decision,budget_block_reason,is_extraordinary_adjustment,exception_status,exception_action,amount_requested,currency,submitted_at,created_at,requested_by,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,description,notes,company_bank_account_id,scheduled_payment_date,payment_reference,payment_concept").order("created_at", { ascending: false }),
         client.from("proveedores").select("id,alias,nombre_completo,beneficiary_name,destination_type,clabe,cuenta_bancaria,convenio_number"),
         client.from("companies").select("id,name,legal_name"),
         client.from("cost_centers").select("id,code,name"),
@@ -200,7 +200,6 @@
     const original = window.openRequestDetail;
     if (!original || window._workboardDetailPatched) return;
     window._workboardDetailPatched = true;
-    console.log("[workboard v5] patch activo");
     window.openRequestDetail = async function(requestId) {
       await original(requestId);
       window.setTimeout(() => injectLayoutReadiness(requestId), 350);
@@ -208,18 +207,11 @@
   }
 
   function injectLayoutReadiness(requestId) {
-    console.log("[workboard v5] injectLayoutReadiness", requestId);
     const target = document.getElementById("detailContent");
-    if (!target || target.querySelector("[data-layout-readiness-extension]")) {
-      console.log("[workboard v5] guard activado — ya existe la sección o no hay target");
-      return;
-    }
+    if (!target || target.querySelector("[data-layout-readiness-extension]")) return;
 
     const request = state.requests.find((item) => item.id === requestId);
-    if (!request || isCashOrCheck(request)) {
-      console.log("[workboard v5] request no aplica:", request?.request_type);
-      return;
-    }
+    if (!request || isCashOrCheck(request)) return;
 
     const section = document.createElement("section");
     section.className = "decision-card layout-readiness-card";
@@ -229,23 +221,6 @@
     const decisionPanel = Array.from(target.children).find((node) => /Decision del aprobador/i.test(node.textContent || ""));
     if (decisionPanel) target.insertBefore(section, decisionPanel);
     else target.appendChild(section);
-
-    console.log("[workboard v5] sección inyectada OK, hijos de detailContent:", target.children.length);
-
-    const removalWatcher = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of m.removedNodes) {
-          if (node === section || node.querySelector?.("[data-layout-readiness-extension]")) {
-            console.error("[workboard v5] SECCIÓN ELIMINADA por:", new Error().stack);
-            removalWatcher.disconnect();
-          }
-        }
-        if (m.type === "childList" && m.target === target) {
-          console.log("[workboard v5] detailContent cambió — innerHTML completo reemplazado");
-        }
-      }
-    });
-    removalWatcher.observe(target, { childList: true, subtree: false });
 
     section.addEventListener("click", (e) => {
       if (e.target.closest("[data-open-layout-data]")) openLayoutDataEditor(requestId);
@@ -680,8 +655,14 @@
   }
 
   function toast(title, message, type = "success") {
-    const stack = document.getElementById("toastStack");
-    if (!stack) return window.alert(`${title}\n${message}`);
+    let stack = document.getElementById("toastStack");
+    if (!stack) {
+      stack = document.createElement("div");
+      stack.id = "toastStack";
+      stack.className = "toast-stack-v2";
+      stack.setAttribute("aria-live", "polite");
+      document.body.appendChild(stack);
+    }
     const node = document.createElement("div");
     node.className = `toast ${type}`;
     node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
@@ -720,7 +701,8 @@
   }
 
   function isCashOrCheck(request) {
-    return request.request_type === "cash" || request.request_type === "check";
+    const method = String(request?.payment_method || request?.request_type || "").toLowerCase();
+    return method === "cash" || method === "check";
   }
 
   function isBudgetException(request) {

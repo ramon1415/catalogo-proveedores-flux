@@ -12,6 +12,43 @@
   <style>
     .form-grid input, .form-grid select, .form-grid textarea { min-height:34px; padding:0 10px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none; }
     .form-grid textarea { min-height:72px; padding:8px 10px; resize:vertical; }
+    #newLayoutDialog{width:min(980px,calc(100vw - 28px));max-width:980px}
+    .layout-preview{display:grid;gap:0;margin-top:14px;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--bg-surface)}
+    .layout-preview-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--border)}
+    .layout-preview-metric{padding:10px 12px;border-right:1px solid var(--border)}
+    .layout-preview-metric:nth-child(-n+4){border-bottom:1px solid var(--border)}
+    .layout-preview-metric:nth-child(4n){border-right:0}
+    .layout-preview-metric:last-child{border-right:0}
+    .layout-preview-metric span{display:block;color:var(--text-3);font-size:9.5px;text-transform:uppercase}
+    .layout-preview-metric strong{display:block;margin-top:4px;color:var(--text-1);font-size:14px}
+    .layout-preview-metric-action{appearance:none;width:100%;border:0;border-right:1px solid var(--border);border-radius:0;background:transparent;text-align:left;font:inherit;cursor:pointer}
+    .layout-preview-metric-action:hover,.layout-preview-metric-action:focus-visible{background:var(--bg-hover);outline:2px solid var(--accent);outline-offset:-2px}
+    .layout-preview-metric-action small{display:block;margin-top:3px;color:var(--accent-text);font-size:10px;font-weight:700}
+    .layout-preview-metric-action.danger{box-shadow:inset 0 3px 0 #dc2626}
+    .layout-preview-metric-action.warning{box-shadow:inset 0 3px 0 #d97706}
+    .layout-preview-section{padding:12px 14px;border-bottom:1px solid var(--border)}
+    .layout-preview-section:last-child{border-bottom:0}
+    .layout-preview-section{scroll-margin-top:16px}
+    .layout-preview-section:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+    .layout-preview-section-attention{background:color-mix(in srgb,#d97706 4%,var(--bg-surface))}
+    .layout-preview-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}
+    .layout-preview-head h3{margin:0;color:var(--text-1);font-size:12px}
+    .layout-preview-head span{color:var(--text-3);font-size:10.5px}
+    .layout-preview-list{display:grid;gap:6px;max-height:230px;overflow:auto;scrollbar-gutter:stable}
+    .layout-preview-row{display:grid;grid-template-columns:minmax(110px,.8fr) minmax(150px,1.25fr) minmax(110px,.8fr) minmax(150px,1.2fr) auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-2)}
+    .layout-preview-row:last-child{border-bottom:0}
+    .layout-preview-row strong{color:var(--text-1)}
+    .layout-preview-row small{display:block;color:var(--text-3);margin-top:2px}
+    .layout-preview-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+    .layout-preview-empty{color:var(--text-3);font-size:11.5px;padding:5px 0}
+    .layout-extraordinary{border-left:3px solid #d97706;padding-left:9px}
+    .layout-reject-reason{color:#d97706}
+    .layout-review-actions{display:flex;justify-content:flex-end;margin-top:12px}
+    .layout-completion-summary{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:11px 12px;border:1px solid var(--border);border-radius:7px;background:var(--bg-surface);color:var(--text-2)}
+    .layout-completion-summary strong{color:var(--text-1)}
+    .layout-completion-summary small{grid-column:1/-1;color:var(--text-3)}
+    .layout-completion-impact{padding:10px 12px;border-left:3px solid #d97706;background:color-mix(in srgb,#d97706 8%,transparent);color:var(--text-2);font-size:11.5px;line-height:1.5}
+    @media(max-width:760px){.layout-preview-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.layout-preview-metric:nth-child(2n){border-right:0}.layout-preview-metric:nth-child(-n+4){border-bottom:1px solid var(--border)}.layout-preview-row{grid-template-columns:1fr 1fr}.layout-preview-actions{grid-column:1/-1;justify-content:flex-start}.modal-actions{flex-wrap:wrap}.modal-actions button{flex:1 1 150px}}
   </style>
 </head>
 <body>
@@ -64,7 +101,7 @@
         <div class="page-header">
           <div>
             <h1>Layouts de pago</h1>
-            <p>Genera archivos semanales de pago a partir de solicitudes aprobadas.</p>
+            <p>Genera archivos semanales a partir de solicitudes liberadas para pago.</p>
           </div>
           <div style="display:flex;gap:8px">
             <button id="refreshBtn" class="secondary-btn" type="button">Actualizar</button>
@@ -117,12 +154,12 @@
   </div>
 
   <!-- Dialog: nuevo layout -->
-  <dialog id="newLayoutDialog" class="narrow">
+  <dialog id="newLayoutDialog">
     <form id="newLayoutForm" class="modal-content">
       <div class="modal-header">
         <div>
           <h2 style="color:var(--text-1)">Nuevo layout de pago</h2>
-          <p>Selecciona el periodo y filtros opcionales para crear un layout desde solicitudes aprobadas.</p>
+          <p>Revisa que cada pago este liberado antes de crear el archivo.</p>
         </div>
         <button type="button" id="closeNewLayoutModalBtn" class="icon-btn">✕</button>
       </div>
@@ -134,12 +171,51 @@
           <label>Empresa<select id="layoutCompanyId"><option value="">Todas las empresas</option></select></label>
           <label>Cuenta origen<select id="layoutBankAccountId"><option value="">Todas las cuentas</option></select></label>
         </div>
+        <div class="layout-review-actions"><button type="button" id="reviewLayoutBtn" class="secondary-btn">Revisar solicitudes</button></div>
+        <div id="layoutEligibilityPreview" class="layout-preview hidden" aria-live="polite"></div>
         <div id="layoutInvalidBox" class="hidden" style="margin-top:12px;padding:12px 14px;background:var(--amber-dim);border:1px solid rgba(245,158,11,.26);border-radius:9px;font-size:12.5px;color:var(--text-2);line-height:1.6"></div>
       </div>
       <div class="modal-actions">
         <button type="button" id="cancelNewLayoutBtn" class="secondary-btn">Cancelar</button>
-        <button type="submit" id="submitNewLayoutBtn" class="primary-btn">Crear layout</button>
+        <button type="submit" id="submitNewLayoutBtn" class="primary-btn" disabled>Crear layout</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="layoutRebatchDialog" class="narrow">
+    <form id="layoutRebatchForm" class="modal-content">
+      <div class="modal-header">
+        <div><h2 style="color:var(--text-1)">Enviar nuevamente a aprobacion</h2><p>El rechazo anterior se conserva; se crea una nueva participacion en corte.</p></div>
+        <button type="button" id="closeLayoutRebatchBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <div class="full-row" id="layoutRebatchOriginal" style="padding:10px;border-left:3px solid #d97706;background:var(--amber-dim);color:var(--text-2);font-size:12px;line-height:1.5"></div>
+          <label class="full-row">Que se corrigio *<textarea id="layoutRebatchNote" minlength="10" maxlength="1000" required></textarea></label>
+          <label class="full-row">Destino<select id="layoutRebatchTarget"><option value="">Dejar disponible para siguiente corte</option></select></label>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" id="cancelLayoutRebatchBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitLayoutRebatchBtn" class="primary-btn">Enviar nuevamente</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="layoutCompletionDialog" class="narrow">
+    <form id="layoutCompletionForm" class="modal-content">
+      <div class="modal-header">
+        <div><h2 id="layoutCompletionTitle" style="color:var(--text-1)">Completar datos de pago</h2><p>Corrige lo necesario sin salir de la generacion del layout.</p></div>
+        <button type="button" id="closeLayoutCompletionBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <div class="full-row layout-completion-summary" id="layoutCompletionSummary"></div>
+          <label class="full-row">Cuenta origen<select id="layoutCompletionBankAccount"><option value="">Selecciona cuenta origen</option></select></label>
+          <label>Referencia de pago<input id="layoutCompletionReference" type="text" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 7, 42 o 40002"><span class="field-hint">De 1 a 5 digitos.</span></label>
+          <label>Fecha programada<input id="layoutCompletionDate" type="date"></label>
+          <label class="full-row">Concepto de pago<input id="layoutCompletionConcept" type="text" maxlength="120" placeholder="Concepto que aparecera en el layout"></label>
+          <div class="full-row layout-completion-impact" id="layoutCompletionImpact"></div>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" id="cancelLayoutCompletionBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitLayoutCompletionBtn" class="primary-btn">Guardar y reevaluar</button></div>
     </form>
   </dialog>
 
@@ -211,6 +287,25 @@
     </form>
   </dialog>
 
+  <dialog id="layoutActionConfirmDialog" class="narrow">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="layoutActionConfirmTitle">Confirmar operacion</h2>
+          <p>Revisa el alcance antes de continuar.</p>
+        </div>
+        <button type="button" id="layoutActionConfirmCloseBtn" class="icon-btn" aria-label="Cerrar">x</button>
+      </div>
+      <div class="modal-scroll">
+        <p id="layoutActionConfirmBody"></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="layoutActionConfirmCancelBtn" class="secondary-btn">Cancelar</button>
+        <button type="button" id="layoutActionConfirmAcceptBtn" class="primary-btn">Confirmar</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Dialog: confirmar pago -->
   <dialog id="confirmDialog" class="narrow">
     <form id="confirmPaymentForm" class="modal-content">
@@ -262,7 +357,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260707-pagosint-reference-ux"></script>
+  <script src="./layouts.js?v=20260714-qa-closure-p2"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260617-fase2-success"></script>
 </body>
 </html>
