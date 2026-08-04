@@ -1,0 +1,83 @@
+#transferReceiptDialog {
+  color-scheme: dark;
+}
+
+#transferReceiptDialog .transfer-receipt-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg-hover);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#transferReceiptDialog .transfer-receipt-feedback.hidden {
+  display: none;
+}
+
+#transferReceiptDialog .transfer-receipt-feedback strong {
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+
+#transferReceiptDialog .transfer-receipt-feedback.error {
+  border-color: rgba(224, 62, 82, .35);
+  background: var(--ruby-dim);
+  color: var(--ruby);
+}
+
+#transferReceiptDialog .transfer-receipt-feedback.success {
+  border-color: rgba(18, 183, 106, .3);
+  background: var(--emerald-dim);
+  color: var(--emerald);
+}
+
+#transferReceiptDialog .transfer-receipt-feedback.warning {
+  border-color: rgba(245, 158, 11, .32);
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl,
+#transferReceiptDialog .transfer-receipt-modal input.f-ctrl,
+#transferReceiptDialog .transfer-receipt-modal input[type="date"].f-ctrl,
+#transferReceiptDialog .transfer-receipt-modal textarea.f-ctrl {
+  background: var(--bg-input) !important;
+  border-color: var(--border) !important;
+  color: var(--text-1) !important;
+  caret-color: var(--accent-text);
+  color-scheme: dark;
+}
+
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl:focus,
+#transferReceiptDialog .transfer-receipt-modal input.f-ctrl:focus,
+#transferReceiptDialog .transfer-receipt-modal input[type="date"].f-ctrl:focus,
+#transferReceiptDialog .transfer-receipt-modal textarea.f-ctrl:focus {
+  background: var(--bg-input) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px var(--accent-dim) !important;
+  color: var(--text-1) !important;
+  outline: none;
+}
+
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl::placeholder {
+  color: var(--text-3) !important;
+}
+
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl:-webkit-autofill,
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl:-webkit-autofill:hover,
+#transferReceiptDialog .transfer-receipt-modal .f-ctrl:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset !important;
+  -webkit-text-fill-color: var(--text-1) !important;
+  caret-color: var(--accent-text);
+  border-color: var(--accent) !important;
+  transition: background-color 9999s ease-out 0s;
+}
+
+#toastStack {
+  z-index: 20000;
+}

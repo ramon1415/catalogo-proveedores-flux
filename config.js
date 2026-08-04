@@ -234,6 +234,7 @@ try {
   const modules = [
     { key: "requests", section: "Operacion", file: "solicitudes.html", href: "./solicitudes.html", icon: "S", label: "Solicitudes de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION] },
     { key: "layouts", section: "Operacion", file: "layouts.html", href: "./layouts.html", icon: "L", label: "Layouts de pago", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "receipt-batches", section: "Operacion", file: "comprobantes_batch.html", href: "./comprobantes_batch.html", icon: "B", label: "Comprobantes batch", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN], sensitive: true },
     { key: "cash", section: "Operacion", file: "efectivo.html", href: "./efectivo.html", icon: "E", label: "Efectivo y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "payments", section: "Operacion", file: "pagos_comprobaciones.html", href: "./pagos_comprobaciones.html", icon: "$", label: "Pagos y comprobaciones", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION], hidden: true },
     { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=income", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
@@ -247,7 +248,7 @@ try {
   const navSections = ["Operacion", "General", "Configuracion"]
   const ROLE_CACHE_KEY = "flux-role-state-v1"
   const NAV_HTML_CACHE_KEY = "flux-nav-html-v1"
-  const NAV_RENDER_VERSION = "20260624-menu-render-stability"
+  const NAV_RENDER_VERSION = "20260721-receipt-batches"
 
   const roleState = {
     loaded: false,
@@ -340,7 +341,7 @@ try {
   }
 
   function fallbackFirstPaintModules() {
-    return modules.filter((item) => !item.hidden)
+    return modules.filter((item) => !item.hidden && !item.sensitive)
   }
 
   function firstPaintModules() {
