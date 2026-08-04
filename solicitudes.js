@@ -7,6 +7,10 @@ let costCenters = [];
 let budgetCategories = [];
 let proveedores = [];
 let budgetAvailabilityRows = [];
+let approverCandidates = [];
+let approverLoadVersion = 0;
+let approverReloadTimer = null;
+let pendingApproverSelection = null;
 let highlightedRequestId = null;
 let currentDetailRequestId = null;
 let requestFileUpload = null;
@@ -110,6 +114,9 @@ function cacheDom() {
   dom.toastStack = document.getElementById("toastStack");
 
   dom.companyId = document.getElementById("companyId");
+  dom.approverId = document.getElementById("approverId");
+  dom.approverAssignmentId = document.getElementById("approverAssignmentId");
+  dom.approverHelp = document.getElementById("approverHelp");
   dom.costCenterId = document.getElementById("costCenterId");
   dom.budgetCategoryId = document.getElementById("budgetCategoryId");
   dom.budgetCategorySearch = document.getElementById("budgetCategorySearch");
@@ -129,6 +136,7 @@ function cacheDom() {
   dom.notes = document.getElementById("notes");
 
   dom.summaryCompany = document.getElementById("summaryCompany");
+  dom.summaryApprover = document.getElementById("summaryApprover");
   dom.summaryCostCenter = document.getElementById("summaryCostCenter");
   dom.summaryCategory = document.getElementById("summaryCategory");
   dom.summaryProvider = document.getElementById("summaryProvider");
@@ -202,13 +210,20 @@ function bindEvents() {
     });
   });
 
-  dom.companyId?.addEventListener("change", handleBudgetScopeChange);
-  dom.costCenterId?.addEventListener("change", handleBudgetScopeChange);
+  dom.companyId?.addEventListener("change", handleCompanyScopeChange);
+  dom.approverId?.addEventListener("change", () => {
+    syncApproverSelection();
+    updateSummaryPanel();
+  });
+  dom.costCenterId?.addEventListener("change", handleBudgetAndApproverScopeChange);
   dom.budgetCategoryId?.addEventListener("change", updateSummaryPanel);
   dom.budgetMonth?.addEventListener("change", handleBudgetScopeChange);
   initProviderCombo();
   dom.proveedorId?.addEventListener("change", updateSummaryPanel);
-  dom.amountRequested?.addEventListener("input", updateSummaryPanel);
+  dom.amountRequested?.addEventListener("input", () => {
+    updateSummaryPanel();
+    scheduleApproverOptionsLoad();
+  });
   dom.currency?.addEventListener("change", handleCurrencyChange);
   dom.exchangeRate?.addEventListener("input", updateSummaryPanel);
   dom.isExtraordinaryAdjustment?.addEventListener("change", updateSummaryPanel);
@@ -263,7 +278,7 @@ async function loadPaymentRequests() {
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
+    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -305,6 +320,201 @@ async function handleBudgetScopeChange() {
   await loadAvailableBudgetCategories();
   updateSummaryPanel();
 }
+
+async function handleCompanyScopeChange() {
+  approverLoadVersion += 1;
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
+  await handleBudgetScopeChange();
+  await loadPaymentRequestApproverOptions();
+  updateSummaryPanel();
+}
+
+async function handleBudgetAndApproverScopeChange() {
+  approverLoadVersion += 1;
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
+  await handleBudgetScopeChange();
+  await loadPaymentRequestApproverOptions();
+}
+
+function scheduleApproverOptionsLoad() {
+  window.clearTimeout(approverReloadTimer);
+  approverLoadVersion += 1;
+  invalidateApproverOptions("Actualizando aprobadores disponibles...");
+  approverReloadTimer = window.setTimeout(loadPaymentRequestApproverOptions, 300);
+}
+
+function captureApproverSelection() {
+  const selected = approverCandidates.find(candidate => candidate.profile_id === dom.approverId?.value);
+  if (!selected) return;
+  pendingApproverSelection = {
+    profile_id: selected.profile_id,
+    assignment_id: selected.assignment_id || null,
+    source: selected.source || "approval_rules",
+  };
+}
+
+function candidateMatchesSelection(candidate, selection) {
+  if (!candidate || !selection) return false;
+  if (candidate.profile_id !== selection.profile_id) return false;
+  if ((candidate.source || "approval_rules") !== selection.source) return false;
+  if (selection.source === "assigned") {
+    return (candidate.assignment_id || null) === selection.assignment_id;
+  }
+  return true;
+}
+
+function invalidateApproverOptions(label) {
+  captureApproverSelection();
+  resetApproverSelect(label, true);
+}
+
+function resetApproverSelect(label = "Completa empresa, centro de costo y monto", preservePendingSelection = false) {
+  if (!preservePendingSelection) pendingApproverSelection = null;
+  approverCandidates = [];
+  if (!dom.approverId) return;
+  dom.approverId.disabled = true;
+  dom.approverId.innerHTML = optionPlaceholder(label);
+  if (dom.approverAssignmentId) dom.approverAssignmentId.value = "";
+  if (dom.approverHelp) {
+    dom.approverHelp.textContent = "Cuando completes los datos de la solicitud, mostraremos los aprobadores disponibles.";
+    dom.approverHelp.style.color = "";
+  }
+  updateSummaryPanel();
+}
+
+async function loadPaymentRequestApproverOptions() {
+  const companyId = dom.companyId?.value || "";
+  const costCenterId = dom.costCenterId?.value || null;
+  const amount = numberValue(dom.amountRequested?.value);
+  const requestVersion = ++approverLoadVersion;
+  if (!companyId || !costCenterId || amount <= 0) {
+    resetApproverSelect("Completa empresa, centro de costo y monto", true);
+    return;
+  }
+
+  resetApproverSelect("Cargando aprobadores disponibles...", true);
+  const { data, error } = await supabaseClient.rpc("list_payment_request_approver_options", {
+    p_company_id: companyId,
+    p_cost_center_id: costCenterId,
+    p_amount: amount,
+  });
+  if (requestVersion !== approverLoadVersion) return;
+
+  if (error) {
+    resetApproverSelect("No se pudieron cargar aprobadores", true);
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = friendlyError(error, "list_payment_request_approver_options");
+      dom.approverHelp.style.color = "var(--ruby)";
+    }
+    updateSummaryPanel();
+    return;
+  }
+
+  const previousSelection = pendingApproverSelection;
+  pendingApproverSelection = null;
+  approverCandidates = Array.isArray(data) ? data : [];
+  if (!approverCandidates.length) {
+    resetApproverSelect("Sin aprobadores disponibles");
+    if (dom.approverHelp) {
+      dom.approverHelp.textContent = "No hay aprobadores disponibles para esta empresa y condiciones. Solicita a un administrador configurar uno.";
+      dom.approverHelp.style.color = "var(--amber)";
+    }
+    updateSummaryPanel();
+    return;
+  }
+
+  dom.approverId.innerHTML = optionPlaceholder("Seleccionar aprobador") +
+    approverCandidates.map(candidate => {
+      const label = candidate.option_label || candidate.display_name || candidate.email || "Sin nombre";
+      return `<option value="${escapeHtml(candidate.profile_id)}" data-assignment-id="${escapeHtml(candidate.assignment_id || "")}" data-source="${escapeHtml(candidate.source || "approval_rules")}">${escapeHtml(label)}</option>`;
+    }).join("");
+
+  dom.approverId.disabled = false;
+  const preservedCandidate = previousSelection
+    ? approverCandidates.find(candidate => candidateMatchesSelection(candidate, previousSelection))
+    : null;
+  if (preservedCandidate) {
+    dom.approverId.value = preservedCandidate.profile_id;
+  } else if (approverCandidates.length === 1) {
+    dom.approverId.value = approverCandidates[0].profile_id;
+  }
+  syncApproverSelection();
+  if (dom.approverHelp) {
+    const source = approverCandidates[0]?.source;
+    const sourceHelp = source === "assigned"
+      ? "Selecciona uno de los aprobadores configurados para ti en esta empresa."
+      : "No tienes aprobadores configurados. Se muestran usuarios elegibles según las reglas de aprobación.";
+    if (approverCandidates.length === 1) {
+      dom.approverHelp.textContent = `Único aprobador disponible para estas condiciones. ${sourceHelp}`;
+    } else if (previousSelection && !preservedCandidate) {
+      dom.approverHelp.textContent = `La selección anterior ya no está disponible. ${sourceHelp}`;
+    } else {
+      dom.approverHelp.textContent = sourceHelp;
+    }
+    dom.approverHelp.style.color = previousSelection && !preservedCandidate
+      ? "var(--amber)"
+      : source === "assigned" ? "var(--accent-text)" : "";
+  }
+  updateSummaryPanel();
+}
+
+function syncApproverSelection() {
+  pendingApproverSelection = null;
+  const option = dom.approverId?.selectedOptions?.[0];
+  if (dom.approverAssignmentId) {
+    dom.approverAssignmentId.value = option?.dataset?.assignmentId || "";
+  }
+}
+
+function validatePaymentRequestApproverSelection() {
+  const approverId = dom.approverId?.value || "";
+  if (!approverId) return "Selecciona quién revisará esta solicitud.";
+  const selected = approverCandidates.find(candidate => candidate.profile_id === approverId);
+  if (!selected) return "La lista de aprobadores cambió. Revisa las opciones y selecciona nuevamente.";
+  const assignmentId = dom.approverAssignmentId?.value || null;
+  if (selected.source === "assigned" && assignmentId !== (selected.assignment_id || null)) {
+    return "La opción configurada perdió su referencia. Revisa las opciones y selecciona nuevamente.";
+  }
+  return "";
+}
+
+function focusFirstInvalidRequestField() {
+  const target = dom.requestForm?.querySelector(":invalid") || dom.approverId;
+  const scrollTarget = target?.closest("label, .form-section") || target;
+  scrollTarget?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (target && !target.disabled) {
+    window.setTimeout(() => target.focus({ preventScroll: true }), 120);
+  }
+}
+
+async function refreshPaymentRequestApproversAfterError(error) {
+  const message = String(error?.message || error || "");
+  const staleKeys = [
+    "approver_assignment_id_required",
+    "approver_assignment_not_active",
+    "approver_assignment_snapshot_mismatch",
+    "approver_assignment_not_allowed_without_pool",
+    "approver_not_in_configured_pool",
+    "approver_must_come_from_configured_pool",
+    "approver_not_allowed_by_approval_rules",
+    "configured_approver_no_longer_eligible",
+  ];
+  if (!staleKeys.some(key => message.includes(key))) return false;
+
+  pendingApproverSelection = null;
+  resetApproverSelect("Actualizando aprobadores disponibles...");
+  await loadPaymentRequestApproverOptions();
+  if (dom.approverHelp) {
+    const currentHelp = dom.approverHelp.textContent || "";
+    dom.approverHelp.textContent = `La lista de aprobadores cambió. Revisa y selecciona nuevamente. ${currentHelp}`.trim();
+    dom.approverHelp.style.color = "var(--amber)";
+  }
+  return true;
+}
+
+window.validatePaymentRequestApproverSelection = validatePaymentRequestApproverSelection;
+window.focusFirstInvalidRequestField = focusFirstInvalidRequestField;
+window.refreshPaymentRequestApproversAfterError = refreshPaymentRequestApproversAfterError;
 
 async function loadAvailableBudgetCategories() {
   const companyId = dom.companyId.value;
@@ -677,6 +887,7 @@ function openNewRequestModal() {
   if (dom.providerSearch) dom.providerSearch.value = "";
   if (dom.proveedorId) { dom.proveedorId.value = ""; dom.proveedorId.dispatchEvent(new Event("change")); }
   renderProveedorOptions("");
+  resetApproverSelect();
   budgetAvailabilityRows = [];
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
@@ -691,6 +902,7 @@ async function fillDemoRequest() {
   const btn = document.getElementById("demoFillBtn");
   if (btn) { btn.disabled = true; btn.textContent = "⚡ Llenando…"; }
   try {
+    dom.amountRequested.value = "5000";
     const { data } = await supabaseClient
       .from("budget_availability")
       .select("company_id,cost_center_id,budget_month,budget_category_id")
@@ -701,17 +913,21 @@ async function fillDemoRequest() {
       dom.companyId.value = row.company_id;
       dom.costCenterId.value = row.cost_center_id;
       dom.budgetMonth.value = String(row.budget_month).slice(0, 7);
-      await handleBudgetScopeChange();
+      await handleCompanyScopeChange();
       if (row.budget_category_id) dom.budgetCategoryId.value = row.budget_category_id;
     } else {
       if (dom.companyId.options.length > 1) dom.companyId.selectedIndex = 1;
       if (dom.costCenterId.options.length > 1) dom.costCenterId.selectedIndex = 1;
-      await handleBudgetScopeChange();
+      await handleCompanyScopeChange();
+    }
+
+    if (!dom.approverId.disabled && !dom.approverId.value && dom.approverId.options.length > 1) {
+      dom.approverId.selectedIndex = 1;
+      syncApproverSelection();
     }
 
     if (proveedores.length) selectProvider(proveedores[0].id, proveedorLabel(proveedores[0]));
 
-    dom.amountRequested.value = "5000";
     dom.currency.value = "MXN";
     handleCurrencyChange();
     dom.description.value = "Demo - pago de servicios de prueba";
@@ -735,6 +951,7 @@ async function submitPaymentRequest(event) {
   const validation = validateRequestPayload(payload);
   if (validation) {
     showToast("Revisa la solicitud", validation, "warning");
+    focusFirstInvalidRequestField();
     return;
   }
 
@@ -755,6 +972,8 @@ async function submitPaymentRequest(event) {
       p_notes: payload.notes,
       p_requested_by: currentProfileId,
       p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+      p_approver_id: payload.approver_id,
+      p_approver_assignment_id: payload.approver_assignment_id,
     });
 
     if (error) throw error;
@@ -793,6 +1012,7 @@ async function submitPaymentRequest(event) {
     highlightedRequestId = newRequestId;
     await loadPaymentRequests();
   } catch (error) {
+    await refreshPaymentRequestApproversAfterError(error);
     showToast("No se pudo crear la solicitud", friendlyError(error, "create_payment_request"), "error");
     dom.submitRequestBtn.disabled = false;
     dom.submitRequestBtn.textContent = "Crear solicitud";
@@ -802,10 +1022,13 @@ async function submitPaymentRequest(event) {
 function collectRequestPayload() {
   const currency = dom.currency.value || "MXN";
   const exchangeRate = currency === "MXN" ? 1 : numberValue(dom.exchangeRate.value);
+  const selectedApprover = approverCandidates.find(candidate => candidate.profile_id === dom.approverId?.value);
 
   return {
     proveedor_id: dom.proveedorId.value || null,
     company_id: dom.companyId.value || null,
+    approver_id: dom.approverId?.value || null,
+    approver_assignment_id: selectedApprover?.assignment_id || null,
     cost_center_id: dom.costCenterId.value || null,
     budget_category_id: dom.budgetCategoryId.value || null,
     budget_month: monthInputToDate(dom.budgetMonth.value),
@@ -829,7 +1052,7 @@ function validateRequestPayload(payload) {
   if (!payload.currency) return "Selecciona la moneda.";
   if (!payload.exchange_rate || payload.exchange_rate <= 0) return "El tipo de cambio debe ser mayor a 0.";
   if (!payload.description) return "Captura una descripcion.";
-  return "";
+  return validatePaymentRequestApproverSelection();
 }
 
 function openRequestDetail(id) {
@@ -866,6 +1089,7 @@ function openRequestDetail(id) {
     ${Components.refGrid([
       { label: "Proveedor",      value: escapeHtml(proveedorAlias(proveedor)) },
       { label: "Empresa",        value: escapeHtml(companyName(company)) },
+      { label: "Aprobador seleccionado", value: `<span id="detailApproverRouting">Cargando...</span>`, full: true },
       { label: "Centro de costo",value: escapeHtml(costCenterName(center)), muted: true },
       { label: "Mes presupuestal",value: escapeHtml(formatMonth(request.budget_month)), muted: true },
       { label: "Partida",        value: escapeHtml(budgetCategoryLabel(category)), muted: true, full: true },
@@ -906,9 +1130,34 @@ function openRequestDetail(id) {
   if (dom.editRequestBtn) dom.editRequestBtn.style.display = canEdit ? "" : "none";
 
   loadApprovalHistory(request.id);
+  loadDetailApprover(request.id);
   if (isPaid) loadPaymentInfo(request.id);
   if (!dom.detailDialog.open) dom.detailDialog.showModal();
   if (window.FluxAuth?.canApprove?.()) loadDetailIncidencias(request);
+}
+
+async function loadDetailApprover(paymentRequestId) {
+  const target = document.getElementById("detailApproverRouting");
+  if (!target) return;
+  const { data, error } = await supabaseClient.rpc("get_payment_request_approver_details", {
+    p_payment_request_id: paymentRequestId,
+  });
+  if (error) {
+    target.textContent = "No disponible";
+    return;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.profile_id) {
+    target.textContent = "Sin revisor asignado";
+    return;
+  }
+  const roles = Array.isArray(row.eligible_roles) && row.eligible_roles.length ? ` · ${row.eligible_roles.join(", ")}` : "";
+  const source = row.source === "assigned"
+    ? " · Configurado por administración"
+    : row.source === "approval_rules"
+      ? " · Elegible por reglas"
+      : "";
+  target.textContent = `${row.display_name || "Sin nombre"}${roles}${source}`;
 }
 
 window.openRequestDetail = openRequestDetail;
@@ -1214,6 +1463,8 @@ function renderDecisionPanel(request) {
   const exception = isExceptionRequest(request);
   const finalStatus = isFinalDecisionStatus(request.status);
   const isPaid = request.status === "paid";
+  const canDecide = Boolean(window.FluxAuth?.canApprove?.())
+    && (!request.approver_id || request.approver_id === currentProfileId);
   const noteClass = isPaid ? "success" : finalStatus ? "neutral" : exception ? "warning" : "success";
   const noteText = isPaid
     ? "Esta solicitud ya fue pagada."
@@ -1225,6 +1476,8 @@ function renderDecisionPanel(request) {
 
   const controls = finalStatus
     ? `<div class="decision-note neutral">Esta solicitud ya tiene una decisión registrada.</div>`
+    : !canDecide
+    ? `<div class="decision-note neutral">Solo el aprobador seleccionado puede registrar una decisión.</div>`
     : `
       <textarea id="decisionComments" placeholder="${exception ? "Comentario obligatorio para resolver la excepción..." : "Comentario para la decisión..."}"></textarea>
       <div id="decisionError" class="decision-error"></div>
@@ -1418,6 +1671,7 @@ function renderStatusBadge(status) {
 
 function updateSummaryPanel() {
   const company = companyById(dom.companyId.value);
+  const approver = approverCandidates.find(candidate => candidate.profile_id === dom.approverId?.value);
   const center = costCenterById(dom.costCenterId.value);
   const category = budgetCategoryById(dom.budgetCategoryId.value);
   const availability = availabilityForCategory(dom.budgetCategoryId.value);
@@ -1426,6 +1680,17 @@ function updateSummaryPanel() {
   const currency = dom.currency?.value || "MXN";
 
   dom.summaryCompany.textContent = company ? companyName(company) : "Sin seleccionar";
+  if (dom.summaryApprover) {
+    if (approver) {
+      const roles = Array.isArray(approver.eligible_roles) && approver.eligible_roles.length
+        ? ` · ${approver.eligible_roles.join(", ")}`
+        : "";
+      const source = approver.source === "assigned" ? " · Configurado" : " · Elegible por reglas";
+      dom.summaryApprover.textContent = `${approver.display_name || approver.email}${roles}${source}`;
+    } else {
+      dom.summaryApprover.textContent = "Pendiente de seleccionar";
+    }
+  }
   dom.summaryCostCenter.textContent = center ? costCenterName(center) : "Sin seleccionar";
   dom.summaryCategory.textContent = category
     ? `${budgetCategoryLabel(category)} | Disp. ${formatCurrency(getAvailableAmount(availability), "MXN")}`
@@ -1686,6 +1951,23 @@ function showToast(title, message, type = "success") {
 
 function friendlyError(error, operation = "") {
   const message = error?.message || String(error || "Error desconocido");
+  const routingErrors = {
+    company_scope_required: "Tu perfil no tiene membresía activa en la empresa seleccionada.",
+    approver_id_required: "Selecciona quién revisará esta solicitud.",
+    approver_assignment_id_required: "Selecciona uno de los aprobadores configurados para ti.",
+    approver_assignment_not_allowed_without_pool: "La opción elegida ya no corresponde al origen disponible. Vuelve a cargar los aprobadores.",
+    approver_assignment_not_active: "El aprobador configurado fue desactivado. Selecciona otra opción.",
+    approver_assignment_snapshot_mismatch: "La opción seleccionada no coincide con la empresa o el solicitante.",
+    approver_not_in_configured_pool: "El aprobador ya no pertenece a tu lista configurada.",
+    approver_must_come_from_configured_pool: "Debes elegir un aprobador de tu lista configurada.",
+    approver_not_allowed_by_approval_rules: "El aprobador ya no cumple las reglas para esta empresa, centro de costo y monto.",
+    configured_approver_no_longer_eligible: "El aprobador configurado ya no tiene membresía o rol elegible.",
+    approver_not_eligible_for_company: "El aprobador ya no es elegible para esta empresa.",
+    requester_company_membership_required: "El solicitante no tiene membresía activa en la empresa.",
+    requester_cannot_be_own_approver: "El solicitante no puede aprobar su propia solicitud.",
+  };
+  const routingKey = Object.keys(routingErrors).find(key => message.includes(key));
+  if (routingKey) return routingErrors[routingKey];
   if (message.toLowerCase().includes("row-level security") || error?.code === "42501") {
     return `${operation ? `${operation}: ` : ""}la operacion fue bloqueada por RLS. Revisa policies para usuarios autenticados.`;
   }
@@ -1713,6 +1995,14 @@ function friendlyDecisionError(error) {
     actor_cannot_reject: "Tu rol no tiene permiso para rechazar esta solicitud.",
     actor_cannot_request_changes: "Tu rol no tiene permiso para solicitar cambios.",
     actor_cannot_request_budget_adjustment: "Tu rol no tiene permiso para solicitar ajuste presupuestal.",
+    selected_approver_only: "Solo el aprobador seleccionado para esta solicitud puede registrar la decisión.",
+    approver_assignment_snapshot_invalid: "No se pudo validar el origen administrativo del aprobador seleccionado.",
+    selected_approver_cannot_approve: "El aprobador seleccionado ya no cumple la regla para aprobar esta solicitud.",
+    selected_approver_cannot_approve_exception: "El aprobador seleccionado no puede autorizar esta excepción.",
+    selected_approver_cannot_reject: "El aprobador seleccionado no cumple la regla para rechazar esta solicitud.",
+    selected_approver_cannot_request_changes: "El aprobador seleccionado no cumple la regla para solicitar cambios.",
+    selected_approver_cannot_request_budget_adjustment: "El aprobador seleccionado no puede solicitar este ajuste presupuestal.",
+    actor_profile_must_match_current_profile: "La sesión no coincide con el perfil que intenta decidir.",
   };
 
   const key = Object.keys(known).find(item => message.includes(item));

@@ -229,6 +229,8 @@
         p_notes: payload.notes,
         p_requested_by: payload.requested_by,
         p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+        p_approver_id: payload.approver_id,
+        p_approver_assignment_id: payload.approver_assignment_id,
       })
       if (error) throw error
 
@@ -334,6 +336,14 @@
     panel?.remove()
     form.reset()
     form.dataset.fase2Submitting = "false"
+    const approver = document.getElementById("approverId")
+    if (approver) {
+      approver.disabled = true
+      approver.innerHTML = '<option value="">Completa empresa, centro de costo y monto</option>'
+      approver.dispatchEvent(new Event("change", { bubbles: true }))
+    }
+    const assignment = document.getElementById("approverAssignmentId")
+    if (assignment) assignment.value = ""
     modalScroll?.classList.remove("hidden")
     const headerTitle = form.querySelector(".modal-header h2")
     const headerCopy = form.querySelector(".modal-header p")
@@ -372,6 +382,8 @@
       payment_method: normalizePaymentMethod(value("paymentMethod") || "transfer"),
       proveedor_id: value("proveedorId"),
       company_id: value("companyId"),
+      approver_id: value("approverId"),
+      approver_assignment_id: value("approverAssignmentId") || null,
       cost_center_id: value("costCenterId"),
       budget_category_id: value("budgetCategoryId"),
       budget_month: value("budgetMonth") ? `${value("budgetMonth")}-01` : null,
@@ -389,6 +401,7 @@
     if (!payload.request_type) return "Selecciona el tipo de solicitud."
     if (!payload.payment_method) return "Selecciona el metodo de pago."
     if (!payload.company_id) return "Selecciona una empresa."
+    if (!payload.approver_id) return "Selecciona quien revisa o aprueba la solicitud."
     if (!payload.cost_center_id) return "Selecciona un centro de costo."
     if (!payload.budget_category_id) return "Selecciona una partida presupuestal."
     if (!payload.budget_month) return "Selecciona el mes presupuestal."

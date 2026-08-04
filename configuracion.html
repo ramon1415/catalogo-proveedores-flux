@@ -243,6 +243,48 @@
               </table>
             </div>
           </section>
+
+          <section class="table-card">
+            <div class="table-toolbar" style="grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto">
+              <select id="routingMembershipProfile" aria-label="Usuario para membresía"></select>
+              <select id="routingMembershipCompany" aria-label="Empresa para membresía"></select>
+              <button type="button" id="saveRoutingMembershipBtn" class="primary-btn">Agregar membresía</button>
+            </div>
+            <div style="padding:0 16px 10px">
+              <strong style="font-size:12px;color:var(--text-1)">Alcance usuario–empresa</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">Define en qué empresas puede operar cada perfil.</p>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Usuario</th><th>Empresa</th><th>Estatus</th><th>Acción</th></tr></thead>
+                <tbody id="routingMembershipsTableBody">
+                  <tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">Carga la pestaña Sistema para consultar membresías.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-card">
+            <div style="padding:14px 16px 8px">
+              <strong style="font-size:12px;color:var(--text-1)">Aprobadores disponibles por solicitante</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">Define las personas que un solicitante puede elegir para revisar sus solicitudes en cada empresa.</p>
+            </div>
+            <form id="routingAssignmentForm" class="table-toolbar" style="grid-template-columns:minmax(170px,1fr) minmax(170px,1fr) minmax(170px,1fr) auto">
+              <select id="routingRequester" aria-label="Solicitante" required></select>
+              <select id="routingAssignmentCompany" aria-label="Empresa" required disabled></select>
+              <select id="routingApprover" aria-label="Aprobador disponible" required disabled></select>
+              <button type="submit" id="saveRoutingAssignmentBtn" class="primary-btn">Agregar aprobador</button>
+            </form>
+            <div id="routingAssignmentHelp" class="field-hint" style="padding:0 16px 10px">Selecciona un solicitante con membresía activa.</div>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Solicitante</th><th>Empresa</th><th>Aprobador disponible</th><th>Rol</th><th>Estatus</th><th>Acción</th></tr></thead>
+                <tbody id="routingAssignmentsTableBody">
+                  <tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Sin aprobadores configurados.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
       </section>
@@ -412,6 +454,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260610-role-alias"></script>
+  <script src="./configuracion.js?v=20260709-multi-approver-pool"></script>
 </body>
 </html>

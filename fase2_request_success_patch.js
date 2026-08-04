@@ -37,6 +37,7 @@
       const validation = validatePayload(payload)
       if (validation) {
         toast("Revisa la solicitud", validation, "warning")
+        window.focusFirstInvalidRequestField?.()
         form.dataset.fase2SuccessSubmitting = "false"
         setButtonLoading(submitButton, false, "Crear solicitud")
         return
@@ -55,6 +56,8 @@
         p_notes: payload.notes,
         p_requested_by: payload.requested_by,
         p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+        p_approver_id: payload.approver_id,
+        p_approver_assignment_id: payload.approver_assignment_id,
       })
       if (error) throw error
 
@@ -71,7 +74,11 @@
       if (metadataWarning) toast("Metodo de pago pendiente", metadataWarning, "warning")
       refreshRequestsList(requestId)
     } catch (error) {
-      toast("No se pudo crear la solicitud", friendlyError(error), "error")
+      await window.refreshPaymentRequestApproversAfterError?.(error)
+      const message = typeof window.friendlyError === "function"
+        ? window.friendlyError(error, "create_payment_request")
+        : friendlyError(error)
+      toast("No se pudo crear la solicitud", message, "error")
       form.dataset.fase2SuccessSubmitting = "false"
       setButtonLoading(submitButton, false, "Crear solicitud")
     }
@@ -183,6 +190,8 @@
       payment_method: normalizePaymentMethod(value("paymentMethod") || "transfer"),
       proveedor_id: value("proveedorId"),
       company_id: value("companyId"),
+      approver_id: value("approverId"),
+      approver_assignment_id: value("approverAssignmentId") || null,
       cost_center_id: value("costCenterId"),
       budget_category_id: value("budgetCategoryId"),
       budget_month: value("budgetMonth") ? `${value("budgetMonth")}-01` : null,
@@ -206,6 +215,10 @@
     if (!payload.proveedor_id) return "Selecciona un proveedor."
     if (!payload.amount_requested || payload.amount_requested <= 0) return "El monto solicitado debe ser mayor a 0."
     if (!payload.description) return "Captura una descripcion."
+    if (typeof window.validatePaymentRequestApproverSelection === "function") {
+      return window.validatePaymentRequestApproverSelection()
+    }
+    if (!payload.approver_id) return "Selecciona quien revisara esta solicitud."
     return ""
   }
 
