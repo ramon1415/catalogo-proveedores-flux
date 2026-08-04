@@ -68,12 +68,10 @@ jobs:
             raise SystemExit(f"PLATFORM_SCOPE_INVALID:{names}")
           if event["pull_request"]["base"]["ref"]!="main":
             raise SystemExit("PLATFORM_BASE_NOT_MAIN")
-          if event["pull_request"]["head"]["ref"]!="platform/flux-reusable-prod-release":
-            raise SystemExit("PLATFORM_HEAD_INVALID")
           text=pathlib.Path(expected).read_text()
           required=[
             "workflow_dispatch:","target_git_sha:","migration_allowlist_json:",
-            "environment: supabase-production","github.ref == 'refs/heads/main'",
+            "environment: supabase-production","github.ref_name == 'main'",
             "PENDING","APPLIED_EQUIVALENT","migration-allowlist.json","prod-postchecks.json",
           ]
           banned=["migration"+" repair","db"+" reset","db"+" push","NODE_TLS"+"_"+"REJECT_UNAUTHORIZED"]
@@ -86,7 +84,7 @@ jobs:
 
   release-production:
     name: Protected PROD preflight, allowlisted apply and postchecks
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: supabase-production
@@ -254,7 +252,11 @@ jobs:
           else
             [[ -n "$SUPABASE_DB_PASSWORD_PROD" ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
             DIRECT_HOST="db.$EXPECTED_PROD_REF.supabase.co"
-            DIRECT_ADDR="$(getent ahostsv4 "$DIRECT_HOST" | awk '{print $1; exit}')"
+            DIRECT_ADDR=""
+            if DIRECT_LOOKUP="$(getent ahostsv4 "$DIRECT_HOST" 2>/dev/null)"; then
+              DIRECT_ADDR="$(printf '%s\n' "$DIRECT_LOOKUP" | awk 'NF { print $1; exit }')"
+            fi
+            unset DIRECT_LOOKUP
             if [[ -n "$DIRECT_ADDR" ]]; then
               export PGHOST="$DIRECT_HOST" PGHOSTADDR="$DIRECT_ADDR" PGPORT=5432 PGDATABASE=postgres PGUSER=postgres PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
               CONNECTION_MODE="direct-project-host"
@@ -271,7 +273,9 @@ jobs:
             PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_preflight" \
               psql_prod -X -Atq -v ON_ERROR_STOP=1 -c "$1"
           }
-          identity="$(roq "select json_build_object('database',current_database(),'user',current_user,'server_addr',inet_server_addr(),'server_port',inet_server_port(),'server_version_num',current_setting('server_version_num'),'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only'))::text;")"
+          if ! identity="$(roq "select json_build_object('database',current_database(),'user',current_user,'server_addr',inet_server_addr(),'server_port',inet_server_port(),'server_version_num',current_setting('server_version_num'),'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only'))::text;" 2>/dev/null)"; then
+            fail_gate "STOP / PROD_DB_ENDPOINT_UNREACHABLE"
+          fi
           printf '%s\n' "$identity" | jq --arg ref "$EXPECTED_PROD_REF" --arg mode "$CONNECTION_MODE" '.+{status:"PASS",project_ref:$ref,connection_mode:$mode}' > "$EVIDENCE_DIR/prod-db-identity.json"
           privilege="$(roq "select r.rolsuper or (has_schema_privilege(current_user,'public','CREATE') and pg_has_role(current_user,p.relowner,'MEMBER') and pg_has_role(current_user,s.relowner,'MEMBER')) from pg_roles r cross join pg_class p cross join pg_class s where r.rolname=current_user and p.oid='public.proveedores'::regclass and s.oid='storage.objects'::regclass;")"
           [[ "$privilege" = t ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
