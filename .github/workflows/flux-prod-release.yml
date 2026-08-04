@@ -73,8 +73,13 @@ jobs:
             "workflow_dispatch:","target_git_sha:","migration_allowlist_json:",
             "environment: supabase-production","github.ref_name == 'main'",
             "PENDING","APPLIED_EQUIVALENT","migration-allowlist.json","prod-postchecks.json",
+            "SUPABASE_PROD_SESSION_POOLER_DB_URL","BEGIN TRANSACTION READ ONLY",
+            "connection-diagnostic.json","POOLER_USERNAME_INVALID","PGSSLMODE=require",
           ]
-          banned=["migration"+" repair","db"+" reset","db"+" push","NODE_TLS"+"_"+"REJECT_UNAUTHORIZED"]
+          banned=[
+            "migration"+" repair","db"+" reset","db"+" push","NODE_TLS"+"_"+"REJECT_UNAUTHORIZED",
+            "aws"+"-0-","PGPORT="+"65"+"43","SUPABASE_PROD"+"_"+"DB_URL","SUPABASE_DB"+"_"+"PASSWORD_PROD",
+          ]
           missing=[item for item in required if item not in text]
           found=[item for item in banned if item.lower() in text.lower()]
           if missing or found:
@@ -98,8 +103,7 @@ jobs:
       FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
-      SUPABASE_DB_PASSWORD_PROD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
-      SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
 
     steps:
       - name: Initialize sanitized evidence
@@ -235,7 +239,6 @@ jobs:
             (root/"gate-result.txt").write_text("STOP / PROD_BACKUP_UNAVAILABLE\n")
             raise SystemExit("PROD_BACKUP_UNAVAILABLE")
           PY
-          printf 'PROD_REGION=%s\n' "$(jq -r '.region // empty' "$RUNNER_TEMP/flux-prod-project.json")" >> "$GITHUB_ENV"
 
       - name: PROD preflight and read-only dry-run plan
         shell: bash
@@ -246,37 +249,138 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq postgresql-client
           fi
-          if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then
-            [[ "$SUPABASE_PROD_DB_URL" == *"$EXPECTED_PROD_REF"* && "$SUPABASE_PROD_DB_URL" != *"$FORBIDDEN_DEV_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
-            CONNECTION_MODE="protected-write-url"
-          else
-            [[ -n "$SUPABASE_DB_PASSWORD_PROD" ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
-            DIRECT_HOST="db.$EXPECTED_PROD_REF.supabase.co"
-            DIRECT_ADDR=""
-            if DIRECT_LOOKUP="$(getent ahostsv4 "$DIRECT_HOST" 2>/dev/null)"; then
-              DIRECT_ADDR="$(printf '%s\n' "$DIRECT_LOOKUP" | awk 'NF { print $1; exit }')"
-            fi
-            unset DIRECT_LOOKUP
-            if [[ -n "$DIRECT_ADDR" ]]; then
-              export PGHOST="$DIRECT_HOST" PGHOSTADDR="$DIRECT_ADDR" PGPORT=5432 PGDATABASE=postgres PGUSER=postgres PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
-              CONNECTION_MODE="direct-project-host"
-            else
-              [[ -n "$PROD_REGION" ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
-              export PGHOST="aws-0-$PROD_REGION.pooler.supabase.com" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$EXPECTED_PROD_REF" PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
-              CONNECTION_MODE="session-pooler"
-            fi
+          [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || fail_gate "WAIT / PROD_SESSION_POOLER_SECRET_REQUIRED"
+          if ! python3 - <<'PY'
+          import hashlib, os, urllib.parse
+          try:
+              raw=os.environ["SUPABASE_PROD_SESSION_POOLER_DB_URL"]
+              parsed=urllib.parse.urlsplit(raw)
+              host=(parsed.hostname or "").lower()
+              user=urllib.parse.unquote(parsed.username or "")
+              password=urllib.parse.unquote(parsed.password or "")
+              database=urllib.parse.unquote((parsed.path or "").lstrip("/"))
+              query=urllib.parse.parse_qs(parsed.query,keep_blank_values=True)
+              ssl_modes=[item.lower() for item in query.get("sslmode",[])]
+              prod=os.environ["EXPECTED_PROD_REF"]
+              dev=os.environ["FORBIDDEN_DEV_REF"]
+              valid=(
+                  parsed.scheme in ("postgres","postgresql")
+                  and host.endswith(".pooler.supabase.com")
+                  and host != ".pooler.supabase.com"
+                  and parsed.port == 5432
+                  and user == f"postgres.{prod}"
+                  and bool(password)
+                  and bool(database)
+                  and dev not in urllib.parse.unquote(raw)
+                  and all(mode in ("require","verify-ca","verify-full") for mode in ssl_modes)
+              )
+              if not valid:
+                  raise SystemExit(1)
+              fingerprint=hashlib.sha256(host.encode()).hexdigest()
+              with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as env:
+                  env.write(f"POOLER_HOST_FINGERPRINT={fingerprint}\n")
+          except Exception:
+              raise SystemExit(1)
+          PY
+          then
+            fail_gate "STOP / PROD_SESSION_POOLER_URL_INVALID"
           fi
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          CONNECTION_MODE="explicit-session-pooler"
           psql_prod() {
-            if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then command psql "$SUPABASE_PROD_DB_URL" "$@"; else command psql "$@"; fi
+            command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" "$@"
           }
           roq() {
             PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_preflight" \
               psql_prod -X -Atq -v ON_ERROR_STOP=1 -c "$1"
           }
-          if ! identity="$(roq "select json_build_object('database',current_database(),'user',current_user,'server_addr',inet_server_addr(),'server_port',inet_server_port(),'server_version_num',current_setting('server_version_num'),'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only'))::text;" 2>/dev/null)"; then
-            fail_gate "STOP / PROD_DB_ENDPOINT_UNREACHABLE"
+          classify_connection_failure() {
+            local exit_code="$1" phase="$2" raw_file="$3"
+            local raw_lc category sqlstate message
+            raw_lc="$(tr '[:upper:]' '[:lower:]' < "$raw_file")"
+            sqlstate="$(grep -Eio 'sqlstate[[:space:]:=]+[0-9a-z]{5}' "$raw_file" | head -n1 | grep -Eio '[0-9a-z]{5}$' | tr '[:lower:]' '[:upper:]' || true)"
+            if grep -Eq 'tenant or user not found|invalid (pooler )?user|user .* does not exist' <<<"$raw_lc"; then
+              category="POOLER_USERNAME_INVALID"
+              message="The session-pooler username was rejected."
+            elif grep -Eq 'password authentication failed|no password supplied|authentication failed' <<<"$raw_lc"; then
+              category="AUTHENTICATION_FAILED"
+              message="PostgreSQL authentication failed."
+            elif grep -Eq 'database .* does not exist|unknown database' <<<"$raw_lc"; then
+              category="DATABASE_NOT_FOUND"
+              message="The requested PostgreSQL database was not found."
+            elif grep -Eq 'certificate verify failed|certificate verification|ssl error|tls error|certificate has expired|self-signed certificate' <<<"$raw_lc"; then
+              category="TLS_VERIFICATION_FAILED"
+              message="TLS verification failed."
+            elif grep -Eq 'could not translate host name|name or service not known|temporary failure in name resolution|nodename nor servname' <<<"$raw_lc"; then
+              category="DNS_RESOLUTION_FAILED"
+              message="DNS resolution failed."
+            elif grep -Eq 'timeout expired|connection timed out|operation timed out' <<<"$raw_lc"; then
+              category="CONNECTION_TIMEOUT"
+              message="The PostgreSQL connection timed out."
+            elif grep -Eq 'connection refused|network is unreachable|no route to host|could not connect to server|server closed the connection unexpectedly' <<<"$raw_lc"; then
+              category="TCP_CONNECTION_FAILED"
+              message="The TCP connection to PostgreSQL failed."
+            else
+              category="UNKNOWN_CONNECTION_FAILURE"
+              message="The PostgreSQL connection failed for an unclassified reason."
+            fi
+            jq -n --arg category "$category" --argjson exit_code "$exit_code" --arg sqlstate "$sqlstate" \
+              --arg phase "$phase" --arg fingerprint "$POOLER_HOST_FINGERPRINT" --arg message "$message" \
+              '{category:$category,exit_code:$exit_code,sqlstate:($sqlstate|select(length>0)//null),phase:$phase,tls_enabled:true,project_ref_match:true,host_fingerprint:$fingerprint,message:$message}' \
+              > "$EVIDENCE_DIR/connection-diagnostic.json"
+            rm -f "$raw_file" "$RUNNER_TEMP/flux-prod-handshake.stdout.raw"
+            fail_gate "STOP / PROD_$category"
+          }
+          HANDSHAKE_OUT="$RUNNER_TEMP/flux-prod-handshake.stdout.raw"
+          HANDSHAKE_ERR="$RUNNER_TEMP/flux-prod-handshake.stderr.raw"
+          set +e
+          PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_handshake" \
+            psql_prod -X -Atq -v ON_ERROR_STOP=1 >"$HANDSHAKE_OUT" 2>"$HANDSHAKE_ERR" <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SELECT json_build_object(
+            'database',current_database(),
+            'user',current_user,
+            'transaction_read_only',current_setting('transaction_read_only'),
+            'server_version_num',current_setting('server_version_num')
+          )::text;
+          ROLLBACK;
+          SQL
+          HANDSHAKE_EXIT=$?
+          set -e
+          if [[ "$HANDSHAKE_EXIT" -ne 0 ]]; then
+            classify_connection_failure "$HANDSHAKE_EXIT" "READ_ONLY_HANDSHAKE" "$HANDSHAKE_ERR"
           fi
-          printf '%s\n' "$identity" | jq --arg ref "$EXPECTED_PROD_REF" --arg mode "$CONNECTION_MODE" '.+{status:"PASS",project_ref:$ref,connection_mode:$mode}' > "$EVIDENCE_DIR/prod-db-identity.json"
+          if ! python3 - <<'PY'
+          import json,os,pathlib
+          out=pathlib.Path(os.environ["RUNNER_TEMP"]+"/flux-prod-handshake.stdout.raw")
+          lines=[line for line in out.read_text().splitlines() if line.strip()]
+          identity=json.loads(lines[-1]) if lines else {}
+          expected_user="postgres."+os.environ["EXPECTED_PROD_REF"]
+          forbidden=os.environ["FORBIDDEN_DEV_REF"]
+          if (
+              identity.get("user") not in ("postgres",expected_user)
+              or identity.get("transaction_read_only") != "on"
+              or not identity.get("database")
+              or forbidden in json.dumps(identity)
+          ):
+              raise SystemExit(1)
+          evidence={
+              "status":"PASS",
+              "connection_mode":"explicit-session-pooler",
+              "database":identity["database"],
+              "transaction_read_only":"on",
+              "server_version_num":identity.get("server_version_num"),
+              "tls_enabled":True,
+              "project_ref_match":True,
+              "host_fingerprint":os.environ["POOLER_HOST_FINGERPRINT"],
+          }
+          pathlib.Path(os.environ["EVIDENCE_DIR"]+"/prod-db-identity.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          PY
+          then
+            rm -f "$HANDSHAKE_OUT" "$HANDSHAKE_ERR"
+            fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+          fi
+          rm -f "$HANDSHAKE_OUT" "$HANDSHAKE_ERR"
           privilege="$(roq "select r.rolsuper or (has_schema_privilege(current_user,'public','CREATE') and pg_has_role(current_user,p.relowner,'MEMBER') and pg_has_role(current_user,s.relowner,'MEMBER')) from pg_roles r cross join pg_class p cross join pg_class s where r.rolname=current_user and p.oid='public.proveedores'::regclass and s.oid='storage.objects'::regclass;")"
           [[ "$privilege" = t ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
           prereq="$(roq "select to_regclass('public.proveedores') is not null and to_regclass('public.profiles') is not null and to_regclass('storage.objects') is not null and to_regclass('storage.buckets') is not null and exists(select 1 from storage.buckets where id='payment-receipts' and public=false) and to_regprocedure('public.flux_approver_roles()') is not null and to_regprocedure('public.flux_member_roles()') is not null;")"
@@ -312,8 +416,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           fail_gate() { printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"; exit 1; }
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
           psql_prod() {
-            if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then command psql "$SUPABASE_PROD_DB_URL" "$@"; else command psql "$@"; fi
+            command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" "$@"
           }
           roq() {
             PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_postcheck" \
@@ -384,8 +489,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          unset PGPASSWORD SUPABASE_DB_PASSWORD_PROD SUPABASE_PROD_DB_URL SUPABASE_ACCESS_TOKEN
-          rm -f "$RUNNER_TEMP/flux-prod-project.json" "$RUNNER_TEMP/flux-prod-backups.json" "$RUNNER_TEMP/flux-allowlist.txt" "$RUNNER_TEMP/flux-prod-mutations.ndjson"
+          unset SUPABASE_PROD_SESSION_POOLER_DB_URL SUPABASE_ACCESS_TOKEN POOLER_HOST_FINGERPRINT PGSSLMODE PGCONNECT_TIMEOUT
+          rm -f "$RUNNER_TEMP/flux-prod-project.json" "$RUNNER_TEMP/flux-prod-backups.json" "$RUNNER_TEMP/flux-allowlist.txt" "$RUNNER_TEMP/flux-prod-mutations.ndjson" \
+            "$RUNNER_TEMP/flux-prod-handshake.stdout.raw" "$RUNNER_TEMP/flux-prod-handshake.stderr.raw"
           printf '%s\n' PASS > "$EVIDENCE_DIR/cleanup.txt"
 
       - name: Upload sanitized evidence
