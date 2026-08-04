@@ -132,3 +132,12 @@ Ningún hunk de cortes DEPENDE funcionalmente de código del slice de permisos (
 - Deep-link `layouts.js` → `proveedores.html?provider_id=` cubierto por `openProviderFromQuery()` portado.
 - Cero referencias a `extraordinaryDialog` en `solicitudes.html`.
 - RPCs auditados archivo por archivo (tabla arriba), incluidos los dinámicos (`runRpc(...)`, `state.view === "finance" ? ... : ...`).
+
+## Addendum 5-ago-2026 — branding del PDF de corte
+
+`exportPdf()` de `approval_batches.js` actualizado a la identidad Flux verde que ya
+está en prod (login + shell): wordmark embebido (base64, ~12 KB) arriba a la derecha,
+encabezado de tabla `#172d29` con texto crema, filas alternadas con tinte verde y pie
+"Flux Operadora — corte semanal". Solo estilos/branding — cero cambios de datos,
+columnas o RPCs. `node --check` OK. Verificado renderizando el PDF con datos mock
+(jsPDF + autotable reales). Cache bump: `approval_batches.js?v=20260805-brand-pdf`.
