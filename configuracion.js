@@ -21,6 +21,12 @@ let sociosPeriods = []
 let editingMemberId = null
 let sociosLoaded = false
 
+// Enrutamiento de aprobadores
+let routingCompanies = []
+let routingMemberships = []
+let routingAssignments = []
+let routingApprovers = []
+
 // ── Init ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", initConfigurationPage)
 
@@ -80,10 +86,16 @@ function bindEvents() {
   // Usuarios
   document.getElementById("usersSearch")?.addEventListener("input", renderUsersTable)
   document.getElementById("usersRoleFilter")?.addEventListener("change", renderUsersTable)
-  document.getElementById("refreshUsersBtn")?.addEventListener("click", loadUsers)
+  document.getElementById("refreshUsersBtn")?.addEventListener("click", loadSystemAdministration)
   document.getElementById("closeAssignRoleBtn")?.addEventListener("click", closeAssignRole)
   document.getElementById("cancelAssignRoleBtn")?.addEventListener("click", closeAssignRole)
   document.getElementById("saveAssignRoleBtn")?.addEventListener("click", saveAssignRole)
+  document.getElementById("saveRoutingMembershipBtn")?.addEventListener("click", saveRoutingMembership)
+  document.getElementById("routingMembershipsTableBody")?.addEventListener("click", handleRoutingMembershipAction)
+  document.getElementById("routingRequester")?.addEventListener("change", handleRoutingRequesterChange)
+  document.getElementById("routingAssignmentCompany")?.addEventListener("change", loadRoutingApproverOptions)
+  document.getElementById("routingAssignmentForm")?.addEventListener("submit", saveRoutingAssignment)
+  document.getElementById("routingAssignmentsTableBody")?.addEventListener("click", handleRoutingAssignmentAction)
 }
 
 // ── Tab logic ────────────────────────────────────────────────────
@@ -125,7 +137,7 @@ function openTab(tab) {
   params.set("tab", tab)
   window.history.replaceState({}, "", `${window.location.pathname}?${params}`)
 
-  if (tab === "system" && window.FluxAuth?.isSysadmin?.()) loadUsers()
+  if (tab === "system" && window.FluxAuth?.isSysadmin?.()) loadSystemAdministration()
 
   if (tab === "originAccounts" && !originLoaded) loadOriginAccounts()
   if (tab === "members" && !sociosLoaded) loadSocios()
@@ -728,11 +740,263 @@ async function saveAssignRole() {
 
     showToast("Rol actualizado", "El acceso del usuario fue actualizado correctamente.", "success")
     closeAssignRole()
-    await loadUsers()
+    await loadSystemAdministration()
   } catch (err) {
     showToast("Error al guardar", err.message, "error")
   } finally {
     btn.disabled = false
     btn.textContent = "Guardar rol"
   }
+}
+
+async function loadSystemAdministration() {
+  await loadUsers()
+  await loadApproverRoutingAdmin()
+}
+
+async function loadApproverRoutingAdmin() {
+  const membershipsBody = document.getElementById("routingMembershipsTableBody")
+  const assignmentsBody = document.getElementById("routingAssignmentsTableBody")
+  if (membershipsBody) membershipsBody.innerHTML = `<tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">Cargando membresías...</td></tr>`
+  if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Cargando aprobadores disponibles...</td></tr>`
+
+  try {
+    const [companiesResult, membershipsResult, assignmentsResult] = await Promise.all([
+      configClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name"),
+      configClient.rpc("list_profile_company_memberships"),
+      configClient.rpc("list_approver_assignments"),
+    ])
+    const failed = [companiesResult, membershipsResult, assignmentsResult].find(result => result.error)
+    if (failed) throw failed.error
+
+    routingCompanies = companiesResult.data || []
+    routingMemberships = membershipsResult.data || []
+    routingAssignments = assignmentsResult.data || []
+    populateRoutingBaseSelectors()
+    renderRoutingMemberships()
+    renderRoutingAssignments()
+    handleRoutingRequesterChange()
+  } catch (error) {
+    const message = escHtml(friendlyRoutingError(error))
+    if (membershipsBody) membershipsBody.innerHTML = `<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--ruby)">${message}</td></tr>`
+    if (assignmentsBody) assignmentsBody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--ruby)">${message}</td></tr>`
+  }
+}
+
+function populateRoutingBaseSelectors() {
+  const profileOptions = `<option value="">Seleccionar usuario...</option>` +
+    allUsers.filter(user => user.active !== false).map(user => `<option value="${escHtml(user.id)}">${escHtml(user.full_name || user.email || "Sin nombre")}</option>`).join("")
+  const companyOptions = `<option value="">Seleccionar empresa...</option>` +
+    routingCompanies.map(company => `<option value="${escHtml(company.id)}">${escHtml(company.legal_name || company.name || "Sin empresa")}</option>`).join("")
+  const membershipProfile = document.getElementById("routingMembershipProfile")
+  const membershipCompany = document.getElementById("routingMembershipCompany")
+  const requester = document.getElementById("routingRequester")
+  if (membershipProfile) membershipProfile.innerHTML = profileOptions
+  if (membershipCompany) membershipCompany.innerHTML = companyOptions
+  if (requester) requester.innerHTML = profileOptions.replace("Seleccionar usuario...", "Seleccionar solicitante...")
+}
+
+function renderRoutingMemberships() {
+  const tbody = document.getElementById("routingMembershipsTableBody")
+  if (!tbody) return
+  if (!routingMemberships.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">No hay membresías configuradas.</td></tr>`
+    return
+  }
+  tbody.innerHTML = routingMemberships.map(row => `
+    <tr>
+      <td><span class="cell-main">${escHtml(row.profile_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.profile_email || "")}</span></td>
+      <td>${escHtml(row.company_name || "Sin empresa")}</td>
+      <td>${Components.badge(row.active ? "Activa" : "Inactiva", row.active ? "success" : "neutral")}</td>
+      <td><button type="button" class="small-btn" data-routing-membership-id="${escHtml(row.id)}">${row.active ? "Desactivar" : "Activar"}</button></td>
+    </tr>`).join("")
+}
+
+async function saveRoutingMembership() {
+  const profileId = document.getElementById("routingMembershipProfile")?.value || ""
+  const companyId = document.getElementById("routingMembershipCompany")?.value || ""
+  if (!profileId || !companyId) return showToast("Datos incompletos", "Selecciona usuario y empresa.", "warning")
+  const button = document.getElementById("saveRoutingMembershipBtn")
+  button.disabled = true
+  try {
+    const { error } = await configClient.rpc("set_profile_company_membership", {
+      p_profile_id: profileId,
+      p_company_id: companyId,
+      p_active: true,
+    })
+    if (error) throw error
+    showToast("Membresía guardada", "El alcance usuario–empresa quedó activo.", "success")
+    await loadApproverRoutingAdmin()
+  } catch (error) {
+    showToast("No se pudo guardar", friendlyRoutingError(error), "danger")
+  } finally {
+    button.disabled = false
+  }
+}
+
+async function handleRoutingMembershipAction(event) {
+  const button = event.target.closest("[data-routing-membership-id]")
+  if (!button) return
+  const membership = routingMemberships.find(row => row.id === button.dataset.routingMembershipId)
+  if (!membership) return
+  button.disabled = true
+  try {
+    const { error } = await configClient.rpc("set_profile_company_membership", {
+      p_profile_id: membership.profile_id,
+      p_company_id: membership.company_id,
+      p_active: !membership.active,
+    })
+    if (error) throw error
+    showToast("Membresía actualizada", !membership.active ? "Membresía activada." : "Membresía desactivada.", "success")
+    await loadApproverRoutingAdmin()
+  } catch (error) {
+    showToast("No se pudo actualizar", friendlyRoutingError(error), "danger")
+  } finally {
+    button.disabled = false
+  }
+}
+
+function handleRoutingRequesterChange() {
+  const requesterId = document.getElementById("routingRequester")?.value || ""
+  const companySelect = document.getElementById("routingAssignmentCompany")
+  const approverSelect = document.getElementById("routingApprover")
+  const activeMemberships = routingMemberships.filter(row => row.profile_id === requesterId && row.active)
+  if (companySelect) {
+    companySelect.disabled = !requesterId || !activeMemberships.length
+    companySelect.innerHTML = `<option value="">Seleccionar empresa...</option>` +
+      activeMemberships.map(row => `<option value="${escHtml(row.company_id)}">${escHtml(row.company_name || "Sin empresa")}</option>`).join("")
+  }
+  if (approverSelect) {
+    approverSelect.disabled = true
+    approverSelect.innerHTML = `<option value="">Selecciona solicitante y empresa</option>`
+  }
+  setRoutingAssignmentHelp(activeMemberships.length ? "Selecciona la empresa para cargar aprobadores elegibles." : "El solicitante necesita una membresía activa.")
+}
+
+async function loadRoutingApproverOptions() {
+  const requesterId = document.getElementById("routingRequester")?.value || ""
+  const companyId = document.getElementById("routingAssignmentCompany")?.value || ""
+  const select = document.getElementById("routingApprover")
+  routingApprovers = []
+  if (!select) return
+  if (!requesterId || !companyId) {
+    select.disabled = true
+    select.innerHTML = `<option value="">Selecciona solicitante y empresa</option>`
+    return
+  }
+  select.disabled = true
+  select.innerHTML = `<option value="">Cargando aprobadores...</option>`
+  const { data, error } = await configClient.rpc("list_company_approver_candidates", {
+    p_company_id: companyId,
+    p_requester_id: requesterId,
+  })
+  if (error) {
+    select.innerHTML = `<option value="">No se pudieron cargar</option>`
+    setRoutingAssignmentHelp(friendlyRoutingError(error), true)
+    return
+  }
+  routingApprovers = data || []
+  select.innerHTML = `<option value="">Seleccionar aprobador...</option>` +
+    routingApprovers.map(row => {
+      const roles = Array.isArray(row.eligible_roles) ? row.eligible_roles.join(", ") : ""
+      return `<option value="${escHtml(row.profile_id)}">${escHtml(row.display_name || row.email || "Sin nombre")}${roles ? ` - ${escHtml(roles)}` : ""}</option>`
+    }).join("")
+  select.disabled = !routingApprovers.length
+  setRoutingAssignmentHelp(routingApprovers.length ? "Se excluyen los aprobadores que ya están activos en este pool." : "No quedan aprobadores disponibles para agregar.", !routingApprovers.length)
+}
+
+async function saveRoutingAssignment(event) {
+  event.preventDefault()
+  const requesterId = document.getElementById("routingRequester")?.value || ""
+  const companyId = document.getElementById("routingAssignmentCompany")?.value || ""
+  const approverId = document.getElementById("routingApprover")?.value || ""
+  if (!requesterId || !companyId || !approverId) return showToast("Datos incompletos", "Selecciona solicitante, empresa y aprobador.", "warning")
+  const button = document.getElementById("saveRoutingAssignmentBtn")
+  button.disabled = true
+  try {
+    const { error } = await configClient.rpc("add_approver_assignment", {
+      p_company_id: companyId,
+      p_requester_id: requesterId,
+      p_approver_id: approverId,
+    })
+    if (error) throw error
+    showToast("Aprobador agregado correctamente", "El aprobador quedó disponible para este solicitante y empresa.", "success")
+    await loadApproverRoutingAdmin()
+  } catch (error) {
+    showToast("No se pudo guardar", friendlyRoutingError(error), "danger")
+  } finally {
+    button.disabled = false
+  }
+}
+
+function renderRoutingAssignments() {
+  const tbody = document.getElementById("routingAssignmentsTableBody")
+  if (!tbody) return
+  if (!routingAssignments.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">No hay aprobadores disponibles configurados.</td></tr>`
+    return
+  }
+  tbody.innerHTML = routingAssignments.map(row => `
+    <tr>
+      <td><span class="cell-main">${escHtml(row.requester_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.requester_email || "")}</span></td>
+      <td>${escHtml(row.company_name || "Sin empresa")}</td>
+      <td><span class="cell-main">${escHtml(row.approver_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.approver_email || "")}</span></td>
+      <td>${escHtml(Array.isArray(row.approver_roles) && row.approver_roles.length ? row.approver_roles.join(", ") : "Sin rol elegible")}</td>
+      <td>${Components.badge(row.active ? "Activo" : "Inactivo", row.active ? "success" : "neutral")}</td>
+      <td><button type="button" class="small-btn ${row.active ? "danger" : ""}" data-routing-assignment-id="${escHtml(row.id)}" data-routing-assignment-action="${row.active ? "remove" : "activate"}">${row.active ? "Quitar" : "Activar"}</button></td>
+    </tr>`).join("")
+}
+
+async function handleRoutingAssignmentAction(event) {
+  const button = event.target.closest("[data-routing-assignment-id]")
+  if (!button) return
+  const assignment = routingAssignments.find(row => row.id === button.dataset.routingAssignmentId)
+  if (!assignment) return
+  button.disabled = true
+  try {
+    const activating = button.dataset.routingAssignmentAction === "activate"
+    const { error } = activating
+      ? await configClient.rpc("add_approver_assignment", {
+          p_company_id: assignment.company_id,
+          p_requester_id: assignment.requester_id,
+          p_approver_id: assignment.approver_id,
+        })
+      : await configClient.rpc("remove_approver_assignment", {
+          p_assignment_id: assignment.id,
+        })
+    if (error) throw error
+    showToast(
+      activating ? "Aprobador activado correctamente" : "Aprobador eliminado correctamente",
+      activating ? "Volvió a quedar disponible en el pool." : "Los demás aprobadores configurados permanecen sin cambios.",
+      "success"
+    )
+    await loadApproverRoutingAdmin()
+  } catch (error) {
+    showToast("No se pudo quitar", friendlyRoutingError(error), "danger")
+  } finally {
+    button.disabled = false
+  }
+}
+
+function setRoutingAssignmentHelp(message, isError = false) {
+  const element = document.getElementById("routingAssignmentHelp")
+  if (!element) return
+  element.textContent = message
+  element.style.color = isError ? "var(--ruby)" : ""
+}
+
+function friendlyRoutingError(error) {
+  const message = error?.message || String(error || "Error desconocido")
+  const known = {
+    routing_admin_required: "Solo SysAdmin puede administrar el enrutamiento.",
+    membership_used_by_active_approver_pool: "Quita primero los aprobadores activos que usan esta membresía.",
+    requester_company_membership_required: "El solicitante necesita membresía activa en la empresa.",
+    approver_company_membership_required: "El usuario no pertenece a la empresa o su membresía no está activa.",
+    approver_role_required: "El usuario no tiene rol finance/director.",
+    approver_not_eligible_for_company: "El aprobador debe ser finance/director y pertenecer a la empresa.",
+    requester_cannot_be_own_pool_approver: "El solicitante no puede agregarse como su propio aprobador.",
+    approver_already_configured: "Este aprobador ya está configurado para el solicitante y la empresa.",
+  }
+  const key = Object.keys(known).find(item => message.includes(item))
+  return key ? known[key] : friendlyError(error)
 }
