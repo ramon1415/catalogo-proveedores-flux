@@ -1,0 +1,395 @@
+name: Flux protected reusable PROD release
+
+'on':
+  pull_request:
+    paths:
+      - .github/workflows/flux-prod-release.yml
+  workflow_dispatch:
+    inputs:
+      release_pr_number:
+        description: Open release PR whose head is the immutable target
+        required: true
+        type: string
+      target_git_sha:
+        description: Exact 40-character Git SHA to release
+        required: true
+        type: string
+      migration_allowlist_json:
+        description: Exact JSON array of migration paths allowed for this release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+  deployments: read
+
+concurrency:
+  group: flux-protected-prod-release
+  cancel-in-progress: false
+
+jobs:
+  validate-platform-workflow:
+    name: Validate protected release workflow
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout platform PR
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate one-file scope and safety policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PATH: .github/workflows/flux-prod-release.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          event=json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          number=event["pull_request"]["number"]
+          repo=os.environ["GITHUB_REPOSITORY"]
+          request=urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/pulls/{number}/files?per_page=100",
+            headers={
+              "Accept":"application/vnd.github+json",
+              "Authorization":"Bearer "+os.environ["GH_TOKEN"],
+              "X-GitHub-Api-Version":"2022-11-28",
+              "User-Agent":"flux-platform-release-validator",
+            },
+          )
+          with urllib.request.urlopen(request,timeout=30) as response:
+            names=[item["filename"] for item in json.load(response)]
+          expected=os.environ["EXPECTED_PATH"]
+          if names != [expected]:
+            raise SystemExit(f"PLATFORM_SCOPE_INVALID:{names}")
+          if event["pull_request"]["base"]["ref"]!="main":
+            raise SystemExit("PLATFORM_BASE_NOT_MAIN")
+          if event["pull_request"]["head"]["ref"]!="platform/flux-reusable-prod-release":
+            raise SystemExit("PLATFORM_HEAD_INVALID")
+          text=pathlib.Path(expected).read_text()
+          required=[
+            "workflow_dispatch:","target_git_sha:","migration_allowlist_json:",
+            "environment: supabase-production","github.ref == 'refs/heads/main'",
+            "PENDING","APPLIED_EQUIVALENT","migration-allowlist.json","prod-postchecks.json",
+          ]
+          banned=["migration"+" repair","db"+" reset","db"+" push","NODE_TLS_REJECT_UNAUTHORIZED"]
+          missing=[item for item in required if item not in text]
+          found=[item for item in banned if item.lower() in text.lower()]
+          if missing or found:
+            raise SystemExit(f"PLATFORM_POLICY_INVALID missing={missing} banned={found}")
+          print(json.dumps({"status":"PASS","files":names,"required_markers":len(required),"banned_markers":0}))
+          PY
+
+  release-production:
+    name: Protected PROD preflight, allowlisted apply and postchecks
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: supabase-production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_PR_NUMBER: ${{ inputs.release_pr_number }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      MIGRATION_ALLOWLIST_JSON: ${{ inputs.migration_allowlist_json }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+      EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_DB_PASSWORD_PROD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
+      SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+
+    steps:
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/flux-prod-release"
+          mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$EVIDENCE_DIR/gate-result.txt"
+          printf '%s\n' '[]' > "$EVIDENCE_DIR/mutation-ledger.json"
+          printf '%s\n' 'PENDING' > "$EVIDENCE_DIR/cleanup.txt"
+
+      - name: Recapture main, release PR, target and exact allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.request
+          root=pathlib.Path(os.environ["EVIDENCE_DIR"])
+          repo=os.environ["GITHUB_REPOSITORY"]
+          token=os.environ["GH_TOKEN"]
+          target=os.environ["TARGET_GIT_SHA"].lower()
+          if not re.fullmatch(r"[0-9a-f]{40}",target):
+            raise SystemExit("TARGET_SHA_INVALID")
+          try:
+            number=int(os.environ["RELEASE_PR_NUMBER"])
+            allowlist=json.loads(os.environ["MIGRATION_ALLOWLIST_JSON"])
+          except Exception as exc:
+            raise SystemExit(f"INPUT_INVALID:{exc}")
+          if not isinstance(allowlist,list) or not allowlist or not all(isinstance(x,str) for x in allowlist):
+            raise SystemExit("ALLOWLIST_INVALID")
+          if len(allowlist)!=len(set(allowlist)):
+            raise SystemExit("ALLOWLIST_DUPLICATED")
+          if any(not re.fullmatch(r"supabase/migrations/[0-9A-Za-z_.-]+\.sql",x) for x in allowlist):
+            raise SystemExit("ALLOWLIST_PATH_INVALID")
+          supported={
+            "supabase/migrations/016_provider_csf_file_path.sql",
+            "supabase/migrations/017_provider_csf_storage_policies.sql",
+            "supabase/migrations/020_normalize_proveedores_canonical.sql",
+            "supabase/migrations/00404_harden_anonymous_provider_csf_storage.sql",
+          }
+          if set(allowlist)-supported:
+            raise SystemExit("ALLOWLIST_UNSUPPORTED")
+          def api(path):
+            req=urllib.request.Request(
+              "https://api.github.com"+path,
+              headers={
+                "Accept":"application/vnd.github+json",
+                "Authorization":"Bearer "+token,
+                "X-GitHub-Api-Version":"2022-11-28",
+                "User-Agent":"flux-protected-prod-release",
+              },
+            )
+            with urllib.request.urlopen(req,timeout=30) as response:
+              return json.load(response)
+          main=api(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"]
+          pr=api(f"/repos/{repo}/pulls/{number}")
+          changed=[item["filename"] for item in api(f"/repos/{repo}/pulls/{number}/files?per_page=100")]
+          changed_migrations=sorted(x for x in changed if x.startswith("supabase/migrations/") and x.endswith(".sql"))
+          active=[]
+          current=int(os.environ["GITHUB_RUN_ID"])
+          for status in ("queued","in_progress"):
+            payload=api(f"/repos/{repo}/actions/runs?status={status}&per_page=100")
+            active.extend([
+              {"id":r["id"],"status":r["status"],"workflow":r["name"],"branch":r.get("head_branch")}
+              for r in payload.get("workflow_runs",[]) if int(r["id"])!=current
+            ])
+          checks={
+            "dispatch_ref_main":os.environ["GITHUB_REF"]=="refs/heads/main",
+            "workflow_sha_is_main":os.environ["WORKFLOW_SHA"]==main,
+            "pr_open":pr["state"]=="open",
+            "pr_unmerged":not pr["merged"],
+            "pr_base_main":pr["base"]["ref"]=="main",
+            "target_matches_pr_head":pr["head"]["sha"].lower()==target,
+            "allowlist_matches_pr_migrations":changed_migrations==sorted(allowlist),
+            "other_active_runs":len(active),
+          }
+          passed=all(v is True or v==0 for v in checks.values())
+          evidence={
+            "status":"PASS" if passed else "STOP","main_sha":main,
+            "workflow_sha":os.environ["WORKFLOW_SHA"],
+            "release_pr":{"number":number,"state":pr["state"],"draft":pr["draft"],"base":pr["base"]["ref"],"head":pr["head"]["ref"],"head_sha":pr["head"]["sha"]},
+            "target_git_sha":target,"changed_files":changed,
+            "changed_migrations":changed_migrations,"migration_allowlist":allowlist,
+            "active_runs_excluding_current":active,"checks":checks,
+          }
+          (root/"github-release-state.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          (root/"migration-allowlist.json").write_text(json.dumps(allowlist,indent=2)+"\n")
+          if not passed:
+            (root/"gate-result.txt").write_text("STOP / RELEASE_STATE_OR_ALLOWLIST_INVALID\n")
+            raise SystemExit("RELEASE_STATE_OR_ALLOWLIST_INVALID")
+          PY
+
+      - name: Checkout immutable target SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify target bytes and backup availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$TARGET_GIT_SHA" || fail "STOP / TARGET_SHA_DRIFT"
+          jq -r '.[]' "$EVIDENCE_DIR/migration-allowlist.json" > "$RUNNER_TEMP/flux-allowlist.txt"
+          while IFS= read -r path; do
+            test -f "$path" || fail "STOP / ALLOWLIST_FILE_MISSING"
+            git ls-tree "$TARGET_GIT_SHA" -- "$path"
+          done < "$RUNNER_TEMP/flux-allowlist.txt" > "$EVIDENCE_DIR/target-migration-blobs.txt"
+          test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF" || fail "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+          test "$SUPABASE_PROJECT_REF_PROD" != "$FORBIDDEN_DEV_REF" || fail "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+          test -n "$SUPABASE_ACCESS_TOKEN" || fail "STOP / PROD_BACKUP_UNAVAILABLE"
+          curl --silent --show-error --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF" > "$RUNNER_TEMP/flux-prod-project.json"
+          curl --silent --show-error --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF/database/backups" > "$RUNNER_TEMP/flux-prod-backups.json"
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ["EVIDENCE_DIR"])
+          project=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"]+"/flux-prod-project.json").read_text())
+          payload=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"]+"/flux-prod-backups.json").read_text())
+          backups=payload.get("backups",[]) if isinstance(payload,dict) else payload
+          pitr=bool(payload.get("pitr_enabled",False)) if isinstance(payload,dict) else False
+          good=[x for x in backups if str(x.get("status","")).lower() in ("completed","success")]
+          good.sort(key=lambda x:str(x.get("inserted_at") or x.get("created_at") or x.get("started_at") or ""),reverse=True)
+          ref=str(project.get("id") or project.get("ref") or "")
+          evidence={"status":"PASS" if ref==os.environ["EXPECTED_PROD_REF"] and (pitr or bool(good)) else "STOP","project_ref":ref,"project_name":project.get("name"),"region":project.get("region"),"pitr_enabled":pitr,"latest_successful_backup":good[0] if good else None}
+          (root/"prod-backup.json").write_text(json.dumps(evidence,indent=2)+"\n")
+          if evidence["status"]!="PASS":
+            (root/"gate-result.txt").write_text("STOP / PROD_BACKUP_UNAVAILABLE\n")
+            raise SystemExit("PROD_BACKUP_UNAVAILABLE")
+          PY
+          printf 'PROD_REGION=%s\n' "$(jq -r '.region // empty' "$RUNNER_TEMP/flux-prod-project.json")" >> "$GITHUB_ENV"
+
+      - name: PROD preflight and read-only dry-run plan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          fail_gate() { printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"; exit 1; }
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+          if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then
+            [[ "$SUPABASE_PROD_DB_URL" == *"$EXPECTED_PROD_REF"* && "$SUPABASE_PROD_DB_URL" != *"$FORBIDDEN_DEV_REF"* ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+            CONNECTION_MODE="protected-write-url"
+          else
+            [[ -n "$SUPABASE_DB_PASSWORD_PROD" ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
+            DIRECT_HOST="db.$EXPECTED_PROD_REF.supabase.co"
+            DIRECT_ADDR="$(getent ahostsv4 "$DIRECT_HOST" | awk '{print $1; exit}')"
+            if [[ -n "$DIRECT_ADDR" ]]; then
+              export PGHOST="$DIRECT_HOST" PGHOSTADDR="$DIRECT_ADDR" PGPORT=5432 PGDATABASE=postgres PGUSER=postgres PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
+              CONNECTION_MODE="direct-project-host"
+            else
+              [[ -n "$PROD_REGION" ]] || fail_gate "STOP / PROD_PROJECT_IDENTITY_MISMATCH"
+              export PGHOST="aws-0-$PROD_REGION.pooler.supabase.com" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$EXPECTED_PROD_REF" PGPASSWORD="$SUPABASE_DB_PASSWORD_PROD" PGSSLMODE=require PGCONNECT_TIMEOUT=20
+              CONNECTION_MODE="session-pooler"
+            fi
+          fi
+          psql_prod() {
+            if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then command psql "$SUPABASE_PROD_DB_URL" "$@"; else command psql "$@"; fi
+          }
+          roq() {
+            PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_preflight" \
+              psql_prod -X -Atq -v ON_ERROR_STOP=1 -c "$1"
+          }
+          identity="$(roq "select json_build_object('database',current_database(),'user',current_user,'server_addr',inet_server_addr(),'server_port',inet_server_port(),'server_version_num',current_setting('server_version_num'),'default_transaction_read_only',current_setting('default_transaction_read_only'),'transaction_read_only',current_setting('transaction_read_only'))::text;")"
+          printf '%s\n' "$identity" | jq --arg ref "$EXPECTED_PROD_REF" --arg mode "$CONNECTION_MODE" '.+{status:"PASS",project_ref:$ref,connection_mode:$mode}' > "$EVIDENCE_DIR/prod-db-identity.json"
+          privilege="$(roq "select r.rolsuper or (has_schema_privilege(current_user,'public','CREATE') and pg_has_role(current_user,p.relowner,'MEMBER') and pg_has_role(current_user,s.relowner,'MEMBER')) from pg_roles r cross join pg_class p cross join pg_class s where r.rolname=current_user and p.oid='public.proveedores'::regclass and s.oid='storage.objects'::regclass;")"
+          [[ "$privilege" = t ]] || fail_gate "STOP / PROD_DDL_PRIVILEGES_INSUFFICIENT"
+          prereq="$(roq "select to_regclass('public.proveedores') is not null and to_regclass('public.profiles') is not null and to_regclass('storage.objects') is not null and to_regclass('storage.buckets') is not null and exists(select 1 from storage.buckets where id='payment-receipts' and public=false) and to_regprocedure('public.flux_approver_roles()') is not null and to_regprocedure('public.flux_member_roles()') is not null;")"
+          [[ "$prereq" = t ]] || fail_gate "STOP / PROD_PREFLIGHT_FAILED"
+
+          c016="$(roq "select (select count(*) from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name in ('csf_file_path','csf_uploaded_at','csf_uploaded_by')) + (select count(*) from pg_constraint where conrelid='public.proveedores'::regclass and conname='proveedores_csf_uploaded_by_fkey') + (select count(*) from pg_indexes where schemaname='public' and tablename='proveedores' and indexname='proveedores_csf_uploaded_by_idx');")"
+          q016="$(roq "select (select count(*)=3 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name in ('csf_file_path','csf_uploaded_at','csf_uploaded_by')) and exists(select 1 from pg_constraint where conrelid='public.proveedores'::regclass and conname='proveedores_csf_uploaded_by_fkey' and contype='f' and convalidated) and exists(select 1 from pg_indexes where schemaname='public' and tablename='proveedores' and indexname='proveedores_csf_uploaded_by_idx');")"
+          if [[ "$q016" = t && "$c016" = 5 ]]; then M016=APPLIED_EQUIVALENT; elif [[ "$c016" = 0 ]]; then M016=PENDING; else M016=CONFLICTING; fi
+
+          c017="$(roq "select count(*) from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Authenticated can upload provider CSF','Authenticated can read provider CSF');")"
+          q017="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Authenticated can upload provider CSF' and cmd='INSERT' and 'authenticated'=any(roles) and lower(coalesce(with_check,'')) like '%payment-receipts%' and lower(coalesce(with_check,'')) like '%csf/%' and lower(coalesce(with_check,'')) like '%flux_approver_roles%') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Authenticated can read provider CSF' and cmd='SELECT' and 'authenticated'=any(roles) and lower(coalesce(qual,'')) like '%payment-receipts%' and lower(coalesce(qual,'')) like '%csf/%' and lower(coalesce(qual,'')) like '%flux_approver_roles%');")"
+          if [[ "$q017" = t && "$c017" = 2 ]]; then M017=APPLIED_EQUIVALENT; elif [[ "$c017" = 0 ]]; then M017=PENDING; else M017=CONFLICTING; fi
+
+          c020="$(roq "select case when exists(select 1 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name='persona_tipo') then 1 else 0 end + (select count(*) from pg_constraint where conrelid='public.proveedores'::regclass and conname in ('proveedores_rfc_format_check','proveedores_clabe_format_check','proveedores_persona_tipo_check')) + (select count(*) from pg_indexes where schemaname='public' and tablename='proveedores' and indexname in ('proveedores_alias_normalized_uidx','proveedores_rfc_normalized_uidx','proveedores_clabe_normalized_uidx','proveedores_bank_account_normalized_uidx')) + case when to_regprocedure('public.normalize_proveedores_canonical()') is not null then 1 else 0 end + case when exists(select 1 from pg_trigger where tgrelid='public.proveedores'::regclass and tgname='normalize_proveedores_canonical_before_write' and not tgisinternal) then 1 else 0 end + (select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and policyname in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers'));")"
+          q020="$(roq "select exists(select 1 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name='persona_tipo' and data_type='text') and (select count(*)=3 from pg_constraint where conrelid='public.proveedores'::regclass and conname in ('proveedores_rfc_format_check','proveedores_clabe_format_check','proveedores_persona_tipo_check') and convalidated) and (select count(*)=4 from pg_index i join pg_class c on c.oid=i.indexrelid where i.indrelid='public.proveedores'::regclass and i.indisunique and c.relname in ('proveedores_alias_normalized_uidx','proveedores_rfc_normalized_uidx','proveedores_clabe_normalized_uidx','proveedores_bank_account_normalized_uidx')) and exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='normalize_proveedores_canonical' and lower(pg_get_functiondef(p.oid)) like '%new.rfc%' and lower(pg_get_functiondef(p.oid)) like '%new.clabe%' and lower(pg_get_functiondef(p.oid)) like '%new.persona_tipo%' and lower(pg_get_functiondef(p.oid)) like '%alias_duplicado%') and exists(select 1 from pg_trigger t where t.tgrelid='public.proveedores'::regclass and t.tgname='normalize_proveedores_canonical_before_write' and not t.tgisinternal and t.tgenabled<>'D' and t.tgfoid=to_regprocedure('public.normalize_proveedores_canonical()')::oid and (t.tgtype & 1)=1 and (t.tgtype & 2)=2 and (t.tgtype & 4)=4 and (t.tgtype & 16)=16) and (select count(*)=3 from pg_policies where schemaname='public' and tablename='proveedores' and policyname in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers')) and not exists(select 1 from pg_policies where schemaname='public' and tablename='proveedores' and policyname not in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers')) and not exists(select 1 from information_schema.role_table_grants where table_schema='public' and table_name='proveedores' and grantee='anon') and not exists(select 1 from information_schema.role_table_grants where table_schema='public' and table_name='proveedores' and grantee='authenticated' and privilege_type in ('DELETE','TRUNCATE','REFERENCES','TRIGGER'));")"
+          if [[ "$q020" = t && "$c020" = 13 ]]; then M020=APPLIED_EQUIVALENT; elif [[ "$c020" = 0 ]]; then M020=PENDING; else M020=CONFLICTING; fi
+
+          q00404="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can read payment receipts temporarily' and cmd='SELECT' and 'anon'=any(roles) and regexp_replace(lower(coalesce(qual,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::textandname!~~''csf/%''::text') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can upload payment receipts temporarily' and cmd='INSERT' and 'anon'=any(roles) and regexp_replace(lower(coalesce(with_check,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::textandname!~~''csf/%''::text') and exists(select 1 from storage.buckets where id='payment-receipts' and public=false);")"
+          b00404="$(roq "select (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can read payment receipts temporarily' and cmd='SELECT' and 'anon'=any(roles) and regexp_replace(lower(coalesce(qual,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::text') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can upload payment receipts temporarily' and cmd='INSERT' and 'anon'=any(roles) and regexp_replace(lower(coalesce(with_check,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::text');")"
+          if [[ "$q00404" = t && "$q017" = t ]]; then M00404=APPLIED_EQUIVALENT; elif [[ "$b00404" = t ]]; then M00404=PENDING; else M00404=CONFLICTING; fi
+
+          for state in "$M016" "$M017" "$M020" "$M00404"; do
+            [[ "$state" = PENDING || "$state" = APPLIED_EQUIVALENT ]] || fail_gate "STOP / PROD_SCHEMA_CONFLICT"
+          done
+          jq -n --arg m016 "$M016" --arg m017 "$M017" --arg m020 "$M020" --arg m00404 "$M00404" \
+            '{status:"PASS",dry_run:true,mutations_executed:0,migrations:{"016":$m016,"017":$m017,"020":$m020,"00404":$m00404},apply_order:["016","017","020","00404"]}' \
+            > "$EVIDENCE_DIR/prod-dry-run-plan.json"
+          printf 'M016=%s\nM017=%s\nM020=%s\nM00404=%s\n' "$M016" "$M017" "$M020" "$M00404" >> "$GITHUB_ENV"
+          printf '%s\n' PASS > "$EVIDENCE_DIR/prod-preflight.txt"
+
+      - name: Apply only allowlisted PENDING migrations and run postchecks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          fail_gate() { printf '%s\n' "$1" > "$EVIDENCE_DIR/gate-result.txt"; exit 1; }
+          psql_prod() {
+            if [[ -n "$SUPABASE_PROD_DB_URL" ]]; then command psql "$SUPABASE_PROD_DB_URL" "$@"; else command psql "$@"; fi
+          }
+          roq() {
+            PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_prod_release_postcheck" \
+              psql_prod -X -Atq -v ON_ERROR_STOP=1 -c "$1"
+          }
+          count_rel() {
+            if [[ "$(roq "select to_regclass('$1') is not null;")" = t ]]; then roq "select count(*)::bigint from $1;"; else printf '%s\n' -1; fi
+          }
+          snapshot() {
+            local out="$1"
+            local providers storage notifications attempts requests batches funds intake events pdigest sdigest
+            providers="$(count_rel public.proveedores)"
+            storage="$(count_rel storage.objects)"
+            notifications="$(count_rel public.notification_events)"
+            attempts="$(count_rel public.notification_delivery_attempts)"
+            requests="$(count_rel public.payment_requests)"
+            batches="$(count_rel public.approval_batches)"
+            funds="$(count_rel public.cash_funds)"
+            intake="$(count_rel public.payment_intake)"
+            events="$(count_rel public.payment_intake_events)"
+            pdigest="$(roq "select md5(coalesce(string_agg(((to_jsonb(p)-array['alias','rfc','clabe','banco','cuenta_bancaria','persona_tipo','csf_file_path','csf_uploaded_at','csf_uploaded_by','updated_at'])::text),'|' order by p.id::text),'')) from public.proveedores p;")"
+            sdigest="$(roq "select md5(coalesce(string_agg((id::text||'|'||bucket_id||'|'||name),'|' order by id::text),'')) from storage.objects;")"
+            jq -n --argjson providers "$providers" --argjson storage "$storage" --argjson notifications "$notifications" --argjson attempts "$attempts" --argjson requests "$requests" --argjson batches "$batches" --argjson funds "$funds" --argjson intake "$intake" --argjson events "$events" --arg pdigest "$pdigest" --arg sdigest "$sdigest" \
+              '{proveedores:$providers,storage_objects:$storage,notification_events:$notifications,notification_delivery_attempts:$attempts,payment_requests:$requests,approval_batches:$batches,cash_funds:$funds,payment_intake:$intake,payment_intake_events:$events,provider_protected_digest:$pdigest,storage_objects_digest:$sdigest}' > "$out"
+          }
+          snapshot "$EVIDENCE_DIR/data-before.json"
+          ledger="$RUNNER_TEMP/flux-prod-mutations.ndjson"
+          : > "$ledger"
+          apply_one() {
+            local version="$1" path="$2" state="$3"
+            jq -e --arg path "$path" 'index($path)!=null' "$EVIDENCE_DIR/migration-allowlist.json" >/dev/null || fail_gate "STOP / MIGRATION_OUTSIDE_ALLOWLIST"
+            if [[ "$state" = PENDING ]]; then
+              psql_prod -X -v ON_ERROR_STOP=1 -f "$path" || fail_gate "STOP / PROD_MIGRATION_APPLY_FAILED"
+              jq -nc --arg version "$version" --arg path "$path" '{version:$version,path:$path,before:"PENDING",action:"APPLIED_EXACT_ALLOWLISTED_FILE",status:"PASS"}' >> "$ledger"
+            else
+              jq -nc --arg version "$version" --arg path "$path" '{version:$version,path:$path,before:"APPLIED_EQUIVALENT",action:"SKIPPED_EQUIVALENT",status:"PASS"}' >> "$ledger"
+            fi
+          }
+          apply_one 016 "supabase/migrations/016_provider_csf_file_path.sql" "$M016"
+          apply_one 017 "supabase/migrations/017_provider_csf_storage_policies.sql" "$M017"
+          apply_one 020 "supabase/migrations/020_normalize_proveedores_canonical.sql" "$M020"
+          apply_one 00404 "supabase/migrations/00404_harden_anonymous_provider_csf_storage.sql" "$M00404"
+          jq -s '.' "$ledger" > "$EVIDENCE_DIR/mutation-ledger.json"
+
+          post="$(roq "select (select count(*)=3 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name in ('csf_file_path','csf_uploaded_at','csf_uploaded_by')) and exists(select 1 from pg_constraint where conrelid='public.proveedores'::regclass and conname='proveedores_csf_uploaded_by_fkey' and convalidated) and exists(select 1 from pg_indexes where schemaname='public' and tablename='proveedores' and indexname='proveedores_csf_uploaded_by_idx') and (select count(*)=2 from pg_policies where schemaname='storage' and tablename='objects' and policyname in ('Authenticated can upload provider CSF','Authenticated can read provider CSF')) and exists(select 1 from information_schema.columns where table_schema='public' and table_name='proveedores' and column_name='persona_tipo') and (select count(*)=3 from pg_constraint where conrelid='public.proveedores'::regclass and conname in ('proveedores_rfc_format_check','proveedores_clabe_format_check','proveedores_persona_tipo_check') and convalidated) and (select count(*)=4 from pg_index i join pg_class c on c.oid=i.indexrelid where i.indrelid='public.proveedores'::regclass and i.indisunique and c.relname in ('proveedores_alias_normalized_uidx','proveedores_rfc_normalized_uidx','proveedores_clabe_normalized_uidx','proveedores_bank_account_normalized_uidx')) and to_regprocedure('public.normalize_proveedores_canonical()') is not null and exists(select 1 from pg_trigger where tgrelid='public.proveedores'::regclass and tgname='normalize_proveedores_canonical_before_write' and not tgisinternal and tgenabled<>'D') and (select count(*)=3 from pg_policies where schemaname='public' and tablename='proveedores' and policyname in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers')) and not exists(select 1 from pg_policies where schemaname='public' and tablename='proveedores' and policyname not in ('proveedores_select_members','proveedores_insert_members','proveedores_update_managers')) and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can read payment receipts temporarily' and regexp_replace(lower(coalesce(qual,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::textandname!~~''csf/%''::text') and (select count(*)=1 from pg_policies where schemaname='storage' and tablename='objects' and policyname='Anon can upload payment receipts temporarily' and regexp_replace(lower(coalesce(with_check,'')),'[[:space:]()]','','g')='bucket_id=''payment-receipts''::textandname!~~''csf/%''::text') and exists(select 1 from storage.buckets where id='payment-receipts' and public=false);")"
+          [[ "$post" = t ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+          provider_delete="$(roq "select count(*) from pg_policies where schemaname='public' and tablename='proveedores' and cmd='DELETE';")"
+          csf_mutating="$(roq "select count(*) from pg_policies where schemaname='storage' and tablename='objects' and (lower(policyname) like '%provider csf%' or lower(coalesce(qual,'')) like '%csf/%' or lower(coalesce(with_check,'')) like '%csf/%') and cmd in ('UPDATE','DELETE','ALL');")"
+          roles="$(roq "select public.flux_approver_roles()::text;")"
+          roles_lc="$(printf '%s' "$roles" | tr '[:upper:]' '[:lower:]')"
+          manager=false
+          operation_denied=false
+          [[ "$roles_lc" == *manager* ]] && manager=true
+          [[ ! "$roles_lc" =~ operator|operation|operacion|operación ]] && operation_denied=true
+          [[ "$provider_delete" = 0 && "$csf_mutating" = 0 && "$manager" = true && "$operation_denied" = true ]] || fail_gate "STOP / PROD_SCHEMA_POSTCHECK_FAILED"
+
+          snapshot "$EVIDENCE_DIR/data-after.json"
+          delta="$(jq -n --slurpfile b "$EVIDENCE_DIR/data-before.json" --slurpfile a "$EVIDENCE_DIR/data-after.json" '[($b[0].proveedores==$a[0].proveedores),($b[0].storage_objects==$a[0].storage_objects),($b[0].notification_events==$a[0].notification_events),($b[0].notification_delivery_attempts==$a[0].notification_delivery_attempts),($b[0].payment_requests==$a[0].payment_requests),($b[0].approval_batches==$a[0].approval_batches),($b[0].cash_funds==$a[0].cash_funds),($b[0].payment_intake==$a[0].payment_intake),($b[0].payment_intake_events==$a[0].payment_intake_events),($b[0].provider_protected_digest==$a[0].provider_protected_digest),($b[0].storage_objects_digest==$a[0].storage_objects_digest)]|map(select(.==false))|length')"
+          notification_delta="$(jq -n --slurpfile b "$EVIDENCE_DIR/data-before.json" --slurpfile a "$EVIDENCE_DIR/data-after.json" '$a[0].notification_events-$b[0].notification_events')"
+          email_delta="$(jq -n --slurpfile b "$EVIDENCE_DIR/data-before.json" --slurpfile a "$EVIDENCE_DIR/data-after.json" '$a[0].notification_delivery_attempts-$b[0].notification_delivery_attempts')"
+          [[ "$delta" = 0 && "$notification_delta" = 0 && "$email_delta" = 0 ]] || fail_gate "STOP / UNEXPECTED_PROD_CHANGES"
+          jq -n --argjson unexpected "$delta" --argjson notifications "$notification_delta" --argjson emails "$email_delta" --arg roles "$roles" \
+            '{status:"PASS",schema_postcheck:true,storage_bucket_private:true,anonymous_csf_access:"DENIED",manager_authorized:true,operation_csf_admin_denied:true,approver_roles:$roles,PROD_DATA_UNEXPECTED_DELTA:$unexpected,PROD_NOTIFICATIONS_SENT:$notifications,EXTERNAL_EMAILS:$emails}' > "$EVIDENCE_DIR/prod-postchecks.json"
+          printf '%s\n' 'PASS / PROD_PREFLIGHT_PASS / DRY_RUN_ALLOWLIST_PASS / PROD_MIGRATIONS_APPLIED_OR_VERIFIED / PROD_POSTCHECKS_PASS / NO_UNEXPECTED_PROD_CHANGES' > "$EVIDENCE_DIR/gate-result.txt"
+
+      - name: Cleanup runner
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          unset PGPASSWORD SUPABASE_DB_PASSWORD_PROD SUPABASE_PROD_DB_URL SUPABASE_ACCESS_TOKEN
+          rm -f "$RUNNER_TEMP/flux-prod-project.json" "$RUNNER_TEMP/flux-prod-backups.json" "$RUNNER_TEMP/flux-allowlist.txt" "$RUNNER_TEMP/flux-prod-mutations.ndjson"
+          printf '%s\n' PASS > "$EVIDENCE_DIR/cleanup.txt"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flux-prod-release-${{ github.run_id }}
+          path: ${{ runner.temp }}/flux-prod-release
+          if-no-files-found: error
+          retention-days: 14
+
