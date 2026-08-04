@@ -250,7 +250,8 @@ jobs:
             sudo apt-get install -y -qq postgresql-client
           fi
           [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || fail_gate "WAIT / PROD_SESSION_POOLER_SECRET_REQUIRED"
-          if ! python3 - <<'PY'
+          if ! POOLER_HOST_FINGERPRINT="$(
+            python3 - <<'PY'
           import hashlib, os, urllib.parse
           try:
               raw=os.environ["SUPABASE_PROD_SESSION_POOLER_DB_URL"]
@@ -276,15 +277,16 @@ jobs:
               )
               if not valid:
                   raise SystemExit(1)
-              fingerprint=hashlib.sha256(host.encode()).hexdigest()
-              with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as env:
-                  env.write(f"POOLER_HOST_FINGERPRINT={fingerprint}\n")
+              print(hashlib.sha256(host.encode()).hexdigest())
           except Exception:
               raise SystemExit(1)
           PY
-          then
+          )"; then
             fail_gate "STOP / PROD_SESSION_POOLER_URL_INVALID"
           fi
+          [[ -n "$POOLER_HOST_FINGERPRINT" ]] || fail_gate "STOP / PROD_SESSION_POOLER_URL_INVALID"
+          export POOLER_HOST_FINGERPRINT
+          printf 'POOLER_HOST_FINGERPRINT=%s\n' "$POOLER_HOST_FINGERPRINT" >> "$GITHUB_ENV"
           export PGSSLMODE=require PGCONNECT_TIMEOUT=20
           CONNECTION_MODE="explicit-session-pooler"
           psql_prod() {
