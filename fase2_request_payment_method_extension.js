@@ -699,7 +699,7 @@
       .fase2-success-folio{font-weight:900;color:var(--text-1)!important}
       .fase2-floating-success{position:fixed;top:18px;right:18px;z-index:2147483000;max-width:min(420px,calc(100vw - 32px));padding:16px 18px;border:1px solid rgba(18,183,106,.34);border-radius:16px;background:linear-gradient(135deg,rgba(6,78,59,.98),rgba(8,47,73,.98));box-shadow:0 22px 60px rgba(0,0,0,.42);color:#ecfdf5;display:flex;flex-direction:column;gap:4px;opacity:0;transform:translateY(-10px);transition:opacity .22s ease,transform .22s ease;pointer-events:none}
       .fase2-floating-success.is-visible{opacity:1;transform:translateY(0)}
-      .fase2-floating-success strong{font-size:15px;font-weight:900;color:#5eead4}
+      .fase2-floating-success strong{font-size:15px;font-weight:900;color:#cfe1cb}
       .fase2-floating-success span{font-size:13px;font-weight:700;color:#d1fae5}
       @media (max-width:720px){.fase2-floating-success{top:12px;left:12px;right:12px;max-width:none}}
     `

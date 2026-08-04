@@ -755,7 +755,7 @@ try {
       loadExtension("./ingresos_incidents_guard_patch.js?v=20260610-no-flicker", "ingresos-incidents-guard")
     }
     if (pageName === "dashboard.html") {
-      loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
+      loadExtension("./dashboard_report_downloads_extension.js?v=20260805-brand-verde", "dashboard-report-downloads")
       loadExtension("./dashboard_demo_extension.js?v=20260602-ux1", "dashboard-demo")
     }
   }
