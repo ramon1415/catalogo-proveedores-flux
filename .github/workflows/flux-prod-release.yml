@@ -76,7 +76,7 @@ jobs:
             "environment: supabase-production","github.ref == 'refs/heads/main'",
             "PENDING","APPLIED_EQUIVALENT","migration-allowlist.json","prod-postchecks.json",
           ]
-          banned=["migration"+" repair","db"+" reset","db"+" push","NODE_TLS_REJECT_UNAUTHORIZED"]
+          banned=["migration"+" repair","db"+" reset","db"+" push","NODE_TLS"+"_"+"REJECT_UNAUTHORIZED"]
           missing=[item for item in required if item not in text]
           found=[item for item in banned if item.lower() in text.lower()]
           if missing or found:
