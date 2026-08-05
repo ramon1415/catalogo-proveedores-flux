@@ -1,0 +1,614 @@
+name: Notifications N1-A contract harness static safety
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - ops/notifications/n1-a/contract-tests.sql
+      - ops/notifications/n1-a/README.md
+      - .github/workflows/notifications-n1-a-contract-test-harness-static.yml
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate smallint binding and preserved harness semantics
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+
+          SQL_PATH = "ops/notifications/n1-a/contract-tests.sql"
+          README_PATH = "ops/notifications/n1-a/README.md"
+          WORKFLOW_PATH = ".github/workflows/notifications-n1-a-contract-test-harness-static.yml"
+          MIGRATION_PATH = "supabase/migrations/041_notifications_external_isolation.sql"
+          ALLOWED_PATHS = {SQL_PATH, README_PATH, WORKFLOW_PATH}
+          EXPECTED_BASE_BLOBS = {
+              SQL_PATH: "6d1593c3d49bd25791af96d49e6ec72ef43d15df",
+              README_PATH: "12725949e8b6f3bbc58dbd02f774b989e668cfec",
+              WORKFLOW_PATH: "1c17940286cff7c8c323c5d033a56cf2a9c5f6ee",
+              MIGRATION_PATH: "aaf9c2561365e1c99744bd487668961dbf8a6444",
+          }
+
+          EXPECTED_WORKFLOW_HEADER = """name: Notifications N1-A contract harness static safety
+
+          on:
+            pull_request:
+              branches:
+                - dev
+              paths:
+                - ops/notifications/n1-a/contract-tests.sql
+                - ops/notifications/n1-a/README.md
+                - .github/workflows/notifications-n1-a-contract-test-harness-static.yml
+
+          permissions:
+            contents: read
+
+          jobs:
+            static-contract:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout pull request
+                  uses: actions/checkout@v4
+                  with:
+                    fetch-depth: 0
+                    persist-credentials: false
+
+                - name: Validate smallint binding and preserved harness semantics
+                  shell: bash
+                  run: |
+          """
+
+          CALL_RE = re.compile(
+              r"(public\.notification_external_payload_valid\(\s*'[^']+'\s*,\s*)"
+              r"([^,\n]+?)"
+              r"(\s*,)",
+              re.IGNORECASE,
+          )
+          SMALLINT_SIGNATURE_RE = re.compile(
+              r"create\s+(?:or\s+replace\s+)?function\s+"
+              r"public\.notification_external_payload_valid\s*\(\s*"
+              r"p_event_type\s+text\s*,\s*"
+              r"p_event_version\s+smallint\s*,\s*"
+              r"p_payload\s+jsonb\s*\)",
+              re.IGNORECASE,
+          )
+          INTEGER_OVERLOAD_RE = re.compile(
+              r"create\s+(?:or\s+replace\s+)?function\s+"
+              r"public\.notification_external_payload_valid\s*\(\s*"
+              r"p_event_type\s+text\s*,\s*"
+              r"p_event_version\s+(?:integer|int4)\s*,\s*"
+              r"p_payload\s+jsonb\s*\)",
+              re.IGNORECASE,
+          )
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          def git_output(*args):
+              return subprocess.check_output(
+                  ["git", *args],
+                  text=True,
+                  encoding="utf-8",
+              )
+
+          def compact(value):
+              return re.sub(r"\s+", "", value.lower())
+
+          def binding_errors(migration_text, sql_text, base_migration, base_sql):
+              errors = []
+              if migration_text != base_migration:
+                  errors.append("migration changed")
+              if len(SMALLINT_SIGNATURE_RE.findall(migration_text)) != 1:
+                  errors.append("smallint signature not proven")
+              if INTEGER_OVERLOAD_RE.search(migration_text):
+                  errors.append("integer overload detected")
+
+              raw_call_count = sql_text.count(
+                  "public.notification_external_payload_valid("
+              )
+              calls = list(CALL_RE.finditer(sql_text))
+              if raw_call_count != 6 or len(calls) != 6:
+                  errors.append("call count is not six")
+              if len(calls) == 6 and any(
+                  compact(match.group(2)) != "1::smallint"
+                  for match in calls
+              ):
+                  errors.append("smallint binding incomplete")
+
+              base_calls = list(CALL_RE.finditer(base_sql))
+              if len(base_calls) != 6 or any(
+                  compact(match.group(2)) != "1"
+                  for match in base_calls
+              ):
+                  errors.append("baseline call contract changed")
+
+              normalized, normalized_count = CALL_RE.subn(
+                  lambda match: match.group(1) + "1" + match.group(3),
+                  sql_text,
+              )
+              if normalized_count != 6 or normalized != base_sql:
+                  errors.append("test semantics changed")
+              return errors
+
+          def replace_first_binding(sql_text, replacement):
+              return CALL_RE.sub(
+                  lambda match: (
+                      match.group(1) + replacement + match.group(3)
+                  ),
+                  sql_text,
+                  count=1,
+              )
+
+          base_ref = os.environ.get("GITHUB_BASE_REF", "dev")
+          require(base_ref == "dev", "unexpected base branch")
+
+          for path, expected_blob in EXPECTED_BASE_BLOBS.items():
+              observed = git_output(
+                  "rev-parse", f"origin/{base_ref}:{path}"
+              ).strip()
+              require(
+                  observed == expected_blob,
+                  f"source drift for {path}",
+              )
+
+          changed = {
+              line
+              for line in git_output(
+                  "diff",
+                  "--name-only",
+                  "--diff-filter=ACMR",
+                  f"origin/{base_ref}",
+                  "--",
+              ).splitlines()
+              if line
+          }
+          require(
+              changed == ALLOWED_PATHS,
+              f"changed paths violate contract: {sorted(changed)}",
+          )
+
+          workflow_text = Path(WORKFLOW_PATH).read_text(encoding="utf-8")
+          header, marker, script_text = workflow_text.partition(
+              "        run: |"
+          )
+          require(marker != "", "workflow run block missing")
+          require(
+              header + marker + "\n" == EXPECTED_WORKFLOW_HEADER,
+              "workflow capabilities, trigger, paths, or permissions changed",
+          )
+          for left, right in (
+              ("cu", "rl "),
+              ("ps", "ql "),
+              ("gh", " api "),
+              ("workflow_", "dispatch"),
+              ("repository_", "dispatch"),
+              ("upload-", "artifact"),
+              ("supabase ", "db "),
+          ):
+              require(
+                  left + right not in script_text.lower(),
+                  "forbidden runtime capability in static validator",
+              )
+          for left, right in (
+              ("import req", "uests"),
+              ("import url", "lib"),
+              ("import soc", "ket"),
+          ):
+              require(
+                  left + right not in script_text.lower(),
+                  "network library in static validator",
+              )
+
+          base_sql = git_output(
+              "show", f"origin/{base_ref}:{SQL_PATH}"
+          )
+          base_migration = git_output(
+              "show", f"origin/{base_ref}:{MIGRATION_PATH}"
+          )
+          sql = Path(SQL_PATH).read_text(encoding="utf-8")
+          migration = Path(MIGRATION_PATH).read_text(encoding="utf-8")
+          readme = Path(README_PATH).read_text(encoding="utf-8")
+
+          errors = binding_errors(
+              migration,
+              sql,
+              base_migration,
+              base_sql,
+          )
+          require(not errors, "; ".join(errors))
+
+          expected_numbers = list(range(1, 56))
+          expected_two_digits = [
+              f"{number:02d}" for number in expected_numbers
+          ]
+          comments = re.findall(
+              r"^  -- (\d{2})\.",
+              sql,
+              flags=re.MULTILINE,
+          )
+          require(
+              comments == expected_two_digits,
+              "numbered tests changed",
+          )
+
+          assertion_ids = {
+              f"N1A_TEST_{digits}_FAILED"
+              for digits in expected_two_digits
+          }
+          payload_id = "N1A_TEST_PAYLOAD_BASELINE_FAILED"
+          native_test_ids = {
+              f"N1A_NATIVE_TEST_{digits}_FAILED"
+              for digits in expected_two_digits
+          }
+          native_fixed_ids = {
+              "N1A_NATIVE_CATALOG_BINDING_FAILED",
+              "N1A_NATIVE_PAYLOAD_BASELINE_FAILED",
+              "N1A_NATIVE_DO_BLOCK_FAILED",
+          }
+          all_ids = set(
+              re.findall(
+                  r"\bN1A_(?:TEST|NATIVE)_[A-Z0-9_]+\b",
+                  sql,
+              )
+          )
+          require(
+              all_ids
+              == (
+                  assertion_ids
+                  | {payload_id}
+                  | native_test_ids
+                  | native_fixed_ids
+              ),
+              "diagnostic IDs changed",
+          )
+
+          markers = [
+              "N1A_SAFE_STAGE=TRANSACTION_STARTED",
+              "N1A_SAFE_STAGE=TEMP_SETUP_STARTED",
+              "N1A_SAFE_STAGE=TEMP_SETUP_COMPLETED",
+              "N1A_SAFE_STAGE=DO_BLOCK_STARTED",
+              "N1A_SAFE_STAGE=DO_BLOCK_COMPLETED",
+              "N1A_SAFE_STAGE=FINAL_OUTPUT_STARTED",
+              "N1A_SAFE_STAGE=FINAL_OUTPUT_COMPLETED",
+              "N1A_SAFE_STAGE=ROLLBACK_STARTED",
+              "N1A_SAFE_STAGE=ROLLBACK_COMPLETED",
+          ]
+          observed_markers = re.findall(
+              r"^\\echo (N1A_SAFE_STAGE=[A-Z_]+)$",
+              sql,
+              flags=re.MULTILINE,
+          )
+          require(
+              observed_markers == markers,
+              "stage markers changed",
+          )
+
+          pass_rows = re.findall(
+              r"\(\s*(\d+),\s*'[^']+',\s*'PASS'\s*\)",
+              sql,
+          )
+          require(
+              [int(value) for value in pass_rows]
+              == expected_numbers,
+              "PASS rows changed",
+          )
+          require(
+              len(
+                  re.findall(
+                      r"^begin;$",
+                      sql,
+                      flags=re.MULTILINE | re.IGNORECASE,
+                  )
+              )
+              == 1,
+              "transaction BEGIN changed",
+          )
+          require(
+              not re.search(
+                  r"^commit;$",
+                  sql,
+                  flags=re.MULTILINE | re.IGNORECASE,
+              ),
+              "COMMIT is forbidden",
+          )
+          require(
+              len(
+                  re.findall(
+                      r"^rollback;$",
+                      sql,
+                      flags=re.MULTILINE | re.IGNORECASE,
+                  )
+              )
+              == 1,
+              "ROLLBACK changed",
+          )
+          require(
+              re.search(
+                  r"rollback;\n"
+                  r"\\echo N1A_SAFE_STAGE=ROLLBACK_COMPLETED\s*$",
+                  sql,
+                  flags=re.IGNORECASE,
+              )
+              is not None,
+              "ROLLBACK is not terminal",
+          )
+
+          temp_tables = set(
+              re.findall(
+                  r"create temporary table ([a-z0-9_]+)",
+                  sql,
+                  flags=re.IGNORECASE,
+              )
+          )
+          expected_temp_tables = {
+              "n1a_external_event_model",
+              "n1a_attempt_model",
+              "n1a_submission_model",
+              "n1a_policy_model",
+          }
+          require(
+              temp_tables == expected_temp_tables,
+              "temporary tables changed",
+          )
+
+          def scrub_sql(text):
+              text = re.sub(
+                  r"'(?:''|[^'])*'",
+                  "''",
+                  text,
+                  flags=re.DOTALL,
+              )
+              return re.sub(r"--[^\n]*", "", text)
+
+          scrubbed = scrub_sql(sql)
+          dml_targets = re.findall(
+              r"\b(?:insert\s+into|update|delete\s+from|"
+              r"merge\s+into)\s+([a-z0-9_.]+)",
+              scrubbed,
+              flags=re.IGNORECASE,
+          )
+          require(dml_targets, "expected temporary DML missing")
+          require(
+              {
+                  target.lower()
+                  for target in dml_targets
+              }
+              <= expected_temp_tables,
+              "permanent DML detected",
+          )
+          claim_calls = re.findall(
+              r"\bclaim_(?:notification_events_for_dispatcher|"
+              r"pending_notification_events|"
+              r"external_notification_events_for_dispatcher)\s*\(",
+              scrubbed,
+              flags=re.IGNORECASE,
+          )
+          require(
+              not claim_calls,
+              "claims must not be invoked",
+          )
+
+          required_readme_fragments = (
+              "30672943982",
+              "N1A_NATIVE_TEST_04_FAILED",
+              "type-binding defect",
+              "text, smallint, jsonb",
+              "resolved as `integer`",
+              "exactly six call sites",
+              "1::smallint",
+              "was not evaluated",
+              "Migration 041 remains applied",
+              "zero DEV access",
+              "zero SQL",
+              "zero Resend calls",
+              "zero email sends",
+              "NOTIFICATIONS-N1-A-R3-R6",
+              "N1-B remains blocked",
+              "rollout remains disabled",
+          )
+          for fragment in required_readme_fragments:
+              require(
+                  fragment in readme,
+                  f"README contract missing: {fragment}",
+              )
+
+          readme_diff = git_output(
+              "diff",
+              "--unified=0",
+              f"origin/{base_ref}",
+              "--",
+              README_PATH,
+          )
+          readme_additions = "\n".join(
+              line[1:]
+              for line in readme_diff.splitlines()
+              if line.startswith("+")
+              and not line.startswith("+++")
+          )
+          for private_pattern in (
+              r"https?://",
+              r"[A-Za-z]:\\",
+              r"/Users/",
+              r"AppData",
+              r"\b[0-9a-f]{8}-[0-9a-f]{4}-"
+              r"[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-"
+              r"[0-9a-f]{12}\b",
+              r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+          ):
+              require(
+                  re.search(
+                      private_pattern,
+                      readme_additions,
+                      flags=re.IGNORECASE,
+                  )
+                  is None,
+                  "private data in README additions",
+              )
+
+          self_tests = []
+
+          def expect_pass(name, migration_text, sql_text):
+              require(
+                  not binding_errors(
+                      migration_text,
+                      sql_text,
+                      base_migration,
+                      base_sql,
+                  ),
+                  f"self-test expected PASS: {name}",
+              )
+              self_tests.append(name)
+
+          def expect_fail(name, migration_text, sql_text):
+              require(
+                  bool(
+                      binding_errors(
+                          migration_text,
+                          sql_text,
+                          base_migration,
+                          base_sql,
+                      )
+                  ),
+                  f"self-test expected FAIL: {name}",
+              )
+              self_tests.append(name)
+
+          expect_pass(
+              "01_signature_and_six_smallint_casts",
+              migration,
+              sql,
+          )
+          expect_fail(
+              "02_one_untyped_call",
+              migration,
+              replace_first_binding(sql, "1"),
+          )
+          expect_fail(
+              "03_one_integer_cast",
+              migration,
+              replace_first_binding(sql, "1::integer"),
+          )
+          expect_fail(
+              "04_cast_integer_form",
+              migration,
+              replace_first_binding(
+                  sql,
+                  "cast(1 as integer)",
+              ),
+          )
+          expect_fail(
+              "05_one_bigint_cast",
+              migration,
+              replace_first_binding(sql, "1::bigint"),
+          )
+          expect_fail(
+              "06_seventh_call",
+              migration,
+              sql
+              + "\nselect public.notification_external_payload_valid("
+              + "'provider_intake.received', 1::smallint, "
+              + "'{}'::jsonb);\n",
+          )
+          expect_fail(
+              "07_one_call_removed",
+              migration,
+              sql.replace(
+                  "public.notification_external_payload_valid(",
+                  "public.notification_external_payload_valid_removed(",
+                  1,
+              ),
+          )
+          expect_fail(
+              "08_source_signature_integer",
+              migration.replace(
+                  "p_event_version smallint",
+                  "p_event_version integer",
+                  1,
+              ),
+              sql,
+          )
+          expect_fail(
+              "09_integer_overload_added",
+              migration
+              + "\ncreate function "
+              + "public.notification_external_payload_valid("
+              + "p_event_type text, p_event_version integer, "
+              + "p_payload jsonb) returns boolean language sql "
+              + "as 'select false';\n",
+              sql,
+          )
+          expect_fail(
+              "10_test_04_payload_changed",
+              migration,
+              sql.replace(
+                  "'matching_metadata'",
+                  "'matching_metadata_changed'",
+                  1,
+              ),
+          )
+          expect_fail(
+              "11_test_04_assertion_changed",
+              migration,
+              sql.replace(
+                  "N1A_TEST_04_FAILED",
+                  "N1A_TEST_04_CHANGED",
+                  1,
+              ),
+          )
+          expect_fail(
+              "12_test_04_native_id_changed",
+              migration,
+              sql.replace(
+                  "N1A_NATIVE_TEST_04_FAILED",
+                  "N1A_NATIVE_TEST_04_CHANGED",
+                  1,
+              ),
+          )
+          expect_fail(
+              "13_stage_marker_changed",
+              migration,
+              sql.replace(
+                  "N1A_SAFE_STAGE=DO_BLOCK_STARTED",
+                  "N1A_SAFE_STAGE=DO_BLOCK_CHANGED",
+                  1,
+              ),
+          )
+          expect_fail(
+              "14_migration_modified",
+              migration + "\n-- unauthorized mutation\n",
+              sql,
+          )
+          expect_fail(
+              "15_test_count_changed",
+              migration,
+              sql.replace("  -- 55.", "  -- 56.", 1),
+          )
+          expect_pass(
+              "16_expected_sql",
+              migration,
+              sql,
+          )
+          require(
+              len(self_tests) == 16
+              and len(set(self_tests)) == 16,
+              "static self-test count mismatch",
+          )
+
+          print("STATIC_SELF_TESTS_PASS=16")
+          print("PASS / N1_A_PAYLOAD_TEST_BINDING_STATIC_SAFE")
+          PY
