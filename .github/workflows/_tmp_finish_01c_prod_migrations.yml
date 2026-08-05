@@ -1,0 +1,224 @@
+name: Temporary finish 01C PROD migrations
+
+on:
+  push:
+    branches:
+      - ops/finish-01c-prod-migrations-20260805
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BRANCH: ops/finish-01c-prod-migrations-20260805
+  EXPECTED_PARENT: 783ea021a2b41bec86ee0d07fcee14e075cf2468
+  EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+  FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+  CLI_VERSION: 2.45.4
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: supabase-production
+    timeout-minutes: 25
+    env:
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+    steps:
+      - name: Checkout exact authorized main child
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Guard branch, source and PROD endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$EXPECTED_BRANCH"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git rev-parse "$EXPECTED_PARENT")" = "$EXPECTED_PARENT"
+          test -n "${SUPABASE_PROD_SESSION_POOLER_DB_URL:-}"
+          if [[ -n "${SUPABASE_PROJECT_REF_PROD:-}" ]]; then
+            test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF"
+          fi
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          python3 - <<'PY'
+          import os, urllib.parse
+          raw = os.environ['SUPABASE_PROD_SESSION_POOLER_DB_URL']
+          p = urllib.parse.urlsplit(raw)
+          host = (p.hostname or '').lower()
+          user = urllib.parse.unquote(p.username or '')
+          password = urllib.parse.unquote(p.password or '')
+          database = urllib.parse.unquote((p.path or '').lstrip('/'))
+          prod = os.environ['EXPECTED_PROD_REF']
+          dev = os.environ['FORBIDDEN_DEV_REF']
+          valid = (
+              p.scheme in ('postgres','postgresql')
+              and host.endswith('.pooler.supabase.com')
+              and p.port == 5432
+              and user == f'postgres.{prod}'
+              and bool(password)
+              and bool(database)
+              and dev not in urllib.parse.unquote(raw)
+          )
+          if not valid:
+              raise SystemExit('PROD_SESSION_POOLER_IDENTITY_INVALID')
+          PY
+
+      - name: Install PostgreSQL and pinned Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          npx --yes "supabase@$CLI_VERSION" --version | tee "$RUNNER_TEMP/supabase-version.txt"
+
+      - name: Capture strict precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/01c-prod-evidence"
+          mkdir -p "$EVIDENCE"
+          cp "$RUNNER_TEMP/supabase-version.txt" "$EVIDENCE/"
+          PGSSLMODE=require PGCONNECT_TIMEOUT=20 \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE/precheck.txt"
+          begin transaction read only;
+          select 'db='||current_database();
+          select 'user='||current_user;
+          select 'm036='||count(*) from supabase_migrations.schema_migrations where version='20260805030000' and name='036_quarantine_legacy_extraordinary_authorizations';
+          select 'm037_040='||count(*) from supabase_migrations.schema_migrations where version between '20260805030001' and '20260805030004';
+          select 'authorizations='||count(*) from public.payment_request_extraordinary_authorizations;
+          select 'domain_events='||count(*) from public.payment_request_extraordinary_events;
+          select 'policies_absent='||(to_regclass('public.extraordinary_payment_policies') is null)::text;
+          select 'faculties_absent='||(to_regclass('public.extraordinary_profile_faculties') is null)::text;
+          select 'bucket_absent='||(not exists(select 1 from storage.buckets where id='extraordinary-authorizations'))::text;
+          select 'requests='||count(*) from public.payment_requests;
+          select 'layouts='||count(*) from public.payment_layouts;
+          select 'layout_lines='||count(*) from public.payment_layout_lines;
+          select 'receipts='||count(*) from public.payment_receipts;
+          select 'notification_events='||count(*) from public.notification_events;
+          select 'notification_attempts='||count(*) from public.notification_delivery_attempts;
+          rollback;
+          SQL
+          grep -qx 'm036=1' "$EVIDENCE/precheck.txt"
+          grep -qx 'm037_040=0' "$EVIDENCE/precheck.txt"
+          grep -qx 'authorizations=0' "$EVIDENCE/precheck.txt"
+          grep -qx 'domain_events=1' "$EVIDENCE/precheck.txt"
+          grep -qx 'policies_absent=true' "$EVIDENCE/precheck.txt"
+          grep -qx 'faculties_absent=true' "$EVIDENCE/precheck.txt"
+          grep -qx 'bucket_absent=true' "$EVIDENCE/precheck.txt"
+          grep -qx 'requests=2' "$EVIDENCE/precheck.txt"
+          grep -qx 'layouts=1' "$EVIDENCE/precheck.txt"
+          grep -qx 'layout_lines=1' "$EVIDENCE/precheck.txt"
+          grep -qx 'receipts=0' "$EVIDENCE/precheck.txt"
+          grep -qx 'notification_events=0' "$EVIDENCE/precheck.txt"
+          grep -qx 'notification_attempts=0' "$EVIDENCE/precheck.txt"
+
+      - name: Build isolated four-migration workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/01c-supabase-workdir"
+          mkdir -p "$WORKDIR/supabase/migrations"
+          printf 'project_id = "%s"\n' "$EXPECTED_PROD_REF" > "$WORKDIR/supabase/config.toml"
+          for version in 20260805030001 20260805030002 20260805030003 20260805030004; do
+            files=(supabase/migrations/${version}_*.sql)
+            test "${#files[@]}" -eq 1
+            cp "${files[0]}" "$WORKDIR/supabase/migrations/"
+          done
+          test "$(find "$WORKDIR/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 4
+          find "$WORKDIR/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort > "$RUNNER_TEMP/01c-prod-evidence/local-migrations.txt"
+
+      - name: Supabase CLI dry-run exact 037 through 040
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/01c-supabase-workdir"
+          OUT="$RUNNER_TEMP/01c-prod-evidence/dry-run.txt"
+          npx --yes "supabase@$CLI_VERSION" --workdir "$WORKDIR" --yes db push \
+            --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+            --include-all --dry-run 2>&1 | tee "$OUT"
+          for version in 20260805030001 20260805030002 20260805030003 20260805030004; do
+            grep -q "$version" "$OUT"
+          done
+          if grep -q '20260805030000' "$OUT"; then
+            echo 'Migration 036 unexpectedly pending' >&2
+            exit 1
+          fi
+
+      - name: Apply exact 037 through 040 with official ledger registration
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$RUNNER_TEMP/01c-supabase-workdir"
+          OUT="$RUNNER_TEMP/01c-prod-evidence/apply.txt"
+          npx --yes "supabase@$CLI_VERSION" --workdir "$WORKDIR" --yes db push \
+            --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+            --include-all 2>&1 | tee "$OUT"
+
+      - name: Certify final PROD backend and zero Notification delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/01c-prod-evidence"
+          PGSSLMODE=require PGCONNECT_TIMEOUT=20 \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE/postcheck.txt"
+          begin transaction read only;
+          select 'migration='||version||':'||name from supabase_migrations.schema_migrations where version between '20260805030000' and '20260805030004' order by version;
+          select 'migration_count='||count(*) from supabase_migrations.schema_migrations where version between '20260805030000' and '20260805030004';
+          select 'authorizations='||count(*) from public.payment_request_extraordinary_authorizations;
+          select 'domain_events='||count(*) from public.payment_request_extraordinary_events;
+          select 'policies='||count(*) from public.extraordinary_payment_policies;
+          select 'faculties='||count(*) from public.extraordinary_profile_faculties;
+          select 'faculty_events='||count(*) from public.extraordinary_profile_faculty_events;
+          select 'bucket='||count(*) from storage.buckets where id='extraordinary-authorizations' and public=false and file_size_limit=5242880;
+          select 'bucket_objects='||count(*) from storage.objects where bucket_id='extraordinary-authorizations';
+          select 'finance_release_columns='||count(*) from information_schema.columns where table_schema='public' and table_name='approval_batch_items' and column_name like 'finance_release%';
+          select 'begin_rpc='||(to_regprocedure('public.begin_extraordinary_authorization(uuid,text,text,uuid,timestamp with time zone,text)') is not null)::text;
+          select 'ratify_rpc='||(to_regprocedure('public.ratify_extraordinary_authorization(uuid,text,text)') is not null)::text;
+          select 'dispute_rpc='||(to_regprocedure('public.dispute_extraordinary_authorization(uuid,text,text)') is not null)::text;
+          select 'faculty_rpc='||(to_regprocedure('public.set_extraordinary_profile_faculty(uuid,uuid,boolean,text)') is not null)::text;
+          select 'current_faculty_rpc='||(to_regprocedure('public.current_extraordinary_faculty_company_ids()') is not null)::text;
+          select 'requests='||count(*) from public.payment_requests;
+          select 'layouts='||count(*) from public.payment_layouts;
+          select 'layout_lines='||count(*) from public.payment_layout_lines;
+          select 'receipts='||count(*) from public.payment_receipts;
+          select 'notification_events='||count(*) from public.notification_events;
+          select 'notification_attempts='||count(*) from public.notification_delivery_attempts;
+          rollback;
+          SQL
+          grep -qx 'migration_count=5' "$EVIDENCE/postcheck.txt"
+          grep -qx 'authorizations=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'policies=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'faculties=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'faculty_events=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'bucket=1' "$EVIDENCE/postcheck.txt"
+          grep -qx 'bucket_objects=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'finance_release_columns=4' "$EVIDENCE/postcheck.txt"
+          grep -qx 'begin_rpc=true' "$EVIDENCE/postcheck.txt"
+          grep -qx 'ratify_rpc=true' "$EVIDENCE/postcheck.txt"
+          grep -qx 'dispute_rpc=true' "$EVIDENCE/postcheck.txt"
+          grep -qx 'faculty_rpc=true' "$EVIDENCE/postcheck.txt"
+          grep -qx 'current_faculty_rpc=true' "$EVIDENCE/postcheck.txt"
+          grep -qx 'requests=2' "$EVIDENCE/postcheck.txt"
+          grep -qx 'layouts=1' "$EVIDENCE/postcheck.txt"
+          grep -qx 'layout_lines=1' "$EVIDENCE/postcheck.txt"
+          grep -qx 'receipts=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'notification_events=0' "$EVIDENCE/postcheck.txt"
+          grep -qx 'notification_attempts=0' "$EVIDENCE/postcheck.txt"
+          printf '%s\n' 'PASS / M037_M038_M039_M040_APPLIED / PROD_LEDGER_REGISTERED / NOTIFICATION_DELTA_ZERO' > "$EVIDENCE/result.txt"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extraordinary-01c-prod-migrations
+          path: ${{ runner.temp }}/01c-prod-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove temporary workflow branch
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin --delete "$EXPECTED_BRANCH"
