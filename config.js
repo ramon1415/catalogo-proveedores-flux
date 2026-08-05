@@ -241,6 +241,7 @@ try {
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "approval-batches", section: "General", file: "approval_batches.html", href: "./approval_batches.html", icon: "C", label: "Cortes semanales", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "config", section: "Configuracion", file: "configuracion.html", href: "./configuracion.html", icon: "C", label: "Configuracion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
   ]
 
@@ -732,12 +733,11 @@ try {
     if (!enabledPages.includes(pageName)) return
 
     if (["efectivo.html", "layouts.html"].includes(pageName)) {
-      loadExtension("./cash_flow_extension.js?v=20260603-cash-ux", "cash-flow")
+      loadExtension("./cash_flow_extension.js?v=20260714-payment-method", "cash-flow")
     }
     if (pageName === "solicitudes.html") {
-      loadExtension("./solicitudes_cash_detail_patch.js?v=20260603-cash-detail", "solicitudes-cash-detail")
       loadExtension("./solicitudes_ux1_extension.js?v=20260701-reconcile", "solicitudes-ux1")
-      loadExtension("./solicitudes_workboard_extension.js?v=20260604-table6col2", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260714-payment-method", "solicitudes-workboard")
       loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }
     if (pageName === "layouts.html") {
