@@ -296,15 +296,15 @@ async function loadExtraordinaryFaculties() {
 
 function ensureExtraordinaryIntentPlacement() {
   const section = dom.extraordinaryIntentSection || document.getElementById("extraordinaryIntentSection");
-  const adjustment = dom.isExtraordinaryAdjustment || document.getElementById("isExtraordinaryAdjustment");
-  const adjustmentLabel = adjustment?.closest("label");
-  const targetGrid = adjustmentLabel?.parentElement;
+  const approver = dom.approverId || document.getElementById("approverId");
+  const approverLabel = approver?.closest("label");
+  const finalGrid = approverLabel?.parentElement;
 
-  if (!section || !adjustmentLabel || !targetGrid) return false;
-  if (section.parentElement !== targetGrid || adjustmentLabel.nextElementSibling !== section) {
-    adjustmentLabel.insertAdjacentElement("afterend", section);
+  if (!section || !approverLabel || !finalGrid) return false;
+  if (section.parentElement !== finalGrid || section.nextElementSibling !== approverLabel) {
+    approverLabel.insertAdjacentElement("beforebegin", section);
   }
-  return section.parentElement === targetGrid && adjustmentLabel.nextElementSibling === section;
+  return section.parentElement === finalGrid && section.nextElementSibling === approverLabel;
 }
 
 function syncExtraordinaryIntentVisibility() {
