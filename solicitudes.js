@@ -135,6 +135,7 @@ function cacheDom() {
   dom.isExtraordinaryAdjustment = document.getElementById("isExtraordinaryAdjustment");
   dom.extraordinaryIntentSection = document.getElementById("extraordinaryIntentSection");
   dom.requiresExtraordinaryTreatment = document.getElementById("requiresExtraordinaryTreatment");
+  dom.extraordinaryIntentHelp = document.getElementById("extraordinaryIntentHelp");
   dom.description = document.getElementById("description");
   dom.notes = document.getElementById("notes");
 
@@ -295,10 +296,30 @@ async function loadExtraordinaryFaculties() {
 
 function syncExtraordinaryIntentVisibility() {
   const companyId = dom.companyId?.value || "";
-  const allowed = companyId && extraordinaryFacultyCompanyIds.has(companyId);
-  dom.extraordinaryIntentSection?.classList.toggle("hidden", !allowed);
-  if (!allowed && dom.requiresExtraordinaryTreatment) {
-    dom.requiresExtraordinaryTreatment.checked = false;
+  const hasAnyFaculty = extraordinaryFacultyCompanyIds.size > 0;
+  const hasSelectedCompany = Boolean(companyId);
+  const allowed = Boolean(hasSelectedCompany && extraordinaryFacultyCompanyIds.has(companyId));
+
+  dom.extraordinaryIntentSection?.classList.toggle("hidden", !hasAnyFaculty);
+  dom.extraordinaryIntentSection?.classList.toggle("is-disabled", hasAnyFaculty && !allowed);
+  dom.extraordinaryIntentSection?.classList.toggle("is-enabled", allowed);
+
+  if (dom.requiresExtraordinaryTreatment) {
+    dom.requiresExtraordinaryTreatment.disabled = !allowed;
+    dom.requiresExtraordinaryTreatment.setAttribute("aria-disabled", String(!allowed));
+    if (!allowed) dom.requiresExtraordinaryTreatment.checked = false;
+  }
+
+  if (dom.extraordinaryIntentHelp) {
+    if (!hasAnyFaculty) {
+      dom.extraordinaryIntentHelp.textContent = "";
+    } else if (!hasSelectedCompany) {
+      dom.extraordinaryIntentHelp.textContent = "Selecciona una empresa autorizada para habilitar esta opción.";
+    } else if (!allowed) {
+      dom.extraordinaryIntentHelp.textContent = "Tu facultad extraordinaria no aplica para la empresa seleccionada.";
+    } else {
+      dom.extraordinaryIntentHelp.textContent = "La marca inicial registra intención solamente; la autorización externa se completa después de guardar y validar presupuesto.";
+    }
   }
 }
 

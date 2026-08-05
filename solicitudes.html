@@ -134,6 +134,9 @@
     .extraordinary-intent-copy { display:grid; gap:3px }
     .extraordinary-intent-copy strong { color:var(--text-1); font-size:12px }
     .extraordinary-intent-copy small { color:var(--text-3); font-weight:500; line-height:1.45 }
+    .extraordinary-intent-card.is-disabled { opacity:.72; cursor:not-allowed }
+    .extraordinary-intent-card.is-disabled input { cursor:not-allowed }
+    .extraordinary-intent-card.is-enabled { border-color:rgba(217,119,6,.36); background:var(--amber-dim) }
     .approver-final-section { border-color:rgba(94,234,212,.22); background:linear-gradient(180deg,rgba(15,118,110,.08),rgba(255,255,255,.015)) }
     .approver-final-section > .field-hint { display:block; margin:-4px 0 12px }
 
@@ -332,7 +335,7 @@
                   <input id="requiresExtraordinaryTreatment" type="checkbox">
                   <span class="extraordinary-intent-copy">
                     <strong>Requiere tratamiento extraordinario</strong>
-                    <small>Usa esta opción únicamente cuando el pago no pueda esperar la aprobación ordinaria del Director. La solicitud deberá completar una autorización externa antes de quedar disponible para layout.</small>
+                    <small id="extraordinaryIntentHelp">Selecciona una empresa autorizada para habilitar esta opción.</small>
                   </span>
                 </label>
               </div>
@@ -541,7 +544,7 @@
   <script src="./config.js?v=20260701-reconcile"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js"></script>
-  <script src="./solicitudes.js?v=20260805-extraordinary-uat-form-fix"></script>
+  <script src="./solicitudes.js?v=20260805-extraordinary-visible-state"></script>
   <script src="./pdf-lib-1.17.1.min.js?v=20260723-vendored-root"></script>
   <script src="./payment_batch_single_page_pdf.js?v=20260723-one-to-one"></script>
   <script src="./payment_request_reconciliation_evidence.js?v=20260723-one-to-one"></script>
