@@ -133,19 +133,19 @@ begin
       values
         (
           v_ready_oid,
-          'fc799a1c1cb7c8f43602973d368bcdf5519c36fadbd47cfd7b00ce2c458fdd54'
+          '62f3833d88afd3d526d651cd23559fa585ffedf0c83b2f4e41bf43cf624750a1'
         ),
         (
           v_validator_oid,
-          '0743fa6050b9ea609e06f11710bb9c8f00365a289c99b24607b0947f85453926'
+          '3c4ef401c18704e1cc6c0eaadb3fa794ab0f7a04092726af6c6dc30a461fa6fe'
         ),
         (
           v_consumer_oid,
-          'd822c1a097f18e7748b855fe24e1e149cd33131eee1a2bc1ff559bf922cc8cb6'
+          '5bfbab08b6714ec0916360663761b70dd1eecc39f009283fd9e6b57345a395d9'
         ),
         (
           v_invalidator_oid,
-          '1c9fb6835916977ba9107c031d0c0b838eb3317663a063deabbbf96206541ccf'
+          'b143ee4c78cc26393852158c0784fd4623bb7e15f485979fd47e28168dfcad70'
         )
     ) expected(function_oid, body_sha256)
     join pg_proc function_info
