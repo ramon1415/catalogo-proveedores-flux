@@ -441,41 +441,56 @@ begin
     raise exception '039_precheck: legacy extraordinary RPC is executable';
   end if;
 
-  if (
-    select count(*) filter (
-      where status = 'legacy_consumed_unverified'
-    ) <> 7
-       or count(*) filter (
-         where status = 'legacy_quarantined'
-       ) <> 1
-       or count(*) filter (
-         where status = 'active'
-           and evidence_verified_at is null
-       ) <> 0
-    from public.payment_request_extraordinary_authorizations
+  if not (
+    (
+      select count(*)
+      from public.payment_request_extraordinary_authorizations
+    ) = 0
+    or (
+      select count(*) filter (
+        where status = 'legacy_consumed_unverified'
+      ) = 7
+         and count(*) filter (
+           where status = 'legacy_quarantined'
+         ) = 1
+         and count(*) filter (
+           where status = 'active'
+             and evidence_verified_at is null
+         ) = 0
+      from public.payment_request_extraordinary_authorizations
+    )
   ) then
-    raise exception '039_precheck: legacy classified cohort drifted';
+    raise exception '039_precheck: classified cohort is neither PROD zero-state nor DEV historical-state';
   end if;
 
-  if (
-    select count(*)
-    from public.payment_request_extraordinary_events event
-    where event.event_type = 'legacy_revoked_preserved'
-  ) <> 1
-  or (
-    select count(*)
-    from public.payment_request_extraordinary_events event
-    join public.payment_request_extraordinary_authorizations authorization_row
-      on authorization_row.id = event.authorization_id
-    where event.event_type = 'legacy_revoked_preserved'
-      and event.idempotency_key =
-        'migration-036:revoked:' || authorization_row.id::text
-      and event.metadata ->> 'classification_source' =
-        'migration_036_governance'
-      and event.metadata ->> 'status' = 'revoked'
-      and authorization_row.status = 'revoked'
-  ) <> 1 then
-    raise exception '039_precheck: legacy revoked provenance drifted';
+  if not (
+    (
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations) = 0
+      and
+      (select count(*)
+       from public.payment_request_extraordinary_events event
+       where event.event_type = 'legacy_revoked_preserved') = 0
+    )
+    or (
+      (select count(*)
+       from public.payment_request_extraordinary_events event
+       where event.event_type = 'legacy_revoked_preserved') = 1
+      and
+      (select count(*)
+       from public.payment_request_extraordinary_events event
+       join public.payment_request_extraordinary_authorizations authorization_row
+         on authorization_row.id = event.authorization_id
+       where event.event_type = 'legacy_revoked_preserved'
+         and event.idempotency_key =
+           'migration-036:revoked:' || authorization_row.id::text
+         and event.metadata ->> 'classification_source' =
+           'migration_036_governance'
+         and event.metadata ->> 'status' = 'revoked'
+         and authorization_row.status = 'revoked') = 1
+    )
+  ) then
+    raise exception '039_precheck: revoked provenance is neither PROD zero-state nor DEV historical-state';
   end if;
 
   if not exists (
