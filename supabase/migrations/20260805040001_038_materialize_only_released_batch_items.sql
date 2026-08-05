@@ -95,22 +95,28 @@ begin
     raise exception '038_precheck: legacy extraordinary RPC is not blocked';
   end if;
 
-  if (
-    select count(*) filter (
-      where status = 'legacy_consumed_unverified'
-    ) <> 7
-       or count(*) filter (where status = 'legacy_quarantined') <> 1
-       or count(*) filter (
-         where status = 'revoked'
-           and evidence_verified_at is null
-       ) < 1
-       or count(*) filter (
-         where status = 'active'
-           and evidence_verified_at is null
-       ) <> 0
-    from public.payment_request_extraordinary_authorizations
+  if not (
+    (
+      select count(*)
+      from public.payment_request_extraordinary_authorizations
+    ) = 0
+    or (
+      select count(*) filter (
+        where status = 'legacy_consumed_unverified'
+      ) = 7
+         and count(*) filter (where status = 'legacy_quarantined') = 1
+         and count(*) filter (
+           where status = 'revoked'
+             and evidence_verified_at is null
+         ) >= 1
+         and count(*) filter (
+           where status = 'active'
+             and evidence_verified_at is null
+         ) = 0
+      from public.payment_request_extraordinary_authorizations
+    )
   ) then
-    raise exception '038_precheck: migration 036 legacy distribution is invalid';
+    raise exception '038_precheck: migration 036 distribution is neither PROD zero-state nor DEV historical-state';
   end if;
 
   if to_regclass('public.extraordinary_payment_policies') is null
