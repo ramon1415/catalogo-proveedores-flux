@@ -213,7 +213,8 @@ function bindEvents() {
     });
   });
 
-  dom.companyId?.addEventListener("change", () => {
+  dom.companyId?.addEventListener("change", async () => {
+    await loadExtraordinaryFaculties();
     syncExtraordinaryIntentVisibility();
     handleCompanyScopeChange();
   });
@@ -286,7 +287,9 @@ async function loadExtraordinaryFaculties() {
     return;
   }
   const rows = Array.isArray(data) ? data : [];
-  extraordinaryFacultyCompanyIds = new Set(rows.filter(Boolean));
+  extraordinaryFacultyCompanyIds = new Set(
+    rows.map(row => typeof row === "string" ? row : row?.company_id).filter(Boolean)
+  );
   syncExtraordinaryIntentVisibility();
 }
 
@@ -831,7 +834,7 @@ function renderPaymentRequestsTable() {
   }
 }
 
-function openNewRequestModal() {
+async function openNewRequestModal() {
   dom.requestForm.reset();
   dom.currency.value = "MXN";
   dom.exchangeRate.value = "1";
@@ -848,6 +851,7 @@ function openNewRequestModal() {
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
   handleCurrencyChange();
+  await loadExtraordinaryFaculties();
   syncExtraordinaryIntentVisibility();
   dom.requestDialog.showModal();
 }
