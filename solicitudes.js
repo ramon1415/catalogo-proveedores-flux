@@ -14,6 +14,7 @@ let highlightedRequestId = null;
 let currentDetailRequestId = null;
 let requestFileUpload = null;
 let editRequestFileUpload = null;
+let extraordinaryFacultyCompanyIds = new Set();
 
 const ACTIVE_REQUEST_STATUSES = [
   "submitted",
@@ -68,6 +69,7 @@ async function initSolicitudesPage() {
       loadCostCenters(),
       loadBudgetCategories(),
       loadProveedores(),
+      loadExtraordinaryFaculties(),
     ]);
 
     populateFilters();
@@ -131,6 +133,8 @@ function cacheDom() {
   dom.exchangeRate = document.getElementById("exchangeRate");
   dom.exchangeRateRow = document.getElementById("exchangeRateRow");
   dom.isExtraordinaryAdjustment = document.getElementById("isExtraordinaryAdjustment");
+  dom.extraordinaryIntentSection = document.getElementById("extraordinaryIntentSection");
+  dom.requiresExtraordinaryTreatment = document.getElementById("requiresExtraordinaryTreatment");
   dom.description = document.getElementById("description");
   dom.notes = document.getElementById("notes");
 
@@ -209,7 +213,10 @@ function bindEvents() {
     });
   });
 
-  dom.companyId?.addEventListener("change", handleCompanyScopeChange);
+  dom.companyId?.addEventListener("change", () => {
+    syncExtraordinaryIntentVisibility();
+    handleCompanyScopeChange();
+  });
   dom.approverId?.addEventListener("change", () => {
     syncApproverSelection();
     updateSummaryPanel();
@@ -272,12 +279,32 @@ async function loadProveedores() {
   proveedores = data || [];
 }
 
+async function loadExtraordinaryFaculties() {
+  const { data, error } = await supabaseClient.rpc("current_extraordinary_faculty_company_ids");
+  if (error) {
+    extraordinaryFacultyCompanyIds = new Set();
+    return;
+  }
+  const rows = Array.isArray(data) ? data : [];
+  extraordinaryFacultyCompanyIds = new Set(rows.filter(Boolean));
+  syncExtraordinaryIntentVisibility();
+}
+
+function syncExtraordinaryIntentVisibility() {
+  const companyId = dom.companyId?.value || "";
+  const allowed = companyId && extraordinaryFacultyCompanyIds.has(companyId);
+  dom.extraordinaryIntentSection?.classList.toggle("hidden", !allowed);
+  if (!allowed && dom.requiresExtraordinaryTreatment) {
+    dom.requiresExtraordinaryTreatment.checked = false;
+  }
+}
+
 async function loadPaymentRequests() {
   showMessage("Cargando solicitudes...");
 
   const { data, error } = await supabaseClient
     .from("payment_requests")
-    .select("id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
+    .select("id,request_number,extraordinary_state,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -699,6 +726,22 @@ function renderFilterState() {
   dom.filterSummaryText.textContent = `Vista filtrada: ${activeParts.join(" · ")}`;
 }
 
+function renderExtraordinaryStateBadge(state) {
+  const map = {
+    extraordinary_requested: ["Extraordinaria solicitada", "warning"],
+    extraordinary_draft: ["Extraordinaria solicitada", "warning"],
+    extraordinary_active: ["Extraordinaria activa", "success"],
+    consumed_pending_ratification: ["Extraordinaria / pendiente de ratificación", "warning"],
+    ratified: ["Extraordinaria ratificada", "success"],
+    disputed: ["Extraordinaria en disputa", "danger"],
+    revoked: ["Extraordinaria revocada", "neutral"],
+    expired: ["Extraordinaria vencida", "neutral"],
+    materially_invalidated: ["Extraordinaria invalidada", "danger"],
+  };
+  const entry = map[state];
+  return entry ? Components.badge(entry[0], entry[1]) : "";
+}
+
 function renderPaymentRequestsTable() {
   const query = normalize(dom.searchInput.value);
   const statusFilter = dom.statusFilter.value;
@@ -747,7 +790,11 @@ function renderPaymentRequestsTable() {
     const category = budgetCategoryById(request.budget_category_id);
     const isHighlighted = highlightedRequestId && request.id === highlightedRequestId;
 
-    const folioExtra = request.is_extraordinary_adjustment ? Components.badge("Extraordinario", "violet") : "";
+    const budgetAdjustmentBadge = request.is_extraordinary_adjustment
+      ? Components.badge("Ajuste presupuestal", "violet")
+      : "";
+    const extraordinaryBadge = renderExtraordinaryStateBadge(request.extraordinary_state);
+    const folioExtra = `${budgetAdjustmentBadge}${extraordinaryBadge}`;
     const statusCell = `${renderStatusBadge(request.status)} ${renderBudgetDecisionBadge(request.budget_decision, request.budget_block_reason)}`;
 
     return `
@@ -801,6 +848,7 @@ function openNewRequestModal() {
   resetBudgetCategorySelect("Selecciona empresa, centro de costo y mes");
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
   handleCurrencyChange();
+  syncExtraordinaryIntentVisibility();
   dom.requestDialog.showModal();
 }
 
@@ -867,7 +915,7 @@ async function submitPaymentRequest(event) {
   dom.submitRequestBtn.textContent = "Creando solicitud y validando presupuesto...";
 
   try {
-    const { data, error } = await supabaseClient.rpc("create_payment_request", {
+    const { data, error } = await supabaseClient.rpc("create_payment_request_with_extraordinary_intent", {
       p_proveedor_id: payload.proveedor_id,
       p_company_id: payload.company_id,
       p_cost_center_id: payload.cost_center_id,
@@ -882,6 +930,7 @@ async function submitPaymentRequest(event) {
       p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
       p_approver_id: payload.approver_id,
       p_approver_assignment_id: payload.approver_assignment_id,
+      p_extraordinary_requested: payload.extraordinary_requested,
     });
 
     if (error) throw error;
@@ -919,8 +968,19 @@ async function submitPaymentRequest(event) {
     closeNewRequestModal();
     highlightedRequestId = newRequestId;
     await loadPaymentRequests();
+    if (payload.extraordinary_requested && newRequestId) {
+      openRequestDetail(newRequestId);
+      document.dispatchEvent(new CustomEvent("flux:extraordinary-intent-created", {
+        detail: { paymentRequestId: newRequestId },
+      }));
+      showToast(
+        "Extraordinaria solicitada",
+        "La solicitud quedó guardada, pero todavía no está disponible para layout. Completa la autorización externa.",
+        "warning"
+      );
+    }
   } catch (error) {
-    showToast("No se pudo crear la solicitud", friendlyError(error, "create_payment_request"), "error");
+    showToast("No se pudo crear la solicitud", friendlyError(error, "create_payment_request_with_extraordinary_intent"), "error");
     dom.submitRequestBtn.disabled = false;
     dom.submitRequestBtn.textContent = "Crear solicitud";
   }
@@ -945,6 +1005,9 @@ function collectRequestPayload() {
     description: dom.description.value.trim(),
     notes: dom.notes.value.trim() || null,
     is_extraordinary_adjustment: dom.isExtraordinaryAdjustment.checked,
+    extraordinary_requested:
+      !dom.extraordinaryIntentSection?.classList.contains("hidden")
+      && Boolean(dom.requiresExtraordinaryTreatment?.checked),
   };
 }
 

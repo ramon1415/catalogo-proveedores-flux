@@ -536,7 +536,7 @@ function renderPreviewRow(row, kind) {
     detailIsHtml = true
     detail = `<span class="layout-reject-reason">${escapeHtml(row.reject_reason || "Sin motivo registrado")}</span><small>${escapeHtml(batch)} · ${escapeHtml(formatDate(row.rejected_at))} · ${escapeHtml(row.rejected_by_name || "Direccion")}</small><small>${escapeHtml(row.latest_correction_note ? `Correccion: ${row.latest_correction_note}` : row.rebatch_status === "released" ? "Reingreso habilitado" : "Pendiente de correccion")}</small>${row.target_batch_label ? `<small>Destino: ${escapeHtml(row.target_batch_label)} · ${escapeHtml(row.target_batch_status || "borrador")}</small>` : ""}`
     if (row.rebatch_status === "blocked" && row.source_item_id) {
-      actions += `<button class="small-btn warning" type="button" data-preview-action="rebatch" data-item-id="${escapeHtml(row.source_item_id)}">Enviar nuevamente</button>`
+      actions += `<button class="small-btn warning" type="button" data-preview-action="rebatch" data-item-id="${escapeHtml(row.source_item_id)}">Corregir y enviar nuevamente</button>`
     } else if (row.target_batch_id) {
       actions += `<button class="small-btn" type="button" data-preview-action="open-batch" data-batch-id="${escapeHtml(row.target_batch_id)}">Abrir nuevo corte</button>`
     }
@@ -644,6 +644,7 @@ function openLayoutCompletionDialog(requestId) {
   const request = findPreviewRequest(requestId)
   if (!request || !dom.layoutCompletionDialog) return
   activeLayoutCompletionRequest = request
+  hideLayoutCompletionError()
   const missing = Array.isArray(request.missing_fields) ? request.missing_fields : []
   const accounts = companyBankAccounts.filter((account) => (
     account.company_id === request.company_id
@@ -673,6 +674,7 @@ function openLayoutCompletionDialog(requestId) {
 }
 
 function closeLayoutCompletionDialog() {
+  if (layoutCompletionSubmitting) return
   activeLayoutCompletionRequest = null
   dom.layoutCompletionForm?.reset()
   if (dom.layoutCompletionDialog?.open) dom.layoutCompletionDialog.close()
@@ -707,10 +709,51 @@ async function submitLayoutCompletion(event) {
       requiresDirection ? "warning" : "success"
     )
   } catch (error) {
-    showToast("No se pudieron guardar los datos", friendlyRpcError(error), "danger")
+    const message = friendlyRpcError(error)
+    showLayoutCompletionError(message)
+    focusLayoutCompletionError(error)
+    showToast("No se pudieron guardar los datos", message, "danger")
   } finally {
+    layoutCompletionSubmitting = false
+    dom.closeLayoutCompletionBtn.disabled = false
+    dom.cancelLayoutCompletionBtn.disabled = false
     setButtonLoading(dom.submitLayoutCompletionBtn, false, "Guardar y reevaluar")
   }
+}
+
+function layoutCompletionFieldError(field, message) {
+  showLayoutCompletionError(message)
+  field?.focus()
+  showToast("Revisa los datos", message, "warning")
+}
+
+function showLayoutCompletionError(message) {
+  if (!dom.layoutCompletionError) return
+  dom.layoutCompletionError.textContent = message
+  dom.layoutCompletionError.classList.remove("hidden")
+}
+
+function hideLayoutCompletionError() {
+  if (!dom.layoutCompletionError) return
+  dom.layoutCompletionError.textContent = ""
+  dom.layoutCompletionError.classList.add("hidden")
+}
+
+function focusLayoutCompletionError(error) {
+  const raw = String(error?.message || error || "").toLowerCase()
+  const field = [
+    [["company_bank_account", "source_account"], dom.layoutCompletionBankAccount],
+    [["payment_reference", "reference"], dom.layoutCompletionReference],
+    [["payment_concept", "concept"], dom.layoutCompletionConcept],
+    [["scheduled_payment_date", "payment_date"], dom.layoutCompletionDate],
+    [["destination_type"], dom.layoutCompletionDestinationType],
+    [["beneficiary"], dom.layoutCompletionBeneficiary],
+    [["clabe"], dom.layoutCompletionClabe],
+    [["cuenta_bancaria", "bank_account"], dom.layoutCompletionProviderAccount],
+    [["convenio"], dom.layoutCompletionConvenio],
+    [["banco", "bank"], dom.layoutCompletionProviderBank],
+  ].find(([keys]) => keys.some((key) => raw.includes(key)))?.[1]
+  ;(field || dom.layoutCompletionForm?.querySelector(":invalid"))?.focus()
 }
 
 function layoutAccountLabel(account) {
@@ -732,15 +775,20 @@ async function openLayoutRebatchDialog(itemId) {
 }
 
 function closeLayoutRebatchDialog() {
+  if (layoutRebatchSubmitting) return
   activeLayoutRebatchItem = null
   if (dom.layoutRebatchDialog?.open) dom.layoutRebatchDialog.close()
 }
 
 async function submitLayoutRebatch(event) {
   event.preventDefault()
+  if (layoutRebatchSubmitting) return
   const note = cleanText(dom.layoutRebatchNote.value)
   if (!activeLayoutRebatchItem || !note || note.length < 10) return showToast("Correccion requerida", "Explica en al menos 10 caracteres que se corrigio.", "warning")
+  layoutRebatchSubmitting = true
   setButtonLoading(dom.submitLayoutRebatchBtn, true, "Registrando...")
+  dom.closeLayoutRebatchBtn.disabled = true
+  dom.cancelLayoutRebatchBtn.disabled = true
   try {
     const { data, error } = await supabaseClient.rpc("release_and_rebatch_rejected_request", {
       p_rejected_item_id: activeLayoutRebatchItem.source_item_id,
@@ -748,7 +796,8 @@ async function submitLayoutRebatch(event) {
       p_target_batch_id: dom.layoutRebatchTarget.value || null,
     })
     if (error) throw error
-    closeLayoutRebatchDialog()
+    activeLayoutRebatchItem = null
+    if (dom.layoutRebatchDialog?.open) dom.layoutRebatchDialog.close()
     showToast(
       "Reingreso registrado",
       data?.new_item_id
@@ -760,7 +809,10 @@ async function submitLayoutRebatch(event) {
   } catch (error) {
     showToast("No se pudo reenviar", friendlyRpcError(error), "danger")
   } finally {
-    setButtonLoading(dom.submitLayoutRebatchBtn, false, "Enviar nuevamente")
+    layoutRebatchSubmitting = false
+    dom.closeLayoutRebatchBtn.disabled = false
+    dom.cancelLayoutRebatchBtn.disabled = false
+    setButtonLoading(dom.submitLayoutRebatchBtn, false, "Corregir y enviar nuevamente")
   }
 }
 

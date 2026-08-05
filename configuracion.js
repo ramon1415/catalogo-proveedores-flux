@@ -26,6 +26,7 @@ let routingCompanies = []
 let routingMemberships = []
 let routingAssignments = []
 let routingApprovers = []
+let extraordinaryFaculties = []
 
 // ── Init ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", initConfigurationPage)
@@ -96,6 +97,8 @@ function bindEvents() {
   document.getElementById("routingAssignmentCompany")?.addEventListener("change", loadRoutingApproverOptions)
   document.getElementById("routingAssignmentForm")?.addEventListener("submit", saveRoutingAssignment)
   document.getElementById("routingAssignmentsTableBody")?.addEventListener("click", handleRoutingAssignmentAction)
+  document.getElementById("extraordinaryFacultyForm")?.addEventListener("submit", saveExtraordinaryFaculty)
+  document.getElementById("extraordinaryFacultiesTableBody")?.addEventListener("click", handleExtraordinaryFacultyAction)
 }
 
 // ── Tab logic ────────────────────────────────────────────────────
@@ -752,6 +755,7 @@ async function saveAssignRole() {
 async function loadSystemAdministration() {
   await loadUsers()
   await loadApproverRoutingAdmin()
+  await loadExtraordinaryFaculties()
 }
 
 async function loadApproverRoutingAdmin() {
@@ -791,9 +795,13 @@ function populateRoutingBaseSelectors() {
   const membershipProfile = document.getElementById("routingMembershipProfile")
   const membershipCompany = document.getElementById("routingMembershipCompany")
   const requester = document.getElementById("routingRequester")
+  const facultyProfile = document.getElementById("extraordinaryFacultyProfile")
+  const facultyCompany = document.getElementById("extraordinaryFacultyCompany")
   if (membershipProfile) membershipProfile.innerHTML = profileOptions
   if (membershipCompany) membershipCompany.innerHTML = companyOptions
   if (requester) requester.innerHTML = profileOptions.replace("Seleccionar usuario...", "Seleccionar solicitante...")
+  if (facultyProfile) facultyProfile.innerHTML = profileOptions.replace("Seleccionar usuario...", "Seleccionar perfil...")
+  if (facultyCompany) facultyCompany.innerHTML = companyOptions
 }
 
 function renderRoutingMemberships() {
@@ -976,6 +984,103 @@ async function handleRoutingAssignmentAction(event) {
   } finally {
     button.disabled = false
   }
+}
+
+async function loadExtraordinaryFaculties() {
+  const tbody = document.getElementById("extraordinaryFacultiesTableBody")
+  if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Cargando facultades...</td></tr>`
+  const { data, error } = await configClient.rpc("list_extraordinary_profile_faculties")
+  if (error) {
+    extraordinaryFaculties = []
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(friendlyExtraordinaryFacultyError(error))}</td></tr>`
+    return
+  }
+  extraordinaryFaculties = Array.isArray(data) ? data : []
+  renderExtraordinaryFaculties()
+}
+
+function renderExtraordinaryFaculties() {
+  const tbody = document.getElementById("extraordinaryFacultiesTableBody")
+  if (!tbody) return
+  if (!extraordinaryFaculties.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin facultades extraordinarias configuradas. No se sembró ningún perfil.</td></tr>`
+    return
+  }
+  tbody.innerHTML = extraordinaryFaculties.map(row => `
+    <tr>
+      <td><strong>${escHtml(row.profile_name || "Perfil")}</strong></td>
+      <td>${escHtml(row.company_name || "Empresa")}</td>
+      <td><span class="badge ${row.enabled ? "success" : "neutral"}">${row.enabled ? "Vigente" : "Revocada"}</span></td>
+      <td>${escHtml(row.reason || "—")}</td>
+      <td><button type="button" class="small-btn ${row.enabled ? "danger" : ""}" data-extraordinary-faculty-profile="${escHtml(row.profile_id)}" data-extraordinary-faculty-company="${escHtml(row.company_id)}" data-extraordinary-faculty-enabled="${row.enabled ? "false" : "true"}">${row.enabled ? "Revocar" : "Conceder"}</button></td>
+    </tr>
+  `).join("")
+}
+
+async function saveExtraordinaryFaculty(event) {
+  event.preventDefault()
+  const profileId = document.getElementById("extraordinaryFacultyProfile")?.value || ""
+  const companyId = document.getElementById("extraordinaryFacultyCompany")?.value || ""
+  const reason = document.getElementById("extraordinaryFacultyReason")?.value.trim() || ""
+  if (!profileId || !companyId || reason.length < 10) {
+    return showToast("Datos incompletos", "Selecciona perfil, empresa y captura un motivo de al menos 10 caracteres.", "warning")
+  }
+  await persistExtraordinaryFaculty(profileId, companyId, true, reason)
+}
+
+async function handleExtraordinaryFacultyAction(event) {
+  const button = event.target.closest("[data-extraordinary-faculty-profile]")
+  if (!button) return
+  const reason = document.getElementById("extraordinaryFacultyReason")?.value.trim() || ""
+  if (reason.length < 10) {
+    document.getElementById("extraordinaryFacultyReason")?.focus()
+    return showToast("Motivo requerido", "Captura arriba el motivo de la concesión o revocación.", "warning")
+  }
+  await persistExtraordinaryFaculty(
+    button.dataset.extraordinaryFacultyProfile,
+    button.dataset.extraordinaryFacultyCompany,
+    button.dataset.extraordinaryFacultyEnabled === "true",
+    reason,
+  )
+}
+
+async function persistExtraordinaryFaculty(profileId, companyId, enabled, reason) {
+  const button = document.getElementById("saveExtraordinaryFacultyBtn")
+  if (button) button.disabled = true
+  try {
+    const { error } = await configClient.rpc("set_extraordinary_profile_faculty", {
+      p_profile_id: profileId,
+      p_company_id: companyId,
+      p_enabled: enabled,
+      p_reason: reason,
+    })
+    if (error) throw error
+    showToast(
+      enabled ? "Facultad concedida" : "Facultad revocada",
+      enabled
+        ? "El perfil podrá solicitar tratamiento extraordinario sólo en esta empresa."
+        : "El perfil dejó de tener facultad extraordinaria en esta empresa.",
+      enabled ? "success" : "warning",
+    )
+    document.getElementById("extraordinaryFacultyReason").value = ""
+    await loadExtraordinaryFaculties()
+  } catch (error) {
+    showToast("No se pudo guardar", friendlyExtraordinaryFacultyError(error), "danger")
+  } finally {
+    if (button) button.disabled = false
+  }
+}
+
+function friendlyExtraordinaryFacultyError(error) {
+  const raw = String(error?.message || error || "Error no identificado")
+  const known = {
+    sysadmin_role_required: "Sólo SysAdmin puede administrar facultades.",
+    extraordinary_faculty_reason_required: "Captura un motivo de 10 a 500 caracteres.",
+    active_profile_required: "El perfil debe estar activo.",
+    active_company_membership_required: "El perfil necesita una membresía activa en la empresa.",
+  }
+  const key = Object.keys(known).find(item => raw.includes(item))
+  return key ? known[key] : raw
 }
 
 function setRoutingAssignmentHelp(message, isError = false) {
