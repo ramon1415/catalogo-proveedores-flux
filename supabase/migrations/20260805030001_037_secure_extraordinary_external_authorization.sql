@@ -2808,22 +2808,30 @@ begin
      ) then
     raise exception '037_postcheck: mixed-close preview contract is invalid';
   end if;
-  if (
-    select count(*)
-    from public.payment_request_extraordinary_authorizations
-    where status = 'legacy_consumed_unverified'
-  ) <> 7
-  or (
-    select count(*)
-    from public.payment_request_extraordinary_authorizations
-    where status = 'legacy_quarantined'
-  ) <> 1
-  or (
-    select count(*)
-    from public.payment_request_extraordinary_authorizations
-    where status = 'revoked'
-  ) <> 1 then
-    raise exception '037_postcheck: legacy distribution changed';
+  if not (
+    (
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations) = 0
+    )
+    or (
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations
+       where status = 'legacy_consumed_unverified') = 7
+      and
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations
+       where status = 'legacy_quarantined') = 1
+      and
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations
+       where status = 'revoked') = 1
+      and
+      (select count(*)
+       from public.payment_request_extraordinary_authorizations) = 9
+    )
+  ) then
+    raise exception
+      '037_postcheck: legacy distribution is neither PROD zero-state nor DEV 7/1/1';
   end if;
 end
 $postcheck$;
