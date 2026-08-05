@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Comprobantes batch | Flux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-static-nav">
+  <link rel="stylesheet" href="./comprobantes_batch.css?v=20260723-guided-ux">
+  <link rel="stylesheet" href="./payment_batch_final_reconciliation.css?v=20260723-v1">
+</head>
+<body>
+  <a class="receipt-batch-skip" href="#mainContent">Saltar al contenido</a>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand"><div class="brand-logo">FL</div><div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Comprobantes batch</div></div></div>
+        <nav class="nav" aria-label="Menú principal" data-flux-nav-mode="static"></nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260721-receipt-batches"></script>
+      </div>
+      <div class="user-card"><p id="userName">Usuario</p><span id="userEmail">Sesión activa</span><button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesión</button></div>
+    </aside>
+
+    <main class="content" id="mainContent" tabindex="-1">
+      <header class="topbar"><div class="topbar-kicker">Tesorería · conciliación bancaria</div><div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div></header>
+
+      <section class="receipt-batch-access" id="accessState" role="status">
+        <div class="receipt-batch-access-card"><span class="receipt-batch-access-icon">B</span><h1 id="accessTitle">Validando acceso</h1><p id="accessMessage">Confirmando sesión y capacidades financieras.</p><a class="primary-btn" id="accessHome" href="./dashboard.html" hidden>Volver al dashboard</a></div>
+      </section>
+
+      <section class="page receipt-batch-page" id="batchWorkspace" hidden>
+        <div class="page-header">
+          <div><p class="receipt-batch-eyebrow">Comprobantes bancarios · BBVA PDF v1</p><h1>Comprobantes batch</h1><p>Sube un lote, revisa cada operación y vincúlala con la solicitud aprobada correspondiente.</p></div>
+          <div class="receipt-batch-toolbar"><button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button><button class="primary-btn" id="newBatchBtn" type="button">Nuevo batch</button></div>
+        </div>
+
+        <div class="notice-v2 warning" id="cutoverNotice"><span class="notice-icon">!</span><span><span class="notice-title">Vinculación 1:1 protegida</span><span class="notice-sep">—</span><span class="notice-desc">Cada comprobante se vincula con una sola solicitud aprobada. El importe y la moneda se leen del PDF y nunca se capturan durante la vinculación.</span></span></div>
+
+        <section class="receipt-batch-flow-overview" aria-label="Flujo de comprobantes">
+          <div class="receipt-flow-step"><span>1</span><strong>Revisar comprobante</strong><small>Abre una sola página</small></div>
+          <div class="receipt-flow-step"><span>2</span><strong>Buscar solicitud aprobada</strong><small>Consulta sin modificar datos</small></div>
+          <div class="receipt-flow-step"><span>3</span><strong>Confirmar coincidencia</strong><small>Importe y moneda exactos</small></div>
+          <div class="receipt-flow-step"><span>4</span><strong>Comprobante vinculado</strong><small>Solicitud marcada como pagada</small></div>
+        </section>
+        <p class="receipt-batch-existing-note"><strong>¿Ya aparece un lote?</strong> Fue cargado anteriormente. Para iniciar otro usa <strong>Nuevo batch</strong>. Si subes exactamente el mismo PDF, Flux abrirá el lote original para evitar duplicados.</p>
+
+        <section class="receipt-batch-kpis" aria-label="Resumen de batches">
+          <button class="kpi info clickable active" type="button" data-summary-filter=""><span class="kpi-label">Total</span><span class="kpi-value" id="countTotal">—</span><span class="kpi-sub">Batches visibles</span></button>
+          <button class="kpi warning clickable" type="button" data-summary-filter="processing"><span class="kpi-label">Procesando</span><span class="kpi-value" id="countProcessing">—</span><span class="kpi-sub">Ingesta o extracción</span></button>
+          <button class="kpi violet clickable" type="button" data-summary-filter="review_required"><span class="kpi-label">Por revisar</span><span class="kpi-value" id="countReview">—</span><span class="kpi-sub">Extracciones</span></button>
+          <button class="kpi success clickable" type="button" data-summary-filter="ready"><span class="kpi-label">Listos</span><span class="kpi-value" id="countCompleted">—</span><span class="kpi-sub">Revisión terminada</span></button>
+          <button class="kpi danger clickable" type="button" data-summary-filter="failed"><span class="kpi-label">Con incidencia</span><span class="kpi-value" id="countFailed">—</span><span class="kpi-sub">Requieren atención</span></button>
+        </section>
+
+        <section class="receipt-batch-workspace" aria-label="Batches de comprobantes">
+          <div class="receipt-batch-list-panel">
+            <div class="receipt-batch-list-controls"><input class="f-ctrl" id="batchSearch" type="search" placeholder="Buscar folio, archivo o empresa" aria-label="Buscar batch"><select class="f-ctrl" id="batchStatusFilter" aria-label="Filtrar por estado"><option value="">Todos los estados</option><option value="awaiting_upload">Esperando carga</option><option value="extracting">Extrayendo</option><option value="review_required">Por revisar</option><option value="ready">Listo</option><option value="failed">Con incidencia</option><option value="cancelled">Cancelado</option></select></div>
+            <div class="receipt-batch-list" id="batchList" aria-live="polite"><div class="receipt-batch-empty">Cargando batches…</div></div>
+          </div>
+          <article class="receipt-batch-detail" id="batchDetail" aria-live="polite"><div class="empty-state-v2"><div class="es-icon">B</div><div class="es-title">Selecciona un batch</div><div class="es-desc">Aquí verás sus documentos, operaciones, conciliación e historial.</div></div></article>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="narrow" id="newBatchDialog" aria-labelledby="newBatchTitle">
+    <form class="modal-content" id="newBatchForm">
+      <div class="modal-header"><div><h2 id="newBatchTitle">Subir lote de comprobantes</h2><p>Selecciona el PDF recibido del banco. Cada página se leerá como una operación y quedará pendiente de revisión.</p></div><button class="icon-btn" id="closeNewBatchBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll">
+        <div class="fg cols-1">
+          <label><span class="f-label">Empresa <span class="f-req">*</span></span><select class="f-ctrl" id="batchCompanyId" required><option value="">Selecciona…</option></select></label>
+          <label><span class="f-label">Archivo PDF BBVA <span class="f-req">*</span></span><input class="form-file" id="batchPdfFile" type="file" accept="application/pdf,.pdf" required><span class="file-hint" id="batchPdfHint">Solo PDF. El límite y bucket los autoriza el servidor.</span></label>
+        </div>
+        <div class="receipt-batch-progress" id="uploadProgress" role="status" aria-live="polite" hidden><div class="progress-bar"><div class="progress-fill" id="uploadProgressFill"></div></div><span id="uploadProgressText">Preparando…</span></div>
+        <p class="receipt-batch-error" id="uploadError" role="alert"></p>
+      </div>
+      <div class="modal-actions"><button class="secondary-btn" id="cancelNewBatchBtn" type="button">Cancelar</button><button class="primary-btn" id="submitNewBatchBtn" type="submit">Subir y revisar</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="narrow" id="duplicateBatchDialog" aria-labelledby="duplicateBatchTitle">
+    <div class="modal-content receipt-duplicate-modal">
+      <div class="modal-header">
+        <div>
+          <p class="receipt-batch-eyebrow">Carga protegida contra duplicados</p>
+          <h2 id="duplicateBatchTitle">Este archivo ya fue cargado</h2>
+          <p>Flux no creó otro lote ni volvió a procesar el PDF.</p>
+        </div>
+        <button class="icon-btn" id="closeDuplicateBatchBtn" type="button" aria-label="Cerrar">×</button>
+      </div>
+      <div class="modal-scroll">
+        <dl class="receipt-duplicate-summary">
+          <div><dt>Folio del lote existente</dt><dd id="duplicateBatchFolio">—</dd></div>
+          <div><dt>Estado actual</dt><dd id="duplicateBatchStatus">—</dd></div>
+        </dl>
+        <p class="receipt-duplicate-help">Puedes abrir el lote original para continuar desde su estado actual. Si deseas cargar otro lote, cierra este aviso y selecciona un PDF diferente.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn" id="dismissDuplicateBatchBtn" type="button">Cerrar</button>
+        <button class="primary-btn" id="openDuplicateBatchBtn" type="button">Abrir lote existente</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="operationDialog" aria-labelledby="operationTitle">
+    <div class="modal-content receipt-operation-modal">
+      <div class="modal-header"><div><h2 id="operationTitle">Comprobante bancario</h2><p id="operationSubtitle">Revisión y vinculación 1:1.</p></div><button class="icon-btn" id="closeOperationBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll" id="operationContent"></div>
+      <div class="receipt-operation-footer">
+        <div class="receipt-operation-action-guide">
+          <span>Siguiente paso</span>
+          <strong id="operationActionReason">Abre el comprobante individual y revisa los datos.</strong>
+        </div>
+        <div class="receipt-operation-primary-actions">
+          <button class="secondary-btn" id="openReceiptPdfBtn" type="button">Ver comprobante</button>
+          <button class="primary-btn" id="acceptExtractionBtn" type="button">Datos correctos, continuar</button>
+          <button class="primary-btn" id="findCandidatesBtn" type="button">Buscar solicitud aprobada</button>
+          <button class="primary-btn" id="confirmOperationBtn" type="button" hidden disabled>Vincular comprobante y marcar solicitud como pagada</button>
+        </div>
+        <details class="receipt-operation-secondary" id="operationSecondaryActions">
+          <summary>¿Los datos leídos son incorrectos?</summary>
+          <div class="receipt-operation-secondary-body">
+            <p>La corrección es un flujo separado, queda auditada y debe revisarse nuevamente antes de buscar una solicitud.</p>
+            <button class="secondary-btn" id="openCorrectionBtn" type="button">Corregir datos leídos</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="narrow" id="extractionCorrectionDialog" aria-labelledby="extractionCorrectionTitle">
+    <form class="modal-content" id="extractionCorrectionForm">
+      <div class="modal-header"><div><h2 id="extractionCorrectionTitle">Corregir datos leídos</h2><p>Solo utiliza este formulario cuando la lectura del PDF sea incorrecta. La corrección quedará auditada y deberá aceptarse nuevamente.</p></div><button class="icon-btn" id="closeCorrectionBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll">
+        <div class="fg cols-2 receipt-correction-grid">
+          <label><span class="f-label">Fecha de pago</span><input class="f-ctrl" id="correctionDate" type="date" required></label>
+          <label><span class="f-label">Importe leído</span><input class="f-ctrl" id="correctionAmount" type="text" inputmode="decimal" required></label>
+          <label><span class="f-label">Moneda</span><input class="f-ctrl" id="correctionCurrency" type="text" maxlength="3" required></label>
+          <label><span class="f-label">Referencia bancaria</span><input class="f-ctrl" id="correctionReference" type="text" maxlength="120" required></label>
+          <label class="span-2"><span class="f-label">Beneficiario</span><input class="f-ctrl" id="correctionBeneficiary" type="text" maxlength="180" required></label>
+          <label class="span-2"><span class="f-label">Concepto</span><input class="f-ctrl" id="correctionConcept" type="text" maxlength="500"></label>
+          <label class="span-2"><span class="f-label">Motivo de la corrección</span><textarea class="f-ctrl" id="correctionReason" minlength="10" maxlength="500" required></textarea></label>
+        </div>
+        <p class="receipt-section-help">El importe corregido será canónico únicamente después de una nueva revisión humana. Nunca podrá editarse durante el matching.</p>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-btn danger-outline" id="markReceiptUnusableBtn" type="button">No es un comprobante individual</button>
+        <button class="secondary-btn" id="cancelCorrectionBtn" type="button">Cancelar</button>
+        <button class="primary-btn" type="submit">Guardar corrección</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="narrow" id="linkConfirmationDialog" aria-labelledby="linkConfirmationTitle">
+    <form class="modal-content" id="linkConfirmationForm">
+      <div class="modal-header"><div><h2 id="linkConfirmationTitle">Confirmar coincidencia</h2><p>Esta acción vinculará un comprobante individual con una sola solicitud.</p></div><button class="icon-btn" id="closeLinkConfirmationBtn" type="button" aria-label="Cerrar">×</button></div>
+      <div class="modal-scroll">
+        <p class="receipt-link-confirmation-copy" id="linkConfirmationCopy"></p>
+        <dl class="receipt-link-confirmation-grid" id="linkConfirmationSummary"></dl>
+        <label class="payment-final-attestation"><input id="linkConfirmationCheck" type="checkbox"><span>Confirmo que revisé el comprobante individual, la solicitud, el importe y la moneda.</span></label>
+      </div>
+      <div class="modal-actions"><button class="secondary-btn" id="cancelLinkConfirmationBtn" type="button">Cancelar</button><button class="primary-btn" id="submitLinkConfirmationBtn" type="submit" disabled>Vincular y marcar como pagada</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast-stack-v2" id="toastStack" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./pdfjs-3.11.174.min.js?v=20260723-vendored-root"></script>
+  <script src="./pdf-lib-1.17.1.min.js?v=20260723-vendored-root"></script>
+  <script src="./config.js?v=20260721-receipt-batches"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./payment_batch_parser.js?v=20260721-v1"></script>
+  <script src="./payment_batch_single_page_pdf.js?v=20260723-one-to-one"></script>
+  <script src="./comprobantes_batch.js?v=20260723-idempotent-evidence-retry"></script>
+</body>
+</html>
