@@ -294,7 +294,21 @@ async function loadExtraordinaryFaculties() {
   syncExtraordinaryIntentVisibility();
 }
 
+function ensureExtraordinaryIntentPlacement() {
+  const section = dom.extraordinaryIntentSection || document.getElementById("extraordinaryIntentSection");
+  const adjustment = dom.isExtraordinaryAdjustment || document.getElementById("isExtraordinaryAdjustment");
+  const adjustmentLabel = adjustment?.closest("label");
+  const targetGrid = adjustmentLabel?.parentElement;
+
+  if (!section || !adjustmentLabel || !targetGrid) return false;
+  if (section.parentElement !== targetGrid || adjustmentLabel.nextElementSibling !== section) {
+    adjustmentLabel.insertAdjacentElement("afterend", section);
+  }
+  return section.parentElement === targetGrid && adjustmentLabel.nextElementSibling === section;
+}
+
 function syncExtraordinaryIntentVisibility() {
+  ensureExtraordinaryIntentPlacement();
   const companyId = dom.companyId?.value || "";
   const hasAnyFaculty = extraordinaryFacultyCompanyIds.size > 0;
   const hasSelectedCompany = Boolean(companyId);
@@ -873,8 +887,15 @@ async function openNewRequestModal() {
   setBudgetCategoryHelp("Selecciona empresa, centro de costo y mes para cargar partidas disponibles.");
   handleCurrencyChange();
   await loadExtraordinaryFaculties();
+  ensureExtraordinaryIntentPlacement();
   syncExtraordinaryIntentVisibility();
   dom.requestDialog.showModal();
+  [0, 60, 180, 420, 900].forEach(delay => {
+    window.setTimeout(() => {
+      ensureExtraordinaryIntentPlacement();
+      syncExtraordinaryIntentVisibility();
+    }, delay);
+  });
 }
 
 // Botón Demo: rellena el formulario con datos de prueba para presentaciones.
