@@ -288,6 +288,27 @@
               </table>
             </div>
           </section>
+
+          <section class="table-card" id="extraordinaryFacultySection">
+            <div style="padding:14px 16px 8px">
+              <strong style="font-size:12px;color:var(--text-1)">Facultad de solicitud extraordinaria</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">La facultad es explícita por perfil y empresa. El rol Finanzas o SysAdmin por sí solo no habilita la operación.</p>
+            </div>
+            <form id="extraordinaryFacultyForm" class="table-toolbar" style="grid-template-columns:minmax(170px,1fr) minmax(170px,1fr) minmax(220px,1.4fr) auto">
+              <select id="extraordinaryFacultyProfile" aria-label="Perfil" required></select>
+              <select id="extraordinaryFacultyCompany" aria-label="Empresa" required></select>
+              <input id="extraordinaryFacultyReason" type="text" minlength="10" maxlength="500" required placeholder="Motivo de la concesión o revocación">
+              <button type="submit" id="saveExtraordinaryFacultyBtn" class="primary-btn">Conceder facultad</button>
+            </form>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Perfil</th><th>Empresa</th><th>Estatus</th><th>Motivo</th><th>Acción</th></tr></thead>
+                <tbody id="extraordinaryFacultiesTableBody">
+                  <tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin facultades extraordinarias configuradas.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
       </section>
@@ -457,6 +478,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260709-multi-approver-pool"></script>
+  <script src="./configuracion.js?v=20260805-extraordinary-faculty"></script>
 </body>
 </html>
