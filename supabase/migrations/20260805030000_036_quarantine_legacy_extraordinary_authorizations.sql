@@ -694,6 +694,7 @@ declare
   v_revoked integer;
   v_active integer;
   v_events integer;
+  v_expected_events integer;
   v_status_constraint_count integer;
 begin
   select * into v_baseline from legacy_036_immutable_baseline;
@@ -717,10 +718,11 @@ begin
 
   select count(*) into v_events
   from public.payment_request_extraordinary_events;
-  if v_events <> case when v_consumed = 0 then 1 else 10 end then
+  v_expected_events := case when v_consumed = 0 then 1 else 10 end;
+  if v_events <> v_expected_events then
     raise exception
       '036_postcheck: expected % legacy events, got %',
-      case when v_consumed = 0 then 1 else 10 end,
+      v_expected_events,
       v_events;
   end if;
 
