@@ -4,11 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cortes semanales | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css?v=20260610-demo-btn">
-  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260624-static-nav">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
   <style>
     [hidden]{display:none!important}
     .batch-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -110,7 +113,7 @@
   <div class="app-shell">
     <aside class="sidebar">
       <div>
-        <div class="brand"><div class="brand-logo">FL</div><div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Cortes semanales</div></div></div>
+        <div class="brand"><div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div><div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Cortes semanales</div></div></div>
         <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
           <div class="nav-section"><div class="nav-section-title">Operacion</div><a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link muted"><span>S</span> Solicitudes de pago</a><a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link muted"><span>L</span> Layouts de pago</a><a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link muted"><span>E</span> Efectivo y comprobaciones</a><a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a></div>
           <div class="nav-section"><div class="nav-section-title">General</div><a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link muted"><span>D</span> Dashboard operativo</a><a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobacion</a><a href="./approval_batches.html" data-flux-nav-key="approval-batches" class="nav-link active"><span>C</span> Cortes semanales</a></div>
