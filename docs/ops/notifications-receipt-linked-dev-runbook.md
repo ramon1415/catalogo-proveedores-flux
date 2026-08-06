@@ -1,11 +1,12 @@
-# NOTIFICATIONS-RECEIPT-LINKED — DEV runbook
+# NOTIFICATIONS-RECEIPT-LINKED — DEV evidence and PROD release package
 
 ## Scope and immutable baseline
 
-- Baseline: `main@2c5c15ef1419001398b9fb2f36ef874c88703321`.
+- Current production baseline: `main@9bcebdc3603ba64c4e5c044fda1acb38621c530e`.
+- Branch reconciliation merge: `5d22a17aec68b2018282ab0fc41c16772a5d6eab`.
 - Branch: `feature/ramon-notifications-receipt-linked`.
 - Trigger: successful, atomic `public.link_payment_receipt_to_request(uuid,uuid,text)`.
-- Production is out of scope. The pull request remains Draft.
+- Production execution is out of scope for this packaging gate. The pull request remains Draft; no workflow in this package has been run.
 - No historical backfill or replay is permitted.
 - Portal, N1-A, N1-B, PR #147, PR #283, PR #286, and PR #321 are out of scope.
 
@@ -43,8 +44,9 @@ In addition:
 
 1. Parse both published migrations with a PostgreSQL grammar parser.
 2. Compare the financial RPC in the new migration with migration 033 after removing only the declared notification delta.
-3. Confirm the PR changes only the migration, dispatcher, contract test, and this runbook.
-4. Confirm no changed path belongs to Portal, workflows, Comprobantes UI, Solicitudes UI, Cortes, Permisos, or extraordinary 01C.
+3. Confirm the PR changes only the two allowlisted migrations, dispatcher, contract test, this runbook, the dedicated protected Phase A workflow, and the permanent scheduler.
+4. Confirm no changed path belongs to Portal, Comprobantes UI, Solicitudes UI, Cortes, Permisos, extraordinary 01C, or any historical workflow.
+5. Parse both new workflow files as YAML and verify their immutable project, cutoff, allowlist, environment, permissions, concurrency, and branch guards.
 
 ## Controlled DEV gate
 
@@ -86,6 +88,131 @@ In addition:
 Capture only remote URLs/SHAs, project ref, migration version, Edge Function version, masked intended/final emails, counts, and SHA-256. Never capture secrets, Base64, private Storage paths, full addresses, bank data, or PDF contents.
 
 Stop without touching PROD if migration history drifts, the function cannot remain `test_only`, any historical event is claimed, the full batch PDF is requested, a real recipient is selected, or an out-of-scope path changes.
+
+## PROD release package (defined, not executed)
+
+### Immutable identity and zero-replay boundary
+
+- PROD project ref: `ucantptjhwttexzmslvm`.
+- Current `main`: `9bcebdc3603ba64c4e5c044fda1acb38621c530e`.
+- Fixed initial cutoff: `2026-08-06T20:11:17.823134Z`.
+- Initial event allowlist: only `payment_receipt.linked`.
+- Dispatch limit: 5.
+- Preflight baseline: zero `payment_receipt.linked` rows, zero `notification_delivery_attempts`, and receipt-linked producer, attachment resolver, and claim v2 absent.
+- The cutoff is immutable for the initial release. Do not substitute deployment time, `now()`, or a scheduler-run timestamp.
+- No historical backfill or replay is allowed.
+
+### Exact release scope
+
+Only these seven paths may differ from current `main`:
+
+1. `supabase/migrations/20260806023116_notifications_receipt_linked.sql`
+2. `supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql`
+3. `supabase/functions/notification-dispatcher/index.ts`
+4. `scripts/qa/notifications-receipt-linked-contract.test.mjs`
+5. `docs/ops/notifications-receipt-linked-dev-runbook.md`
+6. `.github/workflows/supabase-prod-notifications-receipt-linked-release.yml`
+7. `.github/workflows/supabase-prod-notification-dispatcher.yml`
+
+The migration allowlist is exactly two versions, in this order: primary `20260806023116`, then corrective `20260806030202`. No generic PROD release workflow, Portal path, frontend path, or unrelated migration is part of this package.
+
+### PROD secret and variable contract
+
+Required GitHub Environment: `supabase-production`.
+
+Presence is required; values must never be printed:
+
+- Secret `SUPABASE_ACCESS_TOKEN`.
+- Secret `SUPABASE_PROD_SESSION_POOLER_DB_URL`.
+- Secret `NOTIFICATION_DISPATCHER_SECRET`.
+- Existing Supabase runtime secret `RESEND_API_KEY`.
+- Existing Supabase runtime secret `NOTIFICATION_FROM_EMAIL`.
+- Variable `SUPABASE_PROJECT_REF_PROD`, exactly `ucantptjhwttexzmslvm`.
+- Variable `NOTIFICATION_PROD_SCHEDULER_ENABLED`; it must be absent or `false` throughout Phase A.
+
+Phase A writes only these static runtime values during a separately authorized future execution:
+
+```text
+NOTIFICATION_SEND_MODE=disabled
+NOTIFICATION_EVENT_TYPES=payment_receipt.linked
+NOTIFICATION_CUTOFF_AT=2026-08-06T20:11:17.823134Z
+NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod
+```
+
+### Phase A — disabled first deploy
+
+The protected manual workflow is `supabase-prod-notifications-receipt-linked-release.yml`. It is `workflow_dispatch` only, requires the exact approved `main` SHA and explicit PROD/phase/cutoff confirmations, runs in `supabase-production`, and refuses to run if the permanent scheduler is enabled.
+
+A future, separately authorized Phase A run must:
+
+1. prove current `main`, exact source blobs, PROD identity, backup/PITR availability, and the exact two-migration allowlist;
+2. re-run the read-only zero-state and prerequisite precheck;
+3. force `NOTIFICATION_SEND_MODE=disabled`;
+4. deploy only `notification-dispatcher`;
+5. apply exactly the primary migration followed by the corrective migration;
+6. verify both migration-history rows, functions, ACLs, zero receipt events, and zero delivery attempts;
+7. perform an unauthenticated 401 smoke and an authenticated disabled smoke returning `processed=0`, `sent=0`, `failed=0`;
+8. stop with the scheduler disabled, zero Resend calls, and zero emails.
+
+No Phase A execution is authorized by this packaging gate.
+
+### Phase B — real mode and permanent automatic dispatch
+
+Phase B is a distinct, later authorization. It must never be combined with Phase A.
+
+The permanent workflow is `supabase-prod-notification-dispatcher.yml`. Its schedule is `3-58/5 * * * *`, providing one invocation every five minutes. It runs only from `main`, is serialized with `cancel-in-progress: false`, uses the `supabase-production` Environment, and requires `NOTIFICATION_PROD_SCHEDULER_ENABLED=true`.
+
+Every invocation is exactly:
+
+```json
+{"event_types":["payment_receipt.linked"],"created_at_from":"2026-08-06T20:11:17.823134Z","limit":5}
+```
+
+The workflow performs a single authenticated invocation and has no blind retry. Runtime queue idempotency, locks, retry policy, and the provider idempotency key remain authoritative. Enabling real mode and the scheduler requires a separate Ramón execution authorization after Phase A evidence is approved.
+
+### Minimal PROD smoke plan
+
+Phase A smoke:
+
+- unauthenticated request returns 401;
+- authenticated request in disabled mode returns 200;
+- `processed=0`;
+- `sent=0`;
+- `failed=0`;
+- ledger and attempts remain zero;
+- Resend calls and emails remain zero.
+
+Phase B smoke, only after separate authorization:
+
+1. capture a fresh observation timestamp while retaining the fixed release cutoff;
+2. create one normal post-commit `payment_receipt.linked` event through the financial workflow—never from upload, extraction, candidate display, or selection;
+3. allow one serialized scheduler invocation;
+4. reconcile one expected event/attempt/provider ID and its one-page individual PDF;
+5. prove that no earlier event was claimed and that the batch PDF was never fetched or sent;
+6. stop the rollout immediately if any count, recipient, attachment, or cutoff invariant differs.
+
+### Rollback and forward-fix
+
+Operational stop/containment is:
+
+1. set `NOTIFICATION_PROD_SCHEDULER_ENABLED=false`;
+2. set `NOTIFICATION_SEND_MODE=disabled`;
+3. confirm no scheduler job remains active and perform only read-only reconciliation;
+4. preserve all financial and notification evidence.
+
+Data rollback is prohibited:
+
+- No revertir pagos ni receipt links.
+- No borrar notification_events.
+- No borrar delivery_attempts.
+- No hacer replay.
+- Do not remove append-only financial outbox rows.
+
+Database corrections use **Forward-fix** migrations only. Function rollback, if required and separately authorized, redeploys a previously certified dispatcher while send mode remains disabled. Never roll back the financial commit because notification delivery failed.
+
+### PROD execution stop conditions
+
+Stop before or during an authorized release if `main` or any certified blob drifts; either migration is already present unexpectedly; initial ledger counts are nonzero; backup/PITR cannot be proven; a required secret name is absent; the project ref differs; the scheduler is enabled during Phase A; disabled smoke claims work; or any Portal/frontend/unrelated path appears in scope.
 
 ## Release flags
 
