@@ -37,6 +37,7 @@ concurrency:
 
 jobs:
   smoke_notification_dispatcher:
+    if: ${{ inputs.confirm_mode == 'smoke_notification_dispatcher_dev_test_only' }}
     name: Smoke test notification-dispatcher in Supabase DEV
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -454,3 +455,159 @@ jobs:
           path: /tmp/supabase-dev-notification-dispatcher-smoke-evidence
           if-no-files-found: warn
           retention-days: 14
+
+  configure_receipt_linked_primary:
+    if: ${{ inputs.confirm_mode == 'configure_receipt_linked_primary_dev_test_only' }}
+    name: Configure receipt-linked primary dispatch in Supabase DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
+      FUNCTION_NAME: notification-dispatcher
+      FUNCTION_URL: https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/notification-dispatcher
+      CONFIRM_DEV: ${{ inputs.confirm_dev }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+      CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
+      CONFIRM_BRANCH: ${{ inputs.confirm_branch }}
+      CONFIRM_LIMIT: ${{ inputs.confirm_limit }}
+
+    steps:
+      - name: Validate temporary primary-path guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF_NAME}" = "feature/ramon-notifications-receipt-linked" ]]
+          [[ "${CONFIRM_BRANCH}" = "feature/ramon-notifications-receipt-linked" ]]
+          [[ "${CONFIRM_DEV}" = "${SUPABASE_PROJECT_ID}" ]]
+          [[ "${CONFIRM_MODE}" = "configure_receipt_linked_primary_dev_test_only" ]]
+          [[ "${CONFIRM_FUNCTION}" = "${FUNCTION_NAME}" ]]
+          [[ "${CONFIRM_LIMIT}" = "0" ]]
+          [[ "${FUNCTION_URL}" = "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/${FUNCTION_NAME}" ]]
+          [[ -n "${SUPABASE_ACCESS_TOKEN}" ]]
+          [[ -n "${SUPABASE_DEV_DB_URL}" ]]
+          [[ -n "${NOTIFICATION_DISPATCHER_SECRET}" ]]
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+          echo "target=DEV"
+          echo "send_mode=test_only"
+          echo "manual_dispatch=false"
+          echo "prod_mutations=0"
+
+      - name: Check out exact feature head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y postgresql-client >/dev/null
+          fi
+
+      - name: Force test-only runtime and provision primary Vault contract
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          runtime_file="${RUNNER_TEMP}/receipt-linked-primary-runtime.env"
+          umask 077
+          {
+            echo 'NOTIFICATION_SEND_MODE=test_only'
+            printf 'NOTIFICATION_DISPATCHER_SECRET=%s\n' "${NOTIFICATION_DISPATCHER_SECRET}"
+          } > "${runtime_file}"
+          supabase secrets set \
+            --project-ref "${SUPABASE_PROJECT_ID}" \
+            --env-file "${runtime_file}" >/dev/null
+          rm -f "${runtime_file}"
+
+          cutoff="$(psql "${SUPABASE_DEV_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "select to_char(clock_timestamp() at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')")"
+          [[ "${cutoff}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
+
+          psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 \
+            -v dispatcher_url="${FUNCTION_URL}" \
+            -v dispatcher_secret="${NOTIFICATION_DISPATCHER_SECRET}" \
+            -v cutoff="${cutoff}" <<'SQL' >/dev/null
+          begin;
+          select set_config('uat.dispatcher_url', :'dispatcher_url', true);
+          select set_config('uat.dispatcher_secret', :'dispatcher_secret', true);
+          select set_config('uat.dispatcher_cutoff', :'cutoff', true);
+          do $$
+          declare
+            v_id uuid;
+          begin
+            select id into v_id from vault.secrets where name='notification_dispatcher_url';
+            if v_id is null then
+              perform vault.create_secret(current_setting('uat.dispatcher_url'), 'notification_dispatcher_url', 'DEV receipt-linked dispatcher URL');
+            else
+              perform vault.update_secret(v_id, current_setting('uat.dispatcher_url'), 'notification_dispatcher_url', 'DEV receipt-linked dispatcher URL');
+            end if;
+
+            select id into v_id from vault.secrets where name='notification_dispatcher_secret';
+            if v_id is null then
+              perform vault.create_secret(current_setting('uat.dispatcher_secret'), 'notification_dispatcher_secret', 'DEV receipt-linked dispatcher credential');
+            else
+              perform vault.update_secret(v_id, current_setting('uat.dispatcher_secret'), 'notification_dispatcher_secret', 'DEV receipt-linked dispatcher credential');
+            end if;
+
+            select id into v_id from vault.secrets where name='notification_dispatcher_cutoff_at';
+            if v_id is null then
+              perform vault.create_secret(current_setting('uat.dispatcher_cutoff'), 'notification_dispatcher_cutoff_at', 'DEV receipt-linked UAT cutoff');
+            else
+              perform vault.update_secret(v_id, current_setting('uat.dispatcher_cutoff'), 'notification_dispatcher_cutoff_at', 'DEV receipt-linked UAT cutoff');
+            end if;
+
+            select id into v_id from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+            if v_id is null then
+              perform vault.create_secret('true', 'notification_receipt_linked_immediate_enabled', 'DEV receipt-linked primary switch');
+            else
+              perform vault.update_secret(v_id, 'true', 'notification_receipt_linked_immediate_enabled', 'DEV receipt-linked primary switch');
+            end if;
+          end
+          $$;
+          commit;
+          SQL
+
+          row="$(psql "${SUPABASE_DEV_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          select
+            (select count(*) from vault.decrypted_secrets where name=any(array[
+              'notification_dispatcher_url',
+              'notification_dispatcher_secret',
+              'notification_dispatcher_cutoff_at',
+              'notification_receipt_linked_immediate_enabled'
+            ]::text[])),
+            (select decrypted_secret='https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/notification-dispatcher' from vault.decrypted_secrets where name='notification_dispatcher_url'),
+            (select decrypted_secret='true' from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled'),
+            exists(select 1 from pg_extension where extname='pg_net'),
+            to_regprocedure('net.http_post(text,jsonb,jsonb,jsonb,integer)') is not null,
+            exists(
+              select 1 from pg_trigger
+              where tgrelid='public.notification_events'::regclass
+                and tgname='notification_receipt_linked_immediate_dispatch_after_insert'
+                and not tgisinternal
+            );
+          SQL
+          )"
+          [[ "${row}" = '4|t|t|t|t|t' ]]
+          echo "vault_contract=4_of_4"
+          echo "endpoint=canonical_functions_v1"
+          echo "primary_enabled=true"
+          echo "pg_net=active"
+          echo "trigger=active"
+          echo "cutoff=${cutoff}"
+          echo "dispatcher_invoked=0"
