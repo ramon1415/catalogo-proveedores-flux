@@ -1,0 +1,540 @@
+name: Supabase PROD Receipt Linked Phase A
+
+'on':
+  workflow_dispatch:
+    inputs:
+      target_git_sha:
+        description: Exact main SHA containing the approved receipt-linked release package
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the PROD project ref
+        required: true
+        type: string
+      confirm_phase:
+        description: Type receipt_linked_phase_a_disabled
+        required: true
+        type: string
+      confirm_cutoff:
+        description: Confirm the fixed no-replay cutoff
+        required: true
+        default: '2026-08-06T20:11:17.823134Z'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-receipt-linked-phase-a
+  cancel-in-progress: false
+
+jobs:
+  phase_a:
+    name: Deploy disabled dispatcher, post-commit wake-up, and receipt-linked contract
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: supabase-production
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SCHEDULER_ENABLED: ${{ vars.NOTIFICATION_PROD_SCHEDULER_ENABLED }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_PHASE: ${{ inputs.confirm_phase }}
+      CONFIRM_CUTOFF: ${{ inputs.confirm_cutoff }}
+      PROD_CUTOFF: '2026-08-06T20:11:17.823134Z'
+      FUNCTION_NAME: notification-dispatcher
+      FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/notification-dispatcher
+      PRIMARY_MIGRATION: supabase/migrations/20260806023116_notifications_receipt_linked.sql
+      CORRECTIVE_MIGRATION: supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql
+      WAKEUP_MIGRATION: supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql
+      NORMALIZATION_FIX_MIGRATION: supabase/migrations/20260806224918_notifications_receipt_match_text_diacritics.sql
+
+    steps:
+      - name: Validate immutable Phase A guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" = "refs/heads/main" ]]
+          [[ "${GITHUB_SHA}" = "${TARGET_GIT_SHA}" ]]
+          [[ "${TARGET_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_PROD}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${PROJECT_REF}" != "${FORBIDDEN_DEV_REF}" ]]
+          [[ "${CONFIRM_PHASE}" = "receipt_linked_phase_a_disabled" ]]
+          [[ "${CONFIRM_CUTOFF}" = "${PROD_CUTOFF}" ]]
+          [[ "${SCHEDULER_ENABLED:-false}" != "true" ]]
+          [[ -n "${SUPABASE_ACCESS_TOKEN}" ]]
+          [[ -n "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" ]]
+          [[ -n "${NOTIFICATION_DISPATCHER_SECRET}" ]]
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
+          echo "::add-mask::${SUPABASE_PROD_SESSION_POOLER_DB_URL}"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "${current_main}" = "${TARGET_GIT_SHA}" ]]
+          echo "phase=receipt_linked_phase_a_disabled"
+          echo "target=PROD"
+          echo "scheduler_enabled=false"
+          echo "real_mode_enabled=false"
+
+      - name: Check out immutable target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate exact release bytes and allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" = "${TARGET_GIT_SHA}" ]]
+          [[ "$(git hash-object "${PRIMARY_MIGRATION}")" = "5bba750636726f8caf1ba045111745198c2a28fb" ]]
+          [[ "$(git hash-object "${CORRECTIVE_MIGRATION}")" = "febcb202a248cb54155fbfc2fae8c4d77a3b3250" ]]
+          [[ "$(git hash-object "${WAKEUP_MIGRATION}")" = "ee5467372cfba8645bebaa6646dd035a4648d94a" ]]
+          [[ "$(git hash-object "${NORMALIZATION_FIX_MIGRATION}")" = "997792b4c1a03a365d8a1b69bf1b82491a4532c3" ]]
+          [[ "$(git hash-object "supabase/functions/notification-dispatcher/index.ts")" = "df5dcc37d19633065aa77eca2f66744ab8ad6e51" ]]
+
+          mapfile -t release_migrations < <(printf '%s\n' \
+            "${PRIMARY_MIGRATION}" \
+            "${CORRECTIVE_MIGRATION}" \
+            "${WAKEUP_MIGRATION}" \
+            "${NORMALIZATION_FIX_MIGRATION}")
+          [[ "${#release_migrations[@]}" = "4" ]]
+          [[ "${release_migrations[0]}" = "supabase/migrations/20260806023116_notifications_receipt_linked.sql" ]]
+          [[ "${release_migrations[1]}" = "supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql" ]]
+          [[ "${release_migrations[2]}" = "supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql" ]]
+          [[ "${release_migrations[3]}" = "supabase/migrations/20260806224918_notifications_receipt_match_text_diacritics.sql" ]]
+          echo "migration_allowlist=exact_four"
+          echo "migration_order=primary_then_corrective_then_wakeup_then_normalization_fix"
+          echo "dispatcher_source=certified"
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y postgresql-client >/dev/null
+          fi
+          psql --version
+          supabase --version
+
+      - name: Validate backup and required external secret names
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_file="${RUNNER_TEMP}/receipt-linked-backups.json"
+          curl --silent --show-error --fail \
+            --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${EXPECTED_PROJECT_REF}/database/backups" \
+            > "${backup_file}"
+          BACKUP_FILE="${backup_file}" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(os.environ["BACKUP_FILE"], encoding="utf-8") as handle:
+              payload = json.load(handle)
+          backups = payload.get("backups", []) if isinstance(payload, dict) else payload
+          pitr = bool(payload.get("pitr_enabled", False)) if isinstance(payload, dict) else False
+          completed = [
+              item for item in backups
+              if str(item.get("status", "")).lower() in ("completed", "success")
+          ]
+          print(f"backup_or_pitr_available={str(pitr or bool(completed)).lower()}")
+          sys.exit(0 if pitr or completed else 1)
+          PY
+          rm -f "${backup_file}"
+
+          secret_list="$(supabase secrets list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          require_secret() {
+            local name="$1"
+            printf '%s\n' "${secret_list}" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"
+          }
+          require_secret NOTIFICATION_DISPATCHER_SECRET
+          require_secret RESEND_API_KEY
+          require_secret NOTIFICATION_FROM_EMAIL
+          echo "required_external_runtime_secrets=present"
+
+      - name: PROD read-only precheck
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+          PGOPTIONS: '-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=receipt_linked_phase_a_precheck'
+        run: |
+          set -euo pipefail
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          begin transaction read only;
+          select
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked'),
+            (select count(*) from public.notification_delivery_attempts),
+            case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is null then 0 else 1 end,
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757','20260806224918')),
+            case when
+              to_regclass('public.notification_events') is not null
+              and to_regclass('public.notification_delivery_attempts') is not null
+              and to_regclass('public.financial_outbox_events') is not null
+              and to_regclass('public.payment_request_receipt_links') is not null
+              and to_regclass('public.payment_operation_evidence') is not null
+              and to_regclass('public.bank_payment_operations') is not null
+              and to_regclass('public.payment_requests') is not null
+              and to_regclass('public.payment_intake') is not null
+              and to_regclass('public.profiles') is not null
+              and to_regclass('public.proveedores') is not null
+              and to_regclass('vault.decrypted_secrets') is not null
+              and to_regprocedure('public.link_payment_receipt_to_request(uuid,uuid,text)') is not null
+              and to_regprocedure('public.payment_receipt_normalize_match_text(text)') is not null
+              and to_regprocedure('public.append_financial_outbox_event_internal(text,text,uuid,uuid,uuid,jsonb,uuid,uuid,text)') is not null
+              and to_regprocedure('public.claim_notification_events_for_dispatcher(integer,text)') is not null
+            then 1 else 0 end;
+          rollback;
+          SQL
+          )"
+          IFS='|' read -r receipt_events attempts producer resolver claim_v2 migration_rows prerequisites <<< "${row}"
+          printf 'receipt_events=%s attempts=%s producer=%s resolver=%s claim_v2=%s migration_rows=%s prerequisites=%s\n' \
+            "${receipt_events}" "${attempts}" "${producer}" "${resolver}" "${claim_v2}" "${migration_rows}" "${prerequisites}"
+          [[ "${receipt_events}" = "0" ]]
+          [[ "${attempts}" = "0" ]]
+          [[ "${producer}" = "0" ]]
+          [[ "${resolver}" = "0" ]]
+          [[ "${claim_v2}" = "0" ]]
+          [[ "${migration_rows}" = "0" ]]
+          [[ "${prerequisites}" = "1" ]]
+
+      - name: Force disabled runtime configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_file="${RUNNER_TEMP}/receipt-linked-static-runtime.env"
+          umask 077
+          {
+            echo 'NOTIFICATION_SEND_MODE=disabled'
+            echo 'NOTIFICATION_EVENT_TYPES=payment_receipt.linked'
+            echo 'NOTIFICATION_CUTOFF_AT=2026-08-06T20:11:17.823134Z'
+            echo 'NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod'
+          } > "${config_file}"
+          supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" --env-file "${config_file}" >/dev/null
+          rm -f "${config_file}"
+
+          secret_list="$(supabase secrets list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          for name in \
+            NOTIFICATION_DISPATCHER_SECRET \
+            NOTIFICATION_SEND_MODE \
+            RESEND_API_KEY \
+            NOTIFICATION_FROM_EMAIL \
+            NOTIFICATION_EVENT_TYPES \
+            NOTIFICATION_CUTOFF_AT \
+            NOTIFICATION_WORKER_ID
+          do
+            printf '%s\n' "${secret_list}" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"
+          done
+          echo "runtime_secret_contract=complete"
+          echo "notification_send_mode=disabled"
+
+      - name: Deploy only the certified notification-dispatcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy notification-dispatcher \
+            --project-ref "${EXPECTED_PROJECT_REF}" \
+            --no-verify-jwt \
+            --use-api >/dev/null
+          functions_list="$(supabase functions list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          printf '%s\n' "${functions_list}" | grep -q 'notification-dispatcher'
+          if printf '%s\n' "${functions_list}" | grep -q 'provider-intake'; then
+            echo "::error::Unexpected provider-intake mutation scope."
+            exit 1
+          fi
+          echo "deployed_function=notification-dispatcher"
+          echo "verify_jwt=false"
+          echo "send_mode=disabled"
+
+      - name: Configure encrypted wake-up settings disabled
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 \
+            -v dispatcher_url="${FUNCTION_URL}" \
+            -v dispatcher_secret="${NOTIFICATION_DISPATCHER_SECRET}" \
+            -v dispatcher_cutoff="${PROD_CUTOFF}" \
+            -v wakeup_enabled="false" >/dev/null <<'SQL'
+          begin;
+          select vault.create_secret(
+            :'dispatcher_url',
+            'notification_dispatcher_url',
+            'Server-only notification dispatcher URL'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_url'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_url',
+            'notification_dispatcher_url',
+            'Server-only notification dispatcher URL'
+          ) from vault.secrets where name='notification_dispatcher_url';
+
+          select vault.create_secret(
+            :'dispatcher_secret',
+            'notification_dispatcher_secret',
+            'Server-to-server notification dispatcher credential'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_secret'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_secret',
+            'notification_dispatcher_secret',
+            'Server-to-server notification dispatcher credential'
+          ) from vault.secrets where name='notification_dispatcher_secret';
+
+          select vault.create_secret(
+            :'dispatcher_cutoff',
+            'notification_dispatcher_cutoff_at',
+            'Immutable initial no-replay cutoff'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_cutoff_at'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_cutoff',
+            'notification_dispatcher_cutoff_at',
+            'Immutable initial no-replay cutoff'
+          ) from vault.secrets where name='notification_dispatcher_cutoff_at';
+
+          select vault.create_secret(
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_receipt_linked_immediate_enabled'
+          );
+          select vault.update_secret(
+            id,
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          ) from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+          commit;
+          SQL
+
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          select
+            count(*),
+            case when max(decrypted_secret) filter (
+              where name='notification_receipt_linked_immediate_enabled'
+            )='false' then 1 else 0 end
+          from vault.decrypted_secrets
+          where name = any(array[
+            'notification_dispatcher_url',
+            'notification_dispatcher_secret',
+            'notification_dispatcher_cutoff_at',
+            'notification_receipt_linked_immediate_enabled'
+          ]::text[]);
+          SQL
+          )"
+          IFS='|' read -r wakeup_secret_names wakeup_disabled <<< "${row}"
+          [[ "${wakeup_secret_names}" = "4" ]]
+          [[ "${wakeup_disabled}" = "1" ]]
+          echo "wakeup_secret_names=4"
+          echo "wakeup_enabled=false"
+          echo "wakeup_secret_values_logged=false"
+
+      - name: Apply exactly four allowlisted migrations in order
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          workdir="${RUNNER_TEMP}/receipt-linked-migration-workdir"
+          rm -rf "${workdir}"
+          mkdir -p "${workdir}/supabase/migrations"
+          printf 'project_id = "receipt-linked-prod-release"\n' > "${workdir}/supabase/config.toml"
+
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 \
+            -c "select version, coalesce(nullif(regexp_replace(coalesce(name,'remote'),'[^A-Za-z0-9_]+','_','g'),''),'remote') from supabase_migrations.schema_migrations order by version" \
+            > "${workdir}/remote-history.txt"
+
+          while IFS='|' read -r version name; do
+            [[ "${version}" =~ ^[0-9]+$ ]]
+            printf '%s\n' '-- remote history placeholder; already applied' \
+              > "${workdir}/supabase/migrations/${version}_${name}.sql"
+          done < "${workdir}/remote-history.txt"
+          rm -f "${workdir}/remote-history.txt"
+
+          cp "${PRIMARY_MIGRATION}" "${workdir}/${PRIMARY_MIGRATION}"
+          cp "${CORRECTIVE_MIGRATION}" "${workdir}/${CORRECTIVE_MIGRATION}"
+          cp "${WAKEUP_MIGRATION}" "${workdir}/${WAKEUP_MIGRATION}"
+          cp "${NORMALIZATION_FIX_MIGRATION}" "${workdir}/${NORMALIZATION_FIX_MIGRATION}"
+
+          pushd "${workdir}" >/dev/null
+          supabase db push \
+            --db-url "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" \
+            --include-all \
+            --dry-run \
+            --yes > "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          grep -q '20260806023116_notifications_receipt_linked.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          grep -q '20260806030202_notifications_receipt_linked_claim_v2_fix.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          grep -q '20260806212757_notifications_receipt_linked_immediate_dispatch.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          grep -q '20260806224918_notifications_receipt_match_text_diacritics.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+
+          supabase db push \
+            --db-url "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" \
+            --include-all \
+            --yes >/dev/null
+          popd >/dev/null
+          rm -rf "${workdir}" "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          echo "migrations_applied=4"
+          echo "migration_order=20260806023116,20260806030202,20260806212757,20260806224918"
+
+      - name: Run immutable postchecks
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+          PGOPTIONS: '-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=receipt_linked_phase_a_postcheck'
+        run: |
+          set -euo pipefail
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          begin transaction read only;
+          select
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked'),
+            (select count(*) from public.notification_delivery_attempts),
+            case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is not null then 1 else 0 end,
+            case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is not null then 1 else 0 end,
+            case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is not null then 1 else 0 end,
+            case when to_regprocedure('public.notification_receipt_linked_dispatch_wakeup_internal()') is not null then 1 else 0 end,
+            case when exists (
+              select 1 from pg_trigger
+              where tgrelid='public.notification_events'::regclass
+                and tgname='notification_receipt_linked_immediate_dispatch_after_insert'
+                and not tgisinternal
+            ) then 1 else 0 end,
+            case when exists (select 1 from pg_extension where extname='pg_net') then 1 else 0 end,
+            case when
+              (select count(*) from vault.decrypted_secrets where name = any(array[
+                'notification_dispatcher_url',
+                'notification_dispatcher_secret',
+                'notification_dispatcher_cutoff_at',
+                'notification_receipt_linked_immediate_enabled'
+              ]::text[]))=4
+              and (select decrypted_secret from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled')='false'
+            then 1 else 0 end,
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757','20260806224918')),
+            case when
+              pg_get_function_result('public.link_payment_receipt_to_request(uuid,uuid,text)'::regprocedure)='jsonb'
+              and has_function_privilege('authenticated','public.link_payment_receipt_to_request(uuid,uuid,text)','EXECUTE')
+              and not has_function_privilege('anon','public.link_payment_receipt_to_request(uuid,uuid,text)','EXECUTE')
+              and has_function_privilege('service_role','public.get_payment_receipt_notification_attachment(uuid)','EXECUTE')
+              and not has_function_privilege('authenticated','public.get_payment_receipt_notification_attachment(uuid)','EXECUTE')
+              and has_function_privilege('service_role','public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)','EXECUTE')
+              and not has_function_privilege('authenticated','public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)','EXECUTE')
+              and not has_function_privilege('anon','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
+              and not has_function_privilege('authenticated','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
+              and not has_function_privilege('service_role','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
+              and public.payment_receipt_normalize_match_text('Demostración')
+                = public.payment_receipt_normalize_match_text('Demostracion')
+              and has_function_privilege('service_role','public.payment_receipt_normalize_match_text(text)','EXECUTE')
+              and not has_function_privilege('anon','public.payment_receipt_normalize_match_text(text)','EXECUTE')
+              and not has_function_privilege('authenticated','public.payment_receipt_normalize_match_text(text)','EXECUTE')
+            then 1 else 0 end;
+          rollback;
+          SQL
+          )"
+          IFS='|' read -r receipt_events attempts producer resolver claim_v2 wakeup trigger pg_net wakeup_config migration_rows acl_contract <<< "${row}"
+          printf 'receipt_events=%s attempts=%s producer=%s resolver=%s claim_v2=%s wakeup=%s trigger=%s pg_net=%s wakeup_config=%s migration_rows=%s acl_contract=%s\n' \
+            "${receipt_events}" "${attempts}" "${producer}" "${resolver}" "${claim_v2}" "${wakeup}" "${trigger}" "${pg_net}" "${wakeup_config}" "${migration_rows}" "${acl_contract}"
+          [[ "${receipt_events}" = "0" ]]
+          [[ "${attempts}" = "0" ]]
+          [[ "${producer}" = "1" ]]
+          [[ "${resolver}" = "1" ]]
+          [[ "${claim_v2}" = "1" ]]
+          [[ "${wakeup}" = "1" ]]
+          [[ "${trigger}" = "1" ]]
+          [[ "${pg_net}" = "1" ]]
+          [[ "${wakeup_config}" = "1" ]]
+          [[ "${migration_rows}" = "4" ]]
+          [[ "${acl_contract}" = "1" ]]
+
+      - name: Run disabled authenticated smoke without sending
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          unauth_code="$(curl --silent --show-error --output "${RUNNER_TEMP}/unauth.json" \
+            --write-out '%{http_code}' --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --data '{"event_types":["payment_receipt.linked"],"created_at_from":"2026-08-06T20:11:17.823134Z","limit":5}')"
+          [[ "${unauth_code}" = "401" ]]
+          rm -f "${RUNNER_TEMP}/unauth.json"
+
+          response_file="${RUNNER_TEMP}/disabled-smoke.json"
+          auth_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data '{"event_types":["payment_receipt.linked"],"created_at_from":"2026-08-06T20:11:17.823134Z","limit":5}')"
+          [[ "${auth_code}" = "200" ]]
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(os.environ["RESPONSE_FILE"], encoding="utf-8") as handle:
+              data = json.load(handle)
+          safe = {
+              "processed": data.get("processed"),
+              "sent": data.get("sent"),
+              "failed": data.get("failed"),
+              "mode": data.get("mode"),
+          }
+          print(json.dumps(safe, sort_keys=True))
+          ok = safe == {
+              "processed": 0,
+              "sent": 0,
+              "failed": 0,
+              "mode": "disabled",
+          }
+          os.remove(os.environ["RESPONSE_FILE"])
+          sys.exit(0 if ok else 1)
+          PY
+
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 \
+            -c "select (select count(*) from public.notification_events where event_type='payment_receipt.linked'), (select count(*) from public.notification_delivery_attempts);")"
+          IFS='|' read -r receipt_events attempts <<< "${row}"
+          [[ "${receipt_events}" = "0" ]]
+          [[ "${attempts}" = "0" ]]
+          echo "unauthenticated_status=401"
+          echo "authenticated_status=200"
+          echo "processed=0 sent=0 failed=0"
+          echo "resend_calls=0"
+          echo "emails=0"
+          echo "scheduler_enabled=false"
+          echo "phase_b=blocked"

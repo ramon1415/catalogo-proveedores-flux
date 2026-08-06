@@ -1,0 +1,112 @@
+name: Supabase PROD Notification Dispatcher
+
+'on':
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-notification-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch committed payment receipt notifications
+    if: github.ref == 'refs/heads/main' && vars.NOTIFICATION_PROD_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: supabase-production
+
+    env:
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/notification-dispatcher
+      PROD_CUTOFF: '2026-08-06T20:11:17.823134Z'
+      EVENT_TYPES_JSON: '["payment_receipt.linked"]'
+      DISPATCH_LIMIT: '5'
+      DISPATCH_ROLE: recovery_fallback
+
+    steps:
+      - name: Validate immutable production dispatch contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}"
+          test -n "${NOTIFICATION_DISPATCHER_SECRET}"
+          test "${EVENT_TYPES_JSON}" = '["payment_receipt.linked"]'
+          test "${PROD_CUTOFF}" = "2026-08-06T20:11:17.823134Z"
+          test "${DISPATCH_LIMIT}" = "5"
+          test "${DISPATCH_ROLE}" = "recovery_fallback"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+          echo "dispatch_contract=payment_receipt.linked_only"
+          echo "dispatch_role=recovery_fallback"
+          echo "cutoff_fixed=2026-08-06T20:11:17.823134Z"
+          echo "limit=5"
+          echo "retry_policy=single_invocation_no_blind_retry"
+
+      - name: Invoke notification-dispatcher exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="${RUNNER_TEMP}/notification-dispatcher-response.json"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data '{"event_types":["payment_receipt.linked"],"created_at_from":"2026-08-06T20:11:17.823134Z","limit":5}')"
+          test "${http_code}" -ge 200
+          test "${http_code}" -lt 300
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open(os.environ["RESPONSE_FILE"], encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          processed = data.get("processed")
+          sent = data.get("sent")
+          failed = data.get("failed")
+          mode = data.get("mode")
+          events = data.get("events") if isinstance(data.get("events"), list) else []
+
+          valid_counts = (
+              isinstance(processed, int)
+              and isinstance(sent, int)
+              and isinstance(failed, int)
+              and 0 <= processed <= 5
+              and sent + failed == processed
+          )
+          valid_events = all(
+              event.get("event_type") == "payment_receipt.linked"
+              and event.get("status") in ("sent", "failed")
+              for event in events
+          )
+          safe = {
+              "processed": processed,
+              "sent": sent,
+              "failed": failed,
+              "mode": mode,
+              "payment_receipt_linked_only": valid_events,
+              "provider_message_ids_present": sum(
+                  1 for event in events if bool(event.get("provider_message_id"))
+              ),
+          }
+          print(json.dumps(safe, sort_keys=True))
+
+          try:
+              os.remove(os.environ["RESPONSE_FILE"])
+          except FileNotFoundError:
+              pass
+
+          if mode != "real" or not valid_counts or not valid_events:
+              sys.exit(1)
+          PY
