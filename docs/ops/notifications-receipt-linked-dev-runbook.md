@@ -35,6 +35,7 @@
 | release package | wake-up credential handling | Keep server-to-server credentials out of SQL, ledgers, payloads, logs, and browsers | No database-side credential contract existed | Reads URL, fixed cutoff, enable flag, and dispatcher credential from Supabase Vault; values are provisioned by the protected workflow and never committed | Static secret scan, Vault name postcheck, and DEV request metadata reconciliation |
 | release package | wake-up failure isolation | A wake-up failure must not roll back payment or delete the pending event | No primary wake-up existed | The trigger catches enqueue/config errors and returns the inserted ledger row; the five-minute worker remains the recovery fallback | Failure-path static test and controlled DEV fallback UAT |
 | release package | primary/fallback race | Concurrent workers must send each event at most once | The race had not been exercised for this release path | Retains claim v2 `FOR UPDATE SKIP LOCKED`, processing status, delivery tracking, and `Idempotency-Key: notification/{event_id}` | Concurrent mocked dispatcher test and controlled DEV race UAT |
+| `payment_receipt_normalize_match_text` | canonical beneficiary matching | Treat a Latin diacritic and its unaccented bank-export equivalent as the same deterministic match text | The POSIX alphanumeric filter preserved `ó`, so `Servicios Demostración Flux` and `SERVICIOS DEMOSTRACION FLUX` produced different values and the exact candidate finder returned `none` although company, amount, currency, and payable state matched | Forward-only migration `20260806224918_notifications_receipt_match_text_diacritics.sql` folds a bounded Latin character set with `translate` before the existing filter; it preserves signature, immutability, invoker security, search path, owner, and service-only ACL | Contract regression, PostgreSQL parser, migration postcheck, and exact-candidate DEV recheck for `SOL-2026-0104` |
 
 ## Static validation
 
@@ -46,9 +47,9 @@ node --test scripts/qa/notifications-receipt-linked-contract.test.mjs
 
 In addition:
 
-1. Parse all three published migrations with a PostgreSQL grammar parser.
+1. Parse all four published migrations with a PostgreSQL grammar parser.
 2. Compare the financial RPC in the new migration with migration 033 after removing only the declared notification delta.
-3. Confirm the PR changes only the three allowlisted migrations, dispatcher, contract test, this runbook, the dedicated protected Phase A workflow, and the permanent scheduler.
+3. Confirm the PR changes only the four allowlisted migrations, dispatcher, contract test, this runbook, the dedicated protected Phase A workflow, and the permanent scheduler.
 4. Confirm no changed path belongs to Portal, Comprobantes UI, Solicitudes UI, Cortes, Permisos, extraordinary 01C, or any historical workflow.
 5. Parse both new workflow files as YAML and verify their immutable project, cutoff, allowlist, environment, permissions, concurrency, and branch guards.
 
@@ -69,13 +70,14 @@ In addition:
 2. Apply `20260806030202_notifications_receipt_linked_claim_v2_fix` once in DEV; this is required because the first DEV UAT exposed an ambiguous PL/pgSQL identifier before any event was claimed.
 3. Store the DEV dispatcher URL, dispatcher secret, fixed UAT cutoff, and disabled wake-up flag under their four canonical Supabase Vault names without printing values.
 4. Apply `20260806212757_notifications_receipt_linked_immediate_dispatch` once in DEV and verify `pg_net`, the filtered trigger, its revoked ACL, and Vault access.
-5. Run migration postchecks and security/performance advisors.
-6. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
-7. Invoke with an authenticated secret and body containing:
+5. Apply `20260806224918_notifications_receipt_match_text_diacritics` once in DEV and prove accented/unaccented provider names normalize identically without changing financial or provider data.
+6. Run migration postchecks and security/performance advisors.
+7. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
+8. Invoke with an authenticated secret and body containing:
    - `event_types: ["payment_receipt.linked"]`
    - `created_at_from: <recorded QA cutoff>`
    - a limit no greater than 5.
-8. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
+9. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
 
 ### UAT matrix
 
@@ -114,18 +116,19 @@ Stop without touching PROD if migration history drifts, the function cannot rema
 
 ### Exact release scope
 
-Only these eight paths may differ from current `main`:
+Only these nine paths may differ from current `main`:
 
 1. `supabase/migrations/20260806023116_notifications_receipt_linked.sql`
 2. `supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql`
 3. `supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql`
-4. `supabase/functions/notification-dispatcher/index.ts`
-5. `scripts/qa/notifications-receipt-linked-contract.test.mjs`
-6. `docs/ops/notifications-receipt-linked-dev-runbook.md`
-7. `.github/workflows/supabase-prod-notifications-receipt-linked-release.yml`
-8. `.github/workflows/supabase-prod-notification-dispatcher.yml`
+4. `supabase/migrations/20260806224918_notifications_receipt_match_text_diacritics.sql`
+5. `supabase/functions/notification-dispatcher/index.ts`
+6. `scripts/qa/notifications-receipt-linked-contract.test.mjs`
+7. `docs/ops/notifications-receipt-linked-dev-runbook.md`
+8. `.github/workflows/supabase-prod-notifications-receipt-linked-release.yml`
+9. `.github/workflows/supabase-prod-notification-dispatcher.yml`
 
-The migration allowlist is exactly three versions, in this order: primary `20260806023116`, corrective `20260806030202`, then immediate dispatch `20260806212757`. No generic PROD release workflow, Portal path, frontend path, or unrelated migration is part of this package.
+The migration allowlist is exactly four versions, in this order: primary `20260806023116`, corrective `20260806030202`, immediate dispatch `20260806212757`, then the normalization forward-fix `20260806224918`. No generic PROD release workflow, Portal path, frontend path, or unrelated migration is part of this package.
 
 ### PROD secret and variable contract
 
@@ -158,13 +161,13 @@ The protected manual workflow is `supabase-prod-notifications-receipt-linked-rel
 
 A future, separately authorized Phase A run must:
 
-1. prove current `main`, exact source blobs, PROD identity, backup/PITR availability, and the exact three-migration allowlist;
+1. prove current `main`, exact source blobs, PROD identity, backup/PITR availability, and the exact four-migration allowlist;
 2. re-run the read-only zero-state and prerequisite precheck;
 3. force `NOTIFICATION_SEND_MODE=disabled`;
 4. deploy only `notification-dispatcher`;
 5. provision the four encrypted Vault values with the immediate wake-up disabled;
-6. apply exactly the primary migration, corrective migration, and immediate-dispatch migration in order;
-7. verify all three migration-history rows, functions, trigger, pg_net, ACLs, disabled wake-up, zero receipt events, and zero delivery attempts;
+6. apply exactly the primary migration, corrective migration, immediate-dispatch migration, and normalization forward-fix in order;
+7. verify all four migration-history rows, functions, trigger, pg_net, ACLs, accent-folding contract, disabled wake-up, zero receipt events, and zero delivery attempts;
 8. perform an unauthenticated 401 smoke and an authenticated disabled smoke returning `processed=0`, `sent=0`, `failed=0`;
 9. stop with immediate wake-up disabled, the scheduler disabled, zero Resend calls, and zero emails.
 

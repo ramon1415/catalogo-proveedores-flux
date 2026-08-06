@@ -20,6 +20,10 @@ const immediateDispatchMigrationPath = new URL(
   "../../supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql",
   import.meta.url,
 );
+const matchTextFixMigrationPath = new URL(
+  "../../supabase/migrations/20260806224918_notifications_receipt_match_text_diacritics.sql",
+  import.meta.url,
+);
 const financialSourcePath = new URL(
   "../../supabase/migrations/20260805020001_033_payment_batch_final_reconciliation.sql",
   import.meta.url,
@@ -43,6 +47,7 @@ const runbookPath = new URL(
 const migration = readFileSync(migrationPath, "utf8");
 const claimFixMigration = readFileSync(claimFixMigrationPath, "utf8");
 const immediateDispatchMigration = readFileSync(immediateDispatchMigrationPath, "utf8");
+const matchTextFixMigration = readFileSync(matchTextFixMigrationPath, "utf8");
 const financialSource = readFileSync(financialSourcePath, "utf8");
 const dispatcher = readFileSync(dispatcherPath, "utf8");
 const prodScheduler = readFileSync(prodSchedulerPath, "utf8");
@@ -264,6 +269,38 @@ test("claim v2 corrective migration removes the PL/pgSQL event_type ambiguity", 
     claimFixMigration,
     /insert into public\.|delete from public\.|update public\.(?!notification_events)/i,
   );
+});
+
+test("payment receipt matcher folds Latin diacritics without widening data or ACL scope", () => {
+  assert.equal((matchTextFixMigration.match(/^begin;/gim) || []).length, 1);
+  assert.equal((matchTextFixMigration.match(/^commit;/gim) || []).length, 1);
+  assert.match(
+    matchTextFixMigration,
+    /create or replace function public\.payment_receipt_normalize_match_text\(\s*p_value text\s*\)/i,
+  );
+  assert.match(matchTextFixMigration, /returns text\s+language sql\s+immutable\s+security invoker/i);
+  assert.match(matchTextFixMigration, /set search_path to 'public', 'pg_temp'/i);
+  assert.match(
+    matchTextFixMigration,
+    /translate\(\s*lower\(coalesce\(p_value, ''\)\),\s*'áàäâãåéèëêíìïîóòöôõúùüûñç',\s*'aaaaaaeeeeiiiiooooouuuunc'/i,
+  );
+  assert.match(matchTextFixMigration, /'\[\^\[:alnum:\]\]'/i);
+  assert.match(matchTextFixMigration, /'serviciosdemostracionflux'/i);
+  assert.doesNotMatch(matchTextFixMigration, /\bunaccent\s*\(/i);
+  assert.doesNotMatch(matchTextFixMigration, /security definer/i);
+  assert.match(
+    matchTextFixMigration,
+    /revoke all on function public\.payment_receipt_normalize_match_text\(text\)\s+from public, anon, authenticated/i,
+  );
+  assert.match(
+    matchTextFixMigration,
+    /grant execute on function public\.payment_receipt_normalize_match_text\(text\)\s+to service_role/i,
+  );
+  assert.doesNotMatch(
+    matchTextFixMigration,
+    /\b(?:insert\s+into|update|delete\s+from)\s+public\.(?:payment_requests|bank_payment_operations|proveedores|payment_request_receipt_links)\b/i,
+  );
+  assert.doesNotMatch(matchTextFixMigration, /link_payment_receipt_to_request\s*\(/i);
 });
 
 test("requester and provider templates keep their audience boundaries", () => {
@@ -628,7 +665,7 @@ test("PROD scheduler is permanent, fixed-cutoff, receipt-only, serial, and separ
   assert.doesNotMatch(prodScheduler, /NOTIFICATION_SEND_MODE=(?:real|test_only)/);
 });
 
-test("PROD Phase A package is main-only, disabled-first, and exact-three-migration", () => {
+test("PROD Phase A package is main-only, disabled-first, and exact-four-migration", () => {
   assert.match(prodRelease, /workflow_dispatch:/);
   assert.doesNotMatch(prodRelease, /\nschedule:|pull_request:|\npush:/);
   assert.match(prodRelease, /github\.ref == 'refs\/heads\/main'/);
@@ -652,6 +689,10 @@ test("PROD Phase A package is main-only, disabled-first, and exact-three-migrati
     prodRelease,
     /WAKEUP_MIGRATION: supabase\/migrations\/20260806212757_notifications_receipt_linked_immediate_dispatch\.sql/,
   );
+  assert.match(
+    prodRelease,
+    /NORMALIZATION_FIX_MIGRATION: supabase\/migrations\/20260806224918_notifications_receipt_match_text_diacritics\.sql/,
+  );
   assert.ok(
     prodRelease.indexOf("20260806023116_notifications_receipt_linked.sql")
       < prodRelease.indexOf("20260806030202_notifications_receipt_linked_claim_v2_fix.sql"),
@@ -659,6 +700,15 @@ test("PROD Phase A package is main-only, disabled-first, and exact-three-migrati
   assert.ok(
     prodRelease.indexOf("20260806030202_notifications_receipt_linked_claim_v2_fix.sql")
       < prodRelease.indexOf("20260806212757_notifications_receipt_linked_immediate_dispatch.sql"),
+  );
+  assert.ok(
+    prodRelease.indexOf("20260806212757_notifications_receipt_linked_immediate_dispatch.sql")
+      < prodRelease.indexOf("20260806224918_notifications_receipt_match_text_diacritics.sql"),
+  );
+  assert.match(prodRelease, /migration_allowlist=exact_four/);
+  assert.match(
+    prodRelease,
+    /migration_order=primary_then_corrective_then_wakeup_then_normalization_fix/,
   );
   assert.match(prodRelease, /notification_receipt_linked_immediate_enabled/);
   assert.match(prodRelease, /wakeup_enabled=false/);
