@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Type configure_receipt_linked_primary_uat"
+        description: "Type recover_receipt_linked_primary_uat"
         required: true
         type: string
       confirm_folio:
@@ -28,18 +28,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  configure_primary_uat:
+  recover_primary_uat:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: DEV
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
-      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
       SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
-      FUNCTION_URL: https://scsirgbuqjcwoaxfacth.functions.supabase.co/notification-dispatcher
+      FUNCTION_URL: https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/notification-dispatcher
       FIXED_CUTOFF: "2026-08-06T22:20:06.678661Z"
       EXPECTED_BRANCH: feature/ramon-notifications-receipt-linked
+      TARGET_FOLIO: SOL-2026-0103
     steps:
       - name: Validate immutable DEV guardrails
         shell: bash
@@ -47,15 +46,10 @@ jobs:
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "${EXPECTED_BRANCH}"
           test "${{ inputs.confirm_dev }}" = "${SUPABASE_PROJECT_ID}"
-          test "${{ inputs.confirm_mode }}" = "configure_receipt_linked_primary_uat"
-          test "${{ inputs.confirm_folio }}" = "SOL-2026-0103"
+          test "${{ inputs.confirm_mode }}" = "recover_receipt_linked_primary_uat"
+          test "${{ inputs.confirm_folio }}" = "${TARGET_FOLIO}"
           test "${{ inputs.confirm_cutoff }}" = "${FIXED_CUTOFF}"
-          test -n "${SUPABASE_ACCESS_TOKEN}"
           test -n "${SUPABASE_DEV_DB_URL}"
-          test -n "${NOTIFICATION_DISPATCHER_SECRET}"
-
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v2
 
       - name: Install PostgreSQL client
         shell: bash
@@ -64,91 +58,143 @@ jobs:
           sudo apt-get update -y >/dev/null
           sudo apt-get install -y postgresql-client >/dev/null
 
-      - name: Force DEV dispatcher test-only mode
+      - name: Prove the failed primary left an exact recoverable queue
         shell: bash
         run: |
           set -euo pipefail
-          secret_file="${RUNNER_TEMP}/receipt-linked-primary.env"
-          umask 077
-          {
-            echo "NOTIFICATION_SEND_MODE=test_only"
-            printf 'NOTIFICATION_DISPATCHER_SECRET=%s\n' "${NOTIFICATION_DISPATCHER_SECRET}"
-          } > "${secret_file}"
-          supabase secrets set             --project-ref "${SUPABASE_PROJECT_ID}"             --env-file "${secret_file}" >/dev/null
-          rm -f "${secret_file}"
-          echo "runtime_mode=test_only"
-          echo "dispatcher_secret=present"
-
-      - name: Provision enabled primary wake-up in DEV Vault
-        shell: bash
-        run: |
-          set -euo pipefail
-          export DISPATCHER_URL="${FUNCTION_URL}"
-          export DISPATCHER_CUTOFF="${FIXED_CUTOFF}"
-          psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX >/dev/null <<'SQL'
-          \getenv dispatcher_url DISPATCHER_URL
-          \getenv dispatcher_secret NOTIFICATION_DISPATCHER_SECRET
-          \getenv dispatcher_cutoff DISPATCHER_CUTOFF
-          begin;
-          do $guard$
-          begin
-            if (
+          read -r case_total case_pending case_attempts historical_eligible vault_count <<< "$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX -F ' ' <<'SQL'
+          select
+            count(*) filter (
+              where e.event_type='payment_receipt.linked'
+                and e.source_folio='SOL-2026-0103'
+            ),
+            count(*) filter (
+              where e.event_type='payment_receipt.linked'
+                and e.source_folio='SOL-2026-0103'
+                and e.status='pending'
+            ),
+            (
               select count(*)
-              from vault.secrets
+              from public.notification_delivery_attempts a
+              join public.notification_events n on n.id=a.notification_event_id
+              where n.event_type='payment_receipt.linked'
+                and n.source_folio='SOL-2026-0103'
+            ),
+            count(*) filter (
+              where e.event_type='payment_receipt.linked'
+                and e.created_at < '2026-08-06T22:20:06.678661Z'::timestamptz
+                and e.status in ('pending','failed')
+            ),
+            (
+              select count(*)
+              from vault.decrypted_secrets
               where name in (
                 'notification_dispatcher_url',
                 'notification_dispatcher_secret',
                 'notification_dispatcher_cutoff_at',
                 'notification_receipt_linked_immediate_enabled'
               )
-            ) <> 0 then
-              raise exception 'unexpected_existing_receipt_linked_vault_config';
-            end if;
-          end
-          $guard$;
-          select vault.create_secret(
+            )
+          from public.notification_events e;
+          SQL
+          )"
+          test "${case_total}" = "2"
+          test "${case_pending}" = "2"
+          test "${case_attempts}" = "0"
+          test "${historical_eligible}" = "0"
+          test "${vault_count}" = "4"
+          echo "case_events=2"
+          echo "case_pending=2"
+          echo "case_attempts=0"
+          echo "historical_eligible=0"
+
+      - name: Correct DEV URL and enqueue one bounded recovery wake-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DISPATCHER_URL="${FUNCTION_URL}"
+          psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX >/dev/null <<'SQL'
+          \getenv dispatcher_url DISPATCHER_URL
+          begin;
+          select vault.update_secret(
+            id,
             :'dispatcher_url',
             'notification_dispatcher_url',
             'DEV-only PR322 primary UAT'
-          );
-          select vault.create_secret(
-            :'dispatcher_secret',
-            'notification_dispatcher_secret',
-            'DEV-only PR322 primary UAT'
-          );
-          select vault.create_secret(
-            :'dispatcher_cutoff',
-            'notification_dispatcher_cutoff_at',
-            'DEV-only PR322 primary UAT'
-          );
-          select vault.create_secret(
-            'true',
-            'notification_receipt_linked_immediate_enabled',
-            'DEV-only PR322 primary UAT'
-          );
+          )
+          from vault.secrets
+          where name='notification_dispatcher_url';
           commit;
-          SQL
 
-          postcheck="$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX <<'SQL'
-          select count(*)
+          select net.http_post(
+            url := max(decrypted_secret) filter (
+              where name='notification_dispatcher_url'
+            ),
+            body := jsonb_build_object(
+              'event_types',jsonb_build_array('payment_receipt.linked'),
+              'created_at_from',max(decrypted_secret) filter (
+                where name='notification_dispatcher_cutoff_at'
+              ),
+              'limit',5
+            ),
+            headers := jsonb_build_object(
+              'Content-Type','application/json',
+              'x-notification-dispatcher-secret',max(decrypted_secret) filter (
+                where name='notification_dispatcher_secret'
+              )
+            ),
+            timeout_milliseconds := 2000
+          )
           from vault.decrypted_secrets
-          where (
-            name='notification_dispatcher_url'
-            and decrypted_secret='https://scsirgbuqjcwoaxfacth.functions.supabase.co/notification-dispatcher'
-          ) or (
-            name='notification_dispatcher_secret'
-            and nullif(decrypted_secret,'') is not null
-          ) or (
-            name='notification_dispatcher_cutoff_at'
-            and decrypted_secret='2026-08-06T22:20:06.678661Z'
-          ) or (
-            name='notification_receipt_linked_immediate_enabled'
-            and lower(decrypted_secret)='true'
+          where name in (
+            'notification_dispatcher_url',
+            'notification_dispatcher_secret',
+            'notification_dispatcher_cutoff_at'
           );
           SQL
-          )"
-          test "${postcheck}" = "4"
-          echo "vault_contract=4/4"
-          echo "primary_wakeup=enabled"
+          echo "recovery_wakeup=queued_once"
           echo "target=DEV"
           echo "prod_mutations=0"
+
+      - name: Reconcile without blind retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            read -r sent failed pending attempts messages <<< "$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX -F ' ' <<'SQL'
+            select
+              count(*) filter (where e.status='sent'),
+              count(*) filter (where e.status='failed'),
+              count(*) filter (where e.status='pending'),
+              (
+                select count(*)
+                from public.notification_delivery_attempts a
+                join public.notification_events n on n.id=a.notification_event_id
+                where n.event_type='payment_receipt.linked'
+                  and n.source_folio='SOL-2026-0103'
+              ),
+              (
+                select count(*)
+                from public.notification_delivery_attempts a
+                join public.notification_events n on n.id=a.notification_event_id
+                where n.event_type='payment_receipt.linked'
+                  and n.source_folio='SOL-2026-0103'
+                  and nullif(btrim(coalesce(a.provider_message_id,'')),'') is not null
+              )
+            from public.notification_events e
+            where e.event_type='payment_receipt.linked'
+              and e.source_folio='SOL-2026-0103';
+            SQL
+            )"
+            if [ "${sent}" = "2" ] && [ "${failed}" = "0" ] && [ "${pending}" = "0" ] && [ "${attempts}" = "2" ] && [ "${messages}" = "2" ]; then
+              echo "sent=2"
+              echo "failed=0"
+              echo "pending=0"
+              echo "delivery_attempts=2"
+              echo "provider_message_ids_present=2"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Recovery did not reach the exact terminal state."
+          exit 1
