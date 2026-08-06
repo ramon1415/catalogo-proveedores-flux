@@ -297,6 +297,44 @@ export function notificationRecipientRoles(event: NotificationEvent): string[] {
   return [...new Set(value.map((role) => String(role).trim()).filter(Boolean))];
 }
 
+// ── Identidad Flux para correos (paleta: verde #172d29, crema #cfe1cb) ──
+const FLUX_EMAIL_LOGO_URL = "https://flux.quantta.mx/assets/logo-flux-email.png";
+
+function brandEmailHtml(inner: string, options?: { textLogo?: boolean }): string {
+  // textLogo: correos a proveedores no deben referenciar flux.quantta.mx (contrato
+  // de privacidad del dispatcher) → wordmark en texto, sin imagenes externas.
+  const logo = options?.textLogo
+    ? `<span style="font-family:Georgia,'Times New Roman',serif;font-size:30px;font-weight:bold;color:#e5e5da;letter-spacing:.5px">Flux</span>`
+    : `<img src="${FLUX_EMAIL_LOGO_URL}" width="110" height="44" alt="Flux" style="display:block;border:0">`;
+  return `<div style="background:#eef0ea;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%">
+        <tr><td style="background:#172d29;border-radius:12px 12px 0 0;padding:20px 28px">
+          ${logo}
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #dde3da;border-top:0;border-radius:0 0 12px 12px;padding:26px 28px;color:#2c3a34;font-size:14px;line-height:1.5">${inner}</td></tr>
+        <tr><td style="padding:14px 8px;text-align:center;color:#8a978f;font-size:11px">Flux Operadora &middot; Powered by Quantta</td></tr>
+      </table>
+    </td></tr></table>
+  </div>`;
+}
+
+function brandEmailRows(rows: Array<[string, unknown]>): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;width:100%">${
+    rows.map(([label, value]) =>
+      `<tr><td style="padding:7px 16px 7px 0;color:#6b7a72;font-size:13px;border-bottom:1px solid #eef1ec;white-space:nowrap">${escapeHtml(label)}</td><td style="padding:7px 0;color:#172d29;font-weight:bold;font-size:13.5px;border-bottom:1px solid #eef1ec">${escapeHtml(value)}</td></tr>`
+    ).join("")
+  }</table>`;
+}
+
+function brandEmailButton(url: string, label: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px"><tr>
+    <td bgcolor="#cfe1cb" style="border-radius:8px"><a href="${url}" style="display:inline-block;padding:11px 22px;color:#172d29;font-weight:bold;text-decoration:none;font-size:14px">${escapeHtml(label)}</a></td>
+  </tr></table>`;
+}
+
+const BRAND_TEST_BANNER = `<p style="margin-top:20px;padding:10px 14px;background:#fff7ed;border-left:4px solid #d97706;color:#92400e;font-size:13px">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>`;
+
 function renderReceiptLinkedEmail(
   event: NotificationEvent,
   sendMode: string,
@@ -338,20 +376,14 @@ function renderReceiptLinkedEmail(
     ...(providerOnly ? [] : ["", `Abrir Flux: ${internalUrl}`]),
     ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."] : []),
   ];
-  const htmlRows = rows
-    .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${escapeHtml(label)}</td><td style="padding:4px 0"><strong>${escapeHtml(value)}</strong></td></tr>`)
-    .join("");
-  const internalLink = providerOnly
-    ? ""
-    : `<p style="margin-top:18px"><a href="${internalUrl}">Abrir solicitud en Flux</a></p>`;
-  const testBanner = sendMode === "test_only"
-    ? `<p style="margin-top:18px;color:#b45309">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>`
-    : "";
+  const htmlRows = brandEmailRows(rows);
+  const internalLink = providerOnly ? "" : brandEmailButton(internalUrl, "Abrir solicitud en Flux");
+  const testBanner = sendMode === "test_only" ? BRAND_TEST_BANNER : "";
 
   return {
     subject,
     text: textLines.join("\n"),
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.45;color:#111"><p>${escapeHtml(intro)}</p><table style="border-collapse:collapse">${htmlRows}</table>${internalLink}${testBanner}</div>`,
+    html: brandEmailHtml(`<p style="margin:0">${escapeHtml(intro)}</p>${htmlRows}${internalLink}${testBanner}`, { textLogo: providerOnly }),
   };
 }
 
@@ -408,25 +440,17 @@ export function renderEmail(event: NotificationEvent, sendMode: string): { subje
     `Abrir Flux: ${targetPath}`,
   ];
 
-  const htmlRows = rows
-    .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${escapeHtml(label)}</td><td style="padding:4px 0"><strong>${escapeHtml(value)}</strong></td></tr>`)
-    .join("");
+  const htmlRows = brandEmailRows(rows);
   const htmlComment = shouldRenderComment
     ? `<div style="margin-top:18px;padding:12px;border-left:4px solid #d97706;background:#fff7ed">
         <div style="font-size:12px;color:#92400e;font-weight:700;margin-bottom:6px">${escapeHtml(commentLabel)}</div>
-        <div style="white-space:pre-wrap;color:#111">${escapeHtml(renderedCommentText)}</div>
+        <div style="white-space:pre-wrap;color:#2c3a34">${escapeHtml(renderedCommentText)}</div>
       </div>`
     : "";
 
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.45;color:#111">
-      <p>${escapeHtml(actionText(event.event_type))}</p>
-      <table style="border-collapse:collapse">${htmlRows}</table>
-      ${htmlComment}
-      <p style="margin-top:18px;color:#555">Abrir Flux: <strong>${escapeHtml(targetPath)}</strong></p>
-      ${sendMode === "test_only" ? `<p style="margin-top:18px;color:#b45309">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>` : ""}
-    </div>
-  `;
+  const html = brandEmailHtml(`<p style="margin:0">${escapeHtml(actionText(event.event_type))}</p>${htmlRows}${htmlComment}${
+    brandEmailButton(`https://flux.quantta.mx${targetPath}`, "Abrir Flux")
+  }${sendMode === "test_only" ? BRAND_TEST_BANNER : ""}`);
 
   return {
     subject,
