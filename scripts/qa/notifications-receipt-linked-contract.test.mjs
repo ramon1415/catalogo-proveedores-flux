@@ -176,6 +176,14 @@ test("no-recipient is audited in financial outbox without a dead-letter notifica
   assert.match(migration, /where candidate\.resolution = 'eligible'/);
 });
 
+test("recipient constraint adds proveedor while preserving Portal audience only when pre-existing", () => {
+  assert.match(migration, /if v_existing_constraint like '%external_provider%'/);
+  assert.match(migration, /'external_provider'::text,[\s\S]*'proveedor'::text/);
+  assert.match(migration, /else[\s\S]*'administrador_sistema'::text,[\s\S]*'proveedor'::text/);
+  const nonPortalBranch = migration.match(/else[\s\S]*?end if;/i)?.[0] || "";
+  assert.doesNotMatch(nonPortalBranch, /external_provider/);
+});
+
 test("notification idempotency is link-scoped, recipient-fingerprinted, and versioned", () => {
   assert.match(migration, /notification:payment_receipt\.linked:%s:%s:v1/);
   assert.match(migration, /md5\(v_recipient\.email_normalized\)/);

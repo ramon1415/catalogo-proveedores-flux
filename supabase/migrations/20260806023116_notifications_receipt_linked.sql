@@ -612,19 +612,52 @@ begin
 end;
 $$;
 
-alter table public.notification_events
-  drop constraint notification_events_recipient_type_check;
-alter table public.notification_events
-  add constraint notification_events_recipient_type_check
-  check (
-    recipient_type = any(
-      array[
-        'usuario_solicitante'::text,
-        'administrador_sistema'::text,
-        'proveedor'::text
-      ]
-    )
-  );
+do $recipient_type$
+declare
+  v_existing_constraint text;
+begin
+  select pg_get_constraintdef(oid)
+    into v_existing_constraint
+  from pg_constraint
+  where conrelid = 'public.notification_events'::regclass
+    and conname = 'notification_events_recipient_type_check';
+  if v_existing_constraint is null then
+    raise exception 'notification_events_recipient_type_constraint_missing';
+  end if;
+
+  alter table public.notification_events
+    drop constraint notification_events_recipient_type_check;
+
+  if v_existing_constraint like '%external_provider%' then
+    -- DEV already contains the paused Portal audience. Preserve it without
+    -- introducing that audience in environments where it is absent.
+    alter table public.notification_events
+      add constraint notification_events_recipient_type_check
+      check (
+        recipient_type = any(
+          array[
+            'usuario_solicitante'::text,
+            'administrador_sistema'::text,
+            'external_provider'::text,
+            'proveedor'::text
+          ]
+        )
+      );
+  else
+    alter table public.notification_events
+      add constraint notification_events_recipient_type_check
+      check (
+        recipient_type = any(
+          array[
+            'usuario_solicitante'::text,
+            'administrador_sistema'::text,
+            'proveedor'::text
+          ]
+        )
+      );
+  end if;
+end
+$recipient_type$;
 
 create or replace function public.link_payment_receipt_to_request(
   p_operation_id uuid,
