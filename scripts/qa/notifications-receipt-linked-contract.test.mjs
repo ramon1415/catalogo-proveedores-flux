@@ -312,7 +312,9 @@ test("requester and provider templates keep their audience boundaries", () => {
   const provider = renderEmail(receiptEvent(["provider"]), "real");
   assert.match(provider.subject, /^Comprobante de pago —/);
   assert.doesNotMatch(provider.text, /flux\.quantta\.mx|Solicitante|Centro de costo|Partida|Storage|CLABE/i);
-  assert.doesNotMatch(provider.html, /flux\.quantta\.mx|Solicitante|Centro de costo|Partida|Storage|CLABE/i);
+  // Unica excepcion en HTML: la URL del logo de marca (asset estatico, sin acceso al sistema).
+  const providerHtmlSansLogo = provider.html.replaceAll("https://flux.quantta.mx/assets/logo-flux-email.png", "");
+  assert.doesNotMatch(providerHtmlSansLogo, /flux\.quantta\.mx|Solicitante|Centro de costo|Partida|Storage|CLABE/i);
 
   const combined = renderEmail(receiptEvent(["requester", "provider"]), "real");
   assert.match(combined.text, /https:\/\/flux\.quantta\.mx\/solicitudes\.html/);

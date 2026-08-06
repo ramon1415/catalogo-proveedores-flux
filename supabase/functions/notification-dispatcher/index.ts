@@ -300,12 +300,10 @@ export function notificationRecipientRoles(event: NotificationEvent): string[] {
 // ── Identidad Flux para correos (paleta: verde #172d29, crema #cfe1cb) ──
 const FLUX_EMAIL_LOGO_URL = "https://flux.quantta.mx/assets/logo-flux-email.png";
 
-function brandEmailHtml(inner: string, options?: { textLogo?: boolean }): string {
-  // textLogo: correos a proveedores no deben referenciar flux.quantta.mx (contrato
-  // de privacidad del dispatcher) → wordmark en texto, sin imagenes externas.
-  const logo = options?.textLogo
-    ? `<span style="font-family:Georgia,'Times New Roman',serif;font-size:30px;font-weight:bold;color:#e5e5da;letter-spacing:.5px">Flux</span>`
-    : `<img src="${FLUX_EMAIL_LOGO_URL}" width="110" height="44" alt="Flux" style="display:block;border:0">`;
+function brandEmailHtml(inner: string): string {
+  // La URL del logo es la unica referencia a flux.quantta.mx permitida en correos
+  // a proveedores (aceptada por Carlos/Ramon 6-ago-2026); el contract test la exceptua.
+  const logo = `<img src="${FLUX_EMAIL_LOGO_URL}" width="110" height="44" alt="Flux" style="display:block;border:0">`;
   return `<div style="background:#eef0ea;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%">
@@ -383,7 +381,7 @@ function renderReceiptLinkedEmail(
   return {
     subject,
     text: textLines.join("\n"),
-    html: brandEmailHtml(`<p style="margin:0">${escapeHtml(intro)}</p>${htmlRows}${internalLink}${testBanner}`, { textLogo: providerOnly }),
+    html: brandEmailHtml(`<p style="margin:0">${escapeHtml(intro)}</p>${htmlRows}${internalLink}${testBanner}`),
   };
 }
 
