@@ -69,7 +69,12 @@
     window.setTimeout(render, 3200);
   }
 
+  function usesBudgetKpis() {
+    return Boolean(document.querySelector("#totalCard .kpi-label"));
+  }
+
   function reframeCards() {
+    if (usesBudgetKpis()) return; // P3B: los KPI presupuestales mandan (decision Carlos 5-ago-2026)
     setCard("totalCard", "Por atender", "totalRequests", "attention");
     setCard("approvableCard", "Pendientes de aprobacion", "approvableRequests", "approval");
     setCard("exceptionsCard", "Listas para operar", "blockedRequests", "ready");
@@ -423,6 +428,7 @@
   }
 
   function renderStats() {
+    if (usesBudgetKpis()) return; // P3B: no pisar los valores del renderStats base
     setValue("totalRequests", countByView("attention"));
     setValue("approvableRequests", countByView("approval"));
     setValue("blockedRequests", countByView("ready"));

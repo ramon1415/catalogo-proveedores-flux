@@ -4,27 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Acceso pendiente | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{background:#07071a;color:#eeeef6;font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-    .card{background:#111128;border:1px solid rgba(255,255,255,.07);border-radius:20px;padding:40px 36px;max-width:440px;width:100%;text-align:center}
+    body{background:radial-gradient(circle at top left,rgba(207,225,203,.14),transparent 38%),#172d29;color:#f7f7f5;font-family:'Plus Jakarta Sans',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{background:rgba(37,63,58,.66);border:1px solid rgba(229,229,218,.14);border-radius:20px;padding:40px 36px;max-width:440px;width:100%;text-align:center}
     .icon{width:52px;height:52px;border-radius:14px;background:rgba(245,158,11,.13);border:1px solid rgba(245,158,11,.28);display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 20px}
     h1{font-size:18px;font-weight:700;margin-bottom:8px}
-    p{font-size:13px;color:#aaaac3;line-height:1.6;margin-bottom:24px}
-    .email{display:inline-block;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600;color:#eeeef6;margin-bottom:24px}
-    .btn{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(255,255,255,.13);background:transparent;color:#aaaac3;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
-    .btn:hover{background:rgba(255,255,255,.04);color:#eeeef6}
+    p{font-size:13px;color:rgba(229,229,218,.68);line-height:1.6;margin-bottom:24px}
+    .email{display:inline-block;background:rgba(229,229,218,.06);border:1px solid rgba(229,229,218,.12);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:600;color:#f7f7f5;margin-bottom:24px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(229,229,218,.18);background:transparent;color:rgba(229,229,218,.68);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
+    .btn:hover{background:rgba(229,229,218,.06);color:#f7f7f5}
     .brand-logo{width:200px;max-width:70%;height:auto;display:block;margin:0 auto 26px}
-    .powered{font-size:11px;color:#50506a;text-align:center;margin-top:26px;letter-spacing:.3px}
-    .powered span{color:#8888aa;font-weight:600}
+    .powered{font-size:11px;color:rgba(229,229,218,.42);text-align:center;margin-top:26px;letter-spacing:.3px}
+    .powered span{color:rgba(229,229,218,.68);font-weight:600}
   </style>
 </head>
 <body>
   <div class="card">
-    <img class="brand-logo" src="./assets/logo-flux-blanco.webp" alt="Flux">
+    <img class="brand-logo" src="./assets/logo-flux-verde.webp" alt="Flux">
     <h1>Acceso pendiente de aprobación</h1>
     <p>Tu cuenta fue registrada pero aún no tiene un rol asignado. Un administrador debe aprobar tu acceso antes de que puedas usar la Plataforma de Gestión.</p>
     <div class="email" id="pendingEmail">—</div>

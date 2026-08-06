@@ -216,7 +216,7 @@ body,
   background-color: rgba(251, 113, 133, 0.16);
   color: #fb7185;
 }
-.danger-action:focus-visible { outline-color: #5eead4; }
+.danger-action:focus-visible { outline-color: #cfe1cb; }
 .danger-action:disabled {
   border-color: #fb7185;
   background-color: rgba(251, 113, 133, 0.08);
@@ -239,7 +239,7 @@ body,
   background-color: #fecdd3;
   color: #9f1239;
 }
-[data-theme="light"] .danger-action:focus-visible { outline-color: #0f766e; }
+[data-theme="light"] .danger-action:focus-visible { outline-color: #253f3a; }
 [data-theme="light"] .danger-action:disabled {
   border-color: #be123c;
   background-color: #fff1f2;
