@@ -22,6 +22,7 @@
 | migration scratch | attachment resolver | Fail closed on bucket, path, MIME, page count, size, and SHA-256 | Coalesced missing MIME/hash/size to apparently valid values | Requires exact private bucket/path, `application/pdf`, one page, attestation, bounded nonzero size, and 64-character SHA-256 | Metadata rejection tests and DEV hash comparison |
 | migration scratch | attachment chain | Verify event, link, request, operation, and evidence are the same resource | Trusted request source and selected the latest link | Verifies every ID and company relationship from the exact notification source link | Resolver static test and foreign-evidence DEV case |
 | migration scratch | claim v2 | Explicit allowlist and explicit cutoff; no historical backlog | Defaulted to a broad list and silently substituted `now()` | Rejects empty event types, missing cutoff, and unsupported event types; retains `FOR UPDATE SKIP LOCKED` and max attempts | Claim static test and DEV cutoff UAT |
+| `20260806023116_notifications_receipt_linked.sql` | `claim_notification_events_for_dispatcher_v2` event-type normalization | Resolve the `unnest` alias independently from the `RETURNS TABLE` output variable | The unqualified `event_type` in `array_agg` was ambiguous at runtime, so PostgreSQL aborted before claiming any event | Follow-up migration `20260806030202_notifications_receipt_linked_claim_v2_fix.sql` qualifies every normalization reference as `requested.event_type` without changing allowlist, cutoff, locks, retry policy, return shape, or ACL | PostgreSQL parser, dedicated static regression, and rolled-back DEV UAT proving the original native failure and corrected claim |
 | migration scratch | migration safety | Atomic DDL, dependency precheck, ACL/contract postcheck | Had no migration transaction, precheck, or postcheck | Adds one `BEGIN`/`COMMIT`, dependency precheck, recipient/grant/function postchecks | PostgreSQL parser and static transaction test |
 | DEV preflight | recipient constraint drift | Add `proveedor` without changing the paused Portal audience | DEV already allowed `external_provider`, while `main` did not | Rebuilds the constraint conditionally: preserves `external_provider` only where already present and never introduces it where absent | DEV pre/post constraint comparison and migration postcheck |
 | dispatcher scratch | receipt contract | Render requester/provider templates and attach the individual PDF | Had no `payment_receipt.linked` template or attachment path | Adds audience-specific templates, service-only resolver call, private download, memory-only Base64 attachment | Template and end-to-end mocked dispatcher tests |
@@ -40,7 +41,7 @@ node --test scripts/qa/notifications-receipt-linked-contract.test.mjs
 
 In addition:
 
-1. Parse the published migration with a PostgreSQL grammar parser.
+1. Parse both published migrations with a PostgreSQL grammar parser.
 2. Compare the financial RPC in the new migration with migration 033 after removing only the declared notification delta.
 3. Confirm the PR changes only the migration, dispatcher, contract test, and this runbook.
 4. Confirm no changed path belongs to Portal, workflows, Comprobantes UI, Solicitudes UI, Cortes, Permisos, or extraordinary 01C.
@@ -59,13 +60,14 @@ In addition:
 ### One-shot execution
 
 1. Apply `20260806023116_notifications_receipt_linked` once in DEV.
-2. Run migration postchecks and security/performance advisors.
-3. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
-4. Invoke with an authenticated secret and body containing:
+2. Apply `20260806030202_notifications_receipt_linked_claim_v2_fix` once in DEV; this is required because the first DEV UAT exposed an ambiguous PL/pgSQL identifier before any event was claimed.
+3. Run migration postchecks and security/performance advisors.
+4. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
+5. Invoke with an authenticated secret and body containing:
    - `event_types: ["payment_receipt.linked"]`
    - `created_at_from: <recorded QA cutoff>`
    - a limit no greater than 5.
-5. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
+6. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
 
 ### UAT matrix
 

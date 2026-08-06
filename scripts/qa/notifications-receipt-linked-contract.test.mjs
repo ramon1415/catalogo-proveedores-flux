@@ -12,6 +12,10 @@ const migrationPath = new URL(
   "../../supabase/migrations/20260806023116_notifications_receipt_linked.sql",
   import.meta.url,
 );
+const claimFixMigrationPath = new URL(
+  "../../supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql",
+  import.meta.url,
+);
 const financialSourcePath = new URL(
   "../../supabase/migrations/20260805020001_033_payment_batch_final_reconciliation.sql",
   import.meta.url,
@@ -21,6 +25,7 @@ const dispatcherPath = new URL(
   import.meta.url,
 );
 const migration = readFileSync(migrationPath, "utf8");
+const claimFixMigration = readFileSync(claimFixMigrationPath, "utf8");
 const financialSource = readFileSync(financialSourcePath, "utf8");
 const dispatcher = readFileSync(dispatcherPath, "utf8");
 
@@ -217,6 +222,28 @@ test("claim v2 requires explicit allowlist and cutoff and retains SKIP LOCKED/ma
   assert.match(claim, /event\.attempt_count < event\.max_attempts/);
   assert.match(claim, /for update skip locked/);
   assert.match(claim, /event\.status in \('pending', 'failed'\)/);
+});
+
+test("claim v2 corrective migration removes the PL/pgSQL event_type ambiguity", () => {
+  assert.equal((claimFixMigration.match(/^begin;$/gim) || []).length, 1);
+  assert.equal((claimFixMigration.match(/^commit;$/gim) || []).length, 1);
+  const claim = extractFunction(
+    claimFixMigration,
+    "claim_notification_events_for_dispatcher_v2",
+  );
+  assert.match(claim, /btrim\(requested\.event_type\)/);
+  assert.match(claim, /coalesce\(requested\.event_type, ''\)/);
+  assert.doesNotMatch(
+    claim,
+    /array_agg\(distinct btrim\(event_type\) order by btrim\(event_type\)\)/,
+  );
+  assert.match(claim, /event\.event_type = any\(v_event_types\)/);
+  assert.match(claim, /event\.created_at >= p_created_at_from/);
+  assert.match(claim, /for update skip locked/);
+  assert.doesNotMatch(
+    claimFixMigration,
+    /insert into public\.|delete from public\.|update public\.(?!notification_events)/i,
+  );
 });
 
 test("requester and provider templates keep their audience boundaries", () => {
