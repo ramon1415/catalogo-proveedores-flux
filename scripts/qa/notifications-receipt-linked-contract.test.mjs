@@ -24,10 +24,25 @@ const dispatcherPath = new URL(
   "../../supabase/functions/notification-dispatcher/index.ts",
   import.meta.url,
 );
+const prodSchedulerPath = new URL(
+  "../../.github/workflows/supabase-prod-notification-dispatcher.yml",
+  import.meta.url,
+);
+const prodReleasePath = new URL(
+  "../../.github/workflows/supabase-prod-notifications-receipt-linked-release.yml",
+  import.meta.url,
+);
+const runbookPath = new URL(
+  "../../docs/ops/notifications-receipt-linked-dev-runbook.md",
+  import.meta.url,
+);
 const migration = readFileSync(migrationPath, "utf8");
 const claimFixMigration = readFileSync(claimFixMigrationPath, "utf8");
 const financialSource = readFileSync(financialSourcePath, "utf8");
 const dispatcher = readFileSync(dispatcherPath, "utf8");
+const prodScheduler = readFileSync(prodSchedulerPath, "utf8");
+const prodRelease = readFileSync(prodReleasePath, "utf8");
+const runbook = readFileSync(runbookPath, "utf8");
 
 function extractFunction(sql, name) {
   const expression = new RegExp(
@@ -470,4 +485,100 @@ test("dispatcher has no wildcard CORS and Resend retries use a stable idempotenc
   assert.match(dispatcher, /"Idempotency-Key": params\.idempotencyKey/);
   assert.match(dispatcher, /idempotencyKey: `notification\/\$\{event\.id\}`/);
   assert.match(dispatcher, /send_succeeded_but_mark_processed_failed/);
+});
+
+
+test("PROD scheduler is permanent, fixed-cutoff, receipt-only, serial, and separately gated", () => {
+  assert.match(prodScheduler, /schedule:\s*\n\s*- cron: '3-58\/5 \* \* \* \*'/);
+  assert.match(prodScheduler, /workflow_dispatch:/);
+  assert.match(prodScheduler, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(prodScheduler, /vars\.NOTIFICATION_PROD_SCHEDULER_ENABLED == 'true'/);
+  assert.match(prodScheduler, /environment: supabase-production/);
+  assert.match(prodScheduler, /cancel-in-progress: false/);
+  assert.match(prodScheduler, /permissions:\s*\n\s*contents: read/);
+  assert.match(prodScheduler, /PROD_CUTOFF: '2026-08-06T20:11:17\.823134Z'/);
+  assert.match(prodScheduler, /EVENT_TYPES_JSON: '\["payment_receipt\.linked"\]'/);
+  assert.match(
+    prodScheduler,
+    /"event_types":\["payment_receipt\.linked"\],"created_at_from":"2026-08-06T20:11:17\.823134Z","limit":5/,
+  );
+  assert.equal((prodScheduler.match(/curl --silent/g) || []).length, 1);
+  assert.doesNotMatch(prodScheduler, /claim_notification_events_for_dispatcher\(/);
+  assert.doesNotMatch(prodScheduler, /upload-artifact|pull_request:|\npush:/);
+  assert.doesNotMatch(prodScheduler, /NOTIFICATION_SEND_MODE=(?:real|test_only)/);
+});
+
+test("PROD Phase A package is main-only, disabled-first, and exact-two-migration", () => {
+  assert.match(prodRelease, /workflow_dispatch:/);
+  assert.doesNotMatch(prodRelease, /\nschedule:|pull_request:|\npush:/);
+  assert.match(prodRelease, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(prodRelease, /environment: supabase-production/);
+  assert.match(prodRelease, /receipt_linked_phase_a_disabled/);
+  assert.match(prodRelease, /SCHEDULER_ENABLED: \$\{\{ vars\.NOTIFICATION_PROD_SCHEDULER_ENABLED \}\}/);
+  assert.match(prodRelease, /NOTIFICATION_SEND_MODE=disabled/);
+  assert.doesNotMatch(prodRelease, /NOTIFICATION_SEND_MODE=(?:real|test_only)/);
+  assert.match(prodRelease, /NOTIFICATION_EVENT_TYPES=payment_receipt\.linked/);
+  assert.match(prodRelease, /NOTIFICATION_CUTOFF_AT=2026-08-06T20:11:17\.823134Z/);
+  assert.match(prodRelease, /NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod/);
+  assert.match(
+    prodRelease,
+    /PRIMARY_MIGRATION: supabase\/migrations\/20260806023116_notifications_receipt_linked\.sql/,
+  );
+  assert.match(
+    prodRelease,
+    /CORRECTIVE_MIGRATION: supabase\/migrations\/20260806030202_notifications_receipt_linked_claim_v2_fix\.sql/,
+  );
+  assert.ok(
+    prodRelease.indexOf("20260806023116_notifications_receipt_linked.sql")
+      < prodRelease.indexOf("20260806030202_notifications_receipt_linked_claim_v2_fix.sql"),
+  );
+  assert.match(
+    prodRelease,
+    /supabase functions deploy notification-dispatcher[\s\S]*--no-verify-jwt[\s\S]*--use-api/,
+  );
+  assert.equal((prodRelease.match(/supabase functions deploy/g) || []).length, 1);
+  assert.doesNotMatch(prodRelease, /functions deploy provider-intake/);
+  assert.match(prodRelease, /--dry-run/);
+  assert.match(prodRelease, /--include-all/);
+  assert.match(prodRelease, /phase_b=blocked/);
+  assert.match(prodRelease, /unauthenticated_status=401/);
+  assert.match(prodRelease, /authenticated_status=200/);
+  assert.match(prodRelease, /processed=0 sent=0 failed=0/);
+  assert.match(prodRelease, /resend_calls=0/);
+  assert.match(prodRelease, /emails=0/);
+  assert.doesNotMatch(prodRelease, /upload-artifact/);
+});
+
+test("PROD secret contract names are complete and values are never embedded", () => {
+  for (const name of [
+    "NOTIFICATION_DISPATCHER_SECRET",
+    "NOTIFICATION_SEND_MODE",
+    "RESEND_API_KEY",
+    "NOTIFICATION_FROM_EMAIL",
+    "NOTIFICATION_EVENT_TYPES",
+    "NOTIFICATION_CUTOFF_AT",
+    "NOTIFICATION_WORKER_ID",
+  ]) {
+    assert.match(prodRelease, new RegExp(name));
+  }
+  assert.doesNotMatch(prodRelease, /re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}/);
+  assert.doesNotMatch(prodScheduler, /re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}/);
+});
+
+test("release runbook defines fixed cutoff, disabled smoke, and append-only rollback", () => {
+  for (const marker of [
+    "2026-08-06T20:11:17.823134Z",
+    "NOTIFICATION_SEND_MODE=disabled",
+    "payment_receipt.linked",
+    "processed=0",
+    "sent=0",
+    "failed=0",
+    "No revertir pagos ni receipt links",
+    "No borrar notification_events",
+    "No borrar delivery_attempts",
+    "No hacer replay",
+    "Forward-fix",
+  ]) {
+    assert.ok(runbook.includes(marker), marker);
+  }
 });
