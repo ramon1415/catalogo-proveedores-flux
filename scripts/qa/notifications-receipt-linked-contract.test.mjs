@@ -16,6 +16,10 @@ const claimFixMigrationPath = new URL(
   "../../supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql",
   import.meta.url,
 );
+const immediateDispatchMigrationPath = new URL(
+  "../../supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql",
+  import.meta.url,
+);
 const financialSourcePath = new URL(
   "../../supabase/migrations/20260805020001_033_payment_batch_final_reconciliation.sql",
   import.meta.url,
@@ -38,6 +42,7 @@ const runbookPath = new URL(
 );
 const migration = readFileSync(migrationPath, "utf8");
 const claimFixMigration = readFileSync(claimFixMigrationPath, "utf8");
+const immediateDispatchMigration = readFileSync(immediateDispatchMigrationPath, "utf8");
 const financialSource = readFileSync(financialSourcePath, "utf8");
 const dispatcher = readFileSync(dispatcherPath, "utf8");
 const prodScheduler = readFileSync(prodSchedulerPath, "utf8");
@@ -487,6 +492,119 @@ test("dispatcher has no wildcard CORS and Resend retries use a stable idempotenc
   assert.match(dispatcher, /send_succeeded_but_mark_processed_failed/);
 });
 
+test("immediate dispatch is a post-commit pg_net wake-up over the existing ledger", () => {
+  const wakeupFunction = extractFunction(
+    immediateDispatchMigration,
+    "notification_receipt_linked_dispatch_wakeup_internal",
+  );
+  assert.equal((immediateDispatchMigration.match(/^begin;$/gim) || []).length, 1);
+  assert.equal((immediateDispatchMigration.match(/^commit;$/gim) || []).length, 1);
+  assert.match(immediateDispatchMigration, /create extension if not exists pg_net\s+with schema extensions/i);
+  assert.match(
+    immediateDispatchMigration,
+    /create trigger notification_receipt_linked_immediate_dispatch_after_insert\s+after insert on public\.notification_events/i,
+  );
+  assert.match(immediateDispatchMigration, /new\.event_type = 'payment_receipt\.linked'/);
+  assert.match(immediateDispatchMigration, /new\.status = 'pending'/);
+  assert.match(immediateDispatchMigration, /notification_receipt_linked_immediate_enabled/);
+  assert.match(immediateDispatchMigration, /notification_dispatcher_url/);
+  assert.match(immediateDispatchMigration, /notification_dispatcher_secret/);
+  assert.match(immediateDispatchMigration, /notification_dispatcher_cutoff_at/);
+  assert.match(immediateDispatchMigration, /from vault\.decrypted_secrets/);
+  assert.match(immediateDispatchMigration, /select net\.http_post\(/);
+  assert.match(
+    immediateDispatchMigration,
+    /'event_types', jsonb_build_array\('payment_receipt\.linked'\)/,
+  );
+  assert.match(immediateDispatchMigration, /'created_at_from', v_cutoff/);
+  assert.match(immediateDispatchMigration, /'limit', 5/);
+  assert.match(immediateDispatchMigration, /'x-notification-dispatcher-secret', v_secret/);
+  assert.match(immediateDispatchMigration, /timeout_milliseconds := 2000/);
+  assert.match(
+    wakeupFunction,
+    /begin\s+select[\s\S]*from vault\.decrypted_secrets[\s\S]*select net\.http_post\([\s\S]*exception when others then/i,
+  );
+  assert.match(immediateDispatchMigration, /exception when others then[\s\S]*return new;/i);
+  assert.match(immediateDispatchMigration, /revoke all on function[\s\S]*from public, anon, authenticated, service_role/i);
+  assert.doesNotMatch(wakeupFunction, /api\.resend\.com|insert into public\.notification_events/i);
+  assert.doesNotMatch(immediateDispatchMigration, /created_at_from'\s*,\s*(?:now|clock_timestamp)\(/i);
+  assert.doesNotMatch(immediateDispatchMigration, /SUPABASE_SERVICE_ROLE_KEY|sb_secret_|eyJ[A-Za-z0-9_-]{20,}/);
+});
+
+test("primary/fallback race claims one event and sends at most once", async () => {
+  const event = receiptEvent(["requester"]);
+  const pdfBytes = new TextEncoder().encode("%PDF-1.4\nrace-test\n%%EOF");
+  const pdfHash = await sha256Hex(pdfBytes);
+  let claimed = false;
+  let resendCalls = 0;
+  let processedMarks = 0;
+
+  const fetchFn = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/rpc/claim_notification_events_for_dispatcher_v2")) {
+      if (claimed) return Response.json([]);
+      claimed = true;
+      return Response.json([event]);
+    }
+    if (url.endsWith("/rpc/get_payment_receipt_notification_attachment")) {
+      return Response.json({
+        bucket: "payment-batch-documents",
+        path: "11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/evidence/33333333-3333-4333-8333-333333333333.pdf",
+        mime_type: "application/pdf",
+        size_bytes: pdfBytes.length,
+        sha256: pdfHash,
+        filename: "Comprobante_SOL-2026-0001_Proveedor-Uno.pdf",
+      });
+    }
+    if (url.includes("/storage/v1/object/authenticated/")) {
+      return new Response(pdfBytes, { headers: { "content-type": "application/pdf" } });
+    }
+    if (url === "https://api.resend.com/emails") {
+      resendCalls += 1;
+      return Response.json({ id: "race-message-id" });
+    }
+    if (url.endsWith("/rpc/mark_notification_processed_for_dispatcher")) {
+      processedMarks += 1;
+      return Response.json({ status: "sent" });
+    }
+    throw new Error(`unexpected_fetch:${url}`);
+  };
+
+  const environment = {
+    NOTIFICATION_DISPATCHER_SECRET: "expected",
+    NOTIFICATION_SEND_MODE: "test_only",
+    SUPABASE_URL: "https://project.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "service-role",
+    RESEND_API_KEY: "resend",
+    NOTIFICATION_FROM_EMAIL: "Flux <notifications@example.com>",
+    NOTIFICATION_TEST_EMAIL: "qa@example.com",
+  };
+  const makeRequest = () => new Request("https://dispatcher.test", {
+    method: "POST",
+    headers: {
+      "x-notification-dispatcher-secret": "expected",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      event_types: ["payment_receipt.linked"],
+      created_at_from: "2026-08-05T20:00:00.000Z",
+      limit: 5,
+    }),
+  });
+
+  const responses = await Promise.all([
+    handleRequest(makeRequest(), fakeRuntime(environment, fetchFn)),
+    handleRequest(makeRequest(), fakeRuntime(environment, fetchFn)),
+  ]);
+  const results = await Promise.all(responses.map((response) => response.json()));
+
+  assert.equal(results.reduce((sum, result) => sum + result.sent, 0), 1);
+  assert.equal(resendCalls, 1);
+  assert.equal(processedMarks, 1);
+  assert.match(claimFixMigration, /for update skip locked/i);
+  assert.match(dispatcher, /idempotencyKey: `notification\/\$\{event\.id\}`/);
+});
+
 
 test("PROD scheduler is permanent, fixed-cutoff, receipt-only, serial, and separately gated", () => {
   assert.match(prodScheduler, /schedule:\s*\n\s*- cron: '3-58\/5 \* \* \* \*'/);
@@ -498,6 +616,8 @@ test("PROD scheduler is permanent, fixed-cutoff, receipt-only, serial, and separ
   assert.match(prodScheduler, /permissions:\s*\n\s*contents: read/);
   assert.match(prodScheduler, /PROD_CUTOFF: '2026-08-06T20:11:17\.823134Z'/);
   assert.match(prodScheduler, /EVENT_TYPES_JSON: '\["payment_receipt\.linked"\]'/);
+  assert.match(prodScheduler, /DISPATCH_ROLE: recovery_fallback/);
+  assert.match(prodScheduler, /dispatch_role=recovery_fallback/);
   assert.match(
     prodScheduler,
     /"event_types":\["payment_receipt\.linked"\],"created_at_from":"2026-08-06T20:11:17\.823134Z","limit":5/,
@@ -508,7 +628,7 @@ test("PROD scheduler is permanent, fixed-cutoff, receipt-only, serial, and separ
   assert.doesNotMatch(prodScheduler, /NOTIFICATION_SEND_MODE=(?:real|test_only)/);
 });
 
-test("PROD Phase A package is main-only, disabled-first, and exact-two-migration", () => {
+test("PROD Phase A package is main-only, disabled-first, and exact-three-migration", () => {
   assert.match(prodRelease, /workflow_dispatch:/);
   assert.doesNotMatch(prodRelease, /\nschedule:|pull_request:|\npush:/);
   assert.match(prodRelease, /github\.ref == 'refs\/heads\/main'/);
@@ -528,10 +648,22 @@ test("PROD Phase A package is main-only, disabled-first, and exact-two-migration
     prodRelease,
     /CORRECTIVE_MIGRATION: supabase\/migrations\/20260806030202_notifications_receipt_linked_claim_v2_fix\.sql/,
   );
+  assert.match(
+    prodRelease,
+    /WAKEUP_MIGRATION: supabase\/migrations\/20260806212757_notifications_receipt_linked_immediate_dispatch\.sql/,
+  );
   assert.ok(
     prodRelease.indexOf("20260806023116_notifications_receipt_linked.sql")
       < prodRelease.indexOf("20260806030202_notifications_receipt_linked_claim_v2_fix.sql"),
   );
+  assert.ok(
+    prodRelease.indexOf("20260806030202_notifications_receipt_linked_claim_v2_fix.sql")
+      < prodRelease.indexOf("20260806212757_notifications_receipt_linked_immediate_dispatch.sql"),
+  );
+  assert.match(prodRelease, /notification_receipt_linked_immediate_enabled/);
+  assert.match(prodRelease, /wakeup_enabled=false/);
+  assert.match(prodRelease, /vault\.create_secret/);
+  assert.match(prodRelease, /vault\.update_secret/);
   assert.match(
     prodRelease,
     /supabase functions deploy notification-dispatcher[\s\S]*--no-verify-jwt[\s\S]*--use-api/,

@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   phase_a:
-    name: Deploy disabled dispatcher and apply receipt-linked contract
+    name: Deploy disabled dispatcher, post-commit wake-up, and receipt-linked contract
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -54,6 +54,7 @@ jobs:
       FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/notification-dispatcher
       PRIMARY_MIGRATION: supabase/migrations/20260806023116_notifications_receipt_linked.sql
       CORRECTIVE_MIGRATION: supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql
+      WAKEUP_MIGRATION: supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql
 
     steps:
       - name: Validate immutable Phase A guardrails
@@ -97,16 +98,19 @@ jobs:
           [[ "$(git rev-parse HEAD)" = "${TARGET_GIT_SHA}" ]]
           [[ "$(git hash-object "${PRIMARY_MIGRATION}")" = "5bba750636726f8caf1ba045111745198c2a28fb" ]]
           [[ "$(git hash-object "${CORRECTIVE_MIGRATION}")" = "febcb202a248cb54155fbfc2fae8c4d77a3b3250" ]]
+          [[ "$(git hash-object "${WAKEUP_MIGRATION}")" = "ee5467372cfba8645bebaa6646dd035a4648d94a" ]]
           [[ "$(git hash-object "supabase/functions/notification-dispatcher/index.ts")" = "df5dcc37d19633065aa77eca2f66744ab8ad6e51" ]]
 
           mapfile -t release_migrations < <(printf '%s\n' \
             "${PRIMARY_MIGRATION}" \
-            "${CORRECTIVE_MIGRATION}")
-          [[ "${#release_migrations[@]}" = "2" ]]
+            "${CORRECTIVE_MIGRATION}" \
+            "${WAKEUP_MIGRATION}")
+          [[ "${#release_migrations[@]}" = "3" ]]
           [[ "${release_migrations[0]}" = "supabase/migrations/20260806023116_notifications_receipt_linked.sql" ]]
           [[ "${release_migrations[1]}" = "supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql" ]]
-          echo "migration_allowlist=exact_two"
-          echo "migration_order=primary_then_corrective"
+          [[ "${release_migrations[2]}" = "supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql" ]]
+          echo "migration_allowlist=exact_three"
+          echo "migration_order=primary_then_corrective_then_wakeup"
           echo "dispatcher_source=certified"
 
       - name: Set up Supabase CLI
@@ -178,7 +182,7 @@ jobs:
             case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is null then 0 else 1 end,
             case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is null then 0 else 1 end,
             case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is null then 0 else 1 end,
-            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202')),
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757')),
             case when
               to_regclass('public.notification_events') is not null
               and to_regclass('public.notification_delivery_attempts') is not null
@@ -190,6 +194,7 @@ jobs:
               and to_regclass('public.payment_intake') is not null
               and to_regclass('public.profiles') is not null
               and to_regclass('public.proveedores') is not null
+              and to_regclass('vault.decrypted_secrets') is not null
               and to_regprocedure('public.link_payment_receipt_to_request(uuid,uuid,text)') is not null
               and to_regprocedure('public.append_financial_outbox_event_internal(text,text,uuid,uuid,uuid,jsonb,uuid,uuid,text)') is not null
               and to_regprocedure('public.claim_notification_events_for_dispatcher(integer,text)') is not null
@@ -256,7 +261,104 @@ jobs:
           echo "verify_jwt=false"
           echo "send_mode=disabled"
 
-      - name: Apply exactly two allowlisted migrations in order
+      - name: Configure encrypted wake-up settings disabled
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 \
+            -v dispatcher_url="${FUNCTION_URL}" \
+            -v dispatcher_secret="${NOTIFICATION_DISPATCHER_SECRET}" \
+            -v dispatcher_cutoff="${PROD_CUTOFF}" \
+            -v wakeup_enabled="false" >/dev/null <<'SQL'
+          begin;
+          select vault.create_secret(
+            :'dispatcher_url',
+            'notification_dispatcher_url',
+            'Server-only notification dispatcher URL'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_url'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_url',
+            'notification_dispatcher_url',
+            'Server-only notification dispatcher URL'
+          ) from vault.secrets where name='notification_dispatcher_url';
+
+          select vault.create_secret(
+            :'dispatcher_secret',
+            'notification_dispatcher_secret',
+            'Server-to-server notification dispatcher credential'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_secret'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_secret',
+            'notification_dispatcher_secret',
+            'Server-to-server notification dispatcher credential'
+          ) from vault.secrets where name='notification_dispatcher_secret';
+
+          select vault.create_secret(
+            :'dispatcher_cutoff',
+            'notification_dispatcher_cutoff_at',
+            'Immutable initial no-replay cutoff'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_dispatcher_cutoff_at'
+          );
+          select vault.update_secret(
+            id,
+            :'dispatcher_cutoff',
+            'notification_dispatcher_cutoff_at',
+            'Immutable initial no-replay cutoff'
+          ) from vault.secrets where name='notification_dispatcher_cutoff_at';
+
+          select vault.create_secret(
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          )
+          where not exists (
+            select 1 from vault.secrets where name='notification_receipt_linked_immediate_enabled'
+          );
+          select vault.update_secret(
+            id,
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          ) from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+          commit;
+          SQL
+
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          select
+            count(*),
+            case when max(decrypted_secret) filter (
+              where name='notification_receipt_linked_immediate_enabled'
+            )='false' then 1 else 0 end
+          from vault.decrypted_secrets
+          where name = any(array[
+            'notification_dispatcher_url',
+            'notification_dispatcher_secret',
+            'notification_dispatcher_cutoff_at',
+            'notification_receipt_linked_immediate_enabled'
+          ]::text[]);
+          SQL
+          )"
+          IFS='|' read -r wakeup_secret_names wakeup_disabled <<< "${row}"
+          [[ "${wakeup_secret_names}" = "4" ]]
+          [[ "${wakeup_disabled}" = "1" ]]
+          echo "wakeup_secret_names=4"
+          echo "wakeup_enabled=false"
+          echo "wakeup_secret_values_logged=false"
+
+      - name: Apply exactly three allowlisted migrations in order
         shell: bash
         env:
           PGSSLMODE: require
@@ -281,6 +383,7 @@ jobs:
 
           cp "${PRIMARY_MIGRATION}" "${workdir}/${PRIMARY_MIGRATION}"
           cp "${CORRECTIVE_MIGRATION}" "${workdir}/${CORRECTIVE_MIGRATION}"
+          cp "${WAKEUP_MIGRATION}" "${workdir}/${WAKEUP_MIGRATION}"
 
           pushd "${workdir}" >/dev/null
           supabase db push \
@@ -290,6 +393,7 @@ jobs:
             --yes > "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
           grep -q '20260806023116_notifications_receipt_linked.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
           grep -q '20260806030202_notifications_receipt_linked_claim_v2_fix.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
+          grep -q '20260806212757_notifications_receipt_linked_immediate_dispatch.sql' "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
 
           supabase db push \
             --db-url "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" \
@@ -297,8 +401,8 @@ jobs:
             --yes >/dev/null
           popd >/dev/null
           rm -rf "${workdir}" "${RUNNER_TEMP}/receipt-linked-dry-run.txt"
-          echo "migrations_applied=2"
-          echo "migration_order=20260806023116,20260806030202"
+          echo "migrations_applied=3"
+          echo "migration_order=20260806023116,20260806030202,20260806212757"
 
       - name: Run immutable postchecks
         shell: bash
@@ -316,7 +420,24 @@ jobs:
             case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is not null then 1 else 0 end,
             case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is not null then 1 else 0 end,
             case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is not null then 1 else 0 end,
-            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202')),
+            case when to_regprocedure('public.notification_receipt_linked_dispatch_wakeup_internal()') is not null then 1 else 0 end,
+            case when exists (
+              select 1 from pg_trigger
+              where tgrelid='public.notification_events'::regclass
+                and tgname='notification_receipt_linked_immediate_dispatch_after_insert'
+                and not tgisinternal
+            ) then 1 else 0 end,
+            case when exists (select 1 from pg_extension where extname='pg_net') then 1 else 0 end,
+            case when
+              (select count(*) from vault.decrypted_secrets where name = any(array[
+                'notification_dispatcher_url',
+                'notification_dispatcher_secret',
+                'notification_dispatcher_cutoff_at',
+                'notification_receipt_linked_immediate_enabled'
+              ]::text[]))=4
+              and (select decrypted_secret from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled')='false'
+            then 1 else 0 end,
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757')),
             case when
               pg_get_function_result('public.link_payment_receipt_to_request(uuid,uuid,text)'::regprocedure)='jsonb'
               and has_function_privilege('authenticated','public.link_payment_receipt_to_request(uuid,uuid,text)','EXECUTE')
@@ -325,19 +446,26 @@ jobs:
               and not has_function_privilege('authenticated','public.get_payment_receipt_notification_attachment(uuid)','EXECUTE')
               and has_function_privilege('service_role','public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)','EXECUTE')
               and not has_function_privilege('authenticated','public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)','EXECUTE')
+              and not has_function_privilege('anon','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
+              and not has_function_privilege('authenticated','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
+              and not has_function_privilege('service_role','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
             then 1 else 0 end;
           rollback;
           SQL
           )"
-          IFS='|' read -r receipt_events attempts producer resolver claim_v2 migration_rows acl_contract <<< "${row}"
-          printf 'receipt_events=%s attempts=%s producer=%s resolver=%s claim_v2=%s migration_rows=%s acl_contract=%s\n' \
-            "${receipt_events}" "${attempts}" "${producer}" "${resolver}" "${claim_v2}" "${migration_rows}" "${acl_contract}"
+          IFS='|' read -r receipt_events attempts producer resolver claim_v2 wakeup trigger pg_net wakeup_config migration_rows acl_contract <<< "${row}"
+          printf 'receipt_events=%s attempts=%s producer=%s resolver=%s claim_v2=%s wakeup=%s trigger=%s pg_net=%s wakeup_config=%s migration_rows=%s acl_contract=%s\n' \
+            "${receipt_events}" "${attempts}" "${producer}" "${resolver}" "${claim_v2}" "${wakeup}" "${trigger}" "${pg_net}" "${wakeup_config}" "${migration_rows}" "${acl_contract}"
           [[ "${receipt_events}" = "0" ]]
           [[ "${attempts}" = "0" ]]
           [[ "${producer}" = "1" ]]
           [[ "${resolver}" = "1" ]]
           [[ "${claim_v2}" = "1" ]]
-          [[ "${migration_rows}" = "2" ]]
+          [[ "${wakeup}" = "1" ]]
+          [[ "${trigger}" = "1" ]]
+          [[ "${pg_net}" = "1" ]]
+          [[ "${wakeup_config}" = "1" ]]
+          [[ "${migration_rows}" = "3" ]]
           [[ "${acl_contract}" = "1" ]]
 
       - name: Run disabled authenticated smoke without sending

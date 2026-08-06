@@ -2,8 +2,8 @@
 
 ## Scope and immutable baseline
 
-- Current production baseline: `main@9bcebdc3603ba64c4e5c044fda1acb38621c530e`.
-- Branch reconciliation merge: `5d22a17aec68b2018282ab0fc41c16772a5d6eab`.
+- Current production baseline: `main@ecfe0b6a69661ccc14931ab0851b93d8099a4ed9`.
+- Branch reconciliation merge: `285e6481b706fa9b27fff419206f89604826aa59`.
 - Branch: `feature/ramon-notifications-receipt-linked`.
 - Trigger: successful, atomic `public.link_payment_receipt_to_request(uuid,uuid,text)`.
 - Production execution is out of scope for this packaging gate. The pull request remains Draft; no workflow in this package has been run.
@@ -31,6 +31,10 @@
 | dispatcher scratch | delivery idempotency | A timeout or mark failure must not duplicate email | Resend request had no idempotency key | Sends stable `Idempotency-Key: notification/{event_id}` | Dispatcher idempotency test |
 | dispatcher scratch | UAT isolation | Claim only explicit post-cutoff events | Called legacy unbounded claim RPC | Calls claim v2 with explicit event types and cutoff supplied by authenticated request or environment | Test-only claim payload assertion |
 | dispatcher scratch | server-to-server surface | No browser CORS exposure without a demonstrated browser consumer | Returned wildcard CORS | Removed CORS and kept secret-authenticated POST only | Method/secret/CORS tests |
+| release package | normal dispatch latency | Begin dispatch in seconds after the financial COMMIT without coupling payment to HTTP or Resend | Only the five-minute scheduler could wake the dispatcher | Adds an `AFTER INSERT` trigger on pending `payment_receipt.linked` events; `pg_net` queues the authenticated HTTP request and starts it only after COMMIT | Migration contract test plus controlled DEV primary-path UAT |
+| release package | wake-up credential handling | Keep server-to-server credentials out of SQL, ledgers, payloads, logs, and browsers | No database-side credential contract existed | Reads URL, fixed cutoff, enable flag, and dispatcher credential from Supabase Vault; values are provisioned by the protected workflow and never committed | Static secret scan, Vault name postcheck, and DEV request metadata reconciliation |
+| release package | wake-up failure isolation | A wake-up failure must not roll back payment or delete the pending event | No primary wake-up existed | The trigger catches enqueue/config errors and returns the inserted ledger row; the five-minute worker remains the recovery fallback | Failure-path static test and controlled DEV fallback UAT |
+| release package | primary/fallback race | Concurrent workers must send each event at most once | The race had not been exercised for this release path | Retains claim v2 `FOR UPDATE SKIP LOCKED`, processing status, delivery tracking, and `Idempotency-Key: notification/{event_id}` | Concurrent mocked dispatcher test and controlled DEV race UAT |
 
 ## Static validation
 
@@ -42,9 +46,9 @@ node --test scripts/qa/notifications-receipt-linked-contract.test.mjs
 
 In addition:
 
-1. Parse both published migrations with a PostgreSQL grammar parser.
+1. Parse all three published migrations with a PostgreSQL grammar parser.
 2. Compare the financial RPC in the new migration with migration 033 after removing only the declared notification delta.
-3. Confirm the PR changes only the two allowlisted migrations, dispatcher, contract test, this runbook, the dedicated protected Phase A workflow, and the permanent scheduler.
+3. Confirm the PR changes only the three allowlisted migrations, dispatcher, contract test, this runbook, the dedicated protected Phase A workflow, and the permanent scheduler.
 4. Confirm no changed path belongs to Portal, Comprobantes UI, Solicitudes UI, Cortes, Permisos, extraordinary 01C, or any historical workflow.
 5. Parse both new workflow files as YAML and verify their immutable project, cutoff, allowlist, environment, permissions, concurrency, and branch guards.
 
@@ -63,13 +67,15 @@ In addition:
 
 1. Apply `20260806023116_notifications_receipt_linked` once in DEV.
 2. Apply `20260806030202_notifications_receipt_linked_claim_v2_fix` once in DEV; this is required because the first DEV UAT exposed an ambiguous PL/pgSQL identifier before any event was claimed.
-3. Run migration postchecks and security/performance advisors.
-4. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
-5. Invoke with an authenticated secret and body containing:
+3. Store the DEV dispatcher URL, dispatcher secret, fixed UAT cutoff, and disabled wake-up flag under their four canonical Supabase Vault names without printing values.
+4. Apply `20260806212757_notifications_receipt_linked_immediate_dispatch` once in DEV and verify `pg_net`, the filtered trigger, its revoked ACL, and Vault access.
+5. Run migration postchecks and security/performance advisors.
+6. Deploy only `notification-dispatcher` to DEV with JWT verification unchanged from the deployed internal dispatcher contract.
+7. Invoke with an authenticated secret and body containing:
    - `event_types: ["payment_receipt.linked"]`
    - `created_at_from: <recorded QA cutoff>`
    - a limit no greater than 5.
-6. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
+8. Verify every Resend request is redirected to `NOTIFICATION_TEST_EMAIL`.
 
 ### UAT matrix
 
@@ -82,6 +88,10 @@ In addition:
 - Correct one-page PDF: one memory-only attachment; response hash equals evidence hash.
 - Wrong hash, MIME, size, page count, non-shareable, or foreign evidence: no Resend request; failed attempt follows existing retry policy.
 - Historical event before cutoff: never claimed.
+- Primary path: enable the Vault kill switch, create a valid receipt-linked event through the committed financial flow, do not invoke the scheduler, and measure COMMIT/event/dispatch/Resend-accepted timestamps.
+- Primary failure/fallback: disable or invalidate only the wake-up in a controlled way, prove the financial link and pending event remain committed, then run the recovery worker once and send one test-only email.
+- Race: start primary and fallback against one eligible event; combined logical sends remain at most one.
+- Wake-up idempotency: repeat the authenticated wake-up and produce zero additional emails for an already processed event.
 
 ## Evidence and stop conditions
 
@@ -94,7 +104,7 @@ Stop without touching PROD if migration history drifts, the function cannot rema
 ### Immutable identity and zero-replay boundary
 
 - PROD project ref: `ucantptjhwttexzmslvm`.
-- Current `main`: `9bcebdc3603ba64c4e5c044fda1acb38621c530e`.
+- Current `main`: `ecfe0b6a69661ccc14931ab0851b93d8099a4ed9`.
 - Fixed initial cutoff: `2026-08-06T20:11:17.823134Z`.
 - Initial event allowlist: only `payment_receipt.linked`.
 - Dispatch limit: 5.
@@ -104,17 +114,18 @@ Stop without touching PROD if migration history drifts, the function cannot rema
 
 ### Exact release scope
 
-Only these seven paths may differ from current `main`:
+Only these eight paths may differ from current `main`:
 
 1. `supabase/migrations/20260806023116_notifications_receipt_linked.sql`
 2. `supabase/migrations/20260806030202_notifications_receipt_linked_claim_v2_fix.sql`
-3. `supabase/functions/notification-dispatcher/index.ts`
-4. `scripts/qa/notifications-receipt-linked-contract.test.mjs`
-5. `docs/ops/notifications-receipt-linked-dev-runbook.md`
-6. `.github/workflows/supabase-prod-notifications-receipt-linked-release.yml`
-7. `.github/workflows/supabase-prod-notification-dispatcher.yml`
+3. `supabase/migrations/20260806212757_notifications_receipt_linked_immediate_dispatch.sql`
+4. `supabase/functions/notification-dispatcher/index.ts`
+5. `scripts/qa/notifications-receipt-linked-contract.test.mjs`
+6. `docs/ops/notifications-receipt-linked-dev-runbook.md`
+7. `.github/workflows/supabase-prod-notifications-receipt-linked-release.yml`
+8. `.github/workflows/supabase-prod-notification-dispatcher.yml`
 
-The migration allowlist is exactly two versions, in this order: primary `20260806023116`, then corrective `20260806030202`. No generic PROD release workflow, Portal path, frontend path, or unrelated migration is part of this package.
+The migration allowlist is exactly three versions, in this order: primary `20260806023116`, corrective `20260806030202`, then immediate dispatch `20260806212757`. No generic PROD release workflow, Portal path, frontend path, or unrelated migration is part of this package.
 
 ### PROD secret and variable contract
 
@@ -139,20 +150,23 @@ NOTIFICATION_CUTOFF_AT=2026-08-06T20:11:17.823134Z
 NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod
 ```
 
+It also provisions four named values in Supabase Vault: `notification_dispatcher_url`, `notification_dispatcher_secret`, `notification_dispatcher_cutoff_at`, and `notification_receipt_linked_immediate_enabled`. Phase A forces the final value to `false`; the secret value is never printed or stored in Git.
+
 ### Phase A — disabled first deploy
 
 The protected manual workflow is `supabase-prod-notifications-receipt-linked-release.yml`. It is `workflow_dispatch` only, requires the exact approved `main` SHA and explicit PROD/phase/cutoff confirmations, runs in `supabase-production`, and refuses to run if the permanent scheduler is enabled.
 
 A future, separately authorized Phase A run must:
 
-1. prove current `main`, exact source blobs, PROD identity, backup/PITR availability, and the exact two-migration allowlist;
+1. prove current `main`, exact source blobs, PROD identity, backup/PITR availability, and the exact three-migration allowlist;
 2. re-run the read-only zero-state and prerequisite precheck;
 3. force `NOTIFICATION_SEND_MODE=disabled`;
 4. deploy only `notification-dispatcher`;
-5. apply exactly the primary migration followed by the corrective migration;
-6. verify both migration-history rows, functions, ACLs, zero receipt events, and zero delivery attempts;
-7. perform an unauthenticated 401 smoke and an authenticated disabled smoke returning `processed=0`, `sent=0`, `failed=0`;
-8. stop with the scheduler disabled, zero Resend calls, and zero emails.
+5. provision the four encrypted Vault values with the immediate wake-up disabled;
+6. apply exactly the primary migration, corrective migration, and immediate-dispatch migration in order;
+7. verify all three migration-history rows, functions, trigger, pg_net, ACLs, disabled wake-up, zero receipt events, and zero delivery attempts;
+8. perform an unauthenticated 401 smoke and an authenticated disabled smoke returning `processed=0`, `sent=0`, `failed=0`;
+9. stop with immediate wake-up disabled, the scheduler disabled, zero Resend calls, and zero emails.
 
 No Phase A execution is authorized by this packaging gate.
 
@@ -160,7 +174,9 @@ No Phase A execution is authorized by this packaging gate.
 
 Phase B is a distinct, later authorization. It must never be combined with Phase A.
 
-The permanent workflow is `supabase-prod-notification-dispatcher.yml`. Its schedule is `3-58/5 * * * *`, providing one invocation every five minutes. It runs only from `main`, is serialized with `cancel-in-progress: false`, uses the `supabase-production` Environment, and requires `NOTIFICATION_PROD_SCHEDULER_ENABLED=true`.
+The primary path is the `notification_receipt_linked_immediate_dispatch_after_insert` trigger. It fires only for a newly inserted pending `payment_receipt.linked` ledger row. `pg_net` does not start HTTP until the surrounding transaction commits, authenticates to the unchanged dispatcher with the Vault-held dispatcher secret, and sends the same fixed-cutoff, receipt-only, bounded claim request. The trigger never calls Resend and never sends by event ID.
+
+The permanent workflow is `supabase-prod-notification-dispatcher.yml`. Its explicit role is `ROLE=RECOVERY_FALLBACK`. Its schedule is `3-58/5 * * * *`, providing one invocation every five minutes. It runs only from `main`, is serialized with `cancel-in-progress: false`, uses the `supabase-production` Environment, and requires `NOTIFICATION_PROD_SCHEDULER_ENABLED=true`.
 
 Every invocation is exactly:
 
@@ -186,8 +202,8 @@ Phase B smoke, only after separate authorization:
 
 1. capture a fresh observation timestamp while retaining the fixed release cutoff;
 2. create one normal post-commit `payment_receipt.linked` event through the financial workflow—never from upload, extraction, candidate display, or selection;
-3. allow one serialized scheduler invocation;
-4. reconcile one expected event/attempt/provider ID and its one-page individual PDF;
+3. allow the post-commit wake-up to invoke the dispatcher without manually running the scheduler;
+4. reconcile one expected event/attempt/provider ID, its one-page individual PDF, and the COMMIT-to-dispatch latency;
 5. prove that no earlier event was claimed and that the batch PDF was never fetched or sent;
 6. stop the rollout immediately if any count, recipient, attachment, or cutoff invariant differs.
 
@@ -196,9 +212,10 @@ Phase B smoke, only after separate authorization:
 Operational stop/containment is:
 
 1. set `NOTIFICATION_PROD_SCHEDULER_ENABLED=false`;
-2. set `NOTIFICATION_SEND_MODE=disabled`;
-3. confirm no scheduler job remains active and perform only read-only reconciliation;
-4. preserve all financial and notification evidence.
+2. set the Vault value `notification_receipt_linked_immediate_enabled=false`;
+3. set `NOTIFICATION_SEND_MODE=disabled`;
+4. confirm neither primary nor fallback can dispatch and perform only read-only reconciliation;
+5. preserve all financial and notification evidence.
 
 Data rollback is prohibited:
 

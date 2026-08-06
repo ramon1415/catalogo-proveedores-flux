@@ -28,6 +28,7 @@ jobs:
       PROD_CUTOFF: '2026-08-06T20:11:17.823134Z'
       EVENT_TYPES_JSON: '["payment_receipt.linked"]'
       DISPATCH_LIMIT: '5'
+      DISPATCH_ROLE: recovery_fallback
 
     steps:
       - name: Validate immutable production dispatch contract
@@ -40,8 +41,10 @@ jobs:
           test "${EVENT_TYPES_JSON}" = '["payment_receipt.linked"]'
           test "${PROD_CUTOFF}" = "2026-08-06T20:11:17.823134Z"
           test "${DISPATCH_LIMIT}" = "5"
+          test "${DISPATCH_ROLE}" = "recovery_fallback"
           echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
           echo "dispatch_contract=payment_receipt.linked_only"
+          echo "dispatch_role=recovery_fallback"
           echo "cutoff_fixed=2026-08-06T20:11:17.823134Z"
           echo "limit=5"
           echo "retry_policy=single_invocation_no_blind_retry"
