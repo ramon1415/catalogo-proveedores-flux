@@ -471,7 +471,7 @@ jobs:
           exit 1
 
       - name: Manual scheduler transition (WAIT)
-        if: ${{ steps.state_reprobe.outputs.mode == 'real' && steps.state_reprobe.outputs.wakeup == 'true' && steps.state_reprobe.outputs.scheduler == 'false' }}
+        if: ${{ steps.path.outputs.do_wait == '1' || (steps.state_reprobe.outputs.mode == 'real' && steps.state_reprobe.outputs.wakeup == 'true' && steps.state_reprobe.outputs.scheduler == 'false') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -560,15 +560,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf 'PR324_FINAL_HARDENING_COMPLETE
-'
-          printf 'stage=%s
-' "${ACTIVATION_STAGE}"
-          printf 'scheduler_scope=environment:supabase-production
-'
-          printf 'scheduler_enabled=%s
-' "${SCHEDULER_ENABLED}"
-          printf 'initial_state=%s
-' "${{ steps.state_probe.outputs.state }}"
-          printf 'final_state=%s
-' "${{ steps.state_reprobe.outputs.target_state }}"
+          printf 'PR324_FINAL_HARDENING_COMPLETE\n'
+          printf 'stage=%s\n' "${ACTIVATION_STAGE}"
+          printf 'scheduler_scope=environment:supabase-production\n'
+          printf 'scheduler_enabled=%s\n' "${SCHEDULER_ENABLED}"
+          printf 'initial_state=%s\n' "${{ steps.state_probe.outputs.state }}"
+          printf 'final_state=%s\n' "${{ steps.state_reprobe.outputs.target_state }}"
