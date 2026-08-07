@@ -381,7 +381,7 @@ function renderReceiptLinkedEmail(
               </td>
             </tr>
           </table>
-          <div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora ? Powered by Quantta</div>
+          <div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div>
         </td>
       </tr>
     </table>
