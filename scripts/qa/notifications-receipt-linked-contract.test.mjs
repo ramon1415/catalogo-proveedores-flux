@@ -318,6 +318,26 @@ test("requester and provider templates keep their audience boundaries", () => {
   assert.match(combined.text, /https:\/\/flux\.quantta\.mx\/solicitudes\.html/);
 });
 
+test("receipt-linked HTML matches the branded email-card contract", () => {
+  const requester = renderEmail(receiptEvent(["requester"]), "test_only");
+  const provider = renderEmail(receiptEvent(["provider"]), "real");
+
+  for (const rendered of [requester, provider]) {
+    assert.match(rendered.html, /role="presentation"/);
+    assert.match(rendered.html, /max-width:560px/);
+    assert.match(rendered.html, /border-radius:14px/);
+    assert.match(rendered.html, /background:#16322d/);
+    assert.match(rendered.html, />Flux<\/td>/);
+    assert.match(rendered.html, /Flux Operadora ? Powered by Quantta/);
+  }
+
+  assert.match(provider.html, /Empresa pagadora/);
+  assert.doesNotMatch(provider.html, /Modo DEV TEST|Abrir solicitud en Flux/);
+  assert.match(requester.html, /Modo DEV TEST: este correo fue redirigido al destinatario de prueba\./);
+  assert.match(requester.html, /border-left:4px solid #d97706/);
+  assert.match(requester.html, /Abrir solicitud en Flux/);
+});
+
 test("HTML content is escaped", () => {
   const event = receiptEvent(["provider"]);
   event.payload.company = "<script>alert(1)</script>";
