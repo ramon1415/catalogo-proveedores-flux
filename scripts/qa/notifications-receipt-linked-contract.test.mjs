@@ -328,7 +328,7 @@ test("receipt-linked HTML matches the branded email-card contract", () => {
     assert.match(rendered.html, /border-radius:14px/);
     assert.match(rendered.html, /background:#16322d/);
     assert.match(rendered.html, />Flux<\/td>/);
-    assert.match(rendered.html, /Flux Operadora ? Powered by Quantta/);
+    assert.match(rendered.html, /Flux Operadora &middot; Powered by Quantta/);
   }
 
   assert.match(provider.html, /Empresa pagadora/);
