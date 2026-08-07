@@ -240,7 +240,7 @@ jobs:
               and (
                 to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is not null
                 and pg_get_function_result('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)'::regprocedure) LIKE 'TABLE%'
-                and pg_get_function_identity_arguments('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamp with time zone)'::regprocedure) = 'p_limit integer, p_worker_id text, p_event_types text[], p_created_at_from timestamp with time zone'
+                and pg_get_function_identity_arguments('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)'::regprocedure) = 'p_limit integer, p_worker_id text, p_event_types text[], p_created_at_from timestamp with time zone'
                 and (select p.provolatile from pg_proc p where p.oid='public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)'::regprocedure)='v'
                 and (select p.prosecdef from pg_proc p where p.oid='public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)'::regprocedure)
                 and replace(array_to_string((select p.proconfig from pg_proc p where p.oid='public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)'::regprocedure), ','), ' ', '')='search_path=public,pg_temp'
@@ -272,7 +272,6 @@ jobs:
                 and not has_function_privilege('authenticated','public.payment_receipt_normalize_match_text(text)','EXECUTE')
                 and not has_function_privilege('anon','public.payment_receipt_normalize_match_text(text)','EXECUTE')
               )
-            then 1 else 0 end,
             case when
               to_regclass('public.notification_events') is not null
               and to_regclass('public.notification_delivery_attempts') is not null
@@ -516,7 +515,7 @@ jobs:
               and not has_function_privilege('anon','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
               and not has_function_privilege('authenticated','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
               and not has_function_privilege('service_role','public.notification_receipt_linked_dispatch_wakeup_internal()','EXECUTE')
-              and public.payment_receipt_normalize_match_text('Demostraci�n')
+              and public.payment_receipt_normalize_match_text('Demostración')
                 = public.payment_receipt_normalize_match_text('Demostracion')
               and has_function_privilege('service_role','public.payment_receipt_normalize_match_text(text)','EXECUTE')
               and not has_function_privilege('anon','public.payment_receipt_normalize_match_text(text)','EXECUTE')
@@ -598,6 +597,4 @@ jobs:
           echo "emails=0"
           echo "scheduler_enabled=false"
           echo "phase_b=blocked"
-
-
 
