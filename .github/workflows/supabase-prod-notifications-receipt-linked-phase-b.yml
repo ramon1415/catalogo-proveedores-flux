@@ -459,7 +459,7 @@ jobs:
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
             --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
-          read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ[\"RESPONSE_FILE\"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
           [[ "${processed}" = "0" ]]
           [[ "${sent}" = "0" ]]
