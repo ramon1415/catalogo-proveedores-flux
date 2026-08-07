@@ -272,6 +272,7 @@ jobs:
                 and not has_function_privilege('authenticated','public.payment_receipt_normalize_match_text(text)','EXECUTE')
                 and not has_function_privilege('anon','public.payment_receipt_normalize_match_text(text)','EXECUTE')
               )
+            then 1 else 0 end,
             case when
               to_regclass('public.notification_events') is not null
               and to_regclass('public.notification_delivery_attempts') is not null
