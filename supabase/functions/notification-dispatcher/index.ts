@@ -339,19 +339,54 @@ function renderReceiptLinkedEmail(
     ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."] : []),
   ];
   const htmlRows = rows
-    .map(([label, value]) => `<tr><td style="padding:4px 12px 4px 0;color:#666">${escapeHtml(label)}</td><td style="padding:4px 0"><strong>${escapeHtml(value)}</strong></td></tr>`)
+    .map(([label, value]) => `
+      <tr>
+        <td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td>
+      </tr>`)
     .join("");
   const internalLink = providerOnly
     ? ""
-    : `<p style="margin-top:18px"><a href="${internalUrl}">Abrir solicitud en Flux</a></p>`;
+    : `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;">
+        <tr>
+          <td bgcolor="#16322d" style="border-radius:6px;">
+            <a href="${internalUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Abrir solicitud en Flux</a>
+          </td>
+        </tr>
+      </table>`;
   const testBanner = sendMode === "test_only"
-    ? `<p style="margin-top:18px;color:#b45309">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</p>`
+    ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>`
     : "";
 
   return {
     subject,
     text: textLines.join("\n"),
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.45;color:#111"><p>${escapeHtml(intro)}</p><table style="border-collapse:collapse">${htmlRows}</table>${internalLink}${testBanner}</div>`,
+    html: `<!doctype html>
+<html lang="es">
+  <body style="margin:0;padding:0;background:#eef1e9;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;">
+      <tr>
+        <td align="center" style="padding:24px 12px 18px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
+            <tr>
+              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;">
+                <p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">${escapeHtml(intro)}</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table>
+                ${internalLink}
+                ${testBanner}
+              </td>
+            </tr>
+          </table>
+          <div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora ? Powered by Quantta</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
   };
 }
 
