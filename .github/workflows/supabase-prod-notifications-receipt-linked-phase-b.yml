@@ -193,6 +193,45 @@ jobs:
           echo "delivery_attempts=${delivery_attempts}" >> "${GITHUB_OUTPUT}"
           echo "wakeup_secret_count=${wakeup_secret_count}" >> "${GITHUB_OUTPUT}"
 
+      - name: Build and statically validate canonical dispatcher request body
+        id: dispatch_request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from pathlib import Path
+
+          expected = {
+              "event_types": ["payment_receipt.linked"],
+              "created_at_from": "2026-08-06T20:11:17.823134Z",
+              "limit": 5,
+          }
+          payload = {
+              "event_types": ["payment_receipt.linked"],
+              "created_at_from": os.environ["PROD_CUTOFF"],
+              "limit": 5,
+          }
+          request_body = json.dumps(payload, separators=(",", ":"))
+          assert json.loads(request_body) == expected
+
+          source = Path(".github/workflows/supabase-prod-notifications-receipt-linked-phase-b.yml").read_text(encoding="utf-8")
+          function_token = '--request POST "' + '$' + '{FUNCTION_URL}"'
+          body_token = '--data "' + '$' + '{request_body}"'
+          assert source.count(function_token) == 6
+          assert source.count(body_token) == 6
+          assert source.count('base64 --decode') == 6
+          forbidden_fragments = ("--data \"{", "--data \"\\{\\\"")
+          assert not any(fragment in source for fragment in forbidden_fragments)
+
+          encoded = base64.b64encode(request_body.encode("utf-8")).decode("ascii")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"body_b64={encoded}\n")
+
+          PY
+
       - name: Probe current state (stage-aware mode + wakeup + scheduler)
         id: state_probe
         shell: bash
@@ -208,13 +247,15 @@ jobs:
           wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select coalesce((select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1), 'false');")"
           [[ -n "${wakeup}" ]] || wakeup="false"
 
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
           response_file="${RUNNER_TEMP}/dispatcher-state-smoke.json"
           http_code="$(curl --silent --show-error --output "${response_file}" \
             --write-out '%{http_code}' \
             --request POST "${FUNCTION_URL}" \
             --header 'Content-Type: application/json' \
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-            --data "{"event_types":["payment_receipt.linked"],"created_at_from":"${PROD_CUTOFF}","limit":5}")"
+            --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
           read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
@@ -306,13 +347,14 @@ jobs:
             trap - ERR
             set +e
             supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" NOTIFICATION_SEND_MODE=disabled >/dev/null
+            request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
             response_file="${RUNNER_TEMP}/dispatcher-b1-rollback-smoke.json"
             http_code="$(curl --silent --show-error --output "${response_file}" \
               --write-out '%{http_code}' \
               --request POST "${FUNCTION_URL}" \
               --header 'Content-Type: application/json' \
               --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-              --data "{"event_types":["payment_receipt.linked"],"created_at_from":"${PROD_CUTOFF}","limit":5}")"
+              --data "${request_body}")"
             read -r rollback_mode rollback_processed rollback_sent rollback_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
             rm -f "${response_file}"
             if [[ "${http_code}" = "200" && "${rollback_mode}" = "disabled" && "${rollback_processed}" = "0" && "${rollback_sent}" = "0" && "${rollback_failed}" = "0" ]]; then
@@ -350,13 +392,15 @@ jobs:
             false
           fi
 
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
           response_file="${RUNNER_TEMP}/dispatcher-real-smoke.json"
           http_code="$(curl --silent --show-error --output "${response_file}" \
             --write-out '%{http_code}' \
             --request POST "${FUNCTION_URL}" \
             --header 'Content-Type: application/json' \
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-            --data "{"event_types":["payment_receipt.linked"],"created_at_from":"${PROD_CUTOFF}","limit":5}")"
+            --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
           read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
@@ -402,13 +446,15 @@ jobs:
           wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1;")"
           [[ -n "${wakeup}" ]] || wakeup="false"
 
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
           response_file="${RUNNER_TEMP}/dispatcher-state-reprobe.json"
           http_code="$(curl --silent --show-error --output "${response_file}" \
             --write-out '%{http_code}' \
             --request POST "${FUNCTION_URL}" \
             --header 'Content-Type: application/json' \
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-            --data "{\"event_types\":[\"payment_receipt.linked\"],\"created_at_from\":\"${PROD_CUTOFF}\",\"limit\":5}")"
+            --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
           read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ[\"RESPONSE_FILE\"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
@@ -452,13 +498,14 @@ jobs:
           supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" NOTIFICATION_SEND_MODE=disabled >/dev/null
 
           wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select coalesce((select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1), 'false');")"
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
           response_file="${RUNNER_TEMP}/dispatcher-post-b3-rollback-smoke.json"
           http_code="$(curl --silent --show-error --output "${response_file}" \
             --write-out '%{http_code}' \
             --request POST "${FUNCTION_URL}" \
             --header 'Content-Type: application/json' \
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-            --data "{"event_types":["payment_receipt.linked"],"created_at_from":"${PROD_CUTOFF}","limit":5}")"
+            --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
           read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
@@ -518,13 +565,15 @@ jobs:
           migrations_applied_this_run=$((migration_rows_post - pre_migrations))
           [[ "${migrations_applied_this_run}" = "0" ]]
 
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
           response_file="${RUNNER_TEMP}/dispatcher-final-smoke.json"
           http_code="$(curl --silent --show-error --output "${response_file}" \
             --write-out '%{http_code}' \
             --request POST "${FUNCTION_URL}" \
             --header 'Content-Type: application/json' \
             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
-            --data "{\"event_types\":[\"payment_receipt.linked\"],\"created_at_from\":\"${PROD_CUTOFF}\",\"limit\":5}")"
+            --data "${request_body}")"
           [[ "${http_code}" = "200" ]]
           read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
           rm -f "${response_file}"
