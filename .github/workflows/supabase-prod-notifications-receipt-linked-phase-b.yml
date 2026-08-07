@@ -1,0 +1,291 @@
+﻿name: Supabase PROD Receipt Linked Phase B Activation
+
+'on':
+  workflow_dispatch:
+    inputs:
+      target_git_sha:
+        description: Exact main SHA that carries the merged receipt-linked package
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the PROD project ref
+        required: true
+        type: string
+      confirm_phase:
+        description: Type receipt_linked_phase_b_activate
+        required: true
+        type: string
+      confirm_cutoff:
+        description: Confirm the fixed immutable no-replay cutoff
+        required: true
+        default: '2026-08-06T20:11:17.823134Z'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: supabase-prod-receipt-linked-phase-b
+  cancel-in-progress: false
+
+jobs:
+  phase_b_activation:
+    name: Activate real-mode receipt-linked dispatch path
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: supabase-production
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      NOTIFICATION_PROD_SCHEDULER_ENABLED: ${{ vars.NOTIFICATION_PROD_SCHEDULER_ENABLED }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_PHASE: ${{ inputs.confirm_phase }}
+      CONFIRM_CUTOFF: ${{ inputs.confirm_cutoff }}
+      PROD_CUTOFF: '2026-08-06T20:11:17.823134Z'
+      FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/notification-dispatcher
+      SCHEDULER_VARIABLE: NOTIFICATION_PROD_SCHEDULER_ENABLED
+
+    steps:
+      - name: Validate immutable preactivation contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" = "refs/heads/main" ]]
+          [[ "${GITHUB_SHA}" = "${TARGET_GIT_SHA}" ]]
+          [[ "${TARGET_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_PROD}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_PHASE}" = "receipt_linked_phase_b_activate" ]]
+          [[ "${CONFIRM_CUTOFF}" = "${PROD_CUTOFF}" ]]
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "${current_main}" = "${TARGET_GIT_SHA}" ]]
+
+          [[ "${PROJECT_REF}" != "scsirgbuqjcwoaxfacth" ]]
+          [[ -n "${SUPABASE_ACCESS_TOKEN}" ]]
+          [[ -n "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" ]]
+          [[ -n "${NOTIFICATION_DISPATCHER_SECRET}" ]]
+
+          current_sched="${NOTIFICATION_PROD_SCHEDULER_ENABLED:-false}"
+          [[ "${current_sched}" != "true" ]]
+
+          secret_names="$(supabase secrets list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          echo "${secret_names}" | grep -E 'NOTIFICATION_DISPATCHER_SECRET' >/dev/null
+          echo "${secret_names}" | grep -E 'RESEND_API_KEY' >/dev/null
+          echo "${secret_names}" | grep -E 'NOTIFICATION_FROM_EMAIL' >/dev/null
+
+          echo "phase=receipt_linked_phase_b_activate"
+          echo "target=PROD"
+          echo "scheduler_enabled=pre_false"
+
+      - name: Check out exact target commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up tooling
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y postgresql-client >/dev/null
+          fi
+          psql --version
+          supabase --version
+
+      - name: Precheck immutable prerequisites before B1
+        shell: bash
+        run: |
+          set -euo pipefail
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          begin transaction read only;
+          select
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked'),
+            (select count(*) from public.notification_delivery_attempts),
+            case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamptz)') is null then 0 else 1 end,
+            case when to_regprocedure('public.notification_receipt_linked_dispatch_wakeup_internal()') is null then 0 else 1 end,
+            case when exists (
+              select 1 from pg_trigger
+              where tgrelid='public.notification_events'::regclass
+                and tgname='notification_receipt_linked_immediate_dispatch_after_insert'
+                and not tgisinternal
+            ) then 1 else 0 end,
+            case when exists (select 1 from pg_extension where extname='pg_net') then 1 else 0 end,
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757','20260806224918')),
+            case when exists (select 1 from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' and decrypted_secret='false') then 1 else 0 end,
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='pending' and created_at >= timestamp with time zone '${PROD_CUTOFF}'),
+            (select count(*) from public.notification_delivery_attempts),
+            (select count(*) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled');
+          rollback;
+          SQL
+          )"
+
+          IFS='|' read -r receipt_events attempts producer resolver claim_v2 wakeup trigger pg_net migration_rows wakeup_disabled pending_eligible delivery_attempts secret_count <<< "${row}"
+
+          [[ "${receipt_events}" = "0" ]]
+          [[ "${attempts}" = "0" ]]
+          [[ "${producer}" = "1" ]]
+          [[ "${resolver}" = "1" ]]
+          [[ "${claim_v2}" = "1" ]]
+          [[ "${wakeup}" = "1" ]]
+          [[ "${trigger}" = "1" ]]
+          [[ "${pg_net}" = "1" ]]
+          [[ "${migration_rows}" = "4" ]]
+          [[ "${wakeup_disabled}" = "1" ]]
+          [[ "${pending_eligible}" = "0" ]]
+          [[ "${delivery_attempts}" = "0" ]]
+          [[ "${secret_count}" = "1" ]]
+
+          echo "receipt_events=0"
+          echo "attempts=0"
+          echo "pending_eligible=0"
+          echo "delivery_attempts=0"
+          echo "prerequisites=1"
+
+      - name: B1 force runtime config to real (one-shot activation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_file="${RUNNER_TEMP}/receipt-linked-runtime.env"
+          umask 077
+          {
+            echo 'NOTIFICATION_SEND_MODE=real'
+            echo 'NOTIFICATION_EVENT_TYPES=payment_receipt.linked'
+            echo "NOTIFICATION_CUTOFF_AT=${PROD_CUTOFF}"
+            echo 'NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod'
+          } > "${runtime_file}"
+          supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" --env-file "${runtime_file}" >/dev/null
+          rm -f "${runtime_file}"
+
+          secret_names="$(supabase secrets list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          echo "${secret_names}" | grep -E '^NOTIFICATION_SEND_MODE\s+real$|^NOTIFICATION_SEND_MODE\s+real\s' >/dev/null
+          echo "send_mode=real"
+
+      - name: B2 smoke call in zero-pending contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          pending_now="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq <<'SQL'
+          select count(*)
+          from public.notification_events
+          where event_type='payment_receipt.linked'
+            and status='pending'
+            and created_at >= timestamp with time zone '${PROD_CUTOFF}';
+          SQL
+          )"
+          [[ "${pending_now}" = "0" ]]
+
+          response_file="${RUNNER_TEMP}/dispatcher-smoke.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data '{"event_types":["payment_receipt.linked"],"created_at_from":"'${PROD_CUTOFF}'","limit":5}')"
+          [[ "${http_code}" = "200" ]]
+          echo "authenticated_status=${http_code}"
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json, os
+          with open(os.environ['RESPONSE_FILE'], encoding='utf-8') as handle:
+              data = json.load(handle)
+          mode = data.get('mode')
+          processed = data.get('processed')
+          sent = data.get('sent')
+          failed = data.get('failed')
+          assert mode == 'real'
+          assert processed == 0
+          assert sent == 0
+          assert failed == 0
+          print(f"mode={mode}")
+          print(f"processed={processed}")
+          print(f"sent={sent}")
+          print(f"failed={failed}")
+          PY
+
+      - name: B3 enable post-COMMIT wake-up in Vault
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -v ON_ERROR_STOP=1 \
+            -v wakeup_enabled='true' <<'SQL'
+          begin;
+          select vault.update_secret(
+            id,
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          ) from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+          commit;
+          SQL
+
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 <<'SQL'
+          select decrypted_secret
+          from vault.decrypted_secrets
+          where name='notification_receipt_linked_immediate_enabled';
+          SQL
+          )"
+          [[ "${row}" = "true" ]]
+          echo "wakeup_enabled=true"
+
+      - name: B4 enable recovery scheduler variable (manual fallback if unsupported)
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload_file="${RUNNER_TEMP}/scheduler_put.json"
+          if gh api \
+            --method PATCH \
+            /repos/${GITHUB_REPOSITORY}/actions/variables/${SCHEDULER_VARIABLE} \
+            -f name=${SCHEDULER_VARIABLE} \
+            -f value=true \
+            > "${payload_file}" 2>/tmp/gh_err.txt; then
+            echo "scheduler_enabled=true"
+            echo "scheduler_set_method=api_patch"
+          else
+            echo "::error::SCHEDULER_VARIABLE_UPDATE_REQUIRES_MANUAL_ACTION"
+            echo "scheduler_enabled=false"
+            echo "action=WAIT_RAMON_ENABLE_PROD_SCHEDULER_VARIABLE"
+            echo "ui_step=GitHub repo settings -> Variables -> NOTIFICATION_PROD_SCHEDULER_ENABLED = true"
+            rm -f "${payload_file}"
+            exit 1
+          fi
+
+      - name: Post-activation immutable checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq <<'SQL'
+          select
+            current_setting('role', true) is not null,
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='pending' and created_at >= timestamp with time zone '${PROD_CUTOFF}'),
+            (select count(*) from public.notification_delivery_attempts);
+          SQL
+          )"
+          echo "post_activation_row=${row}"
+
+          echo "mode=real"
+          echo "wakeup=true"
+          echo "scheduler=true"
+          echo "cutoff=${PROD_CUTOFF}"
+          echo "event_types=payment_receipt.linked"
+          echo "rollback_order=notification_receipt_linked_immediate_enabled=false; NOTIFICATION_PROD_SCHEDULER_ENABLED=false; NOTIFICATION_SEND_MODE=disabled"
