@@ -86,12 +86,12 @@ begin
   elsif v_snapshot.source_type = 'extraordinary_authorization' then
     select exists (
       select 1
-      from public.payment_request_extraordinary_authorizations authorization
-      where authorization.id = v_snapshot.source_id
-        and authorization.payment_request_id = v_request.id
-        and authorization.status = 'active'
-        and authorization.authorized_by = v_snapshot.authorized_by
-        and authorization.authorized_at is not distinct from v_snapshot.authorized_at
+      from public.payment_request_extraordinary_authorizations extra_auth
+      where extra_auth.id = v_snapshot.source_id
+        and extra_auth.payment_request_id = v_request.id
+        and extra_auth.status = 'active'
+        and extra_auth.authorized_by = v_snapshot.authorized_by
+        and extra_auth.authorized_at is not distinct from v_snapshot.authorized_at
         and v_snapshot.source_status = 'active'
     ) into v_source_current;
   else
