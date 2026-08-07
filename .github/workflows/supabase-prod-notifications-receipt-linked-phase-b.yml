@@ -1,0 +1,619 @@
+name: Supabase PROD Receipt Linked Phase B Activation
+
+'on':
+  workflow_dispatch:
+    inputs:
+      target_git_sha:
+        description: Exact main SHA that carries the merged receipt-linked package
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the PROD project ref
+        required: true
+        type: string
+      confirm_phase:
+        description: Type receipt_linked_phase_b_activate
+        required: true
+        type: string
+      confirm_cutoff:
+        description: Confirm the fixed immutable no-replay cutoff
+        required: true
+        default: '2026-08-06T20:11:17.823134Z'
+        type: string
+      activation_stage:
+        description: activate_primary | finalize_scheduler
+        required: true
+        default: activate_primary
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-receipt-linked-phase-b
+  cancel-in-progress: false
+
+jobs:
+  phase_b_activation:
+    name: Activate real-mode receipt-linked dispatch path
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: supabase-production
+
+    env:
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      SCHEDULER_ENABLED: ${{ vars.NOTIFICATION_PROD_SCHEDULER_ENABLED }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_PHASE: ${{ inputs.confirm_phase }}
+      CONFIRM_CUTOFF: ${{ inputs.confirm_cutoff }}
+      ACTIVATION_STAGE: ${{ inputs.activation_stage }}
+      PROD_CUTOFF: '2026-08-06T20:11:17.823134Z'
+      FUNCTION_NAME: notification-dispatcher
+      FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/notification-dispatcher
+
+    steps:
+      - name: Validate immutable preactivation contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" = "refs/heads/main" ]]
+          [[ "${GITHUB_SHA}" = "${TARGET_GIT_SHA}" ]]
+          [[ "${TARGET_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_PROD}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_PHASE}" = "receipt_linked_phase_b_activate" ]]
+          [[ "${CONFIRM_CUTOFF}" = "${PROD_CUTOFF}" ]]
+          [[ "${ACTIVATION_STAGE}" = "activate_primary" || "${ACTIVATION_STAGE}" = "finalize_scheduler" ]]
+          [[ "${PROJECT_REF}" != "${FORBIDDEN_DEV_REF}" ]]
+          [[ -n "${SUPABASE_ACCESS_TOKEN}" ]]
+          [[ -n "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" ]]
+          [[ -n "${NOTIFICATION_DISPATCHER_SECRET}" ]]
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "${current_main}" = "${TARGET_GIT_SHA}" ]]
+          echo "phase=receipt_linked_phase_b_activate"
+          echo "target=PROD"
+          echo "activation_stage=${ACTIVATION_STAGE}"
+
+      - name: Checkout exact target commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y postgresql-client >/dev/null
+          fi
+          psql --version
+          supabase --version
+
+      - name: Validate required runtime secret names
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_names="$(supabase secrets list --project-ref "${EXPECTED_PROJECT_REF}" 2>/dev/null)"
+          require_secret() {
+            local name="$1"
+            printf '%s\n' "${secret_names}" | grep -Eq "(^|[[:space:]])${name}([[:space:]]|$)"
+          }
+          require_secret NOTIFICATION_DISPATCHER_SECRET
+          require_secret RESEND_API_KEY
+          require_secret NOTIFICATION_FROM_EMAIL
+
+      - name: Backup/PITR precondition gate
+        id: backup_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="${RUNNER_TEMP}/supabase-prod-backups.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${EXPECTED_PROJECT_REF}/database/backups")"
+          [[ "${http_code}" = "200" ]]
+          BACKUP_OR_PITR="$(RESPONSE_FILE="${response_file}" python3 -c 'import json, os; payload=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); backups=payload.get("backups", []) if isinstance(payload, dict) else (payload or []); pitr=bool(payload.get("pitr_enabled", False)) if isinstance(payload, dict) else False; completed=[item for item in backups if str(item.get("status", "")).lower() in ("completed", "success")]; print("1" if (pitr or bool(completed)) else "0")')"
+          rm -f "${response_file}"
+          [[ "${BACKUP_OR_PITR}" = "1" ]]
+          echo "BACKUP_OR_PITR_PASS=1" >> "${GITHUB_OUTPUT}"
+
+      - name: Precheck immutable DB contract (read-only)
+        id: precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 -v cutoff="${PROD_CUTOFF}" <<'SQL'
+          begin transaction read only;
+          select
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked'),
+            (select count(*) from public.notification_delivery_attempts),
+            case when to_regprocedure('public.enqueue_payment_receipt_linked_notifications_internal(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.get_payment_receipt_notification_attachment(uuid)') is null then 0 else 1 end,
+            case when to_regprocedure('public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamp with time zone)') is null then 0 else 1 end,
+            case when pg_get_function_identity_arguments(
+              'public.claim_notification_events_for_dispatcher_v2(integer,text,text[],timestamp with time zone)'::regprocedure
+            ) = 'p_limit integer, p_worker_id text, p_event_types text[], p_created_at_from timestamp with time zone' then 1 else 0 end,
+            case when to_regprocedure('public.notification_receipt_linked_dispatch_wakeup_internal()') is null then 0 else 1 end,
+            case when exists (
+              select 1 from pg_trigger
+              where tgrelid='public.notification_events'::regclass
+                and tgname='notification_receipt_linked_immediate_dispatch_after_insert'
+                and not tgisinternal
+            ) then 1 else 0 end,
+            case when exists (select 1 from pg_extension where extname='pg_net') then 1 else 0 end,
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757','20260806224918')),
+            (select count(*) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled'),
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='pending' and created_at >= :'cutoff'::timestamptz),
+            (select count(*) from public.notification_delivery_attempts),
+            (select exists(select 1 from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' and decrypted_secret='true'));
+          rollback;
+          SQL
+          )"
+
+          IFS='|' read -r receipt_events attempts producer resolver claim_id claim_sig wakeup_fn trigger pg_net migration_rows wakeup_secret_count pending_eligible delivery_attempts wakeup_is_true <<< "${row}"
+
+          [[ "${producer}" = "1" ]]
+          [[ "${resolver}" = "1" ]]
+          [[ "${claim_id}" = "1" ]]
+          [[ "${claim_sig}" = "1" ]]
+          [[ "${wakeup_fn}" = "1" ]]
+          [[ "${trigger}" = "1" ]]
+          [[ "${pg_net}" = "1" ]]
+          [[ "${migration_rows}" = "4" ]]
+          [[ "${pending_eligible}" = "0" ]]
+
+          echo "receipt_events=${receipt_events}" >> "${GITHUB_OUTPUT}"
+          echo "attempts=${attempts}" >> "${GITHUB_OUTPUT}"
+          echo "producer=${producer}" >> "${GITHUB_OUTPUT}"
+          echo "resolver=${resolver}" >> "${GITHUB_OUTPUT}"
+          echo "claim_id=${claim_id}" >> "${GITHUB_OUTPUT}"
+          echo "claim_sig=${claim_sig}" >> "${GITHUB_OUTPUT}"
+          echo "wakeup_fn=${wakeup_fn}" >> "${GITHUB_OUTPUT}"
+          echo "trigger=${trigger}" >> "${GITHUB_OUTPUT}"
+          echo "pg_net=${pg_net}" >> "${GITHUB_OUTPUT}"
+          echo "migration_rows=${migration_rows}" >> "${GITHUB_OUTPUT}"
+          echo "pending_eligible=${pending_eligible}" >> "${GITHUB_OUTPUT}"
+          echo "delivery_attempts=${delivery_attempts}" >> "${GITHUB_OUTPUT}"
+          echo "wakeup_secret_count=${wakeup_secret_count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and statically validate canonical dispatcher request body
+        id: dispatch_request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from pathlib import Path
+
+          expected = {
+              "event_types": ["payment_receipt.linked"],
+              "created_at_from": "2026-08-06T20:11:17.823134Z",
+              "limit": 5,
+          }
+          payload = {
+              "event_types": ["payment_receipt.linked"],
+              "created_at_from": os.environ["PROD_CUTOFF"],
+              "limit": 5,
+          }
+          request_body = json.dumps(payload, separators=(",", ":"))
+          assert json.loads(request_body) == expected
+
+          source = Path(".github/workflows/supabase-prod-notifications-receipt-linked-phase-b.yml").read_text(encoding="utf-8")
+          function_token = '--request POST "' + '$' + '{FUNCTION_URL}"'
+          body_token = '--data "' + '$' + '{request_body}"'
+          assert source.count(function_token) == 6
+          assert source.count(body_token) == 6
+          decode_token = "base64 " + "--decode"
+          assert source.count(decode_token) == 6
+          quote = chr(34)
+          forbidden_fragments = ("--data " + quote + chr(123), "--data " + quote + chr(92) + chr(123))
+          assert not any(fragment in source for fragment in forbidden_fragments)
+
+          encoded = base64.b64encode(request_body.encode("utf-8")).decode("ascii")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"body_b64={encoded}\n")
+
+          PY
+
+      - name: Probe current state (stage-aware mode + wakeup + scheduler)
+        id: state_probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          scheduler="${SCHEDULER_ENABLED}"
+          if [[ "${ACTIVATION_STAGE}" = "activate_primary" ]]; then
+            [[ "${scheduler}" = "false" ]]
+          else
+            [[ "${scheduler}" = "true" ]]
+          fi
+
+          wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select coalesce((select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1), 'false');")"
+          [[ -n "${wakeup}" ]] || wakeup="false"
+
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
+          response_file="${RUNNER_TEMP}/dispatcher-state-smoke.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+          [[ "${http_code}" = "200" ]]
+          read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          rm -f "${response_file}"
+          [[ "${processed}" = "0" ]]
+          [[ "${sent}" = "0" ]]
+          [[ "${failed}" = "0" ]]
+
+          if [[ "${mode}" = "disabled" && "${wakeup}" = "false" && "${scheduler}" = "false" ]]; then
+            state="A"
+          elif [[ "${mode}" = "real" && "${wakeup}" = "true" && "${scheduler}" = "false" ]]; then
+            state="B"
+          elif [[ "${mode}" = "real" && "${wakeup}" = "true" && "${scheduler}" = "true" ]]; then
+            state="C"
+          else
+            state="INVALID"
+          fi
+
+          if [[ "${state}" = "INVALID" ]]; then
+            echo "::error::STATE_MACHINE_RECONCILIATION_REQUIRED"
+            echo "mode=${mode} wakeup=${wakeup} scheduler=${scheduler} pending_eligible=${{ steps.precheck.outputs.pending_eligible }}"
+            exit 1
+          fi
+
+          [[ "${{ steps.precheck.outputs.pending_eligible }}" = "0" ]]
+          echo "state=${state}" >> "${GITHUB_OUTPUT}"
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "wakeup=${wakeup}" >> "${GITHUB_OUTPUT}"
+          echo "scheduler=${scheduler}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve phase-b control path
+        id: path
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${ACTIVATION_STAGE}"
+          state="${{ steps.state_probe.outputs.state }}"
+
+          do_b1=0
+          do_b3=0
+          do_wait=0
+          do_finalize=0
+
+          if [[ "${stage}" = "activate_primary" ]]; then
+            case "${state}" in
+              A)
+                do_b1=1
+                do_b3=1
+                ;;
+              B)
+                do_wait=1
+                ;;
+              C)
+                do_finalize=1
+                ;;
+              *)
+                echo "::error::INVALID_STATE_FOR_ACTIVATION_PATH state=${state}"
+                exit 1
+                ;;
+            esac
+          else
+            case "${state}" in
+              C)
+                do_finalize=1
+                ;;
+              B)
+                do_wait=1
+                ;;
+              *)
+                echo "::error::INVALID_STATE_FOR_FINALIZE state=${state}"
+                exit 1
+                ;;
+            esac
+          fi
+
+          echo "do_b1=${do_b1}" >> "${GITHUB_OUTPUT}"
+          echo "do_b3=${do_b3}" >> "${GITHUB_OUTPUT}"
+          echo "do_wait=${do_wait}" >> "${GITHUB_OUTPUT}"
+          echo "do_finalize=${do_finalize}" >> "${GITHUB_OUTPUT}"
+          echo "target_state=${state}" >> "${GITHUB_OUTPUT}"
+
+      - name: B1 activate real runtime and prove zero-event smoke
+        if: ${{ steps.path.outputs.do_b1 == '1' }}
+        id: b1_activate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          restore_disabled() {
+            trap - ERR
+            set +e
+            supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" NOTIFICATION_SEND_MODE=disabled >/dev/null
+            request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+            response_file="${RUNNER_TEMP}/dispatcher-b1-rollback-smoke.json"
+            http_code="$(curl --silent --show-error --output "${response_file}" \
+              --write-out '%{http_code}' \
+              --request POST "${FUNCTION_URL}" \
+              --header 'Content-Type: application/json' \
+              --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+              --data "${request_body}")"
+            read -r rollback_mode rollback_processed rollback_sent rollback_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+            rm -f "${response_file}"
+            if [[ "${http_code}" = "200" && "${rollback_mode}" = "disabled" && "${rollback_processed}" = "0" && "${rollback_sent}" = "0" && "${rollback_failed}" = "0" ]]; then
+              echo "STOP / PROD_PHASE_B_PRIMARY_ACTIVATION_ROLLED_BACK_SAFE"
+            else
+              echo "::error::PROD_PHASE_B_PRIMARY_ROLLBACK_VERIFICATION_FAILED"
+            fi
+            exit 1
+          }
+          trap restore_disabled ERR
+
+          runtime_file="${RUNNER_TEMP}/receipt-linked-runtime.env"
+          umask 077
+          {
+            echo 'NOTIFICATION_SEND_MODE=real'
+            echo 'NOTIFICATION_EVENT_TYPES=payment_receipt.linked'
+            echo "NOTIFICATION_CUTOFF_AT=${PROD_CUTOFF}"
+            echo 'NOTIFICATION_WORKER_ID=edge-notification-dispatcher-prod'
+          } > "${runtime_file}"
+          supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" --env-file "${runtime_file}" >/dev/null
+          rm -f "${runtime_file}"
+
+          pending_now="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -v cutoff="${PROD_CUTOFF}" <<'SQL'
+          begin transaction read only;
+          select count(*)
+          from public.notification_events
+          where event_type='payment_receipt.linked'
+            and status='pending'
+            and created_at >= :'cutoff'::timestamptz;
+          rollback;
+          SQL
+          )"
+          if [[ "${pending_now}" != "0" ]]; then
+            echo "::error::PROD_PHASE_B_CONCURRENT_BUSINESS_EVENT_DETECTED"
+            false
+          fi
+
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
+          response_file="${RUNNER_TEMP}/dispatcher-real-smoke.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+          [[ "${http_code}" = "200" ]]
+          read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          rm -f "${response_file}"
+          [[ "${mode}" = "real" ]]
+          [[ "${processed}" = "0" ]]
+          [[ "${sent}" = "0" ]]
+          [[ "${failed}" = "0" ]]
+          trap - ERR
+          echo "mode_post=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "pending_eligible=${pending_now}" >> "${GITHUB_OUTPUT}"
+
+      - name: B3 enable post-COMMIT wake-up in Vault
+        if: ${{ steps.path.outputs.do_b3 == '1' }}
+        id: wakeup_set
+        shell: bash
+        env:
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -v ON_ERROR_STOP=1 -v wakeup_enabled='true' <<'SQL'
+          begin;
+          select vault.update_secret(
+            id,
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          ) from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+          commit;
+          SQL
+
+          wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1;")"
+          [[ "${wakeup}" = "true" ]]
+
+      - name: Re-probe state after path step
+        if: ${{ steps.path.outputs.do_b3 == '1' || steps.path.outputs.do_finalize == '1' }}
+        id: state_reprobe
+        shell: bash
+        run: |
+          set -euo pipefail
+          scheduler="${SCHEDULER_ENABLED}"
+
+          wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1;")"
+          [[ -n "${wakeup}" ]] || wakeup="false"
+
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
+          response_file="${RUNNER_TEMP}/dispatcher-state-reprobe.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+          [[ "${http_code}" = "200" ]]
+          read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ[\"RESPONSE_FILE\"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          rm -f "${response_file}"
+          [[ "${processed}" = "0" ]]
+          [[ "${sent}" = "0" ]]
+          [[ "${final_failed}" = "0" ]]
+
+          if [[ "${mode}" = "real" ]]; then
+            final_state="real"
+          elif [[ "${mode}" = "disabled" ]]; then
+            final_state="disabled"
+          else
+            final_state="INVALID"
+          fi
+
+          if [[ "${final_state}" = "INVALID" ]]; then
+            echo "::error::INVALID_DISPATCH_MODE=${mode}"
+            exit 1
+          fi
+
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "wakeup=${wakeup}" >> "${GITHUB_OUTPUT}"
+          echo "scheduler=${scheduler}" >> "${GITHUB_OUTPUT}"
+          echo "target_state=$([[ "${mode}" = "real" && "${wakeup}" = "true" && "${scheduler}" = "true" ]] && echo C || ( [[ "${mode}" = "real" && "${wakeup}" = "true" && "${scheduler}" = "false" ]] && echo B || echo A ))" >> "${GITHUB_OUTPUT}"
+
+      - name: Roll back after B3-path failure while scheduler is false
+        if: ${{ failure() && steps.path.outputs.do_b3 == '1' && (steps.wakeup_set.outcome == 'failure' || steps.wakeup_set.outcome == 'success') && env.SCHEDULER_ENABLED == 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -v ON_ERROR_STOP=1 -v wakeup_enabled='false' <<'SQL'
+          begin;
+          select vault.update_secret(
+            id,
+            :'wakeup_enabled',
+            'notification_receipt_linked_immediate_enabled',
+            'Kill switch for the post-commit receipt-linked wake-up'
+          ) from vault.secrets where name='notification_receipt_linked_immediate_enabled';
+          commit;
+          SQL
+          supabase secrets set --project-ref "${EXPECTED_PROJECT_REF}" NOTIFICATION_SEND_MODE=disabled >/dev/null
+
+          wakeup="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -v ON_ERROR_STOP=1 -c "select coalesce((select lower(decrypted_secret) from vault.decrypted_secrets where name='notification_receipt_linked_immediate_enabled' limit 1), 'false');")"
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+          response_file="${RUNNER_TEMP}/dispatcher-post-b3-rollback-smoke.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+          [[ "${http_code}" = "200" ]]
+          read -r mode processed sent failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data=json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          rm -f "${response_file}"
+          [[ "${wakeup}" = "false" ]]
+          [[ "${mode}" = "disabled" ]]
+          [[ "${processed}" = "0" ]]
+          [[ "${sent}" = "0" ]]
+          [[ "${failed}" = "0" ]]
+          echo "STOP / PROD_PHASE_B_PRIMARY_ACTIVATION_ROLLED_BACK_SAFE"
+          exit 1
+
+      - name: Manual scheduler transition (WAIT)
+        if: ${{ steps.path.outputs.do_wait == '1' || (steps.state_reprobe.outputs.mode == 'real' && steps.state_reprobe.outputs.wakeup == 'true' && steps.state_reprobe.outputs.scheduler == 'false') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PASS / PROD_PHASE_B_PRIMARY_PATH_ACTIVE / SEND_MODE_REAL / WAKEUP_ENABLED / SCHEDULER_DISABLED / WAIT_RAMON_ENABLE_PROD_SCHEDULER_VARIABLE"
+          echo "scheduler_scope=environment:supabase-production"
+          echo "ui_action=GitHub repo Settings → Environments → supabase-production → Environment variables → NOTIFICATION_PROD_SCHEDULER_ENABLED = true"
+          echo "state=B"
+
+      - name: Final immutable certification (state C only)
+        if: ${{ steps.state_reprobe.outputs.mode == 'real' && steps.state_reprobe.outputs.wakeup == 'true' && steps.state_reprobe.outputs.scheduler == 'true' }}
+        id: final_postcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          pre_migrations="${{ steps.precheck.outputs.migration_rows }}"
+          pre_receipt_events="${{ steps.precheck.outputs.receipt_events }}"
+          pre_delivery_attempts="${{ steps.precheck.outputs.delivery_attempts }}"
+
+          row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" -X -Atq -F '|' -v ON_ERROR_STOP=1 -v cutoff="${PROD_CUTOFF}" <<'SQL'
+          begin transaction read only;
+          select
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='pending' and created_at >= :'cutoff'::timestamptz),
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='claimed'),
+            (select count(*) from public.notification_delivery_attempts),
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='failed'),
+            (select count(*) from supabase_migrations.schema_migrations where version in ('20260806023116','20260806030202','20260806212757','20260806224918')),
+            (select count(*) from public.notification_delivery_attempts where status='pending'),
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked' and status='pending' and created_at < :'cutoff'::timestamptz),
+            (select count(*) from public.notification_events where event_type='payment_receipt.linked'),
+            (select count(*) from public.notification_delivery_attempts where created_at < :'cutoff'::timestamptz);
+          rollback;
+          SQL
+          )"
+          IFS='|' read -r pending_now claimed attempts_total failed_events migration_rows_post pending_attempts historical_pending_events total_receipt_events historical_attempts <<< "${row}"
+
+          [[ "${pending_now}" = "0" ]]
+          [[ "${claimed}" = "0" ]]
+          [[ "${failed_events}" = "0" ]]
+          [[ "${migration_rows_post}" = "4" ]]
+          [[ "${pending_attempts}" = "0" ]]
+          [[ "${historical_pending_events}" = "0" ]]
+          [[ "${historical_attempts}" = "0" ]]
+
+          migrations_applied_this_run=$((migration_rows_post - pre_migrations))
+          [[ "${migrations_applied_this_run}" = "0" ]]
+
+          request_body="$(printf '%s' "${{ steps.dispatch_request.outputs.body_b64 }}" | base64 --decode)"
+
+          response_file="${RUNNER_TEMP}/dispatcher-final-smoke.json"
+          http_code="$(curl --silent --show-error --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+          [[ "${http_code}" = "200" ]]
+          read -r mode processed sent final_failed <<< "$(RESPONSE_FILE="${response_file}" python3 -c 'import os, json; data = json.load(open(os.environ["RESPONSE_FILE"], encoding="utf-8")); print(data.get("mode", ""), data.get("processed", ""), data.get("sent", ""), data.get("failed", ""))')"
+          rm -f "${response_file}"
+
+          [[ "${mode}" = "real" ]]
+          [[ "${processed}" = "0" ]]
+          [[ "${sent}" = "0" ]]
+          [[ "${final_failed}" = "0" ]]
+          new_receipt_events=$((total_receipt_events - pre_receipt_events))
+          new_delivery_attempts=$((attempts_total - pre_delivery_attempts))
+          [[ "${new_receipt_events}" -ge 0 ]]
+          [[ "${new_delivery_attempts}" -ge 0 ]]
+          if [[ "${new_receipt_events}" -gt 0 || "${new_delivery_attempts}" -gt 0 ]]; then
+            echo "POST_ACTIVATION_BUSINESS_EVENT_OBSERVED events=${new_receipt_events} attempts=${new_delivery_attempts}"
+          fi
+
+          echo "migrations_applied_this_run=${migrations_applied_this_run}" >> "${GITHUB_OUTPUT}"
+          echo "migration_rows_post=${migration_rows_post}" >> "${GITHUB_OUTPUT}"
+          echo "pending_now=${pending_now}" >> "${GITHUB_OUTPUT}"
+          echo "claimed=${claimed}" >> "${GITHUB_OUTPUT}"
+          echo "attempts_total=${attempts_total}" >> "${GITHUB_OUTPUT}"
+          echo "historical_attempts=${historical_attempts}" >> "${GITHUB_OUTPUT}"
+          echo "total_receipt_events=${total_receipt_events}" >> "${GITHUB_OUTPUT}"
+          echo "new_receipt_events=${new_receipt_events}" >> "${GITHUB_OUTPUT}"
+          echo "new_delivery_attempts=${new_delivery_attempts}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_processed=${processed}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_sent=${sent}" >> "${GITHUB_OUTPUT}"
+          echo "dispatch_failed=${final_failed}" >> "${GITHUB_OUTPUT}"
+
+      - name: Summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'PR324_FINAL_HARDENING_COMPLETE\n'
+          printf 'stage=%s\n' "${ACTIVATION_STAGE}"
+          printf 'scheduler_scope=environment:supabase-production\n'
+          printf 'scheduler_enabled=%s\n' "${SCHEDULER_ENABLED}"
+          printf 'initial_state=%s\n' "${{ steps.state_probe.outputs.state }}"
+          printf 'final_state=%s\n' "${{ steps.state_reprobe.outputs.target_state }}"
