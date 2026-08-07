@@ -222,8 +222,10 @@ jobs:
           body_token = '--data "' + '$' + '{request_body}"'
           assert source.count(function_token) == 6
           assert source.count(body_token) == 6
-          assert source.count('base64 --decode') == 6
-          forbidden_fragments = ("--data \"{", "--data \"\\{\\\"")
+          decode_token = "base64 " + "--decode"
+          assert source.count(decode_token) == 6
+          quote = chr(34)
+          forbidden_fragments = ("--data " + quote + chr(123), "--data " + quote + chr(92) + chr(123))
           assert not any(fragment in source for fragment in forbidden_fragments)
 
           encoded = base64.b64encode(request_body.encode("utf-8")).decode("ascii")
