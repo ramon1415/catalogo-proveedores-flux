@@ -12,22 +12,12 @@ on:
         required: true
         default: "audit"
         type: string
-      audit_scope:
-        description: "Read-only audit scope to run"
-        required: true
-        default: "fine_migrations"
-        type: choice
-        options:
-          - fine_migrations
-          - base_migrations
-          - legacy_002
-          - legacy_004_005_006
 
 permissions:
   contents: read
 
 concurrency:
-  group: supabase-prod-readonly-schema-audit-${{ inputs.audit_scope }}
+  group: supabase-prod-readonly-schema-audit
   cancel-in-progress: false
 
 jobs:
@@ -38,11 +28,10 @@ jobs:
     environment: supabase-production
 
     env:
-      SUPABASE_AUDIT_DB_URL: ${{ secrets.SUPABASE_PROD_AUDIT_DB_URL }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
       SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
       CONFIRM_PROD: ${{ inputs.confirm_prod }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
-      AUDIT_SCOPE: ${{ inputs.audit_scope }}
 
     steps:
       - name: Validate audit guardrails
@@ -50,1146 +39,142 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p audit-output
-          GUARDRAILS_REPORT="audit-output/guardrails.md"
-          {
-            echo "# Supabase PROD read-only audit guardrails"
-            echo ""
-            echo "- Environment: supabase-production"
-            echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Mode requested: ${CONFIRM_MODE}"
-            echo "- Audit scope: ${AUDIT_SCOPE}"
-            echo "- Connection mode: SUPABASE_PROD_AUDIT_DB_URL"
-            echo "- Writes: not executed by this workflow"
-            echo "- db push: not executed by this workflow"
-            echo "- migration repair: not executed by this workflow"
-            echo "- migrations: not executed by this workflow"
-            echo "- n8n: not touched by this workflow"
-            echo ""
-          } > "${GUARDRAILS_REPORT}"
-
-          fail_guardrail() {
-            local message="$1"
-            echo "::error::${message}"
-            echo "- Result: FAILED - ${message}" >> "${GUARDRAILS_REPORT}"
-            exit 1
-          }
-
           if [ "${GITHUB_REF_NAME}" != "dev" ]; then
-            fail_guardrail "This workflow is restricted to the dev branch."
+            echo "::error::This workflow is restricted to the dev branch."
+            exit 1
           fi
 
           if [ "${CONFIRM_MODE}" != "audit" ]; then
-            fail_guardrail "confirm_mode must be exactly: audit"
-          fi
-
-          if [ "${AUDIT_SCOPE}" != "fine_migrations" ] && [ "${AUDIT_SCOPE}" != "base_migrations" ] && [ "${AUDIT_SCOPE}" != "legacy_002" ] && [ "${AUDIT_SCOPE}" != "legacy_004_005_006" ]; then
-            fail_guardrail "audit_scope must be exactly fine_migrations, base_migrations, legacy_002, or legacy_004_005_006."
+            echo "::error::confirm_mode must be exactly: audit"
+            exit 1
           fi
 
           if [ -z "${SUPABASE_PROJECT_ID}" ]; then
-            fail_guardrail "SUPABASE_PROJECT_REF_PROD environment variable is not configured."
+            echo "::error::SUPABASE_PROJECT_REF_PROD environment variable is not configured."
+            exit 1
           fi
 
           if [ "${CONFIRM_PROD}" != "${SUPABASE_PROJECT_ID}" ]; then
-            fail_guardrail "confirm_prod does not match the configured PROD project ref."
+            echo "::error::confirm_prod does not match the configured PROD project ref."
+            exit 1
           fi
 
-          if [ -z "${SUPABASE_AUDIT_DB_URL}" ]; then
-            fail_guardrail "SUPABASE_PROD_AUDIT_DB_URL secret is not configured."
+          if [ -z "${SUPABASE_DB_PASSWORD}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD_PROD secret is not configured."
+            exit 1
           fi
 
-          echo "- Result: PASSED" >> "${GUARDRAILS_REPORT}"
+          echo "Guardrails passed. Running read-only metadata audit only."
 
-      - name: Checkout selected branch
+      - name: Check out selected branch
         uses: actions/checkout@v4
         with:
           ref: dev
-          persist-credentials: false
 
-      - name: Ensure PostgreSQL client
+      - name: Ensure PostgreSQL client is available
         shell: bash
         run: |
           set -euo pipefail
-          if command -v psql >/dev/null 2>&1; then
-            psql --version
-          else
+          if ! command -v psql >/dev/null 2>&1; then
             sudo apt-get update
             sudo apt-get install -y postgresql-client
-            psql --version
           fi
+          psql --version
 
       - name: Run read-only metadata audit
-        id: schema_audit
         shell: bash
         env:
-          PGCONNECT_TIMEOUT: "10"
+          PGCONNECT_TIMEOUT: "15"
           PGOPTIONS: "-c default_transaction_read_only=on -c statement_timeout=15000"
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
-          mkdir -p audit-output/queries audit-output/query-results
-          cat > audit-output/queries/07-legacy-004-005-006-expected-objects.sql <<'SQL'
-          with expected_rls(table_name) as (
-            values
-              ('activity_log'),
-              ('approval_rules'),
-              ('billing_periods'),
-              ('budget_categories'),
-              ('budget_import_batches'),
-              ('budget_import_staging'),
-              ('budget_lines'),
-              ('budget_versions'),
-              ('cash_funds'),
-              ('cash_reconciliation_items'),
-              ('cash_reconciliations'),
-              ('celebration_concepts'),
-              ('companies'),
-              ('company_bank_accounts'),
-              ('company_cost_center_budget_categories'),
-              ('company_cost_centers'),
-              ('cost_centers'),
-              ('document_links'),
-              ('documents'),
-              ('incident_charges'),
-              ('income_payment_allocations'),
-              ('income_payments'),
-              ('invoices'),
-              ('maintenance_fee_charges'),
-              ('maintenance_fee_payments'),
-              ('members'),
-              ('monthly_closure_comments'),
-              ('monthly_closure_exports'),
-              ('monthly_closures'),
-              ('payment_layout_lines'),
-              ('payment_layouts'),
-              ('payment_receipts'),
-              ('payment_request_approvals'),
-              ('payment_request_items'),
-              ('payment_requests'),
-              ('profiles'),
-              ('proveedor_provider_links'),
-              ('proveedores'),
-              ('provider_bank_accounts'),
-              ('providers'),
-              ('roles'),
-              ('sales_invoices'),
-              ('tax_schemes'),
-              ('tickets'),
-              ('user_roles')
-          ), rls_observed as (
-            select
-              e.table_name,
-              coalesce(c.relrowsecurity, false) as exists_in_prod
-            from expected_rls e
-            left join pg_class c on c.relname = e.table_name and c.relnamespace = 'public'::regnamespace
-          ), expected_public_policies(table_name, policy_name) as (
-            values
-              ('billing_periods', 'billing_periods_admin_finance_all'),
-              ('billing_periods', 'billing_periods_select_authenticated'),
-              ('budget_categories', 'authenticated can read budget categories'),
-              ('budget_import_batches', 'Authenticated can delete budget import batches'),
-              ('budget_import_batches', 'Authenticated can insert budget import batches'),
-              ('budget_import_batches', 'Authenticated can read budget import batches'),
-              ('budget_import_batches', 'Authenticated can update budget import batches'),
-              ('budget_import_staging', 'Authenticated can delete budget import staging'),
-              ('budget_import_staging', 'Authenticated can insert budget import staging'),
-              ('budget_import_staging', 'Authenticated can read budget import staging'),
-              ('budget_import_staging', 'Authenticated can update budget import staging'),
-              ('budget_lines', 'authenticated can read budget lines'),
-              ('budget_versions', 'authenticated can read budget versions'),
-              ('cash_funds', 'cash funds manageable by finance roles'),
-              ('cash_funds', 'cash funds readable by owner or finance roles'),
-              ('cash_reconciliation_items', 'cash reconciliation items insert by owner draft or finance role'),
-              ('cash_reconciliation_items', 'cash reconciliation items readable by owner or finance roles'),
-              ('cash_reconciliation_items', 'cash reconciliation items update by owner draft or finance role'),
-              ('cash_reconciliations', 'cash reconciliations insert by owner or finance roles'),
-              ('cash_reconciliations', 'cash reconciliations readable by owner or finance roles'),
-              ('cash_reconciliations', 'cash reconciliations update by owner draft or finance roles'),
-              ('companies', 'authenticated can read companies'),
-              ('company_bank_accounts', 'cba_select'),
-              ('company_bank_accounts', 'cba_write'),
-              ('company_cost_center_budget_categories', 'authenticated can read company cost center budget categories'),
-              ('company_cost_centers', 'authenticated can read company cost centers'),
-              ('cost_centers', 'cost_centers_authenticated_all'),
-              ('document_links', 'document_links_authenticated_all'),
-              ('documents', 'documents_authenticated_all'),
-              ('incident_charges', 'incident_charges_authorized_all'),
-              ('incident_charges', 'incident_charges_authorized_select'),
-              ('income_payment_allocations', 'income_payment_allocations_authenticated_all'),
-              ('income_payments', 'income_payments_authenticated_all'),
-              ('invoices', 'invoices_admin_finance_all'),
-              ('invoices', 'invoices_admin_finance_select'),
-              ('maintenance_fee_charges', 'maintenance_fee_charges_admin_finance_all'),
-              ('maintenance_fee_charges', 'maintenance_fee_charges_admin_finance_select'),
-              ('maintenance_fee_payments', 'maintenance_fee_payments_admin_finance_all'),
-              ('maintenance_fee_payments', 'maintenance_fee_payments_admin_finance_select'),
-              ('members', 'members_admin_finance_all'),
-              ('members', 'members_select_authenticated'),
-              ('monthly_closure_comments', 'monthly_closure_comments_delete_finance'),
-              ('monthly_closure_comments', 'monthly_closure_comments_insert_authorized'),
-              ('monthly_closure_comments', 'monthly_closure_comments_select_authorized'),
-              ('monthly_closure_comments', 'monthly_closure_comments_update_authorized'),
-              ('monthly_closure_exports', 'monthly_closure_exports_select_authorized'),
-              ('monthly_closure_exports', 'monthly_closure_exports_write_finance'),
-              ('monthly_closures', 'monthly_closures_select_authorized'),
-              ('monthly_closures', 'monthly_closures_write_finance'),
-              ('payment_layout_lines', 'authenticated can read payment layout lines'),
-              ('payment_layouts', 'authenticated can read payment layouts'),
-              ('payment_layouts', 'authenticated can update payment layouts'),
-              ('payment_request_items', 'pri_all_members'),
-              ('payment_requests', 'payment_requests_insert'),
-              ('payment_requests', 'payment_requests_select'),
-              ('payment_requests', 'payment_requests_update'),
-              ('profiles', 'profiles_insert_self'),
-              ('profiles', 'profiles_select'),
-              ('profiles', 'profiles_update_self_or_sysadmin'),
-              ('proveedores', 'Usuarios autenticados pueden crear proveedores'),
-              ('proveedores', 'Usuarios autenticados pueden editar proveedores'),
-              ('provider_bank_accounts', 'pba_select'),
-              ('provider_bank_accounts', 'pba_write'),
-              ('providers', 'providers_authenticated_all'),
-              ('roles', 'roles_select'),
-              ('roles', 'roles_write_sysadmin'),
-              ('sales_invoices', 'sales_invoices_authenticated_all'),
-              ('tax_schemes', 'tax_schemes_authenticated_all'),
-              ('user_roles', 'user_roles_select'),
-              ('user_roles', 'user_roles_write_sysadmin')
-          ), public_policy_observed as (
-            select
-              e.table_name,
-              e.policy_name,
-              exists (
-                select 1
-                from pg_policies p
-                where p.schemaname = 'public'
-                  and p.tablename = e.table_name
-                  and p.policyname = e.policy_name
-              ) as exists_in_prod
-            from expected_public_policies e
-          ), expected_buckets(bucket_id, expected_public, expected_file_size_limit, expected_mime_types) as (
-            values
-              ('celebration-contracts', false, null::bigint, null::text[]),
-              ('company-receipts', false, null::bigint, null::text[]),
-              ('payment-receipts', false, 10485760::bigint, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']::text[])
-          ), bucket_observed as (
-            select
-              e.bucket_id,
-              exists (select 1 from storage.buckets b where b.id = e.bucket_id) as bucket_exists,
-              exists (
-                select 1
-                from storage.buckets b
-                where b.id = e.bucket_id
-                  and b.name = e.bucket_id
-                  and b."public" = e.expected_public
-                  and b.file_size_limit is not distinct from e.expected_file_size_limit
-                  and (
-                    e.expected_mime_types is null
-                    or (b.allowed_mime_types @> e.expected_mime_types and e.expected_mime_types @> b.allowed_mime_types)
-                  )
-              ) as exists_in_prod
-            from expected_buckets e
-          ), expected_storage_policies(policy_name) as (
-            values
-              ('Anon can read payment receipts temporarily'),
-              ('Anon can upload payment receipts temporarily')
-          ), storage_policy_observed as (
-            select
-              e.policy_name,
-              exists (
-                select 1
-                from pg_policies p
-                where p.schemaname = 'storage'
-                  and p.tablename = 'objects'
-                  and p.policyname = e.policy_name
-              ) as exists_in_prod
-            from expected_storage_policies e
-          ), expected_roles(role_name) as (
-            values
-              ('admin'),
-              ('approver_2'),
-              ('aprobador_2'),
-              ('finance'),
-              ('finanzas'),
-              ('operator'),
-              ('solicitante'),
-              ('sysadmin'),
-              ('system_admin')
-          ), role_observed as (
-            select
-              e.role_name,
-              exists (select 1 from public.roles r where r.name = e.role_name) as exists_in_prod
-            from expected_roles e
-          ), grant_checks(check_name, exists_in_prod) as (
-            select
-              role_name || '_schema_usage' as check_name,
-              has_schema_privilege(role_name, 'public', 'USAGE') as exists_in_prod
-            from (values ('anon'), ('authenticated')) as roles(role_name)
-            union all
-            select
-              role_name || '_public_table_' || lower(privilege) as check_name,
-              coalesce((
-                select bool_and(has_table_privilege(role_name, c.oid, privilege))
-                from pg_class c
-                join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = 'public'
-                  and c.relkind in ('r','p')
-                  and c.relname in (select table_name from expected_rls)
-              ), false) as exists_in_prod
-            from (values ('anon'), ('authenticated')) as roles(role_name)
-            cross join (values ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) as privileges(privilege)
-            union all
-            select
-              role_name || '_public_sequence_' || lower(privilege) as check_name,
-              coalesce((
-                select bool_and(has_sequence_privilege(role_name, c.oid, privilege))
-                from pg_class c
-                join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = 'public'
-                  and c.relkind = 'S'
-              ), false) as exists_in_prod
-            from (values ('anon'), ('authenticated')) as roles(role_name)
-            cross join (values ('USAGE'), ('SELECT')) as privileges(privilege)
-            union all
-            select
-              role_name || '_public_function_execute' as check_name,
-              coalesce((
-                select bool_and(has_function_privilege(role_name, p.oid, 'EXECUTE'))
-                from pg_proc p
-                join pg_namespace n on n.oid = p.pronamespace
-                where n.nspname = 'public'
-                  and p.prokind = 'f'
-              ), false) as exists_in_prod
-            from (values ('anon'), ('authenticated')) as roles(role_name)
-          ), matrix as (
-            select
-              '004_rls_policies_grants.sql' as migration,
-              'RLS enabled tables' as object_group,
-              count(*) as expected_count,
-              count(*) filter (where exists_in_prod) as found_count,
-              count(*) filter (where not exists_in_prod) as missing_count,
-              coalesce(string_agg(table_name, ', ' order by table_name) filter (where not exists_in_prod), '') as missing_objects,
-              'high: RLS state controls table visibility and writes' as risk,
-              'repair only if all RLS, policies, and grant checks are represented' as recommendation
-            from rls_observed
-            union all
-            select
-              '004_rls_policies_grants.sql',
-              'public policies',
-              count(*),
-              count(*) filter (where exists_in_prod),
-              count(*) filter (where not exists_in_prod),
-              coalesce(string_agg(table_name || '.' || policy_name, ', ' order by table_name, policy_name) filter (where not exists_in_prod), ''),
-              'high: policy differences can change user access',
-              'do not repair as applied if any policy is missing'
-            from public_policy_observed
-            union all
-            select
-              '004_rls_policies_grants.sql',
-              'public grants summary',
-              count(*),
-              count(*) filter (where exists_in_prod),
-              count(*) filter (where not exists_in_prod),
-              coalesce(string_agg(check_name, ', ' order by check_name) filter (where not exists_in_prod), ''),
-              'high: broad anon/authenticated grants must be understood before baseline',
-              'review missing grant checks before repair or patch'
-            from grant_checks
-            union all
-            select
-              '005_storage.sql',
-              'storage buckets config',
-              count(*),
-              count(*) filter (where exists_in_prod),
-              count(*) filter (where not exists_in_prod),
-              coalesce(string_agg(bucket_id, ', ' order by bucket_id) filter (where not exists_in_prod), ''),
-              'high: buckets and file restrictions affect uploads/downloads',
-              'repair only if bucket names, privacy and limits match'
-            from bucket_observed
-            union all
-            select
-              '005_storage.sql',
-              'storage.objects policies',
-              count(*),
-              count(*) filter (where exists_in_prod),
-              count(*) filter (where not exists_in_prod),
-              coalesce(string_agg(policy_name, ', ' order by policy_name) filter (where not exists_in_prod), ''),
-              'high: anon storage policies are intentionally sensitive',
-              'do not repair as applied if policies are missing or unintended'
-            from storage_policy_observed
-            union all
-            select
-              '006_seed_base.sql',
-              'base role seed',
-              count(*),
-              count(*) filter (where exists_in_prod),
-              count(*) filter (where not exists_in_prod),
-              coalesce(string_agg(role_name, ', ' order by role_name) filter (where not exists_in_prod), ''),
-              'low/medium: idempotent role catalog seed',
-              'repair or apply only after confirming missing roles are intended'
-            from role_observed
-          )
-          , detail as (
-            select
-              '004_rls_policies_grants.sql' as migration,
-              'rls_enabled' as object_kind,
-              table_name as object_name,
-              exists_in_prod,
-              'schema=public; policy_source=RLS table flag' as evidence
-            from rls_observed
-            union all
-            select
-              '004_rls_policies_grants.sql',
-              'public_schema_policy',
-              table_name || '.' || policy_name,
-              exists_in_prod,
-              'schema=public; this is not the same as PUBLIC/anon access'
-            from public_policy_observed
-            union all
-            select
-              '004_rls_policies_grants.sql',
-              'grant_check',
-              check_name,
-              exists_in_prod,
-              case
-                when check_name like 'anon_%' then 'role=anon; review carefully before baseline'
-                when check_name like 'authenticated_%' then 'role=authenticated; review carefully before baseline'
-                else ''
-              end
-            from grant_checks
-            union all
-            select
-              '005_storage.sql',
-              'bucket_config',
-              bucket_id,
-              exists_in_prod,
-              'bucket_exists=' || bucket_exists::text || '; expected_private=true'
-            from bucket_observed
-            union all
-            select
-              '005_storage.sql',
-              'storage_policy',
-              policy_name,
-              exists_in_prod,
-              case
-                when policy_name ilike '%anon%' then 'policy name references anon; review as explicit storage risk'
-                else ''
-              end
-            from storage_policy_observed
-            union all
-            select
-              '006_seed_base.sql',
-              'role_seed',
-              role_name,
-              exists_in_prod,
-              'catalog role expected by seed base'
-            from role_observed
-          ), classified_matrix as (
-            select
-              migration,
-              object_group,
-              expected_count,
-              found_count,
-              missing_count,
-              case
-                when found_count = expected_count then 'aplicada'
-                when found_count = 0 then 'no aplicada'
-                when found_count > 0 and found_count < expected_count then 'parcial'
-                else 'no concluyente'
-              end as classification,
-              missing_objects,
-              risk,
-              recommendation
-            from matrix
-          )
-          select
-            1 as row_order,
-            'summary' as row_type,
-            migration,
-            object_group,
-            '' as object_name,
-            null::boolean as exists_in_prod,
-            expected_count,
-            found_count,
-            missing_count,
-            classification,
-            missing_objects as evidence,
-            risk,
-            recommendation
-          from classified_matrix
-          union all
-          select
-            2 as row_order,
-            'detail' as row_type,
-            migration,
-            object_kind as object_group,
-            object_name,
-            exists_in_prod,
-            null::bigint as expected_count,
-            null::bigint as found_count,
-            null::bigint as missing_count,
-            case when exists_in_prod then 'encontrado' else 'faltante' end as classification,
-            evidence,
-            '' as risk,
-            '' as recommendation
-          from detail
-          order by row_order, migration, object_group, object_name;
-          SQL
-
-          if [ "${AUDIT_SCOPE}" = "base_migrations" ]; then
-            REPORT="audit-output/supabase-prod-base-migrations-audit.md"
-            ARTIFACT_NAME="supabase-prod-base-migrations-audit-evidence"
-            REPORT_TITLE="Supabase PROD base migrations audit"
-          elif [ "${AUDIT_SCOPE}" = "legacy_002" ]; then
-            REPORT="audit-output/supabase-prod-legacy-002-audit.md"
-            ARTIFACT_NAME="supabase-prod-legacy-002-audit-evidence"
-            REPORT_TITLE="Supabase PROD legacy 002 read-only audit"
-          elif [ "${AUDIT_SCOPE}" = "legacy_004_005_006" ]; then
-            REPORT="audit-output/supabase-prod-legacy-004-005-006-audit.md"
-            ARTIFACT_NAME="supabase-prod-legacy-004-005-006-audit-evidence"
-            REPORT_TITLE="Supabase PROD legacy 004/005/006 read-only audit"
-          else
-            REPORT="audit-output/supabase-prod-fine-audit.md"
-            ARTIFACT_NAME="supabase-prod-fine-audit-evidence"
-            REPORT_TITLE="Supabase PROD fine migration audit"
-          fi
-          NETWORK_REPORT="audit-output/network-diagnostics.md"
-          QUERY_LOG="audit-output/query-log.md"
-          LAST_QUERY_FILE="audit-output/last-query.txt"
-          PSQL_URI="${SUPABASE_AUDIT_DB_URL}"
-          AUDIT_FAILED=0
-
-          sanitize_file() {
-            local file_path="$1"
-            if [ -f "${file_path}" ]; then
-              sed -E -i \
-                -e 's#postgres(ql)?://[^[:space:]]+#postgresql://***REDACTED***#g' \
-                -e 's#(password=)[^[:space:]]+#\1***REDACTED***#gi' \
-                -e 's#(SUPABASE_[A-Z0-9_]*=)[^[:space:]]+#\1***REDACTED***#g' \
-                -e 's#(access[_-]?token=)[^[:space:]]+#\1***REDACTED***#gi' \
-                -e 's#(apikey=)[^[:space:]]+#\1***REDACTED***#gi' \
-                "${file_path}"
-            fi
-          }
-
-          fail_audit_guardrail() {
-            local message="$1"
-            AUDIT_FAILED=1
-            echo "::error::${message}"
-            echo "## Read-only guardrail failure" >> "${REPORT}"
-            echo "" >> "${REPORT}"
-            echo "${message}" >> "${REPORT}"
-            echo "" >> "${QUERY_LOG}"
-            echo "- Read-only guardrail: FAILED - ${message}" >> "${QUERY_LOG}"
-            sanitize_file "${REPORT}"
-            sanitize_file "${QUERY_LOG}"
+          mkdir -p audit-output
+          REPORT="audit-output/supabase-prod-readonly-schema-audit.md"
+          PGHOST_NAME="db.${SUPABASE_PROJECT_ID}.supabase.co"
+          PGHOST_ADDR="$(getent ahostsv4 "${PGHOST_NAME}" | awk '{ print $1; exit }')"
+          if [ -z "${PGHOST_ADDR}" ]; then
+            echo "::error::Could not resolve an IPv4 address for the Supabase PROD database host."
             exit 1
-          }
+          fi
+          PSQL_URI="host=${PGHOST_NAME} hostaddr=${PGHOST_ADDR} port=5432 dbname=postgres user=postgres sslmode=require"
+          export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
 
           {
-            echo "# ${REPORT_TITLE}"
+            echo "# Supabase PROD read-only schema audit"
             echo ""
-            echo "- Target project ref: ${SUPABASE_PROJECT_ID}"
+            echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Commit: ${GITHUB_SHA}"
-            echo "- Mode: ${CONFIRM_MODE}"
-            echo "- Audit scope: ${AUDIT_SCOPE}"
-            echo "- Read-only guard: every query is wrapped in BEGIN READ ONLY"
-            echo "- db push: not executed"
-            echo "- migration repair: not executed"
-            echo "- migrations: not executed"
-            echo "- DDL/DML: not executed"
+            echo "- Mode: audit only"
+            echo "- Writes: not executed by this workflow"
+            echo "- db push: not executed by this workflow"
+            echo "- migration repair: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
             echo ""
           } > "${REPORT}"
 
+          run_query() {
+            local title="$1"
+            local query="$2"
+            {
+              echo "## ${title}"
+              echo '```'
+              psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "${query}"
+              echo '```'
+              echo ""
+            } >> "${REPORT}"
+          }
+
+          run_query "Connection identity" "select current_database() as current_database, current_user as current_user, now() as checked_at;"
+          run_query "Schema migrations table status" "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'missing' else 'present' end as schema_migrations_table_status;"
+
+          migrations_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('supabase_migrations.schema_migrations') is null then 'missing' else 'present' end;")"
           {
-            echo "# Query log"
-            echo ""
-          } > "${QUERY_LOG}"
-
-          python3 - <<'PY' > "${NETWORK_REPORT}"
-          import os
-          from urllib.parse import urlparse
-          url = os.environ.get("SUPABASE_AUDIT_DB_URL", "")
-          parsed = urlparse(url)
-          host = parsed.hostname or "unknown"
-          port = parsed.port or 5432
-          user = parsed.username or "unknown"
-          masked_host = host
-          if len(host) > 12 and "." in host:
-              first, *rest = host.split(".")
-              masked_host = first[:4] + "***." + ".".join(rest)
-          print("# Network diagnostics")
-          print("")
-          print(f"- Host: {masked_host}")
-          print(f"- Port: {port}")
-          print(f"- User: {user}")
-          print("- Connection string: redacted")
-          PY
-          sanitize_file "${NETWORK_REPORT}"
-
-          DB_HOST=$(python3 - <<'PY'
-          import os
-          from urllib.parse import urlparse
-          print(urlparse(os.environ.get("SUPABASE_AUDIT_DB_URL", "")).hostname or "")
-          PY
-          )
-          DB_PORT=$(python3 - <<'PY'
-          import os
-          from urllib.parse import urlparse
-          print(urlparse(os.environ.get("SUPABASE_AUDIT_DB_URL", "")).port or 5432)
-          PY
-          )
-
-          if [ -n "${DB_HOST}" ]; then
-            if timeout 8 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}" 2>/tmp/tcp-check.err; then
-              echo "- TCP reachable: yes" >> "${NETWORK_REPORT}"
-            else
-              echo "- TCP reachable: no" >> "${NETWORK_REPORT}"
-              cat /tmp/tcp-check.err >> "${NETWORK_REPORT}" || true
-            fi
-          fi
-          sanitize_file "${NETWORK_REPORT}"
-
-          cat > audit-output/queries/00-readonly-guard.sql <<'SQL'
-          begin read only;
-          select current_setting('transaction_read_only') as transaction_read_only;
-          commit;
-          SQL
-
-          READONLY_GUARD_STDOUT="audit-output/query-results/readonly-guard.stdout.txt"
-          READONLY_GUARD_STDERR="audit-output/query-results/readonly-guard.stderr.txt"
-          if ! psql "${PSQL_URI}" \
-            --no-psqlrc \
-            --set ON_ERROR_STOP=1 \
-            --set VERBOSITY=verbose \
-            --echo-errors \
-            --file "audit-output/queries/00-readonly-guard.sql" \
-            > "${READONLY_GUARD_STDOUT}" 2> "${READONLY_GUARD_STDERR}"; then
-            sanitize_file "${READONLY_GUARD_STDOUT}"
-            sanitize_file "${READONLY_GUARD_STDERR}"
-            fail_audit_guardrail "Unable to start and verify a read-only transaction for PROD audit."
-          fi
-          sanitize_file "${READONLY_GUARD_STDOUT}"
-          sanitize_file "${READONLY_GUARD_STDERR}"
-          if ! grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${READONLY_GUARD_STDOUT}"; then
-            fail_audit_guardrail "Read-only transaction guard did not report transaction_read_only=on."
+            echo "## Supabase migration history"
+            echo '```'
+          } >> "${REPORT}"
+          if [ "${migrations_status}" = "present" ]; then
+            psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "select * from supabase_migrations.schema_migrations order by version;" >> "${REPORT}"
+          else
+            echo "supabase_migrations.schema_migrations is missing" >> "${REPORT}"
           fi
           {
-            echo "## Read-only transaction guard"
-            echo ""
-            echo "- Result: success"
-            echo "- Guard: BEGIN READ ONLY returned transaction_read_only=on"
-            echo ""
-          } >> "${QUERY_LOG}"
-          {
-            echo "## Read-only transaction guard"
-            echo ""
-            echo "Result: success - BEGIN READ ONLY returned transaction_read_only=on"
+            echo '```'
             echo ""
           } >> "${REPORT}"
 
-          run_query() {
-            local label="$1"
-            local query_file="$2"
-            local slug
-            slug=$(echo "${label}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
-            local stdout_file="audit-output/query-results/${slug}.stdout.txt"
-            local stderr_file="audit-output/query-results/${slug}.stderr.txt"
-            local wrapper_file="audit-output/queries/${slug}-readonly-wrapper.sql"
+          run_query "Public tables" "select table_schema, table_name from information_schema.tables where table_schema = 'public' order by table_name;"
+          run_query "Public views" "select table_schema, table_name from information_schema.views where table_schema = 'public' order by table_name;"
+          run_query "Public functions" "select p.oid::regprocedure::text as function_signature from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' order by function_signature;"
+          run_query "Public table RLS flags" "select c.relname as table_name, c.relrowsecurity as rls_enabled from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by c.relname;"
+          run_query "Public policies" "select schemaname, tablename, policyname, roles, cmd from pg_policies where schemaname = 'public' order by tablename, policyname;"
 
-            cat > "${wrapper_file}" <<SQL
-          begin read only;
-          select current_setting('transaction_read_only') as transaction_read_only_guard;
-          \i ${query_file}
-          commit;
-          SQL
-
-            echo "${label}" > "${LAST_QUERY_FILE}"
-            {
-              echo "## ${label}"
-              echo ""
-              echo "- Query file: ${query_file}"
-              echo "- Wrapper: ${wrapper_file}"
-              echo "- Guard: BEGIN READ ONLY"
-              echo ""
-            } >> "${QUERY_LOG}"
-
-            if psql "${PSQL_URI}" \
-              --no-psqlrc \
-              --set ON_ERROR_STOP=1 \
-              --set VERBOSITY=verbose \
-              --echo-errors \
-              --file "${wrapper_file}" \
-              > "${stdout_file}" 2> "${stderr_file}"; then
-              if grep -Eq '(^|[[:space:]])on([[:space:]]|$)' "${stdout_file}"; then
-                echo "- Result: success" >> "${QUERY_LOG}"
-                echo "## ${label}" >> "${REPORT}"
-                echo "" >> "${REPORT}"
-                echo "Result: success" >> "${REPORT}"
-                echo "" >> "${REPORT}"
-                echo '```text' >> "${REPORT}"
-                cat "${stdout_file}" >> "${REPORT}"
-                echo '```' >> "${REPORT}"
-                echo "" >> "${REPORT}"
-              else
-                AUDIT_FAILED=1
-                echo "- Result: failure" >> "${QUERY_LOG}"
-                echo "- Reason: transaction_read_only_guard was not confirmed as on" >> "${QUERY_LOG}"
-                echo "## ${label}" >> "${REPORT}"
-                echo "" >> "${REPORT}"
-                echo "Result: failure" >> "${REPORT}"
-                echo "Reason: transaction_read_only_guard was not confirmed as on" >> "${REPORT}"
-                echo "" >> "${REPORT}"
-              fi
-            else
-              local exit_code=$?
-              AUDIT_FAILED=1
-              echo "- Result: failure" >> "${QUERY_LOG}"
-              echo "- Exit code: ${exit_code}" >> "${QUERY_LOG}"
-              echo "## ${label}" >> "${REPORT}"
-              echo "" >> "${REPORT}"
-              echo "Result: failure" >> "${REPORT}"
-              echo "Exit code: ${exit_code}" >> "${REPORT}"
-              echo "" >> "${REPORT}"
-              echo "### stdout" >> "${REPORT}"
-              echo '```text' >> "${REPORT}"
-              cat "${stdout_file}" >> "${REPORT}" || true
-              echo '```' >> "${REPORT}"
-              echo "" >> "${REPORT}"
-              echo "### stderr" >> "${REPORT}"
-              echo '```text' >> "${REPORT}"
-              cat "${stderr_file}" >> "${REPORT}" || true
-              echo '```' >> "${REPORT}"
-              echo "" >> "${REPORT}"
-            fi
-
-            sanitize_file "${stdout_file}"
-            sanitize_file "${stderr_file}"
-            sanitize_file "${QUERY_LOG}"
-            sanitize_file "${REPORT}"
-          }
-
-          cat > audit-output/queries/01-connection-identity.sql <<'SQL'
-          select
-            current_database() as database_name,
-            current_user as db_user,
-            current_setting('default_transaction_read_only') as default_transaction_read_only,
-            current_setting('transaction_read_only') as transaction_read_only,
-            current_setting('statement_timeout') as statement_timeout,
-            now() as audited_at;
-          SQL
-
-          cat > audit-output/queries/02-schema-migrations-presence.sql <<'SQL'
-          select
-            'supabase_migrations' as object_name,
-            to_regnamespace('supabase_migrations') is not null as exists_in_prod
-          union all
-          select
-            'supabase_migrations.schema_migrations' as object_name,
-            to_regclass('supabase_migrations.schema_migrations') is not null as exists_in_prod;
-
-          select
-            n.nspname as schema_name,
-            c.relname as relation_name,
-            c.relkind as relation_kind
-          from pg_class c
-          join pg_namespace n on n.oid = c.relnamespace
-          where n.nspname = 'supabase_migrations'
-          order by c.relname;
-          SQL
-
-          cat > audit-output/queries/03-fine-classification-matrix.sql <<'SQL'
-          with object_status as (
-            select
-              to_regclass('public.payment_request_number_seq') is not null as payment_request_number_seq_exists,
-              to_regclass('public.payment_layout_number_seq') is not null as payment_layout_number_seq_exists,
-              to_regclass('public.historical_actuals') is not null as historical_actuals_exists,
-              to_regclass('public.payment_receipts') is not null as payment_receipts_exists,
-              exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'payment_receipts' and policyname = 'payment_receipts_write_authorized') as payment_receipts_write_policy_exists,
-              exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'payment_requests' and column_name = 'request_type') as request_type_column_exists,
-              exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'payment_requests' and column_name = 'payment_method') as payment_method_column_exists,
-              exists (select 1 from pg_constraint where conrelid = to_regclass('public.payment_requests') and conname = 'payment_requests_payment_method_check' and convalidated = true) as payment_method_constraint_valid,
-              exists (select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'payment_request_type' and e.enumlabel = 'online_purchase') as online_purchase_enum_exists,
-              exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' and p.proname = 'create_payment_layout' and pg_get_functiondef(p.oid) like '%payment_method%' and pg_get_functiondef(p.oid) like '%transfer%') as create_payment_layout_transfer_guard_present,
-              to_regclass('public.notification_events') is not null as notification_events_exists,
-              to_regclass('public.notification_delivery_attempts') is not null as notification_delivery_attempts_exists,
-              (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' and p.proname in ('notification_current_profile_id','notification_current_user_has_role','set_updated_at_notification_events','enqueue_notification_event_internal','enqueue_notification_event','claim_pending_notification_events','mark_notification_processed','mark_notification_failed')) as notification_function_count
-          ), scored as (
-            select
-              (payment_request_number_seq_exists::int + payment_layout_number_seq_exists::int) as score_00110,
-              2 as total_00110,
-              (historical_actuals_exists::int) as score_00401,
-              1 as total_00401,
-              (payment_receipts_exists::int + payment_receipts_write_policy_exists::int) as score_00402,
-              2 as total_00402,
-              (request_type_column_exists::int + payment_method_column_exists::int + payment_method_constraint_valid::int + online_purchase_enum_exists::int + create_payment_layout_transfer_guard_present::int) as score_00403,
-              5 as total_00403,
-              (notification_events_exists::int + notification_delivery_attempts_exists::int + (notification_function_count = 8)::int) as score_007,
-              3 as total_007,
-              *
-            from object_status
-          )
-          select migration, expected_object_group, exists_summary,
-            case when score = total then 'aplicada' when score = 0 then 'no aplicada' when score > 0 and score < total then 'parcial' else 'no concluyente' end as classification,
-            evidence, risk, recommendation
-          from scored
-          cross join lateral (
-            values
-              ('00110_number_sequences.sql','payment_request_number_seq + payment_layout_number_seq',format('%s/%s checks present', score_00110, total_00110),score_00110,total_00110,concat('payment_request_number_seq=', payment_request_number_seq_exists, '; payment_layout_number_seq=', payment_layout_number_seq_exists),'medium: no CLI history','candidate for repair/baseline only after base migration audit'),
-              ('00401_historical_actuals.sql','historical_actuals table',format('%s/%s checks present', score_00401, total_00401),score_00401,total_00401,concat('table=', historical_actuals_exists),'pending if absent','do not repair as applied unless equivalent objects exist'),
-              ('00402_payment_receipts_policies.sql','payment_receipts table + write policy',format('%s/%s checks present', score_00402, total_00402),score_00402,total_00402,concat('table=', payment_receipts_exists, '; write_policy=', payment_receipts_write_policy_exists),'partial policy risk','do not repair as applied while partial'),
-              ('00403_fase2_payment_method_closure.sql','payment_method closure + layout guard',format('%s/%s checks present', score_00403, total_00403),score_00403,total_00403,concat('request_type=', request_type_column_exists, '; payment_method=', payment_method_column_exists, '; constraint=', payment_method_constraint_valid, '; online_purchase=', online_purchase_enum_exists, '; layout_guard=', create_payment_layout_transfer_guard_present),'partial release risk','do not repair as applied while partial'),
-              ('007_notifications.sql','notification tables + functions',format('%s/%s checks present', score_007, total_007),score_007,total_007,concat('events=', notification_events_exists, '; attempts=', notification_delivery_attempts_exists, '; functions=', notification_function_count, '/8'),'notification rollout risk','do not repair; pending real migration if absent')
-          ) as matrix(migration, expected_object_group, exists_summary, score, total, evidence, risk, recommendation)
-          order by migration;
-          SQL
-
-          cat > audit-output/queries/04-base-migrations-expected-objects.sql <<'SQL'
-          with expected(migration, object_kind, object_name) as (
-            values
-              ('00101_extensions_and_types.sql','extension','pgcrypto'),('00101_extensions_and_types.sql','extension','uuid-ossp'),('00101_extensions_and_types.sql','extension','btree_gist'),
-              ('00101_extensions_and_types.sql','type','autorizacion_enum'),('00101_extensions_and_types.sql','type','booking_source_type'),('00101_extensions_and_types.sql','type','booking_status'),('00101_extensions_and_types.sql','type','booking_type'),('00101_extensions_and_types.sql','type','celebration_concept_type'),('00101_extensions_and_types.sql','type','celebration_lead_status'),('00101_extensions_and_types.sql','type','celebration_status'),('00101_extensions_and_types.sql','type','client_type'),('00101_extensions_and_types.sql','type','company_account_type'),('00101_extensions_and_types.sql','type','document_file_type'),('00101_extensions_and_types.sql','type','estado_ticket_enum'),('00101_extensions_and_types.sql','type','event_usage_type'),('00101_extensions_and_types.sql','type','income_payment_method'),('00101_extensions_and_types.sql','type','income_payment_type'),('00101_extensions_and_types.sql','type','metodo_pago_enum'),('00101_extensions_and_types.sql','type','moneda_enum'),('00101_extensions_and_types.sql','type','payer_type'),('00101_extensions_and_types.sql','type','payment_flow'),('00101_extensions_and_types.sql','type','payment_request_status'),('00101_extensions_and_types.sql','type','payment_request_type'),('00101_extensions_and_types.sql','type','production_status'),('00101_extensions_and_types.sql','type','profit_model'),('00101_extensions_and_types.sql','type','provider_type'),('00101_extensions_and_types.sql','type','sales_invoice_status'),('00101_extensions_and_types.sql','type','venue_connection_type'),('00101_extensions_and_types.sql','type','venue_type'),('00101_extensions_and_types.sql','type','vertical_enum'),
-              ('00102_core_tables.sql','table','profiles'),('00102_core_tables.sql','table','roles'),('00102_core_tables.sql','table','user_roles'),('00102_core_tables.sql','table','companies'),('00102_core_tables.sql','table','cost_centers'),('00102_core_tables.sql','table','company_cost_centers'),('00102_core_tables.sql','table','budget_categories'),('00102_core_tables.sql','table','company_cost_center_budget_categories'),('00102_core_tables.sql','table','proveedores'),('00102_core_tables.sql','table','providers'),('00102_core_tables.sql','table','proveedor_provider_links'),('00102_core_tables.sql','table','provider_bank_accounts'),('00102_core_tables.sql','table','company_bank_accounts'),('00102_core_tables.sql','table','tax_schemes'),('00102_core_tables.sql','table','documents'),('00102_core_tables.sql','table','document_links'),('00102_core_tables.sql','table','activity_log'),
-              ('00103_budget_tables.sql','table','budget_versions'),('00103_budget_tables.sql','table','budget_lines'),('00103_budget_tables.sql','table','budget_import_batches'),('00103_budget_tables.sql','table','budget_import_staging'),
-              ('00104_payment_tables.sql','table','approval_rules'),('00104_payment_tables.sql','table','payment_requests'),('00104_payment_tables.sql','table','payment_request_items'),('00104_payment_tables.sql','table','payment_request_approvals'),('00104_payment_tables.sql','table','payment_receipts'),
-              ('00105_layout_tables.sql','table','payment_layouts'),('00105_layout_tables.sql','table','payment_layout_lines'),
-              ('00106_cash_tables.sql','table','cash_funds'),('00106_cash_tables.sql','table','cash_reconciliations'),('00106_cash_tables.sql','table','cash_reconciliation_items'),
-              ('00107_income_tables.sql','table','members'),('00107_income_tables.sql','table','billing_periods'),('00107_income_tables.sql','table','maintenance_fee_charges'),('00107_income_tables.sql','table','maintenance_fee_payments'),('00107_income_tables.sql','table','incident_charges'),('00107_income_tables.sql','table','invoices'),('00107_income_tables.sql','table','clients'),('00107_income_tables.sql','table','client_contacts'),('00107_income_tables.sql','table','venues'),('00107_income_tables.sql','table','venue_spaces'),('00107_income_tables.sql','table','venue_connections'),('00107_income_tables.sql','table','venue_bookings'),('00107_income_tables.sql','table','celebration_events'),('00107_income_tables.sql','table','celebration_concepts'),('00107_income_tables.sql','table','celebration_price_list'),('00107_income_tables.sql','table','celebration_line_items'),('00107_income_tables.sql','table','celebration_leads'),('00107_income_tables.sql','table','production_events'),('00107_income_tables.sql','table','production_categories'),('00107_income_tables.sql','table','production_items'),('00107_income_tables.sql','table','production_locations'),('00107_income_tables.sql','table','income_payments'),('00107_income_tables.sql','table','income_payment_allocations'),('00107_income_tables.sql','table','sales_invoices'),('00107_income_tables.sql','table','tickets'),
-              ('00108_closure_dashboard_tables.sql','table','monthly_closures'),('00108_closure_dashboard_tables.sql','table','monthly_closure_exports'),('00108_closure_dashboard_tables.sql','table','monthly_closure_comments'),('00108_closure_dashboard_tables.sql','constraint','profiles_auth_user_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','payment_requests_company_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','payment_layout_lines_layout_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','cash_funds_payment_request_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','income_payments_company_bank_account_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','monthly_closure_exports_monthly_closure_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','user_roles_profile_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','provider_bank_accounts_provider_id_fkey'),
-              ('00109_views.sql','view','budget_availability'),('00109_views.sql','view','budget_exceptions'),('00109_views.sql','view','celebration_events_with_dates'),
-              ('00110_number_sequences.sql','sequence','payment_request_number_seq'),('00110_number_sequences.sql','sequence','payment_layout_number_seq'),
-              ('00301_helper_functions.sql','function','current_profile_id'),('00301_helper_functions.sql','function','current_user_has_role'),('00301_helper_functions.sql','function','flux_sysadmin_roles'),('00301_helper_functions.sql','function','flux_finance_roles'),('00301_helper_functions.sql','function','flux_approver_roles'),('00301_helper_functions.sql','function','flux_member_roles'),
-              ('00302_budget_rpcs.sql','function','verify_budget_availability'),
-              ('00303_payment_request_rpcs.sql','function','generate_payment_request_number'),('00303_payment_request_rpcs.sql','function','create_payment_request'),('00303_payment_request_rpcs.sql','function','decide_payment_request'),
-              ('00304_layout_rpcs.sql','function','create_payment_layout'),('00304_layout_rpcs.sql','function','mark_payment_layout_uploaded'),('00304_layout_rpcs.sql','function','confirm_payment_layout'),('00304_layout_rpcs.sql','function','reject_payment_layout_line'),
-              ('00305_cash_rpcs.sql','function','verify_cash_block'),('00305_cash_rpcs.sql','function','create_cash_fund'),('00305_cash_rpcs.sql','function','create_cash_reconciliation'),('00305_cash_rpcs.sql','function','submit_cash_reconciliation'),('00305_cash_rpcs.sql','function','review_cash_reconciliation'),
-              ('00306_income_invoice_rpcs.sql','function','generate_maintenance_fees_for_period'),('00306_income_invoice_rpcs.sql','function','register_maintenance_fee_payment'),('00306_income_invoice_rpcs.sql','function','create_incident_charge'),('00306_income_invoice_rpcs.sql','function','resolve_invoice_receiver'),('00306_income_invoice_rpcs.sql','function','create_invoice_record'),('00306_income_invoice_rpcs.sql','function','mark_invoice_paid'),('00306_income_invoice_rpcs.sql','function','close_incident_charge'),
-              ('00307_dashboard_rpcs.sql','function','dashboard_period_key'),('00307_dashboard_rpcs.sql','function','dashboard_period_start'),('00307_dashboard_rpcs.sql','function','dashboard_period_end'),('00307_dashboard_rpcs.sql','function','dashboard_assert_access'),('00307_dashboard_rpcs.sql','function','dashboard_kpis'),('00307_dashboard_rpcs.sql','function','dashboard_budget_comparison'),('00307_dashboard_rpcs.sql','function','dashboard_ytd'),('00307_dashboard_rpcs.sql','function','dashboard_income_members'),('00307_dashboard_rpcs.sql','function','dashboard_closure_checklist'),('00307_dashboard_rpcs.sql','function','dashboard_export_payload')
-          ), observed as (
-            select
-              e.*,
-              case e.object_kind
-                when 'extension' then exists (select 1 from pg_extension where extname = e.object_name)
-                when 'type' then exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = e.object_name)
-                when 'table' then to_regclass('public.' || quote_ident(e.object_name)) is not null
-                when 'view' then exists (select 1 from information_schema.views where table_schema = 'public' and table_name = e.object_name)
-                when 'sequence' then to_regclass('public.' || quote_ident(e.object_name)) is not null
-                when 'function' then exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' and p.proname = e.object_name)
-                when 'constraint' then exists (select 1 from pg_constraint where conname = e.object_name)
-                else null
-              end as exists_in_prod
-            from expected e
-          ), grouped as (
-            select
-              migration,
-              count(*) as expected_count,
-              count(*) filter (where exists_in_prod) as found_count,
-              count(*) filter (where exists_in_prod is false) as missing_count,
-              string_agg(object_kind || ':' || object_name, ', ' order by object_kind, object_name) filter (where exists_in_prod) as found_objects,
-              string_agg(object_kind || ':' || object_name, ', ' order by object_kind, object_name) filter (where exists_in_prod is false) as missing_objects
-            from observed
-            group by migration
-          )
-          select
-            migration,
-            expected_count,
-            found_count,
-            missing_count,
-            case
-              when expected_count = 0 then 'no concluyente'
-              when found_count = expected_count then 'aplicada'
-              when found_count = 0 then 'no aplicada'
-              when found_count > 0 and found_count < expected_count then 'parcial'
-              else 'no concluyente'
-            end as classification,
-            coalesce(found_objects, '') as found_objects,
-            coalesce(missing_objects, '') as missing_objects,
-            case
-              when found_count = expected_count then 'possible repair/baseline candidate only after human equivalence review'
-              when found_count = 0 then 'keep pending; do not repair as applied'
-              else 'partial; do not repair as applied until differences are understood'
-            end as recommendation
-          from grouped
-          order by migration;
-          SQL
-
-          cat > audit-output/queries/05-base-migrations-object-detail.sql <<'SQL'
-          with expected(migration, object_kind, object_name) as (
-            values
-              ('00101_extensions_and_types.sql','extension','pgcrypto'),('00101_extensions_and_types.sql','extension','uuid-ossp'),('00101_extensions_and_types.sql','extension','btree_gist'),
-              ('00101_extensions_and_types.sql','type','autorizacion_enum'),('00101_extensions_and_types.sql','type','booking_source_type'),('00101_extensions_and_types.sql','type','booking_status'),('00101_extensions_and_types.sql','type','booking_type'),('00101_extensions_and_types.sql','type','celebration_concept_type'),('00101_extensions_and_types.sql','type','celebration_lead_status'),('00101_extensions_and_types.sql','type','celebration_status'),('00101_extensions_and_types.sql','type','client_type'),('00101_extensions_and_types.sql','type','company_account_type'),('00101_extensions_and_types.sql','type','document_file_type'),('00101_extensions_and_types.sql','type','estado_ticket_enum'),('00101_extensions_and_types.sql','type','event_usage_type'),('00101_extensions_and_types.sql','type','income_payment_method'),('00101_extensions_and_types.sql','type','income_payment_type'),('00101_extensions_and_types.sql','type','metodo_pago_enum'),('00101_extensions_and_types.sql','type','moneda_enum'),('00101_extensions_and_types.sql','type','payer_type'),('00101_extensions_and_types.sql','type','payment_flow'),('00101_extensions_and_types.sql','type','payment_request_status'),('00101_extensions_and_types.sql','type','payment_request_type'),('00101_extensions_and_types.sql','type','production_status'),('00101_extensions_and_types.sql','type','profit_model'),('00101_extensions_and_types.sql','type','provider_type'),('00101_extensions_and_types.sql','type','sales_invoice_status'),('00101_extensions_and_types.sql','type','venue_connection_type'),('00101_extensions_and_types.sql','type','venue_type'),('00101_extensions_and_types.sql','type','vertical_enum'),
-              ('00102_core_tables.sql','table','profiles'),('00102_core_tables.sql','table','roles'),('00102_core_tables.sql','table','user_roles'),('00102_core_tables.sql','table','companies'),('00102_core_tables.sql','table','cost_centers'),('00102_core_tables.sql','table','company_cost_centers'),('00102_core_tables.sql','table','budget_categories'),('00102_core_tables.sql','table','company_cost_center_budget_categories'),('00102_core_tables.sql','table','proveedores'),('00102_core_tables.sql','table','providers'),('00102_core_tables.sql','table','proveedor_provider_links'),('00102_core_tables.sql','table','provider_bank_accounts'),('00102_core_tables.sql','table','company_bank_accounts'),('00102_core_tables.sql','table','tax_schemes'),('00102_core_tables.sql','table','documents'),('00102_core_tables.sql','table','document_links'),('00102_core_tables.sql','table','activity_log'),
-              ('00103_budget_tables.sql','table','budget_versions'),('00103_budget_tables.sql','table','budget_lines'),('00103_budget_tables.sql','table','budget_import_batches'),('00103_budget_tables.sql','table','budget_import_staging'),
-              ('00104_payment_tables.sql','table','approval_rules'),('00104_payment_tables.sql','table','payment_requests'),('00104_payment_tables.sql','table','payment_request_items'),('00104_payment_tables.sql','table','payment_request_approvals'),('00104_payment_tables.sql','table','payment_receipts'),
-              ('00105_layout_tables.sql','table','payment_layouts'),('00105_layout_tables.sql','table','payment_layout_lines'),
-              ('00106_cash_tables.sql','table','cash_funds'),('00106_cash_tables.sql','table','cash_reconciliations'),('00106_cash_tables.sql','table','cash_reconciliation_items'),
-              ('00107_income_tables.sql','table','members'),('00107_income_tables.sql','table','billing_periods'),('00107_income_tables.sql','table','maintenance_fee_charges'),('00107_income_tables.sql','table','maintenance_fee_payments'),('00107_income_tables.sql','table','incident_charges'),('00107_income_tables.sql','table','invoices'),('00107_income_tables.sql','table','clients'),('00107_income_tables.sql','table','client_contacts'),('00107_income_tables.sql','table','venues'),('00107_income_tables.sql','table','venue_spaces'),('00107_income_tables.sql','table','venue_connections'),('00107_income_tables.sql','table','venue_bookings'),('00107_income_tables.sql','table','celebration_events'),('00107_income_tables.sql','table','celebration_concepts'),('00107_income_tables.sql','table','celebration_price_list'),('00107_income_tables.sql','table','celebration_line_items'),('00107_income_tables.sql','table','celebration_leads'),('00107_income_tables.sql','table','production_events'),('00107_income_tables.sql','table','production_categories'),('00107_income_tables.sql','table','production_items'),('00107_income_tables.sql','table','production_locations'),('00107_income_tables.sql','table','income_payments'),('00107_income_tables.sql','table','income_payment_allocations'),('00107_income_tables.sql','table','sales_invoices'),('00107_income_tables.sql','table','tickets'),
-              ('00108_closure_dashboard_tables.sql','table','monthly_closures'),('00108_closure_dashboard_tables.sql','table','monthly_closure_exports'),('00108_closure_dashboard_tables.sql','table','monthly_closure_comments'),('00108_closure_dashboard_tables.sql','constraint','profiles_auth_user_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','payment_requests_company_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','payment_layout_lines_layout_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','cash_funds_payment_request_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','income_payments_company_bank_account_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','monthly_closure_exports_monthly_closure_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','user_roles_profile_id_fkey'),('00108_closure_dashboard_tables.sql','constraint','provider_bank_accounts_provider_id_fkey'),
-              ('00109_views.sql','view','budget_availability'),('00109_views.sql','view','budget_exceptions'),('00109_views.sql','view','celebration_events_with_dates'),
-              ('00110_number_sequences.sql','sequence','payment_request_number_seq'),('00110_number_sequences.sql','sequence','payment_layout_number_seq'),
-              ('00301_helper_functions.sql','function','current_profile_id'),('00301_helper_functions.sql','function','current_user_has_role'),('00301_helper_functions.sql','function','flux_sysadmin_roles'),('00301_helper_functions.sql','function','flux_finance_roles'),('00301_helper_functions.sql','function','flux_approver_roles'),('00301_helper_functions.sql','function','flux_member_roles'),
-              ('00302_budget_rpcs.sql','function','verify_budget_availability'),
-              ('00303_payment_request_rpcs.sql','function','generate_payment_request_number'),('00303_payment_request_rpcs.sql','function','create_payment_request'),('00303_payment_request_rpcs.sql','function','decide_payment_request'),
-              ('00304_layout_rpcs.sql','function','create_payment_layout'),('00304_layout_rpcs.sql','function','mark_payment_layout_uploaded'),('00304_layout_rpcs.sql','function','confirm_payment_layout'),('00304_layout_rpcs.sql','function','reject_payment_layout_line'),
-              ('00305_cash_rpcs.sql','function','verify_cash_block'),('00305_cash_rpcs.sql','function','create_cash_fund'),('00305_cash_rpcs.sql','function','create_cash_reconciliation'),('00305_cash_rpcs.sql','function','submit_cash_reconciliation'),('00305_cash_rpcs.sql','function','review_cash_reconciliation'),
-              ('00306_income_invoice_rpcs.sql','function','generate_maintenance_fees_for_period'),('00306_income_invoice_rpcs.sql','function','register_maintenance_fee_payment'),('00306_income_invoice_rpcs.sql','function','create_incident_charge'),('00306_income_invoice_rpcs.sql','function','resolve_invoice_receiver'),('00306_income_invoice_rpcs.sql','function','create_invoice_record'),('00306_income_invoice_rpcs.sql','function','mark_invoice_paid'),('00306_income_invoice_rpcs.sql','function','close_incident_charge'),
-              ('00307_dashboard_rpcs.sql','function','dashboard_period_key'),('00307_dashboard_rpcs.sql','function','dashboard_period_start'),('00307_dashboard_rpcs.sql','function','dashboard_period_end'),('00307_dashboard_rpcs.sql','function','dashboard_assert_access'),('00307_dashboard_rpcs.sql','function','dashboard_kpis'),('00307_dashboard_rpcs.sql','function','dashboard_budget_comparison'),('00307_dashboard_rpcs.sql','function','dashboard_ytd'),('00307_dashboard_rpcs.sql','function','dashboard_income_members'),('00307_dashboard_rpcs.sql','function','dashboard_closure_checklist'),('00307_dashboard_rpcs.sql','function','dashboard_export_payload')
-          )
-          select
-            e.migration,
-            e.object_kind,
-            e.object_name,
-            case e.object_kind
-              when 'extension' then exists (select 1 from pg_extension where extname = e.object_name)
-              when 'type' then exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = e.object_name)
-              when 'table' then to_regclass('public.' || quote_ident(e.object_name)) is not null
-              when 'view' then exists (select 1 from information_schema.views where table_schema = 'public' and table_name = e.object_name)
-              when 'sequence' then to_regclass('public.' || quote_ident(e.object_name)) is not null
-              when 'function' then exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.prokind = 'f' and p.proname = e.object_name)
-              when 'constraint' then exists (select 1 from pg_constraint where conname = e.object_name)
-              else null
-            end as exists_in_prod
-          from expected e
-          order by e.migration, e.object_kind, e.object_name;
-          SQL
-
-          cat > audit-output/queries/06-legacy-002-expected-objects.sql <<'SQL'
-          with expected(object_kind, object_name, table_name) as (
-            values
-              ('function','set_updated_at',null),
-              ('function','update_updated_at_column',null),
-              ('index','budget_import_batches_status_idx',null),
-              ('index','budget_import_staging_batch_idx',null),
-              ('index','budget_import_staging_category_idx',null),
-              ('index','budget_import_staging_lookup_idx',null),
-              ('index','budget_import_staging_validation_idx',null),
-              ('index','budget_lines_budget_version_id_idx',null),
-              ('index','budget_lines_lookup_idx',null),
-              ('index','budget_versions_one_active_per_year_idx',null),
-              ('index','cccbc_budget_category_id_idx',null),
-              ('index','cccbc_company_id_idx',null),
-              ('index','cccbc_cost_center_id_idx',null),
-              ('index','celebration_line_items_event_concept_idx',null),
-              ('index','celebration_line_items_venue_booking_id_idx',null),
-              ('index','company_bank_accounts_company_id_idx',null),
-              ('index','company_cost_centers_company_id_idx',null),
-              ('index','company_cost_centers_cost_center_id_idx',null),
-              ('index','idx_approval_rules_active',null),
-              ('index','idx_approval_rules_level',null),
-              ('index','idx_approval_rules_role',null),
-              ('index','idx_approval_rules_scope',null),
-              ('index','idx_billing_periods_cutoff_date',null),
-              ('index','idx_billing_periods_status',null),
-              ('index','idx_billing_periods_year',null),
-              ('index','idx_cash_funds_due_date',null),
-              ('index','idx_cash_funds_payment_request',null),
-              ('index','idx_cash_funds_responsible_status',null),
-              ('index','idx_cash_items_budget_category',null),
-              ('index','idx_cash_items_proveedor',null),
-              ('index','idx_cash_items_reconciliation',null),
-              ('index','idx_cash_reconciliations_fund_status',null),
-              ('index','idx_cash_reconciliations_submitted_by',null),
-              ('index','idx_celebration_events_client',null),
-              ('index','idx_celebration_events_seller',null),
-              ('index','idx_celebration_leads_created_at',null),
-              ('index','idx_celebration_leads_event_id',null),
-              ('index','idx_celebration_leads_source',null),
-              ('index','idx_celebration_leads_status',null),
-              ('index','idx_celebration_leads_utm_campaign',null),
-              ('index','idx_celebration_line_items_event',null),
-              ('index','idx_company_bank_accounts_company_active',null),
-              ('index','idx_document_links_entity',null),
-              ('index','idx_documents_type',null),
-              ('index','idx_incident_charges_budget_category_id',null),
-              ('index','idx_incident_charges_company_id',null),
-              ('index','idx_incident_charges_cost_center_id',null),
-              ('index','idx_incident_charges_external_name',null),
-              ('index','idx_incident_charges_incident_date',null),
-              ('index','idx_incident_charges_member_id',null),
-              ('index','idx_incident_charges_referred_by_member_id',null),
-              ('index','idx_incident_charges_status',null),
-              ('index','idx_income_allocations_income',null),
-              ('index','idx_income_payments_celebration',null),
-              ('index','idx_income_payments_production',null),
-              ('index','idx_invoices_charge_id',null),
-              ('index','idx_invoices_fiscal_uuid',null),
-              ('index','idx_invoices_incident_charge_id',null),
-              ('index','idx_invoices_invoice_type',null),
-              ('index','idx_invoices_issue_date',null),
-              ('index','idx_invoices_member_id',null),
-              ('index','idx_invoices_status',null),
-              ('index','idx_maintenance_fee_charges_billing_period_id',null),
-              ('index','idx_maintenance_fee_charges_member_id',null),
-              ('trigger','trg_billing_periods_updated_at','billing_periods'),
-              ('trigger','trg_cash_funds_updated_at','cash_funds'),
-              ('trigger','trg_cash_reconciliation_items_updated_at','cash_reconciliation_items'),
-              ('trigger','trg_cash_reconciliations_updated_at','cash_reconciliations'),
-              ('trigger','set_celebration_events_updated_at','celebration_events'),
-              ('trigger','trg_celebration_leads_updated_at','celebration_leads'),
-              ('trigger','set_celebration_line_items_updated_at','celebration_line_items'),
-              ('trigger','set_celebration_price_list_updated_at','celebration_price_list'),
-              ('trigger','set_client_contacts_updated_at','client_contacts'),
-              ('trigger','set_clients_updated_at','clients'),
-              ('trigger','set_company_bank_accounts_updated_at','company_bank_accounts'),
-              ('trigger','set_cost_centers_updated_at','cost_centers'),
-              ('trigger','trg_incident_charges_updated_at','incident_charges'),
-              ('trigger','set_income_payment_allocations_updated_at','income_payment_allocations'),
-              ('trigger','set_income_payments_updated_at','income_payments'),
-              ('trigger','trg_invoices_updated_at','invoices'),
-              ('trigger','trg_maintenance_fee_charges_updated_at','maintenance_fee_charges'),
-              ('trigger','trg_members_updated_at','members'),
-              ('trigger','trg_monthly_closure_comments_updated_at','monthly_closure_comments'),
-              ('trigger','trg_monthly_closure_exports_updated_at','monthly_closure_exports'),
-              ('trigger','trg_monthly_closures_updated_at','monthly_closures'),
-              ('trigger','set_payment_request_items_updated_at','payment_request_items'),
-              ('trigger','set_payment_requests_updated_at','payment_requests'),
-              ('trigger','set_production_events_updated_at','production_events'),
-              ('trigger','set_production_items_updated_at','production_items'),
-              ('trigger','set_profiles_updated_at','profiles'),
-              ('trigger','proveedores_updated_at','proveedores'),
-              ('trigger','set_provider_bank_accounts_updated_at','provider_bank_accounts'),
-              ('trigger','set_providers_updated_at','providers'),
-              ('trigger','set_sales_invoices_updated_at','sales_invoices'),
-              ('trigger','tickets_updated_at','tickets'),
-              ('trigger','set_venue_bookings_updated_at','venue_bookings'),
-              ('trigger','set_venue_spaces_updated_at','venue_spaces'),
-              ('trigger','set_venues_updated_at','venues')
-          ), observed as (
-            select
-              e.object_kind,
-              e.object_name,
-              e.table_name,
-              case e.object_kind
-                when 'function' then exists (
-                  select 1
-                  from pg_proc p
-                  join pg_namespace n on n.oid = p.pronamespace
-                  where n.nspname = 'public'
-                    and p.prokind = 'f'
-                    and p.proname = e.object_name
-                )
-                when 'index' then exists (
-                  select 1
-                  from pg_indexes i
-                  where i.schemaname = 'public'
-                    and i.indexname = e.object_name
-                )
-                when 'trigger' then exists (
-                  select 1
-                  from pg_trigger t
-                  join pg_class c on c.oid = t.tgrelid
-                  join pg_namespace n on n.oid = c.relnamespace
-                  where n.nspname = 'public'
-                    and c.relname = e.table_name
-                    and t.tgname = e.object_name
-                    and not t.tgisinternal
-                )
-                else null
-              end as exists_in_prod
-            from expected e
-          ), grouped as (
-            select
-              object_kind,
-              count(*) as expected_count,
-              count(*) filter (where exists_in_prod) as found_count,
-              count(*) filter (where exists_in_prod is false) as missing_count,
-              string_agg(coalesce(table_name || '.', '') || object_name, ', ' order by table_name, object_name) filter (where exists_in_prod is false) as missing_objects
-            from observed
-            group by object_kind
-          )
-          select
-            object_kind,
-            expected_count,
-            found_count,
-            missing_count,
-            case
-              when found_count = expected_count then 'aplicada'
-              when found_count = 0 then 'no aplicada'
-              when found_count > 0 and found_count < expected_count then 'parcial'
-              else 'no concluyente'
-            end as classification,
-            coalesce(missing_objects, '') as missing_objects
-          from grouped
-          order by object_kind;
-
-          select
-            object_kind,
-            object_name,
-            coalesce(table_name, '') as table_name,
-            exists_in_prod
-          from observed
-          order by object_kind, table_name, object_name;
-          SQL
-
-          if [ "${AUDIT_SCOPE}" = "base_migrations" ]; then
-            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
-            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
-            run_query "Base migrations classification matrix" "audit-output/queries/04-base-migrations-expected-objects.sql"
-            run_query "Base migrations object detail" "audit-output/queries/05-base-migrations-object-detail.sql"
-          elif [ "${AUDIT_SCOPE}" = "legacy_002" ]; then
-            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
-            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
-            run_query "Legacy 002 functions indexes triggers" "audit-output/queries/06-legacy-002-expected-objects.sql"
-          elif [ "${AUDIT_SCOPE}" = "legacy_004_005_006" ]; then
-            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
-            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
-            run_query "Legacy 004/005/006 RLS storage seed" "audit-output/queries/07-legacy-004-005-006-expected-objects.sql"
-          else
-            run_query "Connection identity" "audit-output/queries/01-connection-identity.sql"
-            run_query "Schema migrations presence" "audit-output/queries/02-schema-migrations-presence.sql"
-            run_query "Fine audit classification matrix" "audit-output/queries/03-fine-classification-matrix.sql"
-          fi
-
-          unset PSQL_URI SUPABASE_AUDIT_DB_URL
-          sanitize_file "${REPORT}"
-          sanitize_file "${QUERY_LOG}"
-          sanitize_file "${NETWORK_REPORT}"
-
+          storage_status="$(psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -Atq -c "select case when to_regclass('storage.buckets') is null then 'missing' else 'present' end;")"
           {
-            echo "# ${REPORT_TITLE} summary"
-            echo ""
-            echo "- Artifact: ${ARTIFACT_NAME}"
-            echo "- Audit scope: ${AUDIT_SCOPE}"
-            echo "- Result: $([ "${AUDIT_FAILED}" -eq 0 ] && echo success || echo failure)"
-            echo "- Last logical query: $(cat "${LAST_QUERY_FILE}" 2>/dev/null || echo none)"
-            echo ""
-            echo "See ${REPORT} for the full sanitized report."
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-          if [ "${AUDIT_FAILED}" -ne 0 ]; then
-            exit 1
+            echo "## Storage buckets"
+            echo '```'
+          } >> "${REPORT}"
+          if [ "${storage_status}" = "present" ]; then
+            psql "${PSQL_URI}" -v ON_ERROR_STOP=1 -P pager=off -c "select id, name, public from storage.buckets order by name;" >> "${REPORT}"
+          else
+            echo "storage.buckets is missing" >> "${REPORT}"
           fi
+          {
+            echo '```'
+            echo ""
+          } >> "${REPORT}"
 
-      - name: Upload fine audit evidence
-        if: ${{ always() && inputs.audit_scope == 'fine_migrations' }}
+          run_query "Critical object presence" "select object_name, to_regclass(object_name) is not null as exists from (values ('public.profiles'), ('public.roles'), ('public.user_roles'), ('public.suppliers'), ('public.payment_requests'), ('public.payment_layouts'), ('public.payment_layout_lines'), ('public.payment_receipts'), ('public.historical_actuals'), ('public.notification_events'), ('public.notification_delivery_attempts')) as critical_objects(object_name) order by object_name;"
+
+          unset PGPASSWORD
+          cat "${REPORT}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload audit report
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-prod-fine-audit-evidence
-          path: audit-output/
-          retention-days: 14
-
-      - name: Upload base migrations audit evidence
-        if: ${{ always() && inputs.audit_scope == 'base_migrations' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: supabase-prod-base-migrations-audit-evidence
-          path: audit-output/
-          retention-days: 14
-
-      - name: Upload legacy 002 audit evidence
-        if: ${{ always() && inputs.audit_scope == 'legacy_002' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: supabase-prod-legacy-002-audit-evidence
-          path: audit-output/
-          retention-days: 14
-
-      - name: Upload legacy 004/005/006 audit evidence
-        if: ${{ always() && inputs.audit_scope == 'legacy_004_005_006' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: supabase-prod-legacy-004-005-006-audit-evidence
-          path: audit-output/
+          name: supabase-prod-readonly-schema-audit
+          path: audit-output/supabase-prod-readonly-schema-audit.md
+          if-no-files-found: error
           retention-days: 14
 
       - name: Summarize audit controls
@@ -1197,16 +182,13 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Read-only audit controls"
+            echo "## Audit controls"
             echo ""
-            echo "- Workflow: Supabase PROD Read-only Schema Audit"
             echo "- Environment: supabase-production"
-            echo "- Branch required: dev"
-            echo "- Mode required: audit"
-            echo "- Audit scope: ${AUDIT_SCOPE}"
-            echo "- Read-only guard: BEGIN READ ONLY per query"
-            echo "- db push: not executed"
-            echo "- migration repair: not executed"
-            echo "- migrations: not executed"
-            echo "- DDL/DML: not executed"
+            echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Mode: audit only"
+            echo "- Real db push: not executed by this workflow"
+            echo "- Migration repair: not executed by this workflow"
+            echo "- Writes/destructive SQL: not executed by this workflow"
+            echo "- n8n: not touched by this workflow"
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -143,10 +143,10 @@
           <meta charset="utf-8">
           <style>
             body { font-family: Arial, sans-serif; color: #111827; }
-            h1 { color: #0f766e; }
+            h1 { color: #253f3a; }
             h2 { margin-top: 24px; color: #1f2937; }
             table { border-collapse: collapse; margin-bottom: 18px; width: 100%; }
-            th { background: #0f766e; color: white; font-weight: 700; }
+            th { background: #253f3a; color: white; font-weight: 700; }
             th, td { border: 1px solid #cbd5e1; padding: 8px; font-size: 12px; }
           </style>
         </head>
@@ -181,9 +181,9 @@
         <head>
           <meta charset="utf-8">
           <style>
-            body { margin: 0; font-family: Arial, sans-serif; background: #09090f; color: #f8fafc; }
-            .slide { page-break-after: always; width: 10in; height: 5.625in; box-sizing: border-box; padding: .6in; background: #111122; border-bottom: 8px solid #14b8a6; }
-            .eyebrow { color: #5eead4; text-transform: uppercase; letter-spacing: 1px; font-size: 14px; }
+            body { margin: 0; font-family: Arial, sans-serif; background: #0e1c19; color: #f7f7f5; }
+            .slide { page-break-after: always; width: 10in; height: 5.625in; box-sizing: border-box; padding: .6in; background: #172d29; border-bottom: 8px solid #cfe1cb; }
+            .eyebrow { color: #cfe1cb; text-transform: uppercase; letter-spacing: 1px; font-size: 14px; }
             h1 { font-size: 34px; margin: 18px 0 12px; }
             h2 { color: #c4b5fd; font-size: 20px; }
             li { margin: 10px 0; font-size: 18px; }

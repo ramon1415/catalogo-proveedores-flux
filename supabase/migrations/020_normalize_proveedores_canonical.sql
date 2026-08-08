@@ -18,6 +18,7 @@ begin
         'Autenticados pueden leer proveedores',
         'Usuarios autenticados pueden crear proveedores',
         'Usuarios autenticados pueden editar proveedores',
+        'proveedores_select_authenticated',
         'proveedores_select_members',
         'proveedores_insert_members',
         'proveedores_update_managers'
@@ -370,6 +371,7 @@ create trigger normalize_proveedores_canonical_before_write
 drop policy if exists "Autenticados pueden leer proveedores" on public.proveedores;
 drop policy if exists "Usuarios autenticados pueden crear proveedores" on public.proveedores;
 drop policy if exists "Usuarios autenticados pueden editar proveedores" on public.proveedores;
+drop policy if exists proveedores_select_authenticated on public.proveedores;
 drop policy if exists proveedores_select_members on public.proveedores;
 drop policy if exists proveedores_insert_members on public.proveedores;
 drop policy if exists proveedores_update_managers on public.proveedores;

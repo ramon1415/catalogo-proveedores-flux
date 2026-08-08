@@ -130,7 +130,8 @@ async function loadSuppliers() {
 
   if (error) {
     tableBody.innerHTML = `<tr><td colspan="8" style="padding:44px;text-align:center;color:var(--ruby)">No fue posible cargar proveedores.</td></tr>`
-    showToast("Error al cargar", error.message, "error")
+    logSupplierSaveDiagnostic(error, { stage: "load", operation: "select" })
+    showToast("No fue posible cargar proveedores.", "", "error")
     return
   }
 
@@ -298,6 +299,7 @@ async function saveSupplier(event) {
   if (providerReadOnlyMode) return
   if (providerSaveInProgress) return
 
+  const operation = currentEditingId ? "update" : "insert"
   providerSaveInProgress = true
   const submitButton = form.querySelector('button[type="submit"]')
   const submitButtonLabel = submitButton?.textContent || "Guardar proveedor"
@@ -307,7 +309,9 @@ async function saveSupplier(event) {
   }
 
   try {
-    await persistSupplier()
+    await persistSupplier(operation)
+  } catch (error) {
+    showSupplierSaveError(error, { stage: "unexpected", operation })
   } finally {
     providerSaveInProgress = false
     if (submitButton) {
@@ -317,7 +321,7 @@ async function saveSupplier(event) {
   }
 }
 
-async function persistSupplier() {
+async function persistSupplier(operation) {
   const csfFile = providerCsfUpload?.getFile?.() || null
   const canUploadCsf = currentEditingId ? canManageProviderCsf() : canCreateProviderCsf()
 
@@ -369,19 +373,17 @@ async function persistSupplier() {
   if (payload.destination_type === "cuenta") payload.tipo_cuenta = "Cuenta"
   if (payload.destination_type === "convenio") payload.tipo_cuenta = null
 
+  if (isPreviewEnvironment()) {
+    showToast("Este entorno es una vista previa. Los cambios no se guardan.", "", "error")
+    return
+  }
+
   const result = currentEditingId
     ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId).select("id").single()
     : await supabaseClient.from("proveedores").insert(payload).select("id").single()
 
   if (result.error) {
-    const errorMessage = result.error.message || "Error desconocido"
-    const normalizedError = errorMessage.toLowerCase()
-    const msg = normalizedError.includes("persona_tipo_invalido")
-      ? "Selecciona Persona física, Persona moral o No especificado."
-      : normalizedError.includes("row-level security") || result.error.code === "42501"
-        ? "No se pudo guardar. Puede faltar permiso update sobre proveedores."
-        : `Error guardando proveedor: ${errorMessage}`
-    showToast("Error al guardar", msg, "error")
+    showSupplierSaveError(result.error, { stage: "persist", operation })
     return
   }
 
@@ -402,12 +404,7 @@ async function persistSupplier() {
       if (csfError) throw csfError
     } catch (error) {
       csfUploadFailed = true
-      console.error("[Flux] Provider CSF upload failed", {
-        code: error?.code || null,
-        message: error?.message || "unknown_error",
-        status: error?.statusCode || error?.status || null,
-      })
-      showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
+      logSupplierSaveDiagnostic(error, { stage: "csf_upload", operation })
     }
   }
 
@@ -417,7 +414,38 @@ async function persistSupplier() {
   currentCsfPath = null
   if (dialog.open) dialog.close()
   await loadSuppliers()
-  if (!csfUploadFailed) showToast("Proveedor guardado", "Los datos se guardaron correctamente.", "success")
+  if (csfUploadFailed) {
+    showToast("CSF no vinculado", "Proveedor guardado, pero la CSF no pudo subirse.", "warning")
+  } else {
+    showToast("Proveedor guardado correctamente.", "", "success")
+  }
+}
+
+function isPreviewEnvironment() {
+  return String(window.FLUX_CONFIG?.env || "").trim().toLowerCase() === "preview"
+}
+
+function logSupplierSaveDiagnostic(error, { stage, operation }) {
+  const codeCandidate = String(error?.code || "").trim().toLowerCase()
+  const knownCodes = new Set(["provider_payment_execution_rpc_required"])
+  const code = knownCodes.has(codeCandidate) || /^pgrst\d{3}$/.test(codeCandidate) || /^[0-9a-z]{5}$/.test(codeCandidate)
+    ? codeCandidate
+    : "unclassified_save_error"
+  const statusCandidate = Number(error?.statusCode || error?.status)
+  const diagnostic = { stage, operation, code }
+  if (Number.isInteger(statusCandidate) && statusCandidate >= 100 && statusCandidate <= 599) {
+    diagnostic.status = statusCandidate
+  }
+  console.warn("[Flux] Provider save failed", diagnostic)
+}
+
+function showSupplierSaveError(error, { stage, operation }) {
+  logSupplierSaveDiagnostic(error, { stage, operation })
+
+  const message = isPreviewEnvironment()
+    ? "Este entorno es una vista previa. Los cambios no se guardan."
+    : "No fue posible guardar el proveedor. Verifica la información e inténtalo nuevamente."
+  showToast(message, "", "error")
 }
 
 function validateDestination(payload) {
@@ -442,7 +470,11 @@ window.toggleSupplier = async function(id, activo) {
   const confirmed = confirm(activo ? "Seguro que deseas reactivar este proveedor?" : "Seguro que deseas desactivar este proveedor?")
   if (!confirmed) return
   const { error } = await supabaseClient.from("proveedores").update({ activo, updated_at: new Date().toISOString() }).eq("id", id)
-  if (error) { showToast("Error al actualizar", error.message, "error"); return }
+  if (error) {
+    logSupplierSaveDiagnostic(error, { stage: "status_update", operation: "update" })
+    showToast("No fue posible actualizar el proveedor. Inténtalo nuevamente.", "", "error")
+    return
+  }
   await loadSuppliers()
   showToast(activo ? "Proveedor reactivado" : "Proveedor desactivado", "", "success")
 }
@@ -546,4 +578,19 @@ function escapeHtml(value) {
 function showToast(title, message, type = "success") {
   const variantMap = { success: "success", error: "danger", warning: "warning", info: "info" }
   Components.showToast({ title: escapeHtml(title), desc: escapeHtml(message), variant: variantMap[type] ?? "info", duration: 6 })
+  const stack = document.getElementById("toastStack")
+  const toast = stack?.lastElementChild
+  if (!toast) return
+
+  const assertive = type === "error" || type === "warning"
+  toast.setAttribute("role", assertive ? "alert" : "status")
+  toast.setAttribute("aria-live", assertive ? "assertive" : "polite")
+  toast.setAttribute("aria-atomic", "true")
+  toast.setAttribute("aria-label", [title, message].filter(Boolean).join(". "))
+
+  const closeButton = toast.querySelector(".toast-v2-close")
+  if (closeButton) {
+    closeButton.type = "button"
+    closeButton.setAttribute("aria-label", `Cerrar notificación: ${title}`)
+  }
 }

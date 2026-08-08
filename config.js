@@ -997,7 +997,7 @@ try {
     }
     if (pageName === "solicitudes.html") {
       loadExtension("./solicitudes_ux1_extension.js?v=20260701-reconcile", "solicitudes-ux1")
-      loadExtension("./solicitudes_workboard_extension.js?v=20260714-payment-method", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260805-kpi-p3b", "solicitudes-workboard")
       loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }
     if (pageName === "layouts.html") {
@@ -1015,7 +1015,7 @@ try {
       loadExtension("./ingresos_incidents_guard_patch.js?v=20260610-no-flicker", "ingresos-incidents-guard")
     }
     if (pageName === "dashboard.html") {
-      loadExtension("./dashboard_report_downloads_extension.js?v=20260602-ux1", "dashboard-report-downloads")
+      loadExtension("./dashboard_report_downloads_extension.js?v=20260805-brand-verde", "dashboard-report-downloads")
       loadExtension("./dashboard_demo_extension.js?v=20260602-ux1", "dashboard-demo")
     }
   }
