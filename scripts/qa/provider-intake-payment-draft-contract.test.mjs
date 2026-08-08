@@ -10,7 +10,7 @@ const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 const bytes = (relative) => fs.readFileSync(path.join(root, relative))
 
-const migrationPath = "supabase/migrations/041_provider_intake_payment_draft.sql"
+const migrationPath = "supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql"
 const expectedMigrationSha256 =
   "be4f0ade8670c7e8b26eb148eba7c38a4e05bf8954c602a8f432431f1ea0c9cc"
 const migration = read(migrationPath)
@@ -28,7 +28,7 @@ const functionDefinition = (name) => {
   return match[0]
 }
 
-test("Migration 041 active source has the certified SHA-256", () => {
+test("Migration 043 active source has the certified SHA-256", () => {
   const digest = crypto.createHash("sha256").update(bytes(migrationPath)).digest("hex")
   assert.equal(digest, expectedMigrationSha256)
 })
@@ -206,7 +206,7 @@ test("one append-only sanitized event is emitted per material save", () => {
   )
 })
 
-test("Migration 041 cannot create requests convert intakes mutate providers or notify", () => {
+test("Migration 043 cannot create requests convert intakes mutate providers or notify", () => {
   assert.doesNotMatch(migration, /\bdrop\s+table\b/i)
   assert.doesNotMatch(migration, /^\s*(?:delete\s+from|truncate\s+)/im)
   assert.doesNotMatch(

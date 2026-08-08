@@ -7,7 +7,7 @@ Head integrado de Matching: `adacc471204d4715259de272bc75fbaa365afbbb`
 Merge commit y base exacta C1B: `2deae2cddf8ebb22fffd76e7a648483e2b3cc609`  
 Candidata histórica certificada: `26552c8ce17bbe97f5010e4c2672d474adae416e`  
 Estado: `POSTMATCHING_CANDIDATE / NOT_CERTIFIED / NOT_APPLIED`  
-Modo: análisis del repositorio; no se consultó ni modificó Supabase DEV.
+Modo histórico de discovery: análisis del repositorio. La revalidación 2B.1 del 2026-08-08 confirmó DEV por lectura remota y mantuvo cero writes antes de la aplicación autorizada.
 
 ## Dictamen
 
@@ -23,8 +23,8 @@ La auditoría postmerge `2B1-MATCHING-MERGE-W2` cerró como:
 
 PR #258 quedó integrado con head final `adacc471204d4715259de272bc75fbaa365afbbb`
 y merge commit `2deae2cddf8ebb22fffd76e7a648483e2b3cc609`.
-W2 confirmó que Migration 041 continúa disponible, segura y estáticamente
-compatible con ese `dev`. Migration 041 no ha sido aplicada.
+W2 confirmó que Migration 043 continúa disponible, segura y estáticamente
+compatible con ese `dev`. Migration 043 no ha sido aplicada.
 
 La certificación `467/467 PASS` corresponde exclusivamente a la candidata
 histórica `26552c8ce17bbe97f5010e4c2672d474adae416e`. No certifica la candidata
@@ -37,7 +37,7 @@ C1B reconstruye el cambio de forma limpia y filtrada desde
 `2deae2cddf8ebb22fffd76e7a648483e2b3cc609`. Su alcance está limitado a estas
 ocho rutas:
 
-- `supabase/migrations/041_provider_intake_payment_draft.sql`;
+- `supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`;
 - `provider_intakes.css`;
 - `provider_intakes.html`;
 - `provider_intakes.js`;
@@ -82,7 +82,7 @@ prueba contractual y SHA propios.
 `payment_intake_events_immutable`. Migration 029 agrega el índice único parcial
 `(payment_intake_id, metadata ->> 'action_id')`, usado por Migrations 030 y 031
 para idempotencia material. El constraint de `event_type` vigente incluye los
-eventos de triage, `internal_note` y `provider_matched`. Migration 041 preserva
+eventos de triage, `internal_note` y `provider_matched`. Migration 043 preserva
 todos esos tipos y propone agregar únicamente `conversion_draft_created` y
 `conversion_draft_updated`.
 
@@ -201,7 +201,7 @@ cambia Storage. La relación definitiva queda para Fase 2B.2.
 
 ## Brechas y decisiones de diseño
 
-1. No existe borrador de conversión: Migration 041 propone
+1. No existe borrador de conversión: Migration 043 propone
    `public.payment_intake_conversion_drafts`.
 2. No existe helper de solicitantes: se devuelve el actor actual activo con
    membresía, alineado con `create_payment_request`.
@@ -218,9 +218,9 @@ cambia Storage. La relación definitiva queda para Fase 2B.2.
    aprobación, notificación, batch y layout quedan explícitamente fuera de Fase
    2B.1.
 
-## Objetos versionados por Migration 041
+## Objetos versionados por Migration 043
 
-Migration 041, todavía no aplicada, define:
+Migration 043, todavía no aplicada, define:
 
 - tabla cerrada `public.payment_intake_conversion_drafts`;
 - helper interno de fingerprint;
@@ -244,6 +244,6 @@ batches, layouts, notificaciones, Storage o el estado/matching del intake.
 | Certificación histórica | `467/467 PASS / HISTORICAL_ONLY` |
 | Resultado W2 | `PASS / MATCHING_MERGED / C1B_INPUTS_CAPTURED / NO_CHANGES` |
 | Alcance postmatching | `8 rutas` |
-| Migration 041 | `AVAILABLE / COMPATIBLE / NOT_APPLIED` |
+| Migration 043 | `AVAILABLE / COMPATIBLE / NOT_APPLIED` |
 | Estado actual | `POSTMATCHING_CANDIDATE / NOT_CERTIFIED / NOT_APPLIED` |
 | Siguiente gate | `2B1-CERTIFICATION-C2B` |

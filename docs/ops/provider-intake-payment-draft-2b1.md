@@ -56,11 +56,10 @@ autorizada.
 
 ## Arquitectura
 
-`supabase/migrations/041_provider_intake_payment_draft.sql` es la única fuente
-activa del schema de 2B.1. La migration está versionada en la candidata
-postmatching, pero no está aplicada.
+`supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql` es la única fuente
+activa del schema de 2B.1. La migration está versionada en la candidata postmatching como versión Supabase CLI `20260808123752`, slot lógico `043`, pero no está aplicada.
 
-Migration 041 define:
+Migration 043 define:
 
 - `public.payment_intake_conversion_drafts`;
 - `provider_intake_conversion_draft_fingerprint(jsonb)`, helper interno;
@@ -78,7 +77,7 @@ La candidata postmatching se reconstruye de forma limpia y filtrada desde
 `2deae2cddf8ebb22fffd76e7a648483e2b3cc609` y contiene exclusivamente estas
 ocho rutas:
 
-- `supabase/migrations/041_provider_intake_payment_draft.sql`;
+- `supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`;
 - `provider_intakes.css`;
 - `provider_intakes.html`;
 - `provider_intakes.js`;
@@ -224,11 +223,11 @@ cambios ante error, advierte antes de cerrar, admite Escape con confirmación y
 devuelve foco al disparador. No incluye convertir, crear, aprobar ni enviar a
 batch.
 
-## Integridad de Migration 041
+## Integridad de Migration 043
 
 Fuente activa:
 
-`supabase/migrations/041_provider_intake_payment_draft.sql`
+`supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`
 
 Identidad vigente:
 
@@ -237,7 +236,8 @@ Identidad vigente:
 - tamaño: `44,491` bytes;
 - SHA-256:
   `be4f0ade8670c7e8b26eb148eba7c38a4e05bf8954c602a8f432431f1ea0c9cc`;
-- slot 041: disponible y seguro en la base C1B;
+- slot lógico 043: asignado después del 041 vigente en `dev` y del 042 reservado por PR #286;
+- versión Supabase CLI: `20260808123752`;
 - compatibilidad estática W2: `COMPATIBLE_AS_IS`;
 - aplicación: `NOT_APPLIED`.
 
@@ -268,7 +268,7 @@ autorizado:
 - ejecutar SQL manual;
 - usar PROD;
 - ejecutar UAT;
-- aplicar Migration 041;
+- aplicar Migration 043;
 - crear un borrador real;
 - convertir un intake;
 - iniciar Fase 2B.2.
