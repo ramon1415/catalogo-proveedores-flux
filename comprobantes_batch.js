@@ -30,8 +30,9 @@
     candidates: [], candidateOperationId: null, candidateSearchCompleted: false,
     operationLinkStatuses: {},
     selectedRequestId: null, linkPreview: null, individualReceipt: null,
+    operationError: null,
     duplicateBatch: null, summaryFilter: "", trigger: null, busy: false,
-    detailRequest: 0, candidateRequest: 0, previewRequest: 0,
+    detailRequest: 0, candidateRequest: 0, previewRequest: 0, operationEpoch: 0,
     commandKeys: new Map(),
   }
   const dom = {}
@@ -116,13 +117,18 @@
     dom.batchDetail.addEventListener("click", (event) => { const button = event.target.closest("[data-operation-id]"); if (button) openOperation(button.dataset.operationId, button) })
     document.querySelectorAll("[data-summary-filter]").forEach((button) => button.addEventListener("click", () => { state.summaryFilter = button.dataset.summaryFilter; updateSummaryFilter(); renderBatchList() }))
     dom.closeOperationBtn.addEventListener("click", () => dom.operationDialog.close())
+    dom.operationDialog.addEventListener("cancel", (event) => {
+      if (state.busy) event.preventDefault()
+    })
     dom.operationDialog.addEventListener("close", () => {
+      state.operationEpoch += 1
       state.candidateRequest += 1
       state.previewRequest += 1
       state.candidates = []
       state.candidateOperationId = null
       state.candidateSearchCompleted = false
       state.selectedRequestId = null
+      state.operationError = null
       clearIndividualReceipt()
       state.trigger?.focus()
     })
@@ -255,12 +261,14 @@
   function openOperation(operationId, trigger) {
     const operation = batchOperations(state.detail).find((item) => item.id === operationId)
     if (!operation) return
+    state.operationEpoch += 1
     state.operation = operation
     state.candidates = []
     state.candidateOperationId = null
     state.candidateSearchCompleted = false
     state.selectedRequestId = null
     state.linkPreview = null
+    state.operationError = null
     state.candidateRequest += 1
     state.previewRequest += 1
     state.trigger = trigger
@@ -283,6 +291,7 @@
     const extractionStatus = operationStatus(operation)
     const bankOperationId = operation.bank_operation_id
     dom.operationContent.innerHTML = `${operationWorkflow(extractionStatus, bankOperationId, evidence, link)}
+      ${operationErrorNotice()}
       <div class="receipt-operation-summary">${operationCard("Fecha", operation.application_date || operation.operation_date || "Sin fecha")}${operationCard("Importe del comprobante", formatMinor(amountMinor(operation), operation.currency))}${operationCard("Moneda", operation.currency || "Sin moneda")}${operationCard("Beneficiario", operation.beneficiary_name || "Por identificar")}${operationCard("Referencia", operation.bank_unique_folio || operation.bank_reference || "Sin referencia")}${operationCard("Extracción", statusLabel(extractionStatus))}</div>
       ${extractionNotice(extractionStatus, issues, operation.rejection_reason)}
       <section class="data-section"><div class="section-heading">Datos leídos del PDF</div><p class="receipt-section-help">Abre el comprobante individual de una sola página y compara fecha, importe, beneficiario y referencia.</p><pre class="receipt-evidence">${escapeHtml(array(operation.evidence_excerpt).join("\n") || "Sin extracto disponible.")}</pre></section>
@@ -347,7 +356,14 @@
     dom.openCorrectionBtn.hidden = linked || !["review_required","blocked"].includes(extractionStatus)
     dom.openCorrectionBtn.disabled = !can("can_review") || !contractReady || state.busy
     dom.operationSecondaryActions.hidden = dom.openCorrectionBtn.hidden
-    dom.operationActionReason.textContent = nextActionReason(operation, evidence, linked, contractReady)
+    dom.operationActionReason.textContent = state.operationError
+      ? `No se avanzó al paso 2: ${state.operationError}`
+      : nextActionReason(operation, evidence, linked, contractReady)
+  }
+
+  function operationErrorNotice() {
+    if (!state.operationError) return ""
+    return `<div class="notice-v2 danger" role="alert"><span class="notice-icon">!</span><span><span class="notice-title">No se pudo continuar al paso 2</span><span class="notice-sep">—</span><span class="notice-desc">${escapeHtml(state.operationError)}</span></span></div>`
   }
 
   function nextActionReason(operation, evidence, linked, contractReady) {
@@ -434,23 +450,114 @@
     const extractionId = state.operation?.extraction_id || state.operation?.payment_document_extraction_id
     if (!extractionId || !state.operation?.extraction_updated_at || !can("can_review")
       || !can("can_link") || state.individualReceipt?.extractionId !== extractionId) return
+    const operationContext = {
+      epoch: state.operationEpoch,
+      batchId: state.selectedId,
+      extractionId,
+      receipt: state.individualReceipt,
+      evidence: object(state.linkPreview?.evidence),
+    }
+    state.previewRequest += 1
+    state.operationError = null
     setBusy(true)
+    let operationId = state.operation.bank_operation_id
     try {
-      let operationId = state.operation.bank_operation_id
       if (!operationId) {
         const accepted = await rpcIdempotent("extraction.accept", extractionId, RPC.acceptExtraction, {
           p_extraction_id: extractionId,
           p_expected_updated_at: state.operation.extraction_updated_at,
         })
         operationId = accepted.operation_id
+        if (!operationId) throw new Error("bank_payment_operation_identifier_missing")
+        if (operationContextIsCurrent(operationContext)) {
+          state.operation = {
+            ...state.operation,
+            bank_operation_id: operationId,
+            extraction_status: "accepted",
+          }
+          state.linkPreview = {
+            ...object(state.linkPreview),
+            operation_id: operationId,
+          }
+          renderOperation()
+        }
       }
-      await persistIndividualReceipt(operationId)
-      toast("Comprobante revisado", "Los datos y la evidencia individual quedaron listos para buscar una solicitud.", "success")
-      await loadBatches()
+      const evidence = await persistIndividualReceipt(
+        operationId,
+        operationContext.receipt,
+        operationContext.evidence,
+      )
+      if (operationContextIsCurrent(operationContext)) {
+        state.linkPreview = {
+          ...object(state.linkPreview),
+          operation_id: operationId,
+          evidence,
+        }
+        state.operationError = null
+        renderOperation()
+        toast("Comprobante revisado", "Los datos y la evidencia individual quedaron listos para buscar una solicitud.", "success")
+      }
     } catch (error) {
-      toast("No se pudo aceptar el comprobante", friendlyError(error), "danger")
-      await loadBatches()
-    } finally { setBusy(false) }
+      if (operationContextIsCurrent(operationContext)) {
+        state.operationError = friendlyError(error)
+        renderOperation()
+        toast("No se pudo aceptar el comprobante", state.operationError, "danger")
+      }
+    } finally {
+      if (operationContextIsCurrent(operationContext)) setBusy(false)
+      void reconcileOperation(operationContext, operationId)
+    }
+  }
+
+  function operationContextIsCurrent(context) {
+    const currentExtractionId = state.operation?.extraction_id
+      || state.operation?.payment_document_extraction_id
+    return state.operationEpoch === context.epoch
+      && state.selectedId === context.batchId
+      && currentExtractionId === context.extractionId
+      && dom.operationDialog.open
+  }
+
+  async function reconcileOperation(context, knownOperationId) {
+    if (!context.batchId) return
+    try {
+      const [batchesResult, detailResult] = await Promise.all([
+        client.rpc(RPC.listBatches, { p_company_id: null, p_status: null, p_limit: 50 }),
+        client.rpc(RPC.batchDetail, { p_batch_id: context.batchId }),
+      ])
+      if (!operationContextIsCurrent(context)) return
+
+      if (!batchesResult.error) {
+        state.batches = array(batchesResult.data?.items || batchesResult.data)
+        renderSummary()
+        renderBatchList()
+      }
+      if (detailResult.error) return
+
+      state.detail = object(detailResult.data)
+      renderBatchDetail()
+      const refreshed = batchOperations(state.detail).find((item) => (
+        item.extraction_id === context.extractionId
+        || (knownOperationId && item.bank_operation_id === knownOperationId)
+      ))
+      if (!refreshed) return
+      state.operation = refreshed
+      renderOperation()
+
+      const operationId = refreshed.bank_operation_id || knownOperationId
+      if (!operationId) return
+      const requestId = ++state.previewRequest
+      const { data, error } = await client.rpc(RPC.linkPreview, { p_operation_id: operationId })
+      if (requestId !== state.previewRequest || !operationContextIsCurrent(context) || error) return
+      state.linkPreview = object(data)
+      if (object(state.linkPreview.evidence).status === "shareable") state.operationError = null
+      renderOperation()
+    } catch (error) {
+      console.warn("[Flux] No se pudo reconciliar el estado del comprobante", {
+        name: error?.name || null,
+        code: error?.code || null,
+      })
+    }
   }
 
   async function openIndividualReceipt() {
@@ -518,10 +625,13 @@
     return evidence.id === evidenceId ? evidence : { ...evidence, id: evidenceId }
   }
 
-  async function persistIndividualReceipt(operationId) {
-    const receipt = state.individualReceipt
+  async function persistIndividualReceipt(
+    operationId,
+    receipt = state.individualReceipt,
+    initialEvidence = state.linkPreview?.evidence,
+  ) {
     if (!receipt?.bytes || receipt.pageCount !== 1) throw new Error("single_page_receipt_required")
-    let evidence = object(state.linkPreview?.evidence)
+    let evidence = object(initialEvidence)
     if (evidence.status === "shareable") return evidence
     if (evidence.evidence_id && !evidence.id) evidence = normalizeEvidenceIdentifier(evidence)
     if (!evidence.id) evidence = normalizeEvidenceIdentifier(
@@ -627,9 +737,11 @@
   async function refreshLinkPreview() {
     const operationId = state.operation?.bank_operation_id
     if (!operationId || !can("can_link")) return
+    const epoch = state.operationEpoch
     const requestId = ++state.previewRequest
     const { data, error } = await client.rpc(RPC.linkPreview, { p_operation_id: operationId })
-    if (requestId !== state.previewRequest || state.operation?.bank_operation_id !== operationId || !dom.operationDialog.open) return
+    if (requestId !== state.previewRequest || epoch !== state.operationEpoch
+      || state.operation?.bank_operation_id !== operationId || !dom.operationDialog.open) return
     if (error) return
     state.linkPreview = object(data)
     renderOperation()
@@ -954,7 +1066,7 @@
     return /payment_batch_upload_not_found/i.test(detail)
   }
 
-  function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = busy; dom.batchPdfFile.disabled = busy; if (dom.operationDialog.open) renderOperation() }
+  function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = busy; dom.batchPdfFile.disabled = busy; dom.closeOperationBtn.disabled = busy; if (dom.operationDialog.open) renderOperation() }
   function setProgress(percent, text) { dom.uploadProgress.hidden = false; dom.uploadProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`; dom.uploadProgressText.textContent = text }
   function updateSummaryFilter() { document.querySelectorAll("[data-summary-filter]").forEach((button) => { const active = button.dataset.summaryFilter === state.summaryFilter; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)) }) }
   function actionReason() { if (!can("can_review") && !can("can_match") && !can("can_link")) return state.context?.block_reason || "Acciones no autorizadas."; return "Las capacidades se revalidan en cada RPC." }
