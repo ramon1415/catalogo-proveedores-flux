@@ -751,8 +751,8 @@ function openLayoutCompletionDialog(requestId) {
   dom.layoutCompletionConcept.required = missing.includes("payment_concept")
   dom.layoutCompletionDate.required = missing.includes("scheduled_payment_date")
   dom.layoutCompletionImpact.textContent = request.direction_approval_current
-    ? "Estos datos forman parte de la autorizacion. Al guardarlos, el historial se conserva y Direccion debera revisar nuevamente la solicitud antes del pago."
-    : "Al guardar, la solicitud se volvera a evaluar automaticamente en este mismo preview."
+    ? "Cuenta origen, fecha y referencia son datos operativos. Al guardarlos se conserva la autorización vigente de Dirección."
+    : "Al guardar, la solicitud se volverá a evaluar automáticamente en este mismo preview."
   dom.layoutCompletionDialog.showModal()
 }
 
@@ -765,12 +765,15 @@ function closeLayoutCompletionDialog() {
 
 async function submitLayoutCompletion(event) {
   event.preventDefault()
-  if (!activeLayoutCompletionRequest) return
+  if (!activeLayoutCompletionRequest || layoutCompletionSubmitting) return
   const reference = cleanText(dom.layoutCompletionReference.value)
   if (reference && !/^\d{1,5}$/.test(reference)) {
     showToast("Referencia invalida", "Captura de 1 a 5 digitos.", "warning")
     return
   }
+  layoutCompletionSubmitting = true
+  dom.closeLayoutCompletionBtn.disabled = true
+  dom.cancelLayoutCompletionBtn.disabled = true
   setButtonLoading(dom.submitLayoutCompletionBtn, true, "Guardando...")
   try {
     const { data, error } = await supabaseClient.rpc("complete_payment_request_layout_data", {
@@ -782,13 +785,18 @@ async function submitLayoutCompletion(event) {
     })
     if (error) throw error
     const requiresDirection = Boolean(data?.direction_reapproval_required)
-    closeLayoutCompletionDialog()
+    const approvalPreserved = data?.approval_preserved === true
+    activeLayoutCompletionRequest = null
+    dom.layoutCompletionForm?.reset()
+    if (dom.layoutCompletionDialog?.open) dom.layoutCompletionDialog.close()
     await reviewLayoutEligibility()
     showToast(
-      "Datos guardados",
+      approvalPreserved && !requiresDirection ? "Datos de ejecución completados" : "Datos guardados",
       requiresDirection
-        ? "La solicitud conserva su historial y ahora requiere una nueva revision de Direccion antes de entrar al layout."
-        : "La solicitud fue reevaluada. Revisa su estado actualizado en la lista.",
+        ? "Existe un cambio material y la solicitud requiere nueva autorización de Dirección."
+        : approvalPreserved
+          ? "La autorización de Dirección se conserva y la solicitud fue reevaluada."
+          : "La solicitud fue reevaluada. Revisa su estado actualizado en la lista.",
       requiresDirection ? "warning" : "success"
     )
   } catch (error) {
