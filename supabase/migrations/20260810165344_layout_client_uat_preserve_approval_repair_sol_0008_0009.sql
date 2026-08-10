@@ -382,9 +382,14 @@ begin
   select count(*)
     into v_target_count
   from public.payment_requests request
-  where request.id in (
-    '3d83fd86-ebd8-4017-b22e-93a0782d66d2'::uuid,
-    'b5993d98-60dc-4e6a-9437-e6530e6c431f'::uuid
+  where exists (
+    select 1
+    from (values
+      ('SOL-2026-0008'::text, timestamptz '2026-08-10 16:00:01.831732+00'),
+      ('SOL-2026-0009'::text, timestamptz '2026-08-10 16:01:56.51856+00')
+    ) expected(request_number, created_at)
+    where expected.request_number = request.request_number
+      and expected.created_at = request.created_at
   );
 
   if v_target_count = 0 then
@@ -396,27 +401,6 @@ begin
   end if;
 
   execute 'lock table public.payment_requests in access exclusive mode';
-
-  perform 1
-  from public.companies company
-  where company.id = '144042c1-e493-4256-a86c-cd088a8898ce'::uuid
-  for share;
-  perform 1
-  from public.proveedores provider
-  where provider.id = '921362d8-d3c7-4a9f-90f6-c9db091d0a5f'::uuid
-  for share;
-  perform 1
-  from public.cost_centers cost_center
-  where cost_center.id = '371db283-17e2-4fba-820b-b528fc422754'::uuid
-  for share;
-  perform 1
-  from public.budget_categories category
-  where category.id = '4bedd10c-bad6-410c-a3db-6433b11df45e'::uuid
-  for share;
-  perform 1
-  from public.company_bank_accounts account
-  where account.id = '050dcdf2-0798-48ed-81cf-075e56790524'::uuid
-  for share;
 
   if (
     select count(*)
@@ -437,7 +421,6 @@ begin
     select *
     from (values
       (
-        '3d83fd86-ebd8-4017-b22e-93a0782d66d2'::uuid,
         'SOL-2026-0008'::text,
         timestamptz '2026-08-10 16:00:01.831732+00',
         684.20::numeric,
@@ -447,14 +430,11 @@ begin
         timestamptz '2026-08-10 16:16:27.106844+00',
         timestamptz '2026-08-10 16:16:27.043566+00',
         timestamptz '2026-08-10 16:16:27.043566+00',
-        '67b4807a-2e2d-49e2-856c-c34141ece658'::uuid,
-        'e20588a9-06d9-4b63-b9e0-9407cff233db'::uuid,
         68420::bigint,
         timestamptz '2026-08-10 16:00:01.853798+00',
         timestamptz '2026-08-10 16:08:14.346627+00'
       ),
       (
-        'b5993d98-60dc-4e6a-9437-e6530e6c431f'::uuid,
         'SOL-2026-0009'::text,
         timestamptz '2026-08-10 16:01:56.51856+00',
         1315.80::numeric,
@@ -464,31 +444,29 @@ begin
         timestamptz '2026-08-10 16:13:40.525315+00',
         timestamptz '2026-08-10 16:13:42.287747+00',
         timestamptz '2026-08-10 16:13:40.459795+00',
-        '919c1c31-86d2-487c-a25f-9a84287eb248'::uuid,
-        '0283b184-86b1-459c-b849-12889d24a8d9'::uuid,
         131580::bigint,
         timestamptz '2026-08-10 16:01:56.572084+00',
         timestamptz '2026-08-10 16:08:14.373346+00'
       )
     ) expected(
-      request_id, request_number, created_at, amount, reference,
+      request_number, created_at, amount, reference,
       concept_value, concept_sha256, stale_material_at, updated_at,
-      scheduled_at, item_id, snapshot_id, amount_minor,
+      scheduled_at, amount_minor,
       snapshot_material_at, snapshot_materialized_at
     )
-    order by request_id
+    order by request_number
   loop
     select *
       into strict v_request
     from public.payment_requests request
-    where request.id = v_expected.request_id
+    where request.request_number = v_expected.request_number
+      and request.created_at = v_expected.created_at
     for update;
 
     select *
       into strict v_item
     from public.approval_batch_items item
-    where item.id = v_expected.item_id
-      and item.payment_request_id = v_request.id
+    where item.payment_request_id = v_request.id
     for update;
 
     select *
@@ -500,23 +478,44 @@ begin
     select *
       into strict v_snapshot
     from public.payable_snapshots snapshot
-    where snapshot.id = v_expected.snapshot_id
-      and snapshot.payment_request_id = v_request.id
+    where snapshot.payment_request_id = v_request.id
+      and snapshot.version = 1
+      and snapshot.source_type = 'approval_batch_item'
+      and snapshot.source_id = v_item.id
+      and snapshot.amount_minor = v_expected.amount_minor
+      and snapshot.currency = 'MXN'
+      and snapshot.source_status = 'closed'
+      and snapshot.source_approval_material_updated_at =
+        v_expected.snapshot_material_at
+      and snapshot.materialized_at = v_expected.snapshot_materialized_at
     for update;
+
+    perform 1
+    from public.companies company
+    where company.id = v_request.company_id
+    for share;
+    perform 1
+    from public.proveedores provider
+    where provider.id = v_request.proveedor_id
+    for share;
+    perform 1
+    from public.cost_centers cost_center
+    where cost_center.id = v_request.cost_center_id
+    for share;
+    perform 1
+    from public.budget_categories category
+    where category.id = v_request.budget_category_id
+    for share;
+    perform 1
+    from public.company_bank_accounts account
+    where account.id = v_request.company_bank_account_id
+    for share;
 
     if v_request.request_number is distinct from v_expected.request_number
        or v_request.created_at is distinct from v_expected.created_at
        or v_request.status::text is distinct from 'approved'
-       or v_request.company_id is distinct from
-         '144042c1-e493-4256-a86c-cd088a8898ce'::uuid
-       or v_request.proveedor_id is distinct from
-         '921362d8-d3c7-4a9f-90f6-c9db091d0a5f'::uuid
        or v_request.provider_id is not null
        or v_request.provider_bank_account_id is not null
-       or v_request.cost_center_id is distinct from
-         '371db283-17e2-4fba-820b-b528fc422754'::uuid
-       or v_request.budget_category_id is distinct from
-         '4bedd10c-bad6-410c-a3db-6433b11df45e'::uuid
        or v_request.amount_requested is distinct from v_expected.amount
        or v_request.currency::text is distinct from 'MXN'
        or v_request.exchange_rate is distinct from 1
@@ -532,14 +531,12 @@ begin
          sha256(convert_to(coalesce(v_request.concept, ''), 'UTF8')),
          'hex'
        ) is distinct from v_expected.concept_sha256
-       or v_request.company_bank_account_id is distinct from
-         '050dcdf2-0798-48ed-81cf-075e56790524'::uuid
        or v_request.due_date is not null
        or v_request.scheduled_payment_date is distinct from date '2026-08-10'
        or v_request.payment_reference is distinct from v_expected.reference
        or v_request.scheduled_at is distinct from v_expected.scheduled_at
-       or v_request.scheduled_by is distinct from
-         'e514902e-aa2c-4430-aa88-515934c3d13b'::uuid
+       or v_request.requested_by is null
+       or v_request.scheduled_by is distinct from v_request.requested_by
        or v_request.updated_at is distinct from v_expected.updated_at
        or not exists (
          select 1
@@ -600,18 +597,14 @@ begin
        or v_item.director_status is distinct from 'approved'
        or v_item.decided_at is distinct from
          timestamptz '2026-08-10 16:07:07.050191+00'
-       or v_item.decided_by is distinct from
-         'c069a2c6-3750-48d3-994a-7d0f9fc8ddb7'::uuid
+       or v_item.decided_by is null
        or v_item.finance_release_status is distinct from 'released'
        or v_item.finance_released_at is distinct from
          timestamptz '2026-08-10 16:08:14.255686+00'
-       or v_item.finance_released_by is distinct from
-         'e514902e-aa2c-4430-aa88-515934c3d13b'::uuid
+       or v_item.finance_released_by is distinct from v_request.scheduled_by
        or v_item.rebatch_status is distinct from 'not_applicable'
        or v_item.review_sequence is distinct from 1
        or v_item.previous_item_id is not null
-       or v_batch.id is distinct from
-         '34f98a4e-7da3-4155-8eba-c6da55786b6f'::uuid
        or v_batch.company_id is distinct from v_request.company_id
        or v_batch.label is distinct from 'CORTE DEMO CLIENTE  10/AGO/2026'
        or v_batch.status is distinct from 'closed'
@@ -621,6 +614,10 @@ begin
          timestamptz '2026-08-10 16:07:07.050191+00'
        or v_batch.closed_at is distinct from
          timestamptz '2026-08-10 16:08:14.255686+00'
+       or v_batch.created_by is distinct from v_request.scheduled_by
+       or v_batch.closed_by is distinct from v_item.finance_released_by
+       or v_batch.decided_by is distinct from v_item.decided_by
+       or v_batch.director_id is distinct from v_item.decided_by
        or (
          select count(*)
          from public.payable_snapshots snapshot
@@ -737,21 +734,35 @@ begin
     'alter table public.payment_requests disable trigger invalidate_extraordinary_on_material_change';
 
   update public.payment_requests request
-  set approval_material_updated_at = expected.snapshot_material_at
-  from (values
-    (
-      '3d83fd86-ebd8-4017-b22e-93a0782d66d2'::uuid,
-      timestamptz '2026-08-10 16:16:27.106844+00',
-      timestamptz '2026-08-10 16:00:01.853798+00'
-    ),
-    (
-      'b5993d98-60dc-4e6a-9437-e6530e6c431f'::uuid,
-      timestamptz '2026-08-10 16:13:40.525315+00',
-      timestamptz '2026-08-10 16:01:56.572084+00'
-    )
-  ) expected(request_id, stale_material_at, snapshot_material_at)
-  where request.id = expected.request_id
-    and request.approval_material_updated_at = expected.stale_material_at;
+  set approval_material_updated_at = snapshot.source_approval_material_updated_at
+  from public.approval_batch_items item,
+       public.payable_snapshots snapshot,
+       (values
+         (
+           'SOL-2026-0008'::text,
+           timestamptz '2026-08-10 16:00:01.831732+00',
+           timestamptz '2026-08-10 16:16:27.106844+00',
+           timestamptz '2026-08-10 16:00:01.853798+00'
+         ),
+         (
+           'SOL-2026-0009'::text,
+           timestamptz '2026-08-10 16:01:56.51856+00',
+           timestamptz '2026-08-10 16:13:40.525315+00',
+           timestamptz '2026-08-10 16:01:56.572084+00'
+         )
+       ) expected(
+         request_number, created_at, stale_material_at, snapshot_material_at
+       )
+  where request.request_number = expected.request_number
+    and request.created_at = expected.created_at
+    and request.approval_material_updated_at = expected.stale_material_at
+    and item.payment_request_id = request.id
+    and snapshot.payment_request_id = request.id
+    and snapshot.source_type = 'approval_batch_item'
+    and snapshot.source_id = item.id
+    and snapshot.version = 1
+    and snapshot.source_approval_material_updated_at =
+      expected.snapshot_material_at;
 
   get diagnostics v_updated_count = row_count;
 
@@ -783,6 +794,8 @@ declare
   v_missing_fields text[];
   v_direction_current boolean;
   v_finance_current boolean;
+  v_company_id uuid;
+  v_account_id uuid;
 begin
   select lower(function_info.prosrc)
     into v_source
@@ -822,9 +835,14 @@ begin
   select count(*)
     into v_target_count
   from public.payment_requests request
-  where request.id in (
-    '3d83fd86-ebd8-4017-b22e-93a0782d66d2'::uuid,
-    'b5993d98-60dc-4e6a-9437-e6530e6c431f'::uuid
+  where exists (
+    select 1
+    from (values
+      ('SOL-2026-0008'::text, timestamptz '2026-08-10 16:00:01.831732+00'),
+      ('SOL-2026-0009'::text, timestamptz '2026-08-10 16:01:56.51856+00')
+    ) expected(request_number, created_at)
+    where expected.request_number = request.request_number
+      and expected.created_at = request.created_at
   );
 
   if v_target_count = 0 then
@@ -839,41 +857,39 @@ begin
     select *
     from (values
       (
-        '3d83fd86-ebd8-4017-b22e-93a0782d66d2'::uuid,
         'SOL-2026-0008'::text,
-        '67b4807a-2e2d-49e2-856c-c34141ece658'::uuid,
-        'e20588a9-06d9-4b63-b9e0-9407cff233db'::uuid,
+        timestamptz '2026-08-10 16:00:01.831732+00',
         timestamptz '2026-08-10 16:00:01.853798+00',
         timestamptz '2026-08-10 16:16:27.043566+00',
         '26031'::text
       ),
       (
-        'b5993d98-60dc-4e6a-9437-e6530e6c431f'::uuid,
         'SOL-2026-0009'::text,
-        '919c1c31-86d2-487c-a25f-9a84287eb248'::uuid,
-        '0283b184-86b1-459c-b849-12889d24a8d9'::uuid,
+        timestamptz '2026-08-10 16:01:56.51856+00',
         timestamptz '2026-08-10 16:01:56.572084+00',
         timestamptz '2026-08-10 16:13:42.287747+00',
         '26032'::text
       )
     ) expected(
-      request_id, request_number, item_id, snapshot_id,
+      request_number, created_at,
       snapshot_material_at, updated_at, reference
     )
   loop
     select * into strict v_request
     from public.payment_requests request
-    where request.id = v_expected.request_id;
+    where request.request_number = v_expected.request_number
+      and request.created_at = v_expected.created_at;
 
     select * into strict v_item
     from public.approval_batch_items item
-    where item.id = v_expected.item_id
-      and item.payment_request_id = v_request.id;
+    where item.payment_request_id = v_request.id;
 
     select * into strict v_snapshot
     from public.payable_snapshots snapshot
-    where snapshot.id = v_expected.snapshot_id
-      and snapshot.payment_request_id = v_request.id;
+    where snapshot.payment_request_id = v_request.id
+      and snapshot.version = 1
+      and snapshot.source_type = 'approval_batch_item'
+      and snapshot.source_id = v_item.id;
 
     select
       candidate.classification,
@@ -902,8 +918,6 @@ begin
        or v_request.updated_at is distinct from v_expected.updated_at
        or v_request.scheduled_payment_date is distinct from date '2026-08-10'
        or v_request.payment_reference is distinct from v_expected.reference
-       or v_request.company_bank_account_id is distinct from
-         '050dcdf2-0798-48ed-81cf-075e56790524'::uuid
        or not public.approval_batch_request_has_current_direction_approval(
          v_request.id
        )
@@ -935,6 +949,12 @@ begin
     end if;
   end loop;
 
+  select request.company_id, request.company_bank_account_id
+    into strict v_company_id, v_account_id
+  from public.payment_requests request
+  where request.request_number = 'SOL-2026-0008'
+    and request.created_at = timestamptz '2026-08-10 16:00:01.831732+00';
+
   select
     count(*),
     array_agg(candidate.request_number order by candidate.request_number)
@@ -942,8 +962,8 @@ begin
   from public.approval_batch_payment_layout_candidates(
     date '2026-08-10',
     date '2026-08-16',
-    '144042c1-e493-4256-a86c-cd088a8898ce'::uuid,
-    '050dcdf2-0798-48ed-81cf-075e56790524'::uuid
+    v_company_id,
+    v_account_id
   ) candidate
   where candidate.classification in (
     'ready_regular', 'ready_extraordinary', 'legacy_eligible'
