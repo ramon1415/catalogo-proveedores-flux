@@ -84,11 +84,16 @@ test("repair is fail-closed, targets exactly 0008/0009, and restores snapshot wa
   assert.match(migration, /v_stale_count <> 2 or v_repaired_count <> 0/)
   assert.match(
     migration,
-    /set approval_material_updated_at = expected\.snapshot_material_at/,
+    /set approval_material_updated_at = snapshot\.source_approval_material_updated_at/,
   )
   assert.doesNotMatch(
     migration,
-    /set approval_material_updated_at = expected\.snapshot_material_at[\s\S]{0,120}updated_at\s*=/i,
+    /set approval_material_updated_at = snapshot\.source_approval_material_updated_at[\s\S]{0,120}updated_at\s*=/i,
+  )
+  assert.doesNotMatch(
+    migration,
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    "forward data repair must derive generated ids from immutable natural fingerprints",
   )
   assert.match(migration, /SOL-2026-0008/)
   assert.match(migration, /SOL-2026-0009/)
