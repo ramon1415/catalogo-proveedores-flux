@@ -33,8 +33,8 @@ jobs:
     environment: DEV
 
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
+      EXPECTED_FUNCTION_BLOB: a45a3c099cf267575b587a195e1747ce12492323
       CONFIRM_DEV: ${{ inputs.confirm_dev }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
       CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
@@ -44,10 +44,13 @@ jobs:
     steps:
       - name: Validate DEV deploy guardrails
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+          if [ "${GITHUB_REF}" != "refs/heads/dev" ]; then
             echo "::error::This workflow is restricted to the dev branch."
             exit 1
           fi
@@ -71,13 +74,21 @@ jobs:
             echo "::error::SUPABASE_ACCESS_TOKEN secret is not configured for this workflow."
             exit 1
           fi
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
+
+          current_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          if [ "${current_dev}" != "${GITHUB_SHA}" ]; then
+            echo "::error::The dispatched SHA is no longer the current dev head."
+            exit 1
+          fi
 
           echo "DEV deploy guardrails passed."
 
-      - name: Check out dev
-        uses: actions/checkout@v4
+      - name: Check out immutable dev target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: dev
+          ref: ${{ github.sha }}
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Initialize evidence
@@ -90,6 +101,8 @@ jobs:
             echo "# Supabase DEV notification-dispatcher deploy evidence"
             echo ""
             echo "- Branch: ${GITHUB_REF_NAME}"
+            echo "- Git SHA: ${GITHUB_SHA}"
+            echo "- Certified function blob: ${EXPECTED_FUNCTION_BLOB}"
             echo "- Mode: ${CONFIRM_MODE}"
             echo "- Function: ${FUNCTION_NAME}"
             echo "- Project ref: ${SUPABASE_PROJECT_ID}"
@@ -106,8 +119,15 @@ jobs:
             exit 1
           fi
 
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::Checkout does not match the immutable dispatched SHA."
+            exit 1
+          fi
+
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v2
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
 
       - name: Verify deploy inputs
         shell: bash
@@ -125,16 +145,47 @@ jobs:
             exit 1
           fi
 
-          grep -q "\[functions.${FUNCTION_NAME}\]" supabase/config.toml
-          grep -q "verify_jwt = false" supabase/config.toml
+          FUNCTION_NAME="${FUNCTION_NAME}" python3 - <<'PY'
+          import os
+          import tomllib
 
-          find "supabase/functions/${FUNCTION_NAME}" -maxdepth 2 -type f | sort | tee "${EVIDENCE_DIR}/function-files.txt"
+          with open("supabase/config.toml", "rb") as handle:
+              config = tomllib.load(handle)
+          actual = config.get("functions", {}).get(os.environ["FUNCTION_NAME"])
+          if actual != {"verify_jwt": False}:
+              raise SystemExit(f"unexpected function config keys or values: {actual!r}")
+          PY
+
+          mapfile -t function_files < <(find "supabase/functions/${FUNCTION_NAME}" -type f -print | sort)
+          if [ "${#function_files[@]}" != "1" ] || [ "${function_files[0]}" != "supabase/functions/${FUNCTION_NAME}/index.ts" ]; then
+            echo "::error::The dispatcher bundle must contain only its certified index.ts."
+            exit 1
+          fi
+
+          actual_blob="$(git hash-object "supabase/functions/${FUNCTION_NAME}/index.ts")"
+          if [ "${actual_blob}" != "${EXPECTED_FUNCTION_BLOB}" ]; then
+            echo "::error::Function source does not match the certified branded renderer."
+            exit 1
+          fi
+          printf '%s\n' "${actual_blob}" | tee "${EVIDENCE_DIR}/function-source-git-blob.txt"
+
+          printf '%s\n' "${function_files[@]}" | tee "${EVIDENCE_DIR}/function-files.txt"
           cp supabase/config.toml "${EVIDENCE_DIR}/config.toml"
 
       - name: Deploy notification-dispatcher to Supabase DEV
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           set -euo pipefail
+
+          current_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          if [ "${current_dev}" != "${GITHUB_SHA}" ]; then
+            echo "::error::The dev head changed before deployment."
+            exit 1
+          fi
+
           set +e
           supabase functions deploy "${FUNCTION_NAME}" --project-ref "${SUPABASE_PROJECT_ID}" > "${EVIDENCE_DIR}/deploy-stdout.txt" 2> "${EVIDENCE_DIR}/deploy-stderr.txt"
           deploy_status=$?
@@ -158,7 +209,7 @@ jobs:
 
       - name: Upload deploy evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: supabase-dev-notification-dispatcher-deploy-evidence
           path: /tmp/supabase-dev-notification-dispatcher-deploy-evidence
