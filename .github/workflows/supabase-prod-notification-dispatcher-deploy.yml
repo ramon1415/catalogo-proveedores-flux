@@ -1,0 +1,170 @@
+name: Supabase PROD Notification Dispatcher Deploy Only
+
+'on':
+  workflow_dispatch:
+    inputs:
+      target_git_sha:
+        description: Exact current main SHA containing the certified dispatcher
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the PROD Supabase project ref
+        required: true
+        type: string
+      confirm_mode:
+        description: Type deploy_notification_dispatcher_prod
+        required: true
+        default: deploy_notification_dispatcher_prod
+        type: string
+      confirm_function:
+        description: Type notification-dispatcher
+        required: true
+        default: notification-dispatcher
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-notification-dispatcher-deploy-only
+  cancel-in-progress: false
+
+jobs:
+  deploy_notification_dispatcher:
+    name: Deploy only notification-dispatcher to Supabase PROD
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: supabase-production
+
+    env:
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      EXPECTED_FUNCTION_BLOB: a45a3c099cf267575b587a195e1747ce12492323
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+      CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
+      FUNCTION_NAME: notification-dispatcher
+      EVIDENCE_DIR: /tmp/supabase-prod-notification-dispatcher-deploy-evidence
+
+    steps:
+      - name: Validate immutable PROD deploy-only guardrails
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF}" = "refs/heads/main" ]]
+          [[ "${GITHUB_SHA}" = "${TARGET_GIT_SHA}" ]]
+          [[ "${TARGET_GIT_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${PROJECT_REF}" != "${FORBIDDEN_DEV_REF}" ]]
+          [[ "${CONFIRM_PROD}" = "${EXPECTED_PROJECT_REF}" ]]
+          [[ "${CONFIRM_MODE}" = "deploy_notification_dispatcher_prod" ]]
+          [[ "${CONFIRM_FUNCTION}" = "${FUNCTION_NAME}" ]]
+          [[ -n "${SUPABASE_ACCESS_TOKEN}" ]]
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "${current_main}" = "${TARGET_GIT_SHA}" ]]
+
+          echo "target=PROD"
+          echo "scope=notification-dispatcher-only"
+          echo "database=not_touched"
+          echo "runtime_secrets=not_touched"
+          echo "dispatcher_invocation=not_permitted"
+
+      - name: Check out immutable main target
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate exact source and initialize evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${EVIDENCE_DIR}"
+          mkdir -p "${EVIDENCE_DIR}"
+
+          [[ "$(git rev-parse HEAD)" = "${TARGET_GIT_SHA}" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          [[ -f "supabase/functions/${FUNCTION_NAME}/index.ts" ]]
+          [[ ! -e "supabase/config.toml" ]]
+
+          mapfile -t function_files < <(find "supabase/functions" -type f -print | sort)
+          [[ "${#function_files[@]}" = "1" ]]
+          [[ "${function_files[0]}" = "supabase/functions/${FUNCTION_NAME}/index.ts" ]]
+
+          actual_blob="$(git hash-object "supabase/functions/${FUNCTION_NAME}/index.ts")"
+          [[ "${actual_blob}" = "${EXPECTED_FUNCTION_BLOB}" ]]
+          printf '%s\n' "${actual_blob}" > "${EVIDENCE_DIR}/function-source-git-blob.txt"
+          printf '%s\n' "${function_files[@]}" > "${EVIDENCE_DIR}/function-files.txt"
+
+          {
+            echo "# Supabase PROD notification-dispatcher deploy-only evidence"
+            echo
+            echo "- Git SHA: ${TARGET_GIT_SHA}"
+            echo "- Function: ${FUNCTION_NAME}"
+            echo "- Project ref: ${EXPECTED_PROJECT_REF}"
+            echo "- Certified function blob: ${EXPECTED_FUNCTION_BLOB}"
+            echo "- Database migrations: not run"
+            echo "- Runtime secrets: not changed"
+            echo "- Dispatcher: not invoked"
+            echo "- Historical notifications: not replayed"
+          } > "${EVIDENCE_DIR}/summary.md"
+
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+
+      - name: Deploy only notification-dispatcher to Supabase PROD
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          supabase --version | tee "${EVIDENCE_DIR}/supabase-version.txt"
+
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "${current_main}" = "${TARGET_GIT_SHA}" ]]
+
+          set +e
+          supabase functions deploy "${FUNCTION_NAME}" \
+            --project-ref "${EXPECTED_PROJECT_REF}" \
+            --no-verify-jwt \
+            --use-api \
+            > "${EVIDENCE_DIR}/deploy-stdout.txt" \
+            2> "${EVIDENCE_DIR}/deploy-stderr.txt"
+          deploy_status=$?
+          set -e
+
+          {
+            echo "# Deploy result"
+            echo
+            echo "- Exit code: ${deploy_status}"
+            echo "- Function: ${FUNCTION_NAME}"
+            echo "- Project ref: ${EXPECTED_PROJECT_REF}"
+            echo
+            echo "## stdout"
+            cat "${EVIDENCE_DIR}/deploy-stdout.txt"
+            echo
+            echo "## stderr"
+            cat "${EVIDENCE_DIR}/deploy-stderr.txt"
+          } | tee "${EVIDENCE_DIR}/deploy-result.md"
+
+          exit "${deploy_status}"
+
+      - name: Upload deploy evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: supabase-prod-notification-dispatcher-deploy-evidence
+          path: /tmp/supabase-prod-notification-dispatcher-deploy-evidence
+          if-no-files-found: warn
+          retention-days: 30
