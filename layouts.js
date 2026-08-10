@@ -671,7 +671,7 @@ async function handleLayoutPreviewAction(event) {
   if (!button) return
   if (button.dataset.previewAction === "focus-section") {
     const section = document.getElementById(button.dataset.targetId)
-    section?.scrollIntoView({ behavior: "smooth", block: "start" })
+    scrollLayoutModalToSection(section)
     window.setTimeout(() => section?.focus({ preventScroll: true }), 250)
     return
   }
@@ -692,6 +692,27 @@ async function handleLayoutPreviewAction(event) {
     return
   }
   if (button.dataset.previewAction === "rebatch") await openLayoutRebatchDialog(button.dataset.itemId)
+}
+
+function layoutModalScrollContainer() {
+  return dom.newLayoutDialog?.querySelector(".modal-scroll") || null
+}
+
+function resetLayoutPreviewScrollPositions() {
+  const container = layoutModalScrollContainer()
+  if (container) container.scrollTop = 0
+  dom.layoutEligibilityPreview?.querySelectorAll(".layout-preview-list").forEach((list) => {
+    list.scrollTop = 0
+  })
+}
+
+function scrollLayoutModalToSection(section) {
+  const container = layoutModalScrollContainer()
+  if (!section || !container) return
+  const containerRect = container.getBoundingClientRect()
+  const sectionRect = section.getBoundingClientRect()
+  const targetTop = container.scrollTop + sectionRect.top - containerRect.top - 12
+  container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" })
 }
 
 function requestOwnedLayoutFields() {
