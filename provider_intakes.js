@@ -20,6 +20,7 @@ const EVENT_LABELS = Object.freeze({
   provider_matched: "Proveedor relacionado",
   conversion_draft_created: "Preparación de pago iniciada",
   conversion_draft_updated: "Preparación de pago actualizada",
+  banking_resolution: "Decisión bancaria confirmada",
   converted: "Solicitud convertida",
 })
 
@@ -48,6 +49,7 @@ const PAYMENT_DRAFT_STATE = Object.freeze({
   NOT_STARTED: "Sin iniciar",
   DRAFT_INCOMPLETE: "Borrador incompleto",
   READY_PENDING_PROVIDER: "Preparada · pendiente de proveedor",
+  BLOCKED_BANK_REVIEW: "Bloqueada · revisar datos bancarios",
   READY_FOR_CONVERSION: "Lista para conversión",
   ALREADY_CONVERTED: "Solicitud de pago creada",
   BLOCKED_INTAKE_STATUS: "Preparación no disponible",
@@ -73,6 +75,7 @@ const PAYMENT_DRAFT_BLOCKER_LABELS = Object.freeze({
   INTAKE_STATUS_NOT_IN_REVIEW: "El intake debe estar en revisión para editar la preparación.",
   PROVIDER_REQUIRED_FOR_CONVERSION: "Falta vincular un proveedor maestro.",
   PROVIDER_INACTIVE: "El proveedor vinculado está inactivo; selecciona uno activo.",
+  BANKING_DATA_REVIEW_REQUIRED: "La transferencia requiere resolver la diferencia entre datos declarados y el maestro.",
   APPROVER_RULE_PENDING_CONVERSION: "La regla de aprobación se resolverá durante la conversión.",
 })
 
@@ -102,10 +105,14 @@ const state = {
   paymentDraftReloadPending: false,
   paymentConversionActionId: null,
   paymentConversionInFlight: false,
+  linkContext: null,
+  linkCompanies: [],
+  linkMutationInFlight: false,
 }
 
 const dom = {}
 let searchTimer = null
+let matchSearchTimer = null
 
 document.addEventListener("DOMContentLoaded", init)
 
@@ -126,14 +133,25 @@ async function init() {
   dom.userName.textContent = profile?.full_name || session.user?.email || "Usuario"
   dom.userEmail.textContent = profile?.email || session.user?.email || "Sesión activa"
 
-  if (!window.FluxAuth?.canTriageProviderIntakes?.()) {
+  const canTriage = Boolean(window.FluxAuth?.canTriageProviderIntakes?.())
+  await loadLinkManagementContext()
+  const canManageLinks = state.linkCompanies.length > 0
+
+  if (!canTriage && !canManageLinks) {
     renderAccessDenied()
     return
   }
 
   dom.accessState.hidden = true
   dom.triageWorkspace.hidden = false
-  await loadList()
+  dom.manageLinksBtn.hidden = !canManageLinks
+  dom.refreshBtn.hidden = !canTriage
+  document.querySelectorAll("[data-triage-only]").forEach((node) => { node.hidden = !canTriage })
+  dom.linkOnlyState.hidden = canTriage
+  if (canTriage) {
+    await loadList()
+    await handleProviderReturn()
+  }
 }
 
 function bindDom() {
@@ -143,7 +161,7 @@ function bindDom() {
     "folioFilter", "providerFilter", "companyFilter", "statusFilter", "dateFromFilter",
     "dateToFilter", "filesFilter", "sortFilter", "clearFiltersBtn", "resultsSummary",
     "intakeTableBody", "previousPageBtn", "nextPageBtn", "pageStatus", "countTotal",
-    "countReceived", "countReview", "countCorrection", "countRejected", "detailDialog",
+    "countReceived", "countReview", "countCorrection", "countRejected", "countConverted", "countCancelled", "detailDialog",
     "detailTitle", "detailSubtitle", "detailContent", "detailActions", "closeDetailBtn",
     "actionDialog", "actionForm", "actionTitle", "actionDescription", "actionNotes",
     "actionRequiredLabel", "actionNotesHint", "actionCounter", "actionError",
@@ -168,6 +186,13 @@ function bindDom() {
     "reloadPaymentDraftBtn", "paymentDraftSuccess", "cancelPaymentDraftBtn", "savePaymentDraftBtn",
     "paymentConversionConfirm", "cancelPaymentConversionBtn", "confirmPaymentConversionBtn",
     "convertPaymentDraftBtn",
+    "manageLinksBtn", "linkOnlyState", "linkManagementDialog", "closeLinkManagementBtn",
+    "doneLinkManagementBtn", "linkCompany", "linkCurrentState", "linkCreateForm",
+    "linkLabel", "linkDuration", "linkRuntimeContract", "linkManagementError",
+    "createLinkBtn", "linkOneTimeResult", "linkPublicUrl", "copyLinkBtn",
+    "copyLinkStatus", "revokeLinkBtn", "regenerateLinkBtn", "paymentDraftBanking",
+    "paymentDraftBankingMessage", "paymentDraftBankingComparison", "paymentDraftBankingActions",
+    "paymentDraftBankingError",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -206,6 +231,14 @@ function bindEvents() {
   dom.convertPaymentDraftBtn.addEventListener("click", requestPaymentConversion)
   dom.cancelPaymentConversionBtn.addEventListener("click", cancelPaymentConversion)
   dom.confirmPaymentConversionBtn.addEventListener("click", confirmPaymentConversion)
+  dom.manageLinksBtn.addEventListener("click", openLinkManagement)
+  dom.closeLinkManagementBtn.addEventListener("click", closeLinkManagement)
+  dom.doneLinkManagementBtn.addEventListener("click", closeLinkManagement)
+  dom.linkCompany.addEventListener("change", renderLinkManagement)
+  dom.linkCreateForm.addEventListener("submit", createManagedLink)
+  dom.revokeLinkBtn.addEventListener("click", revokeManagedLink)
+  dom.regenerateLinkBtn.addEventListener("click", regenerateManagedLink)
+  dom.copyLinkBtn.addEventListener("click", copyManagedLink)
 
   ;[dom.folioFilter, dom.providerFilter].forEach((input) => {
     input.addEventListener("input", () => {
@@ -330,6 +363,8 @@ function renderSummary() {
   dom.countReview.textContent = numberFormat(state.summary.in_review)
   dom.countCorrection.textContent = numberFormat(state.summary.needs_correction)
   dom.countRejected.textContent = numberFormat(state.summary.rejected)
+  dom.countConverted.textContent = numberFormat(state.summary.converted)
+  dom.countCancelled.textContent = numberFormat(state.summary.cancelled)
 
   if (!state.total) {
     dom.resultsSummary.textContent = "No hay solicitudes que coincidan con los filtros."
@@ -620,6 +655,7 @@ function paymentDraftStateClass(derived) {
     NOT_STARTED: "not-started",
     DRAFT_INCOMPLETE: "incomplete",
     READY_PENDING_PROVIDER: "pending-provider",
+    BLOCKED_BANK_REVIEW: "blocked",
     READY_FOR_CONVERSION: "ready",
     ALREADY_CONVERTED: "converted",
     BLOCKED_INTAKE_STATUS: "blocked",
@@ -633,6 +669,7 @@ function paymentDraftStateMessage(derived, intake, context) {
       : "Vincula o registra al proveedor maestro para completar la conversión."
   }
   if (derived === "READY_FOR_CONVERSION") return "Lista para crear exactamente una solicitud en el flujo normal de Flux."
+  if (derived === "BLOCKED_BANK_REVIEW") return "La transferencia está bloqueada hasta usar explícitamente los datos maestros vigentes o actualizar el proveedor canónico."
   if (derived === "ALREADY_CONVERTED") return "La solicitud quedó vinculada; no se permiten más cambios de preparación."
   if (derived === "BLOCKED_INTAKE_STATUS") {
     return `El estado ${STATUS[intake.status]?.label || intake.status} no permite preparar ni editar el borrador.`
@@ -708,6 +745,7 @@ function providerMatchSection(intake) {
   section.append(stateRow)
 
   if (current) section.append(currentMatchCard(current, eligible))
+  if (current) section.append(providerBankGovernanceCard(intake, current))
 
   if (Number(matchData.duplicate_rfc_count || 0) > 1) {
     section.append(element(
@@ -731,6 +769,7 @@ function providerMatchSection(intake) {
           ? "Sin coincidencias para la búsqueda indicada."
           : "Sin coincidencias deterministas. Puedes buscar por nombre, alias o RFC.",
       ))
+      section.append(createProviderFromIntakeAction(intake))
     }
   }
 
@@ -772,7 +811,7 @@ function currentMatchCard(current, eligible) {
   body.append(
     element("strong", "", current.alias || "Proveedor maestro"),
     element("span", "", current.legal_name || "Razón social no informada"),
-    element("span", "match-bank-summary", `${displayValue(current.bank)} · CLABE ${displayValue(current.clabe_masked)} · Cuenta ${displayValue(current.account_masked)}`),
+    element("span", "match-bank-summary", `${maskedText(current.bank)} · CLABE ${displayValue(current.clabe_masked)} · Cuenta ${displayValue(current.account_masked)}`),
   )
   const actions = element("div", "current-match-actions")
   const view = element("a", "secondary-btn provider-master-link", "Abrir proveedor maestro")
@@ -784,6 +823,8 @@ function currentMatchCard(current, eligible) {
   compare.addEventListener("click", () => openMatchComparison(current.proveedor_id, compare))
   actions.append(view, compare)
   if (eligible) {
+    const update = element("a", "secondary-btn", "Actualizar proveedor")
+    update.href = providerProposalUrl(current.proveedor_id)
     const change = element("button", "secondary-btn", "Cambiar vínculo")
     change.type = "button"
     change.addEventListener("click", () => {
@@ -792,7 +833,7 @@ function currentMatchCard(current, eligible) {
     const clear = element("button", "secondary-btn danger-action", "Retirar vínculo")
     clear.type = "button"
     clear.addEventListener("click", () => openClearMatch(clear))
-    actions.append(change, clear)
+    actions.append(update, change, clear)
   }
   card.append(body, actions)
   return card
@@ -812,15 +853,44 @@ function candidateSearchForm() {
   input.maxLength = 120
   input.value = state.matchSearch
   input.placeholder = "Buscar coincidencias"
+  input.setAttribute("aria-describedby", "providerMatchSearchHint")
   const button = element("button", "secondary-btn", "Buscar coincidencias")
   button.type = "submit"
   controls.append(input, button)
-  form.append(label, controls)
+  const hint = element("small", "candidate-search-hint", "Escribe al menos 2 caracteres. Los resultados se actualizan sin seleccionar ni vincular automáticamente.")
+  hint.id = "providerMatchSearchHint"
+  form.append(label, controls, hint)
+  input.addEventListener("input", () => {
+    window.clearTimeout(matchSearchTimer)
+    const query = input.value.trim()
+    if (query.length === 1) {
+      hint.textContent = "Escribe un carácter más para buscar de forma segura."
+      return
+    }
+    hint.textContent = query.length
+      ? "Buscando progresivamente por nombre, alias o RFC…"
+      : "Escribe al menos 2 caracteres. Los resultados se actualizan sin seleccionar ni vincular automáticamente."
+    matchSearchTimer = window.setTimeout(async () => {
+      await loadMatchState(query)
+      renderDetail()
+      const nextInput = document.getElementById("providerMatchSearch")
+      if (nextInput) {
+        nextInput.focus()
+        nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length)
+      }
+    }, 320)
+  })
   form.addEventListener("submit", async (event) => {
     event.preventDefault()
+    const query = input.value.trim()
+    if (query.length === 1) {
+      hint.textContent = "Escribe un carácter más para buscar de forma segura."
+      input.focus()
+      return
+    }
     button.disabled = true
     button.textContent = "Buscando…"
-    await loadMatchState(input.value)
+    await loadMatchState(query)
     renderDetail()
     document.getElementById("providerMatchSearch")?.focus()
   })
@@ -845,7 +915,7 @@ function candidateCard(candidate, current) {
   const summary = element(
     "p",
     "candidate-summary",
-    `${displayValue(candidate.bank)} · CLABE ${displayValue(candidate.clabe_masked)} · Cuenta ${displayValue(candidate.account_masked)}`,
+    `${maskedText(candidate.bank)} · CLABE ${displayValue(candidate.clabe_masked)} · Cuenta ${displayValue(candidate.account_masked)}`,
   )
   const reasons = matchTagList("Señales", candidate.reasons || [], "reason")
   const differences = matchTagList("Diferencias", candidate.differences || [], "difference")
@@ -874,6 +944,47 @@ function candidateCard(candidate, current) {
   actions.append(select)
   card.append(header, summary, reasons, differences, actions)
   return card
+}
+
+function createProviderFromIntakeAction(intake) {
+  const wrapper = element("div", "create-provider-callout")
+  wrapper.append(element(
+    "p",
+    "",
+    "Si ningún proveedor maestro corresponde, registra uno desde el catálogo canónico. Los datos declarados se cargarán sólo como propuesta pendiente de validación.",
+  ))
+  const link = element("a", "primary-btn", "+ Crear nuevo proveedor")
+  link.href = providerProposalUrl(null, intake?.id)
+  wrapper.append(link)
+  return wrapper
+}
+
+function providerProposalUrl(providerId = null, intakeId = state.detail?.intake?.id) {
+  const params = new URLSearchParams({ intake_id: intakeId || "", return: "provider_intakes" })
+  if (providerId) params.set("provider_id", providerId)
+  return `./proveedores.html?${params.toString()}`
+}
+
+function providerBankGovernanceCard(intake, current) {
+  const banking = state.paymentDraftContext?.state?.banking
+  const wrapper = element("div", "bank-governance-inline")
+  if (!banking?.material_mismatch) {
+    wrapper.hidden = true
+    return wrapper
+  }
+  wrapper.append(
+    element("strong", "", "Diferencia bancaria detectada"),
+    element("p", "", "El proveedor maestro sigue siendo la identidad canónica. Los valores del portal no lo modifican ni crean otro proveedor."),
+  )
+  const fields = (banking.difference_fields || []).map((code) => ({ bank:"Banco", account:"Cuenta", clabe:"CLABE", beneficiary:"Beneficiario" })[code] || code)
+  wrapper.append(element("span", "match-bank-summary", `Campos distintos: ${fields.join(", ")}.`))
+  if (banking.resolution_valid) {
+    wrapper.append(element("span", "bank-resolution-ok", `Uso de datos maestros confirmado · ${formatDateTime(banking.resolution?.created_at)}`))
+  }
+  const update = element("a", "secondary-btn", "Revisar proveedor canónico")
+  update.href = providerProposalUrl(current.proveedor_id, intake.id)
+  wrapper.append(update)
+  return wrapper
 }
 
 function matchTagList(label, values, type) {
@@ -979,8 +1090,9 @@ function renderMatchComparison(comparison) {
     const tr = document.createElement("tr")
     const field = element("th", "", row.field || "Dato")
     field.scope = "row"
-    const declared = element("td", "", displayValue(row.declared))
-    const master = element("td", "", displayValue(row.master))
+    const shouldMaskText = ["Banco", "Beneficiario"].includes(row.field)
+    const declared = element("td", "", shouldMaskText ? maskedText(row.declared) : displayValue(row.declared))
+    const master = element("td", "", shouldMaskText ? maskedText(row.master) : displayValue(row.master))
     const result = element("td", `comparison-result result-${row.result || "not_reported"}`, COMPARISON_RESULT[row.result] || "No informado")
     tr.append(field, declared, master, result)
     tbody.append(tr)
@@ -1185,6 +1297,7 @@ function populatePaymentDraftForm() {
   dom.paymentDraftCompany.value = intake.company_name || ""
   renderPaymentDraftSummary(context)
   renderPaymentDraftProvider(context)
+  renderPaymentDraftBanking()
 
   replaceSelectOptions(
     dom.paymentDraftCostCenter,
@@ -1315,6 +1428,84 @@ function renderPaymentDraftProvider(context) {
     : "Proveedor inactivo · no permite declarar el borrador listo para conversión."
 }
 
+function renderPaymentDraftBanking(methodOverride = null) {
+  const context = state.paymentDraftContext
+  const banking = context?.state?.banking
+  if (!banking?.material_mismatch || !context?.provider) {
+    dom.paymentDraftBanking.hidden = true
+    return
+  }
+
+  const method = methodOverride ?? context.draft?.payment_method ?? ""
+  dom.paymentDraftBanking.hidden = false
+  dom.paymentDraftBankingError.textContent = ""
+  dom.paymentDraftBankingComparison.replaceChildren()
+  ;(banking.comparison || []).filter((row) => row.different).forEach((row) => {
+    const item = element("div", "banking-comparison-item")
+    item.append(
+      element("strong", "", row.field),
+      element("span", "", `Portal: ${displayValue(row.declared)}`),
+      element("span", "", `Maestro: ${displayValue(row.master)}`),
+    )
+    dom.paymentDraftBankingComparison.append(item)
+  })
+
+  dom.paymentDraftBankingActions.replaceChildren()
+  const update = element("a", "secondary-btn", "Actualizar proveedor canónico")
+  update.href = providerProposalUrl(context.provider.proveedor_id, context.intake.id)
+  dom.paymentDraftBankingActions.append(update)
+
+  if (method === "transfer") {
+    if (banking.resolution_valid) {
+      dom.paymentDraftBankingMessage.textContent = `Resuelto: se usarán los datos maestros vigentes. Decisión auditada ${formatDateTime(banking.resolution?.created_at)}.`
+      return
+    }
+    dom.paymentDraftBankingMessage.textContent = "Transferencia: la preparación no quedará READY_FOR_CONVERSION hasta resolver esta diferencia. Elige usar el maestro vigente o actualiza el proveedor y vuelve a calcular."
+    const confirmMaster = element("button", "primary-btn", "Usar datos maestros vigentes")
+    confirmMaster.type = "button"
+    confirmMaster.disabled = state.paymentDraftDirty || context.draft?.payment_method !== "transfer"
+    if (confirmMaster.disabled) confirmMaster.title = "Guarda primero el borrador con método Transferencia."
+    confirmMaster.addEventListener("click", () => confirmMasterBanking(confirmMaster))
+    dom.paymentDraftBankingActions.prepend(confirmMaster)
+    return
+  }
+
+  if (["cash", "check"].includes(method)) {
+    dom.paymentDraftBankingMessage.textContent = "Advertencia informativa: los datos bancarios difieren, pero este método no los utiliza y no bloquea la preparación."
+    return
+  }
+
+  dom.paymentDraftBankingMessage.textContent = "Hay diferencias bancarias. Al seleccionar Transferencia deberás resolverlas; Efectivo o Cheque sólo mostrarán esta advertencia."
+}
+
+async function confirmMasterBanking(button) {
+  const context = state.paymentDraftContext
+  const banking = context?.state?.banking
+  if (!context?.intake || !banking) return
+  if (!confirm("Confirmas que esta solicitud usará los datos bancarios vigentes del proveedor maestro? Esta decisión quedará auditada y no modificará el maestro ni el intake.")) return
+
+  button.disabled = true
+  const original = button.textContent
+  button.textContent = "Confirmando…"
+  dom.paymentDraftBankingError.textContent = ""
+  const { error } = await supabaseClient.rpc("confirm_provider_intake_master_banking", {
+    p_payment_intake_id: context.intake.id,
+    p_expected_intake_updated_at: context.intake.updated_at,
+    p_expected_provider_updated_at: banking.provider_updated_at,
+    p_action_id: createUuid(),
+  })
+  if (error) {
+    dom.paymentDraftBankingError.textContent = friendlyError(error)
+    button.disabled = false
+    button.textContent = original
+    return
+  }
+  await loadPaymentDraftContext()
+  populatePaymentDraftForm()
+  renderDetail()
+  dom.paymentDraftSuccess.textContent = "Decisión bancaria auditada. Se usarán los datos maestros vigentes."
+}
+
 function replaceSelectOptions(select, items, valueFor, labelFor, emptyLabel, decorate = null) {
   select.replaceChildren(optionElement("", emptyLabel))
   items.forEach((item) => {
@@ -1348,6 +1539,7 @@ function updatePaymentDraftOriginAccountState() {
   dom.paymentDraftOriginAccountField.hidden = !transfer
   dom.paymentDraftOriginAccount.disabled = !transfer
   if (!transfer) dom.paymentDraftOriginAccount.value = ""
+  renderPaymentDraftBanking(dom.paymentDraftPaymentMethod.value)
   updatePaymentDraftClientState()
 }
 
@@ -1923,6 +2115,202 @@ async function openTemporaryFile(intakeId, fileId, button) {
   }
 }
 
+async function loadLinkManagementContext() {
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_management_context")
+  if (error) {
+    state.linkContext = { error: friendlyError(error) }
+    state.linkCompanies = []
+    return
+  }
+  state.linkContext = data || {}
+  state.linkCompanies = Array.isArray(data?.companies) ? data.companies : []
+}
+
+function openLinkManagement() {
+  dom.linkCompany.replaceChildren()
+  state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
+  dom.linkDuration.value = String(state.linkContext?.defaults?.duration_hours || 72)
+  dom.linkOneTimeResult.hidden = true
+  dom.linkPublicUrl.value = ""
+  dom.copyLinkStatus.textContent = ""
+  dom.linkManagementError.textContent = ""
+  renderLinkManagement()
+  dom.linkManagementDialog.showModal()
+  window.setTimeout(() => dom.linkCompany.focus(), 0)
+}
+
+function closeLinkManagement() {
+  dom.linkPublicUrl.value = ""
+  dom.linkOneTimeResult.hidden = true
+  dom.copyLinkStatus.textContent = ""
+  if (dom.linkManagementDialog.open) dom.linkManagementDialog.close()
+}
+
+function selectedLinkCompany() {
+  return state.linkCompanies.find((company) => company.id === dom.linkCompany.value) || null
+}
+
+function renderLinkManagement() {
+  const company = selectedLinkCompany()
+  const defaults = state.linkContext?.defaults || {}
+  const link = company?.active_link
+  const isActive = link?.status === "active" && (!link.expires_at || new Date(link.expires_at) > new Date())
+  dom.linkManagementError.textContent = ""
+  dom.linkLabel.value = company ? `Portal de proveedores · ${company.name}`.slice(0, 120) : ""
+  dom.linkRuntimeContract.textContent = `Contrato vigente: ${defaults.max_files || 3} archivos · ${defaults.max_file_mb || 10} MB por archivo · ${defaults.max_total_mb || 12} MB totales · ${defaults.max_submissions_per_day || 20} envíos diarios · ${linkAllowedTypesLabel(defaults.allowed_file_types)}.`
+  dom.linkCurrentState.replaceChildren()
+
+  if (isActive) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Liga activa"),
+      element("p", "", `${link.label} · prefijo ${link.token_prefix} · vence ${formatDateTime(link.expires_at)}.`),
+      element("p", "", `${numberFormat(link.current_intakes)} intake${Number(link.current_intakes) === 1 ? "" : "s"} creado${Number(link.current_intakes) === 1 ? "" : "s"} con esta liga.`),
+      element("small", "", "El token completo no se almacena ni puede recuperarse. Regenera la liga para obtener una nueva URL de una sola visualización."),
+    )
+  } else {
+    dom.linkCurrentState.append(
+      element("strong", "", link?.status === "expired" ? "La liga anterior expiró" : "Sin liga activa"),
+      element("p", "", "Puedes crear una liga nueva sin crear intakes, proveedores ni solicitudes de pago."),
+    )
+  }
+
+  dom.linkCreateForm.hidden = Boolean(isActive)
+  dom.revokeLinkBtn.hidden = !isActive
+  dom.regenerateLinkBtn.hidden = !isActive
+  dom.revokeLinkBtn.dataset.linkId = isActive ? link.id : ""
+  dom.regenerateLinkBtn.dataset.linkId = isActive ? link.id : ""
+}
+
+async function createManagedLink(event) {
+  event.preventDefault()
+  const company = selectedLinkCompany()
+  if (!company || state.linkMutationInFlight) return
+  state.linkMutationInFlight = true
+  dom.createLinkBtn.disabled = true
+  dom.createLinkBtn.textContent = "Creando…"
+  dom.linkManagementError.textContent = ""
+  const defaults = state.linkContext?.defaults || {}
+  const { data, error } = await supabaseClient.rpc("create_provider_intake_link", {
+    p_company_id: company.id,
+    p_label: dom.linkLabel.value.trim(),
+    p_duration_hours: Number(dom.linkDuration.value),
+    p_max_submissions_per_day: Number(defaults.max_submissions_per_day || 20),
+    p_max_file_mb: Number(defaults.max_file_mb || 10),
+  })
+  state.linkMutationInFlight = false
+  dom.createLinkBtn.disabled = false
+  dom.createLinkBtn.textContent = "Generar liga"
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  showOneTimeLink(data)
+}
+
+async function revokeManagedLink() {
+  const company = selectedLinkCompany()
+  const linkId = dom.revokeLinkBtn.dataset.linkId
+  if (!company || !linkId || state.linkMutationInFlight) return
+  if (!confirm(`Revocar la liga activa de ${company.name}? El enlace dejará de aceptar nuevos envíos.`)) return
+  state.linkMutationInFlight = true
+  dom.revokeLinkBtn.disabled = true
+  const { error } = await supabaseClient.rpc("revoke_provider_intake_link", {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+  })
+  state.linkMutationInFlight = false
+  dom.revokeLinkBtn.disabled = false
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  dom.linkOneTimeResult.hidden = true
+  dom.linkPublicUrl.value = ""
+}
+
+async function regenerateManagedLink() {
+  const company = selectedLinkCompany()
+  const linkId = dom.regenerateLinkBtn.dataset.linkId
+  if (!company || !linkId || state.linkMutationInFlight) return
+  if (!confirm(`Revocar y regenerar la liga de ${company.name}? La URL anterior dejará de funcionar inmediatamente.`)) return
+  state.linkMutationInFlight = true
+  dom.regenerateLinkBtn.disabled = true
+  const { data, error } = await supabaseClient.rpc("regenerate_provider_intake_link", {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+    p_duration_hours: Number(dom.linkDuration.value),
+  })
+  state.linkMutationInFlight = false
+  dom.regenerateLinkBtn.disabled = false
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  showOneTimeLink(data)
+}
+
+async function refreshLinkContextAndRender(companyId) {
+  await loadLinkManagementContext()
+  dom.linkCompany.replaceChildren()
+  state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
+  dom.linkCompany.value = companyId
+  renderLinkManagement()
+}
+
+function showOneTimeLink(result) {
+  if (!result?.raw_token) {
+    dom.linkManagementError.textContent = "La liga fue creada, pero la URL de una sola visualización no estuvo disponible. Regenera para obtener otra."
+    return
+  }
+  const publicUrl = new URL("./solicitar.html", window.location.href)
+  publicUrl.search = ""
+  publicUrl.hash = `token=${result.raw_token}`
+  dom.linkPublicUrl.value = publicUrl.href
+  dom.linkOneTimeResult.hidden = false
+  dom.copyLinkStatus.textContent = ""
+  dom.linkPublicUrl.focus()
+  dom.linkPublicUrl.select()
+}
+
+function linkAllowedTypesLabel(types) {
+  const labels = {
+    "application/pdf": "PDF",
+    "application/xml": "XML",
+    "text/xml": "XML",
+    "image/jpeg": "JPG/JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+  }
+  const values = [...new Set((Array.isArray(types) ? types : []).map((type) => labels[type] || type))]
+  return values.length ? values.join(", ") : "formatos definidos por el backend"
+}
+
+async function copyManagedLink() {
+  if (!dom.linkPublicUrl.value) return
+  try {
+    await navigator.clipboard.writeText(dom.linkPublicUrl.value)
+    dom.copyLinkStatus.textContent = "Liga copiada."
+  } catch {
+    dom.linkPublicUrl.focus()
+    dom.linkPublicUrl.select()
+    dom.copyLinkStatus.textContent = "Selecciona y copia manualmente la URL."
+  }
+}
+
+async function handleProviderReturn() {
+  const params = new URLSearchParams(window.location.search)
+  const intakeId = params.get("intake_id")
+  const providerId = params.get("provider_candidate_id")
+  if (!intakeId || !providerId) return
+  window.history.replaceState({}, "", "./provider_intakes.html")
+  await openDetail(intakeId, dom.refreshBtn)
+  showToast("Proveedor guardado", "Revisa el candidato actualizado y confirma el vínculo de forma explícita.", "success")
+  document.getElementById("providerMatchSearch")?.focus()
+}
+
 function transitionCopy(toStatus) {
   return ({
     in_review: {
@@ -2037,6 +2425,20 @@ const ERROR_MESSAGES = Object.freeze({
   provider_intake_conversion_link_invalid: "El vínculo con la solicitud creada es inconsistente.",
   provider_intake_conversion_link_conflict: "Otra conversión ganó la concurrencia. Recarga el detalle.",
   provider_intake_conversion_request_create_failed: "No fue posible crear la solicitud normal de Flux.",
+  provider_intake_banking_resolution_fields_required: "Recarga la preparación antes de confirmar los datos maestros.",
+  provider_intake_banking_resolution_status_invalid: "El estado actual ya no permite resolver los datos bancarios.",
+  provider_intake_banking_resolution_intake_conflict: "El intake cambió. Recarga antes de confirmar los datos maestros.",
+  provider_intake_banking_resolution_provider_required: "Vincula un proveedor maestro antes de resolver los datos bancarios.",
+  provider_intake_banking_resolution_provider_conflict: "El proveedor maestro cambió. Recarga y vuelve a comparar.",
+  provider_intake_banking_resolution_transfer_required: "Guarda primero el borrador con método Transferencia.",
+  provider_intake_banking_resolution_not_required: "Los datos bancarios ya no presentan una diferencia material.",
+  provider_intake_link_auth_required: "Tu sesión ya no es válida. Inicia sesión nuevamente.",
+  provider_intake_link_access_denied: "No tienes una asignación activa de Finanzas o Dirección para esta empresa.",
+  provider_intake_link_active_exists: "La empresa ya tiene una liga activa. Revócala o regenérala.",
+  provider_intake_link_label_invalid: "Captura una etiqueta interna válida.",
+  provider_intake_link_duration_invalid: "Selecciona una vigencia entre 4 horas y 7 días.",
+  provider_intake_link_not_active: "La liga ya no está activa. Actualiza el estado.",
+  provider_intake_link_not_found: "La liga ya no está disponible.",
   file_service_unavailable: "El servicio de documentos temporales aún no está configurado en este ambiente.",
   signed_url_unavailable: "No se pudo generar el enlace temporal. Inténtalo de nuevo.",
 })
@@ -2110,6 +2512,14 @@ function optionElement(value, label) {
 
 function displayValue(value) {
   return value === null || value === undefined || value === "" ? "No indicado" : String(value)
+}
+
+function maskedText(value) {
+  const text = String(value || "").trim()
+  if (!text) return "No indicado"
+  if (text.length <= 2) return "•".repeat(text.length)
+  if (text.length <= 5) return `${text.slice(0, 1)}${"•".repeat(text.length - 2)}${text.slice(-1)}`
+  return `${text.slice(0, 2)}${"•".repeat(Math.min(10, text.length - 4))}${text.slice(-2)}`
 }
 
 function formatDate(value) {

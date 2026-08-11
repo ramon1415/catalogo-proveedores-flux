@@ -24,7 +24,7 @@ test("matching client uses only the three controlled RPCs", () => {
   assert.doesNotMatch(client, /console\.(?:log|info|debug|error)/)
 })
 
-test("UI exposes required states and explicit actions without conversion controls", () => {
+test("UI exposes matching states and keeps provider creation and updates explicit", () => {
   for (const text of [
     "Sin vincular",
     "Candidatos encontrados",
@@ -39,11 +39,14 @@ test("UI exposes required states and explicit actions without conversion control
     "Cambiar vínculo",
     "Retirar vínculo",
     "Abrir proveedor maestro",
+    "Actualizar proveedor",
   ]) {
     assert.match(`${html}\n${client}`, new RegExp(text))
   }
-  assert.match(html, /Conversión disponible en Fase 2B/)
-  assert.doesNotMatch(html, />\s*(?:Convertir a solicitud|Crear proveedor|Actualizar proveedor|Seleccionar aprobador|Seleccionar corte)\s*</i)
+  assert.match(client, /\+ Crear nuevo proveedor/)
+  assert.match(client, /providerProposalUrl/)
+  assert.match(client, /confirma el vínculo de forma explícita/i)
+  assert.doesNotMatch(client, /provider_candidate_id[\s\S]{0,500}set_provider_intake_match/)
 })
 
 test("comparison dialog has table semantics, audit fields, and accessible errors", () => {

@@ -143,6 +143,21 @@
                 <button id="limits-help-button" class="text-button" type="button" aria-expanded="false" aria-controls="limits-help">¿Qué incluye el límite total?</button>
                 <p id="limits-help" hidden>El cálculo incluye archivos, datos del formulario, CAPTCHA y metadatos técnicos del envío.</p>
               </div>
+              <section class="document-kind-guide" aria-labelledby="document-kind-guide-title">
+                <div>
+                  <p class="eyebrow">Antes de seleccionar</p>
+                  <h3 id="document-kind-guide-title">Tipos de documento aceptados</h3>
+                  <p>Clasifica cada archivo después de adjuntarlo. La clasificación no cambia las validaciones del enlace.</p>
+                </div>
+                <ul>
+                  <li><strong>Factura PDF</strong><span id="kind-format-invoice-pdf">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Factura XML</strong><span id="kind-format-invoice-xml">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Documento bancario</strong><span id="kind-format-bank-document">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Soporte</strong><span id="kind-format-support">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Otro</strong><span id="kind-format-other">Formatos disponibles al validar el enlace.</span></li>
+                </ul>
+                <p class="document-kind-runtime" id="document-kind-runtime">Los límites vigentes aparecerán aquí antes de seleccionar archivos.</p>
+              </section>
               <div id="dropzone" class="dropzone" role="group" aria-labelledby="dropzone-title" aria-describedby="dropzone-help file-global-error">
                 <div class="dropzone__icon" aria-hidden="true">↑</div>
                 <strong id="dropzone-title">Arrastra tus documentos aquí</strong>

@@ -39,11 +39,13 @@ body,
 .intake-page { display: grid; gap: 16px; }
 .intake-page[hidden], .access-state[hidden] { display: none !important; }
 .intake-page-header { align-items: flex-end; }
+.intake-header-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.link-only-state { padding:13px 15px; border:1px solid var(--border); border-radius:10px; background:var(--bg-card); color:var(--text-2); }
 .eyebrow { margin: 0 0 5px; color: var(--accent-text); font-size: 10px; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
 
 .triage-kpis {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(7, minmax(105px, 1fr));
   gap: 9px;
 }
 
@@ -64,6 +66,36 @@ body,
 .triage-kpi.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-card)); }
 .triage-kpi span { font-size: 11px; font-weight: 750; }
 .triage-kpi strong { color: var(--text-1); font-size: 23px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+.candidate-search-hint { color:var(--text-3); font-size:10.5px; }
+.create-provider-callout { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:13px; border:1px dashed var(--border-strong); border-radius:10px; background:var(--bg-hover); }
+.create-provider-callout p { flex:1 1 340px; margin:0; color:var(--text-2); font-size:11px; }
+.bank-governance-inline { display:grid; gap:8px; padding:13px; border:1px solid rgba(245,158,11,.28); border-radius:10px; background:var(--amber-dim); }
+.bank-governance-inline p { margin:0; color:var(--text-2); }
+.bank-governance-inline .secondary-btn { justify-self:start; }
+.bank-resolution-ok { color:var(--emerald); font-size:11px; font-weight:750; }
+
+.payment-draft-banking { display:grid; gap:12px; padding:16px; border:1px solid rgba(245,158,11,.3); border-radius:12px; background:var(--amber-dim); }
+.payment-draft-banking h3 { margin:0; font-size:14px; }
+.payment-draft-banking>p { margin:0; color:var(--text-2); }
+.banking-comparison-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.banking-comparison-item { display:grid; gap:3px; padding:10px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card); }
+.banking-comparison-item span { color:var(--text-3); font-size:10.5px; }
+.banking-resolution-actions { display:flex; flex-wrap:wrap; gap:8px; }
+
+.link-management-dialog { width:min(720px,calc(100vw - 32px)); }
+.link-management-shell { max-height:min(820px,calc(100vh - 32px)); }
+.link-management-content { display:grid; gap:14px; }
+.link-management-field,.link-form-grid label { display:grid; gap:5px; color:var(--text-2); font-size:11px; font-weight:750; }
+.link-management-field select,.link-form-grid input,.link-form-grid select,.link-one-time-result textarea { width:100%; min-height:38px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); color:var(--text-1); }
+.link-current-state,.link-runtime-contract,.link-one-time-result { display:grid; gap:7px; padding:13px; border:1px solid var(--border); border-radius:10px; background:var(--bg-hover); }
+.link-current-state p,.link-current-state small,.link-one-time-result p { margin:0; color:var(--text-2); }
+.link-form-grid { display:grid; grid-template-columns:2fr 1fr; gap:10px; margin-bottom:10px; }
+.link-runtime-contract { margin-bottom:10px; color:var(--text-2); font-size:11px; }
+.link-one-time-result { border-color:rgba(18,183,106,.32); background:var(--emerald-dim); }
+.link-one-time-result textarea { resize:none; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11px; overflow-wrap:anywhere; }
+.link-one-time-result code { color:var(--accent-text); }
+.link-management-footer { justify-content:flex-end; }
 
 .triage-filters {
   display: grid;
@@ -642,6 +674,9 @@ textarea:focus-visible {
 }
 
 @media (max-width: 760px) {
+  .triage-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .banking-comparison-list,.link-form-grid { grid-template-columns:1fr; }
+  .intake-page-header { align-items:flex-start; }
   .sidebar { position: relative; display: block; width: 100%; min-height: auto; padding: 10px 12px; }
   .sidebar > div:first-child { min-width: 0; }
   .brand { max-width: calc(100% - 126px); margin: 0 0 8px; padding-bottom: 9px; }

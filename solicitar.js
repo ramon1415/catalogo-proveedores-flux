@@ -142,6 +142,7 @@ function initializePortal() {
   byId("privacy-link").href = linkInfo.privacyUrl;
   byId("file-limit-copy").textContent = `Máximo ${linkInfo.maxFiles} archivos, ${linkInfo.maxFileMb} MB por archivo. Formatos: ${formatAllowedTypes(linkInfo.allowedFileTypes)}.`;
   byId("total-budget-copy").textContent = `Límite total: ${linkInfo.maxTotalMb} MB incluyendo archivos y datos del formulario.`;
+  renderDocumentKindGuide();
   form.querySelectorAll("input, select, textarea, button").forEach((element) => { element.disabled = false; });
   submitButton.disabled = true;
   showOnly("portal");
@@ -152,6 +153,17 @@ function initializePortal() {
 function formatAllowedTypes(types) {
   const labels = { "application/pdf":"PDF", "application/xml":"XML", "text/xml":"XML", "image/jpeg":"JPG", "image/png":"PNG", "image/webp":"WEBP" };
   return [...new Set(types.map((type) => labels[type] || type))].join(", ");
+}
+
+function renderDocumentKindGuide() {
+  const allowed = new Set(linkInfo.allowedFileTypes);
+  const labels = (types) => formatAllowedTypes(types.filter((type) => allowed.has(type))) || "No disponible en este enlace";
+  byId("kind-format-invoice-pdf").textContent = labels(["application/pdf"]);
+  byId("kind-format-invoice-xml").textContent = labels(["application/xml", "text/xml"]);
+  byId("kind-format-bank-document").textContent = labels(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+  byId("kind-format-support").textContent = labels(linkInfo.allowedFileTypes);
+  byId("kind-format-other").textContent = labels(linkInfo.allowedFileTypes);
+  byId("document-kind-runtime").textContent = `${linkInfo.maxFiles} archivo${linkInfo.maxFiles === 1 ? "" : "s"} como máximo · ${linkInfo.maxFileMb} MB por archivo · ${linkInfo.maxTotalMb} MB totales.`;
 }
 
 function rawPayload() {

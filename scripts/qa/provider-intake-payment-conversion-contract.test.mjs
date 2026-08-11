@@ -25,12 +25,13 @@ const functionDefinition = (name) => {
   return match[0]
 }
 
-test("044 is the only active migration after the certified 043 slot", () => {
+test("044 remains followed only by the authorized provider-intake product migration", () => {
   const active = fs.readdirSync(path.join(root, "supabase", "migrations")).sort()
   assert.deepEqual(active, [
     "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
     "20260811035346_043_provider_intake_payment_draft.sql",
     "20260811215129_044_provider_intake_payment_conversion.sql",
+    "20260811230137_045_provider_intake_ramon_uat_product_improvements.sql",
   ])
 })
 

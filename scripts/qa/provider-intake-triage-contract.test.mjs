@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url"
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
-const migration = read("supabase/migrations/029_provider_intake_triage.sql")
+const migration = read("supabase/migrations-legacy/active-pre-brownfield/029_provider_intake_triage.sql")
 const html = read("provider_intakes.html")
 const client = read("provider_intakes.js")
 const styles = read("provider_intakes.css")
@@ -165,7 +165,7 @@ test("client uses server RPCs and never updates intake tables directly", () => {
 })
 
 test("navigation is role-scoped and hidden from unvalidated first paint", () => {
-  assert.match(config, /file: "provider_intakes\.html"[\s\S]{0,240}groups: \[ROLE_GROUPS\.SYSADMIN, ROLE_GROUPS\.ADMIN\][\s\S]{0,80}sensitive: true/)
+  assert.match(config, /file: "provider_intakes\.html"[\s\S]{0,260}groups: \[ROLE_GROUPS\.SYSADMIN, ROLE_GROUPS\.ADMIN, ROLE_GROUPS\.DIRECTION\][\s\S]{0,80}sensitive: true/)
   assert.match(config, /canTriageProviderIntakes/)
   assert.match(config, /!item\.sensitive/)
   assert.match(client, /canTriageProviderIntakes/)
