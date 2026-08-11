@@ -31,6 +31,20 @@ const checkLabels = {
   missing_budget_comments:         "Comentarios de presupuesto pendientes",
 }
 
+// Cada bloqueo enlaza a la pantalla donde se resuelve
+const blockerLinks = {
+  pending_payment_requests:       "./solicitudes.html",
+  approved_without_operation:     "./solicitudes.html",
+  unconfirmed_layouts:            "./layouts.html",
+  unpaid_approved_requests:       "./solicitudes.html",
+  overdue_cash_funds:             "./efectivo.html",
+  cash_reconciliations_in_review: "./efectivo.html",
+  open_incidents:                 "./ingresos.html?tab=incidents",
+  issued_unpaid_invoices:         "./ingresos.html",
+  overdue_maintenance_fees:       "./ingresos.html?tab=income",
+  missing_budget_comments:        "./dashboard.html",
+}
+
 const statusLabels = {
   open: "Abierto", review: "En revision", closed: "Cerrado",
   reopened: "Reabierto",
@@ -73,8 +87,7 @@ function bindEvents() {
   document.getElementById("clearFilterBtn")?.addEventListener("click", clearFilter)
   document.getElementById("memberSearch")?.addEventListener("input", renderMemberTable)
 
-  document.getElementById("closePeriodBtn")?.addEventListener("click", closePeriod)
-  document.getElementById("reopenPeriodBtn")?.addEventListener("click", reopenPeriod)
+  document.getElementById("closureChip")?.addEventListener("click", openClosureModal)
 
   document.getElementById("logoutBtn")?.addEventListener("click", async () => {
     await supabaseClient.auth.signOut()
@@ -140,7 +153,6 @@ async function loadDashboard() {
     state.closureChecklist = payload.closure_checklist || {}
     state.closureComments  = ensureArray(payload.closure_comments)
     renderAll()
-    renderFrozenState()
     const lu = document.getElementById("lastUpdated")
     if (lu) lu.textContent = state.frozen
       ? `Periodo congelado el ${fmtDateTime(state.frozen.closed_at)}`
@@ -224,7 +236,7 @@ function demoChartSeries(count) {
 function renderAll() {
   renderKpis()
   renderMemberTable()
-  renderClosure()
+  renderClosureChip()
   renderExpenses()
   renderYtd()
   renderIncome()
@@ -298,38 +310,32 @@ function renderMemberTable() {
   `).join("")
 }
 
-function renderClosure() {
-  const checklist = state.closureChecklist || {}
-  const checks    = checklist.checks || {}
-  const status    = state.kpis.cierre?.closure_status || "not_created"
-  const canClose  = Boolean(checklist.can_close)
-  const blockers  = ensureArray(checklist.blocking_reasons)
+function periodLabelFromKey(pk) {
+  if (!pk || !/^\d{4}-\d{2}$/.test(pk)) return pk || "—"
+  const [y, m] = pk.split("-")
+  const s = new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
 
-  const btn = document.getElementById("closePeriodBtn")
-  if (btn) btn.disabled = !canClose
+function blockerCount() {
+  const cl = state.closureChecklist || {}
+  return ensureArray(cl.blocking_reasons).length || Object.values(cl.checks || {}).filter((v) => num(v) > 0).length
+}
 
-  const lbl = document.getElementById("closureStatusLabel")
-  if (lbl) lbl.textContent = canClose ? "Listo para cerrar" : `${blockers.length || Object.values(checks).filter((v) => num(v) > 0).length} bloqueos activos`
-
-  const result = document.getElementById("closureResult")
-  if (result) {
-    result.innerHTML = [
-      ["Estatus", closureStatusBadge(status)],
-      ["Puede cerrar", canClose ? Components.badge("Si", "success") : Components.badge("No", "danger")],
-      ["Bloqueos", blockers.length ? blockers.map((k) => checkLabels[k] || k).join(", ") : "Sin bloqueos criticos"],
-    ].map(([label, value]) => `<div class="summary-row"><span>${label}</span><strong>${value}</strong></div>`).join("")
-  }
-
-  const list = document.getElementById("closureChecksList")
-  if (list) {
-    const entries = Object.entries(checks)
-    list.innerHTML = entries.map(([key, value]) => {
-      const count = num(value)
-      return `<div class="summary-row" style="padding:7px 10px">
-        <span>${checkLabels[key] || key}</span>
-        <strong>${count > 0 ? Components.badge("Bloquea", "danger") : Components.badge("OK", "success")}</strong>
-      </div>`
-    }).join("") || `<div style="font-size:12px;color:var(--text-3);padding:4px 0">Sin revisiones para este periodo.</div>`
+function renderClosureChip() {
+  const chip = document.getElementById("closureChip")
+  if (!chip) return
+  const label = periodLabelFromKey(state.periodKey)
+  if (state.frozen) {
+    chip.dataset.state = "closed"
+    chip.textContent = `🔒 ${label} · Cerrado`
+  } else if (state.closureChecklist?.can_close) {
+    chip.dataset.state = "ready"
+    chip.textContent = `${label} · Listo para cerrar`
+  } else {
+    const n = blockerCount()
+    chip.dataset.state = "blocked"
+    chip.textContent = `${label} · ${n} bloqueo${n === 1 ? "" : "s"}`
   }
 }
 
@@ -650,58 +656,127 @@ async function fetchClosure(periodKey) {
   }
 }
 
-function renderFrozenState() {
-  const banner    = document.getElementById("closureFrozenBanner")
-  const closeBtn  = document.getElementById("closePeriodBtn")
-  const reopenBtn = document.getElementById("reopenPeriodBtn")
-  const isSysadmin = Boolean(window.FluxAuth?.isSysadmin?.())
+function openClosureModal() {
+  renderClosureModal()
+  document.getElementById("closureDialog")?.showModal()
+}
 
-  if (state.frozen) {
-    if (banner) {
-      banner.hidden = false
-      banner.innerHTML = `🔒 <strong>Periodo cerrado</strong> · congelado el ${fmtDateTime(state.frozen.closed_at)}. El reporte es inmutable; ajustes posteriores no lo modifican.`
-    }
-    if (closeBtn)  closeBtn.hidden = true
-    if (reopenBtn) reopenBtn.hidden = !isSysadmin
-  } else {
-    if (banner)    banner.hidden = true
-    if (closeBtn)  closeBtn.hidden = false
-    if (reopenBtn) reopenBtn.hidden = true
+function renderClosureModal() {
+  const cl = state.closureChecklist || {}
+  const checks = cl.checks || {}
+  const canClose = Boolean(cl.can_close) && !state.frozen
+  const label = periodLabelFromKey(state.periodKey)
+
+  setEl("closureDialogTitle", `Cierre de ${label}`)
+
+  // Checklist accionable: cada bloqueo enlaza a su pantalla
+  const list = document.getElementById("closureModalChecks")
+  if (list) {
+    const entries = Object.entries(checks)
+    list.innerHTML = entries.length ? entries.map(([key, value]) => {
+      const blocking = num(value) > 0
+      const link = blockerLinks[key]
+      const right = blocking
+        ? (link ? `<a class="small-btn warning" href="${link}">Ir a resolver →</a>` : Components.badge("Bloquea", "danger"))
+        : Components.badge("OK", "success")
+      return `<div class="summary-row"><span>${blocking ? "● " : "○ "}${checkLabels[key] || key}</span><strong>${right}</strong></div>`
+    }).join("") : `<div style="font-size:12px;color:var(--text-3)">Sin revisiones para este periodo.</div>`
   }
+
+  // Preview de lo que se congela (solo si se puede cerrar)
+  const wrap = document.getElementById("closurePreviewWrap")
+  const preview = document.getElementById("closurePreview")
+  if (wrap && preview) {
+    if (canClose) {
+      const inc = state.kpis.ingresos || {}
+      const executed = state.budgetComparison.reduce((s, r) => s + num(r.executed_amount), 0)
+      preview.innerHTML = [
+        ["Egresos ejecutados", money(executed)],
+        ["Ingresos cobrados", money(inc.maintenance_collected)],
+        ["Incidencias abiertas", whole(inc.open_incidents)],
+        ["Bloqueos", "0"],
+      ].map(([l, v]) => `<div class="mini-card"><span>${l}</span><strong>${v}</strong></div>`).join("")
+      wrap.hidden = false
+    } else {
+      wrap.hidden = true
+    }
+  }
+
+  // Footer segun estado
+  const footer = document.getElementById("closureModalFooter")
+  if (!footer) return
+  const isSysadmin = Boolean(window.FluxAuth?.isSysadmin?.())
+  if (state.frozen) {
+    footer.innerHTML =
+      `<span style="margin-right:auto;color:var(--text-2);font-size:12px">🔒 Congelado el ${fmtDateTime(state.frozen.closed_at)}</span>
+       <button class="secondary-btn" data-close-dialog type="button">Cerrar</button>` +
+      (isSysadmin ? `<button class="secondary-btn" id="modalReopenBtn" type="button">Reabrir</button>` : "")
+  } else if (canClose) {
+    footer.innerHTML =
+      `<button class="secondary-btn" data-close-dialog type="button">Cancelar</button>
+       <button class="primary-btn" id="modalCloseBtn" type="button">Congelar periodo</button>`
+  } else {
+    const n = blockerCount()
+    footer.innerHTML =
+      `<span style="margin-right:auto;color:var(--amber);font-size:12px">Resuelve ${n} bloqueo${n === 1 ? "" : "s"} para poder cerrar</span>
+       <button class="secondary-btn" data-close-dialog type="button">Cerrar</button>`
+  }
+  wireClosureFooter()
+}
+
+function wireClosureFooter() {
+  const footer = document.getElementById("closureModalFooter")
+  if (!footer) return
+  footer.querySelectorAll("[data-close-dialog]").forEach((b) =>
+    b.addEventListener("click", () => document.getElementById("closureDialog")?.close())
+  )
+  document.getElementById("modalCloseBtn")?.addEventListener("click", closePeriod)
+  document.getElementById("modalReopenBtn")?.addEventListener("click", showReopenReason)
+  document.getElementById("reopenConfirmBtn")?.addEventListener("click", reopenPeriod)
+}
+
+function showReopenReason() {
+  const footer = document.getElementById("closureModalFooter")
+  if (!footer) return
+  footer.innerHTML =
+    `<input id="reopenReason" class="form-control" placeholder="Motivo para reabrir (obligatorio)" style="flex:1;min-width:200px;margin-right:auto">
+     <button class="secondary-btn" data-close-dialog type="button">Cancelar</button>
+     <button class="primary-btn" id="reopenConfirmBtn" type="button">Reabrir</button>`
+  wireClosureFooter()
+  document.getElementById("reopenReason")?.focus()
 }
 
 async function closePeriod() {
-  if (state.frozen) return
-  if (!state.closureChecklist?.can_close) {
-    showToast("No se puede cerrar", "Resuelve primero los bloqueos del checklist.", "danger")
-    return
-  }
-  if (!window.confirm(`Vas a CONGELAR el periodo ${state.periodKey}.\nEl reporte quedara inmutable. ¿Continuar?`)) return
-
-  const btn = document.getElementById("closePeriodBtn")
-  if (btn) { btn.disabled = true; btn.textContent = "Cerrando..." }
+  if (state.frozen || !state.closureChecklist?.can_close) return
+  const btn = document.getElementById("modalCloseBtn")
+  if (btn) { btn.disabled = true; btn.textContent = "Congelando..." }
   try {
     const { error } = await supabaseClient.rpc("close_monthly_period", { p_period_key: state.periodKey })
     if (error) throw error
-    showToast("Periodo cerrado", `El periodo ${state.periodKey} quedo congelado.`, "success")
+    document.getElementById("closureDialog")?.close()
+    showToast("Periodo cerrado", `${periodLabelFromKey(state.periodKey)} quedo congelado.`, "success")
     await loadDashboard()
   } catch (err) {
     showToast("Error al cerrar", friendlyError(err), "danger")
-  } finally {
-    if (btn) btn.textContent = "Cerrar periodo"
+    if (btn) { btn.disabled = false; btn.textContent = "Congelar periodo" }
   }
 }
 
 async function reopenPeriod() {
-  const reason = window.prompt("Motivo para reabrir el periodo (obligatorio):")
-  if (!reason || !reason.trim()) return
+  const reasonEl = document.getElementById("reopenReason")
+  const reason = (reasonEl?.value || "").trim()
+  if (!reason) { showToast("Motivo requerido", "Captura un motivo para reabrir.", "warning"); reasonEl?.focus(); return }
+  const btn = document.getElementById("reopenConfirmBtn")
+  if (btn) { btn.disabled = true; btn.textContent = "Reabriendo..." }
   try {
-    const { error } = await supabaseClient.rpc("reopen_monthly_period", { p_period_key: state.periodKey, p_reason: reason.trim() })
+    const { error } = await supabaseClient.rpc("reopen_monthly_period", { p_period_key: state.periodKey, p_reason: reason })
     if (error) throw error
-    showToast("Periodo reabierto", `El periodo ${state.periodKey} volvio a calculo en vivo.`, "success")
+    document.getElementById("closureDialog")?.close()
+    showToast("Periodo reabierto", `${periodLabelFromKey(state.periodKey)} volvio a calculo en vivo.`, "success")
     await loadDashboard()
   } catch (err) {
     showToast("Error al reabrir", friendlyError(err), "danger")
+    if (btn) { btn.disabled = false; btn.textContent = "Reabrir" }
   }
 }
 
