@@ -29,7 +29,8 @@ const functionDefinition = (name) => {
 }
 
 test("Migration 043 active source has the certified SHA-256", () => {
-  const digest = crypto.createHash("sha256").update(bytes(migrationPath)).digest("hex")
+  const normalized = bytes(migrationPath).toString("utf8").replace(/\r\n/g, "\n")
+  const digest = crypto.createHash("sha256").update(normalized).digest("hex")
   assert.equal(digest, expectedMigrationSha256)
 })
 
@@ -242,7 +243,7 @@ test("context is sanitized and keeps document paths private", () => {
   assert.doesNotMatch(context, /'bank_account',\s*v_intake|'bank_clabe',\s*v_intake/)
 })
 
-test("frontend exposes all authorized draft states and no conversion action", () => {
+test("frontend preserves all authorized draft states for the 2B.2 extension", () => {
   for (const label of [
     "Preparar solicitud de pago",
     "Continuar preparación",
@@ -254,8 +255,8 @@ test("frontend exposes all authorized draft states and no conversion action", ()
   ]) {
     assert.match(`${html}\n${frontend}`, new RegExp(label))
   }
-  assert.match(html, /Creación definitiva disponible en Fase 2B\.2/)
-  assert.doesNotMatch(html, />\s*(?:Convertir|Crear payment_request|Aprobar|Enviar a batch)\s*</i)
+  assert.match(html, />Convertir a solicitud de pago</)
+  assert.doesNotMatch(html, />\s*(?:Aprobar|Enviar a batch)\s*</i)
 })
 
 test("frontend uses context and save RPCs with concurrency and action material", () => {

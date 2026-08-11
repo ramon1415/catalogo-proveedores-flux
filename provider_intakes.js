@@ -100,6 +100,8 @@ const state = {
   paymentDraftActionId: null,
   paymentDraftDiscarding: false,
   paymentDraftReloadPending: false,
+  paymentConversionActionId: null,
+  paymentConversionInFlight: false,
 }
 
 const dom = {}
@@ -164,6 +166,8 @@ function bindDom() {
     "paymentDraftMissingFields", "paymentDraftBlockers", "paymentDraftDiscardConfirm",
     "keepEditingPaymentDraftBtn", "discardPaymentDraftBtn", "paymentDraftError",
     "reloadPaymentDraftBtn", "paymentDraftSuccess", "cancelPaymentDraftBtn", "savePaymentDraftBtn",
+    "paymentConversionConfirm", "cancelPaymentConversionBtn", "confirmPaymentConversionBtn",
+    "convertPaymentDraftBtn",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -199,6 +203,9 @@ function bindEvents() {
   dom.paymentDraftCostCenter.addEventListener("change", updatePaymentDraftCategoryOptions)
   dom.paymentDraftPaymentMethod.addEventListener("change", updatePaymentDraftOriginAccountState)
   dom.reloadPaymentDraftBtn.addEventListener("click", reloadPaymentDraftModal)
+  dom.convertPaymentDraftBtn.addEventListener("click", requestPaymentConversion)
+  dom.cancelPaymentConversionBtn.addEventListener("click", cancelPaymentConversion)
+  dom.confirmPaymentConversionBtn.addEventListener("click", confirmPaymentConversion)
 
   ;[dom.folioFilter, dom.providerFilter].forEach((input) => {
     input.addEventListener("input", () => {
@@ -600,6 +607,11 @@ function paymentDraftStatusSection(intake) {
       `${missing.length} campo${missing.length === 1 ? "" : "s"} pendiente${missing.length === 1 ? "" : "s"}.`,
     ))
   }
+  if (context.intake?.created_payment_request_id) {
+    const link = element("a", "primary-btn", "Abrir solicitud de pago")
+    link.href = `./solicitudes.html?request_id=${encodeURIComponent(context.intake.created_payment_request_id)}`
+    section.append(link)
+  }
   return section
 }
 
@@ -620,8 +632,8 @@ function paymentDraftStateMessage(derived, intake, context) {
       ? "El proveedor vinculado está inactivo; selecciona uno activo para continuar."
       : "Vincula o registra al proveedor maestro para completar la conversión."
   }
-  if (derived === "READY_FOR_CONVERSION") return "Creación definitiva disponible en Fase 2B.2."
-  if (derived === "ALREADY_CONVERTED") return "No se permiten más cambios de preparación."
+  if (derived === "READY_FOR_CONVERSION") return "Lista para crear exactamente una solicitud en el flujo normal de Flux."
+  if (derived === "ALREADY_CONVERTED") return "La solicitud quedó vinculada; no se permiten más cambios de preparación."
   if (derived === "BLOCKED_INTAKE_STATUS") {
     return `El estado ${STATUS[intake.status]?.label || intake.status} no permite preparar ni editar el borrador.`
   }
@@ -1107,7 +1119,10 @@ async function openPaymentDraft(trigger) {
   state.paymentDraftDiscarding = false
   state.paymentDraftReloadPending = false
   state.paymentDraftActionId = createUuid()
+  state.paymentConversionActionId = createUuid()
+  state.paymentConversionInFlight = false
   dom.paymentDraftDiscardConfirm.hidden = true
+  dom.paymentConversionConfirm.hidden = true
   dom.paymentDraftError.textContent = ""
   dom.paymentDraftSuccess.textContent = ""
   dom.reloadPaymentDraftBtn.hidden = true
@@ -1164,7 +1179,9 @@ function populatePaymentDraftForm() {
   dom.paymentDraftTitle.textContent = context.draft
     ? "Editar solicitud preparada"
     : "Preparar solicitud de pago"
-  dom.paymentDraftSubtitle.textContent = `${intake.public_folio} · no crea payment_requests ni inicia aprobación.`
+  dom.paymentDraftSubtitle.textContent = context.state?.derived_state === "READY_FOR_CONVERSION"
+    ? `${intake.public_folio} · lista para crear una única solicitud Submitted.`
+    : `${intake.public_folio} · completa el borrador antes de convertir.`
   dom.paymentDraftCompany.value = intake.company_name || ""
   renderPaymentDraftSummary(context)
   renderPaymentDraftProvider(context)
@@ -1241,6 +1258,10 @@ function populatePaymentDraftForm() {
     ? "Selecciona únicamente una opción autorizada por el servidor."
     : "Guarda primero centro de costo, monto y solicitante para calcular opciones autorizadas."
   dom.savePaymentDraftBtn.disabled = !context.can_save
+  const conversionReady = context.state?.derived_state === "READY_FOR_CONVERSION"
+  dom.convertPaymentDraftBtn.hidden = !conversionReady
+  dom.convertPaymentDraftBtn.disabled = !conversionReady
+  dom.paymentConversionConfirm.hidden = true
   dom.paymentDraftSnapshot = paymentDraftSnapshot()
   state.paymentDraftDirty = false
   state.paymentDraftDiscarding = false
@@ -1337,7 +1358,12 @@ function handlePaymentDraftInput(event) {
   dom.paymentDraftError.textContent = ""
   dom.reloadPaymentDraftBtn.hidden = true
   state.paymentDraftDirty = paymentDraftSnapshot() !== state.paymentDraftSnapshot
-  if (state.paymentDraftDirty) state.paymentDraftActionId = createUuid()
+  if (state.paymentDraftDirty) {
+    state.paymentDraftActionId = createUuid()
+    state.paymentConversionActionId = createUuid()
+    dom.paymentConversionConfirm.hidden = true
+    dom.convertPaymentDraftBtn.disabled = true
+  }
   updatePaymentDraftClientState()
 }
 
@@ -1523,6 +1549,72 @@ async function submitPaymentDraft(event) {
   renderDetail()
 }
 
+function requestPaymentConversion() {
+  const context = state.paymentDraftContext
+  if (state.paymentDraftDirty) {
+    dom.paymentDraftError.textContent = "Guarda o descarta los cambios antes de convertir."
+    dom.savePaymentDraftBtn.focus()
+    return
+  }
+  if (context?.state?.derived_state !== "READY_FOR_CONVERSION") {
+    dom.paymentDraftError.textContent = "El intake ya no está listo para conversión. Recarga el borrador."
+    dom.reloadPaymentDraftBtn.hidden = false
+    return
+  }
+  state.paymentConversionActionId = state.paymentConversionActionId || createUuid()
+  dom.paymentDraftError.textContent = ""
+  dom.paymentConversionConfirm.hidden = false
+  dom.confirmPaymentConversionBtn.focus()
+}
+
+function cancelPaymentConversion() {
+  if (state.paymentConversionInFlight) return
+  dom.paymentConversionConfirm.hidden = true
+  dom.convertPaymentDraftBtn.focus()
+}
+
+async function confirmPaymentConversion() {
+  const context = state.paymentDraftContext
+  if (state.paymentConversionInFlight || context?.state?.derived_state !== "READY_FOR_CONVERSION") return
+
+  state.paymentConversionInFlight = true
+  dom.confirmPaymentConversionBtn.disabled = true
+  dom.cancelPaymentConversionBtn.disabled = true
+  dom.convertPaymentDraftBtn.disabled = true
+  const originalLabel = dom.confirmPaymentConversionBtn.textContent
+  dom.confirmPaymentConversionBtn.textContent = "Convirtiendo…"
+
+  const { data, error } = await supabaseClient.rpc("convert_provider_intake_to_payment_request", {
+    p_payment_intake_id: context.intake.id,
+    p_expected_intake_updated_at: context.intake.updated_at,
+    p_expected_draft_version: context.draft?.version ?? null,
+    p_action_id: state.paymentConversionActionId || createUuid(),
+  })
+
+  state.paymentConversionInFlight = false
+  dom.confirmPaymentConversionBtn.disabled = false
+  dom.cancelPaymentConversionBtn.disabled = false
+  dom.confirmPaymentConversionBtn.textContent = originalLabel
+
+  if (error) {
+    dom.paymentDraftError.textContent = friendlyError(error)
+    dom.convertPaymentDraftBtn.disabled = false
+    if (String(error?.message || "").includes("conflict")) dom.reloadPaymentDraftBtn.hidden = false
+    return
+  }
+
+  state.paymentDraftDirty = false
+  state.paymentDraftDiscarding = true
+  dom.paymentConversionConfirm.hidden = true
+  dom.paymentDraftDialog.close()
+  showToast(
+    "Solicitud de pago creada",
+    `${data?.request_number || "La solicitud"} entró como ${data?.request_status || "submitted"} con presupuesto ${data?.budget_decision || "validado"}.`,
+    "success",
+  )
+  await Promise.all([reloadOpenDetail(), loadList()])
+}
+
 function requestClosePaymentDraft() {
   if (state.paymentDraftDirty && !state.paymentDraftDiscarding) {
     state.paymentDraftReloadPending = false
@@ -1566,6 +1658,8 @@ function restorePaymentDraftFocus() {
   state.paymentDraftSnapshot = ""
   state.paymentDraftActionId = null
   state.paymentDraftReloadPending = false
+  state.paymentConversionActionId = null
+  state.paymentConversionInFlight = false
   if (trigger?.isConnected) trigger.focus()
 }
 
@@ -1664,7 +1758,7 @@ function renderDetailActions(intake) {
   dom.paymentDraftFooterState.textContent = draftState === "ALREADY_CONVERTED"
     ? "Solicitud de pago creada."
     : draftState === "READY_FOR_CONVERSION"
-      ? "Lista para conversión · creación definitiva disponible en Fase 2B.2."
+      ? "Lista para convertir en exactamente una solicitud normal de Flux."
       : draftState === "READY_PENDING_PROVIDER"
         ? "Preparada · pendiente de proveedor."
         : draftState === "DRAFT_INCOMPLETE"
@@ -1917,6 +2011,32 @@ const ERROR_MESSAGES = Object.freeze({
   provider_intake_conversion_draft_notes_invalid: "Las observaciones contienen texto no permitido o exceden 2000 caracteres.",
   provider_intake_conversion_draft_amount_reason_invalid: "El motivo debe tener entre 10 y 1000 caracteres válidos.",
   provider_intake_conversion_draft_amount_reason_required: "Explica el cambio de monto en al menos 10 caracteres.",
+  provider_intake_conversion_intake_id_required: "Selecciona un intake para convertir.",
+  provider_intake_conversion_fields_required: "Faltan datos de control. Recarga la preparación.",
+  provider_intake_conversion_status_invalid: "El intake ya no está en revisión.",
+  provider_intake_conversion_intake_conflict: "El intake cambió. Recarga antes de convertir.",
+  provider_intake_conversion_draft_required: "No existe un borrador preparado para convertir.",
+  provider_intake_conversion_draft_conflict: "Otra persona actualizó el borrador. Recarga la versión vigente.",
+  provider_intake_conversion_not_ready: "La preparación ya no cumple READY_FOR_CONVERSION.",
+  provider_intake_conversion_provider_required: "Vincula un proveedor maestro antes de convertir.",
+  provider_intake_conversion_provider_inactive: "El proveedor maestro está inactivo.",
+  provider_intake_conversion_cost_center_invalid: "El centro de costo ya no está disponible para la empresa.",
+  provider_intake_conversion_budget_category_invalid: "La categoría presupuestal ya no está disponible.",
+  provider_intake_conversion_budget_month_invalid: "El mes presupuestal ya no es válido.",
+  provider_intake_conversion_payment_method_invalid: "El método de pago ya no es válido.",
+  provider_intake_conversion_origin_account_invalid: "La cuenta origen ya no está disponible.",
+  provider_intake_conversion_origin_account_not_allowed: "La cuenta origen sólo aplica a transferencia.",
+  provider_intake_conversion_requester_invalid: "El solicitante interno ya no es válido.",
+  provider_intake_conversion_requester_company_invalid: "El solicitante perdió acceso a la empresa.",
+  provider_intake_conversion_approver_invalid: "El routing de aprobación cambió. Recarga la preparación.",
+  provider_intake_conversion_amount_invalid: "El monto definitivo ya no es válido.",
+  provider_intake_conversion_currency_invalid: "La moneda ya no es válida.",
+  provider_intake_conversion_scheduled_date_required: "Captura una fecha programada.",
+  provider_intake_conversion_concept_invalid: "El concepto interno ya no es válido.",
+  provider_intake_conversion_amount_reason_required: "El cambio de monto requiere una justificación válida.",
+  provider_intake_conversion_link_invalid: "El vínculo con la solicitud creada es inconsistente.",
+  provider_intake_conversion_link_conflict: "Otra conversión ganó la concurrencia. Recarga el detalle.",
+  provider_intake_conversion_request_create_failed: "No fue posible crear la solicitud normal de Flux.",
   file_service_unavailable: "El servicio de documentos temporales aún no está configurado en este ambiente.",
   signed_url_unavailable: "No se pudo generar el enlace temporal. Inténtalo de nuevo.",
 })

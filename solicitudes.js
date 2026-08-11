@@ -76,10 +76,17 @@ async function initSolicitudesPage() {
     setDefaultMonth();
     updateSummaryPanel();
     await loadPaymentRequests();
+    openRequestFromUrl();
   } catch (error) {
     showMessage(error.message || "No fue posible cargar la pantalla.", true);
     showToast("No fue posible iniciar", friendlyError(error), "error");
   }
+}
+
+function openRequestFromUrl() {
+  const requestId = new URLSearchParams(window.location.search).get("request_id");
+  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return;
+  if (paymentRequests.some(request => request.id === requestId)) openRequestDetail(requestId);
 }
 
 function cacheDom() {
