@@ -45,9 +45,9 @@
       <section class="page intake-page" id="triageWorkspace" hidden>
         <div class="page-header intake-page-header">
           <div>
-            <p class="eyebrow">Portal de proveedores · Fase 2B.1</p>
+            <p class="eyebrow">Portal de proveedores · Fase 2B</p>
             <h1>Solicitudes de proveedores</h1>
-            <p>Revisa información declarada, documentos privados y el historial antes de cualquier conversión.</p>
+            <p>Prepara, convierte y audita solicitudes desacopladas sin salir del flujo normal de Flux.</p>
           </div>
           <button class="secondary-btn" id="refreshBtn" type="button">Actualizar</button>
         </div>
@@ -182,7 +182,7 @@
       </header>
       <div class="dialog-scroll" id="detailContent" role="region" tabindex="0" aria-label="Contenido del detalle de la solicitud" aria-live="polite"></div>
       <footer class="dialog-footer">
-        <p class="phase-two-note" id="paymentDraftFooterState">Preparación disponible al iniciar la revisión. Conversión disponible en Fase 2B.2.</p>
+        <p class="phase-two-note" id="paymentDraftFooterState">Preparación y conversión disponibles durante la revisión.</p>
         <div class="detail-actions" id="detailActions"></div>
       </footer>
     </div>
@@ -257,9 +257,9 @@
     <form class="dialog-shell payment-draft-shell" id="paymentDraftForm" novalidate>
       <header class="dialog-header">
         <div>
-          <p class="eyebrow">Fase 2B.1 · borrador interno</p>
+          <p class="eyebrow">Fase 2B · solicitud desacoplada</p>
           <h2 id="paymentDraftTitle">Preparar solicitud de pago</h2>
-          <p id="paymentDraftSubtitle">No crea una solicitud de pago ni inicia aprobación.</p>
+          <p id="paymentDraftSubtitle">Prepara y convierte el intake mediante el flujo normal de Flux.</p>
         </div>
         <button class="icon-btn" id="closePaymentDraftBtn" type="button" aria-label="Cerrar preparación">✕</button>
       </header>
@@ -415,7 +415,7 @@
                 <ul id="paymentDraftBlockers"></ul>
               </div>
             </div>
-            <p class="payment-draft-phase-note">Creación definitiva disponible en Fase 2B.2.</p>
+            <p class="payment-draft-phase-note">La conversión crea una única solicitud real en estado inicial del flujo normal.</p>
           </section>
 
           <div class="payment-draft-discard" id="paymentDraftDiscardConfirm" role="alert" hidden>
@@ -426,6 +426,17 @@
             <div>
               <button class="secondary-btn" id="keepEditingPaymentDraftBtn" type="button">Seguir editando</button>
               <button class="secondary-btn danger-action" id="discardPaymentDraftBtn" type="button">Descartar cambios</button>
+            </div>
+          </div>
+
+          <div class="payment-draft-discard" id="paymentConversionConfirm" role="alertdialog" aria-labelledby="paymentConversionConfirmTitle" hidden>
+            <div>
+              <strong id="paymentConversionConfirmTitle">Convertir a solicitud de pago</strong>
+              <p>Se creará exactamente una solicitud real, se validará presupuesto y entrará en estado Submitted. Esta acción no aprueba, no crea batch, no ejecuta pago ni envía una notificación externa.</p>
+            </div>
+            <div>
+              <button class="secondary-btn" id="cancelPaymentConversionBtn" type="button">Cancelar</button>
+              <button class="primary-btn" id="confirmPaymentConversionBtn" type="button">Confirmar conversión</button>
             </div>
           </div>
 
@@ -440,6 +451,7 @@
       <footer class="dialog-footer action-footer payment-draft-footer">
         <button class="secondary-btn" id="cancelPaymentDraftBtn" type="button">Cerrar</button>
         <button class="primary-btn" id="savePaymentDraftBtn" type="submit">Guardar borrador</button>
+        <button class="primary-btn" id="convertPaymentDraftBtn" type="button" hidden>Convertir a solicitud de pago</button>
       </footer>
     </form>
   </dialog>
@@ -449,6 +461,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260717-provider-intake-triage"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./provider_intakes.js?v=20260723-phase-2b1"></script>
+  <script src="./provider_intakes.js?v=20260811-phase-2b2"></script>
 </body>
 </html>
