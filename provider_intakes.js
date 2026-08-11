@@ -735,7 +735,7 @@ function providerMatchSection(intake) {
   }
 
   section.append(matchHistory(matchData.history || []))
-  section.append(element("p", "phase-two-inline", "Conversión disponible en Fase 2B. Esta fase no crea una solicitud de pago."))
+  section.append(element("p", "phase-two-inline", "El vínculo maestro queda en modo de solo lectura después de la conversión."))
   return section
 }
 
