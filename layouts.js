@@ -39,6 +39,9 @@ let activeLayoutRebatchItem = null
 let layoutRebatchSubmitting = false
 let activeLayoutCompletionRequest = null
 let layoutCompletionSubmitting = false
+let activeCreatedLayout = null
+let layoutCreationSubmitting = false
+let layoutCreationRequestSequence = 0
 let layoutActionConfirmResolve = null
 const dom = {}
 
@@ -88,6 +91,7 @@ function cacheDom() {
   dom.layoutBankAccountId = document.getElementById("layoutBankAccountId")
   dom.reviewLayoutBtn = document.getElementById("reviewLayoutBtn")
   dom.layoutEligibilityPreview = document.getElementById("layoutEligibilityPreview")
+  dom.layoutCreatedResult = document.getElementById("layoutCreatedResult")
   dom.layoutInvalidBox = document.getElementById("layoutInvalidBox")
   dom.closeNewLayoutModalBtn = document.getElementById("closeNewLayoutModalBtn")
   dom.cancelNewLayoutBtn = document.getElementById("cancelNewLayoutBtn")
@@ -181,8 +185,16 @@ function bindEvents() {
   dom.layoutBankAccountId?.addEventListener("change", () => invalidateLayoutPreview({ filtersChanged: true }))
   dom.reviewLayoutBtn?.addEventListener("click", reviewLayoutEligibility)
   dom.layoutEligibilityPreview?.addEventListener("click", handleLayoutPreviewAction)
+  dom.layoutCreatedResult?.addEventListener("click", handleCreatedLayoutAction)
   dom.closeNewLayoutModalBtn?.addEventListener("click", closeNewLayoutModal)
   dom.cancelNewLayoutBtn?.addEventListener("click", closeNewLayoutModal)
+  dom.newLayoutDialog?.addEventListener("cancel", (event) => {
+    if (layoutCreationSubmitting) {
+      event.preventDefault()
+      return
+    }
+    closeNewLayoutModal()
+  })
   dom.newLayoutForm?.addEventListener("submit", submitNewLayout)
   dom.closeLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
   dom.cancelLayoutRebatchBtn?.addEventListener("click", closeLayoutRebatchDialog)
@@ -378,6 +390,7 @@ async function openNewLayoutModal() {
 
 function closeNewLayoutModal() {
   invalidateLayoutPreview()
+  layoutCreationRequestSequence += 1
   if (dom.newLayoutDialog.open) dom.newLayoutDialog.close()
 }
 
@@ -387,8 +400,14 @@ function resetNewLayoutForm() {
   layoutEligibilityPreviewParamsKey = null
   activeLayoutPreviewRequestId = ++layoutPreviewRequestSequence
   activeLayoutRebatchItem = null
+  activeCreatedLayout = null
+  layoutCreationSubmitting = false
+  layoutCreationRequestSequence += 1
   dom.layoutEligibilityPreview.classList.add("hidden")
   dom.layoutEligibilityPreview.innerHTML = ""
+  dom.layoutCreatedResult?.classList.add("hidden")
+  if (dom.layoutCreatedResult) dom.layoutCreatedResult.innerHTML = ""
+  setNewLayoutFormLocked(false)
   dom.submitNewLayoutBtn.disabled = true
   dom.submitNewLayoutBtn.textContent = "Crear layout"
   dom.layoutInvalidBox.classList.add("hidden")
@@ -446,6 +465,7 @@ function renderLayoutBankAccountOptions() {
 }
 
 function invalidateLayoutPreview({ filtersChanged = false } = {}) {
+  if (activeCreatedLayout) return
   activeLayoutPreviewRequestId = ++layoutPreviewRequestSequence
   layoutEligibilityPreview = null
   layoutEligibilityPreviewParamsKey = null
@@ -481,6 +501,7 @@ function layoutPreviewParamsKey(params = layoutPreviewParams()) {
 
 async function reviewLayoutEligibility() {
   if (!ensureActorProfile()) return
+  if (activeCreatedLayout || layoutCreationSubmitting) return
   if (inFlightLayoutPreviewRequestId !== null) return
   const params = layoutPreviewParams()
   if (!params.p_period_start || !params.p_period_end) return showToast("Fechas requeridas", "Captura fecha inicio y fecha fin.", "warning")
@@ -566,7 +587,10 @@ function renderLayoutEligibilityPreview() {
   dom.layoutEligibilityPreview.classList.remove("hidden")
   dom.submitNewLayoutBtn.disabled = ready.length === 0
   dom.submitNewLayoutBtn.textContent = ready.length
-    ? `Crear layout con ${ready.length} ${ready.length === 1 ? "pago" : "pagos"}`
+    ? `Crear y descargar layout con ${ready.length} ${ready.length === 1 ? "pago" : "pagos"}`
+    : noReadyMessage
+  dom.submitNewLayoutBtn.title = ready.length
+    ? `Crear layout con ${ready.length} ${ready.length === 1 ? "pago" : "pagos"} y preparar su descarga`
     : noReadyMessage
   resetLayoutPreviewScrollPositions()
 }
@@ -1001,6 +1025,12 @@ async function submitLayoutRebatch(event) {
 async function submitNewLayout(event) {
   event.preventDefault()
   if (!ensureActorProfile()) return
+  if (activeCreatedLayout) {
+    renderCreatedLayoutResult()
+    scrollLayoutModalToSection(dom.layoutCreatedResult)
+    return
+  }
+  if (layoutCreationSubmitting) return
   if (!layoutEligibilityPreview) {
     showToast("Revision requerida", "Revisa las solicitudes antes de crear el layout.", "warning")
     return
@@ -1023,6 +1053,9 @@ async function submitNewLayout(event) {
   if (!periodStart || !periodEnd) { showToast("Fechas requeridas", "Captura fecha inicio y fecha fin.", "warning"); return }
   if (periodStart > periodEnd) { showToast("Rango invalido", "La fecha inicio no puede ser mayor a la fecha fin.", "warning"); return }
 
+  const requestId = ++layoutCreationRequestSequence
+  layoutCreationSubmitting = true
+  setNewLayoutCreationBusy(true)
   setButtonLoading(dom.submitNewLayoutBtn, true, "Creando layout...")
   try {
     const { data, error } = await supabaseClient.rpc("create_payment_layout", {
@@ -1036,14 +1069,40 @@ async function submitNewLayout(event) {
 
     if (error) throw error
 
-    await loadLayouts()
-
     if (data?.message === "no_valid_payment_requests") {
       renderLayoutNotice("No hay solicitudes validas para generar layout en este periodo.", data?.invalid_requests || [])
       showToast("Sin solicitudes validas", "No hay solicitudes validas para este periodo.", "warning")
       invalidateLayoutPreview()
       return
     }
+
+    const layoutId = cleanText(data?.layout_id)
+    if (!layoutId) throw new Error("layout_created_without_id")
+
+    activeCreatedLayout = {
+      id: layoutId,
+      number: data?.layout_number || "Layout",
+      paymentCount: numberValue(data?.payment_count),
+      layout: null,
+      lines: [],
+      autoDownloaded: false,
+    }
+    activeLayoutPreviewRequestId = ++layoutPreviewRequestSequence
+    layoutEligibilityPreview = null
+    layoutEligibilityPreviewParamsKey = null
+    setNewLayoutFormLocked(true)
+
+    await loadLayouts()
+    const layout = layouts.find((item) => item.id === layoutId)
+    if (!layout) throw new Error("layout_created_not_readable")
+
+    const { data: lines, error: linesError } = await fetchLayoutLines(layoutId)
+    if (linesError) throw linesError
+    if (requestId !== layoutCreationRequestSequence || !dom.newLayoutDialog?.open) return
+
+    activeCreatedLayout.number = data?.layout_number || layout.layout_number || "Layout"
+    activeCreatedLayout.layout = layout
+    activeCreatedLayout.lines = lines || []
 
     const invalidCount = numberValue(data?.invalid_count)
     const summary = [
@@ -1054,26 +1113,118 @@ async function submitNewLayout(event) {
       `${numberValue(data?.direction_reapproval_count)} requieren nueva autorizacion de Direccion`,
       `${invalidCount} con datos incompletos`,
     ].join(" · ")
-    renderLayoutNotice(`Layout ${data?.layout_number || "creado"} con ${numberValue(data?.payment_count)} pagos. ${summary}`, data?.invalid_requests || [])
+    renderLayoutNotice(`Layout ${activeCreatedLayout.number} con ${activeCreatedLayout.paymentCount} pagos. ${summary}`, data?.invalid_requests || [])
+    renderCreatedLayoutResult()
     showToast(
       "Layout creado",
       summary,
       numberValue(data?.rejected_count) || numberValue(data?.pending_close_count) || numberValue(data?.direction_reapproval_count) || invalidCount ? "warning" : "success"
     )
-    layoutEligibilityPreview = null
-    layoutEligibilityPreviewParamsKey = null
-    dom.layoutEligibilityPreview.classList.add("hidden")
-    dom.submitNewLayoutBtn.disabled = true
-    dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
+    const autoFormat = singleReadyCreatedLayoutFormat(activeCreatedLayout.lines)
+    if (autoFormat) {
+      activeCreatedLayout.autoDownloaded = true
+      renderCreatedLayoutResult()
+      await downloadLayoutBbvaFormat(layoutId, autoFormat)
+    }
   } catch (error) {
-    renderLayoutNotice(friendlyRpcError(error))
-    showToast("No se pudo crear layout", friendlyRpcError(error), "danger")
+    if (requestId !== layoutCreationRequestSequence) return
+    if (activeCreatedLayout) {
+      renderCreatedLayoutResult()
+      renderLayoutNotice(`El Layout ${activeCreatedLayout.number} ya fue creado. No se volverá a crear; reintenta la descarga desde este mismo resultado.`)
+      showToast("Layout creado", "No se pudo preparar la descarga automática. El Layout no se duplicará.", "warning")
+    } else {
+      renderLayoutNotice(friendlyRpcError(error))
+      showToast("No se pudo crear layout", friendlyRpcError(error), "danger")
+    }
   } finally {
+    if (requestId === layoutCreationRequestSequence) {
+      layoutCreationSubmitting = false
+      setNewLayoutCreationBusy(false)
+    }
     setButtonLoading(dom.submitNewLayoutBtn, false, "Crear layout")
-    if (!layoutEligibilityPreview) {
+    if (activeCreatedLayout) {
+      dom.submitNewLayoutBtn.disabled = true
+      dom.submitNewLayoutBtn.textContent = `${activeCreatedLayout.number} creado`
+    } else if (!layoutEligibilityPreview) {
       dom.submitNewLayoutBtn.disabled = true
       dom.submitNewLayoutBtn.textContent = "Revisa solicitudes primero"
     }
+  }
+}
+
+function setNewLayoutCreationBusy(busy) {
+  if (dom.closeNewLayoutModalBtn) dom.closeNewLayoutModalBtn.disabled = busy
+  if (dom.cancelNewLayoutBtn) dom.cancelNewLayoutBtn.disabled = busy
+  if (dom.reviewLayoutBtn) dom.reviewLayoutBtn.disabled = busy || Boolean(activeCreatedLayout)
+}
+
+function setNewLayoutFormLocked(locked) {
+  ;[
+    dom.layoutPeriodStart,
+    dom.layoutPeriodEnd,
+    dom.layoutName,
+    dom.layoutCompanyId,
+    dom.layoutBankAccountId,
+  ].forEach((field) => {
+    if (field) field.disabled = locked
+  })
+  if (dom.reviewLayoutBtn) dom.reviewLayoutBtn.disabled = locked
+}
+
+function createdLayoutDownloadFormats(lines) {
+  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const formats = [BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK].filter((format) => {
+    const selected = activeLines.filter((line) => {
+      try {
+        return detectBbvaLayoutFormat(line) === format
+      } catch {
+        return false
+      }
+    })
+    return selected.length > 0 && validateLayoutLines(selected).length === 0
+  })
+  return formats
+}
+
+function singleReadyCreatedLayoutFormat(lines) {
+  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  if (!activeLines.length || validateLayoutLines(activeLines).length) return null
+  const summary = summarizeLayoutFormats(activeLines)
+  if (summary.convenio.count || summary.unsupported.count) return null
+  const formats = createdLayoutDownloadFormats(activeLines)
+  return formats.length === 1 ? formats[0] : null
+}
+
+function renderCreatedLayoutResult() {
+  if (!dom.layoutCreatedResult || !activeCreatedLayout) return
+  const formats = createdLayoutDownloadFormats(activeCreatedLayout.lines)
+  const actions = formats.map((format) => (
+    `<button type="button" class="primary-btn" data-created-layout-action="download" data-format="${escapeHtml(format)}">Descargar ${escapeHtml(bbvaFormatLabel(format))}</button>`
+  ))
+  if (!actions.length) {
+    actions.push(`<button type="button" class="secondary-btn" data-created-layout-action="details">Revisar líneas</button>`)
+  }
+  const downloadMessage = activeCreatedLayout.autoDownloaded
+    ? "La descarga automática inició. Puedes descargar nuevamente sin crear otro Layout."
+    : formats.length > 1
+      ? "Selecciona el formato bancario que necesitas."
+      : "El Layout quedó creado; usa la descarga disponible sin volver a crearlo."
+  dom.layoutCreatedResult.innerHTML = `
+    <h3>${escapeHtml(activeCreatedLayout.number)} creado con ${activeCreatedLayout.paymentCount} ${activeCreatedLayout.paymentCount === 1 ? "pago" : "pagos"}</h3>
+    <p>${escapeHtml(downloadMessage)}</p>
+    <div class="layout-created-actions">${actions.join("")}</div>`
+  dom.layoutCreatedResult.classList.remove("hidden")
+}
+
+async function handleCreatedLayoutAction(event) {
+  const button = event.target.closest("[data-created-layout-action]")
+  if (!button || !activeCreatedLayout) return
+  if (button.dataset.createdLayoutAction === "details") {
+    await openLayoutLines(activeCreatedLayout.id)
+    return
+  }
+  if (button.dataset.createdLayoutAction === "download") {
+    await downloadLayoutBbvaFormat(activeCreatedLayout.id, button.dataset.format)
   }
 }
 
