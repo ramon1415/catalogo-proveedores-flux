@@ -10,7 +10,7 @@ const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 const bytes = (relative) => fs.readFileSync(path.join(root, relative))
 
-const migrationPath = "supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql"
+const migrationPath = "supabase/migrations/20260811035346_043_provider_intake_payment_draft.sql"
 const expectedMigrationSha256 =
   "be4f0ade8670c7e8b26eb148eba7c38a4e05bf8954c602a8f432431f1ea0c9cc"
 const migration = read(migrationPath)

@@ -37,7 +37,7 @@ C1B reconstruye el cambio de forma limpia y filtrada desde
 `2deae2cddf8ebb22fffd76e7a648483e2b3cc609`. Su alcance está limitado a estas
 ocho rutas:
 
-- `supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`;
+- `supabase/migrations/20260811035346_043_provider_intake_payment_draft.sql`;
 - `provider_intakes.css`;
 - `provider_intakes.html`;
 - `provider_intakes.js`;

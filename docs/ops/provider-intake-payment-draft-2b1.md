@@ -56,8 +56,8 @@ autorizada.
 
 ## Arquitectura
 
-`supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql` es la única fuente
-activa del schema de 2B.1. La migration está versionada en la candidata postmatching como versión Supabase CLI `20260808123752`, slot lógico `043`, pero no está aplicada.
+`supabase/migrations/20260811035346_043_provider_intake_payment_draft.sql` es la única fuente
+activa del schema de 2B.1. La migration está versionada en la candidata postmatching como versión Supabase CLI `20260811035346`, slot lógico `043`, pero no está aplicada.
 
 Migration 043 define:
 
@@ -77,7 +77,7 @@ La candidata postmatching se reconstruye de forma limpia y filtrada desde
 `2deae2cddf8ebb22fffd76e7a648483e2b3cc609` y contiene exclusivamente estas
 ocho rutas:
 
-- `supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`;
+- `supabase/migrations/20260811035346_043_provider_intake_payment_draft.sql`;
 - `provider_intakes.css`;
 - `provider_intakes.html`;
 - `provider_intakes.js`;
@@ -227,7 +227,7 @@ batch.
 
 Fuente activa:
 
-`supabase/migrations/20260808123752_043_provider_intake_payment_draft.sql`
+`supabase/migrations/20260811035346_043_provider_intake_payment_draft.sql`
 
 Identidad vigente:
 
@@ -237,7 +237,7 @@ Identidad vigente:
 - SHA-256:
   `be4f0ade8670c7e8b26eb148eba7c38a4e05bf8954c602a8f432431f1ea0c9cc`;
 - slot lógico 043: asignado después del 041 vigente en `dev` y del 042 reservado por PR #286;
-- versión Supabase CLI: `20260808123752`;
+- versión Supabase CLI: `20260811035346`;
 - compatibilidad estática W2: `COMPATIBLE_AS_IS`;
 - aplicación: `NOT_APPLIED`.
 
