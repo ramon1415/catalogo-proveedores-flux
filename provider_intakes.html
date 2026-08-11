@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./ux2_shared.css">
-  <link rel="stylesheet" href="./provider_intakes.css?v=20260718-phase-2a-reflow-v3">
+  <link rel="stylesheet" href="./provider_intakes.css?v=20260723-phase-2b1">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Saltar al contenido</a>
@@ -45,7 +45,7 @@
       <section class="page intake-page" id="triageWorkspace" hidden>
         <div class="page-header intake-page-header">
           <div>
-            <p class="eyebrow">Portal de proveedores · Fase 2A</p>
+            <p class="eyebrow">Portal de proveedores · Fase 2B.1</p>
             <h1>Solicitudes de proveedores</h1>
             <p>Revisa información declarada, documentos privados y el historial antes de cualquier conversión.</p>
           </div>
@@ -127,7 +127,7 @@
 
         <div class="results-summary" id="resultsSummary" role="status" aria-live="polite">Preparando bandeja…</div>
 
-        <section class="table-card triage-table-card" aria-labelledby="intakeTableCaption">
+        <div class="table-card triage-table-card" role="region" aria-labelledby="intakeTableCaption">
           <div class="table-wrapper">
             <table class="triage-table">
               <caption id="intakeTableCaption">Solicitudes públicas disponibles para triage interno</caption>
@@ -150,7 +150,7 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
 
         <nav class="pagination" aria-label="Paginación de solicitudes">
           <button class="secondary-btn" id="previousPageBtn" type="button">Anterior</button>
@@ -180,9 +180,9 @@
         </div>
         <button class="icon-btn" id="closeDetailBtn" type="button" aria-label="Cerrar detalle">✕</button>
       </header>
-      <div class="dialog-scroll" id="detailContent" tabindex="0" aria-label="Contenido del detalle de la solicitud" aria-live="polite"></div>
+      <div class="dialog-scroll" id="detailContent" role="region" tabindex="0" aria-label="Contenido del detalle de la solicitud" aria-live="polite"></div>
       <footer class="dialog-footer">
-        <p class="phase-two-note">Conversión disponible en Fase 2B.</p>
+        <p class="phase-two-note" id="paymentDraftFooterState">Preparación disponible al iniciar la revisión. Conversión disponible en Fase 2B.2.</p>
         <div class="detail-actions" id="detailActions"></div>
       </footer>
     </div>
@@ -253,11 +253,202 @@
     </form>
   </dialog>
 
+  <dialog class="payment-draft-dialog" id="paymentDraftDialog" aria-labelledby="paymentDraftTitle">
+    <form class="dialog-shell payment-draft-shell" id="paymentDraftForm" novalidate>
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">Fase 2B.1 · borrador interno</p>
+          <h2 id="paymentDraftTitle">Preparar solicitud de pago</h2>
+          <p id="paymentDraftSubtitle">No crea una solicitud de pago ni inicia aprobación.</p>
+        </div>
+        <button class="icon-btn" id="closePaymentDraftBtn" type="button" aria-label="Cerrar preparación">✕</button>
+      </header>
+
+      <div class="dialog-scroll payment-draft-content" id="paymentDraftContent">
+        <div class="payment-draft-loading" id="paymentDraftLoading" role="status">
+          <span class="draft-skeleton"></span>
+          <span class="draft-skeleton short"></span>
+          <span class="draft-skeleton"></span>
+          <span>Cargando contexto autorizado…</span>
+        </div>
+
+        <div id="paymentDraftWorkspace" hidden>
+          <section class="payment-draft-summary" aria-labelledby="paymentDraftSummaryTitle">
+            <div>
+              <p class="eyebrow">Resumen del intake</p>
+              <h3 id="paymentDraftSummaryTitle">Información declarada</h3>
+            </div>
+            <dl class="payment-draft-summary-grid" id="paymentDraftSummary"></dl>
+            <div class="payment-draft-documents">
+              <h4>Documentos privados</h4>
+              <ul id="paymentDraftDocuments"></ul>
+            </div>
+          </section>
+
+          <section class="payment-draft-provider" aria-labelledby="paymentDraftProviderTitle">
+            <div>
+              <p class="eyebrow">Estado del proveedor</p>
+              <h3 id="paymentDraftProviderTitle">Proveedor maestro pendiente</h3>
+            </div>
+            <p id="paymentDraftProviderMessage"></p>
+          </section>
+
+          <section class="payment-draft-fields" aria-labelledby="paymentDraftFieldsTitle">
+            <div class="payment-draft-section-heading">
+              <div>
+                <p class="eyebrow">Datos internos</p>
+                <h3 id="paymentDraftFieldsTitle">Preparación financiera</h3>
+              </div>
+              <span>Se permite guardar parcialmente.</span>
+            </div>
+
+            <div class="payment-draft-form-grid">
+              <label>
+                <span>Empresa pagadora</span>
+                <input id="paymentDraftCompany" type="text" readonly>
+              </label>
+              <label>
+                <span>Centro de costo</span>
+                <select id="paymentDraftCostCenter">
+                  <option value="">Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Categoría o partida</span>
+                <select id="paymentDraftBudgetCategory">
+                  <option value="">Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Mes presupuestal</span>
+                <input id="paymentDraftBudgetMonth" type="month">
+              </label>
+              <label>
+                <span>Método de pago</span>
+                <select id="paymentDraftPaymentMethod">
+                  <option value="">Pendiente</option>
+                  <option value="transfer">Transferencia</option>
+                  <option value="cash">Efectivo</option>
+                  <option value="check">Cheque</option>
+                  <option value="other">Otro</option>
+                </select>
+              </label>
+              <label id="paymentDraftOriginAccountField">
+                <span>Cuenta origen</span>
+                <select id="paymentDraftOriginAccount">
+                  <option value="">Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Monto definitivo</span>
+                <input id="paymentDraftFinalAmount" type="number" min="0.01" max="9999999999999999.99" step="0.01" inputmode="decimal">
+              </label>
+              <label>
+                <span>Moneda</span>
+                <select id="paymentDraftCurrency">
+                  <option value="">Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Fecha programada</span>
+                <input id="paymentDraftScheduledDate" type="date">
+              </label>
+              <label class="payment-draft-wide">
+                <span>Concepto interno</span>
+                <input id="paymentDraftInternalConcept" type="text" minlength="3" maxlength="500">
+              </label>
+              <label class="payment-draft-wide">
+                <span>Observaciones internas</span>
+                <textarea id="paymentDraftInternalNotes" rows="3" maxlength="2000"></textarea>
+              </label>
+              <label class="payment-draft-wide" id="paymentDraftAmountReasonField" hidden>
+                <span>Motivo de cambio de monto</span>
+                <textarea id="paymentDraftAmountReason" rows="3" minlength="10" maxlength="1000" aria-describedby="paymentDraftAmountReasonHint"></textarea>
+                <small id="paymentDraftAmountReasonHint">Obligatorio cuando el monto definitivo difiere del monto declarado.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="payment-draft-fields" aria-labelledby="paymentDraftOwnersTitle">
+            <div class="payment-draft-section-heading">
+              <div>
+                <p class="eyebrow">Responsables</p>
+                <h3 id="paymentDraftOwnersTitle">Solicitante y aprobador</h3>
+              </div>
+            </div>
+            <div class="payment-draft-form-grid">
+              <label>
+                <span>Solicitante interno</span>
+                <select id="paymentDraftRequester">
+                  <option value="">Pendiente</option>
+                </select>
+              </label>
+              <label>
+                <span>Aprobador permitido</span>
+                <select id="paymentDraftApprover" aria-describedby="paymentDraftApproverHint">
+                  <option value="">Pendiente</option>
+                </select>
+                <small id="paymentDraftApproverHint">Las opciones provienen del pool o reglas canónicas del servidor.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="payment-draft-readiness" aria-labelledby="paymentDraftReadinessTitle">
+            <div>
+              <p class="eyebrow">Resumen de preparación</p>
+              <h3 id="paymentDraftReadinessTitle">Estado del borrador</h3>
+            </div>
+            <div class="payment-draft-progress">
+              <div class="payment-draft-progress-copy">
+                <strong id="paymentDraftStateLabel">Sin iniciar</strong>
+                <span id="paymentDraftProgressLabel">0 de 11 campos completos</span>
+              </div>
+              <progress id="paymentDraftProgress" max="11" value="0">0 de 11</progress>
+            </div>
+            <div class="payment-draft-status-columns">
+              <div>
+                <h4>Campos pendientes</h4>
+                <ul id="paymentDraftMissingFields"></ul>
+              </div>
+              <div>
+                <h4>Bloqueos</h4>
+                <ul id="paymentDraftBlockers"></ul>
+              </div>
+            </div>
+            <p class="payment-draft-phase-note">Creación definitiva disponible en Fase 2B.2.</p>
+          </section>
+
+          <div class="payment-draft-discard" id="paymentDraftDiscardConfirm" role="alert" hidden>
+            <div>
+              <strong>Hay cambios sin guardar</strong>
+              <p>Puedes seguir editando o descartar los cambios de este formulario.</p>
+            </div>
+            <div>
+              <button class="secondary-btn" id="keepEditingPaymentDraftBtn" type="button">Seguir editando</button>
+              <button class="secondary-btn danger-action" id="discardPaymentDraftBtn" type="button">Descartar cambios</button>
+            </div>
+          </div>
+
+          <div class="payment-draft-error-row">
+            <p class="field-error payment-draft-error" id="paymentDraftError" role="alert"></p>
+            <button class="secondary-btn" id="reloadPaymentDraftBtn" type="button" hidden>Recargar borrador</button>
+          </div>
+          <p class="payment-draft-success" id="paymentDraftSuccess" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <footer class="dialog-footer action-footer payment-draft-footer">
+        <button class="secondary-btn" id="cancelPaymentDraftBtn" type="button">Cerrar</button>
+        <button class="primary-btn" id="savePaymentDraftBtn" type="submit">Guardar borrador</button>
+      </footer>
+    </form>
+  </dialog>
+
   <div id="toastStack" class="toast-stack-v2" aria-live="polite" aria-atomic="false"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260717-provider-intake-triage"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./provider_intakes.js?v=20260718-phase-2a"></script>
+  <script src="./provider_intakes.js?v=20260723-phase-2b1"></script>
 </body>
 </html>
