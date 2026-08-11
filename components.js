@@ -9,6 +9,10 @@
 
 const Components = (() => {
 
+  // Íconos de estatus (SVG inline, heredan color via currentColor)
+  const CHECK_SVG = '<svg class="flux-ico" viewBox="0 0 1920 1920" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M1827.701 303.065 698.835 1431.801 92.299 825.266 0 917.564 698.835 1616.4 1919.869 395.234z"/></svg>'
+  const CROSS_SVG = '<svg class="flux-ico" viewBox="0 0 1920 1920" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M1827.701 0 960.065 867.636 92.3 0 0 92.168l867.636 867.767L0 1827.57 92.299 1920l867.766-867.766L1827.701 1920l92.168-92.43-867.635-867.635 867.635-867.767z"/></svg>'
+
   // ─────────────────────────────────────────
   // BADGE
   // ─────────────────────────────────────────
@@ -58,7 +62,7 @@ const Components = (() => {
   // variant: 'info' | 'success' | 'warning' | 'danger' | 'neutral' | 'violet'
   // icon: string opcional (✓, !, ✕, i)
   function notice(title, desc, variant = 'info', icon = null) {
-    const iconMap = { info: 'i', success: '✓', warning: '!', danger: '✕', neutral: '·', violet: '◆' }
+    const iconMap = { info: 'i', success: CHECK_SVG, warning: '!', danger: CROSS_SVG, neutral: '·', violet: '◆' }
     const ic = icon ?? iconMap[variant] ?? 'i'
     return `
       <div class="notice-v2 ${variant}">
@@ -130,7 +134,7 @@ const Components = (() => {
   // variant: 'success' | 'danger' | 'warning' | 'info' | 'neutral'
   // duration: segundos de la barra de progreso (0 = sin barra)
   function toast({ title, desc = '', variant = 'info', duration = 4, onClose = '' } = {}) {
-    const iconMap = { success: '✓', danger: '✕', warning: '!', info: 'i', neutral: '·' }
+    const iconMap = { success: CHECK_SVG, danger: CROSS_SVG, warning: '!', info: 'i', neutral: '·' }
     const icon = iconMap[variant] ?? 'i'
     const progress = duration > 0
       ? `<div class="toast-v2-progress"><div class="toast-v2-fill" style="animation:shrink ${duration}s linear forwards"></div></div>`
@@ -226,7 +230,7 @@ const Components = (() => {
 
     const itemsHtml = items.map(item => `
       <div class="check-item${item.ok ? '' : ' fail'}">
-        <div class="check-icon-wrap ${item.ok ? 'ok' : 'fail'}">${item.ok ? '✓' : '✕'}</div>
+        <div class="check-icon-wrap ${item.ok ? 'ok' : 'fail'}">${item.ok ? CHECK_SVG : CROSS_SVG}</div>
         <div style="flex:1">
           <div class="check-label">${item.label}</div>
           ${item.reason ? `<div class="check-reason">${item.reason}</div>` : ''}
