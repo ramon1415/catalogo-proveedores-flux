@@ -11,6 +11,7 @@ const state = {
   closureComments: [],
   activeTab: "expenses",
   chart: null,
+  frozen: null,
 }
 
 const moneyFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 })
@@ -32,6 +33,7 @@ const checkLabels = {
 
 const statusLabels = {
   open: "Abierto", review: "En revision", closed: "Cerrado",
+  reopened: "Reabierto",
   cancelled: "Cancelado", not_created: "Sin cierre",
   pending: "Pendiente", partial: "Parcial", paid: "Pagado",
   overdue: "Vencido", issued: "Emitida", ok: "OK",
@@ -71,13 +73,8 @@ function bindEvents() {
   document.getElementById("clearFilterBtn")?.addEventListener("click", clearFilter)
   document.getElementById("memberSearch")?.addEventListener("input", renderMemberTable)
 
-  document.getElementById("closePeriodBtn")?.addEventListener("click", () => {
-    if (state.closureChecklist?.can_close) {
-      showToast("Cierre pendiente", "El cierre formal se conectara en la siguiente tanda.", "success")
-    } else {
-      showToast("No se puede cerrar", "Resuelve primero los bloqueos del checklist.", "danger")
-    }
-  })
+  document.getElementById("closePeriodBtn")?.addEventListener("click", closePeriod)
+  document.getElementById("reopenPeriodBtn")?.addEventListener("click", reopenPeriod)
 
   document.getElementById("logoutBtn")?.addEventListener("click", async () => {
     await supabaseClient.auth.signOut()
@@ -124,9 +121,18 @@ async function loadDashboard() {
   setLoading(true)
 
   try {
-    const { data, error } = await supabaseClient.rpc("dashboard_export_payload", { p_period_key: state.periodKey })
-    if (error) throw error
-    const payload = normalize(data)
+    // Periodo cerrado -> leer del snapshot congelado; abierto -> calcular en vivo
+    const closure = await fetchClosure(state.periodKey)
+    state.frozen = (closure && closure.status === "closed" && closure.snapshot) ? closure : null
+
+    let payload
+    if (state.frozen) {
+      payload = normalize(state.frozen.snapshot)
+    } else {
+      const { data, error } = await supabaseClient.rpc("dashboard_export_payload", { p_period_key: state.periodKey })
+      if (error) throw error
+      payload = normalize(data)
+    }
     state.kpis             = payload.kpis || {}
     state.budgetComparison = ensureArray(payload.budget_comparison)
     state.ytd              = ensureArray(payload.ytd)
@@ -134,8 +140,11 @@ async function loadDashboard() {
     state.closureChecklist = payload.closure_checklist || {}
     state.closureComments  = ensureArray(payload.closure_comments)
     renderAll()
+    renderFrozenState()
     const lu = document.getElementById("lastUpdated")
-    if (lu) lu.textContent = `Ultima actualizacion: ${fmtDateTime(new Date())}`
+    if (lu) lu.textContent = state.frozen
+      ? `Periodo congelado el ${fmtDateTime(state.frozen.closed_at)}`
+      : `Ultima actualizacion: ${fmtDateTime(new Date())}`
     // load yearly chart in background
     loadYearlyChart()
   } catch (err) {
@@ -625,6 +634,77 @@ function updateChartTheme() {
   state.chart.update()
 }
 
+// ─── Cierre de periodo ─────────────────────────────────────────────────────────
+
+async function fetchClosure(periodKey) {
+  try {
+    const { data, error } = await supabaseClient
+      .from("monthly_closures")
+      .select("id,period_key,status,closed_at,closed_by,snapshot")
+      .eq("period_key", periodKey)
+      .maybeSingle()
+    if (error) return null
+    return data
+  } catch (_) {
+    return null
+  }
+}
+
+function renderFrozenState() {
+  const banner    = document.getElementById("closureFrozenBanner")
+  const closeBtn  = document.getElementById("closePeriodBtn")
+  const reopenBtn = document.getElementById("reopenPeriodBtn")
+  const isSysadmin = Boolean(window.FluxAuth?.isSysadmin?.())
+
+  if (state.frozen) {
+    if (banner) {
+      banner.hidden = false
+      banner.innerHTML = `🔒 <strong>Periodo cerrado</strong> · congelado el ${fmtDateTime(state.frozen.closed_at)}. El reporte es inmutable; ajustes posteriores no lo modifican.`
+    }
+    if (closeBtn)  closeBtn.hidden = true
+    if (reopenBtn) reopenBtn.hidden = !isSysadmin
+  } else {
+    if (banner)    banner.hidden = true
+    if (closeBtn)  closeBtn.hidden = false
+    if (reopenBtn) reopenBtn.hidden = true
+  }
+}
+
+async function closePeriod() {
+  if (state.frozen) return
+  if (!state.closureChecklist?.can_close) {
+    showToast("No se puede cerrar", "Resuelve primero los bloqueos del checklist.", "danger")
+    return
+  }
+  if (!window.confirm(`Vas a CONGELAR el periodo ${state.periodKey}.\nEl reporte quedara inmutable. ¿Continuar?`)) return
+
+  const btn = document.getElementById("closePeriodBtn")
+  if (btn) { btn.disabled = true; btn.textContent = "Cerrando..." }
+  try {
+    const { error } = await supabaseClient.rpc("close_monthly_period", { p_period_key: state.periodKey })
+    if (error) throw error
+    showToast("Periodo cerrado", `El periodo ${state.periodKey} quedo congelado.`, "success")
+    await loadDashboard()
+  } catch (err) {
+    showToast("Error al cerrar", friendlyError(err), "danger")
+  } finally {
+    if (btn) btn.textContent = "Cerrar periodo"
+  }
+}
+
+async function reopenPeriod() {
+  const reason = window.prompt("Motivo para reabrir el periodo (obligatorio):")
+  if (!reason || !reason.trim()) return
+  try {
+    const { error } = await supabaseClient.rpc("reopen_monthly_period", { p_period_key: state.periodKey, p_reason: reason.trim() })
+    if (error) throw error
+    showToast("Periodo reabierto", `El periodo ${state.periodKey} volvio a calculo en vivo.`, "success")
+    await loadDashboard()
+  } catch (err) {
+    showToast("Error al reabrir", friendlyError(err), "danger")
+  }
+}
+
 // ─── Dialogs ─────────────────────────────────────────────────────────────────
 
 async function openHistory() {
@@ -731,6 +811,7 @@ function closureStatusBadge(status) {
     open:        ["Abierto",    "info"],
     review:      ["En revision","warning"],
     closed:      ["Cerrado",    "success"],
+    reopened:    ["Reabierto",  "warning"],
     cancelled:   ["Cancelado",  "neutral"],
     not_created: ["Sin cierre", "neutral"],
   }
@@ -784,6 +865,12 @@ function normalize(data) {
 function friendlyError(err) {
   const raw = String(err?.message || err || "")
   if (raw.includes("not_allowed_to_view_dashboard")) return "No tienes permiso para consultar el Dashboard."
+  if (raw.includes("not_allowed_to_close_period")) return "No tienes permiso para cerrar el periodo."
+  if (raw.includes("not_allowed_to_reopen_period")) return "Solo un administrador puede reabrir un periodo."
+  if (raw.includes("period_already_closed")) return "Este periodo ya esta cerrado."
+  if (raw.includes("closure_blocked")) return "No se puede cerrar: hay bloqueos en el checklist."
+  if (raw.includes("period_not_closed")) return "El periodo no esta cerrado."
+  if (raw.includes("reason_required")) return "Captura un motivo para reabrir."
   if (raw.includes("period_key_required")) return "Selecciona un periodo valido."
   if (raw.includes("JWT") || raw.includes("permission") || raw.includes("policy")) return "Sin permiso para esta accion."
   return raw || "No se pudo cargar la informacion."

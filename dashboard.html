@@ -204,8 +204,12 @@
                 <h2>Checklist de cierre</h2>
                 <div class="panel-sub" id="closureStatusLabel">Calculando...</div>
               </div>
-              <button id="closePeriodBtn" class="primary-btn" type="button" disabled style="white-space:nowrap;font-size:12px">Cerrar periodo</button>
+              <div style="display:flex;gap:6px">
+                <button id="reopenPeriodBtn" class="secondary-btn" type="button" hidden style="white-space:nowrap;font-size:12px">Reabrir</button>
+                <button id="closePeriodBtn" class="primary-btn" type="button" disabled style="white-space:nowrap;font-size:12px">Cerrar periodo</button>
+              </div>
             </div>
+            <div id="closureFrozenBanner" class="message" hidden style="margin:0 14px 10px;border-color:rgba(16,185,129,.3);background:rgba(16,185,129,.1);color:var(--text-1);font-size:12px"></div>
             <div id="closureResult" class="summary-list"></div>
             <div style="border-top:1px solid var(--border);padding:10px 14px 4px">
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);margin-bottom:6px">Revisiones de bloqueo</div>
