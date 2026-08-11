@@ -14,7 +14,7 @@ The RPC locks `payment_intake` first and its conversion draft second. Under thos
 
 ## Migration
 
-- Active file: `supabase/migrations/20260811214145_044_provider_intake_payment_conversion.sql`
+- Active file: `supabase/migrations/20260811215129_044_provider_intake_payment_conversion.sql`
 - Target: Supabase DEV `scsirgbuqjcwoaxfacth`
 - Required predecessor: `20260811035346_043_provider_intake_payment_draft`
 - Application: official Supabase migration mechanism only; never run the body as an ad-hoc product query.
@@ -25,7 +25,7 @@ The migration creates only the conversion RPC, its grant and comments. It does n
 
 After application verify:
 
-1. migration history includes `20260811214145_044_provider_intake_payment_conversion` once;
+1. migration history includes `20260811215129_044_provider_intake_payment_conversion` once;
 2. the RPC is `SECURITY DEFINER`, `VOLATILE`, has `search_path=public, pg_temp`, and is executable only by `authenticated`;
 3. the append-only intake-event trigger and `payment_intake_created_request_uidx` remain active;
 4. the target intake is still unconverted before UAT;

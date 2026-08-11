@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, "..", "..")
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 
-const migrationPath = "supabase/migrations/20260811214145_044_provider_intake_payment_conversion.sql"
+const migrationPath = "supabase/migrations/20260811215129_044_provider_intake_payment_conversion.sql"
 const migration = read(migrationPath)
 const html = read("provider_intakes.html")
 const frontend = read("provider_intakes.js")
@@ -30,7 +30,7 @@ test("044 is the only active migration after the certified 043 slot", () => {
   assert.deepEqual(active, [
     "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
     "20260811035346_043_provider_intake_payment_draft.sql",
-    "20260811214145_044_provider_intake_payment_conversion.sql",
+    "20260811215129_044_provider_intake_payment_conversion.sql",
   ])
 })
 
