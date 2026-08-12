@@ -104,6 +104,10 @@ const state = {
   paymentDraftActionId: null,
   paymentDraftDiscarding: false,
   paymentDraftReloadPending: false,
+  paymentDraftApproverRefreshVersion: 0,
+  paymentDraftApproverDependencyKey: "",
+  paymentDraftPendingApprover: null,
+  paymentDraftApproverLoading: false,
   paymentConversionActionId: null,
   paymentConversionInFlight: false,
   linkContext: null,
@@ -119,6 +123,7 @@ const dom = {}
 let searchTimer = null
 let matchSearchTimer = null
 let linkProviderSearchTimer = null
+let paymentDraftApproverRefreshTimer = null
 
 document.addEventListener("DOMContentLoaded", init)
 
@@ -1294,6 +1299,11 @@ function updateMatchReasonCounter() {
 }
 
 async function openPaymentDraft(trigger) {
+  window.clearTimeout(paymentDraftApproverRefreshTimer)
+  state.paymentDraftApproverRefreshVersion += 1
+  state.paymentDraftApproverDependencyKey = ""
+  state.paymentDraftPendingApprover = null
+  state.paymentDraftApproverLoading = false
   state.paymentDraftTrigger = trigger
   state.paymentDraftDirty = false
   state.paymentDraftDiscarding = false
@@ -1424,22 +1434,23 @@ function populatePaymentDraftForm() {
       option.dataset.source = item.source || ""
     },
   )
+  const savedApproverInvalid = Boolean(
+    draft.approver_profile_id
+      && !(context.approver_options || []).some((item) => item.profile_id === draft.approver_profile_id),
+  )
   dom.paymentDraftApprover.value = draft.approver_profile_id || ""
-  if (draft.approver_profile_id && !dom.paymentDraftApprover.value) {
-    const option = optionElement(draft.approver_profile_id, "Aprobador guardado · requiere recarga de reglas")
-    option.dataset.assignmentId = draft.approver_assignment_id || ""
-    dom.paymentDraftApprover.append(option)
-    dom.paymentDraftApprover.value = draft.approver_profile_id
-  }
 
   updatePaymentDraftCategoryOptions(draft.budget_category_id || "")
   updatePaymentDraftOriginAccountState()
   renderPaymentDraftReadiness(context.state || {})
-  dom.paymentDraftApproverHint.textContent = (context.approver_options || []).length
-    ? "Selecciona únicamente una opción autorizada por el servidor."
-    : "Guarda primero centro de costo, monto y solicitante para calcular opciones autorizadas."
+  dom.paymentDraftApproverHint.textContent = savedApproverInvalid
+    ? "El aprobador guardado ya no es válido para las reglas actuales. Selecciona una nueva opción autorizada."
+    : (context.approver_options || []).length
+      ? "Selecciona únicamente una opción autorizada por el servidor."
+      : "Completa centro de costo, monto y solicitante para calcular aprobadores autorizados."
+  dom.paymentDraftApprover.disabled = false
   dom.savePaymentDraftBtn.disabled = !context.can_save
-  const conversionReady = context.state?.derived_state === "READY_FOR_CONVERSION"
+  const conversionReady = context.state?.derived_state === "READY_FOR_CONVERSION" && !savedApproverInvalid
   dom.convertPaymentDraftBtn.hidden = !conversionReady
   dom.convertPaymentDraftBtn.disabled = !conversionReady
   dom.paymentConversionConfirm.hidden = true
@@ -1448,6 +1459,10 @@ function populatePaymentDraftForm() {
   state.paymentDraftDiscarding = false
   dom.paymentDraftDiscardConfirm.hidden = true
   updatePaymentDraftClientState()
+  state.paymentDraftApproverDependencyKey = paymentDraftApproverDependencyKey()
+  if (!(context.approver_options || []).length) {
+    schedulePaymentDraftApproverRefresh({ force: true, delay: 0 })
+  }
 }
 
 function renderPaymentDraftSummary(context) {
@@ -1611,9 +1626,162 @@ function updatePaymentDraftOriginAccountState() {
   updatePaymentDraftClientState()
 }
 
+function paymentDraftApproverDependencies() {
+  const amountRaw = dom.paymentDraftFinalAmount.value.trim()
+  const amount = Number(amountRaw)
+  return {
+    company_id: state.paymentDraftContext?.intake?.company_id || null,
+    cost_center_id: dom.paymentDraftCostCenter.value || null,
+    requested_by_profile_id: dom.paymentDraftRequester.value || null,
+    final_amount: amountRaw && Number.isFinite(amount) && amount > 0 ? amount : null,
+  }
+}
+
+function paymentDraftApproverDependencyKey() {
+  return JSON.stringify(paymentDraftApproverDependencies())
+}
+
+function paymentDraftApproverDependenciesReady() {
+  return Object.values(paymentDraftApproverDependencies()).every(Boolean)
+}
+
+function paymentDraftActorMatchesRequester() {
+  const requesterId = dom.paymentDraftRequester.value || ""
+  const actorOptions = state.paymentDraftContext?.requester_options || []
+  return actorOptions.length === 1 && actorOptions[0].profile_id === requesterId
+}
+
+function setPaymentDraftApproverPlaceholder(label, hint) {
+  replaceSelectOptions(dom.paymentDraftApprover, [], () => "", () => "", label)
+  dom.paymentDraftApprover.disabled = true
+  dom.paymentDraftApproverHint.textContent = hint
+}
+
+function invalidatePaymentDraftApproverOptions() {
+  state.paymentDraftPendingApprover = dom.paymentDraftApprover.value
+    || state.paymentDraftPendingApprover
+    || null
+  state.paymentDraftContext.approver_options = []
+  setPaymentDraftApproverPlaceholder(
+    "Calculando aprobadores autorizados…",
+    "Calculando aprobadores autorizados…",
+  )
+}
+
+function renderRefreshedPaymentDraftApprovers(options, dependencyKey) {
+  if (dependencyKey !== paymentDraftApproverDependencyKey()) return
+  const previous = state.paymentDraftPendingApprover || dom.paymentDraftApprover.value || ""
+  const eligiblePrevious = options.some((item) => item.profile_id === previous)
+
+  replaceSelectOptions(
+    dom.paymentDraftApprover,
+    options,
+    (item) => item.profile_id,
+    (item) => item.option_label || item.display_name,
+    "Pendiente",
+    (option, item) => {
+      option.dataset.assignmentId = item.assignment_id || ""
+      option.dataset.source = item.source || ""
+    },
+  )
+  dom.paymentDraftApprover.disabled = false
+  if (eligiblePrevious) dom.paymentDraftApprover.value = previous
+
+  state.paymentDraftContext.approver_options = options
+  state.paymentDraftPendingApprover = null
+  state.paymentDraftApproverLoading = false
+  state.paymentDraftApproverDependencyKey = dependencyKey
+
+  if (previous && !eligiblePrevious) {
+    dom.paymentDraftApproverHint.textContent = "El aprobador seleccionado ya no es válido para las reglas actuales. Selecciona una nueva opción autorizada."
+  } else if (options.length) {
+    dom.paymentDraftApproverHint.textContent = "Selecciona únicamente una opción autorizada por el servidor."
+  } else {
+    dom.paymentDraftApproverHint.textContent = "No hay aprobadores elegibles para esta combinación de solicitante, empresa, centro de costo y monto."
+  }
+
+  state.paymentDraftDirty = paymentDraftSnapshot() !== state.paymentDraftSnapshot
+  updatePaymentDraftClientState()
+}
+
+async function refreshPaymentDraftApproverOptions({ force = false } = {}) {
+  const dependencyKey = paymentDraftApproverDependencyKey()
+  if (!force && dependencyKey === state.paymentDraftApproverDependencyKey) return
+
+  state.paymentDraftApproverRefreshVersion += 1
+  const refreshVersion = state.paymentDraftApproverRefreshVersion
+
+  if (!paymentDraftApproverDependenciesReady()) {
+    state.paymentDraftApproverLoading = false
+    state.paymentDraftApproverDependencyKey = dependencyKey
+    state.paymentDraftPendingApprover = null
+    state.paymentDraftContext.approver_options = []
+    setPaymentDraftApproverPlaceholder(
+      "Pendiente",
+      "Completa centro de costo, monto y solicitante para calcular aprobadores autorizados.",
+    )
+    updatePaymentDraftClientState()
+    return
+  }
+
+  if (!paymentDraftActorMatchesRequester()) {
+    state.paymentDraftApproverLoading = false
+    state.paymentDraftApproverDependencyKey = dependencyKey
+    state.paymentDraftPendingApprover = null
+    state.paymentDraftContext.approver_options = []
+    setPaymentDraftApproverPlaceholder(
+      "Pendiente",
+      "La sesión y el solicitante no coinciden. Recarga el borrador antes de continuar.",
+    )
+    dom.paymentDraftError.textContent = "La sesión y el solicitante no coinciden. No se consultaron ni modificaron reglas de aprobación."
+    updatePaymentDraftClientState()
+    return
+  }
+
+  state.paymentDraftApproverLoading = true
+  invalidatePaymentDraftApproverOptions()
+  const dependencies = paymentDraftApproverDependencies()
+  const { data, error } = await supabaseClient.rpc("list_payment_request_approver_options", {
+    p_company_id: dependencies.company_id,
+    p_cost_center_id: dependencies.cost_center_id,
+    p_amount: dependencies.final_amount,
+  })
+
+  if (refreshVersion !== state.paymentDraftApproverRefreshVersion
+      || dependencyKey !== paymentDraftApproverDependencyKey()) return
+
+  if (error) {
+    state.paymentDraftApproverLoading = false
+    state.paymentDraftApproverDependencyKey = dependencyKey
+    state.paymentDraftContext.approver_options = []
+    setPaymentDraftApproverPlaceholder(
+      "Pendiente",
+      "No fue posible calcular aprobadores autorizados. Intenta nuevamente o recarga el borrador.",
+    )
+    dom.paymentDraftError.textContent = friendlyError(error)
+    updatePaymentDraftClientState()
+    return
+  }
+
+  renderRefreshedPaymentDraftApprovers(Array.isArray(data) ? data : [], dependencyKey)
+}
+
+function schedulePaymentDraftApproverRefresh({ force = false, delay = 250 } = {}) {
+  window.clearTimeout(paymentDraftApproverRefreshTimer)
+  paymentDraftApproverRefreshTimer = window.setTimeout(
+    () => refreshPaymentDraftApproverOptions({ force }),
+    delay,
+  )
+}
+
 function handlePaymentDraftInput(event) {
   if (event?.target === dom.paymentDraftCostCenter) updatePaymentDraftCategoryOptions()
   if (event?.target === dom.paymentDraftPaymentMethod) updatePaymentDraftOriginAccountState()
+  if ([dom.paymentDraftCostCenter, dom.paymentDraftFinalAmount, dom.paymentDraftRequester].includes(event?.target)) {
+    state.paymentDraftApproverRefreshVersion += 1
+    invalidatePaymentDraftApproverOptions()
+    schedulePaymentDraftApproverRefresh({ force: true })
+  }
   dom.paymentDraftSuccess.textContent = ""
   dom.paymentDraftError.textContent = ""
   dom.reloadPaymentDraftBtn.hidden = true
@@ -1911,6 +2079,11 @@ function discardAndClosePaymentDraft() {
 }
 
 function restorePaymentDraftFocus() {
+  window.clearTimeout(paymentDraftApproverRefreshTimer)
+  state.paymentDraftApproverRefreshVersion += 1
+  state.paymentDraftApproverDependencyKey = ""
+  state.paymentDraftPendingApprover = null
+  state.paymentDraftApproverLoading = false
   const trigger = state.paymentDraftTrigger
   state.paymentDraftTrigger = null
   state.paymentDraftDirty = false

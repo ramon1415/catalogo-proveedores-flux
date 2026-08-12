@@ -231,6 +231,15 @@ const mockScript = `
     window.__qaConflict = false;
     window.__qaMockSaveCalls = 0;
     window.__qaRpcCalls = [];
+    window.__qaApproverOptions = [{
+      profile_id: "${ids.approver}",
+      display_name: "Aprobador sintético",
+      email: "approver@example.invalid",
+      eligible_roles: ["finance"],
+      source: "assigned",
+      assignment_id: "${ids.assignment}",
+      option_label: "Aprobador sintético · finance",
+    }];
     function builder(table) {
       const api = {
         select() { return api; },
@@ -261,6 +270,10 @@ const mockScript = `
         }
         if (name === "get_provider_intake_payment_draft_context") {
           return { data: structuredClone(window.__qaContext), error: null };
+        }
+        if (name === "list_payment_request_approver_options") {
+          window.__qaLastApproverArgs = structuredClone(args);
+          return { data: structuredClone(window.__qaApproverOptions), error: null };
         }
         if (name === "save_provider_intake_payment_draft") {
           if (window.__qaConflict) return { data: null, error: { message: "provider_intake_conversion_draft_conflict" } };
@@ -366,7 +379,12 @@ const previewOrigin = previewBase ? new URL(previewBase).origin : null
 const baseUrl = previewBase
   ? `${previewBase}/provider_intakes.html`
   : `http://127.0.0.1:${port}/provider_intakes.html`
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({
+  headless: true,
+  ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+    ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+    : {}),
+})
 const evidence = {
   status: "PASS",
   environment: previewBase ? "LIVE_PREVIEW_MOCKED_NO_WRITE" : "LOCAL_MOCK_NO_WRITE",
@@ -383,10 +401,41 @@ const evidence = {
 try {
   const desktop = await instrumentedPage({ width: 1366, height: 900 })
   await openDraft(desktop, baseUrl)
+  await desktop.getByText("Completa centro de costo, monto y solicitante para calcular aprobadores autorizados.").waitFor()
+  assert.equal(await desktop.locator("#paymentDraftApprover").isDisabled(), true)
   await runAxe(desktop, "empty")
   await capture(desktop, "01-empty-draft.png")
 
   await desktop.locator("#paymentDraftCostCenter").selectOption(ids.center)
+  await desktop.locator("#paymentDraftApprover").locator(`option[value="${ids.approver}"]`).waitFor()
+  assert.equal(await desktop.locator("#paymentDraftApprover").isEnabled(), true)
+  assert.deepEqual(
+    await desktop.evaluate(() => window.__qaLastApproverArgs),
+    { p_company_id: ids.company, p_cost_center_id: ids.center, p_amount: 1250 },
+  )
+  await desktop.locator("#paymentDraftApprover").selectOption(ids.approver)
+  await desktop.locator("#paymentDraftFinalAmount").fill("1251")
+  await desktop.waitForTimeout(350)
+  assert.equal(await desktop.locator("#paymentDraftApprover").inputValue(), ids.approver)
+
+  await desktop.evaluate(() => { window.__qaApproverOptions = [] })
+  await desktop.locator("#paymentDraftFinalAmount").fill("1252")
+  await desktop.getByText("No hay aprobadores elegibles para esta combinación de solicitante, empresa, centro de costo y monto.").waitFor()
+  assert.equal(await desktop.locator("#paymentDraftApprover").inputValue(), "")
+
+  await desktop.evaluate((approver) => {
+    window.__qaApproverOptions = [{
+      profile_id: approver.profile,
+      display_name: "Aprobador sintético",
+      email: "approver@example.invalid",
+      eligible_roles: ["finance"],
+      source: "assigned",
+      assignment_id: approver.assignment,
+      option_label: "Aprobador sintético · finance",
+    }]
+  }, { profile: ids.approver, assignment: ids.assignment })
+  await desktop.locator("#paymentDraftFinalAmount").fill("1250")
+  await desktop.locator("#paymentDraftApprover").locator(`option[value="${ids.approver}"]`).waitFor()
   await desktop.locator("#paymentDraftBudgetCategory").selectOption(ids.category)
   await desktop.locator("#paymentDraftBudgetMonth").fill("2026-08")
   await desktop.locator("#paymentDraftPaymentMethod").selectOption("transfer")
