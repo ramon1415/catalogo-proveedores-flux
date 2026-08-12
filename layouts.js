@@ -2381,13 +2381,13 @@ function maskSensitiveSuffix(value, visible = 4) {
 }
 
 function layoutSourceAccountDisplay(line) {
-  return detectBbvaLayoutFormat(line) === BBVA_FORMAT_CIE
+  return normalizeDestinationType(line.destination_type) === "convenio"
     ? maskSensitiveSuffix(line.source_account_number, 4)
     : line.source_account_number || ""
 }
 
 function layoutDestinationDisplay(line) {
-  return detectBbvaLayoutFormat(line) === BBVA_FORMAT_CIE
+  return normalizeDestinationType(line.destination_type) === "convenio"
     ? `CONVENIO ${maskSensitiveSuffix(line.convenio_number, 2)}`
     : line.destination_value || ""
 }

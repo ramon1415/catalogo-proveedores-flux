@@ -235,6 +235,7 @@ test("migration adds an immutable canonical snapshot with no historical backfill
   assert.match(migration, /add column if not exists convenio_number text/i)
   assert.match(migration, /snapshot_payment_layout_line_convenio/i)
   assert.match(migration, /payment_layout_line_convenio_snapshot_immutable/i)
+  assert.match(migration, /if tg_op = 'INSERT' then[\s\S]*v_refresh_snapshot := true;[\s\S]*else/i)
   assert.match(migration, /select nullif\(btrim\(p\.convenio_number\), ''\)/i)
   assert.doesNotMatch(migration, /update\s+public\.payment_layout_lines\s+set\s+convenio_number/i)
   assert.doesNotMatch(migration, /regexp_replace\s*\(\s*(?:new\.)?destination_value/i)

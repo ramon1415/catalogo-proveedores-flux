@@ -35,17 +35,23 @@ set search_path = public, pg_temp
 as $$
 declare
   v_convenio_number text;
+  v_refresh_snapshot boolean := false;
 begin
-  if tg_op = 'UPDATE'
-     and new.proveedor_id is not distinct from old.proveedor_id
-     and lower(btrim(new.destination_type)) is not distinct from lower(btrim(old.destination_type))
-     and new.convenio_number is distinct from old.convenio_number then
-    raise exception 'payment_layout_line_convenio_snapshot_immutable';
+  if tg_op = 'INSERT' then
+    v_refresh_snapshot := true;
+  else
+    if new.proveedor_id is not distinct from old.proveedor_id
+       and lower(btrim(new.destination_type)) is not distinct from lower(btrim(old.destination_type))
+       and new.convenio_number is distinct from old.convenio_number then
+      raise exception 'payment_layout_line_convenio_snapshot_immutable';
+    end if;
+
+    v_refresh_snapshot :=
+      new.proveedor_id is distinct from old.proveedor_id
+      or lower(btrim(new.destination_type)) is distinct from lower(btrim(old.destination_type));
   end if;
 
-  if tg_op = 'INSERT'
-     or new.proveedor_id is distinct from old.proveedor_id
-     or lower(btrim(new.destination_type)) is distinct from lower(btrim(old.destination_type)) then
+  if v_refresh_snapshot then
     if lower(btrim(new.destination_type)) = 'convenio' then
       select nullif(btrim(p.convenio_number), '')
         into v_convenio_number
