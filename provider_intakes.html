@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./ux2_shared.css">
-  <link rel="stylesheet" href="./provider_intakes.css?v=20260811-ramon-uat-improvements">
+  <link rel="stylesheet" href="./provider_intakes.css?v=20260811-provider-aware-links">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Saltar al contenido</a>
@@ -98,15 +98,16 @@
           </label>
           <label>
             <span>Estado</span>
-            <select id="statusFilter" multiple size="2" aria-describedby="statusFilterHint">
-              <option value="received" selected>Recibida</option>
-              <option value="in_review" selected>En revisión</option>
+            <select id="statusFilter" aria-describedby="statusFilterHint">
+              <option value="" selected>Todos</option>
+              <option value="received">Recibidas</option>
+              <option value="in_review">En revisión</option>
               <option value="needs_correction">Requiere corrección</option>
               <option value="rejected">Rechazada</option>
               <option value="converted">Convertida</option>
               <option value="cancelled">Cancelada</option>
             </select>
-            <small id="statusFilterHint">Usa Ctrl o Cmd para elegir varios.</small>
+            <small id="statusFilterHint">Selecciona un estado o Todos.</small>
           </label>
           <label>
             <span>Desde</span>
@@ -145,19 +146,16 @@
               <thead>
                 <tr>
                   <th scope="col">Folio</th>
-                  <th scope="col">Recepción</th>
+                  <th scope="col">Proveedor</th>
                   <th scope="col">Empresa</th>
-                  <th scope="col">Proveedor declarado</th>
-                  <th scope="col">Concepto</th>
                   <th scope="col" class="numeric">Monto</th>
-                  <th scope="col">Archivos</th>
                   <th scope="col">Estado</th>
-                  <th scope="col">Antigüedad</th>
-                  <th scope="col"><span class="sr-only">Acción</span></th>
+                  <th scope="col">Recepción</th>
+                  <th scope="col">Acción</th>
                 </tr>
               </thead>
               <tbody id="intakeTableBody">
-                <tr><td colspan="10" class="table-message">Cargando solicitudes…</td></tr>
+                <tr><td colspan="7" class="table-message">Cargando solicitudes…</td></tr>
               </tbody>
             </table>
           </div>
@@ -483,25 +481,40 @@
       <header class="dialog-header">
         <div>
           <p class="eyebrow">Portal público seguro</p>
-          <h2 id="linkManagementTitle">Administrar liga de proveedor</h2>
-          <p>Una sola liga activa por empresa. El token completo se muestra una sola vez.</p>
+          <h2 id="linkManagementTitle">Generar liga de proveedor</h2>
+          <p>Selecciona la empresa y a quién se enviará la liga.</p>
         </div>
         <button class="icon-btn" id="closeLinkManagementBtn" type="button" aria-label="Cerrar administración de liga">✕</button>
       </header>
       <div class="dialog-scroll link-management-content">
         <label class="link-management-field">
-          <span>Empresa autorizada</span>
+          <span>1. Empresa</span>
           <select id="linkCompany"></select>
         </label>
+        <fieldset class="link-recipient-fieldset">
+          <legend>2. ¿A quién enviarás la liga?</legend>
+          <label><input type="radio" name="linkRecipient" value="existing" checked> Proveedor existente</label>
+          <label><input type="radio" name="linkRecipient" value="generic"> Proveedor nuevo / no identificado</label>
+        </fieldset>
+        <section class="link-provider-picker" id="linkProviderPicker" aria-labelledby="linkProviderPickerTitle">
+          <label class="link-management-field" for="linkProviderSearch">
+            <span id="linkProviderPickerTitle">3. Proveedor</span>
+            <input id="linkProviderSearch" type="search" maxlength="120" autocomplete="off" placeholder="Buscar por nombre, alias o RFC" aria-describedby="linkProviderSearchHint">
+          </label>
+          <small id="linkProviderSearchHint">Escribe al menos 2 caracteres. La selección siempre es explícita.</small>
+          <div class="link-provider-results" id="linkProviderResults" role="listbox" aria-label="Proveedores encontrados"></div>
+        </section>
+        <section class="link-provider-summary" id="linkProviderSummary" aria-live="polite" hidden></section>
         <section class="link-current-state" id="linkCurrentState" aria-live="polite"></section>
         <form id="linkCreateForm">
           <div class="link-form-grid">
-            <label><span>Etiqueta interna</span><input id="linkLabel" maxlength="120" required></label>
-            <label><span>Vigencia</span><select id="linkDuration"><option value="24">24 horas</option><option value="72" selected>72 horas</option><option value="168">7 días</option></select></label>
+            <label><span>5. Vigencia</span><select id="linkDuration"><option value="24">24 horas</option><option value="72" selected>72 horas</option><option value="168">7 días</option></select></label>
+            <label><span>6. Etiqueta interna <small>(opcional)</small></span><input id="linkLabel" maxlength="120" placeholder="Ej. Facturas agosto"></label>
           </div>
+          <p class="link-section-label">7. Límites del enlace</p>
           <div class="link-runtime-contract" id="linkRuntimeContract"></div>
           <p class="field-error" id="linkManagementError" role="alert"></p>
-          <button class="primary-btn" id="createLinkBtn" type="submit">Generar liga</button>
+          <button class="primary-btn" id="createLinkBtn" type="submit">8. Generar liga</button>
         </form>
         <section class="link-one-time-result" id="linkOneTimeResult" hidden>
           <strong>Liga lista para compartir</strong>
@@ -524,6 +537,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260811-provider-intake-link-access"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./provider_intakes.js?v=20260811-ramon-uat-improvements"></script>
+  <script src="./provider_intakes.js?v=20260811-provider-aware-links"></script>
 </body>
 </html>

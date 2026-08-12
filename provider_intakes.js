@@ -91,6 +91,7 @@ const state = {
   detailTrigger: null,
   actionTrigger: null,
   matchData: null,
+  linkTarget: null,
   matchLoading: false,
   matchSearch: "",
   matchAction: null,
@@ -108,11 +109,16 @@ const state = {
   linkContext: null,
   linkCompanies: [],
   linkMutationInFlight: false,
+  linkSelectedProvider: null,
+  linkProviderResults: [],
+  linkScope: null,
+  linkScopeVersion: 0,
 }
 
 const dom = {}
 let searchTimer = null
 let matchSearchTimer = null
+let linkProviderSearchTimer = null
 
 document.addEventListener("DOMContentLoaded", init)
 
@@ -192,7 +198,8 @@ function bindDom() {
     "createLinkBtn", "linkOneTimeResult", "linkPublicUrl", "copyLinkBtn",
     "copyLinkStatus", "revokeLinkBtn", "regenerateLinkBtn", "paymentDraftBanking",
     "paymentDraftBankingMessage", "paymentDraftBankingComparison", "paymentDraftBankingActions",
-    "paymentDraftBankingError",
+    "paymentDraftBankingError", "linkProviderPicker", "linkProviderSearch",
+    "linkProviderSearchHint", "linkProviderResults", "linkProviderSummary",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -234,7 +241,11 @@ function bindEvents() {
   dom.manageLinksBtn.addEventListener("click", openLinkManagement)
   dom.closeLinkManagementBtn.addEventListener("click", closeLinkManagement)
   dom.doneLinkManagementBtn.addEventListener("click", closeLinkManagement)
-  dom.linkCompany.addEventListener("change", renderLinkManagement)
+  dom.linkCompany.addEventListener("change", handleLinkCompanyChange)
+  document.querySelectorAll('input[name="linkRecipient"]').forEach((radio) => {
+    radio.addEventListener("change", handleLinkRecipientChange)
+  })
+  dom.linkProviderSearch.addEventListener("input", handleLinkProviderSearch)
   dom.linkCreateForm.addEventListener("submit", createManagedLink)
   dom.revokeLinkBtn.addEventListener("click", revokeManagedLink)
   dom.regenerateLinkBtn.addEventListener("click", regenerateManagedLink)
@@ -282,7 +293,7 @@ function renderAccessDenied() {
 }
 
 function selectedStatuses() {
-  return Array.from(dom.statusFilter.selectedOptions).map((option) => option.value)
+  return dom.statusFilter.value ? [dom.statusFilter.value] : []
 }
 
 function filterPayload() {
@@ -358,7 +369,9 @@ function updateCompanyOptions(companies) {
 }
 
 function renderSummary() {
-  dom.countTotal.textContent = numberFormat(state.summary.total)
+  const statusTotal = ["received", "in_review", "needs_correction", "rejected", "converted", "cancelled"]
+    .reduce((sum, status) => sum + Number(state.summary[status] || 0), 0)
+  dom.countTotal.textContent = numberFormat(statusTotal)
   dom.countReceived.textContent = numberFormat(state.summary.received)
   dom.countReview.textContent = numberFormat(state.summary.in_review)
   dom.countCorrection.textContent = numberFormat(state.summary.needs_correction)
@@ -380,7 +393,7 @@ function renderTable() {
   if (!state.items.length) {
     const row = document.createElement("tr")
     const cell = document.createElement("td")
-    cell.colSpan = 10
+    cell.colSpan = 7
     cell.className = "table-message"
     cell.textContent = "Sin resultados. Ajusta los filtros o actualiza la bandeja."
     row.append(cell)
@@ -397,14 +410,11 @@ function intakeRow(item) {
   const row = document.createElement("tr")
   row.append(
     cell(item.public_folio || "—", "folio-cell"),
-    cell(formatDateTime(item.created_at)),
-    cell(item.company_name || "—"),
     cell(item.provider_name || "—", "provider-cell", item.provider_name),
-    cell(item.concept || "—", "concept-cell", item.concept),
+    cell(item.company_name || "—"),
     cell(formatMoney(item.amount_requested, item.currency), "numeric"),
-    cell(`${Number(item.file_count || 0)} ${Number(item.file_count || 0) === 1 ? "archivo" : "archivos"}`),
     statusCell(item.status),
-    cell(formatAge(item.created_at)),
+    cell(formatDateTime(item.created_at)),
   )
 
   const actionCell = document.createElement("td")
@@ -416,7 +426,7 @@ function intakeRow(item) {
   button.addEventListener("click", () => openDetail(item.id, button))
   actionCell.append(button)
   row.append(actionCell)
-  const labels = ["Folio", "Recepción", "Empresa", "Proveedor", "Concepto", "Monto", "Archivos", "Estado", "Antigüedad", "Acción"]
+  const labels = ["Folio", "Proveedor", "Empresa", "Monto", "Estado", "Recepción", "Acción"]
   Array.from(row.children).forEach((node, index) => { node.dataset.label = labels[index] })
   return row
 }
@@ -448,7 +458,7 @@ function renderListError(message) {
   dom.intakeTableBody.replaceChildren()
   const row = document.createElement("tr")
   const cellNode = document.createElement("td")
-  cellNode.colSpan = 10
+  cellNode.colSpan = 7
   cellNode.className = "table-message"
   cellNode.textContent = message
   row.append(cellNode)
@@ -481,18 +491,14 @@ function resetAndLoad() {
 
 function clearFilters() {
   dom.filterForm.reset()
-  Array.from(dom.statusFilter.options).forEach((option) => {
-    option.selected = ["received", "in_review"].includes(option.value)
-  })
+  dom.statusFilter.value = ""
   state.page = 1
   updateKpiState()
   loadList()
 }
 
 function applyKpiFilter(status) {
-  Array.from(dom.statusFilter.options).forEach((option) => {
-    option.selected = status ? option.value === status : false
-  })
+  dom.statusFilter.value = status || ""
   state.page = 1
   updateKpiState()
   loadList()
@@ -512,6 +518,7 @@ async function openDetail(intakeId, trigger) {
   state.detailTrigger = trigger
   state.detail = null
   state.matchData = null
+  state.linkTarget = null
   state.paymentDraftContext = null
   dom.detailTitle.textContent = "Cargando solicitud…"
   dom.detailSubtitle.textContent = "Consultando información autorizada"
@@ -531,7 +538,7 @@ async function openDetail(intakeId, trigger) {
   }
 
   state.detail = data
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -711,6 +718,16 @@ async function loadMatchState(search = state.matchSearch) {
   state.matchData = error ? { error: friendlyError(error) } : data
 }
 
+async function loadLinkTarget() {
+  const intakeId = state.detail?.intake?.id
+  if (!intakeId) return
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_target", {
+    p_payment_intake_id: intakeId,
+  })
+  if (state.detail?.intake?.id !== intakeId) return
+  state.linkTarget = error ? { error: friendlyError(error) } : data
+}
+
 function providerMatchSection(intake) {
   const section = element("section", "detail-section full provider-match-section")
   const heading = element("div", "provider-match-heading")
@@ -732,6 +749,9 @@ function providerMatchSection(intake) {
     section.append(element("p", "match-error-inline", matchData?.error || "No fue posible consultar el matching."))
     return section
   }
+
+  const directedTarget = providerLinkTargetCard(intake)
+  if (directedTarget) section.append(directedTarget)
 
   const current = matchData.current_match
   const eligible = Boolean(matchData.eligible)
@@ -776,6 +796,54 @@ function providerMatchSection(intake) {
   section.append(matchHistory(matchData.history || []))
   section.append(element("p", "phase-two-inline", "El vínculo maestro queda en modo de solo lectura después de la conversión."))
   return section
+}
+
+function providerLinkTargetCard(intake) {
+  const target = state.linkTarget
+  if (!target?.targeted) return null
+  const card = element("article", "link-target-card")
+  const heading = element("div", "link-target-heading")
+  const copy = document.createElement("div")
+  copy.append(
+    element("span", "link-target-kicker", "Proveedor destinatario de la liga"),
+    element("strong", "", target.alias || target.legal_name || "Proveedor"),
+    element("p", "", `${target.legal_name || "Razón social no informada"} · ${displayValue(target.rfc_masked)}`),
+  )
+  heading.append(copy, element("span", "match-state-badge match-state-candidates", "Preseleccionado por liga"))
+  card.append(heading)
+  card.append(element(
+    "p",
+    target.bank_review === "REQUIRED" ? "match-warning" : "bank-resolution-ok",
+    target.bank_review === "REQUIRED"
+      ? "⚠ El proveedor reportó nuevos datos bancarios. La identidad sigue siendo el mismo proveedor; Finanzas debe resolver el cambio."
+      : "Datos bancarios maestros confirmados vigentes · revisión bancaria no requerida.",
+  ))
+  const differences = Array.isArray(target.identity_differences) ? target.identity_differences : []
+  if (differences.length) {
+    const wrapper = element("div", "link-target-differences")
+    wrapper.append(element("strong", "", "Datos declarados diferentes al maestro"))
+    const list = document.createElement("ul")
+    differences.forEach((difference) => list.append(element(
+      "li", "", `${difference.field}: ${displayValue(difference.declared)} → ${displayValue(difference.master)}`,
+    )))
+    wrapper.append(list)
+    card.append(wrapper)
+  }
+  const actions = element("div", "candidate-actions")
+  const currentId = state.matchData?.current_match?.proveedor_id || null
+  const confirm = element("button", "primary-btn", currentId === target.proveedor_id ? "Proveedor confirmado" : "Confirmar proveedor")
+  confirm.type = "button"
+  confirm.disabled = !state.matchData?.eligible || !target.active || currentId === target.proveedor_id
+  confirm.addEventListener("click", () => openMatchComparison(target.proveedor_id, confirm))
+  const search = element("button", "secondary-btn", "Buscar otro proveedor")
+  search.type = "button"
+  search.disabled = !state.matchData?.eligible
+  search.addEventListener("click", () => document.getElementById("providerMatchSearch")?.focus())
+  const create = element("a", "secondary-btn", "+ Crear nuevo proveedor")
+  create.href = providerProposalUrl(null, intake.id)
+  actions.append(confirm, search, create)
+  card.append(actions, element("small", "provider-match-helper", "La liga prioriza este candidato, pero nunca crea ni confirma el vínculo automáticamente."))
+  return card
 }
 
 function matchStateClass(current, eligible, candidates) {
@@ -976,7 +1044,7 @@ function providerBankGovernanceCard(intake, current) {
     element("strong", "", "Diferencia bancaria detectada"),
     element("p", "", "El proveedor maestro sigue siendo la identidad canónica. Los valores del portal no lo modifican ni crean otro proveedor."),
   )
-  const fields = (banking.difference_fields || []).map((code) => ({ bank:"Banco", account:"Cuenta", clabe:"CLABE", beneficiary:"Beneficiario" })[code] || code)
+  const fields = (banking.difference_fields || []).map((code) => ({ bank:"Banco", account:"Cuenta", clabe:"CLABE", beneficiary:"Beneficiario", reported_change:"Cambio reportado" })[code] || code)
   wrapper.append(element("span", "match-bank-summary", `Campos distintos: ${fields.join(", ")}.`))
   if (banking.resolution_valid) {
     wrapper.append(element("span", "bank-resolution-ok", `Uso de datos maestros confirmado · ${formatDateTime(banking.resolution?.created_at)}`))
@@ -1213,7 +1281,7 @@ async function refreshOpenDetail() {
   }
   state.detail = data
   state.matchSearch = ""
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -2075,7 +2143,7 @@ async function reloadOpenDetail() {
     return
   }
   state.detail = data
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -2130,16 +2198,27 @@ function openLinkManagement() {
   dom.linkCompany.replaceChildren()
   state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
   dom.linkDuration.value = String(state.linkContext?.defaults?.duration_hours || 72)
+  state.linkSelectedProvider = null
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = ""
+  dom.linkLabel.value = ""
   dom.linkOneTimeResult.hidden = true
   dom.linkPublicUrl.value = ""
   dom.copyLinkStatus.textContent = ""
   dom.linkManagementError.textContent = ""
-  renderLinkManagement()
   dom.linkManagementDialog.showModal()
-  window.setTimeout(() => dom.linkCompany.focus(), 0)
+  const company = selectedLinkCompany()
+  const defaultMode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${defaultMode}"]`)
+  if (radio) radio.checked = true
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+  window.setTimeout(() => (state.linkCompanies.length === 1 ? document.querySelector('input[name="linkRecipient"]') : dom.linkCompany)?.focus(), 0)
 }
 
 function closeLinkManagement() {
+  window.clearTimeout(linkProviderSearchTimer)
   dom.linkPublicUrl.value = ""
   dom.linkOneTimeResult.hidden = true
   dom.copyLinkStatus.textContent = ""
@@ -2150,19 +2229,188 @@ function selectedLinkCompany() {
   return state.linkCompanies.find((company) => company.id === dom.linkCompany.value) || null
 }
 
+function selectedLinkRecipient() {
+  return document.querySelector('input[name="linkRecipient"]:checked')?.value || "existing"
+}
+
+function handleLinkCompanyChange() {
+  state.linkSelectedProvider = null
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = ""
+  dom.linkLabel.value = ""
+  const company = selectedLinkCompany()
+  const mode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${mode}"]`)
+  if (radio) radio.checked = true
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+}
+
+function handleLinkRecipientChange() {
+  state.linkSelectedProvider = null
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = ""
+  dom.linkLabel.value = ""
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+}
+
+function syncLinkRecipientUi() {
+  const existing = selectedLinkRecipient() === "existing"
+  dom.linkProviderPicker.hidden = !existing
+  renderLinkProviderResults()
+  renderLinkProviderSummary()
+  renderLinkManagement()
+}
+
+function handleLinkProviderSearch() {
+  window.clearTimeout(linkProviderSearchTimer)
+  state.linkSelectedProvider = null
+  state.linkScope = null
+  renderLinkProviderSummary()
+  renderLinkManagement()
+  const query = dom.linkProviderSearch.value.trim()
+  if (query.length < 2) {
+    state.linkProviderResults = []
+    dom.linkProviderSearchHint.textContent = query.length === 1
+      ? "Escribe un carácter más para buscar de forma segura."
+      : "Escribe al menos 2 caracteres. La selección siempre es explícita."
+    renderLinkProviderResults()
+    return
+  }
+  dom.linkProviderSearchHint.textContent = "Buscando proveedores activos…"
+  linkProviderSearchTimer = window.setTimeout(() => searchLinkProviders(query), 320)
+}
+
+async function searchLinkProviders(query) {
+  const company = selectedLinkCompany()
+  if (!company || selectedLinkRecipient() !== "existing") return
+  const { data, error } = await supabaseClient.rpc("find_provider_intake_link_providers", {
+    p_company_id: company.id,
+    p_search: query,
+    p_limit: 12,
+  })
+  if (query !== dom.linkProviderSearch.value.trim()) return
+  if (error) {
+    state.linkProviderResults = []
+    dom.linkProviderSearchHint.textContent = friendlyError(error)
+  } else {
+    state.linkProviderResults = Array.isArray(data) ? data : []
+    dom.linkProviderSearchHint.textContent = state.linkProviderResults.length
+      ? "Selecciona explícitamente un resultado."
+      : "No hay proveedores activos que coincidan."
+  }
+  renderLinkProviderResults()
+}
+
+function renderLinkProviderResults() {
+  dom.linkProviderResults.replaceChildren()
+  if (selectedLinkRecipient() !== "existing") return
+  state.linkProviderResults.forEach((provider) => {
+    const button = element("button", "link-provider-result", "")
+    button.type = "button"
+    button.setAttribute("role", "option")
+    button.append(
+      element("strong", "", provider.alias || provider.legal_name || "Proveedor"),
+      element("span", "", provider.legal_name || "Razón social no informada"),
+      element("small", "", `${displayValue(provider.rfc_masked)} · Activo`),
+    )
+    button.addEventListener("click", () => selectLinkProvider(provider))
+    dom.linkProviderResults.append(button)
+  })
+}
+
+function selectLinkProvider(provider) {
+  state.linkSelectedProvider = provider
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = provider.alias || provider.legal_name || "Proveedor seleccionado"
+  dom.linkProviderSearchHint.textContent = "Proveedor seleccionado explícitamente."
+  dom.linkLabel.value = ""
+  renderLinkProviderResults()
+  renderLinkProviderSummary()
+  renderLinkManagement()
+  loadSelectedLinkScope()
+}
+
+function renderLinkProviderSummary() {
+  const provider = state.linkSelectedProvider
+  dom.linkProviderSummary.hidden = !provider
+  dom.linkProviderSummary.replaceChildren()
+  if (!provider) return
+  const title = element("div", "link-provider-summary-heading", "")
+  title.append(
+    element("div", "", ""),
+    element("button", "secondary-btn", "Cambiar proveedor"),
+  )
+  title.firstChild.append(
+    element("span", "link-section-label", "4. Proveedor seleccionado"),
+    element("strong", "", provider.alias || provider.legal_name || "Proveedor"),
+  )
+  title.lastChild.type = "button"
+  title.lastChild.addEventListener("click", () => {
+    state.linkSelectedProvider = null
+    state.linkScope = null
+    dom.linkProviderSearch.value = ""
+    renderLinkProviderSummary()
+    renderLinkManagement()
+    dom.linkProviderSearch.focus()
+  })
+  const list = element("dl", "link-provider-summary-list", "")
+  ;[
+    ["Razón social", provider.legal_name], ["RFC", provider.rfc_masked],
+    ["Banco", provider.bank], ["Cuenta", provider.account_masked], ["CLABE", provider.clabe_masked],
+  ].forEach(([label, value]) => {
+    const row = document.createElement("div")
+    row.append(element("dt", "", label), element("dd", "", displayValue(value)))
+    list.append(row)
+  })
+  dom.linkProviderSummary.append(title, list)
+}
+
+async function loadSelectedLinkScope() {
+  const company = selectedLinkCompany()
+  const providerId = selectedLinkRecipient() === "existing" ? state.linkSelectedProvider?.proveedor_id : null
+  if (!company || (selectedLinkRecipient() === "existing" && !providerId)) {
+    state.linkScope = null
+    renderLinkManagement()
+    return
+  }
+  const version = ++state.linkScopeVersion
+  dom.linkCurrentState.replaceChildren(element("p", "", "Consultando liga de este destinatario…"))
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_scope", {
+    p_company_id: company.id,
+    p_proveedor_id: providerId || null,
+  })
+  if (version !== state.linkScopeVersion) return
+  state.linkScope = error ? { error: friendlyError(error) } : data
+  renderLinkManagement()
+}
+
 function renderLinkManagement() {
   const company = selectedLinkCompany()
   const defaults = state.linkContext?.defaults || {}
-  const link = company?.active_link
+  const isExisting = selectedLinkRecipient() === "existing"
+  const scopeReady = Boolean(company) && (!isExisting || Boolean(state.linkSelectedProvider))
+  const link = state.linkScope?.active_link
   const isActive = link?.status === "active" && (!link.expires_at || new Date(link.expires_at) > new Date())
   dom.linkManagementError.textContent = ""
-  dom.linkLabel.value = company ? `Portal de proveedores · ${company.name}`.slice(0, 120) : ""
   dom.linkRuntimeContract.textContent = `Contrato vigente: ${defaults.max_files || 3} archivos · ${defaults.max_file_mb || 10} MB por archivo · ${defaults.max_total_mb || 12} MB totales · ${defaults.max_submissions_per_day || 20} envíos diarios · ${linkAllowedTypesLabel(defaults.allowed_file_types)}.`
   dom.linkCurrentState.replaceChildren()
 
-  if (isActive) {
+  if (!scopeReady) {
     dom.linkCurrentState.append(
-      element("strong", "", "Liga activa"),
+      element("strong", "", "Selecciona un proveedor"),
+      element("p", "", "Busca y confirma a quién se enviará la liga. No se seleccionará ningún resultado automáticamente."),
+    )
+  } else if (state.linkScope?.error) {
+    dom.linkCurrentState.append(element("p", "field-error", state.linkScope.error))
+  } else if (isActive) {
+    dom.linkCurrentState.append(
+      element("strong", "", isExisting ? "Liga activa para este proveedor" : "Liga genérica activa para esta empresa"),
+      element("p", "", `${company.name}${isExisting ? ` · ${state.linkSelectedProvider.alias || state.linkSelectedProvider.legal_name}` : " · Proveedor nuevo / no identificado"}.`),
       element("p", "", `${link.label} · prefijo ${link.token_prefix} · vence ${formatDateTime(link.expires_at)}.`),
       element("p", "", `${numberFormat(link.current_intakes)} intake${Number(link.current_intakes) === 1 ? "" : "s"} creado${Number(link.current_intakes) === 1 ? "" : "s"} con esta liga.`),
       element("small", "", "El token completo no se almacena ni puede recuperarse. Regenera la liga para obtener una nueva URL de una sola visualización."),
@@ -2170,11 +2418,11 @@ function renderLinkManagement() {
   } else {
     dom.linkCurrentState.append(
       element("strong", "", link?.status === "expired" ? "La liga anterior expiró" : "Sin liga activa"),
-      element("p", "", "Puedes crear una liga nueva sin crear intakes, proveedores ni solicitudes de pago."),
+      element("p", "", "Puedes crear una liga nueva para este destinatario sin crear intakes, proveedores ni solicitudes de pago."),
     )
   }
 
-  dom.linkCreateForm.hidden = Boolean(isActive)
+  dom.linkCreateForm.hidden = Boolean(isActive) || !scopeReady || Boolean(state.linkScope?.error)
   dom.revokeLinkBtn.hidden = !isActive
   dom.regenerateLinkBtn.hidden = !isActive
   dom.revokeLinkBtn.dataset.linkId = isActive ? link.id : ""
@@ -2184,15 +2432,17 @@ function renderLinkManagement() {
 async function createManagedLink(event) {
   event.preventDefault()
   const company = selectedLinkCompany()
-  if (!company || state.linkMutationInFlight) return
+  const providerId = selectedLinkRecipient() === "existing" ? state.linkSelectedProvider?.proveedor_id : null
+  if (!company || (selectedLinkRecipient() === "existing" && !providerId) || state.linkMutationInFlight) return
   state.linkMutationInFlight = true
   dom.createLinkBtn.disabled = true
   dom.createLinkBtn.textContent = "Creando…"
   dom.linkManagementError.textContent = ""
   const defaults = state.linkContext?.defaults || {}
-  const { data, error } = await supabaseClient.rpc("create_provider_intake_link", {
+  const { data, error } = await supabaseClient.rpc("create_provider_intake_link_v2", {
     p_company_id: company.id,
-    p_label: dom.linkLabel.value.trim(),
+    p_proveedor_id: providerId || null,
+    p_label: dom.linkLabel.value.trim() || null,
     p_duration_hours: Number(dom.linkDuration.value),
     p_max_submissions_per_day: Number(defaults.max_submissions_per_day || 20),
     p_max_file_mb: Number(defaults.max_file_mb || 10),
@@ -2237,7 +2487,7 @@ async function regenerateManagedLink() {
   if (!confirm(`Revocar y regenerar la liga de ${company.name}? La URL anterior dejará de funcionar inmediatamente.`)) return
   state.linkMutationInFlight = true
   dom.regenerateLinkBtn.disabled = true
-  const { data, error } = await supabaseClient.rpc("regenerate_provider_intake_link", {
+  const { data, error } = await supabaseClient.rpc("regenerate_provider_intake_link_v2", {
     p_intake_link_id: linkId,
     p_confirmed: true,
     p_duration_hours: Number(dom.linkDuration.value),
@@ -2253,11 +2503,16 @@ async function regenerateManagedLink() {
 }
 
 async function refreshLinkContextAndRender(companyId) {
+  const selectedProvider = state.linkSelectedProvider
+  const selectedRecipient = selectedLinkRecipient()
   await loadLinkManagementContext()
   dom.linkCompany.replaceChildren()
   state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
   dom.linkCompany.value = companyId
-  renderLinkManagement()
+  state.linkSelectedProvider = selectedProvider
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${selectedRecipient}"]`)
+  if (radio) radio.checked = true
+  await loadSelectedLinkScope()
 }
 
 function showOneTimeLink(result) {
@@ -2473,6 +2728,7 @@ function restoreDetailFocus() {
   state.detailTrigger = null
   state.detail = null
   state.matchData = null
+  state.linkTarget = null
   state.matchSearch = ""
   state.paymentDraftContext = null
   if (trigger?.isConnected) trigger.focus()

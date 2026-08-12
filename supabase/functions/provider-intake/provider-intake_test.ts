@@ -62,6 +62,7 @@ const link: LinkResolution = {
     "image/png",
     "image/webp",
   ],
+  provider_target: null,
 };
 
 class FakeRepository implements IntakeRepository {
@@ -75,13 +76,14 @@ class FakeRepository implements IntakeRepository {
   uploadFails = false;
   attachFails = false;
   resolveError: string | null = null;
+  resolvedLink: LinkResolution = link;
 
   resolveLink(): Promise<LinkResolution> {
     this.resolveCalls += 1;
     if (this.resolveError) {
       return Promise.reject(new Error(this.resolveError));
     }
-    return Promise.resolve(link);
+    return Promise.resolve(this.resolvedLink);
   }
 
   createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult> {
@@ -188,6 +190,78 @@ Deno.test("link-info exposes only the public contract", async () => {
   assert(!JSON.stringify(body).includes("company_id"));
   assert(!JSON.stringify(body).includes("intake_link_id"));
   assert(!JSON.stringify(body).includes("token_hash"));
+  assertEquals(body.provider_target, null);
+  assertEquals(response.headers.get("cache-control"), "no-store");
+});
+
+Deno.test("provider-aware link exposes only its targeted masked snapshot", async () => {
+  const repository = new FakeRepository();
+  repository.resolvedLink = {
+    ...link,
+    provider_target: {
+      display_name: "Proveedor A",
+      legal_name: "Proveedor A, S.A. de C.V.",
+      rfc: "PRA010203AB1",
+      email: "contacto@proveedor-a.invalid",
+      phone: "+52 55 0000 0000",
+      bank_name: "Banco A",
+      account_masked: "••••1234",
+      clabe_masked: "••••5678",
+    },
+  };
+  const handler = createProviderIntakeHandler({
+    config,
+    repository,
+    captcha,
+    hashPepper: "pepper-test",
+    logger: () => undefined,
+  });
+  const response = await handler(request("link-info", { method: "GET" }));
+  const body = await response.json();
+  const serialized = JSON.stringify(body);
+
+  assertEquals(response.status, 200);
+  assertEquals(body.provider_target.display_name, "Proveedor A");
+  assertEquals(body.provider_target.account_masked, "••••1234");
+  assertEquals(body.provider_target.clabe_masked, "••••5678");
+  assert(!serialized.includes("proveedor_id"));
+  assert(!serialized.includes("123456789012345678"));
+  assert(!serialized.includes("provider_b"));
+});
+
+Deno.test("provider-aware submit requires an explicit safe bank decision", async () => {
+  const targeted = {
+    ...link,
+    provider_target: {
+      display_name: "Proveedor A",
+      account_masked: "••••1234",
+      clabe_masked: "••••5678",
+    },
+  } satisfies LinkResolution;
+
+  for (const [overrides, expectedStatus] of [
+    [{}, 400],
+    [{ bank_data_confirmation: "MASTER_CONFIRMED" }, 201],
+    [{ bank_data_confirmation: "MASTER_CONFIRMED", bank_account: "12345678" }, 400],
+    [{
+      bank_data_confirmation: "CHANGE_DECLARED",
+      bank_name: "Banco nuevo",
+      beneficiary_name: "Proveedor A",
+      bank_clabe: "123456789012345678",
+    }, 201],
+  ] as const) {
+    const repository = new FakeRepository();
+    repository.resolvedLink = targeted;
+    const handler = createProviderIntakeHandler({
+      config,
+      repository,
+      captcha,
+      hashPepper: "pepper-test",
+      logger: () => undefined,
+    });
+    const response = await handler(submitRequest(overrides));
+    assertEquals(response.status, expectedStatus);
+  }
 });
 
 Deno.test("submit rejects total request size before repository access", async () => {

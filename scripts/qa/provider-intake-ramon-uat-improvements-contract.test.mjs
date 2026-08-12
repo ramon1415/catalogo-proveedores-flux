@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import test from "node:test"
@@ -22,7 +23,7 @@ const config = read("config.js")
 test("migration uses the next dynamic active slot", () => {
   assert.match(migrationName, /^20260811\d{6}_045_provider_intake_ramon_uat_product_improvements\.sql$/)
   assert.ok(migrationName > "20260811215129_044_provider_intake_payment_conversion.sql")
-  assert.equal(migrations.at(-1), migrationName)
+  assert.equal(createHash("sha256").update(fs.readFileSync(path.join(root, "supabase", "migrations", migrationName))).digest("hex"), "563dda79b2a25994deb2d94d682a25ec5c3609ea647da012e93fc3be022ec1b4")
 })
 
 test("public document guidance is visible before selection and remains runtime driven", () => {
@@ -100,13 +101,18 @@ test("link RPCs enforce one active link and one-time raw-token handling", () => 
 })
 
 test("link UI supports create revoke regenerate without side effects", () => {
-  const linkFunctions = ["create_provider_intake_link", "revoke_provider_intake_link", "regenerate_provider_intake_link"]
-    .map((name) => migration.match(new RegExp(`create function public\\.${name}[\\s\\S]*?\\n\\$\\$;`, "i"))?.[0] || "")
-    .join("\n")
+  const migration046Name = migrations.find((name) => name.endsWith("_046_provider_aware_intake_links.sql"))
+  assert.ok(migration046Name)
+  const migration046 = read(path.join("supabase", "migrations", migration046Name))
+  const linkFunctions = [
+    migration046.match(/create function public\.create_provider_intake_link_v2[\s\S]*?\n\$\$;/i)?.[0] || "",
+    migration.match(/create function public\.revoke_provider_intake_link[\s\S]*?\n\$\$;/i)?.[0] || "",
+    migration046.match(/create function public\.regenerate_provider_intake_link_v2[\s\S]*?\n\$\$;/i)?.[0] || "",
+  ].join("\n")
   for (const value of ["Generar liga de proveedor", "Generar liga", "Revocar liga", "Regenerar liga", "Liga lista para compartir"]) {
     assert.match(internalHtml, new RegExp(value))
   }
-  for (const rpc of ["create_provider_intake_link", "revoke_provider_intake_link", "regenerate_provider_intake_link"]) {
+  for (const rpc of ["create_provider_intake_link_v2", "revoke_provider_intake_link", "regenerate_provider_intake_link_v2"]) {
     assert.match(internalJs, new RegExp(`rpc\\("${rpc}"`))
   }
   assert.doesNotMatch(linkFunctions, /insert into public\.(payment_intake|payment_requests|notification_events)/i)

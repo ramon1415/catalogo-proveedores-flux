@@ -114,6 +114,54 @@ async function cleanupBestEffort(
   await markIssueBestEffort(repository, intakeId, issue);
 }
 
+function validateProviderAwareBankContract(
+  payload: IntakePayload,
+  link: LinkResolution,
+): void {
+  const confirmation = payload.bank_data_confirmation;
+  const bankValues = [
+    payload.bank_name,
+    payload.beneficiary_name,
+    payload.bank_account,
+    payload.bank_clabe,
+  ];
+  if (!link.provider_target) {
+    if (confirmation) {
+      throw new IntakeError(
+        "invalid_request",
+        400,
+        "bank_data_confirmation_not_allowed",
+      );
+    }
+    return;
+  }
+  if (!confirmation) {
+    throw new IntakeError(
+      "invalid_request",
+      400,
+      "bank_data_confirmation_required",
+    );
+  }
+  if (confirmation === "MASTER_CONFIRMED" && bankValues.some(Boolean)) {
+    throw new IntakeError(
+      "invalid_request",
+      400,
+      "master_bank_values_not_allowed",
+    );
+  }
+  if (
+    confirmation === "CHANGE_DECLARED" &&
+    (!payload.bank_name || !payload.beneficiary_name ||
+      (!payload.bank_account && !payload.bank_clabe))
+  ) {
+    throw new IntakeError(
+      "invalid_request",
+      400,
+      "bank_change_fields_required",
+    );
+  }
+}
+
 export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
   const now = dependencies.now || Date.now;
   const logger = dependencies.logger ||
@@ -193,6 +241,7 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
               max_total_mb: dependencies.config.maxTotalMb,
               allowed_file_types: link.allowed_file_types,
             },
+            provider_target: link.provider_target,
             privacy_notice: { url: dependencies.config.privacyNoticeUrl },
           },
           statusCode,
@@ -207,6 +256,7 @@ export function createProviderIntakeHandler(dependencies: HandlerDependencies) {
       }
 
       const payload = validatePayload(envelope.payload, dependencies.config);
+      validateProviderAwareBankContract(payload, link);
       const captchaToken = validateCaptchaToken(envelope.captchaToken);
       const remoteIp = clientIp(req);
       const captchaOk = await dependencies.captcha.verify({

@@ -36,4 +36,9 @@ main{min-height:calc(100vh - 210px)}.status-shell,.success-shell{min-height:560p
 .document-kind-guide li strong{font-size:.88rem}
 .document-kind-guide li span{font-size:.78rem;color:var(--slate-500)}
 .document-kind-runtime{font-size:.82rem;font-weight:700;color:var(--slate-900)!important}
+.registered-data-card,.registered-bank-card{margin:0 0 24px;padding:18px;border:1px solid #b9cdb4;border-radius:var(--radius-md);background:var(--teal-50)}
+.registered-data-card h3,.registered-bank-card h3{margin:3px 0 7px;font-size:1rem}.registered-data-card p,.registered-bank-card p{margin:5px 0;color:var(--slate-700);font-size:.86rem}.registered-data-note{font-weight:700}
+.registered-bank-card dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}.registered-bank-card dl div{padding:11px;border-radius:10px;background:var(--white);border:1px solid var(--slate-200)}.registered-bank-card dt{color:var(--slate-500);font-size:.72rem}.registered-bank-card dd{margin:3px 0 0;font-weight:800;overflow-wrap:anywhere}
+.bank-confirmation-options{margin:16px 0 0!important;padding-top:15px!important;border-top:1px solid #b9cdb4!important}.bank-confirmation-options>p{font-size:.9rem;margin:0 0 10px}.bank-confirmation-options label{display:flex;align-items:center;gap:9px;margin:9px 0;color:var(--slate-700);font-size:.88rem;font-weight:700}.bank-confirmation-options input{width:18px;height:18px;accent-color:var(--teal-700)}
 @media(max-width:640px){.document-kind-guide ul{grid-template-columns:1fr}}
+@media(max-width:640px){.registered-bank-card dl{grid-template-columns:1fr}}

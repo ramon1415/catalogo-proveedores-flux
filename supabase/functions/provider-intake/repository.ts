@@ -32,6 +32,10 @@ function knownRpcError(message: string): string {
     "provider_intake_invalid_file_metadata",
     "provider_intake_file_metadata_conflict",
     "provider_intake_not_attachable",
+    "provider_intake_bank_confirmation_not_allowed",
+    "provider_intake_bank_confirmation_required",
+    "provider_intake_master_bank_values_not_allowed",
+    "provider_intake_bank_change_fields_required",
   ];
   return known.find((code) => message.includes(code)) ||
     "provider_intake_repository_error";
@@ -85,13 +89,13 @@ export class SupabaseIntakeRepository implements IntakeRepository {
   }
 
   resolveLink(tokenHash: string): Promise<LinkResolution> {
-    return this.rpc("resolve_provider_intake_link_internal", {
+    return this.rpc("resolve_provider_aware_intake_link_internal", {
       p_token_hash: tokenHash,
     });
   }
 
   createIntake(input: CreateIntakeInput): Promise<CreateIntakeResult> {
-    return this.rpc("create_provider_intake_internal", {
+    return this.rpc("create_provider_aware_intake_internal", {
       p_token_hash: input.tokenHash,
       p_submission: input.submission,
       p_submission_fingerprint: input.submissionFingerprint,

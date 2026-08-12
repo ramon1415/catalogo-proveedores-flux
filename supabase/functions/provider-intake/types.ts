@@ -15,6 +15,7 @@ export const ALLOWED_PAYLOAD_FIELDS = [
   "bank_account",
   "bank_clabe",
   "beneficiary_name",
+  "bank_data_confirmation",
 ] as const;
 
 export type IntakePayloadField = typeof ALLOWED_PAYLOAD_FIELDS[number];
@@ -36,6 +37,7 @@ export type IntakePayload = {
   bank_account?: string;
   bank_clabe?: string;
   beneficiary_name?: string;
+  bank_data_confirmation?: "MASTER_CONFIRMED" | "CHANGE_DECLARED";
 };
 
 export type IntakeConfig = {
@@ -57,6 +59,16 @@ export type LinkResolution = {
   max_file_mb: number;
   max_submissions_per_day: number;
   allowed_file_types: string[];
+  provider_target: null | {
+    display_name?: string;
+    legal_name?: string;
+    rfc?: string;
+    email?: string;
+    phone?: string;
+    bank_name?: string;
+    account_masked?: string;
+    clabe_masked?: string;
+  };
 };
 
 export type CreateIntakeInput = {
