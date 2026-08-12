@@ -489,8 +489,9 @@
       <div class="dialog-scroll link-management-content">
         <label class="link-management-field">
           <span>1. Empresa</span>
-          <select id="linkCompany"></select>
+          <select id="linkCompany" aria-describedby="linkCompanyState"></select>
         </label>
+        <p class="link-company-state" id="linkCompanyState" role="status" aria-live="polite"></p>
         <fieldset class="link-recipient-fieldset">
           <legend>2. ¿A quién enviarás la liga?</legend>
           <label><input type="radio" name="linkRecipient" value="existing" checked> Proveedor existente</label>

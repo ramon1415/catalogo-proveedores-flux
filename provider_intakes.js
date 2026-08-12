@@ -194,7 +194,7 @@ function bindDom() {
     "convertPaymentDraftBtn",
     "manageLinksBtn", "linkOnlyState", "linkManagementDialog", "closeLinkManagementBtn",
     "doneLinkManagementBtn", "linkCompany", "linkCurrentState", "linkCreateForm",
-    "linkLabel", "linkDuration", "linkRuntimeContract", "linkManagementError",
+    "linkCompanyState", "linkLabel", "linkDuration", "linkRuntimeContract", "linkManagementError",
     "createLinkBtn", "linkOneTimeResult", "linkPublicUrl", "copyLinkBtn",
     "copyLinkStatus", "revokeLinkBtn", "regenerateLinkBtn", "paymentDraftBanking",
     "paymentDraftBankingMessage", "paymentDraftBankingComparison", "paymentDraftBankingActions",
@@ -2194,10 +2194,36 @@ async function loadLinkManagementContext() {
   state.linkCompanies = Array.isArray(data?.companies) ? data.companies : []
 }
 
-function openLinkManagement() {
-  dom.linkCompany.replaceChildren()
-  state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
+async function openLinkManagement() {
+  resetLinkSessionState()
+  dom.linkCompany.replaceChildren(optionElement("", "Cargando empresas autorizadas…"))
+  dom.linkCompany.disabled = true
+  dom.linkCompanyState.textContent = "Consultando tu alcance por empresa…"
   dom.linkDuration.value = String(state.linkContext?.defaults?.duration_hours || 72)
+  dom.linkManagementDialog.showModal()
+  syncLinkRecipientUi()
+
+  await loadLinkManagementContext()
+  if (!dom.linkManagementDialog.open) return
+  populateLinkCompanyOptions()
+  const company = selectedLinkCompany()
+  const defaultMode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${defaultMode}"]`)
+  if (radio) radio.checked = true
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+  window.setTimeout(() => (company ? document.querySelector('input[name="linkRecipient"]') : dom.linkCompany)?.focus(), 0)
+}
+
+function closeLinkManagement() {
+  window.clearTimeout(linkProviderSearchTimer)
+  resetLinkSessionState()
+  if (dom.linkManagementDialog.open) dom.linkManagementDialog.close()
+}
+
+function resetLinkSessionState() {
+  window.clearTimeout(linkProviderSearchTimer)
+  state.linkScopeVersion += 1
   state.linkSelectedProvider = null
   state.linkProviderResults = []
   state.linkScope = null
@@ -2207,22 +2233,27 @@ function openLinkManagement() {
   dom.linkPublicUrl.value = ""
   dom.copyLinkStatus.textContent = ""
   dom.linkManagementError.textContent = ""
-  dom.linkManagementDialog.showModal()
-  const company = selectedLinkCompany()
-  const defaultMode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
-  const radio = document.querySelector(`input[name="linkRecipient"][value="${defaultMode}"]`)
-  if (radio) radio.checked = true
-  syncLinkRecipientUi()
-  loadSelectedLinkScope()
-  window.setTimeout(() => (state.linkCompanies.length === 1 ? document.querySelector('input[name="linkRecipient"]') : dom.linkCompany)?.focus(), 0)
 }
 
-function closeLinkManagement() {
-  window.clearTimeout(linkProviderSearchTimer)
-  dom.linkPublicUrl.value = ""
-  dom.linkOneTimeResult.hidden = true
-  dom.copyLinkStatus.textContent = ""
-  if (dom.linkManagementDialog.open) dom.linkManagementDialog.close()
+function populateLinkCompanyOptions(preferredCompanyId = "") {
+  const companies = Array.isArray(state.linkCompanies) ? state.linkCompanies : []
+  dom.linkCompany.replaceChildren()
+  if (!companies.length) {
+    dom.linkCompany.append(optionElement("", "Sin empresas autorizadas"))
+    dom.linkCompany.disabled = true
+    dom.linkCompanyState.textContent = "No tienes empresas autorizadas para generar ligas de proveedor."
+    return null
+  }
+
+  dom.linkCompany.disabled = false
+  if (companies.length > 1) dom.linkCompany.append(optionElement("", "Selecciona una empresa"))
+  companies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
+  const preferred = companies.find((company) => company.id === preferredCompanyId)
+  dom.linkCompany.value = preferred?.id || (companies.length === 1 ? companies[0].id : "")
+  dom.linkCompanyState.textContent = companies.length === 1
+    ? `${companies[0].name || "Empresa autorizada"} está seleccionada.`
+    : `${companies.length} empresas autorizadas disponibles.`
+  return selectedLinkCompany()
 }
 
 function selectedLinkCompany() {
@@ -2234,12 +2265,11 @@ function selectedLinkRecipient() {
 }
 
 function handleLinkCompanyChange() {
-  state.linkSelectedProvider = null
-  state.linkProviderResults = []
-  state.linkScope = null
-  dom.linkProviderSearch.value = ""
-  dom.linkLabel.value = ""
+  resetLinkSessionState()
   const company = selectedLinkCompany()
+  dom.linkCompanyState.textContent = company
+    ? `${company.name || "Empresa autorizada"} está seleccionada.`
+    : "Selecciona una empresa autorizada para continuar."
   const mode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
   const radio = document.querySelector(`input[name="linkRecipient"][value="${mode}"]`)
   if (radio) radio.checked = true
@@ -2248,18 +2278,24 @@ function handleLinkCompanyChange() {
 }
 
 function handleLinkRecipientChange() {
-  state.linkSelectedProvider = null
-  state.linkProviderResults = []
-  state.linkScope = null
-  dom.linkProviderSearch.value = ""
-  dom.linkLabel.value = ""
+  resetLinkSessionState()
   syncLinkRecipientUi()
   loadSelectedLinkScope()
 }
 
 function syncLinkRecipientUi() {
+  const company = selectedLinkCompany()
+  const hasCompany = Boolean(company)
   const existing = selectedLinkRecipient() === "existing"
   dom.linkProviderPicker.hidden = !existing
+  document.querySelectorAll('input[name="linkRecipient"]').forEach((radio) => { radio.disabled = !hasCompany })
+  dom.linkProviderSearch.disabled = !hasCompany || !existing
+  if (!hasCompany) {
+    dom.linkProviderSearch.value = ""
+    dom.linkProviderSearchHint.textContent = "Selecciona una empresa autorizada para habilitar la búsqueda."
+  } else if (existing && !state.linkSelectedProvider && dom.linkProviderSearch.value.trim().length < 2) {
+    dom.linkProviderSearchHint.textContent = "Escribe al menos 2 caracteres. La selección siempre es explícita."
+  }
   renderLinkProviderResults()
   renderLinkProviderSummary()
   renderLinkManagement()
@@ -2267,6 +2303,15 @@ function syncLinkRecipientUi() {
 
 function handleLinkProviderSearch() {
   window.clearTimeout(linkProviderSearchTimer)
+  const company = selectedLinkCompany()
+  if (!company || dom.linkProviderSearch.disabled) {
+    state.linkProviderResults = []
+    dom.linkProviderSearch.value = ""
+    dom.linkProviderSearchHint.textContent = "Selecciona una empresa autorizada para habilitar la búsqueda."
+    renderLinkProviderResults()
+    renderLinkManagement()
+    return
+  }
   state.linkSelectedProvider = null
   state.linkScope = null
   renderLinkProviderSummary()
@@ -2281,18 +2326,18 @@ function handleLinkProviderSearch() {
     return
   }
   dom.linkProviderSearchHint.textContent = "Buscando proveedores activos…"
-  linkProviderSearchTimer = window.setTimeout(() => searchLinkProviders(query), 320)
+  linkProviderSearchTimer = window.setTimeout(() => searchLinkProviders(query, company.id), 320)
 }
 
-async function searchLinkProviders(query) {
+async function searchLinkProviders(query, companyId) {
   const company = selectedLinkCompany()
-  if (!company || selectedLinkRecipient() !== "existing") return
+  if (!company || company.id !== companyId || selectedLinkRecipient() !== "existing") return
   const { data, error } = await supabaseClient.rpc("find_provider_intake_link_providers", {
     p_company_id: company.id,
     p_search: query,
     p_limit: 12,
   })
-  if (query !== dom.linkProviderSearch.value.trim()) return
+  if (query !== dom.linkProviderSearch.value.trim() || selectedLinkCompany()?.id !== companyId) return
   if (error) {
     state.linkProviderResults = []
     dom.linkProviderSearchHint.textContent = friendlyError(error)
@@ -2307,7 +2352,7 @@ async function searchLinkProviders(query) {
 
 function renderLinkProviderResults() {
   dom.linkProviderResults.replaceChildren()
-  if (selectedLinkRecipient() !== "existing") return
+  if (!selectedLinkCompany() || selectedLinkRecipient() !== "existing") return
   state.linkProviderResults.forEach((provider) => {
     const button = element("button", "link-provider-result", "")
     button.type = "button"
@@ -2323,6 +2368,7 @@ function renderLinkProviderResults() {
 }
 
 function selectLinkProvider(provider) {
+  if (!selectedLinkCompany()) return
   state.linkSelectedProvider = provider
   state.linkProviderResults = []
   state.linkScope = null
@@ -2391,6 +2437,7 @@ async function loadSelectedLinkScope() {
 
 function renderLinkManagement() {
   const company = selectedLinkCompany()
+  const hasAuthorizedCompanies = state.linkCompanies.length > 0
   const defaults = state.linkContext?.defaults || {}
   const isExisting = selectedLinkRecipient() === "existing"
   const scopeReady = Boolean(company) && (!isExisting || Boolean(state.linkSelectedProvider))
@@ -2400,7 +2447,17 @@ function renderLinkManagement() {
   dom.linkRuntimeContract.textContent = `Contrato vigente: ${defaults.max_files || 3} archivos · ${defaults.max_file_mb || 10} MB por archivo · ${defaults.max_total_mb || 12} MB totales · ${defaults.max_submissions_per_day || 20} envíos diarios · ${linkAllowedTypesLabel(defaults.allowed_file_types)}.`
   dom.linkCurrentState.replaceChildren()
 
-  if (!scopeReady) {
+  if (!hasAuthorizedCompanies) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Sin empresas autorizadas"),
+      element("p", "", "No tienes empresas autorizadas para generar ligas de proveedor."),
+    )
+  } else if (!company) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Selecciona una empresa"),
+      element("p", "", "Elige una empresa autorizada para habilitar el destinatario y la búsqueda de proveedor."),
+    )
+  } else if (!scopeReady) {
     dom.linkCurrentState.append(
       element("strong", "", "Selecciona un proveedor"),
       element("p", "", "Busca y confirma a quién se enviará la liga. No se seleccionará ningún resultado automáticamente."),
@@ -2423,6 +2480,7 @@ function renderLinkManagement() {
   }
 
   dom.linkCreateForm.hidden = Boolean(isActive) || !scopeReady || Boolean(state.linkScope?.error)
+  dom.createLinkBtn.disabled = !scopeReady || Boolean(state.linkScope?.error) || state.linkMutationInFlight
   dom.revokeLinkBtn.hidden = !isActive
   dom.regenerateLinkBtn.hidden = !isActive
   dom.revokeLinkBtn.dataset.linkId = isActive ? link.id : ""
@@ -2506,9 +2564,7 @@ async function refreshLinkContextAndRender(companyId) {
   const selectedProvider = state.linkSelectedProvider
   const selectedRecipient = selectedLinkRecipient()
   await loadLinkManagementContext()
-  dom.linkCompany.replaceChildren()
-  state.linkCompanies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
-  dom.linkCompany.value = companyId
+  populateLinkCompanyOptions(companyId)
   state.linkSelectedProvider = selectedProvider
   const radio = document.querySelector(`input[name="linkRecipient"][value="${selectedRecipient}"]`)
   if (radio) radio.checked = true

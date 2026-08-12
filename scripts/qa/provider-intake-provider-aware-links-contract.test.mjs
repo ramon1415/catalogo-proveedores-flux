@@ -111,8 +111,25 @@ test("inbox and link modal implement the second-UAT UX contract", () => {
   assert.match(internalHtml, /Proveedor nuevo \/ no identificado/)
   assert.match(internalHtml, /Buscar por nombre, alias o RFC/)
   assert.match(internalJs, /query\.length < 2/)
-  assert.match(internalJs, /setTimeout\(\(\) => searchLinkProviders\(query\), 320\)/)
+  assert.match(internalJs, /setTimeout\(\(\) => searchLinkProviders\(query, company\.id\), 320\)/)
   assert.match(internalCss, /link-management-content[\s\S]*?overflow-y:auto; overflow-x:hidden/)
+})
+
+test("company authorization state is fail-closed and clears dependent link state", () => {
+  assert.match(internalHtml, /id="linkCompany" aria-describedby="linkCompanyState"/)
+  assert.match(internalHtml, /id="linkCompanyState" role="status" aria-live="polite"/)
+  assert.match(internalJs, /await loadLinkManagementContext\(\)[\s\S]*?populateLinkCompanyOptions\(\)/)
+  assert.match(internalJs, /No tienes empresas autorizadas para generar ligas de proveedor/)
+  assert.match(internalJs, /dom\.linkCompany\.disabled = true/)
+  assert.match(internalJs, /radio\.disabled = !hasCompany/)
+  assert.match(internalJs, /dom\.linkProviderSearch\.disabled = !hasCompany \|\| !existing/)
+  assert.match(internalJs, /searchLinkProviders\(query, company\.id\)/)
+  assert.match(internalJs, /selectedLinkCompany\(\)\?\.id !== companyId/)
+  assert.match(internalJs, /function handleLinkCompanyChange\(\) \{\s*resetLinkSessionState\(\)/)
+  assert.match(internalJs, /function handleLinkRecipientChange\(\) \{\s*resetLinkSessionState\(\)/)
+  assert.match(internalJs, /dom\.linkOneTimeResult\.hidden = true[\s\S]*?dom\.linkPublicUrl\.value = ""/)
+  assert.match(internalJs, /dom\.createLinkBtn\.disabled = !scopeReady/)
+  assert.match(internalCss, /\[hidden\] \{ display: none !important; \}/)
 })
 
 test("link creation code has no product side effects", () => {
