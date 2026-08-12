@@ -48,7 +48,9 @@ export function mapError(error: unknown): IntakeError {
   }
   if (
     message.includes("provider_intake_invalid") ||
-    message.includes("unknown_field")
+    message.includes("unknown_field") ||
+    message.includes("provider_intake_bank_") ||
+    message.includes("provider_intake_master_bank_")
   ) {
     return new IntakeError("invalid_request", 400, "invalid_request");
   }

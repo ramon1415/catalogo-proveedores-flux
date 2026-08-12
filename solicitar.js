@@ -84,6 +84,8 @@ function parseLinkInfo(value) {
     !Array.isArray(link.allowed_file_types) ||
     parsedPrivacy.protocol !== "https:"
   ) return null;
+  const providerTarget = parseProviderTarget(value?.provider_target);
+  if (value?.provider_target != null && !providerTarget) return null;
   return {
     companyName: companyName.trim(),
     maxFileMb: link.max_file_mb,
@@ -91,7 +93,35 @@ function parseLinkInfo(value) {
     maxTotalMb: link.max_total_mb,
     allowedFileTypes: link.allowed_file_types.map((type) => String(type).toLowerCase()),
     privacyUrl: parsedPrivacy.href,
+    providerTarget,
   };
+}
+
+function optionalContractText(value, maxLength) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text || text.length > maxLength || /[\u0000-\u001f\u007f]/.test(text)) return null;
+  return text;
+}
+
+function parseProviderTarget(value) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const parsed = {
+    displayName: optionalContractText(value.display_name, 200),
+    legalName: optionalContractText(value.legal_name, 200),
+    rfc: optionalContractText(value.rfc, 20),
+    email: optionalContractText(value.email, 254),
+    phone: optionalContractText(value.phone, 50),
+    bankName: optionalContractText(value.bank_name, 160),
+    accountMasked: optionalContractText(value.account_masked, 40),
+    clabeMasked: optionalContractText(value.clabe_masked, 40),
+  };
+  if (Object.values(parsed).some((entry) => entry === null)) return null;
+  if (!parsed.displayName && !parsed.legalName) return null;
+  if ([parsed.accountMasked, parsed.clabeMasked].some((entry) => /\d{8,}/.test(entry))) return null;
+  return parsed;
 }
 
 async function validateLink() {
@@ -142,7 +172,9 @@ function initializePortal() {
   byId("privacy-link").href = linkInfo.privacyUrl;
   byId("file-limit-copy").textContent = `Máximo ${linkInfo.maxFiles} archivos, ${linkInfo.maxFileMb} MB por archivo. Formatos: ${formatAllowedTypes(linkInfo.allowedFileTypes)}.`;
   byId("total-budget-copy").textContent = `Límite total: ${linkInfo.maxTotalMb} MB incluyendo archivos y datos del formulario.`;
+  renderDocumentKindGuide();
   form.querySelectorAll("input, select, textarea, button").forEach((element) => { element.disabled = false; });
+  applyProviderTarget();
   submitButton.disabled = true;
   showOnly("portal");
   transition("editing");
@@ -154,6 +186,55 @@ function formatAllowedTypes(types) {
   return [...new Set(types.map((type) => labels[type] || type))].join(", ");
 }
 
+function applyProviderTarget() {
+  const target = linkInfo.providerTarget;
+  byId("registered-provider-data").hidden = !target;
+  byId("registered-bank-data").hidden = !target;
+  byId("bank-generic-help").hidden = Boolean(target);
+  if (target) {
+    byId("provider-name").value = target.legalName || target.displayName || "";
+    byId("provider-rfc").value = target.rfc || "";
+    byId("provider-email").value = target.email || "";
+    byId("provider-phone").value = target.phone || "";
+    byId("registered-bank-name").textContent = target.bankName || "No informado";
+    byId("registered-bank-account").textContent = target.accountMasked || "No informada";
+    byId("registered-bank-clabe").textContent = target.clabeMasked || "No informada";
+  }
+  updateBankConfirmationMode();
+  updateSummary();
+}
+
+function updateBankConfirmationMode() {
+  const targeted = Boolean(linkInfo?.providerTarget);
+  const confirmation = new FormData(form).get("bank_data_confirmation") || "";
+  const showDeclared = !targeted || confirmation === "CHANGE_DECLARED";
+  byId("declared-bank-fields").hidden = !showDeclared;
+  for (const name of ["bank_name", "beneficiary_name", "bank_account", "bank_clabe"]) {
+    const control = form.elements.namedItem(name);
+    if (!(control instanceof HTMLElement)) continue;
+    control.disabled = !showDeclared;
+    if (targeted && confirmation === "MASTER_CONFIRMED") control.value = "";
+  }
+  if (targeted) {
+    const copy = confirmation === "CHANGE_DECLARED"
+      ? "Captura únicamente los nuevos datos que quieres reportar. No se actualizará el maestro automáticamente."
+      : "Selecciona una opción para continuar.";
+    byId("bank-data-confirmation-error").textContent = "";
+    byId("bank-information-fieldset").setAttribute("aria-description", copy);
+  }
+}
+
+function renderDocumentKindGuide() {
+  const allowed = new Set(linkInfo.allowedFileTypes);
+  const labels = (types) => formatAllowedTypes(types.filter((type) => allowed.has(type))) || "No disponible en este enlace";
+  byId("kind-format-invoice-pdf").textContent = labels(["application/pdf"]);
+  byId("kind-format-invoice-xml").textContent = labels(["application/xml", "text/xml"]);
+  byId("kind-format-bank-document").textContent = labels(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+  byId("kind-format-support").textContent = labels(linkInfo.allowedFileTypes);
+  byId("kind-format-other").textContent = labels(linkInfo.allowedFileTypes);
+  byId("document-kind-runtime").textContent = `${linkInfo.maxFiles} archivo${linkInfo.maxFiles === 1 ? "" : "s"} como máximo · ${linkInfo.maxFileMb} MB por archivo · ${linkInfo.maxTotalMb} MB totales.`;
+}
+
 function rawPayload() {
   const data = new FormData(form);
   const result = {};
@@ -161,6 +242,7 @@ function rawPayload() {
     "provider_name", "provider_rfc", "provider_email", "provider_phone", "concept", "description",
     "amount_requested", "currency", "requested_payment_date", "invoice_folio", "invoice_uuid", "invoice_date",
     "bank_name", "bank_account", "bank_clabe", "beneficiary_name",
+    "bank_data_confirmation",
   ]) result[name] = data.get(name) || "";
   return result;
 }
@@ -169,13 +251,15 @@ function validation() {
   return validatePayload(rawPayload(), {
     maxAmount: PUBLIC_INTAKE_CONFIG.maxAmount,
     allowedCurrencies: PUBLIC_INTAKE_CONFIG.allowedCurrencies,
+    providerAware: Boolean(linkInfo?.providerTarget),
   });
 }
 
 function setFieldError(name, message) {
   const input = form.elements.namedItem(name);
   const error = byId(`${name.replaceAll("_", "-")}-error`);
-  if (input instanceof HTMLElement) input.setAttribute("aria-invalid", message ? "true" : "false");
+  const field = input instanceof HTMLElement ? input : form.querySelector(`[name="${name}"]`);
+  if (field instanceof HTMLElement) field.setAttribute("aria-invalid", message ? "true" : "false");
   if (error) error.textContent = message || "";
 }
 
@@ -189,7 +273,7 @@ function validateStep(step, focus = true) {
   const result = validation();
   const fields = step === 1
     ? ["provider_name", "provider_rfc", "provider_email", "provider_phone"]
-    : ["concept", "description", "amount_requested", "currency", "requested_payment_date", "invoice_folio", "invoice_uuid", "invoice_date", "bank_name", "bank_account", "bank_clabe", "beneficiary_name"];
+    : ["concept", "description", "amount_requested", "currency", "requested_payment_date", "invoice_folio", "invoice_uuid", "invoice_date", "bank_data_confirmation", "bank_name", "bank_account", "bank_clabe", "beneficiary_name"];
   const stepErrors = fields.filter((name) => result.errors[name]);
   stepErrors.forEach((name) => setFieldError(name, result.errors[name]));
   if (step === 3) {
@@ -199,7 +283,7 @@ function validateStep(step, focus = true) {
     if (!kindsValid || !budgetState().fits) stepErrors.push("files");
   }
   if (stepErrors.length && focus) {
-    const first = stepErrors[0] === "files" ? byId("file-global-error") : form.elements.namedItem(stepErrors[0]);
+    const first = stepErrors[0] === "files" ? byId("file-global-error") : form.querySelector(`[name="${stepErrors[0]}"]`);
     first?.focus();
     formStatus.textContent = "Revisa los campos marcados antes de continuar.";
   } else formStatus.textContent = "";
@@ -286,7 +370,9 @@ function renderReview() {
   content.replaceChildren(
     reviewCard("Proveedor", [["Nombre o razón social",payload.provider_name],["RFC",payload.provider_rfc],["Correo",payload.provider_email],["Teléfono",payload.provider_phone]]),
     reviewCard("Pago y factura", [["Concepto",payload.concept],["Monto",money],["Fecha solicitada",payload.requested_payment_date],["Folio de factura",payload.invoice_folio],["UUID fiscal",payload.invoice_uuid],["Fecha de factura",payload.invoice_date]]),
-    reviewCard("Información bancaria", [["Banco",payload.bank_name],["Cuenta",masked(payload.bank_account)],["CLABE",masked(payload.bank_clabe)],["Beneficiario",payload.beneficiary_name]]),
+    reviewCard("Información bancaria", payload.bank_data_confirmation === "MASTER_CONFIRMED"
+      ? [["Confirmación", "Los datos maestros registrados siguen vigentes"], ["Datos copiados al intake", "Ninguno"]]
+      : [["Confirmación", payload.bank_data_confirmation === "CHANGE_DECLARED" ? "Cambio bancario declarado" : "No aplica"], ["Banco",payload.bank_name],["Cuenta",masked(payload.bank_account)],["CLABE",masked(payload.bank_clabe)],["Beneficiario",payload.beneficiary_name]]),
     reviewCard("Documentos", selectedFiles.length ? selectedFiles.map((entry) => [entry.file.name, fileKindLabel(entry.kind)]) : [["Archivos", "Sin archivos adjuntos"]]),
   );
 }
@@ -583,7 +669,11 @@ function bindEvents() {
     markMaterialChange();
     if (currentStep === 4) updateSubmitReadiness();
   });
-  form.addEventListener("change", () => { markMaterialChange(); if (currentStep === 4) updateSubmitReadiness(); });
+  form.addEventListener("change", (event) => {
+    if (event.target?.name === "bank_data_confirmation") updateBankConfirmationMode();
+    markMaterialChange();
+    if (currentStep === 4) updateSubmitReadiness();
+  });
   byId("retry-link-button").addEventListener("click", validateLink);
   byId("choose-files-button").addEventListener("click", () => byId("file-input").click());
   byId("file-input").addEventListener("change", (event) => { addFiles([...event.target.files]); event.target.value = ""; });

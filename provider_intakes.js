@@ -20,6 +20,7 @@ const EVENT_LABELS = Object.freeze({
   provider_matched: "Proveedor relacionado",
   conversion_draft_created: "Preparación de pago iniciada",
   conversion_draft_updated: "Preparación de pago actualizada",
+  banking_resolution: "Decisión bancaria confirmada",
   converted: "Solicitud convertida",
 })
 
@@ -48,6 +49,7 @@ const PAYMENT_DRAFT_STATE = Object.freeze({
   NOT_STARTED: "Sin iniciar",
   DRAFT_INCOMPLETE: "Borrador incompleto",
   READY_PENDING_PROVIDER: "Preparada · pendiente de proveedor",
+  BLOCKED_BANK_REVIEW: "Bloqueada · revisar datos bancarios",
   READY_FOR_CONVERSION: "Lista para conversión",
   ALREADY_CONVERTED: "Solicitud de pago creada",
   BLOCKED_INTAKE_STATUS: "Preparación no disponible",
@@ -73,6 +75,7 @@ const PAYMENT_DRAFT_BLOCKER_LABELS = Object.freeze({
   INTAKE_STATUS_NOT_IN_REVIEW: "El intake debe estar en revisión para editar la preparación.",
   PROVIDER_REQUIRED_FOR_CONVERSION: "Falta vincular un proveedor maestro.",
   PROVIDER_INACTIVE: "El proveedor vinculado está inactivo; selecciona uno activo.",
+  BANKING_DATA_REVIEW_REQUIRED: "La transferencia requiere resolver la diferencia entre datos declarados y el maestro.",
   APPROVER_RULE_PENDING_CONVERSION: "La regla de aprobación se resolverá durante la conversión.",
 })
 
@@ -88,6 +91,7 @@ const state = {
   detailTrigger: null,
   actionTrigger: null,
   matchData: null,
+  linkTarget: null,
   matchLoading: false,
   matchSearch: "",
   matchAction: null,
@@ -102,10 +106,19 @@ const state = {
   paymentDraftReloadPending: false,
   paymentConversionActionId: null,
   paymentConversionInFlight: false,
+  linkContext: null,
+  linkCompanies: [],
+  linkMutationInFlight: false,
+  linkSelectedProvider: null,
+  linkProviderResults: [],
+  linkScope: null,
+  linkScopeVersion: 0,
 }
 
 const dom = {}
 let searchTimer = null
+let matchSearchTimer = null
+let linkProviderSearchTimer = null
 
 document.addEventListener("DOMContentLoaded", init)
 
@@ -126,14 +139,25 @@ async function init() {
   dom.userName.textContent = profile?.full_name || session.user?.email || "Usuario"
   dom.userEmail.textContent = profile?.email || session.user?.email || "Sesión activa"
 
-  if (!window.FluxAuth?.canTriageProviderIntakes?.()) {
+  const canTriage = Boolean(window.FluxAuth?.canTriageProviderIntakes?.())
+  await loadLinkManagementContext()
+  const canManageLinks = state.linkCompanies.length > 0
+
+  if (!canTriage && !canManageLinks) {
     renderAccessDenied()
     return
   }
 
   dom.accessState.hidden = true
   dom.triageWorkspace.hidden = false
-  await loadList()
+  dom.manageLinksBtn.hidden = !canManageLinks
+  dom.refreshBtn.hidden = !canTriage
+  document.querySelectorAll("[data-triage-only]").forEach((node) => { node.hidden = !canTriage })
+  dom.linkOnlyState.hidden = canTriage
+  if (canTriage) {
+    await loadList()
+    await handleProviderReturn()
+  }
 }
 
 function bindDom() {
@@ -143,7 +167,7 @@ function bindDom() {
     "folioFilter", "providerFilter", "companyFilter", "statusFilter", "dateFromFilter",
     "dateToFilter", "filesFilter", "sortFilter", "clearFiltersBtn", "resultsSummary",
     "intakeTableBody", "previousPageBtn", "nextPageBtn", "pageStatus", "countTotal",
-    "countReceived", "countReview", "countCorrection", "countRejected", "detailDialog",
+    "countReceived", "countReview", "countCorrection", "countRejected", "countConverted", "countCancelled", "detailDialog",
     "detailTitle", "detailSubtitle", "detailContent", "detailActions", "closeDetailBtn",
     "actionDialog", "actionForm", "actionTitle", "actionDescription", "actionNotes",
     "actionRequiredLabel", "actionNotesHint", "actionCounter", "actionError",
@@ -168,6 +192,14 @@ function bindDom() {
     "reloadPaymentDraftBtn", "paymentDraftSuccess", "cancelPaymentDraftBtn", "savePaymentDraftBtn",
     "paymentConversionConfirm", "cancelPaymentConversionBtn", "confirmPaymentConversionBtn",
     "convertPaymentDraftBtn",
+    "manageLinksBtn", "linkOnlyState", "linkManagementDialog", "closeLinkManagementBtn",
+    "doneLinkManagementBtn", "linkCompany", "linkCurrentState", "linkCreateForm",
+    "linkCompanyState", "linkLabel", "linkDuration", "linkRuntimeContract", "linkManagementError",
+    "createLinkBtn", "linkOneTimeResult", "linkPublicUrl", "copyLinkBtn",
+    "copyLinkStatus", "revokeLinkBtn", "regenerateLinkBtn", "paymentDraftBanking",
+    "paymentDraftBankingMessage", "paymentDraftBankingComparison", "paymentDraftBankingActions",
+    "paymentDraftBankingError", "linkProviderPicker", "linkProviderSearch",
+    "linkProviderSearchHint", "linkProviderResults", "linkProviderSummary",
   ]
   ids.forEach((id) => { dom[id] = document.getElementById(id) })
 }
@@ -206,6 +238,18 @@ function bindEvents() {
   dom.convertPaymentDraftBtn.addEventListener("click", requestPaymentConversion)
   dom.cancelPaymentConversionBtn.addEventListener("click", cancelPaymentConversion)
   dom.confirmPaymentConversionBtn.addEventListener("click", confirmPaymentConversion)
+  dom.manageLinksBtn.addEventListener("click", openLinkManagement)
+  dom.closeLinkManagementBtn.addEventListener("click", closeLinkManagement)
+  dom.doneLinkManagementBtn.addEventListener("click", closeLinkManagement)
+  dom.linkCompany.addEventListener("change", handleLinkCompanyChange)
+  document.querySelectorAll('input[name="linkRecipient"]').forEach((radio) => {
+    radio.addEventListener("change", handleLinkRecipientChange)
+  })
+  dom.linkProviderSearch.addEventListener("input", handleLinkProviderSearch)
+  dom.linkCreateForm.addEventListener("submit", createManagedLink)
+  dom.revokeLinkBtn.addEventListener("click", revokeManagedLink)
+  dom.regenerateLinkBtn.addEventListener("click", regenerateManagedLink)
+  dom.copyLinkBtn.addEventListener("click", copyManagedLink)
 
   ;[dom.folioFilter, dom.providerFilter].forEach((input) => {
     input.addEventListener("input", () => {
@@ -249,7 +293,7 @@ function renderAccessDenied() {
 }
 
 function selectedStatuses() {
-  return Array.from(dom.statusFilter.selectedOptions).map((option) => option.value)
+  return dom.statusFilter.value ? [dom.statusFilter.value] : []
 }
 
 function filterPayload() {
@@ -325,11 +369,15 @@ function updateCompanyOptions(companies) {
 }
 
 function renderSummary() {
-  dom.countTotal.textContent = numberFormat(state.summary.total)
+  const statusTotal = ["received", "in_review", "needs_correction", "rejected", "converted", "cancelled"]
+    .reduce((sum, status) => sum + Number(state.summary[status] || 0), 0)
+  dom.countTotal.textContent = numberFormat(statusTotal)
   dom.countReceived.textContent = numberFormat(state.summary.received)
   dom.countReview.textContent = numberFormat(state.summary.in_review)
   dom.countCorrection.textContent = numberFormat(state.summary.needs_correction)
   dom.countRejected.textContent = numberFormat(state.summary.rejected)
+  dom.countConverted.textContent = numberFormat(state.summary.converted)
+  dom.countCancelled.textContent = numberFormat(state.summary.cancelled)
 
   if (!state.total) {
     dom.resultsSummary.textContent = "No hay solicitudes que coincidan con los filtros."
@@ -345,7 +393,7 @@ function renderTable() {
   if (!state.items.length) {
     const row = document.createElement("tr")
     const cell = document.createElement("td")
-    cell.colSpan = 10
+    cell.colSpan = 7
     cell.className = "table-message"
     cell.textContent = "Sin resultados. Ajusta los filtros o actualiza la bandeja."
     row.append(cell)
@@ -362,14 +410,11 @@ function intakeRow(item) {
   const row = document.createElement("tr")
   row.append(
     cell(item.public_folio || "—", "folio-cell"),
-    cell(formatDateTime(item.created_at)),
-    cell(item.company_name || "—"),
     cell(item.provider_name || "—", "provider-cell", item.provider_name),
-    cell(item.concept || "—", "concept-cell", item.concept),
+    cell(item.company_name || "—"),
     cell(formatMoney(item.amount_requested, item.currency), "numeric"),
-    cell(`${Number(item.file_count || 0)} ${Number(item.file_count || 0) === 1 ? "archivo" : "archivos"}`),
     statusCell(item.status),
-    cell(formatAge(item.created_at)),
+    cell(formatDateTime(item.created_at)),
   )
 
   const actionCell = document.createElement("td")
@@ -381,7 +426,7 @@ function intakeRow(item) {
   button.addEventListener("click", () => openDetail(item.id, button))
   actionCell.append(button)
   row.append(actionCell)
-  const labels = ["Folio", "Recepción", "Empresa", "Proveedor", "Concepto", "Monto", "Archivos", "Estado", "Antigüedad", "Acción"]
+  const labels = ["Folio", "Proveedor", "Empresa", "Monto", "Estado", "Recepción", "Acción"]
   Array.from(row.children).forEach((node, index) => { node.dataset.label = labels[index] })
   return row
 }
@@ -413,7 +458,7 @@ function renderListError(message) {
   dom.intakeTableBody.replaceChildren()
   const row = document.createElement("tr")
   const cellNode = document.createElement("td")
-  cellNode.colSpan = 10
+  cellNode.colSpan = 7
   cellNode.className = "table-message"
   cellNode.textContent = message
   row.append(cellNode)
@@ -446,18 +491,14 @@ function resetAndLoad() {
 
 function clearFilters() {
   dom.filterForm.reset()
-  Array.from(dom.statusFilter.options).forEach((option) => {
-    option.selected = ["received", "in_review"].includes(option.value)
-  })
+  dom.statusFilter.value = ""
   state.page = 1
   updateKpiState()
   loadList()
 }
 
 function applyKpiFilter(status) {
-  Array.from(dom.statusFilter.options).forEach((option) => {
-    option.selected = status ? option.value === status : false
-  })
+  dom.statusFilter.value = status || ""
   state.page = 1
   updateKpiState()
   loadList()
@@ -477,6 +518,7 @@ async function openDetail(intakeId, trigger) {
   state.detailTrigger = trigger
   state.detail = null
   state.matchData = null
+  state.linkTarget = null
   state.paymentDraftContext = null
   dom.detailTitle.textContent = "Cargando solicitud…"
   dom.detailSubtitle.textContent = "Consultando información autorizada"
@@ -496,7 +538,7 @@ async function openDetail(intakeId, trigger) {
   }
 
   state.detail = data
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -620,6 +662,7 @@ function paymentDraftStateClass(derived) {
     NOT_STARTED: "not-started",
     DRAFT_INCOMPLETE: "incomplete",
     READY_PENDING_PROVIDER: "pending-provider",
+    BLOCKED_BANK_REVIEW: "blocked",
     READY_FOR_CONVERSION: "ready",
     ALREADY_CONVERTED: "converted",
     BLOCKED_INTAKE_STATUS: "blocked",
@@ -633,6 +676,7 @@ function paymentDraftStateMessage(derived, intake, context) {
       : "Vincula o registra al proveedor maestro para completar la conversión."
   }
   if (derived === "READY_FOR_CONVERSION") return "Lista para crear exactamente una solicitud en el flujo normal de Flux."
+  if (derived === "BLOCKED_BANK_REVIEW") return "La transferencia está bloqueada hasta usar explícitamente los datos maestros vigentes o actualizar el proveedor canónico."
   if (derived === "ALREADY_CONVERTED") return "La solicitud quedó vinculada; no se permiten más cambios de preparación."
   if (derived === "BLOCKED_INTAKE_STATUS") {
     return `El estado ${STATUS[intake.status]?.label || intake.status} no permite preparar ni editar el borrador.`
@@ -674,6 +718,16 @@ async function loadMatchState(search = state.matchSearch) {
   state.matchData = error ? { error: friendlyError(error) } : data
 }
 
+async function loadLinkTarget() {
+  const intakeId = state.detail?.intake?.id
+  if (!intakeId) return
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_target", {
+    p_payment_intake_id: intakeId,
+  })
+  if (state.detail?.intake?.id !== intakeId) return
+  state.linkTarget = error ? { error: friendlyError(error) } : data
+}
+
 function providerMatchSection(intake) {
   const section = element("section", "detail-section full provider-match-section")
   const heading = element("div", "provider-match-heading")
@@ -696,6 +750,9 @@ function providerMatchSection(intake) {
     return section
   }
 
+  const directedTarget = providerLinkTargetCard(intake)
+  if (directedTarget) section.append(directedTarget)
+
   const current = matchData.current_match
   const eligible = Boolean(matchData.eligible)
   const candidates = Array.isArray(matchData.candidates) ? matchData.candidates : []
@@ -708,6 +765,7 @@ function providerMatchSection(intake) {
   section.append(stateRow)
 
   if (current) section.append(currentMatchCard(current, eligible))
+  if (current) section.append(providerBankGovernanceCard(intake, current))
 
   if (Number(matchData.duplicate_rfc_count || 0) > 1) {
     section.append(element(
@@ -731,12 +789,61 @@ function providerMatchSection(intake) {
           ? "Sin coincidencias para la búsqueda indicada."
           : "Sin coincidencias deterministas. Puedes buscar por nombre, alias o RFC.",
       ))
+      section.append(createProviderFromIntakeAction(intake))
     }
   }
 
   section.append(matchHistory(matchData.history || []))
   section.append(element("p", "phase-two-inline", "El vínculo maestro queda en modo de solo lectura después de la conversión."))
   return section
+}
+
+function providerLinkTargetCard(intake) {
+  const target = state.linkTarget
+  if (!target?.targeted) return null
+  const card = element("article", "link-target-card")
+  const heading = element("div", "link-target-heading")
+  const copy = document.createElement("div")
+  copy.append(
+    element("span", "link-target-kicker", "Proveedor destinatario de la liga"),
+    element("strong", "", target.alias || target.legal_name || "Proveedor"),
+    element("p", "", `${target.legal_name || "Razón social no informada"} · ${displayValue(target.rfc_masked)}`),
+  )
+  heading.append(copy, element("span", "match-state-badge match-state-candidates", "Preseleccionado por liga"))
+  card.append(heading)
+  card.append(element(
+    "p",
+    target.bank_review === "REQUIRED" ? "match-warning" : "bank-resolution-ok",
+    target.bank_review === "REQUIRED"
+      ? "⚠ El proveedor reportó nuevos datos bancarios. La identidad sigue siendo el mismo proveedor; Finanzas debe resolver el cambio."
+      : "Datos bancarios maestros confirmados vigentes · revisión bancaria no requerida.",
+  ))
+  const differences = Array.isArray(target.identity_differences) ? target.identity_differences : []
+  if (differences.length) {
+    const wrapper = element("div", "link-target-differences")
+    wrapper.append(element("strong", "", "Datos declarados diferentes al maestro"))
+    const list = document.createElement("ul")
+    differences.forEach((difference) => list.append(element(
+      "li", "", `${difference.field}: ${displayValue(difference.declared)} → ${displayValue(difference.master)}`,
+    )))
+    wrapper.append(list)
+    card.append(wrapper)
+  }
+  const actions = element("div", "candidate-actions")
+  const currentId = state.matchData?.current_match?.proveedor_id || null
+  const confirm = element("button", "primary-btn", currentId === target.proveedor_id ? "Proveedor confirmado" : "Confirmar proveedor")
+  confirm.type = "button"
+  confirm.disabled = !state.matchData?.eligible || !target.active || currentId === target.proveedor_id
+  confirm.addEventListener("click", () => openMatchComparison(target.proveedor_id, confirm))
+  const search = element("button", "secondary-btn", "Buscar otro proveedor")
+  search.type = "button"
+  search.disabled = !state.matchData?.eligible
+  search.addEventListener("click", () => document.getElementById("providerMatchSearch")?.focus())
+  const create = element("a", "secondary-btn", "+ Crear nuevo proveedor")
+  create.href = providerProposalUrl(null, intake.id)
+  actions.append(confirm, search, create)
+  card.append(actions, element("small", "provider-match-helper", "La liga prioriza este candidato, pero nunca crea ni confirma el vínculo automáticamente."))
+  return card
 }
 
 function matchStateClass(current, eligible, candidates) {
@@ -772,7 +879,7 @@ function currentMatchCard(current, eligible) {
   body.append(
     element("strong", "", current.alias || "Proveedor maestro"),
     element("span", "", current.legal_name || "Razón social no informada"),
-    element("span", "match-bank-summary", `${displayValue(current.bank)} · CLABE ${displayValue(current.clabe_masked)} · Cuenta ${displayValue(current.account_masked)}`),
+    element("span", "match-bank-summary", `${maskedText(current.bank)} · CLABE ${displayValue(current.clabe_masked)} · Cuenta ${displayValue(current.account_masked)}`),
   )
   const actions = element("div", "current-match-actions")
   const view = element("a", "secondary-btn provider-master-link", "Abrir proveedor maestro")
@@ -784,6 +891,8 @@ function currentMatchCard(current, eligible) {
   compare.addEventListener("click", () => openMatchComparison(current.proveedor_id, compare))
   actions.append(view, compare)
   if (eligible) {
+    const update = element("a", "secondary-btn", "Actualizar proveedor")
+    update.href = providerProposalUrl(current.proveedor_id)
     const change = element("button", "secondary-btn", "Cambiar vínculo")
     change.type = "button"
     change.addEventListener("click", () => {
@@ -792,7 +901,7 @@ function currentMatchCard(current, eligible) {
     const clear = element("button", "secondary-btn danger-action", "Retirar vínculo")
     clear.type = "button"
     clear.addEventListener("click", () => openClearMatch(clear))
-    actions.append(change, clear)
+    actions.append(update, change, clear)
   }
   card.append(body, actions)
   return card
@@ -812,15 +921,44 @@ function candidateSearchForm() {
   input.maxLength = 120
   input.value = state.matchSearch
   input.placeholder = "Buscar coincidencias"
+  input.setAttribute("aria-describedby", "providerMatchSearchHint")
   const button = element("button", "secondary-btn", "Buscar coincidencias")
   button.type = "submit"
   controls.append(input, button)
-  form.append(label, controls)
+  const hint = element("small", "candidate-search-hint", "Escribe al menos 2 caracteres. Los resultados se actualizan sin seleccionar ni vincular automáticamente.")
+  hint.id = "providerMatchSearchHint"
+  form.append(label, controls, hint)
+  input.addEventListener("input", () => {
+    window.clearTimeout(matchSearchTimer)
+    const query = input.value.trim()
+    if (query.length === 1) {
+      hint.textContent = "Escribe un carácter más para buscar de forma segura."
+      return
+    }
+    hint.textContent = query.length
+      ? "Buscando progresivamente por nombre, alias o RFC…"
+      : "Escribe al menos 2 caracteres. Los resultados se actualizan sin seleccionar ni vincular automáticamente."
+    matchSearchTimer = window.setTimeout(async () => {
+      await loadMatchState(query)
+      renderDetail()
+      const nextInput = document.getElementById("providerMatchSearch")
+      if (nextInput) {
+        nextInput.focus()
+        nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length)
+      }
+    }, 320)
+  })
   form.addEventListener("submit", async (event) => {
     event.preventDefault()
+    const query = input.value.trim()
+    if (query.length === 1) {
+      hint.textContent = "Escribe un carácter más para buscar de forma segura."
+      input.focus()
+      return
+    }
     button.disabled = true
     button.textContent = "Buscando…"
-    await loadMatchState(input.value)
+    await loadMatchState(query)
     renderDetail()
     document.getElementById("providerMatchSearch")?.focus()
   })
@@ -845,7 +983,7 @@ function candidateCard(candidate, current) {
   const summary = element(
     "p",
     "candidate-summary",
-    `${displayValue(candidate.bank)} · CLABE ${displayValue(candidate.clabe_masked)} · Cuenta ${displayValue(candidate.account_masked)}`,
+    `${maskedText(candidate.bank)} · CLABE ${displayValue(candidate.clabe_masked)} · Cuenta ${displayValue(candidate.account_masked)}`,
   )
   const reasons = matchTagList("Señales", candidate.reasons || [], "reason")
   const differences = matchTagList("Diferencias", candidate.differences || [], "difference")
@@ -874,6 +1012,47 @@ function candidateCard(candidate, current) {
   actions.append(select)
   card.append(header, summary, reasons, differences, actions)
   return card
+}
+
+function createProviderFromIntakeAction(intake) {
+  const wrapper = element("div", "create-provider-callout")
+  wrapper.append(element(
+    "p",
+    "",
+    "Si ningún proveedor maestro corresponde, registra uno desde el catálogo canónico. Los datos declarados se cargarán sólo como propuesta pendiente de validación.",
+  ))
+  const link = element("a", "primary-btn", "+ Crear nuevo proveedor")
+  link.href = providerProposalUrl(null, intake?.id)
+  wrapper.append(link)
+  return wrapper
+}
+
+function providerProposalUrl(providerId = null, intakeId = state.detail?.intake?.id) {
+  const params = new URLSearchParams({ intake_id: intakeId || "", return: "provider_intakes" })
+  if (providerId) params.set("provider_id", providerId)
+  return `./proveedores.html?${params.toString()}`
+}
+
+function providerBankGovernanceCard(intake, current) {
+  const banking = state.paymentDraftContext?.state?.banking
+  const wrapper = element("div", "bank-governance-inline")
+  if (!banking?.material_mismatch) {
+    wrapper.hidden = true
+    return wrapper
+  }
+  wrapper.append(
+    element("strong", "", "Diferencia bancaria detectada"),
+    element("p", "", "El proveedor maestro sigue siendo la identidad canónica. Los valores del portal no lo modifican ni crean otro proveedor."),
+  )
+  const fields = (banking.difference_fields || []).map((code) => ({ bank:"Banco", account:"Cuenta", clabe:"CLABE", beneficiary:"Beneficiario", reported_change:"Cambio reportado" })[code] || code)
+  wrapper.append(element("span", "match-bank-summary", `Campos distintos: ${fields.join(", ")}.`))
+  if (banking.resolution_valid) {
+    wrapper.append(element("span", "bank-resolution-ok", `Uso de datos maestros confirmado · ${formatDateTime(banking.resolution?.created_at)}`))
+  }
+  const update = element("a", "secondary-btn", "Revisar proveedor canónico")
+  update.href = providerProposalUrl(current.proveedor_id, intake.id)
+  wrapper.append(update)
+  return wrapper
 }
 
 function matchTagList(label, values, type) {
@@ -979,8 +1158,9 @@ function renderMatchComparison(comparison) {
     const tr = document.createElement("tr")
     const field = element("th", "", row.field || "Dato")
     field.scope = "row"
-    const declared = element("td", "", displayValue(row.declared))
-    const master = element("td", "", displayValue(row.master))
+    const shouldMaskText = ["Banco", "Beneficiario"].includes(row.field)
+    const declared = element("td", "", shouldMaskText ? maskedText(row.declared) : displayValue(row.declared))
+    const master = element("td", "", shouldMaskText ? maskedText(row.master) : displayValue(row.master))
     const result = element("td", `comparison-result result-${row.result || "not_reported"}`, COMPARISON_RESULT[row.result] || "No informado")
     tr.append(field, declared, master, result)
     tbody.append(tr)
@@ -1101,7 +1281,7 @@ async function refreshOpenDetail() {
   }
   state.detail = data
   state.matchSearch = ""
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -1185,6 +1365,7 @@ function populatePaymentDraftForm() {
   dom.paymentDraftCompany.value = intake.company_name || ""
   renderPaymentDraftSummary(context)
   renderPaymentDraftProvider(context)
+  renderPaymentDraftBanking()
 
   replaceSelectOptions(
     dom.paymentDraftCostCenter,
@@ -1315,6 +1496,84 @@ function renderPaymentDraftProvider(context) {
     : "Proveedor inactivo · no permite declarar el borrador listo para conversión."
 }
 
+function renderPaymentDraftBanking(methodOverride = null) {
+  const context = state.paymentDraftContext
+  const banking = context?.state?.banking
+  if (!banking?.material_mismatch || !context?.provider) {
+    dom.paymentDraftBanking.hidden = true
+    return
+  }
+
+  const method = methodOverride ?? context.draft?.payment_method ?? ""
+  dom.paymentDraftBanking.hidden = false
+  dom.paymentDraftBankingError.textContent = ""
+  dom.paymentDraftBankingComparison.replaceChildren()
+  ;(banking.comparison || []).filter((row) => row.different).forEach((row) => {
+    const item = element("div", "banking-comparison-item")
+    item.append(
+      element("strong", "", row.field),
+      element("span", "", `Portal: ${displayValue(row.declared)}`),
+      element("span", "", `Maestro: ${displayValue(row.master)}`),
+    )
+    dom.paymentDraftBankingComparison.append(item)
+  })
+
+  dom.paymentDraftBankingActions.replaceChildren()
+  const update = element("a", "secondary-btn", "Actualizar proveedor canónico")
+  update.href = providerProposalUrl(context.provider.proveedor_id, context.intake.id)
+  dom.paymentDraftBankingActions.append(update)
+
+  if (method === "transfer") {
+    if (banking.resolution_valid) {
+      dom.paymentDraftBankingMessage.textContent = `Resuelto: se usarán los datos maestros vigentes. Decisión auditada ${formatDateTime(banking.resolution?.created_at)}.`
+      return
+    }
+    dom.paymentDraftBankingMessage.textContent = "Transferencia: la preparación no quedará READY_FOR_CONVERSION hasta resolver esta diferencia. Elige usar el maestro vigente o actualiza el proveedor y vuelve a calcular."
+    const confirmMaster = element("button", "primary-btn", "Usar datos maestros vigentes")
+    confirmMaster.type = "button"
+    confirmMaster.disabled = state.paymentDraftDirty || context.draft?.payment_method !== "transfer"
+    if (confirmMaster.disabled) confirmMaster.title = "Guarda primero el borrador con método Transferencia."
+    confirmMaster.addEventListener("click", () => confirmMasterBanking(confirmMaster))
+    dom.paymentDraftBankingActions.prepend(confirmMaster)
+    return
+  }
+
+  if (["cash", "check"].includes(method)) {
+    dom.paymentDraftBankingMessage.textContent = "Advertencia informativa: los datos bancarios difieren, pero este método no los utiliza y no bloquea la preparación."
+    return
+  }
+
+  dom.paymentDraftBankingMessage.textContent = "Hay diferencias bancarias. Al seleccionar Transferencia deberás resolverlas; Efectivo o Cheque sólo mostrarán esta advertencia."
+}
+
+async function confirmMasterBanking(button) {
+  const context = state.paymentDraftContext
+  const banking = context?.state?.banking
+  if (!context?.intake || !banking) return
+  if (!confirm("Confirmas que esta solicitud usará los datos bancarios vigentes del proveedor maestro? Esta decisión quedará auditada y no modificará el maestro ni el intake.")) return
+
+  button.disabled = true
+  const original = button.textContent
+  button.textContent = "Confirmando…"
+  dom.paymentDraftBankingError.textContent = ""
+  const { error } = await supabaseClient.rpc("confirm_provider_intake_master_banking", {
+    p_payment_intake_id: context.intake.id,
+    p_expected_intake_updated_at: context.intake.updated_at,
+    p_expected_provider_updated_at: banking.provider_updated_at,
+    p_action_id: createUuid(),
+  })
+  if (error) {
+    dom.paymentDraftBankingError.textContent = friendlyError(error)
+    button.disabled = false
+    button.textContent = original
+    return
+  }
+  await loadPaymentDraftContext()
+  populatePaymentDraftForm()
+  renderDetail()
+  dom.paymentDraftSuccess.textContent = "Decisión bancaria auditada. Se usarán los datos maestros vigentes."
+}
+
 function replaceSelectOptions(select, items, valueFor, labelFor, emptyLabel, decorate = null) {
   select.replaceChildren(optionElement("", emptyLabel))
   items.forEach((item) => {
@@ -1348,6 +1607,7 @@ function updatePaymentDraftOriginAccountState() {
   dom.paymentDraftOriginAccountField.hidden = !transfer
   dom.paymentDraftOriginAccount.disabled = !transfer
   if (!transfer) dom.paymentDraftOriginAccount.value = ""
+  renderPaymentDraftBanking(dom.paymentDraftPaymentMethod.value)
   updatePaymentDraftClientState()
 }
 
@@ -1883,7 +2143,7 @@ async function reloadOpenDetail() {
     return
   }
   state.detail = data
-  await Promise.all([loadMatchState(), loadPaymentDraftContext()])
+  await Promise.all([loadMatchState(), loadPaymentDraftContext(), loadLinkTarget()])
   renderDetail()
 }
 
@@ -1921,6 +2181,445 @@ async function openTemporaryFile(intakeId, fileId, button) {
     button.disabled = false
     button.textContent = originalLabel
   }
+}
+
+async function loadLinkManagementContext() {
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_management_context")
+  if (error) {
+    state.linkContext = { error: friendlyError(error) }
+    state.linkCompanies = []
+    return
+  }
+  state.linkContext = data || {}
+  state.linkCompanies = Array.isArray(data?.companies) ? data.companies : []
+}
+
+async function openLinkManagement() {
+  resetLinkSessionState()
+  dom.linkCompany.replaceChildren(optionElement("", "Cargando empresas autorizadas…"))
+  dom.linkCompany.disabled = true
+  dom.linkCompanyState.textContent = "Consultando tu alcance por empresa…"
+  dom.linkDuration.value = String(state.linkContext?.defaults?.duration_hours || 72)
+  dom.linkManagementDialog.showModal()
+  syncLinkRecipientUi()
+
+  await loadLinkManagementContext()
+  if (!dom.linkManagementDialog.open) return
+  populateLinkCompanyOptions()
+  const company = selectedLinkCompany()
+  const defaultMode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${defaultMode}"]`)
+  if (radio) radio.checked = true
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+  window.setTimeout(() => (company ? document.querySelector('input[name="linkRecipient"]') : dom.linkCompany)?.focus(), 0)
+}
+
+function closeLinkManagement() {
+  window.clearTimeout(linkProviderSearchTimer)
+  resetLinkSessionState()
+  if (dom.linkManagementDialog.open) dom.linkManagementDialog.close()
+}
+
+function resetLinkSessionState() {
+  window.clearTimeout(linkProviderSearchTimer)
+  state.linkScopeVersion += 1
+  state.linkSelectedProvider = null
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = ""
+  dom.linkLabel.value = ""
+  dom.linkOneTimeResult.hidden = true
+  dom.linkPublicUrl.value = ""
+  dom.copyLinkStatus.textContent = ""
+  dom.linkManagementError.textContent = ""
+}
+
+function populateLinkCompanyOptions(preferredCompanyId = "") {
+  const companies = Array.isArray(state.linkCompanies) ? state.linkCompanies : []
+  dom.linkCompany.replaceChildren()
+  if (!companies.length) {
+    dom.linkCompany.append(optionElement("", "Sin empresas autorizadas"))
+    dom.linkCompany.disabled = true
+    dom.linkCompanyState.textContent = "No tienes empresas autorizadas para generar ligas de proveedor."
+    return null
+  }
+
+  dom.linkCompany.disabled = false
+  if (companies.length > 1) dom.linkCompany.append(optionElement("", "Selecciona una empresa"))
+  companies.forEach((company) => dom.linkCompany.append(optionElement(company.id, company.name || "Empresa")))
+  const preferred = companies.find((company) => company.id === preferredCompanyId)
+  dom.linkCompany.value = preferred?.id || (companies.length === 1 ? companies[0].id : "")
+  dom.linkCompanyState.textContent = companies.length === 1
+    ? `${companies[0].name || "Empresa autorizada"} está seleccionada.`
+    : `${companies.length} empresas autorizadas disponibles.`
+  return selectedLinkCompany()
+}
+
+function selectedLinkCompany() {
+  return state.linkCompanies.find((company) => company.id === dom.linkCompany.value) || null
+}
+
+function selectedLinkRecipient() {
+  return document.querySelector('input[name="linkRecipient"]:checked')?.value || "existing"
+}
+
+function handleLinkCompanyChange() {
+  resetLinkSessionState()
+  const company = selectedLinkCompany()
+  dom.linkCompanyState.textContent = company
+    ? `${company.name || "Empresa autorizada"} está seleccionada.`
+    : "Selecciona una empresa autorizada para continuar."
+  const mode = Number(company?.active_provider_count || 0) > 0 ? "existing" : "generic"
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${mode}"]`)
+  if (radio) radio.checked = true
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+}
+
+function handleLinkRecipientChange() {
+  resetLinkSessionState()
+  syncLinkRecipientUi()
+  loadSelectedLinkScope()
+}
+
+function syncLinkRecipientUi() {
+  const company = selectedLinkCompany()
+  const hasCompany = Boolean(company)
+  const existing = selectedLinkRecipient() === "existing"
+  dom.linkProviderPicker.hidden = !existing
+  document.querySelectorAll('input[name="linkRecipient"]').forEach((radio) => { radio.disabled = !hasCompany })
+  dom.linkProviderSearch.disabled = !hasCompany || !existing
+  if (!hasCompany) {
+    dom.linkProviderSearch.value = ""
+    dom.linkProviderSearchHint.textContent = "Selecciona una empresa autorizada para habilitar la búsqueda."
+  } else if (existing && !state.linkSelectedProvider && dom.linkProviderSearch.value.trim().length < 2) {
+    dom.linkProviderSearchHint.textContent = "Escribe al menos 2 caracteres. La selección siempre es explícita."
+  }
+  renderLinkProviderResults()
+  renderLinkProviderSummary()
+  renderLinkManagement()
+}
+
+function handleLinkProviderSearch() {
+  window.clearTimeout(linkProviderSearchTimer)
+  const company = selectedLinkCompany()
+  if (!company || dom.linkProviderSearch.disabled) {
+    state.linkProviderResults = []
+    dom.linkProviderSearch.value = ""
+    dom.linkProviderSearchHint.textContent = "Selecciona una empresa autorizada para habilitar la búsqueda."
+    renderLinkProviderResults()
+    renderLinkManagement()
+    return
+  }
+  state.linkSelectedProvider = null
+  state.linkScope = null
+  renderLinkProviderSummary()
+  renderLinkManagement()
+  const query = dom.linkProviderSearch.value.trim()
+  if (query.length < 2) {
+    state.linkProviderResults = []
+    dom.linkProviderSearchHint.textContent = query.length === 1
+      ? "Escribe un carácter más para buscar de forma segura."
+      : "Escribe al menos 2 caracteres. La selección siempre es explícita."
+    renderLinkProviderResults()
+    return
+  }
+  dom.linkProviderSearchHint.textContent = "Buscando proveedores activos…"
+  linkProviderSearchTimer = window.setTimeout(() => searchLinkProviders(query, company.id), 320)
+}
+
+async function searchLinkProviders(query, companyId) {
+  const company = selectedLinkCompany()
+  if (!company || company.id !== companyId || selectedLinkRecipient() !== "existing") return
+  const { data, error } = await supabaseClient.rpc("find_provider_intake_link_providers", {
+    p_company_id: company.id,
+    p_search: query,
+    p_limit: 12,
+  })
+  if (query !== dom.linkProviderSearch.value.trim() || selectedLinkCompany()?.id !== companyId) return
+  if (error) {
+    state.linkProviderResults = []
+    dom.linkProviderSearchHint.textContent = friendlyError(error)
+  } else {
+    state.linkProviderResults = Array.isArray(data) ? data : []
+    dom.linkProviderSearchHint.textContent = state.linkProviderResults.length
+      ? "Selecciona explícitamente un resultado."
+      : "No hay proveedores activos que coincidan."
+  }
+  renderLinkProviderResults()
+}
+
+function renderLinkProviderResults() {
+  dom.linkProviderResults.replaceChildren()
+  if (!selectedLinkCompany() || selectedLinkRecipient() !== "existing") return
+  state.linkProviderResults.forEach((provider) => {
+    const button = element("button", "link-provider-result", "")
+    button.type = "button"
+    button.setAttribute("role", "option")
+    button.append(
+      element("strong", "", provider.alias || provider.legal_name || "Proveedor"),
+      element("span", "", provider.legal_name || "Razón social no informada"),
+      element("small", "", `${displayValue(provider.rfc_masked)} · Activo`),
+    )
+    button.addEventListener("click", () => selectLinkProvider(provider))
+    dom.linkProviderResults.append(button)
+  })
+}
+
+function selectLinkProvider(provider) {
+  if (!selectedLinkCompany()) return
+  state.linkSelectedProvider = provider
+  state.linkProviderResults = []
+  state.linkScope = null
+  dom.linkProviderSearch.value = provider.alias || provider.legal_name || "Proveedor seleccionado"
+  dom.linkProviderSearchHint.textContent = "Proveedor seleccionado explícitamente."
+  dom.linkLabel.value = ""
+  renderLinkProviderResults()
+  renderLinkProviderSummary()
+  renderLinkManagement()
+  loadSelectedLinkScope()
+}
+
+function renderLinkProviderSummary() {
+  const provider = state.linkSelectedProvider
+  dom.linkProviderSummary.hidden = !provider
+  dom.linkProviderSummary.replaceChildren()
+  if (!provider) return
+  const title = element("div", "link-provider-summary-heading", "")
+  title.append(
+    element("div", "", ""),
+    element("button", "secondary-btn", "Cambiar proveedor"),
+  )
+  title.firstChild.append(
+    element("span", "link-section-label", "4. Proveedor seleccionado"),
+    element("strong", "", provider.alias || provider.legal_name || "Proveedor"),
+  )
+  title.lastChild.type = "button"
+  title.lastChild.addEventListener("click", () => {
+    state.linkSelectedProvider = null
+    state.linkScope = null
+    dom.linkProviderSearch.value = ""
+    renderLinkProviderSummary()
+    renderLinkManagement()
+    dom.linkProviderSearch.focus()
+  })
+  const list = element("dl", "link-provider-summary-list", "")
+  ;[
+    ["Razón social", provider.legal_name], ["RFC", provider.rfc_masked],
+    ["Banco", provider.bank], ["Cuenta", provider.account_masked], ["CLABE", provider.clabe_masked],
+  ].forEach(([label, value]) => {
+    const row = document.createElement("div")
+    row.append(element("dt", "", label), element("dd", "", displayValue(value)))
+    list.append(row)
+  })
+  dom.linkProviderSummary.append(title, list)
+}
+
+async function loadSelectedLinkScope() {
+  const company = selectedLinkCompany()
+  const providerId = selectedLinkRecipient() === "existing" ? state.linkSelectedProvider?.proveedor_id : null
+  if (!company || (selectedLinkRecipient() === "existing" && !providerId)) {
+    state.linkScope = null
+    renderLinkManagement()
+    return
+  }
+  const version = ++state.linkScopeVersion
+  dom.linkCurrentState.replaceChildren(element("p", "", "Consultando liga de este destinatario…"))
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_link_scope", {
+    p_company_id: company.id,
+    p_proveedor_id: providerId || null,
+  })
+  if (version !== state.linkScopeVersion) return
+  state.linkScope = error ? { error: friendlyError(error) } : data
+  renderLinkManagement()
+}
+
+function renderLinkManagement() {
+  const company = selectedLinkCompany()
+  const hasAuthorizedCompanies = state.linkCompanies.length > 0
+  const defaults = state.linkContext?.defaults || {}
+  const isExisting = selectedLinkRecipient() === "existing"
+  const scopeReady = Boolean(company) && (!isExisting || Boolean(state.linkSelectedProvider))
+  const link = state.linkScope?.active_link
+  const isActive = link?.status === "active" && (!link.expires_at || new Date(link.expires_at) > new Date())
+  dom.linkManagementError.textContent = ""
+  dom.linkRuntimeContract.textContent = `Contrato vigente: ${defaults.max_files || 3} archivos · ${defaults.max_file_mb || 10} MB por archivo · ${defaults.max_total_mb || 12} MB totales · ${defaults.max_submissions_per_day || 20} envíos diarios · ${linkAllowedTypesLabel(defaults.allowed_file_types)}.`
+  dom.linkCurrentState.replaceChildren()
+
+  if (!hasAuthorizedCompanies) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Sin empresas autorizadas"),
+      element("p", "", "No tienes empresas autorizadas para generar ligas de proveedor."),
+    )
+  } else if (!company) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Selecciona una empresa"),
+      element("p", "", "Elige una empresa autorizada para habilitar el destinatario y la búsqueda de proveedor."),
+    )
+  } else if (!scopeReady) {
+    dom.linkCurrentState.append(
+      element("strong", "", "Selecciona un proveedor"),
+      element("p", "", "Busca y confirma a quién se enviará la liga. No se seleccionará ningún resultado automáticamente."),
+    )
+  } else if (state.linkScope?.error) {
+    dom.linkCurrentState.append(element("p", "field-error", state.linkScope.error))
+  } else if (isActive) {
+    dom.linkCurrentState.append(
+      element("strong", "", isExisting ? "Liga activa para este proveedor" : "Liga genérica activa para esta empresa"),
+      element("p", "", `${company.name}${isExisting ? ` · ${state.linkSelectedProvider.alias || state.linkSelectedProvider.legal_name}` : " · Proveedor nuevo / no identificado"}.`),
+      element("p", "", `${link.label} · prefijo ${link.token_prefix} · vence ${formatDateTime(link.expires_at)}.`),
+      element("p", "", `${numberFormat(link.current_intakes)} intake${Number(link.current_intakes) === 1 ? "" : "s"} creado${Number(link.current_intakes) === 1 ? "" : "s"} con esta liga.`),
+      element("small", "", "El token completo no se almacena ni puede recuperarse. Regenera la liga para obtener una nueva URL de una sola visualización."),
+    )
+  } else {
+    dom.linkCurrentState.append(
+      element("strong", "", link?.status === "expired" ? "La liga anterior expiró" : "Sin liga activa"),
+      element("p", "", "Puedes crear una liga nueva para este destinatario sin crear intakes, proveedores ni solicitudes de pago."),
+    )
+  }
+
+  dom.linkCreateForm.hidden = Boolean(isActive) || !scopeReady || Boolean(state.linkScope?.error)
+  dom.createLinkBtn.disabled = !scopeReady || Boolean(state.linkScope?.error) || state.linkMutationInFlight
+  dom.revokeLinkBtn.hidden = !isActive
+  dom.regenerateLinkBtn.hidden = !isActive
+  dom.revokeLinkBtn.dataset.linkId = isActive ? link.id : ""
+  dom.regenerateLinkBtn.dataset.linkId = isActive ? link.id : ""
+}
+
+async function createManagedLink(event) {
+  event.preventDefault()
+  const company = selectedLinkCompany()
+  const providerId = selectedLinkRecipient() === "existing" ? state.linkSelectedProvider?.proveedor_id : null
+  if (!company || (selectedLinkRecipient() === "existing" && !providerId) || state.linkMutationInFlight) return
+  state.linkMutationInFlight = true
+  dom.createLinkBtn.disabled = true
+  dom.createLinkBtn.textContent = "Creando…"
+  dom.linkManagementError.textContent = ""
+  const defaults = state.linkContext?.defaults || {}
+  const { data, error } = await supabaseClient.rpc("create_provider_intake_link_v2", {
+    p_company_id: company.id,
+    p_proveedor_id: providerId || null,
+    p_label: dom.linkLabel.value.trim() || null,
+    p_duration_hours: Number(dom.linkDuration.value),
+    p_max_submissions_per_day: Number(defaults.max_submissions_per_day || 20),
+    p_max_file_mb: Number(defaults.max_file_mb || 10),
+  })
+  state.linkMutationInFlight = false
+  dom.createLinkBtn.disabled = false
+  dom.createLinkBtn.textContent = "Generar liga"
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  showOneTimeLink(data)
+}
+
+async function revokeManagedLink() {
+  const company = selectedLinkCompany()
+  const linkId = dom.revokeLinkBtn.dataset.linkId
+  if (!company || !linkId || state.linkMutationInFlight) return
+  if (!confirm(`Revocar la liga activa de ${company.name}? El enlace dejará de aceptar nuevos envíos.`)) return
+  state.linkMutationInFlight = true
+  dom.revokeLinkBtn.disabled = true
+  const { error } = await supabaseClient.rpc("revoke_provider_intake_link", {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+  })
+  state.linkMutationInFlight = false
+  dom.revokeLinkBtn.disabled = false
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  dom.linkOneTimeResult.hidden = true
+  dom.linkPublicUrl.value = ""
+}
+
+async function regenerateManagedLink() {
+  const company = selectedLinkCompany()
+  const linkId = dom.regenerateLinkBtn.dataset.linkId
+  if (!company || !linkId || state.linkMutationInFlight) return
+  if (!confirm(`Revocar y regenerar la liga de ${company.name}? La URL anterior dejará de funcionar inmediatamente.`)) return
+  state.linkMutationInFlight = true
+  dom.regenerateLinkBtn.disabled = true
+  const { data, error } = await supabaseClient.rpc("regenerate_provider_intake_link_v2", {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+    p_duration_hours: Number(dom.linkDuration.value),
+  })
+  state.linkMutationInFlight = false
+  dom.regenerateLinkBtn.disabled = false
+  if (error) {
+    dom.linkManagementError.textContent = friendlyError(error)
+    return
+  }
+  await refreshLinkContextAndRender(company.id)
+  showOneTimeLink(data)
+}
+
+async function refreshLinkContextAndRender(companyId) {
+  const selectedProvider = state.linkSelectedProvider
+  const selectedRecipient = selectedLinkRecipient()
+  await loadLinkManagementContext()
+  populateLinkCompanyOptions(companyId)
+  state.linkSelectedProvider = selectedProvider
+  const radio = document.querySelector(`input[name="linkRecipient"][value="${selectedRecipient}"]`)
+  if (radio) radio.checked = true
+  await loadSelectedLinkScope()
+}
+
+function showOneTimeLink(result) {
+  if (!result?.raw_token) {
+    dom.linkManagementError.textContent = "La liga fue creada, pero la URL de una sola visualización no estuvo disponible. Regenera para obtener otra."
+    return
+  }
+  const publicUrl = new URL("./solicitar.html", window.location.href)
+  publicUrl.search = ""
+  publicUrl.hash = `token=${result.raw_token}`
+  dom.linkPublicUrl.value = publicUrl.href
+  dom.linkOneTimeResult.hidden = false
+  dom.copyLinkStatus.textContent = ""
+  dom.linkPublicUrl.focus()
+  dom.linkPublicUrl.select()
+}
+
+function linkAllowedTypesLabel(types) {
+  const labels = {
+    "application/pdf": "PDF",
+    "application/xml": "XML",
+    "text/xml": "XML",
+    "image/jpeg": "JPG/JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+  }
+  const values = [...new Set((Array.isArray(types) ? types : []).map((type) => labels[type] || type))]
+  return values.length ? values.join(", ") : "formatos definidos por el backend"
+}
+
+async function copyManagedLink() {
+  if (!dom.linkPublicUrl.value) return
+  try {
+    await navigator.clipboard.writeText(dom.linkPublicUrl.value)
+    dom.copyLinkStatus.textContent = "Liga copiada."
+  } catch {
+    dom.linkPublicUrl.focus()
+    dom.linkPublicUrl.select()
+    dom.copyLinkStatus.textContent = "Selecciona y copia manualmente la URL."
+  }
+}
+
+async function handleProviderReturn() {
+  const params = new URLSearchParams(window.location.search)
+  const intakeId = params.get("intake_id")
+  const providerId = params.get("provider_candidate_id")
+  if (!intakeId || !providerId) return
+  window.history.replaceState({}, "", "./provider_intakes.html")
+  await openDetail(intakeId, dom.refreshBtn)
+  showToast("Proveedor guardado", "Revisa el candidato actualizado y confirma el vínculo de forma explícita.", "success")
+  document.getElementById("providerMatchSearch")?.focus()
 }
 
 function transitionCopy(toStatus) {
@@ -2037,6 +2736,20 @@ const ERROR_MESSAGES = Object.freeze({
   provider_intake_conversion_link_invalid: "El vínculo con la solicitud creada es inconsistente.",
   provider_intake_conversion_link_conflict: "Otra conversión ganó la concurrencia. Recarga el detalle.",
   provider_intake_conversion_request_create_failed: "No fue posible crear la solicitud normal de Flux.",
+  provider_intake_banking_resolution_fields_required: "Recarga la preparación antes de confirmar los datos maestros.",
+  provider_intake_banking_resolution_status_invalid: "El estado actual ya no permite resolver los datos bancarios.",
+  provider_intake_banking_resolution_intake_conflict: "El intake cambió. Recarga antes de confirmar los datos maestros.",
+  provider_intake_banking_resolution_provider_required: "Vincula un proveedor maestro antes de resolver los datos bancarios.",
+  provider_intake_banking_resolution_provider_conflict: "El proveedor maestro cambió. Recarga y vuelve a comparar.",
+  provider_intake_banking_resolution_transfer_required: "Guarda primero el borrador con método Transferencia.",
+  provider_intake_banking_resolution_not_required: "Los datos bancarios ya no presentan una diferencia material.",
+  provider_intake_link_auth_required: "Tu sesión ya no es válida. Inicia sesión nuevamente.",
+  provider_intake_link_access_denied: "No tienes una asignación activa de Finanzas o Dirección para esta empresa.",
+  provider_intake_link_active_exists: "La empresa ya tiene una liga activa. Revócala o regenérala.",
+  provider_intake_link_label_invalid: "Captura una etiqueta interna válida.",
+  provider_intake_link_duration_invalid: "Selecciona una vigencia entre 4 horas y 7 días.",
+  provider_intake_link_not_active: "La liga ya no está activa. Actualiza el estado.",
+  provider_intake_link_not_found: "La liga ya no está disponible.",
   file_service_unavailable: "El servicio de documentos temporales aún no está configurado en este ambiente.",
   signed_url_unavailable: "No se pudo generar el enlace temporal. Inténtalo de nuevo.",
 })
@@ -2071,6 +2784,7 @@ function restoreDetailFocus() {
   state.detailTrigger = null
   state.detail = null
   state.matchData = null
+  state.linkTarget = null
   state.matchSearch = ""
   state.paymentDraftContext = null
   if (trigger?.isConnected) trigger.focus()
@@ -2110,6 +2824,14 @@ function optionElement(value, label) {
 
 function displayValue(value) {
   return value === null || value === undefined || value === "" ? "No indicado" : String(value)
+}
+
+function maskedText(value) {
+  const text = String(value || "").trim()
+  if (!text) return "No indicado"
+  if (text.length <= 2) return "•".repeat(text.length)
+  if (text.length <= 5) return `${text.slice(0, 1)}${"•".repeat(text.length - 2)}${text.slice(-1)}`
+  return `${text.slice(0, 2)}${"•".repeat(Math.min(10, text.length - 4))}${text.slice(-2)}`
 }
 
 function formatDate(value) {

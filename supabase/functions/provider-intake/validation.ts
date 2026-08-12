@@ -243,6 +243,22 @@ export function validatePayload(
     throw new IntakeError("invalid_request", 400, "invoice_uuid_invalid");
   }
 
+  const bankDataConfirmation = normalizedText(
+    raw.bank_data_confirmation,
+    "bank_data_confirmation",
+    32,
+  )?.toUpperCase();
+  if (
+    bankDataConfirmation &&
+    !["MASTER_CONFIRMED", "CHANGE_DECLARED"].includes(bankDataConfirmation)
+  ) {
+    throw new IntakeError(
+      "invalid_request",
+      400,
+      "bank_data_confirmation_invalid",
+    );
+  }
+
   return {
     provider_name: providerName,
     provider_rfc: providerRfc,
@@ -267,6 +283,10 @@ export function validatePayload(
       "beneficiary_name",
       200,
     ),
+    bank_data_confirmation: bankDataConfirmation as
+      | "MASTER_CONFIRMED"
+      | "CHANGE_DECLARED"
+      | undefined,
   };
 }
 

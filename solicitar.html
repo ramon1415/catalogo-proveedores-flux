@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="./solicitar.css">
+  <link rel="stylesheet" href="./solicitar.css?v=20260811-provider-aware-links">
 </head>
 <body>
   <a class="skip-link" href="#contenido">Saltar al contenido principal</a>
@@ -92,6 +92,12 @@
                 <span class="section-number" aria-hidden="true">01</span>
                 <div><p class="eyebrow">Paso 1 de 4</p><h2 id="step-1-title" tabindex="-1">Datos del proveedor</h2><p>Identifica a la persona o empresa que solicita el pago.</p></div>
               </div>
+              <aside class="registered-data-card" id="registered-provider-data" aria-labelledby="registered-provider-title" hidden>
+                <p class="eyebrow">Datos registrados</p>
+                <h3 id="registered-provider-title">Información precargada para este enlace</h3>
+                <p>Verifica que esta información siga vigente. Si algo cambió, actualízalo antes de enviar.</p>
+                <p class="registered-data-note">Tus cambios se guardarán únicamente como datos declarados para esta solicitud; no modificarán automáticamente al proveedor maestro.</p>
+              </aside>
               <fieldset>
                 <legend>Identificación y contacto</legend>
                 <div class="field-grid">
@@ -123,10 +129,25 @@
                   <div class="field field--wide"><label for="invoice-uuid">UUID fiscal</label><input id="invoice-uuid" name="invoice_uuid" type="text" maxlength="36" autocomplete="off" autocapitalize="characters" aria-describedby="invoice-uuid-help invoice-uuid-error"><small id="invoice-uuid-help">Formato del folio fiscal: 8-4-4-4-12 caracteres.</small><p class="field-error" id="invoice-uuid-error"></p></div>
                 </div>
               </fieldset>
-              <fieldset>
+              <fieldset id="bank-information-fieldset">
                 <legend>Información bancaria</legend>
-                <p class="fieldset-help">Completa esta sección solo cuando corresponda al pago.</p>
-                <div class="field-grid">
+                <p class="fieldset-help" id="bank-generic-help">Completa esta sección solo cuando corresponda al pago.</p>
+                <section class="registered-bank-card" id="registered-bank-data" aria-labelledby="registered-bank-title" hidden>
+                  <p class="eyebrow">Datos bancarios registrados</p>
+                  <h3 id="registered-bank-title">Confirma la vigencia de tus datos</h3>
+                  <dl>
+                    <div><dt>Banco</dt><dd id="registered-bank-name">No informado</dd></div>
+                    <div><dt>Cuenta</dt><dd id="registered-bank-account">No informada</dd></div>
+                    <div><dt>CLABE</dt><dd id="registered-bank-clabe">No informada</dd></div>
+                  </dl>
+                  <div class="bank-confirmation-options" role="group" aria-labelledby="bank-confirmation-question">
+                    <p id="bank-confirmation-question"><strong>¿Tus datos bancarios registrados siguen vigentes? <span aria-hidden="true">*</span></strong></p>
+                    <label><input type="radio" name="bank_data_confirmation" value="MASTER_CONFIRMED" aria-describedby="bank-data-confirmation-error"> Sí, siguen vigentes</label>
+                    <label><input type="radio" name="bank_data_confirmation" value="CHANGE_DECLARED" aria-describedby="bank-data-confirmation-error"> Necesito reportar un cambio</label>
+                    <p class="field-error" id="bank-data-confirmation-error"></p>
+                  </div>
+                </section>
+                <div class="field-grid" id="declared-bank-fields">
                   <div class="field"><label for="bank-name">Banco</label><input id="bank-name" name="bank_name" type="text" maxlength="160" autocomplete="off" aria-describedby="bank-name-error"><p class="field-error" id="bank-name-error"></p></div>
                   <div class="field"><label for="beneficiary-name">Beneficiario</label><input id="beneficiary-name" name="beneficiary_name" type="text" maxlength="200" autocomplete="off" aria-describedby="beneficiary-name-error"><p class="field-error" id="beneficiary-name-error"></p></div>
                   <div class="field"><label for="bank-account">Número de cuenta</label><input id="bank-account" name="bank_account" type="text" maxlength="34" inputmode="text" autocomplete="off" aria-describedby="bank-account-help bank-account-error"><small id="bank-account-help">De 4 a 34 letras o números.</small><p class="field-error" id="bank-account-error"></p></div>
@@ -143,6 +164,21 @@
                 <button id="limits-help-button" class="text-button" type="button" aria-expanded="false" aria-controls="limits-help">¿Qué incluye el límite total?</button>
                 <p id="limits-help" hidden>El cálculo incluye archivos, datos del formulario, CAPTCHA y metadatos técnicos del envío.</p>
               </div>
+              <section class="document-kind-guide" aria-labelledby="document-kind-guide-title">
+                <div>
+                  <p class="eyebrow">Antes de seleccionar</p>
+                  <h3 id="document-kind-guide-title">Tipos de documento aceptados</h3>
+                  <p>Clasifica cada archivo después de adjuntarlo. La clasificación no cambia las validaciones del enlace.</p>
+                </div>
+                <ul>
+                  <li><strong>Factura PDF</strong><span id="kind-format-invoice-pdf">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Factura XML</strong><span id="kind-format-invoice-xml">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Documento bancario</strong><span id="kind-format-bank-document">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Soporte</strong><span id="kind-format-support">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Otro</strong><span id="kind-format-other">Formatos disponibles al validar el enlace.</span></li>
+                </ul>
+                <p class="document-kind-runtime" id="document-kind-runtime">Los límites vigentes aparecerán aquí antes de seleccionar archivos.</p>
+              </section>
               <div id="dropzone" class="dropzone" role="group" aria-labelledby="dropzone-title" aria-describedby="dropzone-help file-global-error">
                 <div class="dropzone__icon" aria-hidden="true">↑</div>
                 <strong id="dropzone-title">Arrastra tus documentos aquí</strong>
@@ -212,6 +248,6 @@
 
   <footer class="site-footer"><p>Flux Operadora · Tecnología Quantta</p><p>Portal exclusivo para recepción de solicitudes de proveedores.</p></footer>
 
-  <script type="module" src="./solicitar.js"></script>
+  <script type="module" src="./solicitar.js?v=20260811-provider-aware-links"></script>
 </body>
 </html>

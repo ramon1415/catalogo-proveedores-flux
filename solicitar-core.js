@@ -40,6 +40,7 @@ export const FIELD_LIMITS = Object.freeze({
   bank_account: 34,
   bank_clabe: 30,
   beneficiary_name: 200,
+  bank_data_confirmation: 32,
 });
 
 export function tokenFromLocation({ hash = "", search = "", historyState = null }) {
@@ -119,6 +120,14 @@ export function validatePayload(raw, options = {}) {
   copy("bank_name");
   copy("beneficiary_name");
 
+  const bankConfirmation = copy("bank_data_confirmation");
+  if (options.providerAware) {
+    if (!bankConfirmation) errors.bank_data_confirmation = "Confirma si tus datos bancarios siguen vigentes.";
+    else if (!["MASTER_CONFIRMED", "CHANGE_DECLARED"].includes(bankConfirmation)) errors.bank_data_confirmation = "Selecciona una opción válida.";
+  } else if (bankConfirmation) {
+    errors.bank_data_confirmation = "Esta confirmación no corresponde a un enlace genérico.";
+  }
+
   const rfc = copy("provider_rfc");
   if (rfc) {
     const normalized = rfc.toUpperCase().replace(/[\s-]/g, "");
@@ -162,6 +171,20 @@ export function validatePayload(raw, options = {}) {
     const normalized = clabe.replace(/[\s-]/g, "");
     if (!/^\d{18}$/.test(normalized)) errors.bank_clabe = "La CLABE debe contener exactamente 18 dígitos.";
     else payload.bank_clabe = normalized;
+  }
+
+  if (options.providerAware && bankConfirmation === "MASTER_CONFIRMED") {
+    delete payload.bank_name;
+    delete payload.bank_account;
+    delete payload.bank_clabe;
+    delete payload.beneficiary_name;
+  }
+  if (options.providerAware && bankConfirmation === "CHANGE_DECLARED") {
+    if (!payload.bank_name) errors.bank_name = "Captura el banco reportado.";
+    if (!payload.beneficiary_name) errors.beneficiary_name = "Captura el beneficiario reportado.";
+    if (!payload.bank_account && !payload.bank_clabe) {
+      errors.bank_account = "Captura al menos la cuenta o la CLABE reportada.";
+    }
   }
 
   return { valid: Object.keys(errors).length === 0, errors, payload };
