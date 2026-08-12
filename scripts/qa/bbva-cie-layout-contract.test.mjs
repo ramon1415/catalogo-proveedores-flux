@@ -6,7 +6,7 @@ import vm from "node:vm"
 const root = new URL("../../", import.meta.url)
 const source = readFileSync(new URL("layouts.js", root), "utf8")
 const migration = readFileSync(
-  new URL("supabase/migrations/20260812231500_047_snapshot_bbva_cie_convenio_number.sql", root),
+  new URL("supabase/migrations/20260812231500_048_snapshot_bbva_cie_convenio_number.sql", root),
   "utf8",
 )
 const docs = readFileSync(new URL("docs/ops/bbva-cie-layout-format.md", root), "utf8")

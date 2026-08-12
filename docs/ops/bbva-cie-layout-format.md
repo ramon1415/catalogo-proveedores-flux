@@ -76,7 +76,7 @@ Flux limita CIE a ASCII después de la normalización. En ese subconjunto, los b
 | IMPORTE | `amount` |
 | CONCEPTO CIE | `payment_concept` |
 
-La migration `047` agrega `payment_layout_lines.convenio_number` y lo captura desde `proveedores.convenio_number` al insertar una línea CIE. No hay backfill automático: una línea histórica sin snapshot queda bloqueada. El serializer nunca consulta el proveedor vivo ni extrae dígitos de `destination_value`.
+La migration `048` agrega `payment_layout_lines.convenio_number` y lo captura desde `proveedores.convenio_number` al insertar una línea CIE. No hay backfill automático: una línea histórica sin snapshot queda bloqueada. El serializer nunca consulta el proveedor vivo ni extrae dígitos de `destination_value`.
 
 ## Routing y aislamiento
 
