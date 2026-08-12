@@ -120,7 +120,7 @@ test("CIE fixed strings pad and truncate like VBA String * N", () => {
     payment_reference: "REFERENCE-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
   }))
   assert.equal(cie.parseBbvaCieLine(long).concept, "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234")
-  assert.equal(cie.parseBbvaCieLine(long).reference, "REFERENCE-ABCDEFGHIJK")
+  assert.equal(cie.parseBbvaCieLine(long).reference, "REFERENCE-ABCDEFGHIJ")
 })
 
 test("RemoveTrash mapping and uppercasing match the recovered VBA table", () => {

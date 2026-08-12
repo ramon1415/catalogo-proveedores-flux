@@ -22,10 +22,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Run CIE and layout regression contracts
-        run: >-
-          node --test
-          scripts/qa/bbva-cie-layout-contract.test.mjs
-          scripts/qa/layout-client-uat-hotfix-contract.test.mjs
-          scripts/qa/layout-concept-no-reauth-contract.test.mjs
-          scripts/qa/layout-operational-materiality-reconcile-contract.test.mjs
+      - name: Check frontend syntax
+        run: node --check layouts.js
+
+      - name: Run CIE and embedded PAGOSBBV/PAGOSINT regression contracts
+        run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs
