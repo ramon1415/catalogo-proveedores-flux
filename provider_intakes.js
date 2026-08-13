@@ -1454,7 +1454,7 @@ function populatePaymentDraftForm() {
   dom.convertPaymentDraftBtn.hidden = !conversionReady
   dom.convertPaymentDraftBtn.disabled = !conversionReady
   dom.paymentConversionConfirm.hidden = true
-  dom.paymentDraftSnapshot = paymentDraftSnapshot()
+  state.paymentDraftSnapshot = paymentDraftSnapshot()
   state.paymentDraftDirty = false
   state.paymentDraftDiscarding = false
   dom.paymentDraftDiscardConfirm.hidden = true
@@ -1790,7 +1790,6 @@ function handlePaymentDraftInput(event) {
     state.paymentDraftActionId = createUuid()
     state.paymentConversionActionId = createUuid()
     dom.paymentConversionConfirm.hidden = true
-    dom.convertPaymentDraftBtn.disabled = true
   }
   updatePaymentDraftClientState()
 }
@@ -1847,7 +1846,7 @@ function updatePaymentDraftClientState() {
     dom.paymentDraftStateLabel.textContent = missing.length
       ? "Cambios sin guardar · borrador incompleto"
       : state.paymentDraftContext.provider?.active
-        ? "Cambios sin guardar · lista para conversión"
+        ? "Cambios sin guardar · guarda antes de convertir"
         : "Cambios sin guardar · pendiente de proveedor"
   }
 }
@@ -1980,7 +1979,9 @@ async function submitPaymentDraft(event) {
 function requestPaymentConversion() {
   const context = state.paymentDraftContext
   if (state.paymentDraftDirty) {
-    dom.paymentDraftError.textContent = "Guarda o descarta los cambios antes de convertir."
+    const message = "Primero guarda el borrador. Después podrás convertirlo en una solicitud de pago."
+    dom.paymentDraftError.textContent = message
+    showToast("Cambios sin guardar", message, "warning")
     dom.savePaymentDraftBtn.focus()
     return
   }
