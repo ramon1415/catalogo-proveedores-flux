@@ -271,6 +271,19 @@ test("frontend uses context and save RPCs with concurrency and action material",
   assert.doesNotMatch(frontend, /service[_-]?role/i)
 })
 
+test("dirty conversion stays interactive and explains the required save without converting", () => {
+  const dirtyInputHandler = frontend.slice(
+    frontend.indexOf("function handlePaymentDraftInput"),
+    frontend.indexOf("function paymentDraftSnapshot"),
+  )
+  assert.match(frontend, /state\.paymentDraftSnapshot = paymentDraftSnapshot\(\)/)
+  assert.doesNotMatch(frontend, /dom\.paymentDraftSnapshot = paymentDraftSnapshot\(\)/)
+  assert.doesNotMatch(dirtyInputHandler, /convertPaymentDraftBtn\.disabled = true/)
+  assert.match(frontend, /Cambios sin guardar · guarda antes de convertir/)
+  assert.match(frontend, /showToast\("Cambios sin guardar", message, "warning"\)/)
+  assert.match(frontend, /dom\.savePaymentDraftBtn\.focus\(\)/)
+})
+
 test("modal includes accessible labels dirty-close controls and responsive containment", () => {
   assert.match(html, /id="paymentDraftDialog" aria-labelledby="paymentDraftTitle"/)
   assert.match(html, /id="paymentDraftError" role="alert"/)
