@@ -1,0 +1,240 @@
+name: Deploy Supabase DEV Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operation"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - apply
+      script_path:
+        description: "Exact CIE 049 migration path"
+        required: true
+        type: string
+      confirm_dev:
+        description: "Type the DEV Supabase project ref to confirm: scsirgbuqjcwoaxfacth"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cie-049-supabase-dev
+  cancel-in-progress: false
+
+jobs:
+  cie-049:
+    name: CIE 049 controlled migration gate
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/feature/ramon-bbva-cie-layout'
+    env:
+      EXPECTED_BRANCH: feature/ramon-bbva-cie-layout
+      EXPECTED_DEV_SHA: 926411eacd443c36850517020a67c99c75a381cf
+      EXPECTED_MIGRATION_VERSION: "20260813011425"
+      EXPECTED_MIGRATION_NAME: 049_snapshot_bbva_cie_convenio_number
+      EXPECTED_MIGRATION_PATH: supabase/migrations/20260813011425_049_snapshot_bbva_cie_convenio_number.sql
+      EXPECTED_MIGRATION_BLOB: 9f08428589e396e1ddd89e92fb928c0ae11061c3
+      EXPECTED_SUPABASE_DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+      FORBIDDEN_SUPABASE_PROD_PROJECT_REF: ucantptjhwttexzmslvm
+      OPERATION: ${{ inputs.operation }}
+      SCRIPT_PATH: ${{ inputs.script_path }}
+      CONFIRM_DEV: ${{ inputs.confirm_dev }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Guard branch, project and exact CIE migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REF_NAME}" == "${EXPECTED_BRANCH}" ]] || {
+            echo "::error::Workflow must run from the approved CIE feature branch."
+            exit 1
+          }
+          [[ "${OPERATION}" == "dry-run" || "${OPERATION}" == "apply" ]] || {
+            echo "::error::Unsupported operation."
+            exit 1
+          }
+          [[ "${CONFIRM_DEV}" == "${EXPECTED_SUPABASE_DEV_PROJECT_REF}" ]] || {
+            echo "::error::DEV confirmation mismatch."
+            exit 1
+          }
+          [[ "${SUPABASE_DEV_PROJECT_REF:-}" == "${EXPECTED_SUPABASE_DEV_PROJECT_REF}" ]] || {
+            echo "::error::DEV secret project ref mismatch."
+            exit 1
+          }
+          [[ "${SUPABASE_DEV_PROJECT_REF}" != "${FORBIDDEN_SUPABASE_PROD_PROJECT_REF}" ]] || {
+            echo "::error::PROD project ref detected."
+            exit 1
+          }
+          [[ "${SCRIPT_PATH}" == "${EXPECTED_MIGRATION_PATH}" ]] || {
+            echo "::error::Only the exact resequenced CIE 049 migration is authorized."
+            exit 1
+          }
+          [[ -f "${EXPECTED_MIGRATION_PATH}" ]] || {
+            echo "::error::CIE 049 migration file is missing."
+            exit 1
+          }
+          [[ ! -e supabase/migrations/20260812231500_048_snapshot_bbva_cie_convenio_number.sql ]] || {
+            echo "::error::Obsolete CIE 048 migration still exists."
+            exit 1
+          }
+          [[ "$(git hash-object "${EXPECTED_MIGRATION_PATH}")" == "${EXPECTED_MIGRATION_BLOB}" ]] || {
+            echo "::error::CIE SQL blob changed during resequencing."
+            exit 1
+          }
+          [[ -n "${SUPABASE_DEV_DB_URL:-}" ]] || {
+            echo "::error::Missing DEV database URL."
+            exit 1
+          }
+          node <<'NODE'
+          const expected = process.env.EXPECTED_SUPABASE_DEV_PROJECT_REF
+          const forbidden = process.env.FORBIDDEN_SUPABASE_PROD_PROJECT_REF
+          const target = new URL(process.env.SUPABASE_DEV_DB_URL)
+          const directHost = target.hostname === `db.${expected}.supabase.co`
+          const poolerUser = decodeURIComponent(target.username) === `postgres.${expected}`
+          if (!directHost && !poolerUser) {
+            throw new Error("Database URL does not prove the approved DEV project")
+          }
+          if (
+            target.hostname.includes(forbidden) ||
+            decodeURIComponent(target.username).includes(forbidden)
+          ) {
+            throw new Error("PROD project identity detected")
+          }
+          NODE
+          echo "Branch, DEV identity and exact CIE 049 blob guards passed."
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Preflight concurrency and migration ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_dev_sha="$(curl --fail --silent --show-error \
+            https://api.github.com/repos/ramon1415/catalogo-proveedores-flux/branches/dev \
+            | jq -r '.commit.sha')"
+          [[ "${current_dev_sha}" == "${EXPECTED_DEV_SHA}" ]] || {
+            echo "::error::DEV baseline changed before dry-run."
+            exit 1
+          }
+          ledger_state="$(psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -Atc "
+            select
+              max(version) || '|' ||
+              count(*) filter (where version = '20260812210013') || '|' ||
+              count(*) filter (
+                where version = '20260813005145'
+                  and name = '048_allow_sysadmin_provider_intake_links'
+              ) || '|' ||
+              count(*) filter (where version = '${EXPECTED_MIGRATION_VERSION}')
+            from supabase_migrations.schema_migrations;
+          ")"
+          [[ "${ledger_state}" == "20260813005145|1|1|0" ]] || {
+            echo "::error::DEV migration ledger changed before dry-run."
+            exit 1
+          }
+          npx --yes supabase@2.114.0 --version
+          npx --yes supabase@2.114.0 db push --help >/dev/null
+          npx --yes supabase@2.114.0 migration list --db-url "${SUPABASE_DEV_DB_URL}"
+
+      - name: Canonical dry-run must contain CIE 049 only
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          dry_run_output="$(npx --yes supabase@2.114.0 db push \
+            --db-url "${SUPABASE_DEV_DB_URL}" --dry-run 2>&1)"
+          dry_run_status=$?
+          set -e
+          printf '%s\n' "${dry_run_output}"
+          [[ ${dry_run_status} -eq 0 ]] || {
+            echo "::error::Canonical dry-run failed."
+            exit 1
+          }
+          mapfile -t proposed_versions < <(
+            printf '%s\n' "${dry_run_output}" |
+              grep -Eo '[0-9]{14}' |
+              sort -u
+          )
+          [[ ${#proposed_versions[@]} -eq 1 ]] || {
+            echo "::error::Dry-run did not contain exactly one migration version."
+            exit 1
+          }
+          [[ "${proposed_versions[0]}" == "${EXPECTED_MIGRATION_VERSION}" ]] || {
+            echo "::error::Dry-run proposed a migration other than CIE 049."
+            exit 1
+          }
+          printf '%s\n' "${dry_run_output}" |
+            grep -q "${EXPECTED_MIGRATION_NAME}" || {
+              echo "::error::Dry-run did not name the exact CIE 049 migration."
+              exit 1
+            }
+          echo "DRY_RUN_EXCLUSIVE=CIE_049_ONLY"
+
+      - name: Second concurrency gate
+        if: inputs.operation == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_dev_sha="$(curl --fail --silent --show-error \
+            https://api.github.com/repos/ramon1415/catalogo-proveedores-flux/branches/dev \
+            | jq -r '.commit.sha')"
+          [[ "${current_dev_sha}" == "${EXPECTED_DEV_SHA}" ]] || {
+            echo "::error::DEV baseline changed after dry-run."
+            exit 1
+          }
+          ledger_state="$(psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -Atc "
+            select
+              max(version) || '|' ||
+              count(*) filter (where version = '${EXPECTED_MIGRATION_VERSION}')
+            from supabase_migrations.schema_migrations;
+          ")"
+          [[ "${ledger_state}" == "20260813005145|0" ]] || {
+            echo "::error::DEV migration ledger changed after dry-run."
+            exit 1
+          }
+          echo "Second concurrency gate passed."
+
+      - name: Apply CIE 049 once
+        if: inputs.operation == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes supabase@2.114.0 db push \
+            --db-url "${SUPABASE_DEV_DB_URL}" --yes
+
+      - name: Verify exact CIE 049 ledger result
+        if: inputs.operation == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(psql "${SUPABASE_DEV_DB_URL}" -X -v ON_ERROR_STOP=1 -Atc "
+            select count(*) || '|' || min(name)
+            from supabase_migrations.schema_migrations
+            where version = '${EXPECTED_MIGRATION_VERSION}';
+          ")"
+          [[ "${result}" == "1|${EXPECTED_MIGRATION_NAME}" ]] || {
+            echo "::error::CIE 049 ledger verification failed."
+            exit 1
+          }
+          npx --yes supabase@2.114.0 migration list --db-url "${SUPABASE_DEV_DB_URL}"
+          echo "CIE_049_APPLIED_EXACTLY_ONCE"
