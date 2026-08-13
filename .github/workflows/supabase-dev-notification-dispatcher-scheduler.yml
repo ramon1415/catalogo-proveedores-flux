@@ -1,0 +1,141 @@
+name: Supabase DEV Receipt Notification Dispatcher
+
+'on':
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-dev-receipt-notification-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch DEV payment receipt notifications
+    if: github.ref == 'refs/heads/main' && vars.NOTIFICATION_DEV_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: DEV
+
+    env:
+      EXPECTED_PROJECT_REF: scsirgbuqjcwoaxfacth
+      PROJECT_REF: scsirgbuqjcwoaxfacth
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      FUNCTION_URL: https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/notification-dispatcher
+      DEV_CUTOFF: '2026-08-13T22:36:00Z'
+      EVENT_TYPES_JSON: '["payment_receipt.linked"]'
+      DISPATCH_LIMIT: '5'
+
+    steps:
+      - name: Validate immutable DEV dispatch contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}"
+          test "${FUNCTION_URL}" = "https://${EXPECTED_PROJECT_REF}.supabase.co/functions/v1/notification-dispatcher"
+          test -n "${NOTIFICATION_DISPATCHER_SECRET}"
+          test "${EVENT_TYPES_JSON}" = '["payment_receipt.linked"]'
+          test "${DEV_CUTOFF}" = "2026-08-13T22:36:00Z"
+          test "${DISPATCH_LIMIT}" = "5"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+          echo "project_ref=${PROJECT_REF}"
+          echo "environment=DEV"
+          echo "dispatch_contract=payment_receipt.linked_only"
+          echo "cutoff_fixed=${DEV_CUTOFF}"
+          echo "limit=${DISPATCH_LIMIT}"
+          echo "retry_policy=single_invocation_no_blind_retry"
+
+      - name: Invoke DEV notification-dispatcher exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="${RUNNER_TEMP}/notification-dispatcher-response.json"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data '{"event_types":["payment_receipt.linked"],"created_at_from":"2026-08-13T22:36:00Z","limit":5}')"
+          test "${http_code}" -ge 200
+          test "${http_code}" -lt 300
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          response_file = os.environ["RESPONSE_FILE"]
+          with open(response_file, encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          processed = data.get("processed")
+          sent = data.get("sent")
+          failed = data.get("failed")
+          mode = data.get("mode")
+          events = data.get("events") if isinstance(data.get("events"), list) else []
+
+          valid_counts = (
+              isinstance(processed, int)
+              and isinstance(sent, int)
+              and isinstance(failed, int)
+              and 0 <= processed <= 5
+              and sent + failed == processed
+          )
+          valid_events = len(events) == processed and all(
+              event.get("event_type") == "payment_receipt.linked"
+              and event.get("status") in ("sent", "failed")
+              for event in events
+          )
+          sent_events = [event for event in events if event.get("status") == "sent"]
+          valid_sent_evidence = all(
+              bool(event.get("provider_message_id"))
+              and isinstance(event.get("attachment_size_bytes"), int)
+              and event.get("attachment_size_bytes", 0) > 0
+              and bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(event.get("attachment_sha256") or "")))
+              for event in sent_events
+          )
+
+          intended_recipients = []
+          for event in events:
+              email = str(event.get("intended_recipient_email") or "")
+              if "@" not in email:
+                  intended_recipients.append("masked")
+                  continue
+              local, domain = email.split("@", 1)
+              intended_recipients.append(f"{local[:2]}{'*' * max(len(local) - 2, 2)}@{domain}")
+
+          safe = {
+              "processed": processed,
+              "sent": sent,
+              "failed": failed,
+              "mode": mode,
+              "payment_receipt_linked_only": valid_events,
+              "provider_message_ids_present": sum(
+                  1 for event in sent_events if bool(event.get("provider_message_id"))
+              ),
+              "attachment_sha256_present": sum(
+                  1 for event in sent_events if bool(event.get("attachment_sha256"))
+              ),
+              "attachment_sizes_positive": sum(
+                  1 for event in sent_events if isinstance(event.get("attachment_size_bytes"), int)
+                  and event.get("attachment_size_bytes", 0) > 0
+              ),
+              "intended_recipients": intended_recipients,
+              "final_recipients": "masked",
+          }
+          print(json.dumps(safe, sort_keys=True))
+
+          try:
+              os.remove(response_file)
+          except FileNotFoundError:
+              pass
+
+          if mode != "test_only" or not valid_counts or not valid_events or not valid_sent_evidence:
+              sys.exit(1)
+          PY
