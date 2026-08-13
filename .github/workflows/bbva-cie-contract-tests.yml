@@ -1,0 +1,29 @@
+name: BBVA CIE contract tests
+
+on:
+  push:
+    branches:
+      - feature/ramon-bbva-cie-layout
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check frontend syntax
+        run: node --check layouts.js
+
+      - name: Run CIE and embedded PAGOSBBV/PAGOSINT regression contracts
+        run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs
