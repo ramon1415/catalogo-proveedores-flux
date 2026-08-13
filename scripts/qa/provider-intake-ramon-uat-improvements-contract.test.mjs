@@ -11,8 +11,11 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8")
 const migrations = fs.readdirSync(path.join(root, "supabase", "migrations")).sort()
 const migrationName = migrations.find((name) => name.endsWith("_provider_intake_ramon_uat_product_improvements.sql"))
 assert.ok(migrationName, "missing product improvement migration")
+const sysadminLinkMigrationName = migrations.find((name) => name.endsWith("_048_allow_sysadmin_provider_intake_links.sql"))
+assert.ok(sysadminLinkMigrationName, "missing SysAdmin provider-link authorization migration")
 
 const migration = read(path.join("supabase", "migrations", migrationName))
+const sysadminLinkMigration = read(path.join("supabase", "migrations", sysadminLinkMigrationName))
 const internalHtml = read("provider_intakes.html")
 const internalJs = read("provider_intakes.js")
 const publicHtml = read("solicitar.html")
@@ -76,13 +79,15 @@ test("transfer banking mismatch blocks conversion until an audited safe decision
   assert.match(internalJs, /Actualizar proveedor canónico/)
 })
 
-test("link authorization is company scoped and admin or sysadmin alone is insufficient", () => {
-  const auth = migration.match(/create function public\.provider_intake_link_actor_authorized[\s\S]*?\n\$\$;/)?.[0] || ""
+test("link authorization grants global SysAdmin access and keeps operators company scoped", () => {
+  const auth = sysadminLinkMigration.match(/create or replace function public\.provider_intake_link_actor_authorized[\s\S]*?\n\$\$;/)?.[0] || ""
+  assert.match(sysadminLinkMigrationName, /^\d{14}_048_allow_sysadmin_provider_intake_links\.sql$/)
+  assert.match(auth, /lower\(btrim\(role\.name\)\) = any\(public\.flux_sysadmin_roles\(\)\)/)
   assert.match(auth, /has_active_company_membership/)
   assert.match(auth, /from public\.companies[\s\S]*?coalesce\(company\.active, true\)/)
   assert.match(auth, /extraordinary_profile_is_company_director/)
   assert.match(auth, /'finance', 'finanzas', 'treasury', 'tesoreria', 'administracion'/)
-  assert.doesNotMatch(auth, /'admin'|'sysadmin'|'superadmin'|'system_admin'/)
+  assert.match(auth, /exists[\s\S]*?flux_sysadmin_roles\(\)[\s\S]*?or \([\s\S]*?has_active_company_membership/)
   assert.match(config, /provider-intakes[\s\S]*?ROLE_GROUPS\.DIRECTION/)
 })
 
