@@ -50,5 +50,10 @@ jobs:
       - name: Run provider catalog canonical RPC contracts
         run: node --test scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
 
+      - name: Run relevant provider-intake regressions
+        run: |
+          node --test scripts/qa/provider-intake-ramon-uat-improvements-contract.test.mjs
+          node --test scripts/qa/provider-intake-provider-aware-links-contract.test.mjs
+
       - name: Run CIE and embedded PAGOSBBV/PAGOSINT regression contracts
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs
