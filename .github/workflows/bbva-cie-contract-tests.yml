@@ -1,9 +1,29 @@
-name: BBVA CIE contract tests
+name: Provider catalog RPC and BBVA CIE contract tests
 
 on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - proveedores.js
+      - layouts.js
+      - scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
+      - scripts/qa/bbva-cie-layout-contract.test.mjs
+      - supabase/migrations/20260813011425_049_snapshot_bbva_cie_convenio_number.sql
+      - docs/ops/bbva-cie-layout-format.md
+      - .github/workflows/bbva-cie-contract-tests.yml
   push:
     branches:
-      - feature/ramon-bbva-cie-layout
+      - dev
+      - "fix/**"
+    paths:
+      - proveedores.js
+      - layouts.js
+      - scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
+      - scripts/qa/bbva-cie-layout-contract.test.mjs
+      - supabase/migrations/20260813011425_049_snapshot_bbva_cie_convenio_number.sql
+      - docs/ops/bbva-cie-layout-format.md
+      - .github/workflows/bbva-cie-contract-tests.yml
   workflow_dispatch:
 
 permissions:
@@ -23,7 +43,17 @@ jobs:
           node-version: "22"
 
       - name: Check frontend syntax
-        run: node --check layouts.js
+        run: |
+          node --check proveedores.js
+          node --check layouts.js
+
+      - name: Run provider catalog canonical RPC contracts
+        run: node --test scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
+
+      - name: Run relevant provider-intake regressions
+        run: |
+          node --test scripts/qa/provider-intake-ramon-uat-improvements-contract.test.mjs
+          node --test scripts/qa/provider-intake-provider-aware-links-contract.test.mjs
 
       - name: Run CIE and embedded PAGOSBBV/PAGOSINT regression contracts
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs
