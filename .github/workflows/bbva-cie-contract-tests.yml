@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - dev
+      - "fix/**"
     paths:
       - proveedores.js
       - layouts.js
