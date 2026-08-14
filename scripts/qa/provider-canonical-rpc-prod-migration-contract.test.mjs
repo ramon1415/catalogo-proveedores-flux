@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
@@ -17,6 +18,36 @@ test("provider PROD migration is transaction wrapped and fingerprint gated", () 
   assert.match(migration, /commit;\s*$/)
 })
 
+test("postcheck fingerprints the exact versioned bodies independent of CRLF", () => {
+  const expectedBodies = {
+    guard_provider_payment_execution_data_insert: "078e06dbfcda88db72607d090c55ac3e",
+    mark_provider_payment_material_change: "53582d2af3fe93e025a8a5bda4341a36",
+    save_provider_catalog_with_payment_execution_data: "5d9f62be1627ab96b1b312d917e6d6d5",
+  }
+  const postcheckOffset = migration.indexOf("do $postcheck$")
+  assert.ok(postcheckOffset >= 0)
+  const postcheck = migration.slice(postcheckOffset)
+
+  assert.doesNotMatch(postcheck, /md5\(pg_get_functiondef/i)
+  assert.match(postcheck, /md5\(replace\(p\.prosrc, E'\\r\\n', E'\\n'\)\)/i)
+  assert.match(postcheck, /join pg_language l on l\.oid = p\.prolang/i)
+  assert.match(postcheck, /l\.lanname <> 'plpgsql'/i)
+
+  for (const [name, expectedMd5] of Object.entries(expectedBodies)) {
+    const definitionOffset = migration.indexOf(`CREATE OR REPLACE FUNCTION public.${name}(`)
+    assert.ok(definitionOffset >= 0, `definition missing: ${name}`)
+    const bodyMarker = "AS $function$"
+    const bodyOffset = migration.indexOf(bodyMarker, definitionOffset)
+    const bodyEnd = migration.indexOf("$function$", bodyOffset + bodyMarker.length)
+    assert.ok(bodyOffset >= 0 && bodyEnd > bodyOffset, `body missing: ${name}`)
+    const source = migration
+      .slice(bodyOffset + bodyMarker.length, bodyEnd)
+      .replace(/\r\n/g, "\n")
+    const actualMd5 = createHash("md5").update(source).digest("hex")
+    assert.equal(actualMd5, expectedMd5, `functional body drift: ${name}`)
+    assert.match(postcheck, new RegExp(expectedMd5))
+  }
+})
 test("migration creates only the three approved provider functions", () => {
   const names = [...migration.matchAll(/CREATE OR REPLACE FUNCTION public\.([a-z0-9_]+)/gi)]
     .map((match) => match[1].toLowerCase())
