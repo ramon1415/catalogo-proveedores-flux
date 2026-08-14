@@ -290,7 +290,8 @@ State: Draft; never merge in N0.
 - Migration apply: 0
 - Storage writes/uploads: 0
 - Real payroll rows/files: 0
-- Deployments: 0
+- Manual deployments: 0
+- Automatic Vercel branch Preview: 1 (created by the repository PR integration; no UI files changed and it is neither DEV nor PROD)
 
 Only read-only introspection was performed against DEV.
 
