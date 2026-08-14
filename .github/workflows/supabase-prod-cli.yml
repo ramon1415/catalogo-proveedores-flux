@@ -1,4 +1,4 @@
-name: Supabase PROD CLI Dry Run
+name: Supabase PROD Provider Recovery Apply
 
 on:
   workflow_dispatch:
@@ -8,21 +8,21 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Type dry-run to confirm this workflow must not apply migrations"
+        description: "Type apply-provider-recovery-once to confirm the single provider migration apply"
         required: true
-        default: "dry-run"
+        default: "apply-provider-recovery-once"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: supabase-prod-cli-dry-run
+  group: supabase-prod-provider-recovery-apply
   cancel-in-progress: false
 
 jobs:
   dry_run:
-    name: Supabase PROD migration dry-run
+    name: Supabase PROD provider recovery apply
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: supabase-production
@@ -46,8 +46,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "dry-run" ]; then
-            echo "::error::confirm_mode must be exactly: dry-run"
+          if [ "${CONFIRM_MODE}" != "apply-provider-recovery-once" ]; then
+            echo "::error::confirm_mode must be exactly: apply-provider-recovery-once"
             exit 1
           fi
 
@@ -76,7 +76,7 @@ jobs:
             exit 1
           fi
 
-          echo "Guardrails passed. Running dry-run only."
+          echo "Guardrails passed. Applying the single provider recovery migration once."
 
       - name: Check out authorized CIE recovery
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
           set -euo pipefail
           supabase migration list --db-url "${SUPABASE_DB_URL}"
 
-      - name: Dry-run Supabase PROD migrations
+      - name: Preflight and apply single provider recovery migration
         shell: bash
         run: |
           set -euo pipefail
@@ -147,18 +147,38 @@ jobs:
               raise SystemExit(f"PROD_PROVIDER_RECOVERY_DRYRUN_NOT_EXCLUSIVE: {sorted(found)}")
           print("PASS / PROD_PROVIDER_RECOVERY_DRYRUN_EXACTLY_ONE")
           PY
+          echo "Applying the preflight-approved provider recovery migration exactly once."
+          supabase db push --db-url "${SUPABASE_DB_URL}" --yes 2>&1 | tee "${RUNNER_TEMP}/provider-recovery-apply.txt"
+          echo "PASS / PROD_PROVIDER_RECOVERY_APPLY_COMMAND_COMPLETED"
 
-      - name: Summarize dry-run
+      - name: Verify provider migration in remote ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase migration list --db-url "${SUPABASE_DB_URL}" 2>&1 | tee "${RUNNER_TEMP}/provider-recovery-post-list.txt"
+          python3 - "${RUNNER_TEMP}/provider-recovery-post-list.txt" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          version = "20260814004000"
+          if not re.search(rf"`{version}`\s*\|\s*`{version}`", text):
+              raise SystemExit("provider recovery version not confirmed in remote ledger")
+          print("PASS / PROD_PROVIDER_RECOVERY_LEDGER_CONFIRMED")
+          PY
+
+      - name: Summarize apply
         if: always()
         shell: bash
         run: |
           {
-            echo "## Supabase PROD CLI dry-run"
+            echo "## Supabase PROD provider recovery apply"
             echo ""
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Mode: dry-run only"
-            echo "- Real db push: not executed by this workflow"
+            echo "- Mode: single provider recovery apply"
+            echo "- Real db push: executed once after exclusive dry-run PASS"
             echo "- Migration repair: not executed by this workflow"
             echo "- n8n: not touched by this workflow"
           } >> "${GITHUB_STEP_SUMMARY}"
