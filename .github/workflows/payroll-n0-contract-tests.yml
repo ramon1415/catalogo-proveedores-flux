@@ -9,7 +9,9 @@ on:
       - docs/ops/payroll-n0-contract.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
+      - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
+      - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
 
@@ -33,7 +35,7 @@ jobs:
         run: node --check payroll_parser.js
 
       - name: Payroll N0 contracts
-        run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs
+        run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
