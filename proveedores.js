@@ -362,16 +362,25 @@ async function persistSupplier(operation) {
     return
   }
 
-  const result = currentEditingId
-    ? await supabaseClient.from("proveedores").update(payload).eq("id", currentEditingId).select("id").single()
-    : await supabaseClient.from("proveedores").insert(payload).select("id").single()
+  const result = await supabaseClient.rpc("save_provider_catalog_with_payment_execution_data", {
+    p_proveedor_id: currentEditingId || null,
+    p_payload: payload,
+  })
 
   if (result.error) {
     showSupplierSaveError(result.error, { stage: "persist", operation })
     return
   }
 
-  const providerId = result.data?.id || currentEditingId
+  const providerId = result.data?.id
+  if (!providerId) {
+    showSupplierSaveError(
+      { code: "provider_rpc_response_invalid", message: "provider_rpc_response_invalid" },
+      { stage: "persist", operation },
+    )
+    return
+  }
+
   let csfUploadFailed = false
 
   if (csfFile && providerId) {
@@ -409,12 +418,31 @@ function isPreviewEnvironment() {
   return String(window.FLUX_CONFIG?.env || "").trim().toLowerCase() === "preview"
 }
 
+const PROVIDER_SAVE_ERROR_MESSAGES = Object.freeze({
+  finance_role_required: "Los datos bancarios del proveedor solo pueden ser guardados por Finanzas.",
+  provider_payment_execution_data_invalid: "Revisa los datos bancarios del proveedor.",
+  provider_create_role_required: "No tienes permiso para crear proveedores.",
+  provider_update_role_required: "No tienes permiso para actualizar proveedores.",
+  provider_payload_contains_unsupported_fields: "El formulario contiene campos no admitidos. Actualiza la pagina e intentalo nuevamente.",
+  provider_rpc_response_invalid: "El proveedor se guardo sin una confirmacion valida. Actualiza el catalogo antes de reintentar.",
+})
+
+function providerSaveErrorCode(error) {
+  const candidates = [error?.message, error?.details, error?.hint, error?.code]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+  const knownCode = Object.keys(PROVIDER_SAVE_ERROR_MESSAGES)
+    .find((code) => candidates.some((candidate) => candidate.includes(code)))
+  if (knownCode) return knownCode
+
+  const transportCode = candidates.find((candidate) =>
+    /^pgrst\d{3}$/.test(candidate) || /^[0-9a-z]{5}$/.test(candidate),
+  )
+  return transportCode || "unclassified_save_error"
+}
+
 function logSupplierSaveDiagnostic(error, { stage, operation }) {
-  const codeCandidate = String(error?.code || "").trim().toLowerCase()
-  const knownCodes = new Set(["provider_payment_execution_rpc_required"])
-  const code = knownCodes.has(codeCandidate) || /^pgrst\d{3}$/.test(codeCandidate) || /^[0-9a-z]{5}$/.test(codeCandidate)
-    ? codeCandidate
-    : "unclassified_save_error"
+  const code = providerSaveErrorCode(error)
   const statusCandidate = Number(error?.statusCode || error?.status)
   const diagnostic = { stage, operation, code }
   if (Number.isInteger(statusCandidate) && statusCandidate >= 100 && statusCandidate <= 599) {
@@ -424,11 +452,13 @@ function logSupplierSaveDiagnostic(error, { stage, operation }) {
 }
 
 function showSupplierSaveError(error, { stage, operation }) {
+  const code = providerSaveErrorCode(error)
   logSupplierSaveDiagnostic(error, { stage, operation })
 
   const message = isPreviewEnvironment()
     ? "Este entorno es una vista previa. Los cambios no se guardan."
-    : "No fue posible guardar el proveedor. Verifica la información e inténtalo nuevamente."
+    : PROVIDER_SAVE_ERROR_MESSAGES[code]
+      || "No fue posible guardar el proveedor. Verifica la informacion e intentalo nuevamente."
   showToast(message, "", "error")
 }
 
