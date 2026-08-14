@@ -92,6 +92,46 @@ jobs:
           set -euo pipefail
           find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort
 
+      - name: Align proven historical timestamp aliases in runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import hashlib
+          import pathlib
+          import re
+
+          root = pathlib.Path("supabase/migrations")
+          pairs = {
+              "20260809214308_reconcile_layout_operational_materiality_sol_2026_0006.sql": (
+                  "20260809215709_reconcile_layout_operational_materiality_sol_2026_0006.sql",
+                  "ba133d39fe1747f49603f47883a2510a",
+              ),
+              "20260810165344_layout_client_uat_preserve_approval_repair_sol_0008_0009.sql": (
+                  "20260810172702_layout_client_uat_preserve_approval_repair_sol_0008_0009.sql",
+                  "e47a8d0bc23ae4309375dce191630061",
+              ),
+              "20260810175316_layout_concept_no_reauth.sql": (
+                  "20260810175919_layout_concept_no_reauth.sql",
+                  "74787d8ca328cf54bc422cb76952d832",
+              ),
+              "20260810185817_paid_layout_receipt_match.sql": (
+                  "20260810190637_paid_layout_receipt_match.sql",
+                  "02b8dbe1cfb2af2bd1ae96d2f87ac197",
+              ),
+          }
+          for source_name, (target_name, expected_compact_md5) in pairs.items():
+              source = root / source_name
+              target = root / target_name
+              if not source.is_file() or target.exists():
+                  raise SystemExit(f"historical alias state unexpected: {source_name}")
+              compact = re.sub(rb"\s+", b"", source.read_bytes())
+              actual = hashlib.md5(compact).hexdigest()
+              if actual != expected_compact_md5:
+                  raise SystemExit(f"historical SQL fingerprint drift: {source_name}")
+              source.rename(target)
+              print(f"aligned proven historical alias: {source_name} -> {target_name}")
+          PY
       - name: Link Supabase PROD project
         shell: bash
         run: |
@@ -108,7 +148,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          supabase db push --db-url "${SUPABASE_DB_URL}" --dry-run
+          supabase db push --db-url "${SUPABASE_DB_URL}" --dry-run 2>&1 | tee "${RUNNER_TEMP}/cie-prod-dry-run.txt"
+          python3 - "${RUNNER_TEMP}/cie-prod-dry-run.txt" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          expected = {
+              "20260813011425_049_snapshot_bbva_cie_convenio_number.sql",
+              "20260814004000_provider_catalog_canonical_rpc_prod.sql",
+          }
+          found = set(re.findall(r"\b(20\d{12}_[A-Za-z0-9_.-]+\.sql)\b", text))
+          if found != expected:
+              raise SystemExit(f"PROD_MIGRATION_SET_NOT_EXCLUSIVE: {sorted(found)}")
+          print("PASS / PROD_MIGRATION_SET_EXACTLY_TWO")
+          PY
 
       - name: Summarize dry-run
         if: always()
