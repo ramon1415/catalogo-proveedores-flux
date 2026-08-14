@@ -9,7 +9,7 @@ Fecha de corte: 2026-08-14. Este reporte no contiene valores de empleados, cuent
 - Ese SHA incluye el merge de PR #361 y la corrección forward-only N1 `20260814183429_fix_payroll_request_total_trigger.sql`.
 - Rama de trabajo: `feature/ramon-payroll-n2a-source-recovery`.
 - No se consultó ni modificó PROD.
-- No hubo escrituras en Supabase DEV, DDL nuevo, migrations, UI ni despliegues.
+- No hubo escrituras en Supabase DEV, DDL nuevo, migrations, cambios UI ni despliegues manuales.
 
 ## B. Search coverage
 
@@ -186,14 +186,15 @@ Los contratos N0 parser/migration y el forward fix N1 se ejecutan junto con N2A.
 
 ## L. PR
 
-La rama contiene sólo parser, tests sintéticos, manifest no-PII y este reporte. El PR debe permanecer Draft con base `dev`; no se autoriza merge en N2A.
+La rama contiene sólo parser, tests sintéticos, manifest no-PII y este reporte. El PR debe permanecer Draft con base `dev`; no se autoriza merge en N2A. La creación del PR activó el preview automático estándar de Vercel; ese preview no es DEV ni PROD y no contiene cambios UI.
 
 ## M. DEV
 
 - DB writes: 0.
 - DDL/migrations nuevas: 0.
 - UI: 0.
-- Deployments: 0.
+- Deployments manuales: 0.
+- Preview automático de Vercel por PR: 1; fuera de DEV/PROD.
 
 ## N. PROD
 
