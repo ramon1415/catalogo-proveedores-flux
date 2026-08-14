@@ -1,0 +1,66 @@
+{
+  "manifest_version": "payroll-source-recovery-n2a-v1",
+  "notice": "METADATA_ONLY_NO_SOURCE_BYTES_NO_REAL_VALUES",
+  "sources": [
+    {
+      "logical_name": "qna15_payroll_interbank_macro_workbook",
+      "source_type": "XLSM",
+      "sha256": "cc5b4376a2bd7c9b8e1de02b29cafbf186e03d371bc0b9ce7364bc4da26df556",
+      "size_bytes": 2747218,
+      "classification": "SOURCE_PHYSICAL_SUPPORTING",
+      "format_contract_status": "PAYROLL_SPEI_TXT:CERTIFIED_FROM_MULTIPLE_CONVERGENT_SOURCES;BBVA_SAME_BANK_TXT:PARTIAL_CONTRACT_ONLY",
+      "pii_present": true,
+      "repo_fixture_allowed": false
+    },
+    {
+      "logical_name": "qna15_toka_macro_workbook",
+      "source_type": "XLSM",
+      "sha256": "66f20373ceea98aec461ff91526a182c2155bc1435e807fc0f88fc1ff042450d",
+      "size_bytes": 2698369,
+      "classification": "SOURCE_PHYSICAL_SUPPORTING",
+      "format_contract_status": "TOKA_AGGREGATE_TRANSFER:SUPPORTING;TOKA_XML:MISSING_PHYSICAL_SOURCE",
+      "pii_present": true,
+      "repo_fixture_allowed": false
+    },
+    {
+      "logical_name": "historical_pagosit_180626",
+      "source_type": "TXT",
+      "sha256": "7be47fea70730bc8cdfca9a70548d857d76bf94baabd924c35eb6053f3b23851",
+      "size_bytes": 260,
+      "classification": "HISTORICAL_RELATED_FORMAT",
+      "format_contract_status": "PAYROLL_SPEI_TXT:CONVERGENT_BYTE_EVIDENCE",
+      "pii_present": true,
+      "repo_fixture_allowed": false
+    },
+    {
+      "logical_name": "historical_pagosbbv_020726",
+      "source_type": "TXT",
+      "sha256": "13e3f73f04c69a533a93ea655fb4bd2bf3ba8a1f31fd2f7d312bab59008829e9",
+      "size_bytes": 174,
+      "classification": "HISTORICAL_RELATED_FORMAT",
+      "format_contract_status": "BBVA_SAME_BANK_TXT:INSUFFICIENT_FOR_PAYROLL_BYTE_CONTRACT",
+      "pii_present": true,
+      "repo_fixture_allowed": false
+    },
+    {
+      "logical_name": "bbva_simulator_x",
+      "source_type": "XLSM",
+      "sha256": "a676ce4fd28d86e4e6f8d9de804fc55c4c4b855275eac2efe20b1af0cfe3247d",
+      "size_bytes": 2788687,
+      "classification": "SIMULATOR_SOURCE_ONLY",
+      "format_contract_status": "SUPPORTING_NOT_PAYROLL_RUN_OUTPUT",
+      "pii_present": true,
+      "repo_fixture_allowed": false
+    },
+    {
+      "logical_name": "payroll_functional_spec",
+      "source_type": "MARKDOWN",
+      "sha256": "c18796c80ad446ee6cab98e6f6e848f6d908dd705a431779d6af2f46dabe16db",
+      "size_bytes": 13726,
+      "classification": "DOCUMENTATION_ONLY",
+      "format_contract_status": "CONSISTENCY_CHECK_ONLY",
+      "pii_present": false,
+      "repo_fixture_allowed": false
+    }
+  ]
+}
