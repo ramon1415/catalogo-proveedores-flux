@@ -571,16 +571,32 @@ for each row
 execute function public.guard_provider_payment_execution_data_insert();
 
 do $postcheck$
+declare
+  v_guard_prosrc_md5 text;
+  v_mark_prosrc_md5 text;
+  v_rpc_prosrc_md5 text;
 begin
-  if md5(pg_get_functiondef(
-       'public.guard_provider_payment_execution_data_insert()'::regprocedure
-     )) <> 'f6c9b89f28826d9012dc7c47a5637bf5'
-     or md5(pg_get_functiondef(
-       'public.mark_provider_payment_material_change()'::regprocedure
-     )) <> 'bd0116a89af40526fb275308da77eb04'
-     or md5(pg_get_functiondef(
-       'public.save_provider_catalog_with_payment_execution_data(uuid,jsonb)'::regprocedure
-     )) <> '789e67d14e088df86b9064f97da5fe3a' then
+  -- pg_get_functiondef() includes the stored prosrc line endings. DEV retained
+  -- CRLF bodies while the versioned GitHub migration is applied with LF. Only
+  -- normalize CRLF to LF; every functional source character remains hashed.
+  select md5(replace(p.prosrc, E'\r\n', E'\n'))
+    into v_guard_prosrc_md5
+    from pg_proc p
+    where p.oid = 'public.guard_provider_payment_execution_data_insert()'::regprocedure;
+
+  select md5(replace(p.prosrc, E'\r\n', E'\n'))
+    into v_mark_prosrc_md5
+    from pg_proc p
+    where p.oid = 'public.mark_provider_payment_material_change()'::regprocedure;
+
+  select md5(replace(p.prosrc, E'\r\n', E'\n'))
+    into v_rpc_prosrc_md5
+    from pg_proc p
+    where p.oid = 'public.save_provider_catalog_with_payment_execution_data(uuid,jsonb)'::regprocedure;
+
+  if v_guard_prosrc_md5 <> '078e06dbfcda88db72607d090c55ac3e'
+     or v_mark_prosrc_md5 <> '53582d2af3fe93e025a8a5bda4341a36'
+     or v_rpc_prosrc_md5 <> '5d9f62be1627ab96b1b312d917e6d6d5' then
     raise exception 'provider_canonical_rpc_postcheck_definition_mismatch';
   end if;
 
@@ -621,6 +637,7 @@ begin
        select 1
        from pg_proc p
        join pg_namespace n on n.oid = p.pronamespace
+       join pg_language l on l.oid = p.prolang
        where n.nspname = 'public'
          and p.proname in (
            'guard_provider_payment_execution_data_insert',
@@ -628,7 +645,8 @@ begin
            'save_provider_catalog_with_payment_execution_data'
          )
          and (
-           not p.prosecdef
+           l.lanname <> 'plpgsql'
+           or not p.prosecdef
            or pg_get_userbyid(p.proowner) <> 'postgres'
            or not exists (
              select 1
