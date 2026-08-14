@@ -40,8 +40,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
-            echo "::error::This workflow is restricted to the dev branch."
+          if [ "${GITHUB_REF_NAME}" != "release/ramon-bbva-cie-prod" ]; then
+            echo "::error::This workflow is restricted to the authorized CIE release branch."
             exit 1
           fi
 
@@ -72,10 +72,10 @@ jobs:
 
           echo "Guardrails passed. Running dry-run only."
 
-      - name: Check out dev
+      - name: Check out authorized CIE release
         uses: actions/checkout@v4
         with:
-          ref: dev
+          ref: release/ramon-bbva-cie-prod
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
