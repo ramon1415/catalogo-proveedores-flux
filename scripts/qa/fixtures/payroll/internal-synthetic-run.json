@@ -1,0 +1,107 @@
+{
+  "evidenceClassification": "INTERNAL_SYNTHETIC_MODEL_NOT_SOURCE_FORMAT",
+  "notice": "Synthetic normalized records only. This fixture is not an XLSX, BBVA TXT, SPEI TXT, TOKA XML, or bank format example.",
+  "request": {
+    "periodStart": "2026-08-01",
+    "periodEnd": "2026-08-15",
+    "sourceAccount": "000000000000000001",
+    "requestAmount": "4000.00"
+  },
+  "coverContract": {
+    "columns": {
+      "employeeName": "employee_name",
+      "rfc": "rfc",
+      "curp": "curp",
+      "nss": "nss",
+      "bankName": "bank_name",
+      "account": "account",
+      "clabe": "clabe",
+      "netAmount": "net_amount",
+      "cashAmount": "cash_amount",
+      "vouchersAmount": "vouchers_amount"
+    }
+  },
+  "coverRows": [
+    {
+      "__sourceRow": 2,
+      "employee_name": "PERSONA SINTETICA UNO",
+      "rfc": "SYNTHETIC-RFC-001",
+      "curp": "SYNTHETIC-CURP-001",
+      "nss": "SYNTHETIC-NSS-001",
+      "bank_name": "BANCO SINTETICO",
+      "account": "0000000001",
+      "clabe": "",
+      "net_amount": "1250.00",
+      "cash_amount": "1000.00",
+      "vouchers_amount": "250.00"
+    },
+    {
+      "__sourceRow": 3,
+      "employee_name": "PERSONA SINTETICA DOS",
+      "rfc": "SYNTHETIC-RFC-002",
+      "curp": "SYNTHETIC-CURP-002",
+      "nss": "SYNTHETIC-NSS-002",
+      "bank_name": "BANCO EXTERNO SINTETICO",
+      "account": "",
+      "clabe": "000000000000000002",
+      "net_amount": "1950.00",
+      "cash_amount": "1750.00",
+      "vouchers_amount": "200.00"
+    },
+    {
+      "__sourceRow": 4,
+      "employee_name": "PERSONA SINTETICA TRES",
+      "rfc": "SYNTHETIC-RFC-003",
+      "curp": "SYNTHETIC-CURP-003",
+      "nss": "SYNTHETIC-NSS-003",
+      "bank_name": "BANCO SINTETICO",
+      "account": "0000000003",
+      "clabe": "",
+      "net_amount": "800.00",
+      "cash_amount": "800.00",
+      "vouchers_amount": "0.00"
+    }
+  ],
+  "sameBankRecords": [
+    {
+      "sourceRow": 1,
+      "sourceAccount": "000000000000000001",
+      "account": "0000000001",
+      "amount": "1000.00",
+      "employeeName": "PERSONA SINTETICA UNO"
+    },
+    {
+      "sourceRow": 2,
+      "sourceAccount": "000000000000000001",
+      "account": "0000000003",
+      "amount": "800.00",
+      "employeeName": "PERSONA SINTETICA TRES"
+    }
+  ],
+  "speiRecords": [
+    {
+      "sourceRow": 1,
+      "sourceAccount": "000000000000000001",
+      "clabe": "000000000000000002",
+      "amount": "1750.00",
+      "employeeName": "PERSONA SINTETICA DOS"
+    }
+  ],
+  "tokaRecords": [
+    {
+      "sourceRow": 1,
+      "rfc": "SYNTHETIC-RFC-001",
+      "amount": "250.00"
+    },
+    {
+      "sourceRow": 2,
+      "rfc": "SYNTHETIC-RFC-002",
+      "amount": "200.00"
+    }
+  ],
+  "channels": {
+    "banco": "1800.00",
+    "spei": "1750.00",
+    "vales": "450.00"
+  }
+}
