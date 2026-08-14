@@ -1,4 +1,4 @@
-name: Supabase PROD Provider Recovery Apply
+name: Supabase PROD CLI Dry Run
 
 on:
   workflow_dispatch:
@@ -8,21 +8,21 @@ on:
         required: true
         type: string
       confirm_mode:
-        description: "Type apply-provider-recovery-once to confirm the single provider migration apply"
+        description: "Type dry-run to confirm this workflow must not apply migrations"
         required: true
-        default: "apply-provider-recovery-once"
+        default: "dry-run"
         type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: supabase-prod-provider-recovery-apply
+  group: supabase-prod-cli-dry-run
   cancel-in-progress: false
 
 jobs:
   dry_run:
-    name: Supabase PROD provider recovery apply
+    name: Supabase PROD migration dry-run
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: supabase-production
@@ -30,7 +30,6 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD_PROD }}
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
       SUPABASE_PROJECT_ID: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
       CONFIRM_PROD: ${{ inputs.confirm_prod }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
@@ -41,13 +40,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_REF_NAME}" != "release/ramon-bbva-cie-prod" ]; then
-            echo "::error::This workflow is restricted to the authorized CIE recovery branch."
+          if [ "${GITHUB_REF_NAME}" != "dev" ]; then
+            echo "::error::This workflow is restricted to the dev branch."
             exit 1
           fi
 
-          if [ "${CONFIRM_MODE}" != "apply-provider-recovery-once" ]; then
-            echo "::error::confirm_mode must be exactly: apply-provider-recovery-once"
+          if [ "${CONFIRM_MODE}" != "dry-run" ]; then
+            echo "::error::confirm_mode must be exactly: dry-run"
             exit 1
           fi
 
@@ -66,22 +65,17 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${SUPABASE_DB_URL}" ]; then
-            echo "::error::SUPABASE_PROD_SESSION_POOLER_DB_URL secret is not configured."
+          if [ -z "${SUPABASE_DB_PASSWORD}" ]; then
+            echo "::error::SUPABASE_DB_PASSWORD_PROD secret is not configured."
             exit 1
           fi
 
-          if [[ "${SUPABASE_DB_URL}" != *"${SUPABASE_PROJECT_ID}"* ]]; then
-            echo "::error::The configured pooler URL does not match PROD project ref."
-            exit 1
-          fi
+          echo "Guardrails passed. Running dry-run only."
 
-          echo "Guardrails passed. Applying the single provider recovery migration once."
-
-      - name: Check out authorized CIE recovery
+      - name: Check out dev
         uses: actions/checkout@v4
         with:
-          ref: release/ramon-bbva-cie-prod
+          ref: dev
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@v2
@@ -92,32 +86,6 @@ jobs:
           set -euo pipefail
           find supabase/migrations -maxdepth 1 -type f -name "*.sql" | sort
 
-      - name: Align proven historical timestamp aliases in runner
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          import hashlib
-          import pathlib
-          import re
-
-          root = pathlib.Path("supabase/migrations")
-          pairs = {
-              "20260809214308_reconcile_layout_operational_materiality_sol_2026_0006.sql": ("20260809215709_reconcile_layout_operational_materiality_sol_2026_0006.sql", "ba133d39fe1747f49603f47883a2510a"),
-              "20260810165344_layout_client_uat_preserve_approval_repair_sol_0008_0009.sql": ("20260810172702_layout_client_uat_preserve_approval_repair_sol_0008_0009.sql", "e47a8d0bc23ae4309375dce191630061"),
-              "20260810175316_layout_concept_no_reauth.sql": ("20260810175919_layout_concept_no_reauth.sql", "74787d8ca328cf54bc422cb76952d832"),
-              "20260810185817_paid_layout_receipt_match.sql": ("20260810190637_paid_layout_receipt_match.sql", "02b8dbe1cfb2af2bd1ae96d2f87ac197"),
-          }
-          for source_name, (target_name, expected_md5) in pairs.items():
-              source = root / source_name
-              target = root / target_name
-              if not source.is_file() or target.exists():
-                  raise SystemExit(f"historical alias state unexpected: {source_name}")
-              actual = hashlib.md5(re.sub(rb"\s+", b"", source.read_bytes())).hexdigest()
-              if actual != expected_md5:
-                  raise SystemExit(f"historical SQL fingerprint drift: {source_name}")
-              source.rename(target)
-          PY
       - name: Link Supabase PROD project
         shell: bash
         run: |
@@ -128,57 +96,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          supabase migration list --db-url "${SUPABASE_DB_URL}"
+          supabase migration list --linked
 
-      - name: Preflight and apply single provider recovery migration
+      - name: Dry-run Supabase PROD migrations
         shell: bash
         run: |
           set -euo pipefail
-          supabase db push --db-url "${SUPABASE_DB_URL}" --dry-run 2>&1 | tee "${RUNNER_TEMP}/provider-recovery-dry-run.txt"
-          python3 - "${RUNNER_TEMP}/provider-recovery-dry-run.txt" <<'PY'
-          import pathlib
-          import re
-          import sys
+          supabase db push --linked --dry-run
 
-          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-          expected = {"20260814004000_provider_catalog_canonical_rpc_prod.sql"}
-          found = set(re.findall(r"\b(20\d{12}_[A-Za-z0-9_.-]+\.sql)\b", text))
-          if found != expected:
-              raise SystemExit(f"PROD_PROVIDER_RECOVERY_DRYRUN_NOT_EXCLUSIVE: {sorted(found)}")
-          print("PASS / PROD_PROVIDER_RECOVERY_DRYRUN_EXACTLY_ONE")
-          PY
-          echo "Applying the preflight-approved provider recovery migration exactly once."
-          supabase db push --db-url "${SUPABASE_DB_URL}" --yes 2>&1 | tee "${RUNNER_TEMP}/provider-recovery-apply.txt"
-          echo "PASS / PROD_PROVIDER_RECOVERY_APPLY_COMMAND_COMPLETED"
-
-      - name: Verify provider migration in remote ledger
-        shell: bash
-        run: |
-          set -euo pipefail
-          supabase migration list --db-url "${SUPABASE_DB_URL}" 2>&1 | tee "${RUNNER_TEMP}/provider-recovery-post-list.txt"
-          python3 - "${RUNNER_TEMP}/provider-recovery-post-list.txt" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-          version = "20260814004000"
-          if not re.search(rf"`{version}`\s*\|\s*`{version}`", text):
-              raise SystemExit("provider recovery version not confirmed in remote ledger")
-          print("PASS / PROD_PROVIDER_RECOVERY_LEDGER_CONFIRMED")
-          PY
-
-      - name: Summarize apply
+      - name: Summarize dry-run
         if: always()
         shell: bash
         run: |
           {
-            echo "## Supabase PROD provider recovery apply"
+            echo "## Supabase PROD CLI dry-run"
             echo ""
             echo "- Environment: supabase-production"
             echo "- Branch: ${GITHUB_REF_NAME}"
-            echo "- Mode: single provider recovery apply"
-            echo "- Real db push: executed once after exclusive dry-run PASS"
+            echo "- Mode: dry-run only"
+            echo "- Real db push: not executed by this workflow"
             echo "- Migration repair: not executed by this workflow"
             echo "- n8n: not touched by this workflow"
           } >> "${GITHUB_STEP_SUMMARY}"
