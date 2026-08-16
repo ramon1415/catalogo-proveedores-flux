@@ -1,24 +1,43 @@
 {
-  "manifest_version": "payroll-source-recovery-n2a-v1",
+  "manifest_version": "payroll-source-recovery-n2a-r2-v2",
   "notice": "METADATA_ONLY_NO_SOURCE_BYTES_NO_REAL_VALUES",
   "sources": [
     {
-      "logical_name": "qna15_payroll_interbank_macro_workbook",
+      "logical_name": "interbank_payroll_xlsm_input",
+      "evidence_id": "INTERBANK_PAYROLL_XLSM_INPUT",
+      "source_filename": "Qna 15_2026 AFE Macro Cuentas interbancarias (1).xlsm",
       "source_type": "XLSM",
       "sha256": "cc5b4376a2bd7c9b8e1de02b29cafbf186e03d371bc0b9ce7364bc4da26df556",
       "size_bytes": 2747218,
       "classification": "SOURCE_PHYSICAL_SUPPORTING",
-      "format_contract_status": "PAYROLL_SPEI_TXT:CERTIFIED_FROM_MULTIPLE_CONVERGENT_SOURCES;BBVA_SAME_BANK_TXT:PARTIAL_CONTRACT_ONLY",
+      "evidence_kind": "INPUT_PHYSICAL",
+      "facts": {
+        "record_count": 5,
+        "external_cover_sheet_reference": true,
+        "same_bank_record_count": 0,
+        "sheet_count": 53,
+        "vba_present": true
+      },
+      "format_contract_status": "PAYROLL_SPEI_INPUT:CERTIFIED;PAYROLL_SPEI_TXT:CERTIFIED_FROM_MULTIPLE_CONVERGENT_SOURCES;BBVA_SAME_BANK_GENERATOR:GENERATOR_CONTRACT_CERTIFIED;BBVA_SAME_BANK_TXT:PARTIAL_CONTRACT_ONLY",
       "pii_present": true,
       "repo_fixture_allowed": false
     },
     {
-      "logical_name": "qna15_toka_macro_workbook",
+      "logical_name": "toka_xlsm_input",
+      "evidence_id": "TOKA_XLSM_INPUT",
+      "source_filename": "Qna 15_2026 AFE Macro TOKA (1).xlsm",
       "source_type": "XLSM",
       "sha256": "66f20373ceea98aec461ff91526a182c2155bc1435e807fc0f88fc1ff042450d",
       "size_bytes": 2698369,
       "classification": "SOURCE_PHYSICAL_SUPPORTING",
-      "format_contract_status": "TOKA_AGGREGATE_TRANSFER:SUPPORTING;TOKA_XML:MISSING_PHYSICAL_SOURCE",
+      "evidence_kind": "INPUT_PHYSICAL",
+      "facts": {
+        "aggregate_transfer_count": 1,
+        "same_bank_record_count": 0,
+        "sheet_count": 53,
+        "vba_present": true
+      },
+      "format_contract_status": "TOKA_AGGREGATE_TRANSFER:CERTIFIED_FROM_PHYSICAL_INPUT;TOKA_XML:MISSING_PHYSICAL_SOURCE",
       "pii_present": true,
       "repo_fixture_allowed": false
     },
