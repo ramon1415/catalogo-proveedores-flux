@@ -9,6 +9,9 @@
 
   const PARSER_VERSION = 'payroll-normalized-v1';
   const SYNTHETIC_EVIDENCE = 'INTERNAL_SYNTHETIC_MODEL_NOT_SOURCE_FORMAT';
+  const PAYROLL_SPEI_CONTRACT_VERSION = 'bbva-simulator-pagos-interbancarios-128-v1';
+  const PAYROLL_SPEI_RECORD_BYTES = 130;
+  const PAYROLL_SPEI_USEFUL_BYTES = 128;
   const MAX_SAFE_MINOR = BigInt(Number.MAX_SAFE_INTEGER);
 
   const ISSUE_CODES = Object.freeze({
@@ -17,6 +20,7 @@
     SOURCE_FIXTURES_REQUIRED: 'PAYROLL_SOURCE_FIXTURES_REQUIRED',
     LAYOUT_FORMAT_UNSUPPORTED: 'PAYROLL_LAYOUT_FORMAT_UNSUPPORTED',
     LAYOUT_LINE_INVALID: 'PAYROLL_LAYOUT_LINE_INVALID',
+    SPEI_BYTE_CONTRACT_INVALID: 'PAYROLL_SPEI_BYTE_CONTRACT_INVALID',
     EMPLOYEE_NOT_FOUND: 'PAYROLL_EMPLOYEE_NOT_FOUND',
     EMPLOYEE_MATCH_AMBIGUOUS: 'PAYROLL_EMPLOYEE_MATCH_AMBIGUOUS',
     EMPLOYEE_NAME_MISMATCH: 'PAYROLL_EMPLOYEE_NAME_MISMATCH',
@@ -235,8 +239,138 @@
     return blockedPhysicalParser('layout_mismo_banco_txt');
   }
 
-  function parsePayrollSpei() {
-    return blockedPhysicalParser('layout_spei_txt');
+  function payrollSpeiBytes(input) {
+    if (typeof input === 'string') {
+      const bytes = new Uint8Array(input.length);
+      for (let index = 0; index < input.length; index += 1) {
+        const code = input.charCodeAt(index);
+        if (code > 255) return null;
+        bytes[index] = code;
+      }
+      return bytes;
+    }
+    if (input instanceof ArrayBuffer) return new Uint8Array(input);
+    if (ArrayBuffer.isView(input)) {
+      return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    }
+    return null;
+  }
+
+  function payrollAscii(bytes, start, end) {
+    let value = '';
+    for (let index = start; index < end; index += 1) {
+      value += String.fromCharCode(bytes[index]);
+    }
+    return value;
+  }
+
+  function speiContractIssue(row, field) {
+    return issue(ISSUE_CODES.SPEI_BYTE_CONTRACT_INVALID, 'layout_spei_txt', row, field);
+  }
+
+  function parsePayrollSpeiTxt(input) {
+    const bytes = payrollSpeiBytes(input);
+    const issues = [];
+    const records = [];
+    if (!bytes || bytes.length === 0) {
+      return {
+        parserVersion: PARSER_VERSION,
+        contractVersion: PAYROLL_SPEI_CONTRACT_VERSION,
+        records,
+        issues: [speiContractIssue(null, 'source')]
+      };
+    }
+    if (
+      (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) ||
+      (bytes[0] === 0xff && bytes[1] === 0xfe) ||
+      (bytes[0] === 0xfe && bytes[1] === 0xff)
+    ) {
+      issues.push(speiContractIssue(null, 'bom'));
+    }
+    for (let index = 0; index < bytes.length; index += 1) {
+      const byte = bytes[index];
+      if (byte > 0x7f || (byte < 0x20 && byte !== 0x0d && byte !== 0x0a)) {
+        issues.push(speiContractIssue(null, 'encoding'));
+        break;
+      }
+    }
+    if (bytes.length % PAYROLL_SPEI_RECORD_BYTES !== 0) {
+      issues.push(speiContractIssue(null, 'record_length'));
+    }
+    if (issues.length > 0) {
+      return {
+        parserVersion: PARSER_VERSION,
+        contractVersion: PAYROLL_SPEI_CONTRACT_VERSION,
+        records,
+        issues
+      };
+    }
+
+    const lineCount = bytes.length / PAYROLL_SPEI_RECORD_BYTES;
+    for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+      const row = lineIndex + 1;
+      const offset = lineIndex * PAYROLL_SPEI_RECORD_BYTES;
+      if (
+        bytes[offset + PAYROLL_SPEI_USEFUL_BYTES] !== 0x0d ||
+        bytes[offset + PAYROLL_SPEI_USEFUL_BYTES + 1] !== 0x0a
+      ) {
+        issues.push(speiContractIssue(row, 'crlf'));
+        continue;
+      }
+      const line = payrollAscii(bytes, offset, offset + PAYROLL_SPEI_USEFUL_BYTES);
+      const destination = line.slice(0, 18);
+      const sourceAccount = line.slice(18, 36);
+      const currency = line.slice(36, 39);
+      const amount = line.slice(39, 55);
+      const beneficiary = line.slice(55, 85);
+      const accountType = line.slice(85, 87);
+      const destinationBank = line.slice(87, 90);
+      const paymentReference = line.slice(90, 120);
+      const numericReference = line.slice(120, 127);
+      const indicator = line.slice(127, 128);
+      const amountResult = parseMoneyMinor(amount);
+      const fieldChecks = [
+        ['destination_account', /^\d{18}$/.test(destination)],
+        ['source_account', /^\d{18}$/.test(sourceAccount)],
+        ['currency', currency === 'MXP'],
+        ['amount', /^\d{13}\.\d{2}$/.test(amount) && amountResult.ok && amountResult.valueMinor > 0],
+        ['beneficiary', /^[\x20-\x7e]{30}$/.test(beneficiary) && beneficiary === beneficiary.toUpperCase()],
+        ['account_type', accountType === '40'],
+        ['destination_bank', /^\d{3}$/.test(destinationBank) && destinationBank === destination.slice(0, 3)],
+        ['payment_reference', /^[\x20-\x7e]{30}$/.test(paymentReference) && paymentReference === paymentReference.toUpperCase()],
+        ['numeric_reference', /^(?:\d{7}| {7})$/.test(numericReference)],
+        ['indicator', indicator === 'H']
+      ];
+      const invalidFields = fieldChecks.filter(function (entry) { return !entry[1]; });
+      invalidFields.forEach(function (entry) {
+        issues.push(speiContractIssue(row, entry[0]));
+      });
+      if (invalidFields.length > 0) continue;
+      records.push({
+        sourceRow: row,
+        clabe: destination,
+        sourceAccount,
+        currency,
+        amount,
+        amountMinor: amountResult.valueMinor,
+        employeeName: beneficiary.trimEnd(),
+        accountType,
+        destinationBank,
+        paymentReference: paymentReference.trimEnd(),
+        numericReference: numericReference.trim(),
+        indicator
+      });
+    }
+    return {
+      parserVersion: PARSER_VERSION,
+      contractVersion: PAYROLL_SPEI_CONTRACT_VERSION,
+      records,
+      issues
+    };
+  }
+
+  function parsePayrollSpei(input) {
+    return parsePayrollSpeiTxt(input);
   }
 
   function parsePayrollTokaXml() {
@@ -428,6 +562,9 @@
   return Object.freeze({
     PARSER_VERSION,
     SYNTHETIC_EVIDENCE,
+    PAYROLL_SPEI_CONTRACT_VERSION,
+    PAYROLL_SPEI_RECORD_BYTES,
+    PAYROLL_SPEI_USEFUL_BYTES,
     ISSUE_CODES,
     normalizeText,
     normalizeName,
@@ -438,6 +575,7 @@
     parsePayrollCoverSheetRows,
     parsePayrollBbvaSameBank,
     parsePayrollSpei,
+    parsePayrollSpeiTxt,
     parsePayrollTokaXml,
     normalizePayrollBankRecords,
     normalizePayrollTokaRecords,

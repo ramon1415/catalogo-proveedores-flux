@@ -88,11 +88,10 @@ test('three synthetic people merge deterministically and reconcile exactly', () 
   });
 });
 
-test('physical XLSX, BBVA, SPEI, and TOKA adapters fail closed without fixtures', () => {
+test('uncertified physical XLSX, same-bank BBVA, and TOKA adapters remain fail closed', () => {
   const results = [
     parser.parsePayrollCoverSheet('opaque'),
     parser.parsePayrollBbvaSameBank('opaque'),
-    parser.parsePayrollSpei('opaque'),
     parser.parsePayrollTokaXml('<opaque/>')
   ];
   for (const result of results) {
@@ -102,6 +101,15 @@ test('physical XLSX, BBVA, SPEI, and TOKA adapters fail closed without fixtures'
       true
     );
   }
+});
+
+test('certified SPEI adapter fails closed on bytes outside its physical contract', () => {
+  const result = parser.parsePayrollSpei('opaque');
+  assert.equal(result.records.length, 0);
+  assert.equal(
+    result.issues.some((item) => item.code === parser.ISSUE_CODES.SPEI_BYTE_CONTRACT_INVALID),
+    true
+  );
 });
 
 test('missing account match is blocking and issues never echo source values', () => {

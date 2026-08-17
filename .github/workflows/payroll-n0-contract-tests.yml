@@ -7,9 +7,11 @@ on:
     paths:
       - payroll_parser.js
       - docs/ops/payroll-n0-contract.md
+      - docs/ops/payroll-source-recovery-report.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
       - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
+      - scripts/qa/payroll-n2a-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - .github/workflows/payroll-n0-contract-tests.yml
@@ -34,8 +36,8 @@ jobs:
       - name: Syntax
         run: node --check payroll_parser.js
 
-      - name: Payroll N0 contracts
-        run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
+      - name: Payroll N0, N1, and N2A contracts
+        run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs scripts/qa/payroll-n2a-source-recovery-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
