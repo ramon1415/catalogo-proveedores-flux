@@ -186,8 +186,8 @@ jobs:
           import sys
 
           sql = Path(sys.argv[1]).read_text(encoding="utf-8")
-          start = sql.index("create function public.claim_notification_external_events_strict(")
-          end = sql.index("\nalter function public.claim_notification_external_events_strict", start)
+          start = sql.index("create function public.claim_payment_request_created_events_for_dispatcher(")
+          end = sql.index("\nalter function public.claim_payment_request_created_events_for_dispatcher", start)
           claim = sql[start:end]
 
           if claim.count("event.created_at > p_created_at_after") != 1:
