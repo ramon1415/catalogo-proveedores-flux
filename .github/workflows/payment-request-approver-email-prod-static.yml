@@ -181,8 +181,21 @@ jobs:
           migration="supabase/migrations/20260817230000_payment_request_approver_email_prod.sql"
           recovery=".github/workflows/supabase-prod-payment-request-created-recovery.yml"
 
-          test "$(grep -c "event.created_at > p_created_at_after" "${migration}")" = "2"
-          test "$(grep -c "event.created_at >= p_created_at_after" "${migration}" || true)" = "0"
+          python3 - "${migration}" <<'PY'
+          from pathlib import Path
+          import sys
+
+          sql = Path(sys.argv[1]).read_text(encoding="utf-8")
+          start = sql.index("create function public.claim_notification_external_events_strict(")
+          end = sql.index("\nalter function public.claim_notification_external_events_strict", start)
+          claim = sql[start:end]
+
+          if claim.count("event.created_at > p_created_at_after") != 1:
+              raise SystemExit("exclusive_cutoff_predicate=invalid")
+          if "event.created_at >= p_created_at_after" in claim:
+              raise SystemExit("inclusive_cutoff_predicate=present")
+          print("claim_exclusive_cutoff=pass")
+          PY
           grep -q "new.created_at <= v_cutoff_at" "${migration}"
           grep -q "'no_recipient'::text" "${migration}"
           grep -q "v_status := 'no_recipient'" "${migration}"
