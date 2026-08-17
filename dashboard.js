@@ -69,6 +69,8 @@ function bindEvents() {
   document.getElementById("historyBtn")?.addEventListener("click", openHistory)
   document.getElementById("histYearsBtn")?.addEventListener("click", toggleHistYearsMenu)
   document.getElementById("histExitBtn")?.addEventListener("click", () => { exitHistYear(); loadDashboard() })
+  document.getElementById("histViewMensual")?.addEventListener("click", () => setHistView("mensual"))
+  document.getElementById("histViewCuentas")?.addEventListener("click", () => setHistView("cuentas"))
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("histYearsMenu")
     if (menu && !menu.classList.contains("hidden") && !e.target.closest("#histYearsBtn") && !e.target.closest("#histYearsMenu")) menu.classList.add("hidden")
@@ -671,20 +673,32 @@ async function enterHistYear(year) {
       .limit(10000)
     if (error) throw error
     const meses = {}
+    const cuentas = new Map()
     for (const r of data || []) {
       const m = Number(String(r.period_month).slice(5, 7))
       meses[m] = meses[m] || { ingresos: 0, egresos: 0 }
       const fam = String(r.account_code || "")[0]
       if (fam === "4") meses[m].ingresos += num(r.amount)
       else if (fam === "6") meses[m].egresos += num(r.amount)
+      if (fam === "4" || fam === "6") {
+        const c = cuentas.get(r.account_code) || { nombre: r.account_name || "", fam, meses: {}, total: 0 }
+        c.meses[m] = (c.meses[m] || 0) + num(r.amount)
+        c.total += num(r.amount)
+        cuentas.set(r.account_code, c)
+      }
     }
     const mm = Object.keys(meses).map(Number).sort((a, b) => a - b)
     const labels = mm.map((m) => new Date(year, m - 1, 1).toLocaleDateString("es-MX", { month: "short" }))
     const ingresos = mm.map((m) => Math.round(meses[m].ingresos * 100) / 100)
     const egresos  = mm.map((m) => Math.round(meses[m].egresos * 100) / 100)
     if (sub) sub.textContent = `Histórico ${year} · contabilidad CONTPAQ`
+    state.histCuentas = { year, mm, cuentas }
     drawHistChart(labels, ingresos, egresos)
     renderHistTable(year, mm, meses)
+    renderHistKpis(year, meses, mm)
+    renderHistCuentas()
+    enterHistLayout()
+    setHistView("mensual")
     setHistLegend(true)
   } catch (err) {
     if (sub) sub.textContent = "No se pudo cargar el histórico"
@@ -696,8 +710,95 @@ async function enterHistYear(year) {
 function exitHistYear() {
   if (!state.histYear) return
   state.histYear = null
-  document.getElementById("histPanel")?.classList.add("hidden")
+  document.getElementById("histGrid")?.classList.add("hidden")
+  document.getElementById("histKpiStrip")?.classList.add("hidden")
+  document.getElementById("kpiGrid")?.classList.remove("hidden")
+  const dashGrid = document.getElementById("dashGrid")
+  dashGrid?.classList.remove("hidden")
+  const card = document.getElementById("memberCard")
+  if (card && dashGrid && card.parentElement?.id === "histMemberSlot") {
+    dashGrid.insertBefore(card, dashGrid.firstElementChild)
+    card.classList.remove("compact-rows")
+  }
   setHistLegend(false)
+}
+
+function enterHistLayout() {
+  document.getElementById("histGrid")?.classList.remove("hidden")
+  document.getElementById("kpiGrid")?.classList.add("hidden")
+  document.getElementById("histKpiStrip")?.classList.remove("hidden")
+  document.getElementById("dashGrid")?.classList.add("hidden")
+  const card = document.getElementById("memberCard")
+  const slot = document.getElementById("histMemberSlot")
+  if (card && slot && card.parentElement !== slot) {
+    slot.appendChild(card)
+    card.classList.add("compact-rows")
+  }
+}
+
+function setHistView(view) {
+  const mensual = document.getElementById("histMensualWrap")
+  const cuentasW = document.getElementById("histCuentasWrap")
+  const grid = document.getElementById("histGrid")
+  const slot = document.getElementById("histMemberSlot")
+  const on = view === "cuentas"
+  mensual?.classList.toggle("hidden", on)
+  cuentasW?.classList.toggle("hidden", !on)
+  grid?.classList.toggle("full", on)
+  slot?.classList.toggle("hidden", on)
+  document.getElementById("histViewMensual")?.style.setProperty("background", on ? "transparent" : "var(--accent-dim)")
+  document.getElementById("histViewCuentas")?.style.setProperty("background", on ? "var(--accent-dim)" : "transparent")
+}
+
+function renderHistKpis(year, meses, mm) {
+  let ti = 0, te = 0
+  for (const m of mm) { ti += meses[m].ingresos; te += meses[m].egresos }
+  const neto = ti - te
+  const set = (id, v, color) => {
+    const el = document.getElementById(id)
+    if (el) { el.textContent = moneyFmt.format(v); if (color) el.style.color = color }
+  }
+  set("histKpiIngresos", ti)
+  set("histKpiEgresos", te)
+  set("histKpiNeto", neto, neto >= 0 ? "var(--emerald)" : "var(--ruby)")
+  set("histKpiPromedio", mm.length ? te / mm.length : 0)
+}
+
+function renderHistCuentas() {
+  const tabla = document.getElementById("histCuentasTable")
+  if (!tabla || !state.histCuentas) return
+  const { year, mm, cuentas } = state.histCuentas
+  const mesesCorto = mm.map((m) => new Date(year, m - 1, 1).toLocaleDateString("es-MX", { month: "short" }))
+  const fmtK = (v) => (v === 0 ? "—" : moneyFmt.format(v))
+  const filaCuenta = ([code, c]) => `<tr>
+    <td class="hist-cuenta-col"><span class="cell-main">${safe(c.nombre)}</span><span class="muted-line">${safe(code)}</span></td>
+    ${mm.map((m) => `<td style="text-align:right;white-space:nowrap">${fmtK(Math.round((c.meses[m] || 0) * 100) / 100)}</td>`).join("")}
+    <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(Math.round(c.total * 100) / 100)}</td>
+  </tr>`
+  const seccion = (titulo, fam, colorVar) => {
+    const lista = [...cuentas.entries()].filter(([, c]) => c.fam === fam).sort((a, b) => b[1].total - a[1].total)
+    if (!lista.length) return ""
+    const sub = mm.map((m) => lista.reduce((s, [, c]) => s + (c.meses[m] || 0), 0))
+    const tot = lista.reduce((s, [, c]) => s + c.total, 0)
+    return `
+      <tr><td colspan="${mm.length + 2}" style="padding:9px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${colorVar};background:var(--bg-hover)">${titulo}</td></tr>
+      ${lista.map(filaCuenta).join("")}
+      <tr style="font-weight:800">
+        <td class="hist-cuenta-col">Total ${titulo.toLowerCase()}</td>
+        ${sub.map((v) => `<td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(v * 100) / 100)}</td>`).join("")}
+        <td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(tot * 100) / 100)}</td>
+      </tr>`
+  }
+  tabla.innerHTML = `
+    <thead><tr>
+      <th class="hist-cuenta-col">Cuenta</th>
+      ${mesesCorto.map((l) => `<th style="text-align:right;text-transform:capitalize">${l}</th>`).join("")}
+      <th style="text-align:right">Total</th>
+    </tr></thead>
+    <tbody class="compact-rows">
+      ${seccion("Ingresos", "4", "var(--emerald)")}
+      ${seccion("Egresos", "6", "var(--accent-text)")}
+    </tbody>`
 }
 
 function setHistLegend(on) {
