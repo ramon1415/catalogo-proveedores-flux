@@ -115,6 +115,9 @@ jobs:
           set -euo pipefail
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/payment-request-approver-email-c1-static.yml', aliases: true)"
           ruby -e "require 'yaml'; YAML.load_file('.github/workflows/supabase-dev-notification-dispatcher.yml', aliases: true)"
+          if [ -f .github/workflows/payment-request-approver-email-c1-dev-uat-temporary.yml ]; then
+            ruby -e "require 'yaml'; YAML.load_file('.github/workflows/payment-request-approver-email-c1-dev-uat-temporary.yml', aliases: true)"
+          fi
           if [ -f .github/workflows/supabase-dev-notification-dispatcher-scheduler.yml ]; then
             ruby -e "require 'yaml'; YAML.load_file('.github/workflows/supabase-dev-notification-dispatcher-scheduler.yml', aliases: true)"
             python3 - <<'PY'

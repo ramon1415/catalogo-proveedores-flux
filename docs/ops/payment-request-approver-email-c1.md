@@ -49,7 +49,7 @@ No other `payment_request.*` event is enabled by this slice.
 
 ## DEV activation
 
-The exact activation cutoff will be captured from the DEV database clock immediately before enabling the wake-up. It will then be written once to the event-specific Vault contract and to the recovery workflow. It must not be reused from another notification lane.
+The immutable DEV activation cutoff is `2026-08-17T21:20:56.735024Z`, captured from the DEV database clock immediately before enabling the wake-up. The event-specific Vault contract and recovery workflow must use this exact value. It is not shared with any other notification lane.
 
 The DEV UAT must prove:
 
