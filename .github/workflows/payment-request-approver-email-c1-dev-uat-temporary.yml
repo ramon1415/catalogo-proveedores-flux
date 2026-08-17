@@ -250,14 +250,14 @@ jobs:
         run: |
           set -euo pipefail
           psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -X -v marker="${UAT_MARKER}" <<'SQL' >/dev/null
-          do $uat$
+          select set_config('c1.uat_marker',  :'marker', false);\n          do $uat$
           declare
             v_template record;
             v_result jsonb;
           begin
             if exists (
               select 1 from public.payment_requests
-              where notes = :'marker'
+              where notes = current_setting('c1.uat_marker')
             ) then
               return;
             end if;
@@ -317,7 +317,7 @@ jobs:
               'MXN',
               1,
               'QA PAYMENT REQUEST APPROVER EMAIL C1',
-              :'marker',
+              current_setting('c1.uat_marker'),
               v_template.requester_id,
               false,
               v_template.approver_id,
