@@ -108,7 +108,7 @@ test("created renderer is branded, approver-facing, internal, and attachment-fre
 });
 
 test("created dispatch preserves microseconds and uses the exclusive RPC", async () => {
-  const exactCutoff = "2026-08-17T21:30:15.123456Z";
+  const exactCutoff = "2026-08-17T20:30:15.123456Z";
   const calls = [];
   const event = createdEvent();
   const fetchFn = async (input, init = {}) => {
@@ -183,7 +183,7 @@ test("payment_request.created cannot be mixed with any other event type", async 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           event_types: ["payment_request.created", "payment_request.approved"],
-          created_at_from: "2026-08-17T21:30:15.123456Z",
+          created_at_from: "2026-08-17T20:30:15.123456Z",
         }),
       }),
       optionsRuntime,
