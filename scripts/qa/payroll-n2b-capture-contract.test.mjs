@@ -5,6 +5,7 @@ import test from 'node:test';
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const migration = read('supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql');
 const capture = read('payroll_capture.js');
+const captureCss = read('payroll_capture.css');
 const parser = read('payroll_parser.js');
 const html = read('solicitudes.html');
 const requestTypeExtension = read('fase2_request_payment_method_extension.js');
@@ -104,6 +105,13 @@ test('payroll mode keeps shared concept and notes visible while hiding only fiel
   assert.match(capture, /const target = control\.closest\('label'\);/);
   assert.doesNotMatch(capture, /control\.closest\('\.form-section'\)/);
   assert.match(capture, /descriptionSection\.querySelector\('h3'\)\.textContent = 'Concepto \/ descripci.n'/);
+  assert.match(capture, /\['requestProviderSection', 'requestVisitContextSection'\]/);
+  assert.match(capture, /document\.getElementById\(id\)\?\.classList\.toggle\('hidden', payroll\)/);
+  assert.doesNotMatch(capture, /requestProviderSection[^\n]*closest\('\.form-section'\)/);
+  assert.match(
+    captureCss,
+    /\.request-layout\.payroll-mode \.checkbox-card\.hidden\s*\{\s*display:\s*none\s*!important;/
+  );
 });
 
 test('UI and persisted summaries avoid employee rows and sensitive banking output', () => {

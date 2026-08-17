@@ -67,6 +67,7 @@
 
     state.observer = new MutationObserver(function () {
       syncPayrollOptionVisibility();
+      if (state.active) syncNonPayrollSections(true);
     });
     state.observer.observe(dom.requestForm, { childList: true, subtree: true });
 
@@ -461,6 +462,7 @@
       setControlMode(control, payroll);
     });
     hiddenTargets.forEach(function (target) { target.classList.toggle('hidden', payroll); });
+    syncNonPayrollSections(payroll);
     document.getElementById('approverSelectionSection')?.classList.toggle('hidden', payroll);
     if (payroll) document.getElementById('cashCheckSection')?.classList.add('hidden');
 
@@ -483,6 +485,12 @@
       if (descriptionSection?.querySelector('h3')) descriptionSection.querySelector('h3').textContent = 'Descripcion';
       dom.submit.textContent = 'Crear solicitud';
     }
+  }
+
+  function syncNonPayrollSections(payroll) {
+    ['requestProviderSection', 'requestVisitContextSection'].forEach(function (id) {
+      document.getElementById(id)?.classList.toggle('hidden', payroll);
+    });
   }
 
   function setControlMode(control, payroll) {

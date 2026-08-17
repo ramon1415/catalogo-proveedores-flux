@@ -109,6 +109,10 @@
   display: block;
 }
 
+.request-layout.payroll-mode .checkbox-card.hidden {
+  display: none !important;
+}
+
 .request-layout.payroll-mode .form-sections {
   max-width: none;
 }
