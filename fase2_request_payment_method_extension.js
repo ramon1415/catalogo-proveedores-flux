@@ -570,7 +570,7 @@
     try {
       let query = client
         .from("payment_requests")
-        .select("id,request_number,payment_method,status,company_id,created_at")
+        .select("id,request_number,request_type,payment_method,status,company_id,created_at")
         .eq("status", "approved")
         .gte("created_at", `${periodStart}T00:00:00`)
         .lte("created_at", `${periodEnd}T23:59:59`)
@@ -579,7 +579,9 @@
       const { data, error } = await query
       if (error) throw error
       const candidates = data || []
-      const nonTransfer = candidates.filter((request) => normalizePaymentMethodForLayout(request.payment_method) !== "transfer")
+      const nonTransfer = candidates.filter((request) => (
+        normalizePaymentMethodForLayout(request.payment_method, request.request_type) !== "transfer"
+      ))
       if (nonTransfer.length) {
         event.preventDefault()
         event.stopImmediatePropagation()
@@ -599,7 +601,7 @@
   function renderLayoutGuardNotice(rows) {
     const box = document.getElementById("layoutInvalidBox")
     if (!box) return
-    const items = rows.slice(0, 8).map((row) => `<li><strong>${escapeHtml(row.request_number || row.id)}</strong>: ${escapeHtml(paymentMethodLabel(row.payment_method))}</li>`).join("")
+    const items = rows.slice(0, 8).map((row) => `<li><strong>${escapeHtml(row.request_number || row.id)}</strong>: ${escapeHtml(paymentMethodLabel(normalizePaymentMethodForLayout(row.payment_method, row.request_type)))}</li>`).join("")
     const more = rows.length > 8 ? `<p style="margin-top:6px;color:var(--text-3)">Y ${rows.length - 8} mas.</p>` : ""
     box.innerHTML = `
       <strong>Solo se pueden generar layouts bancarios con metodo de pago Transferencia.</strong>
@@ -634,9 +636,14 @@
     return "other"
   }
 
-  function normalizePaymentMethodForLayout(value) {
+  function normalizePaymentMethodForLayout(value, requestType) {
     const key = normalize(value)
-    if (!key) return ""
+    if (!key) {
+      const requestTypeKey = normalize(requestType)
+      if (requestTypeKey === "cash") return "cash"
+      if (requestTypeKey === "check") return "check"
+      return "transfer"
+    }
     return normalizePaymentMethod(key)
   }
 

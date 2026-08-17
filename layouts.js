@@ -117,6 +117,7 @@ function cacheDom() {
   dom.layoutCompletionSummary = document.getElementById("layoutCompletionSummary")
   dom.layoutCompletionBankAccount = document.getElementById("layoutCompletionBankAccount")
   dom.layoutCompletionReference = document.getElementById("layoutCompletionReference")
+  dom.layoutCompletionReferenceHint = document.getElementById("layoutCompletionReferenceHint")
   dom.layoutCompletionConcept = document.getElementById("layoutCompletionConcept")
   dom.layoutCompletionDate = document.getElementById("layoutCompletionDate")
   dom.layoutCompletionImpact = document.getElementById("layoutCompletionImpact")
@@ -561,7 +562,7 @@ function renderLayoutEligibilityPreview() {
   const ready = [...regular, ...extraordinary, ...legacy]
   const totals = aggregatePreviewTotals(ready)
   const noReadyMessage = invalid.length
-    ? "Completa los datos pendientes"
+    ? "Revisa las solicitudes no elegibles"
     : pendingClose.length
       ? "Finanzas debe cerrar el corte"
       : pendingDirector.length
@@ -576,7 +577,7 @@ function renderLayoutEligibilityPreview() {
       ${previewMetric("Regulares / extraordinarias", `${regular.length + legacy.length} / ${extraordinary.length}`)}
       ${previewMetric("Rechazadas", rejected.length, rejected.length ? "layoutPreviewRejected" : null, "danger")}
       ${previewMetric("Reautorizacion requerida", directionReapproval.length)}
-      ${previewMetric("Datos por completar", invalid.length, invalid.length ? "layoutPreviewInvalid" : null, "warning")}
+      ${previewMetric("No elegibles", invalid.length, invalid.length ? "layoutPreviewInvalid" : null, "warning")}
       ${previewMetric("Importe listo", totals.map((row) => formatPreviewMoney(row.amount, row.currency)).join(" | ") || "Sin importe")}
     </div>
     ${renderPreviewSection("Listas para layout", "Solo estas solicitudes se incluiran", ready, "ready")}
@@ -584,7 +585,7 @@ function renderLayoutEligibilityPreview() {
     ${renderPreviewSection("Pendientes de Direccion", "No se incluiran en el layout", pendingDirector, "pending_director")}
     ${renderPreviewSection("Reautorizacion de Direccion", "Los datos cambiaron despues de la autorizacion", directionReapproval, "direction_reapproval")}
     ${renderPreviewSection("Rechazadas por Direccion", "Conservan rechazo, motivo e historial", rejected, "rejected", "layoutPreviewRejected")}
-    ${renderPreviewSection("Solicitudes por completar", "Corrige aqui los datos faltantes para que vuelvan a evaluarse", invalid, "invalid", "layoutPreviewInvalid")}
+    ${renderPreviewSection("Solicitudes no elegibles", "Revisa el motivo y abre la solicitud para continuar", invalid, "invalid", "layoutPreviewInvalid")}
   `
   dom.layoutEligibilityPreview.classList.remove("hidden")
   dom.submitNewLayoutBtn.disabled = ready.length === 0
@@ -637,8 +638,9 @@ function renderPreviewRow(row, kind) {
     }
   } else if (kind === "invalid") {
     detailIsHtml = true
-    detail = `<strong>Falta completar</strong><small>${escapeHtml(formatMissingFields(row.missing_fields))}</small>`
     const missing = Array.isArray(row.missing_fields) ? row.missing_fields : []
+    const missingDetail = missing.length ? `<small>${escapeHtml(formatMissingFields(missing, row.destination_type))}</small>` : ""
+    detail = `<strong>${escapeHtml(layoutClassificationReasonLabel(row.classification_reason))}</strong>${missingDetail}`
     if (missing.some((field) => requestOwnedLayoutFields().includes(field))) {
       actions += `<button class="small-btn warning" type="button" data-preview-action="complete-layout-data" data-request-id="${escapeHtml(row.payment_request_id)}">Completar datos</button>`
     }
@@ -648,7 +650,82 @@ function renderPreviewRow(row, kind) {
   } else if (row.classification === "legacy_eligible") {
     detail = "Elegible por compatibilidad historica"
   }
+  const budgetSource = budgetAuthorizationSourceLabel(row.budget_authorization_source)
+  if (budgetSource) {
+    const sourceDetail = `<small>Autorizacion presupuestal: ${escapeHtml(budgetSource)}</small>`
+    if (detailIsHtml) detail += sourceDetail
+    else {
+      detail = `<span>${escapeHtml(detail)}</span>${sourceDetail}`
+      detailIsHtml = true
+    }
+  }
   return `<div class="layout-preview-row${rowClass}"><div><strong>${escapeHtml(row.request_number || "Sin folio")}</strong><small>${escapeHtml(row.company_name || "Sin empresa")}</small></div><div>${escapeHtml(row.provider_name || "Sin proveedor")}</div><div><strong>${escapeHtml(formatPreviewMoney(row.amount, row.currency))}</strong></div><div>${detailIsHtml ? detail : escapeHtml(detail)}</div><div class="layout-preview-actions">${actions}</div></div>`
+}
+
+function layoutClassificationReasonLabel(value) {
+  return ({
+    sin_disponible: "Presupuesto vigente insuficiente",
+    budget_validation_required: "Presupuesto pendiente de revalidacion",
+    incomplete_layout_data: "Faltan datos de pago",
+    closed_batch_required: "Requiere corte cerrado",
+    extraordinary_reauthorization_required: "Requiere nueva autorizacion extraordinaria",
+    extraordinary_not_ready_secure_contract: "Autorizacion extraordinaria incompleta o no vigente",
+  })[value] || value || "Solicitud no elegible"
+}
+
+function budgetAuthorizationSourceLabel(value) {
+  return ({
+    live_budget: "Presupuesto vigente",
+    approved_exception: "Excepcion aprobada",
+    extraordinary: "Autorizacion extraordinaria",
+  })[value] || ""
+}
+
+function layoutReferenceIssue(value, destinationType) {
+  const reference = cleanText(value)
+  if (!reference) return "payment_reference"
+  if (destinationType === "clabe" && !/^\d{1,5}$/.test(reference)) {
+    return "payment_reference_invalid"
+  }
+  if (destinationType === "convenio" && (
+    reference.length > BBVA_CIE_REFERENCE_LENGTH
+    || !/^[\x20-\x7e]+$/.test(reference)
+    || reference.includes("|")
+  )) {
+    return "payment_reference_invalid"
+  }
+  return null
+}
+
+function layoutReferenceIssueLabel(issue, destinationType) {
+  if (issue === "payment_reference") return "referencia de pago requerida"
+  if (destinationType === "clabe") return "referencia invalida: captura de 1 a 5 digitos"
+  if (destinationType === "convenio") return "referencia CIE invalida: usa hasta 20 caracteres ASCII y no incluyas |"
+  return "referencia de pago invalida"
+}
+
+function configureLayoutReferenceInput(destinationType) {
+  const input = dom.layoutCompletionReference
+  const hint = dom.layoutCompletionReferenceHint
+  if (!input || !hint) return
+  input.removeAttribute("pattern")
+  input.removeAttribute("maxlength")
+  input.inputMode = "text"
+  input.placeholder = "Captura la referencia de pago"
+  hint.textContent = "La referencia depende del tipo de destino del proveedor."
+  if (destinationType === "clabe") {
+    input.inputMode = "numeric"
+    input.pattern = "[0-9]{1,5}"
+    input.maxLength = 5
+    input.placeholder = "Ej. 7, 42 o 40002"
+    hint.textContent = "PAGOSINT: captura de 1 a 5 digitos; el archivo completa ceros a la izquierda."
+  } else if (destinationType === "convenio") {
+    input.maxLength = BBVA_CIE_REFERENCE_LENGTH
+    input.placeholder = "Ej. REF20260812TEST"
+    hint.textContent = "CIE: hasta 20 caracteres ASCII; no uses |."
+  } else if (destinationType === "cuenta") {
+    hint.textContent = "PAGOSBBV: captura la referencia operativa de la solicitud."
+  }
 }
 
 function extraordinaryCategoryLabel(value) {
@@ -735,6 +812,7 @@ function requestOwnedLayoutFields() {
     "company_bank_account_inactive",
     "source_account_number",
     "payment_reference",
+    "payment_reference_invalid",
     "payment_concept",
   ]
 }
@@ -768,9 +846,10 @@ function openLayoutCompletionDialog(requestId) {
     && cleanText(account.account_number)
   ))
   dom.layoutCompletionTitle.textContent = `Completar ${request.request_number || "solicitud"}`
-  dom.layoutCompletionSummary.innerHTML = `<strong>${escapeHtml(request.provider_name || "Sin proveedor")}</strong><span>${escapeHtml(formatPreviewMoney(request.amount, request.currency))}</span><small>Pendiente: ${escapeHtml(formatMissingFields(missing))}</small>`
+  dom.layoutCompletionSummary.innerHTML = `<strong>${escapeHtml(request.provider_name || "Sin proveedor")}</strong><span>${escapeHtml(formatPreviewMoney(request.amount, request.currency))}</span><small>Pendiente: ${escapeHtml(formatMissingFields(missing, request.destination_type))}</small>`
   dom.layoutCompletionBankAccount.innerHTML = `<option value="">${accounts.length ? "Selecciona cuenta origen" : "No hay cuentas origen activas con numero"}</option>${accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(layoutAccountLabel(account))}</option>`).join("")}`
   dom.layoutCompletionBankAccount.value = accounts.some((account) => account.id === request.company_bank_account_id) ? request.company_bank_account_id : ""
+  configureLayoutReferenceInput(request.destination_type)
   dom.layoutCompletionReference.value = request.payment_reference || ""
   dom.layoutCompletionConcept.value = request.payment_concept || ""
   dom.layoutCompletionDate.value = request.scheduled_payment_date || ""
@@ -780,7 +859,10 @@ function openLayoutCompletionDialog(requestId) {
     "company_bank_account_inactive",
     "source_account_number",
   ].includes(field))
-  dom.layoutCompletionReference.required = missing.includes("payment_reference")
+  dom.layoutCompletionReference.required = missing.some((field) => [
+    "payment_reference",
+    "payment_reference_invalid",
+  ].includes(field))
   dom.layoutCompletionConcept.required = missing.includes("payment_concept")
   dom.layoutCompletionDate.required = missing.includes("scheduled_payment_date")
   dom.layoutCompletionImpact.textContent = request.direction_approval_current
@@ -800,8 +882,10 @@ async function submitLayoutCompletion(event) {
   event.preventDefault()
   if (!activeLayoutCompletionRequest || layoutCompletionSubmitting) return
   const reference = cleanText(dom.layoutCompletionReference.value)
-  if (reference && !/^\d{1,5}$/.test(reference)) {
-    showToast("Referencia invalida", "Captura de 1 a 5 digitos.", "warning")
+  const referenceIssue = layoutReferenceIssue(reference, activeLayoutCompletionRequest.destination_type)
+  if (referenceIssue) {
+    showToast("Referencia invalida", layoutReferenceIssueLabel(referenceIssue, activeLayoutCompletionRequest.destination_type), "warning")
+    dom.layoutCompletionReference.focus()
     return
   }
   layoutCompletionSubmitting = true
@@ -1149,7 +1233,7 @@ async function handleCreatedLayoutAction(event) {
 function renderLayoutNotice(message, invalidRequests = []) {
   const list = invalidRequests.length
     ? `<ul style="margin:6px 0 0 16px">${invalidRequests.slice(0, 8).map((item) => {
-        const fields = formatMissingFields(item.missing_fields)
+        const fields = formatMissingFields(item.missing_fields, item.destination_type)
         return `<li><strong>${escapeHtml(item.request_number || item.payment_request_id || "Solicitud")}</strong>: ${escapeHtml(fields)}</li>`
       }).join("")}</ul>` : ""
   const more = invalidRequests.length > 8 ? `<p style="margin-top:4px;color:var(--text-3)">Y ${invalidRequests.length - 8} mas.</p>` : ""
@@ -1162,10 +1246,11 @@ function renderInvalidRequests(invalidRequests) {
   renderLayoutNotice("Solicitudes fuera del layout por datos incompletos", invalidRequests)
 }
 
-function formatMissingFields(fields) {
+function formatMissingFields(fields, destinationType = null) {
   const values = Array.isArray(fields) ? fields : fields ? [fields] : ["datos incompletos"]
   const labels = {
     payment_reference: "referencia de pago requerida",
+    payment_reference_invalid: layoutReferenceIssueLabel("payment_reference_invalid", destinationType),
     payment_concept: "concepto de pago requerido",
     company_bank_account_id: "cuenta origen requerida",
     company_bank_account_id_not_found: "cuenta origen no encontrada",

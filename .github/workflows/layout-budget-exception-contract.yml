@@ -1,0 +1,57 @@
+name: Layout budget exception contract
+
+'on':
+  pull_request:
+    branches:
+      - main
+    paths:
+      - supabase/migrations/20260817204224_honor_approved_budget_exceptions_in_layout.sql
+      - layouts.js
+      - layouts.html
+      - solicitudes_workboard_extension.js
+      - solicitudes.html
+      - config.js
+      - fase2_request_payment_method_extension.js
+      - scripts/qa/layout-budget-exception-reference-contract.test.mjs
+      - scripts/qa/layout-budget-exception-sql-parse.py
+      - .github/workflows/layout-budget-exception-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Budget exception and reference alignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check layouts.js
+          node --check solicitudes_workboard_extension.js
+          node --check fase2_request_payment_method_extension.js
+
+      - name: Validate budget exception and reference contract
+        run: node --test scripts/qa/layout-budget-exception-reference-contract.test.mjs
+
+      - name: Parse PostgreSQL migration and SQL function bodies
+        run: |
+          python -m pip install --disable-pip-version-check pglast==7.10
+          python scripts/qa/layout-budget-exception-sql-parse.py
+
+      - name: Run existing Layout regression contracts
+        run: |
+          node --test scripts/qa/layout-client-uat-hotfix-contract.test.mjs
+          node --test scripts/qa/layout-operational-materiality-reconcile-contract.test.mjs
+          node --test scripts/qa/layout-concept-no-reauth-contract.test.mjs
+          node --test scripts/qa/layout-source-account-approval-contract.test.mjs
+          node --test scripts/qa/bbva-cie-layout-contract.test.mjs

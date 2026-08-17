@@ -269,8 +269,8 @@
     return `
       <div style="margin-bottom:10px">
         <span style="display:block;font-size:10.5px;font-weight:800;letter-spacing:.65px;text-transform:uppercase;color:var(--text-3);margin-bottom:4px">Preparacion para layout</span>
-        <div style="font-size:15px;font-weight:700;color:var(--text-1);margin-bottom:4px">${missing.length ? "Faltan datos para generar el layout" : "Lista para layout de pago"}</div>
-        <div style="font-size:12.5px;color:var(--text-3)">Cada solicitud conserva su propia cuenta origen. El layout solo agrupa solicitudes que ya tienen datos completos.</div>
+        <div style="font-size:15px;font-weight:700;color:var(--text-1);margin-bottom:4px">${missing.length ? "Faltan datos de pago" : "Datos de pago completos"}</div>
+        <div style="font-size:12.5px;color:var(--text-3)">La elegibilidad final se confirma en Revisar solicitudes e incluye presupuesto, autorizaciones y estado operativo.</div>
       </div>
       ${Components.checkList({ items: checkItems, progress })}
       ${footer}
@@ -282,6 +282,7 @@
     const account = findById(state.accounts, request.company_bank_account_id);
     const destination = providerDestinationValue(provider);
     const beneficiary = provider?.beneficiary_name || provider?.nombre_completo || provider?.alias || "";
+    const reference = paymentReferenceReadiness(request.payment_reference, provider?.destination_type);
     return [
       { source: "request", label: "Cuenta origen seleccionada", complete: Boolean(request.company_bank_account_id), message: "Falta seleccionar cuenta origen en la solicitud." },
       { source: "account", label: "Numero de cuenta origen", complete: Boolean(account?.account_number), message: "La cuenta origen seleccionada no tiene numero de cuenta capturado." },
@@ -289,9 +290,48 @@
       { source: "provider", label: "Destino de pago del proveedor", complete: Boolean(destination), message: providerDestinationMissingMessage(provider) },
       { source: "provider", label: "Beneficiario", complete: Boolean(beneficiary), message: "Falta beneficiario para layout en el proveedor." },
       { source: "request", label: "Fecha programada de pago", complete: Boolean(request.scheduled_payment_date), message: "Falta fecha programada de pago en la solicitud." },
-      { source: "request", label: "Referencia de pago", complete: Boolean(request.payment_reference), message: "Falta referencia de pago en la solicitud." },
+      { source: "request", label: "Referencia de pago", complete: reference.complete, message: reference.message },
       { source: "request", label: "Concepto de pago", complete: Boolean(request.payment_concept), message: "Falta concepto de pago en la solicitud." },
     ];
+  }
+
+  function paymentReferenceReadiness(value, destinationType) {
+    const reference = String(value || "").trim();
+    if (!reference) {
+      return { complete: false, message: "Falta referencia de pago en la solicitud." };
+    }
+    if (destinationType === "clabe" && !/^\d{1,5}$/.test(reference)) {
+      return { complete: false, message: "Referencia invalida: captura de 1 a 5 digitos." };
+    }
+    if (destinationType === "convenio" && (
+      reference.length > 20
+      || !/^[\x20-\x7e]+$/.test(reference)
+      || reference.includes("|")
+    )) {
+      return { complete: false, message: "Referencia CIE invalida: usa hasta 20 caracteres ASCII y no incluyas |." };
+    }
+    return { complete: true, message: "" };
+  }
+
+  function configurePaymentReferenceInput(input, hint, destinationType) {
+    input.removeAttribute("pattern");
+    input.removeAttribute("maxlength");
+    input.inputMode = "text";
+    input.placeholder = "Captura la referencia de pago";
+    hint.textContent = "La referencia depende del tipo de destino del proveedor.";
+    if (destinationType === "clabe") {
+      input.inputMode = "numeric";
+      input.pattern = "[0-9]{1,5}";
+      input.maxLength = 5;
+      input.placeholder = "Ej. 7, 42 o 40002";
+      hint.textContent = "PAGOSINT: captura de 1 a 5 digitos; el archivo completa ceros a la izquierda.";
+    } else if (destinationType === "convenio") {
+      input.maxLength = 20;
+      input.placeholder = "Ej. REF20260812TEST";
+      hint.textContent = "CIE: hasta 20 caracteres ASCII; no uses |.";
+    } else if (destinationType === "cuenta") {
+      hint.textContent = "PAGOSBBV: captura la referencia operativa de la solicitud.";
+    }
   }
 
   function providerDestinationValue(provider) {
@@ -331,7 +371,8 @@
               <input id="layoutDataScheduledDate" class="form-control" type="date">
             </label>
             <label>Referencia de pago
-              <input id="layoutDataReference" class="form-control" type="text" placeholder="Ej. FACTURA 123, RECIBO MAYO...">
+              <input id="layoutDataReference" class="form-control" type="text" placeholder="Captura la referencia de pago">
+              <span id="layoutDataReferenceHint" class="field-hint">La referencia depende del tipo de destino del proveedor.</span>
             </label>
             <label class="full-row">Concepto de pago
               <input id="layoutDataConcept" class="form-control" type="text" placeholder="Ej. Mantenimiento mayo, servicio CFE...">
@@ -350,14 +391,25 @@
   }
 
   let activeLayoutRequestId = null;
+  let activeLayoutRequest = null;
 
   async function openLayoutDataEditor(requestId) {
     ensureLayoutDataDialog();
     activeLayoutRequestId = requestId;
     const request = await fetchRequestForLayout(requestId);
-    if (!request) return;
+    if (!request) {
+      activeLayoutRequestId = null;
+      return;
+    }
+    activeLayoutRequest = request;
     Object.assign(state.requests.find((item) => item.id === requestId) || {}, request);
     renderAccountOptions(request);
+    const provider = findById(state.providers, request.proveedor_id);
+    configurePaymentReferenceInput(
+      document.getElementById("layoutDataReference"),
+      document.getElementById("layoutDataReferenceHint"),
+      provider?.destination_type,
+    );
     document.getElementById("layoutDataScheduledDate").value = request.scheduled_payment_date || "";
     document.getElementById("layoutDataReference").value = request.payment_reference || "";
     document.getElementById("layoutDataConcept").value = request.payment_concept || "";
@@ -366,6 +418,7 @@
 
   function closeLayoutDataEditor() {
     activeLayoutRequestId = null;
+    activeLayoutRequest = null;
     document.getElementById("layoutDataExtensionDialog")?.close();
   }
 
@@ -384,6 +437,15 @@
   async function saveLayoutDataEditor(event) {
     event.preventDefault();
     if (!activeLayoutRequestId) return;
+    const referenceInput = document.getElementById("layoutDataReference");
+    const reference = referenceInput.value.trim();
+    const provider = findById(state.providers, activeLayoutRequest?.proveedor_id);
+    const referenceReadiness = paymentReferenceReadiness(reference, provider?.destination_type);
+    if (!referenceReadiness.complete) {
+      toast("Referencia invalida", referenceReadiness.message, "error");
+      referenceInput.focus();
+      return;
+    }
     const button = document.getElementById("saveLayoutDataExtensionBtn");
     button.disabled = true;
     button.textContent = "Guardando...";
@@ -391,19 +453,18 @@
       const payload = {
         company_bank_account_id: document.getElementById("layoutDataAccountId").value || null,
         scheduled_payment_date: document.getElementById("layoutDataScheduledDate").value || null,
-        payment_reference: document.getElementById("layoutDataReference").value.trim() || null,
+        payment_reference: reference,
         payment_concept: document.getElementById("layoutDataConcept").value.trim() || null,
         updated_at: new Date().toISOString(),
       };
       const { error } = await client.from("payment_requests").update(payload).eq("id", activeLayoutRequestId);
       if (error) throw error;
+      const reloadId = activeLayoutRequestId;
       toast("Datos actualizados", "Datos de layout actualizados correctamente.", "success");
       closeLayoutDataEditor();
       await loadData();
       document.querySelector("[data-layout-readiness-extension]")?.remove();
-      const _reloadId = activeLayoutRequestId;
-      await loadData();
-      injectLayoutReadiness(_reloadId);
+      injectLayoutReadiness(reloadId);
       render();
     } catch (error) {
       toast("No se pudieron guardar los datos", friendlyError(error), "error");

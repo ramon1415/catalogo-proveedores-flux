@@ -34,5 +34,5 @@ test("layout preview and created result scroll only inside the modal", () => {
   assert.match(reset, /container\.scrollTop = 0/)
   assert.match(reset, /querySelectorAll\("\.layout-preview-list"\)/)
 
-  assert.match(html, /layouts\.js\?v=20260810-layout-review-click-hotfix/)
+  assert.match(html, /layouts\.js\?v=20260817-budget-exception-layout/)
 })

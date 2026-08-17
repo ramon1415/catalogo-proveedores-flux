@@ -738,7 +738,7 @@ try {
     }
     if (pageName === "solicitudes.html") {
       loadExtension("./solicitudes_ux1_extension.js?v=20260701-reconcile", "solicitudes-ux1")
-      loadExtension("./solicitudes_workboard_extension.js?v=20260805-kpi-p3b", "solicitudes-workboard")
+      loadExtension("./solicitudes_workboard_extension.js?v=20260817-budget-exception-layout", "solicitudes-workboard")
       loadExtension("./solicitudes_incident_copy_guard.js?v=20260604-menu-incidents", "solicitudes-incident-copy-guard")
     }
     if (pageName === "layouts.html") {
