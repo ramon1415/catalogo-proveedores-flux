@@ -7,7 +7,7 @@ import {
   renderEmail,
 } from "../../supabase/functions/notification-dispatcher/index.ts";
 
-const migrationPath = new URL("../../supabase/migrations/20260817211201_payment_request_approver_email_c1.sql", import.meta.url);
+const migrationPath = new URL("../../supabase/migrations/20260817211825_payment_request_approver_email_c1.sql", import.meta.url);
 const dispatcherPath = new URL(
   "../../supabase/functions/notification-dispatcher/index.ts",
   import.meta.url,

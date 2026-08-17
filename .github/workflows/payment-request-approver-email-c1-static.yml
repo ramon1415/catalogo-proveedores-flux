@@ -8,7 +8,7 @@ name: Payment Request Approver Email C1 Static
     branches:
       - dev
     paths:
-      - supabase/migrations/20260817211201_payment_request_approver_email_c1.sql
+      - supabase/migrations/20260817211825_payment_request_approver_email_c1.sql
       - supabase/functions/notification-dispatcher/index.ts
       - scripts/qa/payment-request-approver-email-c1-contract.test.mjs
       - scripts/qa/notification-dispatcher-branded-deploy-dev-guard.test.mjs
@@ -53,7 +53,7 @@ jobs:
           set -euo pipefail
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
-          allowed='^((supabase/migrations/20260817211201_payment_request_approver_email_c1\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-c1-contract\.test\.mjs)|(scripts/qa/notification-dispatcher-branded-deploy-dev-guard\.test\.mjs)|(\.github/workflows/payment-request-approver-email-c1-static\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher-scheduler\.yml)|(\.github/workflows/payment-request-approver-email-c1-dev-uat-temporary\.yml)|(docs/ops/payment-request-approver-email-c1\.md))$'
+          allowed='^((supabase/migrations/20260817211825_payment_request_approver_email_c1\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-c1-contract\.test\.mjs)|(scripts/qa/notification-dispatcher-branded-deploy-dev-guard\.test\.mjs)|(\.github/workflows/payment-request-approver-email-c1-static\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher-scheduler\.yml)|(\.github/workflows/payment-request-approver-email-c1-dev-uat-temporary\.yml)|(docs/ops/payment-request-approver-email-c1\.md))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo "::error::Scope contains a non-authorized file."
             exit 1
@@ -97,7 +97,7 @@ jobs:
               print(f"{label}=unchanged")
 
           migration = Path(
-              "supabase/migrations/20260817211201_payment_request_approver_email_c1.sql"
+              "supabase/migrations/20260817211825_payment_request_approver_email_c1.sql"
           ).read_text(encoding="utf-8")
           forbidden = [
               "create or replace function public.notification_receipt_linked_dispatch_wakeup_internal",
@@ -137,9 +137,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(grep -c "event.created_at > p_created_at_after" supabase/migrations/20260817211201_payment_request_approver_email_c1.sql)" = "2"
-          test "$(grep -c "event.created_at >= p_created_at_after" supabase/migrations/20260817211201_payment_request_approver_email_c1.sql || true)" = "0"
-          ! grep -R -E "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role.*eyJ"             supabase/migrations/20260817211201_payment_request_approver_email_c1.sql             supabase/functions/notification-dispatcher/index.ts             scripts/qa/payment-request-approver-email-c1-contract.test.mjs             docs/ops/payment-request-approver-email-c1.md
+          test "$(grep -c "event.created_at > p_created_at_after" supabase/migrations/20260817211825_payment_request_approver_email_c1.sql)" = "2"
+          test "$(grep -c "event.created_at >= p_created_at_after" supabase/migrations/20260817211825_payment_request_approver_email_c1.sql || true)" = "0"
+          ! grep -R -E "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role.*eyJ"             supabase/migrations/20260817211825_payment_request_approver_email_c1.sql             supabase/functions/notification-dispatcher/index.ts             scripts/qa/payment-request-approver-email-c1-contract.test.mjs             docs/ops/payment-request-approver-email-c1.md
           echo "exclusive_cutoff=pass"
           echo "historical_replay=blocked"
           echo "payment_receipt_linked=unchanged"
