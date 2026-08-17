@@ -51,16 +51,28 @@ No other `payment_request.*` event is enabled by this slice.
 
 The immutable DEV activation cutoff is `2026-08-17T21:20:56.735024Z`, captured from the DEV database clock immediately before enabling the wake-up. The event-specific Vault contract and recovery workflow must use this exact value. It is not shared with any other notification lane.
 
-The DEV UAT must prove:
+## DEV certification
 
-- one canonical synthetic payment request;
-- one `payment_request.created` event;
-- one test-only delivery attempt;
-- one Resend provider message ID;
-- zero real recipients;
-- zero delivery-attempt delta for events at or before the cutoff;
-- zero duplicate event, attempt, or send on recovery;
-- `payment_receipt.linked` regression PASS.
+PASS was recorded in [run 32071060527](https://github.com/ramon1415/catalogo-proveedores-flux/actions/runs/32071060527) against candidate `e6fc568a503e76f215dae8064344363d55180de3`.
+
+- Synthetic request: `SOL-2026-0112`, created through the canonical insert path, status `submitted`.
+- Producer: the existing AFTER INSERT trigger emitted exactly one `payment_request.created` event.
+- Recipient resolver: event profile and email both equal the request's selected approver snapshot.
+- Primary post-COMMIT wake-up: PASS; the event reached `sent` without a manual recovery dispatch.
+- Delivery: one event, one delivery attempt, one provider message ID, `test_only`.
+- Real recipients: 0.
+- Exclusive boundary: the event is strictly after `2026-08-17T21:20:56.735024Z`; a transactional boundary test proved an event exactly at the cutoff is not claimable.
+- Historical guard: 54 old pending events remained ineligible; delivery attempts for events at or before the cutoff remained 97 before and after.
+- Historical state fingerprint remained `88d98389de9394766cf066d7023dc092`.
+- Recovery invocation after the successful primary send returned `processed=0`, `sent=0`, `failed=0`.
+- Duplicate events, attempts, and sends: 0.
+- Other post-cutoff `payment_request.created` events: 0.
+- Migration `20260817211825_payment_request_approver_email_c1.sql`: one DEV history row.
+- Dispatcher: DEV version 35, deployed candidate blob `b4bcf88a109f38eca5c44dfe217750a5bd3f0d82`.
+- `payment_receipt.linked` regression: PASS. Claim, wake-up, and trigger hashes stayed `694e143204841f79e0724ad234ac79d5`, `dda802d2b5d6a204fd5010c7a5fb8b0a`, and `05e5649de2b2e44120f938e1999d89d6`.
+- Temporary UAT workflow removed after certification; net workflow delta: 0.
+
+The event-specific DEV Vault activation remains enabled with the fixed cutoff above, and DEV remains `test_only`. No PROD or `main` mutation occurred.
 
 ## Rollback
 
