@@ -68,7 +68,7 @@ PASS was recorded in [run 32071060527](https://github.com/ramon1415/catalogo-pro
 - Duplicate events, attempts, and sends: 0.
 - Other post-cutoff `payment_request.created` events: 0.
 - Migration `20260817211825_payment_request_approver_email_c1.sql`: one DEV history row.
-- Dispatcher: DEV version 35, deployed candidate blob `b4bcf88a109f38eca5c44dfe217750a5bd3f0d82`.
+- Dispatcher: DEV active version 39. Secret reprovisioning advanced the runtime revision, while the active entrypoint remains source deployment 35; byte-for-byte comparison (BOM/line-ending normalized) equals candidate blob `b4bcf88a109f38eca5c44dfe217750a5bd3f0d82`.
 - `payment_receipt.linked` regression: PASS. Claim, wake-up, and trigger hashes stayed `694e143204841f79e0724ad234ac79d5`, `dda802d2b5d6a204fd5010c7a5fb8b0a`, and `05e5649de2b2e44120f938e1999d89d6`.
 - Temporary UAT workflow removed after certification; net workflow delta: 0.
 
