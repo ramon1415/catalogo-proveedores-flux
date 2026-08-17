@@ -1,0 +1,35 @@
+name: Budget approval frontend contract
+
+'on':
+  pull_request:
+    branches:
+      - main
+    paths:
+      - budget_live_frontend_guards.js
+      - solicitudes.html
+      - aprobaciones.html
+      - scripts/qa/budget-live-own-commitment-contract.test.mjs
+      - .github/workflows/budget-approval-frontend-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Request-aware budget approval guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate syntax and contract
+        run: |
+          node --check budget_live_frontend_guards.js
+          node --test scripts/qa/budget-live-own-commitment-contract.test.mjs
