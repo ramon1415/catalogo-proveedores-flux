@@ -35,6 +35,7 @@ type DispatchOptions = {
   limit: number;
   eventTypes: string[];
   createdAtFrom: string;
+  createdAtAfterExclusive: string;
 };
 
 type NotificationAttachment = {
@@ -176,6 +177,12 @@ export async function readDispatchOptions(req: Request, runtime: Runtime): Promi
   if (eventTypes.some((eventType) => !allowedEventTypes.has(eventType))) {
     throw new Error("notification_event_type_not_allowed");
   }
+  if (
+    eventTypes.includes("payment_request.created") &&
+    (eventTypes.length !== 1 || eventTypes[0] !== "payment_request.created")
+  ) {
+    throw new Error("payment_request_created_dispatch_scope_must_be_exclusive");
+  }
 
   const cutoffValue = String(
     body.created_at_from ?? optionalEnv(runtime, "NOTIFICATION_CUTOFF_AT"),
@@ -189,6 +196,7 @@ export async function readDispatchOptions(req: Request, runtime: Runtime): Promi
     limit: clampLimit(queryLimit || body.limit),
     eventTypes,
     createdAtFrom: cutoff.toISOString(),
+    createdAtAfterExclusive: cutoffValue,
   };
 }
 
@@ -297,6 +305,89 @@ export function notificationRecipientRoles(event: NotificationEvent): string[] {
   return [...new Set(value.map((role) => String(role).trim()).filter(Boolean))];
 }
 
+
+function renderPaymentRequestCreatedEmail(
+  event: NotificationEvent,
+  sendMode: string,
+): { subject: string; text: string; html: string } {
+  const payload = event.payload || {};
+  const folio = textValue(payload.folio) || event.source_folio || "sin folio";
+  const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
+  const subject = `${subjectPrefix}${event.subject || `Nueva solicitud de pago: ${folio}`}`;
+  const amountText = money(payload.amount, payload.currency);
+  const rows = [
+    ["Folio", folio],
+    ["Empresa", payload.company],
+    ["Solicitante", payload.requester],
+    ["Proveedor", payload.provider],
+    ["Importe", amountText],
+    ["Centro de costo", payload.cost_center],
+    ["Partida presupuestal", payload.budget_category],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const approvalUrl = "https://flux.quantta.mx/aprobaciones.html";
+  const intro = "Se generó una solicitud de pago que requiere tu revisión.";
+  const textLines = [
+    "Nueva solicitud por revisar",
+    "",
+    intro,
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Revisar solicitud: ${approvalUrl}`,
+    ...(sendMode === "test_only"
+      ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."]
+      : []),
+  ];
+  const htmlRows = rows
+    .map(([label, value]) => `
+      <tr>
+        <td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td>
+      </tr>`)
+    .join("");
+  const testBanner = sendMode === "test_only"
+    ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>`
+    : "";
+
+  return {
+    subject,
+    text: textLines.join("\n"),
+    html: `<!doctype html>
+<html lang="es">
+  <body style="margin:0;padding:0;background:#eef1e9;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;">
+      <tr>
+        <td align="center" style="padding:24px 12px 18px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
+            <tr>
+              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;">
+                <h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Nueva solicitud por revisar</h1>
+                <p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">${escapeHtml(intro)}</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table>
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;">
+                  <tr>
+                    <td bgcolor="#16322d" style="border-radius:6px;">
+                      <a href="${approvalUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Revisar solicitud</a>
+                    </td>
+                  </tr>
+                </table>
+                ${testBanner}
+              </td>
+            </tr>
+          </table>
+          <div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
+  };
+}
+
 function renderReceiptLinkedEmail(
   event: NotificationEvent,
   sendMode: string,
@@ -391,6 +482,9 @@ function renderReceiptLinkedEmail(
 }
 
 export function renderEmail(event: NotificationEvent, sendMode: string): { subject: string; text: string; html: string } {
+  if (event.event_type === "payment_request.created") {
+    return renderPaymentRequestCreatedEmail(event, sendMode);
+  }
   if (event.event_type === "payment_receipt.linked") {
     return renderReceiptLinkedEmail(event, sendMode);
   }
@@ -665,17 +759,30 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
     const workerId = optionalEnv(runtime, "NOTIFICATION_WORKER_ID", "edge-notification-dispatcher-dev");
     const options = await readDispatchOptions(req, runtime);
 
-    const events = await callRpc<NotificationEvent[]>(
-      runtime.fetch,
-      supabaseUrl,
-      serviceRoleKey,
-      "claim_notification_events_for_dispatcher_v2",
-      {
+    const createdOnly = options.eventTypes.length === 1 &&
+      options.eventTypes[0] === "payment_request.created";
+    const claimRpcName = createdOnly
+      ? "claim_payment_request_created_events_for_dispatcher"
+      : "claim_notification_events_for_dispatcher_v2";
+    const claimPayload = createdOnly
+      ? {
+        p_limit: options.limit,
+        p_worker_id: workerId,
+        p_created_at_after: options.createdAtAfterExclusive,
+      }
+      : {
         p_limit: options.limit,
         p_worker_id: workerId,
         p_event_types: options.eventTypes,
         p_created_at_from: options.createdAtFrom,
-      },
+      };
+
+    const events = await callRpc<NotificationEvent[]>(
+      runtime.fetch,
+      supabaseUrl,
+      serviceRoleKey,
+      claimRpcName,
+      claimPayload,
     );
 
     const results: DispatchResult[] = [];

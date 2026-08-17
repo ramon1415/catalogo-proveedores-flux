@@ -1,0 +1,153 @@
+name: Supabase PROD Payment Request Created Recovery
+
+'on':
+  schedule:
+    - cron: '1-56/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-payment-request-created-recovery
+  cancel-in-progress: false
+
+jobs:
+  dispatch_payment_request_created:
+    name: Recover committed payment request created notifications
+    if: github.ref == 'refs/heads/main' && vars.NOTIFICATION_PROD_PAYMENT_REQUEST_CREATED_RECOVERY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: supabase-production
+
+    env:
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      EVENT_TYPES_JSON: '["payment_request.created"]'
+      DISPATCH_LIMIT: '5'
+      DISPATCH_ROLE: recovery_fallback
+
+    steps:
+      - name: Invoke isolated created-event recovery exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${PROJECT_REF}" = "${EXPECTED_PROJECT_REF}"
+          test -n "${SUPABASE_PROD_SESSION_POOLER_DB_URL}"
+          test -n "${NOTIFICATION_DISPATCHER_SECRET}"
+          test "${EVENT_TYPES_JSON}" = '["payment_request.created"]'
+          test "${DISPATCH_LIMIT}" = "5"
+          test "${DISPATCH_ROLE}" = "recovery_fallback"
+
+          echo "::add-mask::${SUPABASE_PROD_SESSION_POOLER_DB_URL}"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+
+          runtime_row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" \
+            -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          begin transaction read only;
+          select
+            coalesce(max(decrypted_secret) filter (
+              where name = 'notification_payment_request_created_dispatcher_url'
+            ), ''),
+            coalesce(max(decrypted_secret) filter (
+              where name = 'notification_payment_request_created_cutoff_at'
+            ), ''),
+            coalesce(max(decrypted_secret) filter (
+              where name = 'notification_payment_request_created_immediate_enabled'
+            ), 'false')
+          from vault.decrypted_secrets
+          where name = any(array[
+            'notification_payment_request_created_dispatcher_url',
+            'notification_payment_request_created_cutoff_at',
+            'notification_payment_request_created_immediate_enabled'
+          ]::text[]);
+          commit;
+          SQL
+          )"
+
+          IFS='|' read -r function_url activation_cutoff immediate_enabled <<< "${runtime_row}"
+          test "${function_url}" = \
+            "https://${EXPECTED_PROJECT_REF}.supabase.co/functions/v1/notification-dispatcher"
+          test -n "${activation_cutoff}"
+          test "${immediate_enabled,,}" = "true"
+
+          echo "::add-mask::${activation_cutoff}"
+          export ACTIVATION_CUTOFF="${activation_cutoff}"
+          request_body="$(python3 - <<'PY'
+          import datetime
+          import json
+          import os
+
+          cutoff = os.environ["ACTIVATION_CUTOFF"]
+          parsed = datetime.datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
+          if parsed.tzinfo is None:
+              raise SystemExit("activation_cutoff_timezone_required")
+
+          print(json.dumps({
+              "event_types": ["payment_request.created"],
+              "created_at_from": cutoff,
+              "limit": 5,
+          }, separators=(",", ":")))
+          PY
+          )"
+
+          REQUEST_BODY="${request_body}" python3 - <<'PY'
+          import json
+          import os
+
+          body = json.loads(os.environ["REQUEST_BODY"])
+          assert body["event_types"] == ["payment_request.created"]
+          assert body["created_at_from"] == os.environ["ACTIVATION_CUTOFF"]
+          assert body["limit"] == 5
+          assert set(body) == {"event_types", "created_at_from", "limit"}
+          PY
+
+          response_file="${RUNNER_TEMP}/payment-request-created-recovery-response.json"
+          trap 'rm -f "${response_file}"' EXIT
+
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${function_url}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
+
+          test "${http_code}" -ge 200
+          test "${http_code}" -lt 300
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["RESPONSE_FILE"], encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          processed = data.get("processed")
+          sent = data.get("sent")
+          failed = data.get("failed")
+          events = data.get("events") if isinstance(data.get("events"), list) else []
+
+          assert data.get("mode") == "real"
+          assert isinstance(processed, int) and 0 <= processed <= 5
+          assert isinstance(sent, int) and isinstance(failed, int)
+          assert sent + failed == processed
+          assert len(events) == processed
+          assert all(
+              event.get("event_type") == "payment_request.created"
+              and event.get("status") in ("sent", "failed")
+              for event in events
+          )
+
+          print(json.dumps({
+              "processed": processed,
+              "sent": sent,
+              "failed": failed,
+              "payment_request_created_only": True,
+              "dispatch_role": "recovery_fallback",
+          }, sort_keys=True))
+          PY
