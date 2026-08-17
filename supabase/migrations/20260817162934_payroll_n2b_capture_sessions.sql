@@ -1,5 +1,6 @@
 -- Flux Operadora / Quantta
 -- Payroll N2B: finance-only staged capture and private upload sessions.
+-- Remote DEV migration version: 20260817162934.
 --
 -- This is a temporary capture contract. It is not payroll_runs, does not
 -- create payment_requests, and cannot enter approvals, layouts, dispersion,

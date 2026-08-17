@@ -20,7 +20,7 @@ on:
       - scripts/qa/payroll-n2b-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
-      - supabase/migrations/20260817095518_payroll_n2b_capture_sessions.sql
+      - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
 

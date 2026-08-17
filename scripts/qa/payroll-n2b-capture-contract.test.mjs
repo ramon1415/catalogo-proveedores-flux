@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
-const migration = read('supabase/migrations/20260817095518_payroll_n2b_capture_sessions.sql');
+const migration = read('supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql');
 const capture = read('payroll_capture.js');
 const parser = read('payroll_parser.js');
 const html = read('solicitudes.html');
@@ -114,7 +114,7 @@ test('the protected workflow runs N2B syntax, model and migration/UI contracts',
   assert.match(workflow, /payroll_capture\.js/);
   assert.match(workflow, /payroll_capture\.css/);
   assert.match(workflow, /payroll-n2b-\*\.test\.mjs/);
-  assert.match(workflow, /20260817095518_payroll_n2b_capture_sessions\.sql/);
+  assert.match(workflow, /20260817162934_payroll_n2b_capture_sessions\.sql/);
   assert.match(workflow, /node --check payroll_capture\.js/);
   assert.match(workflow, /payroll-n2b-capture-model\.test\.mjs/);
   assert.match(workflow, /payroll-n2b-capture-contract\.test\.mjs/);
