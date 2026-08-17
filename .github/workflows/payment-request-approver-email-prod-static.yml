@@ -1,0 +1,217 @@
+name: Payment Request Approver Email PROD Static
+
+'on':
+  push:
+    branches:
+      - release/ramon-payment-request-approver-email-prod
+  pull_request:
+    branches:
+      - main
+    paths:
+      - supabase/migrations/20260817230000_payment_request_approver_email_prod.sql
+      - supabase/functions/notification-dispatcher/index.ts
+      - scripts/qa/payment-request-approver-email-prod-contract.test.mjs
+      - .github/workflows/payment-request-approver-email-prod-static.yml
+      - .github/workflows/supabase-prod-payment-request-created-recovery.yml
+      - docs/ops/payment-request-approver-email-prod.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-request-approver-email-prod-static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Selective forward, exclusive cutoff, receipt regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out selective candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recapture immutable remote sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main codex/payment-request-approver-email-c1
+          test "$(git rev-parse origin/main)" =             "7573ef86ba8d55f96343a772d94de38e89cb4d88"
+          test "$(git rev-parse origin/codex/payment-request-approver-email-c1)" =             "7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
+          echo "main_base=7573ef86ba8d55f96343a772d94de38e89cb4d88"
+          echo "c1_certified_source=7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
+          echo "pr147_dependency=false"
+
+      - name: Validate exact selective scope and no DEV merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          printf '%s
+' "${changed[@]}"
+
+          test "${#changed[@]}" = "6"
+          allowed='^((supabase/migrations/20260817230000_payment_request_approver_email_prod\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-prod-contract\.test\.mjs)|(\.github/workflows/payment-request-approver-email-prod-static\.yml)|(\.github/workflows/supabase-prod-payment-request-created-recovery\.yml)|(docs/ops/payment-request-approver-email-prod\.md))$'
+          if printf '%s
+' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
+            echo "::error::Selective scope contains a non-authorized file."
+            exit 1
+          fi
+
+          test -z "$(git rev-list --merges origin/main..HEAD)"
+          git diff --check origin/main...HEAD
+          git diff --exit-code origin/main...HEAD --             .github/workflows/supabase-prod-notification-dispatcher.yml
+          echo "selective_scope=6"
+          echo "dev_merge_commits=0"
+          echo "receipt_scheduler=unchanged"
+
+      - name: Prove certified dispatcher source and receipt byte preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" =             "b4bcf88a109f38eca5c44dfe217750a5bd3f0d82"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = "supabase/functions/notification-dispatcher/index.ts"
+          before = subprocess.check_output(
+              ["git", "show", f"origin/main:{path}"],
+              text=True,
+              encoding="utf-8-sig",
+          )
+          after = Path(path).read_text(encoding="utf-8-sig")
+
+          def block(value, start, end):
+              a = value.index(start)
+              b = value.index(end, a)
+              return value[a:b]
+
+          comparisons = [
+              (
+                  "receipt_renderer",
+                  "function renderReceiptLinkedEmail",
+                  "export function renderEmail",
+              ),
+              (
+                  "receipt_attachment",
+                  "export function validateAttachmentMetadata",
+                  "async function sendResendEmail",
+              ),
+              (
+                  "resend_transport",
+                  "async function sendResendEmail",
+                  "export async function handleRequest",
+              ),
+          ]
+          for label, start, end in comparisons:
+              if block(before, start, end) != block(after, start, end):
+                  raise SystemExit(f"{label}=changed")
+              print(f"{label}=unchanged")
+
+          migration = Path(
+              "supabase/migrations/20260817230000_payment_request_approver_email_prod.sql"
+          ).read_text(encoding="utf-8")
+          forbidden = [
+              "create or replace function public.notification_receipt_linked_dispatch_wakeup_internal",
+              "create function public.notification_receipt_linked_dispatch_wakeup_internal",
+              "drop trigger notification_receipt_linked_immediate_dispatch_after_insert",
+              "create trigger notification_receipt_linked_immediate_dispatch_after_insert",
+              "create or replace function public.get_payment_receipt_notification_attachment",
+              "create function public.get_payment_receipt_notification_attachment",
+          ]
+          lowered = migration.lower()
+          if any(item in lowered for item in forbidden):
+              raise SystemExit("payment_receipt_linked_contract=changed")
+          print("payment_receipt_linked_contract=unchanged")
+          PY
+
+      - name: Run focused executable contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --test scripts/qa/payment-request-approver-email-prod-contract.test.mjs
+
+      - name: Parse SQL and YAML statically
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/payment-request-approver-email-prod-static.yml', aliases: true)"
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/supabase-prod-payment-request-created-recovery.yml', aliases: true)"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path(
+              "supabase/migrations/20260817230000_payment_request_approver_email_prod.sql"
+          )
+          sql = path.read_text(encoding="utf-8")
+          if "" in sql:
+              raise SystemExit("migration_line_endings=invalid")
+          if not sql.startswith("begin;
+") or not sql.rstrip().endswith("commit;"):
+              raise SystemExit("migration_transaction_boundary=invalid")
+          for tag in ("$precheck$", "$postcheck$"):
+              if sql.count(tag) != 2:
+                  raise SystemExit(f"migration_dollar_quote={tag}:invalid")
+          if sql.count("$$") != 6:
+              raise SystemExit("migration_function_dollar_quotes=invalid")
+          if re.search(r"(?:delete|truncate)s+(?:froms+)?public.", sql, re.I):
+              raise SystemExit("migration_destructive_dml=present")
+          if re.search(r"vault.(?:create_secret|update_secret)", sql, re.I):
+              raise SystemExit("activation_cutoff_write=present")
+          if "2026-08-17T21:20:56.735024Z" in sql:
+              raise SystemExit("dev_cutoff=hardcoded")
+          print("migration_static_parser=pass")
+          PY
+
+      - name: Validate anti-replay, no-recipient, and recovery contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration="supabase/migrations/20260817230000_payment_request_approver_email_prod.sql"
+          recovery=".github/workflows/supabase-prod-payment-request-created-recovery.yml"
+
+          test "$(grep -c "event.created_at > p_created_at_after" "${migration}")" = "2"
+          test "$(grep -c "event.created_at >= p_created_at_after" "${migration}" || true)" = "0"
+          grep -q "new.created_at <= v_cutoff_at" "${migration}"
+          grep -q "'no_recipient'::text" "${migration}"
+          grep -q "v_status := 'no_recipient'" "${migration}"
+          grep -q "v_last_error := 'recipient_email_missing'" "${migration}"
+          grep -q "NOTIFICATION_PROD_PAYMENT_REQUEST_CREATED_RECOVERY_ENABLED == 'true'" "${recovery}"
+          grep -q "notification_payment_request_created_cutoff_at" "${recovery}"
+          ! grep -q "payment_receipt.linked" "${recovery}"
+          ! grep -Eq '20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' "${recovery}"
+
+          echo "exclusive_cutoff=pass"
+          echo "old_pending_reprocess=blocked"
+          echo "no_recipient=terminal"
+          echo "recovery=disabled_and_isolated"
+
+      - name: Secret and governance scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            supabase/migrations/20260817230000_payment_request_approver_email_prod.sql
+            supabase/functions/notification-dispatcher/index.ts
+            scripts/qa/payment-request-approver-email-prod-contract.test.mjs
+            .github/workflows/payment-request-approver-email-prod-static.yml
+            .github/workflows/supabase-prod-payment-request-created-recovery.yml
+            docs/ops/payment-request-approver-email-prod.md
+          )
+
+          ! grep -R -E             "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(?:ql)?://[^[:space:]]+:[^[:space:]]+@"             "${files[@]}"
+          ! grep -R -E "C:\\\\Users\\\\|/Users/|/home/" "${files[@]}"
+          ! grep -R -E "depends on #147|based on #147|cherry-pick.*#147" "${files[@]}"
+
+          echo "secret_scan=pass"
+          echo "pr147_dependency=false"
+          echo "prod_execution=false"
