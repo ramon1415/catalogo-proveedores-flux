@@ -720,6 +720,9 @@ function exitHistYear() {
     dashGrid.insertBefore(card, dashGrid.firstElementChild)
     card.classList.remove("compact-rows")
   }
+  document.getElementById("histHeaderCtl")?.classList.add("hidden")
+  document.getElementById("tabsBlock")?.classList.remove("hidden")
+  showTab(state.activeTab || "expenses")
   setHistLegend(false)
 }
 
@@ -728,6 +731,12 @@ function enterHistLayout() {
   document.getElementById("kpiGrid")?.classList.add("hidden")
   document.getElementById("histKpiStrip")?.classList.remove("hidden")
   document.getElementById("dashGrid")?.classList.add("hidden")
+  document.getElementById("histHeaderCtl")?.classList.remove("hidden")
+  const yl = document.getElementById("histYearLabel")
+  if (yl) yl.textContent = state.histYear || ""
+  document.getElementById("tabsBlock")?.classList.add("hidden")
+  ;["expenses", "ytd", "income", "cash", "incidents"].forEach((id) =>
+    document.getElementById(`${id}Tab`)?.classList.add("hidden"))
   const card = document.getElementById("memberCard")
   const slot = document.getElementById("histMemberSlot")
   if (card && slot && card.parentElement !== slot) {
@@ -771,7 +780,7 @@ function renderHistCuentas() {
   const mesesCorto = mm.map((m) => new Date(year, m - 1, 1).toLocaleDateString("es-MX", { month: "short" }))
   const fmtK = (v) => (v === 0 ? "—" : moneyFmt.format(v))
   const filaCuenta = ([code, c]) => `<tr>
-    <td class="hist-cuenta-col"><span class="cell-main">${safe(c.nombre)}</span><span class="muted-line">${safe(code)}</span></td>
+    <td class="hist-cuenta-col" title="${safe(code)}"><span class="cell-main">${safe(c.nombre)}</span></td>
     ${mm.map((m) => `<td style="text-align:right;white-space:nowrap">${fmtK(Math.round((c.meses[m] || 0) * 100) / 100)}</td>`).join("")}
     <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(Math.round(c.total * 100) / 100)}</td>
   </tr>`

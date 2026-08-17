@@ -130,6 +130,10 @@
               <button id="histYearsBtn" class="secondary-btn" type="button" title="Histórico / años anteriores" style="min-height:34px;padding:0 12px;font-size:16px;line-height:1">⋯</button>
               <div id="histYearsMenu" class="hidden" style="position:absolute;top:38px;left:0;z-index:30;min-width:170px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:10px;padding:6px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:2px"></div>
             </div>
+            <div id="histHeaderCtl" class="hidden" style="display:flex;align-items:center;gap:10px;background:var(--accent-dim);border:1px solid var(--border);border-radius:8px;padding:0 6px 0 12px;min-height:34px">
+              <span style="font-size:12px;color:var(--text-2)">Histórico&nbsp;<strong id="histYearLabel" style="font-size:14.5px;color:var(--accent-text)"></strong></span>
+              <button id="histExitBtn" class="secondary-btn" type="button" style="font-size:11.5px;min-height:26px;padding:3px 10px">Año en curso</button>
+            </div>
             <button id="refreshBtn" class="secondary-btn" type="button">Actualizar</button>
             <button id="exportBtn" class="secondary-btn" type="button">Exportar</button>
             <button id="historyBtn" class="secondary-btn" type="button">Historial</button>
@@ -204,7 +208,6 @@
               <div style="display:flex;gap:6px">
                 <button id="histViewMensual" class="secondary-btn" type="button" style="font-size:11.5px;min-height:28px;padding:4px 10px">Mensual</button>
                 <button id="histViewCuentas" class="secondary-btn" type="button" style="font-size:11.5px;min-height:28px;padding:4px 10px">Por cuenta</button>
-                <button id="histExitBtn" class="secondary-btn" type="button" style="font-size:11.5px;min-height:28px;padding:4px 10px">Año en curso</button>
               </div>
             </div>
             <div id="histMensualWrap" class="table-wrapper" style="min-height:auto;max-height:none">
@@ -266,7 +269,7 @@
         </div>
 
         <!-- Tabs secundarios -->
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="tabsBlock" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <div class="section-tabs">
             <button class="section-tab active" data-tab="expenses" type="button">Gastos del mes</button>
             <button class="section-tab" data-tab="ytd" type="button">YTD</button>
@@ -429,6 +432,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260817-historico2"></script>
+  <script src="./dashboard.js?v=20260817-historico3"></script>
 </body>
 </html>
