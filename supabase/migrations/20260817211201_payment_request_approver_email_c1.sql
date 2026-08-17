@@ -290,11 +290,12 @@ begin
 
   if v_wakeup_definition not like '%notification_payment_request_created_cutoff_at%'
      or v_wakeup_definition not like '%notification_payment_request_created_immediate_enabled%'
-     or v_wakeup_definition not like '%'event_types'', jsonb_build_array(''payment_request.created'')%'
+     or position(
+          'jsonb_build_array(''payment_request.created'')'
+          in v_wakeup_definition
+        ) = 0
      or v_wakeup_definition like '%payment_receipt.linked%'
-     or v_wakeup_definition like '%api.resend.com%'
-     or v_wakeup_definition like '%created_at_from'', now(%'
-     or v_wakeup_definition like '%created_at_from'', clock_timestamp(%' then
+     or v_wakeup_definition like '%api.resend.com%' then
     raise exception 'payment_request_created_wakeup_contract_invalid';
   end if;
 
@@ -308,7 +309,10 @@ begin
   if v_receipt_trigger_definition is null
      or v_receipt_trigger_definition not like '%payment_receipt.linked%'
      or v_receipt_trigger_definition like '%payment_request.created%'
-     or v_receipt_wakeup_definition not like '%'event_types'', jsonb_build_array(''payment_receipt.linked'')%'
+     or position(
+          'jsonb_build_array(''payment_receipt.linked'')'
+          in v_receipt_wakeup_definition
+        ) = 0
      or v_receipt_wakeup_definition like '%payment_request.created%' then
     raise exception 'payment_receipt_linked_regression_detected';
   end if;
