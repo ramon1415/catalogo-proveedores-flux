@@ -453,9 +453,10 @@
     fieldIds.forEach(function (id) {
       const control = document.getElementById(id);
       if (!control) return;
-      const target = ['amountRequested', 'currency', 'exchangeRate', 'isExtraordinaryAdjustment'].includes(id)
-        ? control.closest('.form-section')
-        : control.closest('label');
+      // Hide only the provider-payment field itself. Hiding its nearest
+      // section can also remove shared payroll fields such as concept/notes
+      // when extensions compose the form differently at runtime.
+      const target = control.closest('label');
       if (target) hiddenTargets.add(target);
       setControlMode(control, payroll);
     });

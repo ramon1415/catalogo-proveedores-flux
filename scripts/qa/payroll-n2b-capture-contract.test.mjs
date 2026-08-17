@@ -12,6 +12,9 @@ const workflow = read('.github/workflows/payroll-n0-contract-tests.yml');
 const fileTableDefinition = migration.match(
   /create table public\.payroll_capture_files \(([\s\S]*?)\n\);/i
 )?.[1] || '';
+const payrollHiddenFieldIds = capture.match(
+  /const fieldIds = \[([\s\S]*?)\n\s*\];/
+)?.[1] || '';
 const storageSelectFunction = migration.match(
   /create function public\.payroll_capture_storage_select_allowed\(p_name text\)([\s\S]*?)\$\$;/i
 )?.[1] || '';
@@ -93,6 +96,14 @@ test('Nómina has a dedicated Finance-only submit path and cannot enter approval
   assert.match(capture, /FINANCE_ROLES = \['finance', 'finanzas', 'treasury', 'tesoreria', 'administracion'\]/);
   assert.doesNotMatch(capture, /isAdminFinance/);
   assert.match(capture, /p_expected_version: state\.sessionVersion/);
+});
+
+test('payroll mode keeps shared concept and notes visible while hiding only field labels', () => {
+  assert.ok(payrollHiddenFieldIds);
+  assert.doesNotMatch(payrollHiddenFieldIds, /['"](?:description|notes)['"]/);
+  assert.match(capture, /const target = control\.closest\('label'\);/);
+  assert.doesNotMatch(capture, /control\.closest\('\.form-section'\)/);
+  assert.match(capture, /descriptionSection\.querySelector\('h3'\)\.textContent = 'Concepto \/ descripci.n'/);
 });
 
 test('UI and persisted summaries avoid employee rows and sensitive banking output', () => {
