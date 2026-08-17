@@ -62,8 +62,8 @@ function createdEvent() {
 function block(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);
-  assert.ok(start >= 0, ${startMarker} not found$);
-  assert.ok(end > start, ${endMarker} not found after ${startMarker}$);
+  assert.ok(start >= 0, startMarker + " not found");
+  assert.ok(end > start, endMarker + " not found after " + startMarker);
   return source.slice(start, end);
 }
 
@@ -112,8 +112,8 @@ test("recipient_email_missing alone becomes terminal no_recipient", () => {
     "approver_not_eligible_for_company",
     "created_notification_enqueue_failed",
   ]) {
-    const at = producer.indexOf($'${error}'$);
-    assert.ok(at >= 0, $${error} missing$);
+    const at = producer.indexOf("'" + error + "'");
+    assert.ok(at >= 0, error + " missing");
     assert.match(producer.slice(Math.max(0, at - 240), at + 240), /dead_letter/);
   }
   assert.match(migration, /'no_recipient'::text/);
@@ -191,7 +191,7 @@ test("created dispatch preserves microseconds and uses only the strict RPC", asy
     if (url.endsWith("/rpc/mark_notification_processed_for_dispatcher")) {
       return Response.json({ status: "sent" });
     }
-    throw new Error($unexpected_fetch:${url}$);
+    throw new Error("unexpected_fetch:" + url);
   };
 
   const response = await handleRequest(
@@ -240,7 +240,7 @@ test("created dispatch preserves microseconds and uses only the strict RPC", asy
   const resendBody = JSON.parse(resendCall.init.body);
   assert.deepEqual(resendBody.to, ["qa@example.com"]);
   assert.equal("attachments" in resendBody, false);
-  assert.equal(resendCall.init.headers["Idempotency-Key"], $notification/${event.id}$);
+  assert.equal(resendCall.init.headers["Idempotency-Key"], "notification/" + event.id);
 });
 
 test("created event cannot be mixed with another event type", async () => {
@@ -269,7 +269,7 @@ test("receipt dispatch retains claim v2 and its normalized inclusive input contr
       claimBody = JSON.parse(init.body);
       return Response.json([]);
     }
-    throw new Error($unexpected_fetch:${url}$);
+    throw new Error("unexpected_fetch:" + url);
   };
 
   const response = await handleRequest(

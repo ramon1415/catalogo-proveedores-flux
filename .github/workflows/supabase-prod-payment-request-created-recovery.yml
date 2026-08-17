@@ -46,7 +46,8 @@ jobs:
           echo "::add-mask::${SUPABASE_PROD_SESSION_POOLER_DB_URL}"
           echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
 
-          runtime_row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}"             -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
+          runtime_row="$(psql "${SUPABASE_PROD_SESSION_POOLER_DB_URL}" \
+            -X -Atq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
           begin transaction read only;
           select
             coalesce(max(decrypted_secret) filter (
@@ -69,7 +70,8 @@ jobs:
           )"
 
           IFS='|' read -r function_url activation_cutoff immediate_enabled <<< "${runtime_row}"
-          test "${function_url}" =             "https://${EXPECTED_PROJECT_REF}.supabase.co/functions/v1/notification-dispatcher"
+          test "${function_url}" = \
+            "https://${EXPECTED_PROJECT_REF}.supabase.co/functions/v1/notification-dispatcher"
           test -n "${activation_cutoff}"
           test "${immediate_enabled,,}" = "true"
 
@@ -107,7 +109,13 @@ jobs:
           response_file="${RUNNER_TEMP}/payment-request-created-recovery-response.json"
           trap 'rm -f "${response_file}"' EXIT
 
-          http_code="$(curl --silent --show-error             --output "${response_file}"             --write-out '%{http_code}'             --request POST "${function_url}"             --header 'Content-Type: application/json'             --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}"             --data "${request_body}")"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${function_url}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "${request_body}")"
 
           test "${http_code}" -ge 200
           test "${http_code}" -lt 300

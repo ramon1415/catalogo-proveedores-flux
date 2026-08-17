@@ -40,8 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags origin main codex/payment-request-approver-email-c1
-          test "$(git rev-parse origin/main)" =             "7573ef86ba8d55f96343a772d94de38e89cb4d88"
-          test "$(git rev-parse origin/codex/payment-request-approver-email-c1)" =             "7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
+          test "$(git rev-parse origin/main)" = \
+            "7573ef86ba8d55f96343a772d94de38e89cb4d88"
+          test "$(git rev-parse origin/codex/payment-request-approver-email-c1)" = \
+            "7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
           echo "main_base=7573ef86ba8d55f96343a772d94de38e89cb4d88"
           echo "c1_certified_source=7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
           echo "pr147_dependency=false"
@@ -51,20 +53,19 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
-          printf '%s
-' "${changed[@]}"
+          printf '%s\n' "${changed[@]}"
 
           test "${#changed[@]}" = "6"
           allowed='^((supabase/migrations/20260817230000_payment_request_approver_email_prod\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-prod-contract\.test\.mjs)|(\.github/workflows/payment-request-approver-email-prod-static\.yml)|(\.github/workflows/supabase-prod-payment-request-created-recovery\.yml)|(docs/ops/payment-request-approver-email-prod\.md))$'
-          if printf '%s
-' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
+          if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo "::error::Selective scope contains a non-authorized file."
             exit 1
           fi
 
           test -z "$(git rev-list --merges origin/main..HEAD)"
           git diff --check origin/main...HEAD
-          git diff --exit-code origin/main...HEAD --             .github/workflows/supabase-prod-notification-dispatcher.yml
+          git diff --exit-code origin/main...HEAD -- \
+            .github/workflows/supabase-prod-notification-dispatcher.yml
           echo "selective_scope=6"
           echo "dev_merge_commits=0"
           echo "receipt_scheduler=unchanged"
@@ -73,7 +74,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" =             "b4bcf88a109f38eca5c44dfe217750a5bd3f0d82"
+          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" = \
+            "b4bcf88a109f38eca5c44dfe217750a5bd3f0d82"
 
           python3 - <<'PY'
           from pathlib import Path
@@ -153,19 +155,18 @@ jobs:
               "supabase/migrations/20260817230000_payment_request_approver_email_prod.sql"
           )
           sql = path.read_text(encoding="utf-8")
-          if "" in sql:
+          if "\r" in sql:
               raise SystemExit("migration_line_endings=invalid")
-          if not sql.startswith("begin;
-") or not sql.rstrip().endswith("commit;"):
+          if not sql.startswith("begin;\n") or not sql.rstrip().endswith("commit;"):
               raise SystemExit("migration_transaction_boundary=invalid")
           for tag in ("$precheck$", "$postcheck$"):
               if sql.count(tag) != 2:
                   raise SystemExit(f"migration_dollar_quote={tag}:invalid")
           if sql.count("$$") != 6:
               raise SystemExit("migration_function_dollar_quotes=invalid")
-          if re.search(r"(?:delete|truncate)s+(?:froms+)?public.", sql, re.I):
+          if re.search(r"\b(?:delete|truncate)\s+(?:from\s+)?public\.", sql, re.I):
               raise SystemExit("migration_destructive_dml=present")
-          if re.search(r"vault.(?:create_secret|update_secret)", sql, re.I):
+          if re.search(r"vault\.(?:create_secret|update_secret)", sql, re.I):
               raise SystemExit("activation_cutoff_write=present")
           if "2026-08-17T21:20:56.735024Z" in sql:
               raise SystemExit("dev_cutoff=hardcoded")
@@ -208,8 +209,10 @@ jobs:
             docs/ops/payment-request-approver-email-prod.md
           )
 
-          ! grep -R -E             "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(?:ql)?://[^[:space:]]+:[^[:space:]]+@"             "${files[@]}"
-          ! grep -R -E "C:\\\\Users\\\\|/Users/|/home/" "${files[@]}"
+          ! grep -R -E \
+            "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(?:ql)?://[^[:space:]]+:[^[:space:]]+@" \
+            "${files[@]}"
+          ! grep -R -E 'C:\\Users\\|/Users/|/home/' "${files[@]}"
           ! grep -R -E "depends on #147|based on #147|cherry-pick.*#147" "${files[@]}"
 
           echo "secret_scan=pass"
