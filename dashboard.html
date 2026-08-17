@@ -115,6 +115,10 @@
               <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)">Periodo</span>
               <input id="periodInput" type="month" style="min-height:34px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-1);padding:0 10px;font:inherit;font-size:12.5px;outline:none">
             </label>
+            <div style="position:relative">
+              <button id="histYearsBtn" class="secondary-btn" type="button" title="Histórico / años anteriores" style="min-height:34px;padding:0 12px;font-size:16px;line-height:1">⋯</button>
+              <div id="histYearsMenu" class="hidden" style="position:absolute;top:38px;left:0;z-index:30;min-width:170px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:10px;padding:6px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:2px"></div>
+            </div>
             <button id="refreshBtn" class="secondary-btn" type="button">Actualizar</button>
             <button id="exportBtn" class="secondary-btn" type="button">Exportar</button>
             <button id="historyBtn" class="secondary-btn" type="button">Historial</button>
@@ -159,14 +163,32 @@
               <div class="panel-sub" id="chartSubtitle">Cargando datos del año...</div>
             </div>
             <div class="chart-legend">
-              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(20,184,166,.75)"></div>Ejecutado</div>
-              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(20,184,166,.22);outline:1px dashed rgba(20,184,166,.5);outline-offset:1px"></div>Presupuesto</div>
+              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(74,124,109,.85)"></div>Ejecutado</div>
+              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(74,124,109,.25);outline:1px dashed rgba(74,124,109,.55);outline-offset:1px"></div>Presupuesto</div>
               <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(16,185,129,.85)"></div>Cobrado</div>
               <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(16,185,129,.25);outline:1px dashed rgba(16,185,129,.5);outline-offset:1px"></div>Esperado</div>
             </div>
           </div>
           <div class="chart-body">
             <canvas id="mainChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Histórico mensual (se muestra al elegir un año en ⋯) -->
+        <div id="histPanel" class="table-card hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)">
+            <div>
+              <div style="font-size:13px;font-weight:800" id="histPanelTitle">Histórico</div>
+              <div style="font-size:11px;color:var(--text-3)">Fuente: contabilidad CONTPAQ (auxiliares) · ingresos 4xx / egresos 6xx</div>
+            </div>
+            <button id="histExitBtn" class="secondary-btn" type="button" style="font-size:12px">Volver al año en curso</button>
+          </div>
+          <div class="table-wrapper" style="min-height:auto;max-height:none">
+            <table style="min-width:640px">
+              <thead><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr></thead>
+              <tbody id="histTableBody"></tbody>
+              <tfoot id="histTableFoot"></tfoot>
+            </table>
           </div>
         </div>
 
@@ -378,6 +400,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260610-chart-demo"></script>
+  <script src="./dashboard.js?v=20260817-historico"></script>
 </body>
 </html>
