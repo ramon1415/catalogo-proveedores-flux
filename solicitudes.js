@@ -329,6 +329,11 @@ async function handleBudgetScopeChange() {
 }
 
 async function handleCompanyScopeChange() {
+  if (window.FluxPayrollCapture?.isActive?.()) {
+    await window.FluxPayrollCapture.handleCompanyChange();
+    updateSummaryPanel();
+    return;
+  }
   approverLoadVersion += 1;
   invalidateApproverOptions("Actualizando aprobadores disponibles...");
   await handleBudgetScopeChange();
@@ -884,6 +889,7 @@ function renderPaymentRequestsTable() {
 
 function openNewRequestModal() {
   dom.requestForm.reset();
+  window.FluxPayrollCapture?.reset?.();
   dom.currency.value = "MXN";
   dom.exchangeRate.value = "1";
   handleCurrencyChange();
