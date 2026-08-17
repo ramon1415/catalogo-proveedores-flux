@@ -250,7 +250,8 @@ jobs:
         run: |
           set -euo pipefail
           psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -X -v marker="${UAT_MARKER}" <<'SQL' >/dev/null
-          select set_config('c1.uat_marker',  :'marker', false);\n          do $uat$
+          select set_config('c1.uat_marker', :'marker', false);
+          do $uat$
           declare
             v_template record;
             v_result jsonb;
