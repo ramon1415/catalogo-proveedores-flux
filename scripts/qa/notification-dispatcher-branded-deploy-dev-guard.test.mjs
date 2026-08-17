@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const expectedBlob = "a45a3c099cf267575b587a195e1747ce12492323";
+const expectedBlob = "b4bcf88a109f38eca5c44dfe217750a5bd3f0d82";
 const sourcePath = new URL(
   "../../supabase/functions/notification-dispatcher/index.ts",
   import.meta.url,

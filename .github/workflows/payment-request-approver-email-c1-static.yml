@@ -1,0 +1,145 @@
+name: Payment Request Approver Email C1 Static
+
+'on':
+  push:
+    branches:
+      - codex/payment-request-approver-email-c1
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - supabase/migrations/20260817211201_payment_request_approver_email_c1.sql
+      - supabase/functions/notification-dispatcher/index.ts
+      - scripts/qa/payment-request-approver-email-c1-contract.test.mjs
+      - scripts/qa/notification-dispatcher-branded-deploy-dev-guard.test.mjs
+      - .github/workflows/payment-request-approver-email-c1-static.yml
+      - .github/workflows/supabase-dev-notification-dispatcher.yml
+      - .github/workflows/supabase-dev-notification-dispatcher-scheduler.yml
+      - .github/workflows/payment-request-approver-email-c1-dev-uat-temporary.yml
+      - docs/ops/payment-request-approver-email-c1.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-request-approver-email-c1-static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Exclusive cutoff and receipt regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recapture remote baselines
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin dev main
+          test "$(git rev-parse origin/dev)" = "85ae6edd68dd275e157ea03d3f90ec88ba94fb25"
+          echo "dev_baseline=85ae6edd68dd275e157ea03d3f90ec88ba94fb25"
+          echo "main_read_only=7295a7a11a9015ca24d5f73144d3745a64bb6396"
+
+      - name: Validate exact file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+          allowed='^((supabase/migrations/20260817211201_payment_request_approver_email_c1\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-c1-contract\.test\.mjs)|(scripts/qa/notification-dispatcher-branded-deploy-dev-guard\.test\.mjs)|(\.github/workflows/payment-request-approver-email-c1-static\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher\.yml)|(\.github/workflows/supabase-dev-notification-dispatcher-scheduler\.yml)|(\.github/workflows/payment-request-approver-email-c1-dev-uat-temporary\.yml)|(docs/ops/payment-request-approver-email-c1\.md))$'
+          if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
+            echo "::error::Scope contains a non-authorized file."
+            exit 1
+          fi
+
+      - name: Run executable Node contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --test scripts/qa/payment-request-approver-email-c1-contract.test.mjs
+
+      - name: Prove receipt renderer and attachment path unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = "supabase/functions/notification-dispatcher/index.ts"
+          before = subprocess.check_output(
+              ["git", "show", f"origin/dev:{path}"],
+              text=True,
+              encoding="utf-8-sig",
+          )
+          after = Path(path).read_text(encoding="utf-8-sig")
+
+          def block(value, start, end):
+              a = value.index(start)
+              b = value.index(end, a)
+              return value[a:b]
+
+          comparisons = [
+              ("receipt_renderer", "function renderReceiptLinkedEmail", "export function renderEmail"),
+              ("receipt_attachment", "export function validateAttachmentMetadata", "async function sendResendEmail"),
+          ]
+          for label, start, end in comparisons:
+              if block(before, start, end) != block(after, start, end):
+                  raise SystemExit(f"{label}=changed")
+              print(f"{label}=unchanged")
+
+          migration = Path(
+              "supabase/migrations/20260817211201_payment_request_approver_email_c1.sql"
+          ).read_text(encoding="utf-8")
+          forbidden = [
+              "create or replace function public.notification_receipt_linked_dispatch_wakeup_internal",
+              "drop trigger if exists notification_receipt_linked_immediate_dispatch_after_insert",
+              "create trigger notification_receipt_linked_immediate_dispatch_after_insert",
+          ]
+          if any(item in migration.lower() for item in forbidden):
+              raise SystemExit("receipt_migration_contract=changed")
+          print("payment_receipt_linked_regression=pass")
+          PY
+
+      - name: Validate YAML and recovery preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/payment-request-approver-email-c1-static.yml', aliases: true)"
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/supabase-dev-notification-dispatcher.yml', aliases: true)"
+          if [ -f .github/workflows/supabase-dev-notification-dispatcher-scheduler.yml ]; then
+            ruby -e "require 'yaml'; YAML.load_file('.github/workflows/supabase-dev-notification-dispatcher-scheduler.yml', aliases: true)"
+            python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          path = ".github/workflows/supabase-dev-notification-dispatcher-scheduler.yml"
+          receipt = subprocess.check_output(
+              ["git", "show", f"origin/main:{path}"],
+              text=True,
+              encoding="utf-8",
+          )
+          candidate = Path(path).read_text(encoding="utf-8")
+          if not candidate.startswith(receipt):
+              raise SystemExit("receipt_scheduler_prefix=changed")
+          print("receipt_scheduler_prefix=unchanged")
+          PY
+          fi
+
+      - name: Validate static safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c "event.created_at > p_created_at_after" supabase/migrations/20260817211201_payment_request_approver_email_c1.sql)" = "2"
+          test "$(grep -c "event.created_at >= p_created_at_after" supabase/migrations/20260817211201_payment_request_approver_email_c1.sql || true)" = "0"
+          ! grep -R -E "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role.*eyJ"             supabase/migrations/20260817211201_payment_request_approver_email_c1.sql             supabase/functions/notification-dispatcher/index.ts             scripts/qa/payment-request-approver-email-c1-contract.test.mjs             docs/ops/payment-request-approver-email-c1.md
+          echo "exclusive_cutoff=pass"
+          echo "historical_replay=blocked"
+          echo "payment_receipt_linked=unchanged"
