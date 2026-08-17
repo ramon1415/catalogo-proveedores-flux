@@ -767,7 +767,9 @@
       ? 'Pendiente de validación'
       : formatMinor(evaluation.totalAmountMinor);
     const spei = state.files.layout_spei;
-    dom.speiCount.textContent = spei?.status === 'parsed' ? String(spei.recordCount) : 'Pendiente';
+    dom.speiCount.textContent = ['parsed', 'client_parsed_unverified'].includes(spei?.status)
+      ? String(spei.recordCount)
+      : 'Pendiente';
     dom.issues.innerHTML = evaluation.issues.length
       ? evaluation.issues.map(function (item) {
           return '<span class="payroll-issue-chip">' + escapeHtml(item.type) + ' · ' + escapeHtml(slotLabel(item.source)) + '</span>';

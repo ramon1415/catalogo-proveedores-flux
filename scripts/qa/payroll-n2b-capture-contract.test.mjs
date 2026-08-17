@@ -114,6 +114,10 @@ test('UI and persisted summaries avoid employee rows and sensitive banking outpu
   assert.doesNotMatch(migration, /storage_path[^\n]*jsonb|parser[^\n]*jsonb/i);
   assert.match(capture, /recordCount/);
   assert.match(capture, /totalAmountMinor/);
+  assert.match(
+    capture,
+    /dom\.speiCount\.textContent = \['parsed', 'client_parsed_unverified'\]\.includes\(spei\?\.status\)/
+  );
   assert.match(capture, /aria-label="Seleccionar TXT SPEI"/);
   assert.match(capture, /aria-describedby="payrollSpeiStatus"/);
   assert.ok(storageSelectFunction);
