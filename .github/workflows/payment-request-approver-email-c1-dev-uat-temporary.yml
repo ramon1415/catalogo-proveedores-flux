@@ -218,11 +218,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          new_before="$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX -v cutoff="${ACTIVATION_CUTOFF}" <<'SQL'
+          new_before="$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX \
+            -v cutoff="${ACTIVATION_CUTOFF}" \
+            -v marker="${UAT_MARKER}" <<'SQL'
           select count(*)
-          from public.notification_events
-          where event_type='payment_request.created'
-            and created_at > :'cutoff'::timestamptz;
+          from public.notification_events e
+          left join public.payment_requests pr on pr.id=e.source_id
+          where e.event_type='payment_request.created'
+            and e.created_at > :'cutoff'::timestamptz
+            and coalesce(pr.notes,'') <> :'marker';
           SQL
           )"
           test "${new_before}" = "0"
@@ -339,18 +343,17 @@ jobs:
           set -euo pipefail
           event_status=""
           for attempt in $(seq 1 30); do
-            event_status="$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX -v marker="${UAT_MARKER}" <<'SQL'
-            select coalesce(e.status,'missing')
-            from public.payment_requests pr
-            left join public.notification_events e
-              on e.source_id=pr.id
-             and e.event_type='payment_request.created'
-             and e.idempotency_key='payment_request.created:' || pr.id::text || ':approver'
-            where pr.notes=:'marker'
-            order by pr.created_at desc
-            limit 1;
-            SQL
-            )"
+            event_status="$(psql "${SUPABASE_DEV_DB_URL}" -v ON_ERROR_STOP=1 -AtX -c "
+              select coalesce(e.status,'missing')
+              from public.payment_requests pr
+              left join public.notification_events e
+                on e.source_id=pr.id
+               and e.event_type='payment_request.created'
+               and e.idempotency_key='payment_request.created:' || pr.id::text || ':approver'
+              where pr.notes='${UAT_MARKER}'
+              order by pr.created_at desc
+              limit 1;
+            ")"
             if [ "${event_status}" = "sent" ]; then
               break
             fi
