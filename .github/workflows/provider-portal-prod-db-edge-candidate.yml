@@ -1,0 +1,133 @@
+name: Provider Portal PROD DB Edge Candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**provider_portal_prod**"
+      - "supabase/functions/provider-intake/**"
+      - "supabase/config.toml"
+      - "scripts/release/build-provider-portal-prod-db-edge.mjs"
+      - "scripts/qa/provider-portal-prod-**"
+      - "docs/ops/provider-portal-prod-**"
+      - ".github/workflows/provider-portal-prod-db-edge-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: provider-portal-prod-db-edge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: provider_portal_shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d provider_portal_shadow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Fetch pinned DEV provider source
+        run: git fetch --no-tags origin c91faf703a79c02d6e9ef21a7b07ea9a0af76a91
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Generate dynamic forward migration slots with Supabase CLI
+        id: slots
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes supabase@2.114.0 --version
+          if [[ ! -f docs/ops/provider-portal-prod-db-edge-candidate.json ]]; then
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_runtime_control
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_core_workflow
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_draft_conversion
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_provider_aware_links
+          fi
+
+      - name: Build selective candidate from pinned sources
+        run: node scripts/release/build-provider-portal-prod-db-edge.mjs
+
+      - name: Static release contract
+        run: |
+          git diff --check
+          node scripts/qa/provider-portal-prod-db-edge-contract.test.mjs
+
+      - name: Edge unit and production configuration tests
+        run: deno test --allow-none supabase/functions/provider-intake/*_test.ts
+
+      - name: PostgreSQL 17 targeted current-PROD shadow replay
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-fixture.sql
+          for migration in $(find supabase/migrations -maxdepth 1 -type f -name '*_provider_portal_prod_*.sql' | sort); do
+            echo "Applying $migration"
+            psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f "$migration"
+          done
+          psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-assertions.sql
+
+      - name: Enforce selective scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only 70fd10bacea6a9f7b32a36b67906c598f96f39e0...HEAD > /tmp/changed-before-generation.txt
+          git status --short
+          if grep -E '(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' /tmp/changed-before-generation.txt; then
+            echo "Unexpected excluded scope detected" >&2
+            exit 1
+          fi
+
+      - name: Commit generated candidate to the PR branch
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add supabase scripts/release scripts/qa docs/ops
+            git commit -m "build: materialize selective Provider Portal PROD DB/Edge candidate"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
+
+      - name: Candidate result
+        run: |
+          echo "FRESH_PROD_FORWARD_CHAIN_PASS=true"
+          echo "SYSADMIN_ONLY_GATE_PROVEN=true"
+          echo "PUBLIC_PROVIDER_LINK_BOUNDARY_PROVEN=true"
+          echo "PROVIDER_INTAKE_NOTIFICATION_RELEASE_DELTA=0"
+          echo "NO_PROD_MUTATIONS=true"

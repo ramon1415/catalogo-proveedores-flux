@@ -1,0 +1,2 @@
+[functions.provider-intake]
+verify_jwt = false
