@@ -40,16 +40,23 @@ The Finance-only `Nómina` request type switches the existing modal into payroll
 
 The approval control is always disabled with `Validación completa — flujo de aprobación pendiente de habilitar`. Existing `payroll_uses_separate_flow` approval exclusion and payroll layout exclusion remain unchanged. N2B creates no approval batch, Director notification, PAGOSBBV/PAGOSINT/CIE layout, bank file, receipt match, or budget provision.
 
-## Synthetic UAT gate
+## Synthetic UAT result
 
-The controlled DEV scenario is `NÓMINA TEST N2B - NO PAGAR`, SPEI-only, using synthetic 128-byte records and an existing masked DEV source account. Expected result:
+The controlled DEV scenario `NÓMINA TEST N2B - NO PAGAR` was executed against the Vercel Preview and DEV only. It used one generated 128-byte SPEI record, an existing QA-labelled company, and an existing masked DEV source account. No real employee or customer file was used.
 
 - a temporary capture session and private synthetic SPEI object;
-- certified SPEI count and aggregate total;
+- local certified SPEI parser PASS: 1 record and MXN 1,250.00;
 - cover sheet still required/pending;
 - same-bank and TOKA not required;
 - approval blocked;
+- persisted SPEI authority remains `browser_client_attested` / `client_parsed_unverified`;
 - zero new payment requests, channels, approval events, layouts or notifications.
+
+Post-UAT DEV counts were: one capture session, one capture file, one private object, zero payroll payment requests/channels/run files/run lines, zero payroll approval items, and zero payroll layout lines. The global request, approval, layout, and notification counts remained at their pre-UAT values.
+
+Desktop visual UAT confirmed visible concept/notes, masked source account, parser status, count/total, distinct missing-cover state, and a disabled approval control. The browser-control viewport override did not change the live Chromium viewport, so no mobile screenshot is claimed; responsive CSS and DOM contracts remain covered statically.
+
+DEV had no active Finance profile available for the interactive check. One existing authenticated DEV profile received a narrowly scoped temporary Finance role grant for the UAT and the exact grant was removed immediately afterward; its original role set was revalidated. No Director role was changed.
 
 No real employee data, customer XLSM, bank action, PROD write or N3 behavior is permitted.
 
