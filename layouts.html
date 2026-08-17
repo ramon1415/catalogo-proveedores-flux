@@ -235,7 +235,7 @@
         <div class="form-grid">
           <div class="full-row layout-completion-summary" id="layoutCompletionSummary"></div>
           <label class="full-row">Cuenta origen<select id="layoutCompletionBankAccount"><option value="">Selecciona cuenta origen</option></select></label>
-          <label>Referencia de pago<input id="layoutCompletionReference" type="text" inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" placeholder="Ej. 7, 42 o 40002"><span class="field-hint">De 1 a 5 digitos.</span></label>
+          <label>Referencia de pago<input id="layoutCompletionReference" type="text" placeholder="Captura la referencia de pago"><span id="layoutCompletionReferenceHint" class="field-hint">La referencia depende del tipo de destino del proveedor.</span></label>
           <label>Fecha programada<input id="layoutCompletionDate" type="date"></label>
           <label class="full-row">Concepto de pago<input id="layoutCompletionConcept" type="text" maxlength="120" placeholder="Concepto que aparecera en el layout"></label>
           <div class="full-row layout-completion-impact" id="layoutCompletionImpact"></div>
@@ -383,7 +383,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./layouts.js?v=20260810-layout-review-click-hotfix"></script>
-  <script src="./fase2_request_payment_method_extension.js?v=20260805-brand-verde"></script>
+  <script src="./layouts.js?v=20260817-budget-exception-layout"></script>
+  <script src="./fase2_request_payment_method_extension.js?v=20260817-layout-method-parity"></script>
 </body>
 </html>
