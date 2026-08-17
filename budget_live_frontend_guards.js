@@ -167,7 +167,10 @@
 
       renderBudgetPanel(panel, { tone: "info", title: "Revalidando presupuesto", message: "Consultando disponibilidad actual antes de guardar..." });
       const request = state.currentEditRequestId ? await fetchRequest(state.currentEditRequestId) : null;
-      const result = await revalidateBudget({ ...request, ...fields });
+      const result = await revalidateBudget(
+        { ...request, ...fields },
+        { persistedRequest: request, amountIsBudgetBase: true },
+      );
       renderBudgetPanel(panel, panelModelFromValidation(result, request, "edit"));
 
       if (!result.ok || result.status === "unknown") {
@@ -213,7 +216,10 @@
     }
     renderBudgetPanel(panel, { tone: "info", title: "Revalidando presupuesto", message: "Consultando disponibilidad actual..." });
     const request = requestId ? await fetchRequest(requestId) : null;
-    const result = await revalidateBudget({ ...request, ...fields });
+    const result = await revalidateBudget(
+      { ...request, ...fields },
+      { persistedRequest: request, amountIsBudgetBase: true },
+    );
     renderBudgetPanel(panel, panelModelFromValidation(result, request, "edit"));
   }
 
@@ -307,7 +313,7 @@
 
     if (isExceptionFlow(request)) return true;
 
-    const result = await revalidateBudget(request);
+    const result = await revalidateBudget(request, { persistedRequest: request });
     await renderDetailBudgetSignals(requestId, result, request);
 
     if (!result.ok || result.status === "unknown") {
@@ -342,7 +348,7 @@
       else detail.prepend(panel);
     }
 
-    const result = precomputed || await revalidateBudget(request);
+    const result = precomputed || await revalidateBudget(request, { persistedRequest: request });
     renderBudgetPanel(panel, panelModelFromValidation(result, request, "detail"));
     renderDecisionVisualNotice(detail, request);
 
@@ -603,7 +609,31 @@
     return data || null;
   }
 
-  async function revalidateBudget(request) {
+  const BUDGET_COMMITMENT_STATUSES = new Set([
+    "submitted",
+    "pending_approval",
+    "approved",
+    "finance_validation",
+    "scheduled",
+    "paid",
+  ]);
+
+  function sameBudgetCoordinates(saved, target) {
+    return String(saved?.company_id || "") === String(target?.company_id || "")
+      && String(saved?.cost_center_id || "") === String(target?.cost_center_id || "")
+      && String(saved?.budget_category_id || "") === String(target?.budget_category_id || "")
+      && monthToDate(saved?.budget_month) === monthToDate(target?.budget_month);
+  }
+
+  function ownCommitmentInSelectedBudget(saved, target) {
+    if (!saved || saved.budget_decision !== "aprobable") return 0;
+    if (!BUDGET_COMMITMENT_STATUSES.has(String(saved.status || ""))) return 0;
+    if (!sameBudgetCoordinates(saved, target)) return 0;
+    const rate = saved.exchange_rate == null ? 1 : numberValue(saved.exchange_rate);
+    return numberValue(saved.amount_requested) * rate;
+  }
+
+  async function revalidateBudget(request, { persistedRequest = request, amountIsBudgetBase = false } = {}) {
     const c = client();
     if (!c) return { ok: false, status: "unknown", message: BUDGET_RECHECK_BLOCK_MESSAGE, details: "No hay cliente de datos para revalidar presupuesto." };
     if (!request?.company_id || !request?.cost_center_id || !request?.budget_category_id || !request?.budget_month) {
@@ -639,8 +669,11 @@
     }
 
     const row = pickAvailabilityRow(rows);
-    const amount = numberValue(request.amount_requested);
-    const available = availableAmount(row);
+    const requestRate = request.exchange_rate == null ? 1 : numberValue(request.exchange_rate);
+    const amount = numberValue(request.amount_requested) * (amountIsBudgetBase ? 1 : requestRate);
+    const liveAvailable = availableAmount(row);
+    const ownCommitment = ownCommitmentInSelectedBudget(persistedRequest, request);
+    const available = liveAvailable + ownCommitment;
     const after = available - amount;
     return {
       ok: true,
@@ -648,6 +681,8 @@
       row,
       rows_count: rows.length,
       ambiguous: rows.length > 1,
+      live_available: liveAvailable,
+      own_commitment: ownCommitment,
       amount,
       available,
       after,
@@ -710,7 +745,7 @@
       <p>${escapeHtml(model.message || "")}</p>
       ${hasNumbers ? `
         <div class="budget-live-grid">
-          <div class="budget-live-cell"><span>Disponible vivo</span><b>${escapeHtml(formatCurrency(model.available))}</b></div>
+          <div class="budget-live-cell"><span>Disponible para esta solicitud</span><b>${escapeHtml(formatCurrency(model.available))}</b></div>
           <div class="budget-live-cell"><span>Monto solicitud</span><b>${escapeHtml(formatCurrency(model.amount))}</b></div>
           <div class="budget-live-cell"><span>Despues de operar</span><b>${escapeHtml(formatCurrency(model.after))}</b></div>
         </div>
@@ -782,7 +817,7 @@
           <div class="modal-scroll">
             <div class="budget-live-panel ok">
               <strong>${escapeHtml(request.request_number || "Solicitud")}</strong>
-              <p>Disponible actual: ${escapeHtml(formatCurrency(result.available))}. Monto solicitado: ${escapeHtml(formatCurrency(result.amount))}. Disponible posterior: ${escapeHtml(formatCurrency(result.after))}.</p>
+              <p>Disponible para esta solicitud: ${escapeHtml(formatCurrency(result.available))}. Monto solicitado: ${escapeHtml(formatCurrency(result.amount))}. Disponible posterior: ${escapeHtml(formatCurrency(result.after))}.</p>
             </div>
           </div>
           <div class="modal-actions">
