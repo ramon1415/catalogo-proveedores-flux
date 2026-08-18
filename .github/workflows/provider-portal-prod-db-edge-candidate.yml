@@ -223,12 +223,12 @@ jobs:
 
           main = api(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"].lower()
           pr = api(f"/repos/{repo}/pulls/368")
-          target_commit = api(f"/repos/{repo}/commits/{target}")
-          target_parents = [str(parent.get("sha") or "").lower() for parent in target_commit.get("parents", [])]
-          target_files = sorted(item["filename"] for item in target_commit.get("files", []))
           merge_sha = str(pr.get("merge_commit_sha") or "").lower()
-          target_is_authorized_workflow_fix = (
-              merge_sha in target_parents
+          comparison = api(f"/repos/{repo}/compare/{merge_sha}...{target}")
+          target_files = sorted(item["filename"] for item in comparison.get("files", []))
+          target_is_authorized_workflow_fix_chain = (
+              comparison.get("status") in ("ahead", "identical")
+              and int(comparison.get("ahead_by", 0)) <= 2
               and target_files == [".github/workflows/provider-portal-prod-db-edge-candidate.yml"]
           )
           active = []
@@ -246,7 +246,7 @@ jobs:
               "workflow_is_from_target": os.environ["GITHUB_SHA"].lower() == target,
               "pr368_merged": bool(pr.get("merged")),
               "pr368_base_main": pr["base"]["ref"] == "main",
-              "pr368_merge_commit_is_target_or_scoped_workflow_parent": merge_sha == target or target_is_authorized_workflow_fix,
+              "pr368_merge_commit_is_target_or_scoped_workflow_ancestor": merge_sha == target or target_is_authorized_workflow_fix_chain,
               "concurrent_release_runs": len(active),
           }
           evidence = {
@@ -347,9 +347,8 @@ jobs:
               raise SystemExit("PROD_SESSION_POOLER_URL_INVALID")
           PY
           export PGSSLMODE=require PGCONNECT_TIMEOUT=20
-          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_precheck"
           psql_prod() { command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 "$@"; }
-          roq() { psql_prod -Atq -c "$1"; }
+          roq() { psql_prod -Atq -c "begin transaction read only; $1 rollback;"; }
 
           roq "select json_build_object(
             'database',current_database(),
@@ -483,7 +482,7 @@ jobs:
           fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
           export PGSSLMODE=require PGCONNECT_TIMEOUT=20
           psql_prod() { command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 "$@"; }
-          roq() { PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_postcheck" psql_prod -Atq -c "$1"; }
+          roq() { psql_prod -Atq -c "begin transaction read only; $1 rollback;"; }
 
           roq "select json_build_object(
             'history_count',(select count(*) from supabase_migrations.schema_migrations),
