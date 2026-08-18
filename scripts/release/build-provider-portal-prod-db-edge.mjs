@@ -487,7 +487,7 @@ type EnvReader = (name: string) => string | undefined;
 
 function required(reader: EnvReader, name: string): string {
   const value = reader(name)?.trim() || "";
-  if (!value) throw new Error(`missing_required_secret:${name}`);
+  if (!value) throw new Error("missing_required_secret:" + name);
   return value;
 }
 
@@ -564,7 +564,7 @@ function validEnv(overrides: Record<string, string> = {}) {
 function mustFail(overrides: Record<string, string>, code: string) {
   let failure = "";
   try { readProviderIntakeProdSecurityConfig(validEnv(overrides)); } catch (error) { failure = String(error); }
-  assert(failure.includes(code), `expected ${code}; got ${failure}`);
+  assert(failure.includes(code), "expected " + code + "; got " + failure);
 }
 
 Deno.test("production Edge contract accepts only the exact public boundary", () => {
@@ -779,7 +779,7 @@ import path from "node:path";
 const fail = (message) => { throw new Error(message); };
 const manifest = JSON.parse(fs.readFileSync("docs/ops/provider-portal-prod-runtime-manifest.json", "utf8"));
 const migrationFiles = fs.readdirSync("supabase/migrations").filter((f) => /_provider_portal_prod_.*\.sql$/.test(f)).sort();
-if (migrationFiles.length !== 4) fail(`expected 4 forward migrations; got ${migrationFiles.length}`);
+if (migrationFiles.length !== 4) fail("expected 4 forward migrations; got " + migrationFiles.length);
 const versions = migrationFiles.map((f) => f.slice(0, 14));
 if (new Set(versions).size !== 4 || versions.some((v) => v <= "20260817230000")) fail("invalid forward migration versions");
 const sql = migrationFiles.map((f) => fs.readFileSync(path.join("supabase/migrations", f), "utf8")).join("\n");
@@ -790,28 +790,28 @@ for (const required of [
   "payment_intake_conversion_drafts", "convert_provider_intake_to_payment_request",
   "create_provider_intake_link_v2", "resolve_provider_aware_intake_link_internal",
   "create_provider_aware_intake_internal", "MASTER_CONFIRMED", "CHANGE_DECLARED",
-]) if (!sql.includes(required)) fail(`missing SQL contract: ${required}`);
+]) if (!sql.includes(required)) fail("missing SQL contract: " + required);
 for (const forbidden of [
   "create function public.create_provider_intake_link(",
   "create function public.regenerate_provider_intake_link(",
   "create function public.resolve_provider_intake_link_internal(",
   "notification_outbox", "enqueue_notification", "n8n", "resend",
-]) if (sql.toLowerCase().includes(forbidden.toLowerCase())) fail(`forbidden SQL delta: ${forbidden}`);
+]) if (sql.toLowerCase().includes(forbidden.toLowerCase())) fail("forbidden SQL delta: " + forbidden);
 if (!/default 'disabled'/.test(sql) || !sql.includes("values (true, 'disabled')")) fail("runtime does not fail closed");
 if (!sql.includes("provider_intake_require_emergency_sysadmin_access")) fail("emergency revoke contract missing");
 
 const edge = fs.readdirSync("supabase/functions/provider-intake");
 for (const required of ["index.ts","handler.ts","repository.ts","captcha.ts","cors.ts","files.ts","validation.ts","prod-config.ts","prod-config_test.ts"]) {
-  if (!edge.includes(required)) fail(`missing Edge source: ${required}`);
+  if (!edge.includes(required)) fail("missing Edge source: " + required);
 }
 const edgeText = edge.filter((f) => f.endsWith(".ts")).map((f) => fs.readFileSync(path.join("supabase/functions/provider-intake", f), "utf8")).join("\n");
 for (const required of [
   "INTAKE_ALLOW_QUERY_TOKEN", "INTAKE_ALLOWED_ORIGINS", "CAPTCHA_EXPECTED_HOSTNAME",
   "CAPTCHA_EXPECTED_ACTION", "INTAKE_PRIVACY_NOTICE_URL", "intake-uploads",
   "resolve_provider_aware_intake_link_internal", "create_provider_aware_intake_internal",
-]) if (!edgeText.includes(required)) fail(`missing Edge contract: ${required}`);
+]) if (!edgeText.includes(required)) fail("missing Edge contract: " + required);
 for (const forbidden of ["scsirgbuqjcwoaxfacth", "catalogo-proveedores-flux-git-dev", "Ambiente DEV", "?token=", "notification_outbox", "enqueue_notification", "resend.com"]) {
-  if (edgeText.toLowerCase().includes(forbidden.toLowerCase())) fail(`forbidden Edge delta: ${forbidden}`);
+  if (edgeText.toLowerCase().includes(forbidden.toLowerCase())) fail("forbidden Edge delta: " + forbidden);
 }
 const nonTestEdge = edge.filter((f) => f.endsWith(".ts") && !f.endsWith("_test.ts"))
   .map((f) => fs.readFileSync(path.join("supabase/functions/provider-intake", f), "utf8")).join("\n");
