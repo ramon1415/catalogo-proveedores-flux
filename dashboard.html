@@ -41,6 +41,9 @@
     .panel-header h2 { font-size:13px; font-weight:700; color:var(--text-1); margin:0; }
     .panel-sub { font-size:11px; color:var(--text-3); margin-top:1px; }
     .dash-grid { display:grid; grid-template-columns:1.3fr .7fr; gap:12px; }
+    /* Vista anual: ocultar lo operativo desde el primer paint (sin flash) */
+    .anual-boot #kpiGrid, .anual-boot #tabsBlock, .anual-boot #dashGrid, .anual-boot #periodLabel,
+    .anual-boot #expensesTab, .anual-boot #ytdTab, .anual-boot #incomeTab, .anual-boot #cashTab, .anual-boot #incidentsTab { display:none !important; }
     /* Modo histórico */
     .compact-rows tbody td { padding:6px 14px; }
     .compact-rows tfoot td { padding:8px 14px; border-top:1px solid var(--border-strong); }
@@ -68,6 +71,7 @@
     .chart-legend-item { display:flex; align-items:center; gap:5px; }
     .chart-legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
   </style>
+  <script>if (new URLSearchParams(location.search).get("view") === "anual") document.documentElement.classList.add("anual-boot")</script>
 </head>
 <body>
   <div class="app-shell">
@@ -433,6 +437,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260818-anual"></script>
+  <script src="./dashboard.js?v=20260818-anual2"></script>
 </body>
 </html>

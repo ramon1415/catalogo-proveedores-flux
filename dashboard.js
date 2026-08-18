@@ -145,8 +145,8 @@ async function loadDashboard() {
     renderAll()
     const lu = document.getElementById("lastUpdated")
     if (lu) lu.textContent = `Ultima actualizacion: ${fmtDateTime(new Date())}`
-    // load yearly chart in background
-    loadYearlyChart()
+    // load yearly chart in background (solo vista operativa)
+    if (!state.anualMode) loadYearlyChart()
   } catch (err) {
     showToast("Error al cargar", friendlyError(err), "danger")
   } finally {
@@ -625,6 +625,12 @@ function drawChart(labels, presupuesto, ejecutado, esperado, cobrado) {
 // ─── Histórico (años anteriores, fuente historical_actuals/CONTPAQ) ─────────
 
 async function initAnualMode() {
+  document.title = "Dashboard anual | Flux Operadora"
+  const h1 = document.querySelector(".page-header h1")
+  if (h1) h1.textContent = "Dashboard anual"
+  const sub = document.querySelector(".page-header p")
+  if (sub) sub.textContent = "Ejercicios históricos: ingresos y egresos contables por año, mes y cuenta."
+  await loadHistMapeo()
   const sel = document.getElementById("histYearSelect")
   document.getElementById("histYearWrap")?.classList.remove("hidden")
   document.getElementById("histExitBtn")?.classList.remove("hidden")
@@ -650,6 +656,24 @@ async function initAnualMode() {
   } catch (err) {
     showToast("Error", friendlyError(err), "danger")
   }
+}
+
+async function loadHistMapeo() {
+  // Estructura tipo presupuesto: cuenta CONTPAQ → partida/grupo del forecast.
+  // Si las tablas del mapper no existen aún (DDL pendiente), cae a vista por cuenta.
+  state.histMapeo = new Map()
+  try {
+    const [mapR, catR] = await Promise.all([
+      supabaseClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code").limit(2000),
+      supabaseClient.from("budget_categories").select("id,name,category").limit(500),
+    ])
+    if (mapR.error || catR.error) return
+    const cats = new Map((catR.data || []).map((c) => [c.id, c]))
+    for (const m of mapR.data || []) {
+      const cat = cats.get(m.budget_category_id)
+      if (cat) state.histMapeo.set(m.contpaq_account_code, { partida: cat.name, grupo: cat.category || "Sin grupo" })
+    }
+  } catch (_) { /* mapper aún no instalado en esta base */ }
 }
 
 async function enterAllYears() {
@@ -882,35 +906,70 @@ function renderHistCuentas() {
   const titleEl = document.getElementById("histCuentasTitle")
   if (titleEl) titleEl.textContent = titulo
   const fmtK = (v) => (v === 0 ? "—" : moneyFmt.format(v))
-  const filaCuenta = ([code, c]) => `<tr>
-    <td class="hist-cuenta-col" title="${safe(code)}"><span class="cell-main">${safe(c.nombre)}</span></td>
-    ${periodos.map((k) => `<td style="text-align:right;white-space:nowrap">${fmtK(Math.round((c.meses[k] || 0) * 100) / 100)}</td>`).join("")}
-    <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(Math.round(c.total * 100) / 100)}</td>
+  const r2 = (v) => Math.round(v * 100) / 100
+  const celdas = (obj) => periodos.map((k) => `<td style="text-align:right;white-space:nowrap">${fmtK(r2(obj[k] || 0))}</td>`).join("")
+
+  const fila = (nombre, meta, meses, total, opts = {}) => `<tr style="${opts.style || ""}">
+    <td class="hist-cuenta-col" ${opts.title ? `title="${safe(opts.title)}"` : ""}>${opts.pad ? '<span style="display:inline-block;width:14px"></span>' : ""}<span class="cell-main">${safe(nombre)}</span>${meta ? `<span class="muted-line">${safe(meta)}</span>` : ""}</td>
+    ${celdas(meses)}
+    <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(r2(total))}</td>
   </tr>`
-  const seccion = (tituloSec, fam, colorVar) => {
-    const lista = [...cuentas.entries()].filter(([, c]) => c.fam === fam).sort((a, b) => b[1].total - a[1].total)
-    if (!lista.length) return ""
-    const sub = periodos.map((k) => lista.reduce((s, [, c]) => s + (c.meses[k] || 0), 0))
-    const tot = lista.reduce((s, [, c]) => s + c.total, 0)
-    return `
-      <tr><td colspan="${periodos.length + 2}" style="padding:9px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${colorVar};background:var(--bg-hover)">${tituloSec}</td></tr>
-      ${lista.map(filaCuenta).join("")}
-      <tr style="font-weight:800">
-        <td class="hist-cuenta-col">Total ${tituloSec.toLowerCase()}</td>
-        ${sub.map((v) => `<td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(v * 100) / 100)}</td>`).join("")}
-        <td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(tot * 100) / 100)}</td>
-      </tr>`
+
+  const headerRow = (texto, colorVar) =>
+    `<tr><td colspan="${periodos.length + 2}" style="padding:9px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${colorVar};background:var(--bg-hover)">${texto}</td></tr>`
+
+  // ── Ingresos: por cuenta (sin estructura de presupuesto) ──
+  const listaIng = [...cuentas.entries()].filter(([, c]) => c.fam === "4").sort((a, b) => b[1].total - a[1].total)
+  let htmlIng = ""
+  if (listaIng.length) {
+    const sub = {}; let tot = 0
+    for (const [, c] of listaIng) { tot += c.total; for (const k of periodos) sub[k] = (sub[k] || 0) + (c.meses[k] || 0) }
+    htmlIng = headerRow("Ingresos", "var(--emerald)") +
+      listaIng.map(([code, c]) => fila(c.nombre, null, c.meses, c.total, { title: code })).join("") +
+      fila("Total ingresos", null, sub, tot, { style: "font-weight:800" })
   }
+
+  // ── Egresos: estructura del presupuesto (grupo → partida) usando el mapeo ──
+  const mapeo = state.histMapeo || new Map()
+  const grupos = new Map() // grupo → { partidas: Map(partida → {meses,total}), meses, total }
+  const sinMapear = []
+  for (const [code, c] of [...cuentas.entries()].filter(([, x]) => x.fam === "6")) {
+    const destino = mapeo.get(code.replace(/-/g, ""))
+    if (!destino) { sinMapear.push([code, c]); continue }
+    const g = grupos.get(destino.grupo) || { partidas: new Map(), meses: {}, total: 0 }
+    const pa = g.partidas.get(destino.partida) || { meses: {}, total: 0 }
+    for (const k of periodos) { const v = c.meses[k] || 0; pa.meses[k] = (pa.meses[k] || 0) + v; g.meses[k] = (g.meses[k] || 0) + v }
+    pa.total += c.total; g.total += c.total
+    g.partidas.set(destino.partida, pa)
+    grupos.set(destino.grupo, g)
+  }
+  let htmlEgr = ""
+  let totEgr = 0; const subEgr = {}
+  const acum = (meses, total) => { totEgr += total; for (const k of periodos) subEgr[k] = (subEgr[k] || 0) + (meses[k] || 0) }
+  if (grupos.size) {
+    htmlEgr += headerRow("Egresos · estructura del presupuesto", "var(--accent-text)")
+    for (const [grupo, g] of [...grupos.entries()].sort((a, b) => b[1].total - a[1].total)) {
+      htmlEgr += fila(grupo, null, g.meses, g.total, { style: "font-weight:800;background:var(--bg-hover)" })
+      for (const [partida, pa] of [...g.partidas.entries()].sort((a, b) => b[1].total - a[1].total)) {
+        htmlEgr += fila(partida, null, pa.meses, pa.total, { pad: true })
+      }
+      acum(g.meses, g.total)
+    }
+  }
+  if (sinMapear.length) {
+    htmlEgr += headerRow(grupos.size ? "Egresos sin mapear a partida" : "Egresos", "var(--amber)")
+    sinMapear.sort((a, b) => b[1].total - a[1].total)
+    for (const [code, c] of sinMapear) { htmlEgr += fila(c.nombre, grupos.size ? "sin partida" : null, c.meses, c.total, { title: code }); acum(c.meses, c.total) }
+  }
+  if (htmlEgr) htmlEgr += fila("Total egresos", null, subEgr, totEgr, { style: "font-weight:800" })
+
   tabla.innerHTML = `
     <thead><tr>
-      <th class="hist-cuenta-col">Cuenta</th>
+      <th class="hist-cuenta-col">Cuenta / partida</th>
       ${etiquetas.map((l) => `<th style="text-align:right;text-transform:capitalize">${l}</th>`).join("")}
       <th style="text-align:right">Total</th>
     </tr></thead>
-    <tbody>
-      ${seccion("Ingresos", "4", "var(--emerald)")}
-      ${seccion("Egresos", "6", "var(--accent-text)")}
-    </tbody>`
+    <tbody>${htmlIng}${htmlEgr}</tbody>`
 }
 
 function setHistLegend(on) {
