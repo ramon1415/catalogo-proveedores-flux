@@ -463,7 +463,7 @@ const t4 = `-- Provider Portal PROD forward chain T4/4: final provider-aware lin
 
 const t2Final = t2.replace(
   /\ngrant execute on function public\.attach_provider_intake_files_internal[\s\S]*?grant execute on function public\.set_provider_intake_match[^;]*;\n/,
-  String.raw`
+  () => String.raw`
 do $$
 declare r record;
 begin
@@ -483,7 +483,7 @@ $$;
 
 const t3Final = t3.replace(
   /\ngrant execute on function public\.get_provider_intake_payment_draft_context[\s\S]*?grant execute on function public\.convert_provider_intake_to_payment_request[^;]*;\n/,
-  String.raw`
+  () => String.raw`
 do $$
 declare r record;
 begin
@@ -499,7 +499,7 @@ $$;
 
 const t4Final = t4.replace(
   /\ngrant execute on function public\.confirm_provider_intake_master_banking[\s\S]*?grant execute on function public\.create_provider_aware_intake_internal[^;]*;\n/,
-  String.raw`
+  () => String.raw`
 do $$
 declare r record;
 begin
