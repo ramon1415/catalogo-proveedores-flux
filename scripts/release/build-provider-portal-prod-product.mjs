@@ -655,7 +655,7 @@ async function main() {
   res = await runCase(routed(true))
   assert.equal(res.statusCode, 200)
   assert.equal(res.payload.expires_in, 120)
-  assert.match(res.payload.signed_url, /^https:\/\/ucantptjhwttexzmslvm\.supabase\.co/)
+  assert.match(res.payload.url, /^https:\/\/ucantptjhwttexzmslvm\.supabase\.co/)
   console.log("PROVIDER_INTAKE_FILE_API_CONTRACT_PASS=true")
 }
 main().catch((error) => { console.error(error); process.exitCode = 1 })
