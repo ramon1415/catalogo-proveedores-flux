@@ -240,6 +240,7 @@ try {
     { key: "income", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=income", icon: "I", label: "Ingresos", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "provider-intakes", section: "Operacion", file: "provider_intakes.html", href: "./provider_intakes.html", icon: "T", label: "Solicitudes de proveedores", groups: [ROLE_GROUPS.SYSADMIN], sensitive: true, runtimeGate: "provider-intake" },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approval-batches", section: "General", file: "approval_batches.html", href: "./approval_batches.html", icon: "C", label: "Cortes semanales", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
@@ -257,6 +258,8 @@ try {
     profile: null,
     roles: [],
     group: ROLE_GROUPS.OPERATION,
+    providerIntakeAccess: false,
+    providerIntakeMode: "unknown",
   }
 
   let rolePromise = null
@@ -273,6 +276,9 @@ try {
       return list.some((role) => roleState.roles.includes(normalizeRole(role)))
     },
     isAdminFinance: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN].includes(roleState.group),
+    canAccessProviderIntakes: () => roleState.providerIntakeAccess === true,
+    canTriageProviderIntakes: () => roleState.providerIntakeAccess === true,
+    getProviderIntakeMode: () => roleState.providerIntakeMode,
     canApprove: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canManageProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION].includes(roleState.group),
     canCreateProviders: () => [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION].includes(roleState.group),
@@ -527,6 +533,8 @@ try {
         roleState.profile = null
         roleState.roles = []
         roleState.group = ROLE_GROUPS.OPERATION
+        roleState.providerIntakeAccess = false
+        roleState.providerIntakeMode = "unknown"
         clearRoleStateCache()
         roleState.loaded = true
         return roleState
@@ -535,14 +543,32 @@ try {
       roleState.profile = await resolveProfile(client, session)
       roleState.roles = await resolveRoles(client, roleState.profile)
       roleState.group = groupFromRoles(roleState.roles)
+      const providerIntakeGate = await resolveProviderIntakeModuleAccess(client)
+      roleState.providerIntakeAccess = providerIntakeGate.allowed
+      roleState.providerIntakeMode = providerIntakeGate.mode
       persistRoleStateCache()
     } catch (_) {
       roleState.roles = []
       roleState.group = ROLE_GROUPS.OPERATION
+      roleState.providerIntakeAccess = false
+      roleState.providerIntakeMode = "unknown"
     }
 
     roleState.loaded = true
     return roleState
+  }
+
+  async function resolveProviderIntakeModuleAccess(client) {
+    try {
+      const { data, error } = await client.rpc("get_provider_intake_module_access")
+      const mode = String(data?.mode || "unknown")
+      if (error || !["disabled", "sysadmin_only", "full"].includes(mode)) {
+        return { allowed: false, mode: "unknown" }
+      }
+      return { allowed: data?.allowed === true, mode }
+    } catch (_) {
+      return { allowed: false, mode: "unknown" }
+    }
   }
 
   async function resolveProfile(client, session) {
@@ -597,7 +623,8 @@ try {
   function modulesForCurrentRole() {
     if (!roleState.loaded) return []
     const group = roleState.group
-    return modules.filter((item) => item.groups.includes(group))
+    return modules.filter((item) => item.groups.includes(group)
+      && (item.runtimeGate !== "provider-intake" || roleState.providerIntakeAccess === true))
   }
 
   function currentModuleKey() {
@@ -624,7 +651,7 @@ try {
 
   function defaultLandingForRole() {
     if (roleState.group === ROLE_GROUPS.PENDING) return "pending.html"
-    const first = modules.find((m) => !m.hidden && m.groups.includes(roleState.group))
+    const first = modulesForCurrentRole().find((m) => !m.hidden)
     return first ? first.file : "solicitudes.html"
   }
 

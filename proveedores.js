@@ -6,6 +6,10 @@ let currentProfileId = null
 let currentCsfPath = null
 let providerCsfUpload = null
 let providerSaveInProgress = false
+const providerQuery = new URLSearchParams(window.location.search)
+const intakeProposalId = providerQuery.get("intake_id")
+const intakeProposalReturn = providerQuery.get("return") === "provider_intakes"
+let intakeProposal = null
 
 const rootElement = document.documentElement
 const tableBody = document.getElementById("suppliersTableBody")
@@ -46,24 +50,78 @@ async function init() {
   document.getElementById("metodo_pago").addEventListener("change", handlePaymentMethodChange)
   document.getElementById("destination_type")?.addEventListener("change", handleDestinationTypeChange)
   document.getElementById("providerCsfLink")?.addEventListener("click", openCurrentCsf)
+  document.getElementById("applyIntakeProposalBtn")?.addEventListener("click", () => applyIntakeProposal(true))
 
   searchInput.addEventListener("input", renderTable)
   statusFilter.addEventListener("change", renderTable)
   form.addEventListener("submit", saveSupplier)
 
   await loadSuppliers()
-  openProviderFromQuery()
+  await openProviderFromQuery()
 }
 
-function openProviderFromQuery() {
-  const providerId = new URLSearchParams(window.location.search).get("provider_id")
-  if (!providerId) return
+async function openProviderFromQuery() {
+  const providerId = providerQuery.get("provider_id")
+  if (!providerId && !intakeProposalId) return
+  if (intakeProposalId) await loadIntakeProposal()
+  if (!providerId) {
+    if (!canManageProviders()) {
+      showToast("Sin permiso", "La administracion de proveedores corresponde a un usuario interno autorizado.", "warning")
+      return
+    }
+    openCreateModal()
+    applyIntakeProposal(false)
+    return
+  }
   const provider = proveedores.find((item) => item.id === providerId)
   if (!provider) {
     showToast("Proveedor no encontrado", "El proveedor solicitado ya no esta disponible en el catalogo.", "warning")
     return
   }
   window.openEditModal(providerId)
+  if (intakeProposal) showIntakeProposal(true)
+}
+
+async function loadIntakeProposal() {
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_provider_proposal", {
+    p_payment_intake_id: intakeProposalId,
+  })
+  if (error || !data?.payment_intake_id) {
+    showToast("Propuesta no disponible", "No fue posible cargar los datos declarados del intake.", "warning")
+    return
+  }
+  intakeProposal = data
+}
+
+function showIntakeProposal(requireExplicitApply) {
+  if (!intakeProposal) return
+  const panel = document.getElementById("intakeProposal")
+  panel.hidden = false
+  document.getElementById("intakeProposalFolio").textContent = intakeProposal.public_folio || "Intake de proveedor"
+  document.getElementById("applyIntakeProposalBtn").hidden = !requireExplicitApply
+}
+
+function applyIntakeProposal(requireConfirmation) {
+  if (!intakeProposal) return
+  if (requireConfirmation && !confirm("Aplicar los datos declarados como propuesta editable? Ningun cambio se guardara hasta que confirmes Guardar proveedor.")) return
+  const hasBankData = Boolean(intakeProposal.bank_name || intakeProposal.bank_account || intakeProposal.bank_clabe || intakeProposal.beneficiary_name)
+  setValue("alias", intakeProposal.provider_name)
+  setValue("nombre_completo", intakeProposal.provider_name)
+  setValue("rfc", intakeProposal.provider_rfc)
+  setValue("email", intakeProposal.provider_email)
+  setValue("telefono", intakeProposal.provider_phone)
+  setValue("banco", intakeProposal.bank_name)
+  setValue("cuenta_bancaria", intakeProposal.bank_account)
+  setValue("clabe", intakeProposal.bank_clabe)
+  setValue("beneficiary_name", intakeProposal.beneficiary_name)
+  if (hasBankData) {
+    setValue("metodo_pago", "Transferencia bancaria")
+    setValue("destination_type", intakeProposal.bank_clabe ? "clabe" : "cuenta")
+  }
+  handlePaymentMethodChange()
+  handleDestinationTypeChange()
+  showIntakeProposal(false)
+  document.getElementById("intakeProposalCopy").textContent = "Propuesta cargada en el formulario. Revisa, corrige, completa o elimina cualquier valor antes de guardar."
 }
 
 function setupTheme() {
@@ -401,6 +459,12 @@ async function persistSupplier(operation) {
     }
   }
 
+  if (intakeProposalReturn && intakeProposalId && providerId && !csfUploadFailed) {
+    const params = new URLSearchParams({ intake_id: intakeProposalId, provider_candidate_id: providerId })
+    window.location.assign(`./provider_intakes.html?${params.toString()}`)
+    return
+  }
+
   form.reset()
   resetCsfControls()
   currentEditingId = null
@@ -499,6 +563,7 @@ function closeModal() {
   currentEditingId = null
   currentCsfPath = null
   resetCsfControls()
+  document.getElementById("intakeProposal").hidden = true
 }
 
 function resetCsfControls() {
