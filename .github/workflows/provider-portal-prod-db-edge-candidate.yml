@@ -347,6 +347,7 @@ jobs:
             'transaction_read_only',current_setting('transaction_read_only')::boolean,
             'history_count',(select count(*) from supabase_migrations.schema_migrations),
             'history_head',(select max(version) from supabase_migrations.schema_migrations),
+            'foundation_025_count',(select count(*) from supabase_migrations.schema_migrations where version='20260805010004' and name='025_provider_intake_foundation'),
             'target_history_count',(select count(*) from supabase_migrations.schema_migrations where version in ('20260818001151','20260818001153','20260818001156','20260818001158')),
             'foundation_tables',json_build_object(
               'intake_links',to_regclass('public.intake_links') is not null,
@@ -355,6 +356,13 @@ jobs:
               'payment_intake_events',to_regclass('public.payment_intake_events') is not null),
             'runtime_control_absent',to_regclass('public.provider_intake_runtime_control') is null,
             'drafts_absent',to_regclass('public.payment_intake_conversion_drafts') is null,
+            'provider_intake_function_count',(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname ilike '%provider_intake%'),
+            'provider_business_rows',json_build_object(
+              'intake_links',(select count(*) from public.intake_links),
+              'payment_intake',(select count(*) from public.payment_intake),
+              'payment_intake_files',(select count(*) from public.payment_intake_files),
+              'payment_intake_events',(select count(*) from public.payment_intake_events),
+              'intake_storage_objects',(select count(*) from storage.objects where bucket_id='intake-uploads')),
             'intake_bucket_exact',(select count(*)=1 from storage.buckets where id='intake-uploads' and public=false and file_size_limit=10485760 and allowed_mime_types=array['application/pdf','application/xml','text/xml','image/jpeg','image/png','image/webp']::text[]),
             'public_intake_storage_policies',(select count(*) from pg_policies where schemaname='storage' and tablename='objects' and (coalesce(qual,'') ilike '%intake-uploads%' or coalesce(with_check,'') ilike '%intake-uploads%') and ('anon'=any(roles) or 'public'=any(roles)))
           );" > "$EVIDENCE_DIR/prod-prewrite.json"
@@ -368,10 +376,13 @@ jobs:
               and value["transaction_read_only"]
               and value["history_count"] == 70
               and value["history_head"] == os.environ["EXPECTED_PRE_HEAD"]
+              and value["foundation_025_count"] == 1
               and value["target_history_count"] == 0
               and all(value["foundation_tables"].values())
               and value["runtime_control_absent"]
               and value["drafts_absent"]
+              and value["provider_intake_function_count"] == 0
+              and all(count == 0 for count in value["provider_business_rows"].values())
               and value["intake_bucket_exact"]
               and value["public_intake_storage_policies"] == 0
           )
