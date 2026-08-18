@@ -70,6 +70,9 @@ const allowedEventTypes = new Set([
   "payment_receipt.linked",
 ]);
 
+const EMAIL_LOGO_URL = "https://flux.quantta.mx/assets/email/flux-logo-email-white.png";
+const EMAIL_LOGO_HTML = `<img src="${EMAIL_LOGO_URL}" width="110" alt="Flux" style="display:block;width:110px;max-width:100%;height:auto;border:0;" />`;
+
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -361,7 +364,7 @@ function renderPaymentRequestCreatedEmail(
         <td align="center" style="padding:24px 12px 18px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
             <tr>
-              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
+              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;">${EMAIL_LOGO_HTML}</td>
             </tr>
             <tr>
               <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;">
@@ -461,7 +464,7 @@ function renderReceiptLinkedEmail(
         <td align="center" style="padding:24px 12px 18px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
             <tr>
-              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
+              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;">${EMAIL_LOGO_HTML}</td>
             </tr>
             <tr>
               <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;">
