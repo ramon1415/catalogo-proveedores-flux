@@ -639,6 +639,16 @@ async function main() {
   assert.equal(res.statusCode, 403)
   assert.equal(calls, 2)
 
+  calls = 0
+  res = await runCase(async (url) => {
+    calls += 1
+    if (url.includes("/auth/v1/user")) return reply({ id: UUIDS.user })
+    if (url.includes("get_provider_intake_module_access")) return reply({ mode: "disabled", allowed: true })
+    throw new Error("unexpected fetch")
+  })
+  assert.equal(res.statusCode, 403)
+  assert.equal(calls, 2)
+
   const routed = (fileFound = true) => async (url) => {
     if (url.includes("/auth/v1/user")) return reply({ id: UUIDS.user })
     if (url.includes("get_provider_intake_module_access")) return reply({ mode: "sysadmin_only", allowed: true })
