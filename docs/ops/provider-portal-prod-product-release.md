@@ -1,8 +1,8 @@
 # Provider Portal â€” SYSADMIN-only PROD pilot UI candidate
 
-- Build base: `70fd10bacea6a9f7b32a36b67906c598f96f39e0`.
+- Build base: `da196b3e28a445ef00941563b07e6d67c25a54ff`.
 - Selective product source: DEV `c91faf703a79c02d6e9ef21a7b07ea9a0af76a91`.
-- Backend prerequisite: Draft PR A #368 and its T1â†’T4 chain.
+- Backend foundation: PR A #368 is already merged in this `main` baseline; activation remains a separate gate.
 - Internal access is resolved by `get_provider_intake_module_access`; unknown/error hides and denies.
 - The public provider route needs no Flux login and accepts the token only from `#token=`.
 - Notification release delta: **0**.

@@ -77,17 +77,10 @@ async function initSolicitudesPage() {
     setDefaultMonth();
     updateSummaryPanel();
     await loadPaymentRequests();
-    openRequestFromUrl();
   } catch (error) {
     showMessage(error.message || "No fue posible cargar la pantalla.", true);
     showToast("No fue posible iniciar", friendlyError(error), "error");
   }
-}
-
-function openRequestFromUrl() {
-  const requestId = new URLSearchParams(window.location.search).get("request_id");
-  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return;
-  if (paymentRequests.some(request => request.id === requestId)) openRequestDetail(requestId);
 }
 
 function cacheDom() {
@@ -733,22 +726,53 @@ function statusMatches(request, filter) {
   return request.status === filter;
 }
 
+function isDefaultRequestFilterState(filters = {}) {
+  return String(filters.search || "").trim() === "" &&
+    (filters.status || "activas") === "activas" &&
+    (filters.budget || "todos") === "todos" &&
+    (filters.company || "todos") === "todos";
+}
+
+function currentRequestFilterState() {
+  return {
+    search: dom.searchInput?.value || "",
+    status: dom.statusFilter?.value || "activas",
+    budget: dom.budgetDecisionFilter?.value || "todos",
+    company: dom.companyFilter?.value || "todos",
+  };
+}
+
+window.FluxPaymentRequestsView = Object.freeze({
+  activeStatuses: Object.freeze([...ACTIVE_REQUEST_STATUSES]),
+  isActiveRequest,
+  statusMatches,
+  isDefaultFilterState: isDefaultRequestFilterState,
+  renderFilterState,
+});
+
 function isExceptionRequest(request) {
   return request?.budget_decision === "bloqueado" || request?.is_extraordinary_adjustment === true;
 }
 
 function hasActiveFilters() {
-  return Boolean(dom.searchInput.value.trim()) ||
-    dom.statusFilter.value !== "todos" ||
-    dom.budgetDecisionFilter.value !== "todos" ||
-    dom.companyFilter.value !== "todos";
+  return !isDefaultRequestFilterState(currentRequestFilterState());
 }
 
 function renderFilterState() {
   const activeParts = [];
 
+  if (isDefaultRequestFilterState(currentRequestFilterState())) {
+    dom.filterSummary.classList.add("hidden");
+    dom.filterSummaryText.textContent = "Vista filtrada";
+    dom.totalCard?.classList.add("active");
+    dom.approvableCard?.classList.remove("active");
+    dom.exceptionsCard?.classList.remove("active");
+    dom.paidCard?.classList.remove("active");
+    return;
+  }
+
   if (dom.searchInput.value.trim()) activeParts.push("Busqueda");
-  if (dom.statusFilter.value !== "todos") activeParts.push(STATUS_FILTER_LABELS[dom.statusFilter.value] || `Estatus: ${dom.statusFilter.value}`);
+  if (dom.statusFilter.value !== "activas") activeParts.push(STATUS_FILTER_LABELS[dom.statusFilter.value] || `Estatus: ${dom.statusFilter.value}`);
   if (dom.budgetDecisionFilter.value === "aprobable") activeParts.push("Aprobables");
   if (dom.budgetDecisionFilter.value === "excepciones") activeParts.push("Excepciones presupuestales");
   if (dom.companyFilter.value !== "todos") {

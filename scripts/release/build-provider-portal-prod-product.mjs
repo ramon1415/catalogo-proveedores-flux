@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const SOURCE_MAIN_SHA = "70fd10bacea6a9f7b32a36b67906c598f96f39e0";
+const SOURCE_MAIN_SHA = "da196b3e28a445ef00941563b07e6d67c25a54ff";
 const SOURCE_DEV_SHA = "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91";
 const PROD_PROJECT = "ucantptjhwttexzmslvm";
 const CANDIDATE_MANIFEST = "docs/ops/provider-portal-prod-product-candidate.json";
@@ -187,39 +187,30 @@ function applyIntakeProposal(requireConfirmation) {
   write("proveedores.js", js);
 }
 
-function integrateRequestDeepLink() {
+function reconcileRequestsIntegration() {
   let html = fs.readFileSync("solicitudes.html", "utf8");
-  html = html.replace(/\.\/solicitudes\.js\?v=[^"]+/, "./solicitudes.js?v=20260818-provider-portal-prod");
+  html = html
+    .replace(/\.\/config\.js\?v=[^"]+/, "./config.js?v=20260818-provider-portal-reconciled")
+    .replace(/\.\/solicitudes\.js\?v=[^"]+/, "./solicitudes.js?v=20260818-default-active");
   write("solicitudes.html", html);
 
   let js = fs.readFileSync("solicitudes.js", "utf8");
-  js = replaceOnce(
-    js,
-    "    await loadPaymentRequests();\n  } catch (error) {",
-    "    await loadPaymentRequests();\n    openRequestFromUrl();\n  } catch (error) {",
-    "converted request deep link load",
-  );
-  js = replaceOnce(
-    js,
+  js = js.replace("    openRequestFromUrl();\n", "");
+  js = js.replace(
+    /\nfunction openRequestFromUrl\(\) \{[\s\S]*?\n\}\n\nfunction cacheDom\(\) \{/,
     "\nfunction cacheDom() {",
-    `
-function openRequestFromUrl() {
-  const requestId = new URLSearchParams(window.location.search).get("request_id");
-  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return;
-  if (paymentRequests.some(request => request.id === requestId)) openRequestDetail(requestId);
-}
-
-function cacheDom() {`,
-    "converted request deep link function",
   );
+  if (js.includes("openRequestFromUrl")) {
+    throw new Error("duplicate converted request deep-link handler remains");
+  }
   write("solicitudes.js", js);
 }
 
 const firstBuild = !fs.existsSync(CANDIDATE_MANIFEST);
 if (firstBuild) {
   integrateProviderProposal();
-  integrateRequestDeepLink();
 }
+reconcileRequestsIntegration();
 
 for (const file of [
   "solicitar.html",
@@ -517,7 +508,7 @@ import { execFileSync } from "node:child_process";
 const fail = (message) => { throw new Error(message); };
 const read = (file) => fs.readFileSync(file, "utf8");
 const manifest = JSON.parse(read("docs/ops/provider-portal-prod-product-candidate.json"));
-const changed = execFileSync("git", ["diff", "--name-only", "70fd10bacea6a9f7b32a36b67906c598f96f39e0"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+const changed = execFileSync("git", ["diff", "--name-only", "${SOURCE_MAIN_SHA}"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 const allowed = new Set([
   ".github/workflows/provider-portal-prod-product-candidate.yml",
   "api/provider-intake-file-url.js", "api/runtime-config.js", "config.js",
@@ -528,6 +519,8 @@ const allowed = new Set([
   "scripts/release/build-provider-portal-prod-product.mjs",
   "scripts/qa/provider-portal-prod-product-contract.test.mjs",
   "scripts/qa/provider-intake-file-api-contract.test.cjs",
+  "scripts/qa/solicitudes-default-active-view-contract.test.mjs",
+  "scripts/qa/layout-budget-exception-reference-contract.test.mjs",
   "docs/ops/provider-portal-prod-product-release.md",
   "docs/ops/provider-portal-prod-product-candidate.json",
 ]);
@@ -576,10 +569,24 @@ if (fileApi.indexOf("get_provider_intake_module_access") > fileApi.indexOf("paym
 if (!read("proveedores.js").includes("save_provider_catalog_with_payment_execution_data")) fail("canonical provider save RPC regressed");
 if (!read("proveedores.js").includes("get_provider_intake_provider_proposal")) fail("provider-new proposal integration missing");
 if (!read("solicitudes.js").includes("create_payment_request_with_extraordinary_intent")) fail("normal request creator regressed");
-if (!read("solicitudes.js").includes("openRequestFromUrl")) fail("converted SOL deep link missing");
+const solicitudes = read("solicitudes.js");
+const workboard = read("solicitudes_workboard_extension.js");
+const batchExecution = read("solicitudes_batch_execution.js");
+const requestIdHandler = /new URLSearchParams\(window\.location\.search\)\.get\("request_id"\)/g;
+const requestIdHandlerCount = [solicitudes, workboard, batchExecution]
+  .reduce((count, source) => count + (source.match(requestIdHandler)?.length || 0), 0);
+if (requestIdHandlerCount !== 1 || !/new URLSearchParams\(window\.location\.search\)\.get\("request_id"\)/.test(batchExecution)) fail("converted SOL deep link handler is not canonical and unique");
+for (const [file, source] of [["solicitudes.js", solicitudes], ["solicitudes_workboard_extension.js", workboard], ["solicitudes_batch_execution.js", batchExecution]]) {
+  const mainSource = execFileSync("git", ["show", manifest.generated_from_main_sha + ":" + file], { encoding: "utf8" });
+  if (source.replace(/\r\n/g, "\n") !== mainSource.replace(/\r\n/g, "\n")) fail("Solicitudes main contract drifted: " + file);
+}
+if (!solicitudes.includes('status: dom.statusFilter?.value || "activas"')) fail("default active request filter regressed");
+if (!workboard.includes('view: "default"') || workboard.includes('view: "attention",')) fail("legacy attention view restored");
+if (!workboard.includes("window.FluxPaymentRequestsView?.statusMatches")) fail("KPI/table active-status contract disconnected");
+if (!read("solicitudes.html").includes('config.js?v=20260818-provider-portal-reconciled')) fail("combined config cache buster missing");
 
 for (const [file, expected] of Object.entries(manifest.unchanged_main_sha256)) {
-  const actual = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const actual = crypto.createHash("sha256").update(fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n")).digest("hex");
   if (actual !== expected) fail("normal Flux regression hash changed: " + file);
 }
 if (manifest.provider_intake_notification_release_delta !== 0 || manifest.legal_content_approval_pending !== true) fail("release manifest P0 state invalid");
@@ -698,7 +705,7 @@ write("docs/ops/provider-portal-prod-product-release.md", [
   "",
   "- Build base: `" + SOURCE_MAIN_SHA + "`.",
   "- Selective product source: DEV `" + SOURCE_DEV_SHA + "`.",
-  "- Backend prerequisite: Draft PR A #368 and its T1â†’T4 chain.",
+  "- Backend foundation: PR A #368 is already merged in this `main` baseline; activation remains a separate gate.",
   "- Internal access is resolved by `get_provider_intake_module_access`; unknown/error hides and denies.",
   "- The public provider route needs no Flux login and accepts the token only from `#token=`.",
   "- Notification release delta: **0**.",
@@ -715,4 +722,3 @@ write("docs/ops/provider-portal-prod-product-release.md", [
 ].join("\n"));
 
 console.log(JSON.stringify({ generated: true, firstBuild, sourceMain: SOURCE_MAIN_SHA, sourceDev: SOURCE_DEV_SHA }));
-

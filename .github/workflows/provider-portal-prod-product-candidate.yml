@@ -42,6 +42,7 @@ jobs:
 
       - name: Fetch pinned semantic sources
         run: |
+          git fetch --no-tags origin da196b3e28a445ef00941563b07e6d67c25a54ff
           git fetch --no-tags origin c91faf703a79c02d6e9ef21a7b07ea9a0af76a91
           git fetch --no-tags origin b574010bd4164e7d08aabb01044c50aa353db8ce
           git fetch --no-tags origin 2512f834c0632884f8596f74e8da3e28fbef4d20
@@ -72,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only 70fd10bacea6a9f7b32a36b67906c598f96f39e0)"
+          changed="$(git diff --name-only da196b3e28a445ef00941563b07e6d67c25a54ff)"
           if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' <<<"$changed"; then
             echo "Forbidden Product PR scope detected" >&2
             exit 1
@@ -102,4 +103,3 @@ jobs:
           echo "NORMAL_FLUX_REGRESSION_PASS=true"
           echo "PROVIDER_INTAKE_NOTIFICATION_RELEASE_DELTA=0"
           echo "NO_PROD_MUTATIONS=true"
-

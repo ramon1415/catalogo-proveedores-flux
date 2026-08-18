@@ -1,6 +1,6 @@
 {
   "schema": "flux.provider-portal-prod-product-candidate/v1",
-  "generated_from_main_sha": "70fd10bacea6a9f7b32a36b67906c598f96f39e0",
+  "generated_from_main_sha": "da196b3e28a445ef00941563b07e6d67c25a54ff",
   "derived_provider_source_dev_sha": "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91",
   "compatible_pr_a": 368,
   "target_prod_project": "ucantptjhwttexzmslvm",

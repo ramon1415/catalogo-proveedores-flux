@@ -1,0 +1,51 @@
+{
+  "schema": "flux.provider-portal-prod-runtime-manifest/v1",
+  "generated_from_main_sha": "70fd10bacea6a9f7b32a36b67906c598f96f39e0",
+  "derived_provider_source_dev_sha": "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91",
+  "prod_project": "ucantptjhwttexzmslvm",
+  "prod_migration_head_at_build": "20260817230000",
+  "forward_migrations": [
+    {
+      "name": "provider_portal_prod_runtime_control",
+      "version": "20260818001151",
+      "file": "supabase/migrations/20260818001151_provider_portal_prod_runtime_control.sql"
+    },
+    {
+      "name": "provider_portal_prod_core_workflow",
+      "version": "20260818001153",
+      "file": "supabase/migrations/20260818001153_provider_portal_prod_core_workflow.sql"
+    },
+    {
+      "name": "provider_portal_prod_draft_conversion",
+      "version": "20260818001156",
+      "file": "supabase/migrations/20260818001156_provider_portal_prod_draft_conversion.sql"
+    },
+    {
+      "name": "provider_portal_prod_provider_aware_links",
+      "version": "20260818001158",
+      "file": "supabase/migrations/20260818001158_provider_portal_prod_provider_aware_links.sql"
+    }
+  ],
+  "default_mode": "disabled",
+  "pilot_mode": "sysadmin_only",
+  "public_valid_link_without_login": true,
+  "provider_intake_notification_release_delta": 0,
+  "required_edge_variables": {
+    "CAPTCHA_PROVIDER": "turnstile",
+    "CAPTCHA_SECRET": "required_secret_not_committed",
+    "CAPTCHA_EXPECTED_HOSTNAME": "flux.quantta.mx",
+    "CAPTCHA_EXPECTED_ACTION": "provider_intake_submit",
+    "INTAKE_ALLOWED_ORIGINS": "https://flux.quantta.mx",
+    "INTAKE_ALLOW_NO_ORIGIN": "false",
+    "INTAKE_ALLOW_QUERY_TOKEN": "false",
+    "INTAKE_PRIVACY_NOTICE_URL": "required_https_provider_specific_url_not_committed",
+    "INTAKE_HASH_PEPPER": "required_secret_not_committed",
+    "SUPABASE_URL": "platform_managed",
+    "SUPABASE_SERVICE_ROLE_KEY": "platform_managed_secret"
+  },
+  "turnstile_production_secret_configured": false,
+  "turnstile_production_site_key_configured": false,
+  "legal_content_approval_pending": true,
+  "prod_apply_executed": false,
+  "edge_deploy_executed": false
+}
