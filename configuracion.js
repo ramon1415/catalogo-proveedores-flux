@@ -1084,19 +1084,31 @@ function renderContpaqMapper() {
     body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Esta empresa no tiene catálogo CONTPAQ cargado.</td></tr>`
     updateContpaqCounter(); return
   }
-  body.innerHTML = cats.map((cat) => {
-    const code = contpaqState.mappings.get(cat.id) || ""
-    const account = code ? contpaqState.accounts.get(code) : null
-    const ok = Boolean(account)
-    return `<tr data-cat="${cat.id}" style="${ok ? "" : "background:rgba(245,158,11,.05)"}">
-      <td><span class="cell-main">${escHtml(cat.name)}</span><span class="muted-line">${escHtml(cat.category || "")}</span></td>
-      <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
-      <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
-      <td data-map-state="${cat.id}">${ok
-        ? `<span class="badge success">Mapeada</span>`
-        : `<span class="badge warning">Sin mapear</span>`}</td>
-    </tr>`
-  }).join("")
+  const porGrupo = new Map()
+  for (const cat of cats) {
+    const g = cat.category || "Sin grupo"
+    if (!porGrupo.has(g)) porGrupo.set(g, [])
+    porGrupo.get(g).push(cat)
+  }
+  let html = ""
+  for (const [grupo, lista] of [...porGrupo.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"))) {
+    const mapeadas = lista.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
+    html += `<tr><td colspan="4" style="padding:8px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--accent-text);background:var(--bg-hover)">${escHtml(grupo)} <span style="color:var(--text-3);font-weight:600;text-transform:none;letter-spacing:0">· ${mapeadas}/${lista.length}</span></td></tr>`
+    html += lista.map((cat) => {
+      const code = contpaqState.mappings.get(cat.id) || ""
+      const account = code ? contpaqState.accounts.get(code) : null
+      const ok = Boolean(account)
+      return `<tr data-cat="${cat.id}" style="${ok ? "" : "background:rgba(245,158,11,.05)"}">
+        <td style="padding-left:26px"><span class="cell-main">${escHtml(cat.name)}</span></td>
+        <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
+        <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
+        <td data-map-state="${cat.id}">${ok
+          ? `<span class="badge success">Mapeada</span>`
+          : `<span class="badge warning">Sin mapear</span>`}</td>
+      </tr>`
+    }).join("")
+  }
+  body.innerHTML = html
   body.querySelectorAll("[data-map-input]").forEach((input) => {
     input.addEventListener("change", () => saveContpaqMapping(input.dataset.mapInput, input.value.trim(), input))
   })
