@@ -85,7 +85,7 @@ jobs:
           node scripts/qa/provider-portal-prod-db-edge-contract.test.mjs
 
       - name: Edge unit and production configuration tests
-        run: deno test --allow-none supabase/functions/provider-intake/*_test.ts
+        run: deno test supabase/functions/provider-intake/*_test.ts
 
       - name: PostgreSQL 17 targeted current-PROD shadow replay
         env:
