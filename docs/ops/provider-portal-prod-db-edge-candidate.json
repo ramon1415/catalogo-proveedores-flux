@@ -1,0 +1,43 @@
+{
+  "schema": "flux.provider-portal-prod-db-edge-candidate/v1",
+  "generated_from_main_sha": "70fd10bacea6a9f7b32a36b67906c598f96f39e0",
+  "derived_provider_source_dev_sha": "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91",
+  "migrations": [
+    {
+      "path": "supabase/migrations/20260818001151_provider_portal_prod_runtime_control.sql",
+      "version": "20260818001151",
+      "sha256": "a516ff8fcbbf44cbd316e47ef7b672c8dd2cb15f735dadeb4ed873b1e0c493c9"
+    },
+    {
+      "path": "supabase/migrations/20260818001153_provider_portal_prod_core_workflow.sql",
+      "version": "20260818001153",
+      "sha256": "69b56aad4ae31b3548239ed6714876721ff439e9ae37f2215334db55804d8234"
+    },
+    {
+      "path": "supabase/migrations/20260818001156_provider_portal_prod_draft_conversion.sql",
+      "version": "20260818001156",
+      "sha256": "6d46a47504298ac28607176453ef3211cc4f037db7c73e7e717451cedda3c39d"
+    },
+    {
+      "path": "supabase/migrations/20260818001158_provider_portal_prod_provider_aware_links.sql",
+      "version": "20260818001158",
+      "sha256": "479fce011e27c5a1643e5b57f3b376c4eeed6355d0307ac93861b3bbd57c449c"
+    }
+  ],
+  "edge_files": [
+    "supabase/functions/provider-intake/captcha.ts",
+    "supabase/functions/provider-intake/cors.ts",
+    "supabase/functions/provider-intake/crypto.ts",
+    "supabase/functions/provider-intake/files.ts",
+    "supabase/functions/provider-intake/handler.ts",
+    "supabase/functions/provider-intake/index.ts",
+    "supabase/functions/provider-intake/prod-config.ts",
+    "supabase/functions/provider-intake/prod-config_test.ts",
+    "supabase/functions/provider-intake/provider-intake_test.ts",
+    "supabase/functions/provider-intake/repository.ts",
+    "supabase/functions/provider-intake/responses.ts",
+    "supabase/functions/provider-intake/types.ts",
+    "supabase/functions/provider-intake/validation.ts"
+  ],
+  "notification_release_delta": 0
+}

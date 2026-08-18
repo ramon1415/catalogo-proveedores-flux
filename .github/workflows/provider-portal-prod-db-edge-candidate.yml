@@ -1,0 +1,571 @@
+name: Provider Portal PROD DB Edge Candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**provider_portal_prod**"
+      - "supabase/functions/provider-intake/**"
+      - "supabase/config.toml"
+      - "scripts/release/build-provider-portal-prod-db-edge.mjs"
+      - "scripts/qa/provider-portal-prod-**"
+      - "docs/ops/provider-portal-prod-**"
+      - ".github/workflows/provider-portal-prod-db-edge-candidate.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Validation only or the explicitly authorized Stage 1 database apply
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - apply_stage_1
+      confirm_prod:
+        description: Exact PROD project ref; required for apply_stage_1
+        required: false
+        type: string
+      target_git_sha:
+        description: Exact merged main SHA; required for apply_stage_1
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: provider-portal-prod-db-edge-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-validate:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.stage == 'validate')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: provider_portal_shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d provider_portal_shadow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Fetch pinned DEV provider source
+        run: git fetch --no-tags origin c91faf703a79c02d6e9ef21a7b07ea9a0af76a91
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Generate dynamic forward migration slots with Supabase CLI
+        id: slots
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes supabase@2.114.0 --version
+          if [[ ! -f docs/ops/provider-portal-prod-db-edge-candidate.json ]]; then
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_runtime_control
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_core_workflow
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_draft_conversion
+            sleep 1
+            npx --yes supabase@2.114.0 migration new provider_portal_prod_provider_aware_links
+          fi
+
+      - name: Build selective candidate from pinned sources
+        run: node scripts/release/build-provider-portal-prod-db-edge.mjs
+
+      - name: Static release contract
+        run: |
+          git diff --check
+          node scripts/qa/provider-portal-prod-db-edge-contract.test.mjs
+
+      - name: Edge unit and production configuration tests
+        run: deno test supabase/functions/provider-intake/*_test.ts
+
+      - name: PostgreSQL 17 targeted current-PROD shadow replay
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-fixture.sql
+          for migration in $(find supabase/migrations -maxdepth 1 -type f -name '*_provider_portal_prod_*.sql' | sort); do
+            echo "Applying $migration"
+            psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f "$migration"
+          done
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-assertions.sql
+
+      - name: Enforce selective scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only ec7fb3b74a7b37f1e90f0ee0aab65f13f25f44a0...HEAD > /tmp/changed-before-generation.txt
+          git status --short
+          if grep -E '(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' /tmp/changed-before-generation.txt; then
+            echo "Unexpected excluded scope detected" >&2
+            exit 1
+          fi
+
+      - name: Commit generated candidate to the PR branch
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add supabase scripts/release scripts/qa docs/ops
+            git commit -m "build: materialize selective Provider Portal PROD DB/Edge candidate"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
+
+      - name: Candidate result
+        run: |
+          echo "FRESH_PROD_FORWARD_CHAIN_PASS=true"
+          echo "SYSADMIN_ONLY_GATE_PROVEN=true"
+          echo "PUBLIC_PROVIDER_LINK_BOUNDARY_PROVEN=true"
+          echo "PROVIDER_INTAKE_NOTIFICATION_RELEASE_DELTA=0"
+          echo "NO_PROD_MUTATIONS=true"
+
+  stage1-apply-production:
+    name: Authorized Stage 1 PROD database foundation
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'apply_stage_1' && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: supabase-production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+      FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+      EXPECTED_PRE_HEAD: "20260817230000"
+      EXPECTED_T1_SHA256: a516ff8fcbbf44cbd316e47ef7b672c8dd2cb15f735dadeb4ed873b1e0c493c9
+      EXPECTED_T2_SHA256: 69b56aad4ae31b3548239ed6714876721ff439e9ae37f2215334db55804d8234
+      EXPECTED_T3_SHA256: 6d46a47504298ac28607176453ef3211cc4f037db7c73e7e717451cedda3c39d
+      EXPECTED_T4_SHA256: 479fce011e27c5a1643e5b57f3b376c4eeed6355d0307ac93861b3bbd57c449c
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+
+    steps:
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/provider-portal-stage1"
+          mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Revalidate immutable GitHub release state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.request
+
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          target = os.environ["TARGET_GIT_SHA"].lower()
+
+          def stop(code, evidence=None):
+              if evidence is not None:
+                  (root / "github-preflight.json").write_text(json.dumps(evidence, indent=2) + "\n")
+              (root / "result.txt").write_text(f"STOP / {code}\n")
+              raise SystemExit(code)
+
+          if not re.fullmatch(r"[0-9a-f]{40}", target):
+              stop("TARGET_SHA_INVALID")
+          if os.environ["CONFIRM_PROD"] != os.environ["EXPECTED_PROD_REF"]:
+              stop("PROD_CONFIRMATION_MISMATCH")
+          if os.environ["SUPABASE_PROJECT_REF_PROD"] != os.environ["EXPECTED_PROD_REF"]:
+              stop("PROD_PROJECT_IDENTITY_MISMATCH")
+          if os.environ["FORBIDDEN_DEV_REF"] in os.environ["SUPABASE_PROJECT_REF_PROD"]:
+              stop("DEV_PROJECT_FORBIDDEN")
+
+          def api(path):
+              request = urllib.request.Request(
+                  "https://api.github.com" + path,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": "Bearer " + token,
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "provider-portal-stage1-release",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+
+          main = api(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"].lower()
+          pr = api(f"/repos/{repo}/pulls/368")
+          active = []
+          current = int(os.environ["GITHUB_RUN_ID"])
+          for status in ("queued", "in_progress"):
+              runs = api(f"/repos/{repo}/actions/runs?status={status}&per_page=100").get("workflow_runs", [])
+              for run in runs:
+                  name = str(run.get("name") or "")
+                  if int(run["id"]) != current and re.search(r"prod|migration|supabase|release|provider portal", name, re.I):
+                      active.append({"id": run["id"], "name": name, "status": run["status"]})
+
+          checks = {
+              "dispatch_is_main": os.environ["GITHUB_REF"] == "refs/heads/main",
+              "target_is_main": target == main,
+              "workflow_is_from_target": os.environ["GITHUB_SHA"].lower() == target,
+              "pr368_merged": bool(pr.get("merged")),
+              "pr368_base_main": pr["base"]["ref"] == "main",
+              "pr368_merge_commit_is_target": str(pr.get("merge_commit_sha") or "").lower() == target,
+              "concurrent_release_runs": len(active),
+          }
+          evidence = {
+              "status": "PASS" if all(v is True or v == 0 for v in checks.values()) else "STOP",
+              "target_git_sha": target,
+              "main_sha": main,
+              "pr368": {"state": pr["state"], "merged": pr.get("merged"), "merge_commit_sha": pr.get("merge_commit_sha")},
+              "active_release_runs_excluding_current": active,
+              "checks": checks,
+          }
+          if evidence["status"] != "PASS":
+              stop("GITHUB_RELEASE_STATE_INVALID", evidence)
+          (root / "github-preflight.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          PY
+
+      - name: Checkout immutable merged main SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact T1-T4 bytes and backup availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ "$(git rev-parse HEAD)" = "$TARGET_GIT_SHA" ]] || fail TARGET_SHA_DRIFT
+          declare -A expected=(
+            [supabase/migrations/20260818001151_provider_portal_prod_runtime_control.sql]="$EXPECTED_T1_SHA256"
+            [supabase/migrations/20260818001153_provider_portal_prod_core_workflow.sql]="$EXPECTED_T2_SHA256"
+            [supabase/migrations/20260818001156_provider_portal_prod_draft_conversion.sql]="$EXPECTED_T3_SHA256"
+            [supabase/migrations/20260818001158_provider_portal_prod_provider_aware_links.sql]="$EXPECTED_T4_SHA256"
+          )
+          : > "$EVIDENCE_DIR/migration-sha256.txt"
+          for path in "${!expected[@]}"; do
+            [[ -f "$path" ]] || fail MIGRATION_FILE_MISSING
+            actual="$(sha256sum "$path" | awk '{print $1}')"
+            [[ "$actual" = "${expected[$path]}" ]] || fail MIGRATION_SHA_MISMATCH
+            printf '%s  %s\n' "$actual" "$path" >> "$EVIDENCE_DIR/migration-sha256.txt"
+          done
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]] || fail PROD_BACKUP_UNAVAILABLE
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF" > "$RUNNER_TEMP/prod-project.json"
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF/database/backups" > "$RUNNER_TEMP/prod-backups.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          project = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"] + "/prod-project.json").read_text())
+          payload = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"] + "/prod-backups.json").read_text())
+          backups = payload.get("backups", []) if isinstance(payload, dict) else payload
+          pitr = bool(payload.get("pitr_enabled", False)) if isinstance(payload, dict) else False
+          good = [b for b in backups if str(b.get("status", "")).lower() in ("completed", "success")]
+          ref = str(project.get("id") or project.get("ref") or "")
+          evidence = {"status": "PASS" if ref == os.environ["EXPECTED_PROD_REF"] and (pitr or good) else "STOP", "project_ref": ref, "pitr_enabled": pitr, "successful_backup_available": bool(good)}
+          (root / "backup.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          if evidence["status"] != "PASS":
+              (root / "result.txt").write_text("STOP / PROD_BACKUP_UNAVAILABLE\n")
+              raise SystemExit("PROD_BACKUP_UNAVAILABLE")
+          PY
+
+      - name: Install pinned Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes supabase@2.114.0 --version
+          npx --yes supabase@2.114.0 db push --help >/dev/null
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+
+      - name: PROD identity, prewrite schema and immutable data snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || fail PROD_SESSION_POOLER_SECRET_REQUIRED
+          python3 - <<'PY'
+          import os, urllib.parse
+          parsed = urllib.parse.urlsplit(os.environ["SUPABASE_PROD_SESSION_POOLER_DB_URL"])
+          prod = os.environ["EXPECTED_PROD_REF"]
+          dev = os.environ["FORBIDDEN_DEV_REF"]
+          raw = urllib.parse.unquote(os.environ["SUPABASE_PROD_SESSION_POOLER_DB_URL"])
+          valid = (
+              parsed.scheme in ("postgres", "postgresql")
+              and (parsed.hostname or "").lower().endswith(".pooler.supabase.com")
+              and parsed.port == 5432
+              and urllib.parse.unquote(parsed.username or "") == f"postgres.{prod}"
+              and bool(parsed.password)
+              and dev not in raw
+          )
+          if not valid:
+              raise SystemExit("PROD_SESSION_POOLER_URL_INVALID")
+          PY
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql_prod() { command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 "$@"; }
+          roq() { PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_precheck" psql_prod -Atq -c "$1"; }
+
+          roq "select json_build_object(
+            'database',current_database(),
+            'server_version_num',current_setting('server_version_num')::integer,
+            'transaction_read_only',current_setting('transaction_read_only')::boolean,
+            'history_count',(select count(*) from supabase_migrations.schema_migrations),
+            'history_head',(select max(version) from supabase_migrations.schema_migrations),
+            'foundation_025_count',(select count(*) from supabase_migrations.schema_migrations where version='20260805010004' and name='025_provider_intake_foundation'),
+            'target_history_count',(select count(*) from supabase_migrations.schema_migrations where version in ('20260818001151','20260818001153','20260818001156','20260818001158')),
+            'foundation_tables',json_build_object(
+              'intake_links',to_regclass('public.intake_links') is not null,
+              'payment_intake',to_regclass('public.payment_intake') is not null,
+              'payment_intake_files',to_regclass('public.payment_intake_files') is not null,
+              'payment_intake_events',to_regclass('public.payment_intake_events') is not null),
+            'runtime_control_absent',to_regclass('public.provider_intake_runtime_control') is null,
+            'drafts_absent',to_regclass('public.payment_intake_conversion_drafts') is null,
+            'provider_intake_function_count',(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname ilike '%provider_intake%'),
+            'provider_business_rows',json_build_object(
+              'intake_links',(select count(*) from public.intake_links),
+              'payment_intake',(select count(*) from public.payment_intake),
+              'payment_intake_files',(select count(*) from public.payment_intake_files),
+              'payment_intake_events',(select count(*) from public.payment_intake_events),
+              'intake_storage_objects',(select count(*) from storage.objects where bucket_id='intake-uploads')),
+            'intake_bucket_exact',(select count(*)=1 from storage.buckets where id='intake-uploads' and public=false and file_size_limit=10485760 and allowed_mime_types=array['application/pdf','application/xml','text/xml','image/jpeg','image/png','image/webp']::text[]),
+            'public_intake_storage_policies',(select count(*) from pg_policies where schemaname='storage' and tablename='objects' and (coalesce(qual,'') ilike '%intake-uploads%' or coalesce(with_check,'') ilike '%intake-uploads%') and ('anon'=any(roles) or 'public'=any(roles)))
+          );" > "$EVIDENCE_DIR/prod-prewrite.json"
+
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          value = json.loads((root / "prod-prewrite.json").read_text())
+          expected = (
+              value["server_version_num"] >= 170000
+              and value["transaction_read_only"]
+              and value["history_count"] == 70
+              and value["history_head"] == os.environ["EXPECTED_PRE_HEAD"]
+              and value["foundation_025_count"] == 1
+              and value["target_history_count"] == 0
+              and all(value["foundation_tables"].values())
+              and value["runtime_control_absent"]
+              and value["drafts_absent"]
+              and value["provider_intake_function_count"] == 0
+              and all(count == 0 for count in value["provider_business_rows"].values())
+              and value["intake_bucket_exact"]
+              and value["public_intake_storage_policies"] == 0
+          )
+          if not expected:
+              (root / "result.txt").write_text("STOP / PROD_PREWRITE_STATE_CHANGED\n")
+              raise SystemExit("PROD_PREWRITE_STATE_CHANGED")
+          PY
+
+          roq "select json_build_object(
+            'companies',json_build_object('count',(select count(*) from public.companies),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.companies t)),
+            'profiles',json_build_object('count',(select count(*) from public.profiles),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.profiles t)),
+            'proveedores',json_build_object('count',(select count(*) from public.proveedores),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.proveedores t)),
+            'intake_links',json_build_object('count',(select count(*) from public.intake_links),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.intake_links t)),
+            'payment_intake',json_build_object('count',(select count(*) from public.payment_intake),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake t)),
+            'payment_intake_files',json_build_object('count',(select count(*) from public.payment_intake_files),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake_files t)),
+            'payment_intake_events',json_build_object('count',(select count(*) from public.payment_intake_events),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake_events t)),
+            'payment_requests',json_build_object('count',(select count(*) from public.payment_requests),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_requests t)),
+            'approval_batches',json_build_object('count',(select count(*) from public.approval_batches),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.approval_batches t)),
+            'payment_layouts',json_build_object('count',(select count(*) from public.payment_layouts),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_layouts t)),
+            'payment_layout_lines',json_build_object('count',(select count(*) from public.payment_layout_lines),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_layout_lines t)),
+            'notification_events',json_build_object('count',(select count(*) from public.notification_events),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.notification_events t)),
+            'notification_delivery_attempts',json_build_object('count',(select count(*) from public.notification_delivery_attempts),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.notification_delivery_attempts t)),
+            'storage_objects',json_build_object('count',(select count(*) from storage.objects),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from storage.objects t)),
+            'intake_storage_objects',(select count(*) from storage.objects where bucket_id='intake-uploads')
+          );" > "$EVIDENCE_DIR/data-before.json"
+
+      - name: Build exact remote-history mirror and dry-run T1-T4
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          RELEASE_DIR="$RUNNER_TEMP/provider-portal-stage1-project"
+          mkdir -p "$RELEASE_DIR/supabase/migrations"
+          printf 'RELEASE_DIR=%s\n' "$RELEASE_DIR" >> "$GITHUB_ENV"
+          cp supabase/config.toml "$RELEASE_DIR/supabase/config.toml"
+          PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=provider_portal_stage1_history" \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -F $'\t' -v ON_ERROR_STOP=1 \
+            -c "select version,coalesce(name,'migration') from supabase_migrations.schema_migrations order by version" \
+            > "$RUNNER_TEMP/prod-history.tsv"
+          while IFS=$'\t' read -r version name; do
+            [[ "$version" =~ ^[0-9]+$ ]] || fail REMOTE_HISTORY_VERSION_INVALID
+            safe="$(printf '%s' "$name" | tr -cs 'A-Za-z0-9_' '_' | sed 's/^_*//;s/_*$//')"
+            [[ -n "$safe" ]] || safe=migration
+            printf '%s\n' '-- already applied remotely; exact history mirror placeholder' > "$RELEASE_DIR/supabase/migrations/${version}_${safe}.sql"
+          done < "$RUNNER_TEMP/prod-history.tsv"
+          for path in \
+            supabase/migrations/20260818001151_provider_portal_prod_runtime_control.sql \
+            supabase/migrations/20260818001153_provider_portal_prod_core_workflow.sql \
+            supabase/migrations/20260818001156_provider_portal_prod_draft_conversion.sql \
+            supabase/migrations/20260818001158_provider_portal_prod_provider_aware_links.sql; do
+            cp "$path" "$RELEASE_DIR/$path"
+          done
+          (
+            cd "$RELEASE_DIR"
+            npx --yes supabase@2.114.0 db push --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --dry-run --include-all 2>&1
+          ) | tee "$RUNNER_TEMP/supabase-dry-run.raw"
+          for version in 20260818001151 20260818001153 20260818001156 20260818001158; do
+            grep -q "$version" "$RUNNER_TEMP/supabase-dry-run.raw" || fail DRY_RUN_TARGET_MISSING
+          done
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          raw = pathlib.Path(os.environ["RUNNER_TEMP"] + "/supabase-dry-run.raw").read_text(errors="replace")
+          versions = sorted(set(re.findall(r"(?<!\d)\d{14}(?!\d)", raw)))
+          target = ["20260818001151", "20260818001153", "20260818001156", "20260818001158"]
+          evidence = {"status": "PASS" if versions == target else "STOP", "planned_versions": versions, "expected_versions": target, "mutations_executed": 0}
+          pathlib.Path(os.environ["EVIDENCE_DIR"] + "/dry-run.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          if evidence["status"] != "PASS":
+              pathlib.Path(os.environ["EVIDENCE_DIR"] + "/result.txt").write_text("STOP / DRY_RUN_NOT_EXACT_T1_T4\n")
+              raise SystemExit("DRY_RUN_NOT_EXACT_T1_T4")
+          PY
+          rm -f "$RUNNER_TEMP/supabase-dry-run.raw"
+
+      - name: Apply exact T1-T4 once with Supabase migration ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          (
+            cd "$RELEASE_DIR"
+            npx --yes supabase@2.114.0 db push --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --include-all --yes
+          )
+
+      - name: PROD postchecks and immutable data delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql_prod() { command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 "$@"; }
+          roq() { PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_postcheck" psql_prod -Atq -c "$1"; }
+
+          roq "select json_build_object(
+            'history_count',(select count(*) from supabase_migrations.schema_migrations),
+            'history_head',(select max(version) from supabase_migrations.schema_migrations),
+            'target_rows',(select json_object_agg(version,c) from (select version,count(*) c from supabase_migrations.schema_migrations where version in ('20260818001151','20260818001153','20260818001156','20260818001158') group by version) s),
+            'target_names_exact',(select count(*)=4 from supabase_migrations.schema_migrations where (version,name) in (('20260818001151','provider_portal_prod_runtime_control'),('20260818001153','provider_portal_prod_core_workflow'),('20260818001156','provider_portal_prod_draft_conversion'),('20260818001158','provider_portal_prod_provider_aware_links'))),
+            'runtime_control_rows',(select count(*) from public.provider_intake_runtime_control),
+            'runtime_mode',public.provider_intake_runtime_mode(),
+            'runtime_events',(select count(*) from public.provider_intake_runtime_control_events),
+            'public_access_allowed',public.provider_intake_public_access_allowed(),
+            'internal_access_allowed',public.provider_intake_internal_access_allowed(null),
+            'draft_rows',(select count(*) from public.payment_intake_conversion_drafts),
+            'rls_enabled',(select count(*)=7 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('provider_intake_runtime_control','provider_intake_runtime_control_events','payment_intake_conversion_drafts','intake_links','payment_intake','payment_intake_files','payment_intake_events') and c.relrowsecurity),
+            'mode_aware_policies',(select count(*)=4 from pg_policies where schemaname='public' and policyname in ('intake_links_select_provider_portal_mode','payment_intake_select_provider_portal_mode','payment_intake_files_select_provider_portal_mode','payment_intake_events_select_provider_portal_mode') and (coalesce(qual,'') ilike '%provider_intake_internal_access_allowed%')),
+            'runtime_table_excess_grants',(select count(*) from information_schema.role_table_grants where table_schema='public' and table_name in ('provider_intake_runtime_control','provider_intake_runtime_control_events') and grantee in ('PUBLIC','anon','authenticated','service_role')),
+            'public_or_anon_provider_function_grants',(select count(*) from information_schema.routine_privileges where routine_schema='public' and routine_name like '%provider_intake%' and grantee in ('PUBLIC','anon')),
+            'public_intake_storage_policies',(select count(*) from pg_policies where schemaname='storage' and tablename='objects' and (coalesce(qual,'') ilike '%intake-uploads%' or coalesce(with_check,'') ilike '%intake-uploads%') and ('anon'=any(roles) or 'public'=any(roles)))
+          );" > "$EVIDENCE_DIR/prod-postcheck.json"
+
+          roq "select json_build_object(
+            'companies',json_build_object('count',(select count(*) from public.companies),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.companies t)),
+            'profiles',json_build_object('count',(select count(*) from public.profiles),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.profiles t)),
+            'proveedores',json_build_object('count',(select count(*) from public.proveedores),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.proveedores t)),
+            'intake_links',json_build_object('count',(select count(*) from public.intake_links),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.intake_links t)),
+            'payment_intake',json_build_object('count',(select count(*) from public.payment_intake),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake t)),
+            'payment_intake_files',json_build_object('count',(select count(*) from public.payment_intake_files),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake_files t)),
+            'payment_intake_events',json_build_object('count',(select count(*) from public.payment_intake_events),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_intake_events t)),
+            'payment_requests',json_build_object('count',(select count(*) from public.payment_requests),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_requests t)),
+            'approval_batches',json_build_object('count',(select count(*) from public.approval_batches),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.approval_batches t)),
+            'payment_layouts',json_build_object('count',(select count(*) from public.payment_layouts),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_layouts t)),
+            'payment_layout_lines',json_build_object('count',(select count(*) from public.payment_layout_lines),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.payment_layout_lines t)),
+            'notification_events',json_build_object('count',(select count(*) from public.notification_events),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.notification_events t)),
+            'notification_delivery_attempts',json_build_object('count',(select count(*) from public.notification_delivery_attempts),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from public.notification_delivery_attempts t)),
+            'storage_objects',json_build_object('count',(select count(*) from storage.objects),'digest',(select md5(coalesce(string_agg(md5(to_jsonb(t)::text),'' order by md5(to_jsonb(t)::text)),'')) from storage.objects t)),
+            'intake_storage_objects',(select count(*) from storage.objects where bucket_id='intake-uploads')
+          );" > "$EVIDENCE_DIR/data-after.json"
+
+          cmp -s "$EVIDENCE_DIR/data-before.json" "$EVIDENCE_DIR/data-after.json" || fail BUSINESS_OR_MATERIAL_DATA_DELTA
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          post = json.loads((root / "prod-postcheck.json").read_text())
+          target = post.get("target_rows") or {}
+          ok = (
+              post["history_count"] == 74
+              and post["history_head"] == "20260818001158"
+              and all(target.get(v) == 1 for v in ("20260818001151", "20260818001153", "20260818001156", "20260818001158"))
+              and post["target_names_exact"]
+              and post["runtime_control_rows"] == 1
+              and post["runtime_mode"] == "disabled"
+              and post["runtime_events"] == 0
+              and not post["public_access_allowed"]
+              and not post["internal_access_allowed"]
+              and post["draft_rows"] == 0
+              and post["rls_enabled"]
+              and post["mode_aware_policies"]
+              and post["runtime_table_excess_grants"] == 0
+              and post["public_or_anon_provider_function_grants"] == 0
+              and post["public_intake_storage_policies"] == 0
+          )
+          if not ok:
+              (root / "result.txt").write_text("STOP / PROD_POSTCHECK_FAILED\n")
+              raise SystemExit("PROD_POSTCHECK_FAILED")
+          before = json.loads((root / "data-before.json").read_text())
+          after = json.loads((root / "data-after.json").read_text())
+          summary = {
+              "status": "PASS",
+              "business_data_delta": 0,
+              "storage_delta": after["storage_objects"]["count"] - before["storage_objects"]["count"],
+              "notification_event_delta": after["notification_events"]["count"] - before["notification_events"]["count"],
+              "notification_delivery_attempt_delta": after["notification_delivery_attempts"]["count"] - before["notification_delivery_attempts"]["count"],
+              "runtime_mode": post["runtime_mode"],
+              "migration_head": post["history_head"],
+          }
+          (root / "stage1-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          (root / "result.txt").write_text("PASS / T1_T2_T3_T4_APPLIED_ONCE / MODE_DISABLED / DATA_DELTA_ZERO\n")
+          PY
+
+      - name: Cleanup runner secrets and temporary project
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          unset SUPABASE_ACCESS_TOKEN SUPABASE_PROD_SESSION_POOLER_DB_URL PGSSLMODE PGCONNECT_TIMEOUT
+          rm -rf "$RUNNER_TEMP/provider-portal-stage1-project"
+          rm -f "$RUNNER_TEMP/prod-project.json" "$RUNNER_TEMP/prod-backups.json" "$RUNNER_TEMP/prod-history.tsv" "$RUNNER_TEMP/supabase-dry-run.raw"
+
+      - name: Upload sanitized Stage 1 evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: provider-portal-stage1-${{ github.run_id }}
+          path: ${{ runner.temp }}/provider-portal-stage1
+          if-no-files-found: error
+          retention-days: 14
