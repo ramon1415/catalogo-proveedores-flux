@@ -376,6 +376,11 @@
   </dialog>
 
   <!-- Dialog: socio -->
+  <style>
+    [data-grupo-edit] { opacity: 0; transition: opacity .12s; }
+    tr:hover [data-grupo-edit], [data-grupo-edit]:focus-visible { opacity: 1; }
+    #grupoDialog { margin: auto; }
+  </style>
   <dialog id="grupoDialog" class="narrow" style="max-width:440px">
     <form id="grupoForm" class="modal-content">
       <div class="modal-header">
@@ -519,6 +524,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260818-mapper4"></script>
+  <script src="./configuracion.js?v=20260818-mapper5"></script>
 </body>
 </html>
