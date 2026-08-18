@@ -833,9 +833,11 @@ for (const required of [
 for (const forbidden of ["scsirgbuqjcwoaxfacth", "catalogo-proveedores-flux-git-dev", "Ambiente DEV", "?token=", "notification_outbox", "enqueue_notification", "resend.com"]) {
   if (edgeText.toLowerCase().includes(forbidden.toLowerCase())) fail("forbidden Edge delta: " + forbidden);
 }
-const nonTestEdge = edge.filter((f) => f.endsWith(".ts") && !f.endsWith("_test.ts"))
+const nonTestEdge = edge.filter((f) => f.endsWith(".ts") && !f.endsWith("_test.ts") && f !== "prod-config.ts")
   .map((f) => fs.readFileSync(path.join("supabase/functions/provider-intake", f), "utf8")).join("\n");
 if (nonTestEdge.includes("1x0000000000000000000000000000000AA")) fail("Turnstile test secret in runtime source");
+const prodConfig = fs.readFileSync("supabase/functions/provider-intake/prod-config.ts", "utf8");
+if (!prodConfig.includes("TURNSTILE_TEST_SECRETS") || !prodConfig.includes("test_key_forbidden")) fail("Turnstile test-key denylist missing");
 if (!fs.readFileSync("supabase/config.toml", "utf8").includes("verify_jwt = false")) fail("public Edge JWT contract missing");
 if (manifest.default_mode !== "disabled" || manifest.legal_content_approval_pending !== true) fail("release manifest is not fail-closed");
 if (manifest.provider_intake_notification_release_delta !== 0) fail("notification release delta is non-zero");
