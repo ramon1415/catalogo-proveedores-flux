@@ -122,7 +122,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only 70fd10bacea6a9f7b32a36b67906c598f96f39e0...HEAD > /tmp/changed-before-generation.txt
+          git diff --name-only ec7fb3b74a7b37f1e90f0ee0aab65f13f25f44a0...HEAD > /tmp/changed-before-generation.txt
           git status --short
           if grep -E '(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' /tmp/changed-before-generation.txt; then
             echo "Unexpected excluded scope detected" >&2
