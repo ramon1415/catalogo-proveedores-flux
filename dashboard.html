@@ -41,6 +41,9 @@
     .panel-header h2 { font-size:13px; font-weight:700; color:var(--text-1); margin:0; }
     .panel-sub { font-size:11px; color:var(--text-3); margin-top:1px; }
     .dash-grid { display:grid; grid-template-columns:1.3fr .7fr; gap:12px; }
+    /* Los controles nativos (select de años, input de mes) siguen el tema */
+    [data-theme="dark"] { color-scheme: dark; }
+    [data-theme="light"] { color-scheme: light; }
     /* Vista anual: ocultar lo operativo desde el primer paint (sin flash) */
     .anual-boot #kpiGrid, .anual-boot #tabsBlock, .anual-boot #dashGrid, .anual-boot #periodLabel,
     .anual-boot #expensesTab, .anual-boot #ytdTab, .anual-boot #incomeTab, .anual-boot #cashTab, .anual-boot #incidentsTab { display:none !important; }
@@ -121,7 +124,7 @@
         <div class="topbar-kicker">Operacion, cierre y reporte mensual</div>
         <div class="topbar-user">
           <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
-          <div class="avatar">FL</div>
+          
         </div>
       </header>
 
@@ -443,6 +446,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260818-anual3"></script>
+  <script src="./dashboard.js?v=20260818-anual4"></script>
 </body>
 </html>

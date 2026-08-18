@@ -591,11 +591,11 @@ function drawChart(labels, presupuesto, ejecutado, esperado, cobrado) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: isDark ? "#1a1a2e" : "#fff",
+          backgroundColor: isDark ? "#152119" : "#fff",
           borderColor: isDark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.1)",
           borderWidth: 1,
-          titleColor: isDark ? "#eeeef6" : "#10111f",
-          bodyColor: isDark ? "#aaaac3" : "#50506a",
+          titleColor: isDark ? "#f7f7f5" : "#15211d",
+          bodyColor: isDark ? "#b4c1ba" : "#4d5f58",
           callbacks: {
             label: (ctx) => ` ${ctx.dataset.label}: ${moneyFmt.format(ctx.raw)}`,
           },
@@ -1003,11 +1003,11 @@ function drawHistChart(labels, ingresos, egresos) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: isDark ? "#1a1a2e" : "#fff",
+          backgroundColor: isDark ? "#152119" : "#fff",
           borderColor: isDark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.1)",
           borderWidth: 1,
-          titleColor: isDark ? "#eeeef6" : "#10111f",
-          bodyColor: isDark ? "#aaaac3" : "#50506a",
+          titleColor: isDark ? "#f7f7f5" : "#15211d",
+          bodyColor: isDark ? "#b4c1ba" : "#4d5f58",
           callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${moneyFmt.format(ctx.raw)}` },
         },
       },
