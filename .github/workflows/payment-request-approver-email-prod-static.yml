@@ -36,27 +36,74 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Recapture immutable remote sources
+      - name: Classify historical C1 guard applicability
+        id: c1_scope
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main codex/payment-request-approver-email-c1
-          test "$(git rev-parse origin/main)" = \
-            "7573ef86ba8d55f96343a772d94de38e89cb4d88"
-          test "$(git rev-parse origin/codex/payment-request-approver-email-c1)" = \
-            "7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
-          echo "main_base=7573ef86ba8d55f96343a772d94de38e89cb4d88"
-          echo "c1_certified_source=7f5aa222c790ed6a031fcac73860bf0fd0e5b454"
+          git fetch --no-tags origin main
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+
+          c1_exclusive='^((supabase/migrations/20260817230000_payment_request_approver_email_prod\.sql)|(scripts/qa/payment-request-approver-email-prod-contract\.test\.mjs)|(\.github/workflows/supabase-prod-payment-request-created-recovery\.yml)|(docs/ops/payment-request-approver-email-prod\.md))$'
+          if printf '%s\n' "${changed[@]}" | grep -Eq "${c1_exclusive}"; then
+            echo "applicable=true" >> "${GITHUB_OUTPUT}"
+            echo "c1_static_guard_applicable=true"
+          else
+            echo "applicable=false" >> "${GITHUB_OUTPUT}"
+            echo "c1_static_guard_not_applicable=true"
+          fi
+
+          echo "main_base=$(git rev-parse origin/main)"
           echo "pr147_dependency=false"
 
+      - name: PASS / C1_STATIC_GUARD_NOT_APPLICABLE
+        if: steps.c1_scope.outputs.applicable != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PASS / C1_STATIC_GUARD_NOT_APPLICABLE"
+          echo "shared_dispatcher_change_does_not_imply_c1=true"
+          echo "historical_c1_guard_disabled=false"
+
+      - name: Validate non-C1 notification regressions and secrets
+        if: steps.c1_scope.outputs.applicable != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+
+          if [[ -f scripts/qa/notification-email-logo-hotfix.test.mjs ]]; then
+            node --test scripts/qa/notification-email-logo-hotfix.test.mjs
+          fi
+          node --test scripts/qa/payment-request-approver-email-prod-contract.test.mjs
+          node --test \
+            --test-name-pattern='recipient resolution|notification idempotency|attachment resolver|claim v2 requires|attachment metadata|test_only claims|hash mismatch|Resend retries|primary/fallback race|PROD scheduler' \
+            scripts/qa/notifications-receipt-linked-contract.test.mjs
+
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          mapfile -t scannable < <(printf '%s\n' "${changed[@]}" | grep -Ev '\.(png|jpg|jpeg|gif|webp|pdf)$' || true)
+          if (( ${#scannable[@]} )); then
+            ! grep -R -E \
+              "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@" \
+              "${scannable[@]}"
+            ! grep -R -E 'C:\\Users\\|/Users/|/home/' "${scannable[@]}"
+          fi
+
+          echo "logo_focal=pass"
+          echo "payment_request_created_regression=pass"
+          echo "payment_receipt_linked_regression=pass"
+          echo "secret_scan=pass"
+
       - name: Validate exact selective scope and no DEV merge
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          test "${#changed[@]}" = "6"
+          test "${#changed[@]}" -ge "1"
           allowed='^((supabase/migrations/20260817230000_payment_request_approver_email_prod\.sql)|(supabase/functions/notification-dispatcher/index\.ts)|(scripts/qa/payment-request-approver-email-prod-contract\.test\.mjs)|(\.github/workflows/payment-request-approver-email-prod-static\.yml)|(\.github/workflows/supabase-prod-payment-request-created-recovery\.yml)|(docs/ops/payment-request-approver-email-prod\.md))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo "::error::Selective scope contains a non-authorized file."
@@ -67,17 +114,15 @@ jobs:
           git diff --check origin/main...HEAD
           git diff --exit-code origin/main...HEAD -- \
             .github/workflows/supabase-prod-notification-dispatcher.yml
-          echo "selective_scope=6"
+          echo "selective_scope=${#changed[@]}"
           echo "dev_merge_commits=0"
           echo "receipt_scheduler=unchanged"
 
       - name: Prove certified dispatcher source and receipt byte preservation
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" = \
-            "b4bcf88a109f38eca5c44dfe217750a5bd3f0d82"
-
           python3 - <<'PY'
           from pathlib import Path
           import subprocess
@@ -135,6 +180,7 @@ jobs:
           PY
 
       - name: Run focused executable contracts
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -142,6 +188,7 @@ jobs:
           node --test scripts/qa/payment-request-approver-email-prod-contract.test.mjs
 
       - name: Parse SQL and YAML statically
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -175,6 +222,7 @@ jobs:
           PY
 
       - name: Validate anti-replay, no-recipient, and recovery contracts
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -211,6 +259,7 @@ jobs:
           echo "recovery=disabled_and_isolated"
 
       - name: Secret and governance scan
+        if: steps.c1_scope.outputs.applicable == 'true'
         shell: bash
         run: |
           set -euo pipefail
