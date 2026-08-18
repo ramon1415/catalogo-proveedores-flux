@@ -105,6 +105,7 @@
           <button type="button" class="config-tab" data-config-tab="members">Socios <span class="tab-badge">Dir</span></button>
           <button type="button" class="config-tab" data-config-tab="originAccounts">Cuentas origen <span class="tab-badge">Adm/Dir</span></button>
           <button type="button" class="config-tab" data-config-tab="budgets">Presupuestos <span class="tab-badge">Trim.</span></button>
+          <button type="button" class="config-tab" data-config-tab="contpaq">Mapeo CONTPAQ <span class="tab-badge">Adm/Dir</span></button>
           <button type="button" class="config-tab" data-config-tab="system">Sistema <span class="tab-badge">SysAdmin</span></button>
         </div>
 
@@ -195,6 +196,36 @@
                 </tbody>
               </table>
             </div>
+          </section>
+        </div>
+
+        <!-- Mapeo contable CONTPAQ -->
+        <div id="contpaqPanel" class="config-panel">
+          <section class="table-card">
+            <div class="panel-toolbar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:13px 16px;border-bottom:1px solid var(--border)">
+              <div>
+                <h2 style="font-size:14px;font-weight:800;margin:0">Mapeo de partidas a cuentas CONTPAQ</h2>
+                <div style="font-size:11px;color:var(--text-3)" id="contpaqMapperCounter">Cargando...</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="contpaqCompanySelect" class="form-control" style="min-width:200px"></select>
+                <input id="contpaqSearch" type="search" placeholder="Buscar partida..." class="form-control" style="min-width:180px">
+              </div>
+            </div>
+            <div class="table-wrapper" style="max-height:calc(100vh - 320px)">
+              <table>
+                <thead><tr>
+                  <th>Partida</th>
+                  <th style="min-width:260px">Cuenta CONTPAQ</th>
+                  <th>Nombre de la cuenta</th>
+                  <th>Estado</th>
+                </tr></thead>
+                <tbody id="contpaqMapperBody">
+                  <tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Cargando...</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <datalist id="contpaqAccountsList"></datalist>
           </section>
         </div>
 
@@ -459,6 +490,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260723-approval-execution-hotfix"></script>
+  <script src="./configuracion.js?v=20260818-contpaq-mapper"></script>
 </body>
 </html>
