@@ -667,7 +667,7 @@ async function enterHistYear(year) {
   try {
     const { data, error } = await supabaseClient
       .from("historical_actuals")
-      .select("account_code,period_month,amount")
+      .select("account_code,account_name,period_month,amount")
       .gte("period_month", `${year}-01-01`)
       .lt("period_month", `${year + 1}-01-01`)
       .limit(10000)
