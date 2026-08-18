@@ -40,6 +40,7 @@ const statusLabels = {
 document.addEventListener("DOMContentLoaded", init)
 
 async function init() {
+  state.anualMode = new URLSearchParams(window.location.search).get("view") === "anual"
   setDefaultPeriod()
   bindEvents()
 
@@ -58,22 +59,21 @@ async function init() {
   if (userName)  userName.textContent  = profile?.full_name || "Usuario"
   if (userEmail) userEmail.textContent = profile?.email || "Sesion activa"
 
-  if (window.Components?.buildNav) window.Components.buildNav("dashboard")
+  if (window.Components?.buildNav) window.Components.buildNav(state.anualMode ? "dashboard-anual" : "dashboard")
 
   await loadDashboard()
+  if (state.anualMode) await initAnualMode()
 }
 
 function bindEvents() {
   document.getElementById("refreshBtn")?.addEventListener("click", loadDashboard)
   document.getElementById("periodInput")?.addEventListener("change", loadDashboard)
   document.getElementById("historyBtn")?.addEventListener("click", openHistory)
-  document.getElementById("histYearsBtn")?.addEventListener("click", toggleHistYearsMenu)
-  document.getElementById("histExitBtn")?.addEventListener("click", () => { exitHistYear(); loadDashboard() })
-  document.getElementById("histViewMensual")?.addEventListener("click", () => setHistView("mensual"))
-  document.getElementById("histViewCuentas")?.addEventListener("click", () => setHistView("cuentas"))
-  document.addEventListener("click", (e) => {
-    const menu = document.getElementById("histYearsMenu")
-    if (menu && !menu.classList.contains("hidden") && !e.target.closest("#histYearsBtn") && !e.target.closest("#histYearsMenu")) menu.classList.add("hidden")
+  document.getElementById("histExitBtn")?.addEventListener("click", () => { window.location.href = "./dashboard.html" })
+  document.getElementById("histYearSelect")?.addEventListener("change", (e) => {
+    const v = e.target.value
+    if (v === "todos") enterAllYears()
+    else enterHistYear(Number(v))
   })
   document.getElementById("exportBtn")?.addEventListener("click", openExport)
   document.getElementById("clearFilterBtn")?.addEventListener("click", clearFilter)
@@ -127,7 +127,7 @@ function bindEvents() {
 // ─── Data loading ────────────────────────────────────────────────────────────
 
 async function loadDashboard() {
-  exitHistYear()
+  if (!state.anualMode) exitHistYear()
   const periodInput = document.getElementById("periodInput")
   state.periodKey = periodInput?.value || currentPeriodKey()
   setLoading(true)
@@ -624,40 +624,159 @@ function drawChart(labels, presupuesto, ejecutado, esperado, cobrado) {
 
 // ─── Histórico (años anteriores, fuente historical_actuals/CONTPAQ) ─────────
 
-async function toggleHistYearsMenu() {
-  const menu = document.getElementById("histYearsMenu")
-  if (!menu) return
-  if (!menu.classList.contains("hidden")) { menu.classList.add("hidden"); return }
-  menu.innerHTML = `<div style="padding:8px 10px;font-size:11px;color:var(--text-3)">Cargando años...</div>`
-  menu.classList.remove("hidden")
+async function initAnualMode() {
+  const sel = document.getElementById("histYearSelect")
+  document.getElementById("histYearWrap")?.classList.remove("hidden")
+  document.getElementById("histExitBtn")?.classList.remove("hidden")
+  document.getElementById("periodLabel")?.classList.add("hidden")
   try {
     const { data, error } = await supabaseClient
       .from("historical_actuals")
       .select("period_month")
-      .order("period_month", { ascending: true })
+      .order("period_month", { ascending: false })
       .limit(5000)
     if (error) throw error
     const years = [...new Set((data || []).map((r) => String(r.period_month).slice(0, 4)))]
     if (!years.length) {
-      menu.innerHTML = `<div style="padding:8px 10px;font-size:11px;color:var(--text-3)">Sin histórico cargado.</div>`
+      showToast("Sin histórico", "No hay datos históricos cargados todavía.", "warning")
       return
     }
-    const item = (label, onclickAttr) =>
-      `<button type="button" class="secondary-btn" data-hist-year="${onclickAttr}" style="justify-content:flex-start;border:0;font-size:12.5px">${label}</button>`
-    menu.innerHTML = `
-      <div style="padding:4px 10px 6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)">Histórico</div>
-      ${years.map((y) => item(`Año ${y}`, y)).join("")}
-      <div style="border-top:1px solid var(--border);margin:4px 0"></div>
-      ${item("Año en curso", "actual")}
-    `
-    menu.querySelectorAll("[data-hist-year]").forEach((btn) => btn.addEventListener("click", () => {
-      menu.classList.add("hidden")
-      const y = btn.dataset.histYear
-      if (y === "actual") { exitHistYear(); loadDashboard() } else enterHistYear(Number(y))
-    }))
+    if (sel) {
+      sel.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("") +
+        `<option value="todos">Todos los años</option>`
+      sel.value = years[0]
+    }
+    await enterHistYear(Number(years[0]))
   } catch (err) {
-    menu.innerHTML = `<div style="padding:8px 10px;font-size:11px;color:var(--ruby)">Error: ${safe(friendlyError(err))}</div>`
+    showToast("Error", friendlyError(err), "danger")
   }
+}
+
+async function enterAllYears() {
+  state.histYear = "todos"
+  const sub = document.getElementById("chartSubtitle")
+  if (sub) sub.textContent = "Cargando todos los años..."
+  try {
+    const { data, error } = await supabaseClient
+      .from("historical_actuals")
+      .select("account_code,account_name,period_month,amount")
+      .limit(20000)
+    if (error) throw error
+    const anios = {}
+    const cuentas = new Map()
+    for (const r of data || []) {
+      const y = String(r.period_month).slice(0, 4)
+      anios[y] = anios[y] || { ingresos: 0, egresos: 0 }
+      const fam = String(r.account_code || "")[0]
+      if (fam === "4") anios[y].ingresos += num(r.amount)
+      else if (fam === "6") anios[y].egresos += num(r.amount)
+      if (fam === "4" || fam === "6") {
+        const c = cuentas.get(r.account_code) || { nombre: r.account_name || "", fam, meses: {}, total: 0 }
+        c.meses[y] = (c.meses[y] || 0) + num(r.amount)
+        c.total += num(r.amount)
+        cuentas.set(r.account_code, c)
+      }
+    }
+    const yy = Object.keys(anios).sort()
+    if (sub) sub.textContent = "Todos los años · contabilidad CONTPAQ"
+    state.histCuentas = { periodos: yy, etiquetas: yy, cuentas, titulo: "Histórico por cuenta — todos los años" }
+    drawAllYearsChart(yy, anios)
+    renderAllYearsTable(yy, anios)
+    renderHistKpisTotales(yy, anios)
+    renderHistCuentas()
+    enterHistLayout()
+    setHistLegend("todos")
+  } catch (err) {
+    if (sub) sub.textContent = "No se pudo cargar"
+    showToast("Error al cargar histórico", friendlyError(err), "danger")
+  }
+}
+
+function drawAllYearsChart(yy, anios) {
+  const canvas = document.getElementById("mainChart")
+  if (!canvas) return
+  const isDark = document.documentElement.dataset.theme !== "light"
+  const gridColor = isDark ? "rgba(255,255,255,.06)" : "rgba(0,0,0,.07)"
+  const tickColor = isDark ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.4)"
+  if (state.chart) state.chart.destroy()
+  state.chart = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: yy,
+      datasets: [
+        { type: "bar", label: "Ingresos", data: yy.map((y) => Math.round(anios[y].ingresos)), backgroundColor: "rgba(16,185,129,.65)", borderColor: "rgba(16,185,129,.9)", borderWidth: 1, borderRadius: 4 },
+        { type: "bar", label: "Egresos", data: yy.map((y) => Math.round(anios[y].egresos)), backgroundColor: "rgba(74,124,109,.8)", borderColor: "rgba(74,124,109,.95)", borderWidth: 1, borderRadius: 4 },
+        { type: "line", label: "Neto", data: yy.map((y) => Math.round(anios[y].ingresos - anios[y].egresos)), borderColor: "rgba(245,158,11,.85)", borderWidth: 2, pointRadius: 4, pointBackgroundColor: "rgba(245,158,11,1)", tension: 0.2, fill: false },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: isDark ? "#1a1a2e" : "#fff",
+          borderColor: isDark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.1)",
+          borderWidth: 1,
+          titleColor: isDark ? "#eeeef6" : "#10111f",
+          bodyColor: isDark ? "#aaaac3" : "#50506a",
+          callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${moneyFmt.format(ctx.raw)}` },
+        },
+      },
+      scales: {
+        x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 12 } } },
+        y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 11 }, callback: (v) => `$${(v / 1e6).toFixed(1)}M` } },
+      },
+    },
+  })
+}
+
+function renderAllYearsTable(yy, anios) {
+  const head = document.getElementById("histTableHead")
+  const body = document.getElementById("histTableBody")
+  const foot = document.getElementById("histTableFoot")
+  const title = document.getElementById("histPanelTitle")
+  if (title) title.textContent = "Comparativo anual"
+  if (head) head.innerHTML = `<tr><th>Año</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th><th style="text-align:right">Δ Ingresos</th></tr>`
+  if (!body) return
+  let ti = 0, te = 0
+  body.innerHTML = yy.map((y, i) => {
+    const { ingresos, egresos } = anios[y]
+    ti += ingresos; te += egresos
+    const neto = ingresos - egresos
+    const prev = i > 0 ? anios[yy[i - 1]].ingresos : null
+    const delta = prev ? ((ingresos - prev) / prev) * 100 : null
+    return `<tr>
+      <td><span class="cell-main">${y}</span></td>
+      <td style="text-align:right">${moneyFmt.format(ingresos)}</td>
+      <td style="text-align:right">${moneyFmt.format(egresos)}</td>
+      <td style="text-align:right;color:${neto >= 0 ? "var(--emerald)" : "var(--ruby)"}">${moneyFmt.format(neto)}</td>
+      <td style="text-align:right;color:${delta === null ? "var(--text-3)" : delta >= 0 ? "var(--emerald)" : "var(--ruby)"}">${delta === null ? "—" : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`}</td>
+    </tr>`
+  }).join("")
+  const netoT = ti - te
+  if (foot) foot.innerHTML = `<tr>
+    <td style="font-weight:800">Total</td>
+    <td style="text-align:right;font-weight:800">${moneyFmt.format(ti)}</td>
+    <td style="text-align:right;font-weight:800">${moneyFmt.format(te)}</td>
+    <td style="text-align:right;font-weight:800;color:${netoT >= 0 ? "var(--emerald)" : "var(--ruby)"}">${moneyFmt.format(netoT)}</td>
+    <td></td>
+  </tr>`
+}
+
+function renderHistKpisTotales(yy, anios) {
+  let ti = 0, te = 0
+  for (const y of yy) { ti += anios[y].ingresos; te += anios[y].egresos }
+  const neto = ti - te
+  const set = (id, v, color) => {
+    const el = document.getElementById(id)
+    if (el) { el.textContent = moneyFmt.format(v); if (color) el.style.color = color }
+  }
+  set("histKpiIngresos", ti)
+  set("histKpiEgresos", te)
+  set("histKpiNeto", neto, neto >= 0 ? "var(--emerald)" : "var(--ruby)")
+  set("histKpiPromedio", yy.length ? te / yy.length : 0)
 }
 
 async function enterHistYear(year) {
@@ -692,13 +811,12 @@ async function enterHistYear(year) {
     const ingresos = mm.map((m) => Math.round(meses[m].ingresos * 100) / 100)
     const egresos  = mm.map((m) => Math.round(meses[m].egresos * 100) / 100)
     if (sub) sub.textContent = `Histórico ${year} · contabilidad CONTPAQ`
-    state.histCuentas = { year, mm, cuentas }
+    state.histCuentas = { periodos: mm, etiquetas: labels, cuentas, titulo: `Histórico por cuenta — ${year}` }
     drawHistChart(labels, ingresos, egresos)
     renderHistTable(year, mm, meses)
     renderHistKpis(year, meses, mm)
     renderHistCuentas()
     enterHistLayout()
-    setHistView("mensual")
     setHistLegend(true)
   } catch (err) {
     if (sub) sub.textContent = "No se pudo cargar el histórico"
@@ -720,7 +838,7 @@ function exitHistYear() {
     dashGrid.insertBefore(card, dashGrid.firstElementChild)
     card.classList.remove("compact-rows")
   }
-  document.getElementById("histHeaderCtl")?.classList.add("hidden")
+  document.getElementById("histCuentasPanel")?.classList.add("hidden")
   document.getElementById("tabsBlock")?.classList.remove("hidden")
   showTab(state.activeTab || "expenses")
   setHistLegend(false)
@@ -731,9 +849,7 @@ function enterHistLayout() {
   document.getElementById("kpiGrid")?.classList.add("hidden")
   document.getElementById("histKpiStrip")?.classList.remove("hidden")
   document.getElementById("dashGrid")?.classList.add("hidden")
-  document.getElementById("histHeaderCtl")?.classList.remove("hidden")
-  const yl = document.getElementById("histYearLabel")
-  if (yl) yl.textContent = state.histYear || ""
+  document.getElementById("histCuentasPanel")?.classList.remove("hidden")
   document.getElementById("tabsBlock")?.classList.add("hidden")
   ;["expenses", "ytd", "income", "cash", "incidents"].forEach((id) =>
     document.getElementById(`${id}Tab`)?.classList.add("hidden"))
@@ -743,20 +859,6 @@ function enterHistLayout() {
     slot.appendChild(card)
     card.classList.add("compact-rows")
   }
-}
-
-function setHistView(view) {
-  const mensual = document.getElementById("histMensualWrap")
-  const cuentasW = document.getElementById("histCuentasWrap")
-  const grid = document.getElementById("histGrid")
-  const slot = document.getElementById("histMemberSlot")
-  const on = view === "cuentas"
-  mensual?.classList.toggle("hidden", on)
-  cuentasW?.classList.toggle("hidden", !on)
-  grid?.classList.toggle("full", on)
-  slot?.classList.toggle("hidden", on)
-  document.getElementById("histViewMensual")?.style.setProperty("background", on ? "transparent" : "var(--accent-dim)")
-  document.getElementById("histViewCuentas")?.style.setProperty("background", on ? "var(--accent-dim)" : "transparent")
 }
 
 function renderHistKpis(year, meses, mm) {
@@ -776,24 +878,25 @@ function renderHistKpis(year, meses, mm) {
 function renderHistCuentas() {
   const tabla = document.getElementById("histCuentasTable")
   if (!tabla || !state.histCuentas) return
-  const { year, mm, cuentas } = state.histCuentas
-  const mesesCorto = mm.map((m) => new Date(year, m - 1, 1).toLocaleDateString("es-MX", { month: "short" }))
+  const { periodos, etiquetas, cuentas, titulo } = state.histCuentas
+  const titleEl = document.getElementById("histCuentasTitle")
+  if (titleEl) titleEl.textContent = titulo
   const fmtK = (v) => (v === 0 ? "—" : moneyFmt.format(v))
   const filaCuenta = ([code, c]) => `<tr>
     <td class="hist-cuenta-col" title="${safe(code)}"><span class="cell-main">${safe(c.nombre)}</span></td>
-    ${mm.map((m) => `<td style="text-align:right;white-space:nowrap">${fmtK(Math.round((c.meses[m] || 0) * 100) / 100)}</td>`).join("")}
+    ${periodos.map((k) => `<td style="text-align:right;white-space:nowrap">${fmtK(Math.round((c.meses[k] || 0) * 100) / 100)}</td>`).join("")}
     <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(Math.round(c.total * 100) / 100)}</td>
   </tr>`
-  const seccion = (titulo, fam, colorVar) => {
+  const seccion = (tituloSec, fam, colorVar) => {
     const lista = [...cuentas.entries()].filter(([, c]) => c.fam === fam).sort((a, b) => b[1].total - a[1].total)
     if (!lista.length) return ""
-    const sub = mm.map((m) => lista.reduce((s, [, c]) => s + (c.meses[m] || 0), 0))
+    const sub = periodos.map((k) => lista.reduce((s, [, c]) => s + (c.meses[k] || 0), 0))
     const tot = lista.reduce((s, [, c]) => s + c.total, 0)
     return `
-      <tr><td colspan="${mm.length + 2}" style="padding:9px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${colorVar};background:var(--bg-hover)">${titulo}</td></tr>
+      <tr><td colspan="${periodos.length + 2}" style="padding:9px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:${colorVar};background:var(--bg-hover)">${tituloSec}</td></tr>
       ${lista.map(filaCuenta).join("")}
       <tr style="font-weight:800">
-        <td class="hist-cuenta-col">Total ${titulo.toLowerCase()}</td>
+        <td class="hist-cuenta-col">Total ${tituloSec.toLowerCase()}</td>
         ${sub.map((v) => `<td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(v * 100) / 100)}</td>`).join("")}
         <td style="text-align:right;white-space:nowrap">${moneyFmt.format(Math.round(tot * 100) / 100)}</td>
       </tr>`
@@ -801,10 +904,10 @@ function renderHistCuentas() {
   tabla.innerHTML = `
     <thead><tr>
       <th class="hist-cuenta-col">Cuenta</th>
-      ${mesesCorto.map((l) => `<th style="text-align:right;text-transform:capitalize">${l}</th>`).join("")}
+      ${etiquetas.map((l) => `<th style="text-align:right;text-transform:capitalize">${l}</th>`).join("")}
       <th style="text-align:right">Total</th>
     </tr></thead>
-    <tbody class="compact-rows">
+    <tbody>
       ${seccion("Ingresos", "4", "var(--emerald)")}
       ${seccion("Egresos", "6", "var(--accent-text)")}
     </tbody>`
@@ -818,6 +921,7 @@ function setHistLegend(on) {
     legend.innerHTML = `
       <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(74,124,109,.85)"></div>Egresos</div>
       <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(16,185,129,.9)"></div>Ingresos</div>
+      ${on === "todos" ? `<div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(245,158,11,.9)"></div>Neto</div>` : ""}
     `
   } else if (state.legendOriginal) {
     legend.innerHTML = state.legendOriginal
@@ -870,6 +974,8 @@ function renderHistTable(year, mm, meses) {
   const foot = document.getElementById("histTableFoot")
   if (!panel || !body) return
   if (title) title.textContent = `Histórico ${year} — mensual`
+  const head = document.getElementById("histTableHead")
+  if (head) head.innerHTML = `<tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr>`
   let ti = 0, te = 0
   body.innerHTML = mm.map((m) => {
     const { ingresos, egresos } = meses[m]

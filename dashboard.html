@@ -122,18 +122,15 @@
             <p>Ejecucion presupuestal, cobranza, efectivo y cierre mensual.</p>
           </div>
           <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
-            <label style="display:flex;flex-direction:column;gap:4px">
+            <label id="periodLabel" style="display:flex;flex-direction:column;gap:4px">
               <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)">Periodo</span>
               <input id="periodInput" type="month" style="min-height:34px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-1);padding:0 10px;font:inherit;font-size:12.5px;outline:none">
             </label>
-            <div style="position:relative">
-              <button id="histYearsBtn" class="secondary-btn" type="button" title="Histórico / años anteriores" style="min-height:34px;padding:0 12px;font-size:16px;line-height:1">⋯</button>
-              <div id="histYearsMenu" class="hidden" style="position:absolute;top:38px;left:0;z-index:30;min-width:170px;background:var(--bg-card);border:1px solid var(--border-strong);border-radius:10px;padding:6px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:2px"></div>
-            </div>
-            <div id="histHeaderCtl" class="hidden" style="display:flex;align-items:center;gap:10px;background:var(--accent-dim);border:1px solid var(--border);border-radius:8px;padding:0 6px 0 12px;min-height:34px">
-              <span style="font-size:12px;color:var(--text-2)">Histórico&nbsp;<strong id="histYearLabel" style="font-size:14.5px;color:var(--accent-text)"></strong></span>
-              <button id="histExitBtn" class="secondary-btn" type="button" style="font-size:11.5px;min-height:26px;padding:3px 10px">Año en curso</button>
-            </div>
+            <label id="histYearWrap" class="hidden" style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--accent-text)">Año</span>
+              <select id="histYearSelect" style="min-height:34px;background:var(--bg-input);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-1);padding:0 10px;font:inherit;font-size:13px;font-weight:700;outline:none"></select>
+            </label>
+            <button id="histExitBtn" class="secondary-btn hidden" type="button" style="font-size:12px">Año en curso</button>
             <button id="refreshBtn" class="secondary-btn" type="button">Actualizar</button>
             <button id="exportBtn" class="secondary-btn" type="button">Exportar</button>
             <button id="historyBtn" class="secondary-btn" type="button">Historial</button>
@@ -205,23 +202,27 @@
                 <div style="font-size:13px;font-weight:800" id="histPanelTitle">Histórico</div>
                 <div style="font-size:10.5px;color:var(--text-3)">Contabilidad CONTPAQ · 4xx / 6xx</div>
               </div>
-              <div style="display:flex;gap:6px">
-                <button id="histViewMensual" class="secondary-btn" type="button" style="font-size:11.5px;min-height:28px;padding:4px 10px">Mensual</button>
-                <button id="histViewCuentas" class="secondary-btn" type="button" style="font-size:11.5px;min-height:28px;padding:4px 10px">Por cuenta</button>
-              </div>
             </div>
             <div id="histMensualWrap" class="table-wrapper" style="min-height:auto;max-height:none">
               <table style="min-width:0">
-                <thead><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr></thead>
+                <thead id="histTableHead"><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr></thead>
                 <tbody id="histTableBody"></tbody>
                 <tfoot id="histTableFoot"></tfoot>
               </table>
             </div>
-            <div id="histCuentasWrap" class="table-wrapper hidden" style="min-height:auto;max-height:520px">
-              <table id="histCuentasTable" style="min-width:0"></table>
-            </div>
           </div>
           <div id="histMemberSlot"></div>
+        </div>
+
+        <!-- Histórico por cuenta (matriz completa, debajo de mensual + cobranza) -->
+        <div id="histCuentasPanel" class="table-card compact-rows hidden">
+          <div style="padding:11px 14px;border-bottom:1px solid var(--border)">
+            <div style="font-size:13px;font-weight:800" id="histCuentasTitle">Histórico por cuenta</div>
+            <div style="font-size:10.5px;color:var(--text-3)">Ordenado por monto · código de cuenta al pasar el mouse</div>
+          </div>
+          <div class="table-wrapper" style="min-height:auto;max-height:560px">
+            <table id="histCuentasTable" style="min-width:0"></table>
+          </div>
         </div>
 
         <!-- Dashboard grid: cobranza + cierre -->
@@ -432,6 +433,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260817-historico4"></script>
+  <script src="./dashboard.js?v=20260818-anual"></script>
 </body>
 </html>
