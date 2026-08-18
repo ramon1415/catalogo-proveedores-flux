@@ -704,32 +704,86 @@ async function enterAllYears() {
       }
     }
     const yy = Object.keys(anios).sort()
-    // serie mensual continua para la gráfica (todos los meses de todos los años)
-    const mensual = {}
+    // por AÑO sobrepuesto: 12 meses en X, una serie por año (egresos sólida, ingresos punteada)
+    const porAnioMes = {}
     for (const r of data || []) {
-      const ym = String(r.period_month).slice(0, 7)
-      mensual[ym] = mensual[ym] || { ingresos: 0, egresos: 0 }
+      const y = String(r.period_month).slice(0, 4)
+      const m = Number(String(r.period_month).slice(5, 7))
+      porAnioMes[y] = porAnioMes[y] || {}
+      porAnioMes[y][m] = porAnioMes[y][m] || { ingresos: 0, egresos: 0 }
       const fam = String(r.account_code || "")[0]
-      if (fam === "4") mensual[ym].ingresos += num(r.amount)
-      else if (fam === "6") mensual[ym].egresos += num(r.amount)
+      if (fam === "4") porAnioMes[y][m].ingresos += num(r.amount)
+      else if (fam === "6") porAnioMes[y][m].egresos += num(r.amount)
     }
-    const yms = Object.keys(mensual).sort()
-    const labelsM = yms.map((ym) => {
-      const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1)
-      return `${d.toLocaleDateString("es-MX", { month: "short" })} ${ym.slice(2, 4)}`
-    })
-    if (sub) sub.textContent = "Todos los años · mensual · contabilidad CONTPAQ"
+    if (sub) sub.textContent = "Todos los años sobrepuestos · mensual · contabilidad CONTPAQ"
     state.histCuentas = { periodos: yy, etiquetas: yy, cuentas, titulo: "Histórico por cuenta — todos los años" }
-    drawHistChart(labelsM, yms.map((k) => r2c(mensual[k].ingresos)), yms.map((k) => r2c(mensual[k].egresos)))
+    drawYearsOverlayChart(yy, porAnioMes)
     renderAllYearsTable(yy, anios)
     renderHistKpisTotales(yy, anios)
     renderHistCuentas()
     enterHistLayout()
-    setHistLegend(true)
+    setYearsOverlayLegend(yy)
   } catch (err) {
     if (sub) sub.textContent = "No se pudo cargar"
     showToast("Error al cargar histórico", friendlyError(err), "danger")
   }
+}
+
+const YEAR_COLORS = ["rgba(148,163,175,VAR)", "rgba(74,124,109,VAR)", "rgba(245,158,11,VAR)", "rgba(46,144,250,VAR)", "rgba(224,62,82,VAR)"]
+
+function drawYearsOverlayChart(yy, porAnioMes) {
+  const canvas = document.getElementById("mainChart")
+  if (!canvas) return
+  const isDark = document.documentElement.dataset.theme !== "light"
+  const gridColor = isDark ? "rgba(255,255,255,.06)" : "rgba(0,0,0,.07)"
+  const tickColor = isDark ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.4)"
+  const labels = Array.from({ length: 12 }, (_, i) =>
+    new Date(2000, i, 1).toLocaleDateString("es-MX", { month: "short" }))
+  const datasets = []
+  yy.forEach((y, i) => {
+    const color = (a) => YEAR_COLORS[i % YEAR_COLORS.length].replace("VAR", a)
+    const serie = (campo) => Array.from({ length: 12 }, (_, m) => {
+      const v = porAnioMes[y]?.[m + 1]?.[campo]
+      return v === undefined ? null : r2c(v)
+    })
+    datasets.push({ type: "line", label: `Egresos ${y}`, data: serie("egresos"), borderColor: color(".9"), backgroundColor: color(".9"), borderWidth: 2, pointRadius: 2.5, tension: 0.25, fill: false, spanGaps: false })
+    datasets.push({ type: "line", label: `Ingresos ${y}`, data: serie("ingresos"), borderColor: color(".55"), backgroundColor: color(".55"), borderDash: [5, 4], borderWidth: 1.5, pointRadius: 2, tension: 0.25, fill: false, spanGaps: false })
+  })
+  if (state.chart) state.chart.destroy()
+  state.chart = new Chart(canvas, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: isDark ? "#152119" : "#fff",
+          borderColor: isDark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.1)",
+          borderWidth: 1,
+          titleColor: isDark ? "#f7f7f5" : "#15211d",
+          bodyColor: isDark ? "#b4c1ba" : "#4d5f58",
+          callbacks: { label: (ctx) => ctx.raw === null ? null : ` ${ctx.dataset.label}: ${moneyFmt.format(ctx.raw)}` },
+        },
+      },
+      scales: {
+        x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 11 } } },
+        y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 11 }, callback: (v) => `$${(v / 1000).toFixed(0)}k` } },
+      },
+    },
+  })
+}
+
+function setYearsOverlayLegend(yy) {
+  const legend = document.querySelector(".chart-legend")
+  if (!legend) return
+  if (!state.legendOriginal) state.legendOriginal = legend.innerHTML
+  legend.innerHTML = yy.map((y, i) => {
+    const color = YEAR_COLORS[i % YEAR_COLORS.length].replace("VAR", ".9")
+    return `<div class="chart-legend-item"><div class="chart-legend-dot" style="background:${color}"></div>${y}</div>`
+  }).join("") + `<div class="chart-legend-item" style="color:var(--text-3)">sólida = egresos · punteada = ingresos</div>`
 }
 
 function renderAllYearsTable(yy, anios) {
