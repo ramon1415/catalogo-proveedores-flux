@@ -468,7 +468,17 @@ write(migrations.provider_portal_prod_provider_aware_links.path, t4);
 
 const edgePaths = run("git", ["ls-tree", "-r", "--name-only", SOURCE_DEV_SHA, "supabase/functions/provider-intake"])
   .trim().split("\n").filter(Boolean);
-for (const edgePath of edgePaths) write(edgePath, show(SOURCE_DEV_SHA, edgePath));
+for (const edgePath of edgePaths) {
+  let content = show(SOURCE_DEV_SHA, edgePath);
+  if (edgePath.endsWith(".ts")) {
+    content = content
+      .replaceAll("https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app", "https://flux.quantta.mx")
+      .replaceAll("https://scsirgbuqjcwoaxfacth.functions.supabase.co", "https://ucantptjhwttexzmslvm.functions.supabase.co")
+      .replaceAll("https://example.test/privacy", "https://privacy.quantta.mx/provider-intake")
+      .replaceAll("Operadora DEV", "Operadora shadow");
+  }
+  write(edgePath, content);
+}
 
 write("supabase/functions/provider-intake/prod-config.ts", String.raw`export const PROVIDER_INTAKE_PROD_CONTRACT = Object.freeze({
   captchaProvider: "turnstile",
