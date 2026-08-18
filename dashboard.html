@@ -56,7 +56,7 @@
     .hist-kpi strong { font-size:15px; font-variant-numeric:tabular-nums; }
     #histGrid { display:grid; grid-template-columns:minmax(430px,1fr) 2fr; gap:12px; align-items:start; }
     #histGrid.full { grid-template-columns:1fr; }
-    .hist-cuenta-col { position:sticky; left:0; background:var(--bg-card); z-index:1; }
+    .hist-cuenta-col { position:sticky; left:0; background:var(--bg-card); z-index:2; box-shadow:2px 0 0 var(--border); }
     tr.hist-grupo { cursor:pointer; user-select:none; }
     tr.hist-grupo .hist-caret { display:inline-block; width:14px; font-size:10px; color:var(--text-3); transition:transform .15s; }
     tr.hist-grupo.abierto .hist-caret { transform:rotate(90deg); }
@@ -446,6 +446,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260818-anual9"></script>
+  <script src="./dashboard.js?v=20260818-anual10"></script>
 </body>
 </html>
