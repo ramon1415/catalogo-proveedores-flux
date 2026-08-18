@@ -1107,7 +1107,7 @@ function renderContpaqMapper() {
       const ok = Boolean(account)
       const revisar = contpaqState.review?.has(cat.id)
       return `<tr data-cat="${cat.id}" style="${ok ? (revisar ? "background:rgba(245,158,11,.07)" : "") : "background:rgba(224,62,82,.05)"}">
-        <td style="padding-left:26px"><span class="cell-main">${escHtml(cat.name)}</span></td>
+        <td style="padding-left:26px"><span style="display:flex;align-items:center;gap:6px"><span class="cell-main">${escHtml(cat.name)}</span><button type="button" class="icon-btn" data-grupo-edit="${cat.id}" title="Cambiar agrupación" style="width:24px;height:24px;font-size:12px;border:0">✎</button></span></td>
         <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
         <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
         <td data-map-state="${cat.id}">${!ok
@@ -1122,6 +1122,8 @@ function renderContpaqMapper() {
   body.querySelectorAll("[data-map-input]").forEach((input) => {
     input.addEventListener("change", () => saveContpaqMapping(input.dataset.mapInput, input.value.trim(), input))
   })
+  body.querySelectorAll("[data-grupo-edit]").forEach((btn) =>
+    btn.addEventListener("click", () => openGrupoDialog(btn.dataset.grupoEdit)))
   updateContpaqCounter()
 }
 
@@ -1165,3 +1167,56 @@ function showToastSafe(title, desc, variant) {
 }
 
 function errorMessage(err) { return err?.message || String(err) }
+
+
+// ── Cambiar agrupación de una partida ───────────────────────────
+const NUEVO_GRUPO = "__nuevo__"
+let grupoDialogCatId = null
+
+function openGrupoDialog(catId) {
+  const cat = contpaqState.categories.find((c) => c.id === catId)
+  if (!cat) return
+  grupoDialogCatId = catId
+  const sub = document.getElementById("grupoDialogPartida")
+  if (sub) sub.textContent = `${cat.name} — hoy en "${cat.category || "Sin grupo"}"`
+  const sel = document.getElementById("grupoSelect")
+  if (sel) {
+    const grupos = [...new Set(contpaqState.categories.map((c) => c.category || "Sin grupo"))].sort((a, b) => a.localeCompare(b, "es"))
+    sel.innerHTML = grupos.map((g) => `<option value="${escHtml(g)}"${g === (cat.category || "Sin grupo") ? " selected" : ""}>${escHtml(g)}</option>`).join("") +
+      `<option value="${NUEVO_GRUPO}">➕ Crear nueva agrupación...</option>`
+  }
+  document.getElementById("grupoNuevoWrap")?.classList.add("hidden")
+  const inp = document.getElementById("grupoNuevoInput")
+  if (inp) inp.value = ""
+  document.getElementById("grupoDialog")?.showModal()
+}
+
+document.getElementById("grupoSelect")?.addEventListener("change", (e) => {
+  document.getElementById("grupoNuevoWrap")?.classList.toggle("hidden", e.target.value !== NUEVO_GRUPO)
+  if (e.target.value === NUEVO_GRUPO) document.getElementById("grupoNuevoInput")?.focus()
+})
+
+document.getElementById("grupoForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const sel = document.getElementById("grupoSelect")
+  let grupo = sel?.value || ""
+  if (grupo === NUEVO_GRUPO) {
+    grupo = (document.getElementById("grupoNuevoInput")?.value || "").trim()
+    if (!grupo) { showToastSafe("Falta el nombre", "Escribe el nombre de la nueva agrupación.", "danger"); return }
+  }
+  try {
+    const { error } = await configClient.from("budget_categories")
+      .update({ category: grupo }).eq("id", grupoDialogCatId)
+    if (error) throw error
+    const cat = contpaqState.categories.find((c) => c.id === grupoDialogCatId)
+    if (cat) cat.category = grupo
+    document.getElementById("grupoDialog")?.close()
+    renderContpaqMapper()
+    showToastSafe("Agrupación actualizada", `Ahora vive en "${grupo}".`, "success")
+  } catch (err) {
+    const msg = /policy|permission|denied/i.test(errorMessage(err))
+      ? "La base aún no permite editar partidas — falta correr rls_budget_categories_write.sql"
+      : errorMessage(err)
+    showToastSafe("No se pudo guardar", msg, "danger")
+  }
+})

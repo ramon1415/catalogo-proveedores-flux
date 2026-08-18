@@ -376,6 +376,30 @@
   </dialog>
 
   <!-- Dialog: socio -->
+  <dialog id="grupoDialog" class="narrow" style="max-width:440px">
+    <form id="grupoForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Cambiar agrupación</h2>
+          <p id="grupoDialogPartida"></p>
+        </div>
+        <button type="button" class="icon-btn" data-close-dialog>✕</button>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.35px">
+        Agrupación
+        <select id="grupoSelect" class="form-control"></select>
+      </label>
+      <label id="grupoNuevoWrap" class="hidden" style="display:flex;flex-direction:column;gap:6px;font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.35px">
+        Nombre de la nueva agrupación
+        <input id="grupoNuevoInput" type="text" class="form-control" placeholder="Ej. Servicios digitales">
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" data-close-dialog>Cancelar</button>
+        <button type="submit" class="primary-btn">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="memberDialog" class="narrow">
     <form id="memberForm" class="modal-content">
       <div class="modal-header">
@@ -495,6 +519,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260723-approval-execution-hotfix"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./configuracion.js?v=20260818-mapper3"></script>
+  <script src="./configuracion.js?v=20260818-mapper4"></script>
 </body>
 </html>
