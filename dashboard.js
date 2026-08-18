@@ -997,7 +997,7 @@ function renderHistCuentas() {
     }
   }
   if (sinMapear.length) {
-    htmlEgr += headerRow(grupos.size ? "Egresos sin mapear a partida" : "Egresos", "var(--amber)")
+    htmlEgr += headerRow(grupos.size ? "Fuera del presupuesto (cuentas sin partida)" : "Egresos", "var(--amber)")
     sinMapear.sort((a, b) => b[1].total - a[1].total)
     for (const [code, c] of sinMapear) { htmlEgr += fila(c.nombre, grupos.size ? "sin partida" : null, c.meses, c.total, { title: code }); acum(c.meses, c.total) }
   }

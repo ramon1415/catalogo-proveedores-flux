@@ -1039,6 +1039,7 @@ async function loadContpaqMapper() {
       sel.addEventListener("change", () => selectContpaqCompany(sel.value))
     }
     document.getElementById("contpaqSearch")?.addEventListener("input", renderContpaqMapper)
+    document.getElementById("contpaqFilter")?.addEventListener("change", renderContpaqMapper)
     await selectContpaqCompany(contpaqState.companies[0]?.id || null)
   } catch (err) {
     if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--ruby)">${escHtml(errorMessage(err))}</td></tr>`
@@ -1053,12 +1054,13 @@ async function selectContpaqCompany(companyId) {
   try {
     const [accountsR, mappingsR] = await Promise.all([
       configClient.from("contpaq_accounts").select("code,name,is_detail").eq("company_id", companyId).limit(5000),
-      configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code").eq("company_id", companyId).limit(2000),
+      configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code,needs_review").eq("company_id", companyId).limit(2000),
     ])
     if (accountsR.error) throw accountsR.error
     if (mappingsR.error) throw mappingsR.error
     contpaqState.accounts = new Map((accountsR.data || []).map((a) => [a.code, a]))
     contpaqState.mappings = new Map((mappingsR.data || []).map((m) => [m.budget_category_id, m.contpaq_account_code]))
+    contpaqState.review = new Set((mappingsR.data || []).filter((m) => m.needs_review).map((m) => m.budget_category_id))
 
     // datalist: solo cuentas de detalle (mapeables), gasto primero
     const list = document.getElementById("contpaqAccountsList")
@@ -1077,9 +1079,14 @@ function renderContpaqMapper() {
   const body = document.getElementById("contpaqMapperBody")
   if (!body) return
   const q = (document.getElementById("contpaqSearch")?.value || "").trim().toLowerCase()
-  const cats = contpaqState.categories.filter((c) =>
-    !q || c.name.toLowerCase().includes(q) || String(c.category || "").toLowerCase().includes(q)
-  )
+  const filtro = document.getElementById("contpaqFilter")?.value || "todas"
+  const cats = contpaqState.categories.filter((c) => {
+    if (q && !c.name.toLowerCase().includes(q) && !String(c.category || "").toLowerCase().includes(q)) return false
+    const mapeada = Boolean(contpaqState.accounts.get(contpaqState.mappings.get(c.id)))
+    if (filtro === "sinmapear") return !mapeada
+    if (filtro === "revisar") return contpaqState.review?.has(c.id)
+    return true
+  })
   if (!contpaqState.accounts.size) {
     body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Esta empresa no tiene catálogo CONTPAQ cargado.</td></tr>`
     updateContpaqCounter(); return
@@ -1098,13 +1105,16 @@ function renderContpaqMapper() {
       const code = contpaqState.mappings.get(cat.id) || ""
       const account = code ? contpaqState.accounts.get(code) : null
       const ok = Boolean(account)
-      return `<tr data-cat="${cat.id}" style="${ok ? "" : "background:rgba(245,158,11,.05)"}">
+      const revisar = contpaqState.review?.has(cat.id)
+      return `<tr data-cat="${cat.id}" style="${ok ? (revisar ? "background:rgba(245,158,11,.07)" : "") : "background:rgba(224,62,82,.05)"}">
         <td style="padding-left:26px"><span class="cell-main">${escHtml(cat.name)}</span></td>
         <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
         <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
-        <td data-map-state="${cat.id}">${ok
-          ? `<span class="badge success">Mapeada</span>`
-          : `<span class="badge warning">Sin mapear</span>`}</td>
+        <td data-map-state="${cat.id}">${!ok
+          ? `<span class="badge warning">Sin mapear</span>`
+          : revisar
+            ? `<span class="badge warning" title="Asignación automática de confianza baja — confirma o corrige la cuenta">⚠ Revisar</span>`
+            : `<span class="badge success">Mapeada</span>`}</td>
       </tr>`
     }).join("")
   }
@@ -1120,7 +1130,8 @@ function updateContpaqCounter() {
   if (!el) return
   const total = contpaqState.categories.length
   const mapped = contpaqState.categories.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
-  el.textContent = `${mapped} de ${total} partidas mapeadas${mapped < total ? ` · ${total - mapped} pendientes` : " · completo ✓"}`
+  const rev = contpaqState.review?.size || 0
+  el.textContent = `${mapped} de ${total} partidas mapeadas${mapped < total ? ` · ${total - mapped} sin mapear` : ""}${rev ? ` · ⚠ ${rev} por revisar` : ""}${mapped === total && !rev ? " · completo ✓" : ""}`
 }
 
 async function saveContpaqMapping(categoryId, code, input) {
@@ -1137,9 +1148,10 @@ async function saveContpaqMapping(categoryId, code, input) {
       if (!account) { showToastSafe("Cuenta no encontrada", `"${code}" no está en el catálogo CONTPAQ de esta empresa.`, "danger"); renderContpaqMapper(); return }
       if (!account.is_detail) { showToastSafe("Cuenta de mayor", `${code} no es cuenta de detalle — elige una cuenta hoja.`, "danger"); renderContpaqMapper(); return }
       const { error } = await configClient.from("budget_account_mappings")
-        .upsert({ company_id: companyId, budget_category_id: categoryId, contpaq_account_code: code, updated_by: profileId, updated_at: new Date().toISOString() }, { onConflict: "company_id,budget_category_id" })
+        .upsert({ company_id: companyId, budget_category_id: categoryId, contpaq_account_code: code, needs_review: false, updated_by: profileId, updated_at: new Date().toISOString() }, { onConflict: "company_id,budget_category_id" })
       if (error) throw error
       contpaqState.mappings.set(categoryId, code)
+      contpaqState.review?.delete(categoryId)
     }
     renderContpaqMapper()
   } catch (err) {
