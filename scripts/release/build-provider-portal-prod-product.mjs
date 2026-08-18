@@ -309,14 +309,14 @@ solicitarHtml = solicitarHtml
   .replace(/\s*<strong class="environment-badge">Ambiente DEV<\/strong>\s*/, "\n")
   .replace(/\s*<aside class="dev-banner"[\s\S]*?<\/aside>\s*/, "\n")
   .replace(/\s*<label class="check-row"><input id="dev-data-confirmed"[\s\S]*?<\/label>\s*/, "\n")
-  .replaceAll("EnvÃ­o confirmado Â· Ambiente DEV", "EnvÃ­o confirmado")
+  .replace(/\s*(?:\u00b7|\u00c2\u00b7)?\s*Ambiente DEV/g, "")
   .replaceAll("20260811-provider-aware-links", "20260818-provider-portal-prod");
 write("solicitar.html", solicitarHtml);
 
 let solicitarJs = fs.readFileSync("solicitar.js", "utf8");
 solicitarJs = solicitarJs
-  .replace(" && byId(\"dev-data-confirmed\").checked", "")
-  .replace(" Â· Ambiente DEV`;", "`;" )
+  .replace(/ && byId\("dev-data-confirmed"\)\.checked/g, "")
+  .replace(/\s+(?:\u00b7|\u00c2\u00b7)\s+Ambiente DEV/g, "")
   .replace(
     "function bootstrap() {\n  bindEvents();",
     `function bootstrap() {\n  bindEvents();\n  if (!PUBLIC_INTAKE_CONFIG.releaseReady) {\n    if (machine.state === "booting") transition("unavailable");\n    showOnly("unavailable");\n    byId("unavailable-message").textContent = "El portal estÃ¡ temporalmente fuera de servicio. Solicita apoyo a tu contacto de Finanzas.";\n    focusHeading("unavailable-title");\n    return;\n  }`,
