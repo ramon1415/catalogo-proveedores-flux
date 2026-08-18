@@ -982,7 +982,7 @@ function renderHistCuentas() {
     for (const [grupo, g] of [...grupos.entries()].sort((a, b) => b[1].total - a[1].total)) {
       gi++
       htmlEgr += `<tr class="hist-grupo" data-grupo="${gi}" style="font-weight:800;background:var(--bg-hover)">
-        <td class="hist-cuenta-col" style="background:var(--bg-hover)"><span class="hist-caret">▶</span><span class="cell-main">${safe(grupo)}</span><span class="muted-line" style="margin-left:14px">${g.partidas.size} partida${g.partidas.size === 1 ? "" : "s"}</span></td>
+        <td class="hist-cuenta-col" style="background:var(--bg-hover)"><span style="display:flex;align-items:center;gap:6px;white-space:nowrap"><span class="hist-caret">▶</span><span class="cell-main">${safe(grupo)}</span><span class="muted-line" style="display:inline;margin:0;white-space:nowrap">· ${g.partidas.size} partida${g.partidas.size === 1 ? "" : "s"}</span></span></td>
         ${celdas(g.meses)}
         <td style="text-align:right;font-weight:800;white-space:nowrap">${moneyFmt.format(r2(g.total))}</td>
       </tr>`
