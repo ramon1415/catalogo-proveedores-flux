@@ -54,7 +54,7 @@
     .hist-kpi { background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:8px 14px; display:flex; align-items:baseline; gap:8px; }
     .hist-kpi span { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--text-3); }
     .hist-kpi strong { font-size:15px; font-variant-numeric:tabular-nums; }
-    #histGrid { display:grid; grid-template-columns:1fr 2fr; gap:12px; align-items:start; }
+    #histGrid { display:grid; grid-template-columns:minmax(430px,1fr) 2fr; gap:12px; align-items:start; }
     #histGrid.full { grid-template-columns:1fr; }
     .hist-cuenta-col { position:sticky; left:0; background:var(--bg-card); z-index:1; }
     tr.hist-grupo { cursor:pointer; user-select:none; }
@@ -217,7 +217,7 @@
               </div>
             </div>
             <div id="histMensualWrap" class="table-wrapper" style="min-height:auto;max-height:none">
-              <table style="min-width:0">
+              <table style="min-width:400px">
                 <thead id="histTableHead"><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr></thead>
                 <tbody id="histTableBody"></tbody>
                 <tfoot id="histTableFoot"></tfoot>
@@ -446,6 +446,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260818-anual8"></script>
+  <script src="./dashboard.js?v=20260818-anual9"></script>
 </body>
 </html>
