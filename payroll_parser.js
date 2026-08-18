@@ -14,6 +14,46 @@
   const PAYROLL_SPEI_USEFUL_BYTES = 128;
   const MAX_SAFE_MINOR = BigInt(Number.MAX_SAFE_INTEGER);
 
+  const PAYROLL_CAPTURE_ISSUE_TYPES = Object.freeze({
+    MISSING_USER_FILE: 'MISSING_USER_FILE',
+    FORMAT_NOT_CERTIFIED: 'FORMAT_NOT_CERTIFIED',
+    PARSER_ERROR: 'PARSER_ERROR',
+    TOTAL_MISMATCH: 'TOTAL_MISMATCH'
+  });
+
+  const PAYROLL_CAPTURE_CAPABILITIES = Object.freeze({
+    caratula: Object.freeze({
+      capability: 'unsupported_pending_source_contract',
+      required: true,
+      uploadSupported: true,
+      parserSupported: false
+    }),
+    layout_mismo_banco: Object.freeze({
+      capability: 'pending_format_certification',
+      required: false,
+      uploadSupported: true,
+      parserSupported: false
+    }),
+    layout_spei: Object.freeze({
+      capability: 'supported_certified',
+      required: false,
+      uploadSupported: true,
+      parserSupported: true
+    }),
+    toka_transfer_xlsm: Object.freeze({
+      capability: 'historical_generator_not_operational_input',
+      required: false,
+      uploadSupported: false,
+      parserSupported: false
+    }),
+    cfdi_vales: Object.freeze({
+      capability: 'pending_employee_breakdown_validation',
+      required: false,
+      uploadSupported: true,
+      parserSupported: false
+    })
+  });
+
   const ISSUE_CODES = Object.freeze({
     COVER_SHEET_REQUIRED: 'PAYROLL_COVER_SHEET_REQUIRED',
     COVER_SHEET_CONTRACT_REQUIRED: 'PAYROLL_COVER_SHEET_CONTRACT_REQUIRED',
@@ -373,6 +413,144 @@
     return parsePayrollSpeiTxt(input);
   }
 
+  function safeCaptureIssues(items) {
+    return (items || []).map(function (item) {
+      const safe = { code: item.code, severity: 'blocking' };
+      if (item.source) safe.source = item.source;
+      if (Number.isInteger(item.row) && item.row > 0) safe.row = item.row;
+      if (item.field) safe.field = item.field;
+      return safe;
+    });
+  }
+
+  function normalizeAllowedSourceAccounts(values) {
+    return new Set((Array.isArray(values) ? values : [])
+      .map(normalizeAccount)
+      .filter(function (value) { return value.length > 0 && value.length <= 18; })
+      .map(function (value) { return value.padStart(18, '0'); }));
+  }
+
+  function summarizePayrollSpeiForCapture(input, allowedSourceAccounts) {
+    const parsed = parsePayrollSpeiTxt(input);
+    const issues = safeCaptureIssues(parsed.issues);
+    const allowed = normalizeAllowedSourceAccounts(allowedSourceAccounts);
+
+    if (
+      parsed.records.length > 0 &&
+      (
+        allowed.size === 0 ||
+        parsed.records.some(function (record) { return !allowed.has(record.sourceAccount); })
+      )
+    ) {
+      issues.push(issue(ISSUE_CODES.SOURCE_ACCOUNT_MISMATCH, 'source_account'));
+    }
+
+    let totalMinor = 0;
+    if (issues.length === 0) {
+      for (const record of parsed.records) {
+        if (!Number.isSafeInteger(record.amountMinor) || record.amountMinor <= 0) {
+          issues.push(issue(ISSUE_CODES.SPEI_BYTE_CONTRACT_INVALID, 'layout_spei_txt', record.sourceRow, 'amount'));
+          break;
+        }
+        totalMinor += record.amountMinor;
+        if (!Number.isSafeInteger(totalMinor)) {
+          issues.push(issue(ISSUE_CODES.SPEI_BYTE_CONTRACT_INVALID, 'layout_spei_txt', null, 'total'));
+          break;
+        }
+      }
+    }
+
+    return Object.freeze({
+      parserVersion: PARSER_VERSION,
+      contractVersion: PAYROLL_SPEI_CONTRACT_VERSION,
+      valid: issues.length === 0 && parsed.records.length > 0,
+      recordCount: issues.length === 0 ? parsed.records.length : 0,
+      totalAmountMinor: issues.length === 0 ? totalMinor : null,
+      currency: 'MXN',
+      issues: safeCaptureIssues(issues)
+    });
+  }
+
+  function captureFilePresent(file) {
+    return Boolean(file && file.present !== false && file.status !== 'missing');
+  }
+
+  function evaluatePayrollCapture(input) {
+    const expectedChannels = Array.from(new Set(
+      (input && Array.isArray(input.expectedChannels) ? input.expectedChannels : [])
+        .filter(function (channel) { return ['banco', 'spei', 'vales'].includes(channel); })
+    ));
+    const files = (input && input.files) || {};
+    const issues = [];
+    const channelTotals = {};
+
+    if (!captureFilePresent(files.caratula)) {
+      issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.MISSING_USER_FILE, source: 'caratula' });
+    } else {
+      issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.FORMAT_NOT_CERTIFIED, source: 'caratula' });
+    }
+
+    expectedChannels.forEach(function (channel) {
+      if (channel === 'banco') {
+        channelTotals.banco = null;
+        if (!captureFilePresent(files.layout_mismo_banco)) {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.MISSING_USER_FILE, source: 'layout_mismo_banco' });
+        } else {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.FORMAT_NOT_CERTIFIED, source: 'layout_mismo_banco' });
+        }
+      }
+
+      if (channel === 'spei') {
+        channelTotals.spei = null;
+        const spei = files.layout_spei;
+        if (!captureFilePresent(spei)) {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.MISSING_USER_FILE, source: 'layout_spei' });
+        } else if (!['parsed', 'validated', 'client_parsed_unverified'].includes(spei.status)) {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.PARSER_ERROR, source: 'layout_spei' });
+        } else if (
+          !Number.isSafeInteger(spei.totalAmountMinor) ||
+          spei.totalAmountMinor <= 0 ||
+          !Number.isInteger(spei.recordCount) ||
+          spei.recordCount <= 0
+        ) {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.TOTAL_MISMATCH, source: 'layout_spei' });
+        } else {
+          channelTotals.spei = spei.totalAmountMinor;
+        }
+      }
+
+      if (channel === 'vales') {
+        channelTotals.vales = null;
+        if (!captureFilePresent(files.cfdi_vales)) {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.MISSING_USER_FILE, source: 'cfdi_vales' });
+        } else {
+          issues.push({ type: PAYROLL_CAPTURE_ISSUE_TYPES.FORMAT_NOT_CERTIFIED, source: 'cfdi_vales' });
+        }
+      }
+    });
+
+    const allChannelTotalsKnown = expectedChannels.length > 0 && expectedChannels.every(function (channel) {
+      return Number.isSafeInteger(channelTotals[channel]) && channelTotals[channel] > 0;
+    });
+    const totalAmountMinor = allChannelTotalsKnown
+      ? expectedChannels.reduce(function (total, channel) { return total + channelTotals[channel]; }, 0)
+      : null;
+    const missingFiles = issues.some(function (item) {
+      return item.type === PAYROLL_CAPTURE_ISSUE_TYPES.MISSING_USER_FILE;
+    });
+
+    return Object.freeze({
+      captureState: missingFiles ? 'files_pending' : 'validation_pending',
+      validationStatus: missingFiles ? 'incomplete' : 'blocked',
+      channelTotals: Object.freeze(channelTotals),
+      totalAmountMinor,
+      totalStatus: totalAmountMinor === null ? 'pending_validation' : 'calculated_from_channels',
+      issues: Object.freeze(issues),
+      approvalEnabled: false,
+      approvalReason: 'PAYROLL_N3_NOT_ENABLED'
+    });
+  }
+
   function parsePayrollTokaXml() {
     return blockedPhysicalParser('cfdi_toka_xml');
   }
@@ -565,6 +743,8 @@
     PAYROLL_SPEI_CONTRACT_VERSION,
     PAYROLL_SPEI_RECORD_BYTES,
     PAYROLL_SPEI_USEFUL_BYTES,
+    PAYROLL_CAPTURE_ISSUE_TYPES,
+    PAYROLL_CAPTURE_CAPABILITIES,
     ISSUE_CODES,
     normalizeText,
     normalizeName,
@@ -576,6 +756,8 @@
     parsePayrollBbvaSameBank,
     parsePayrollSpei,
     parsePayrollSpeiTxt,
+    summarizePayrollSpeiForCapture,
+    evaluatePayrollCapture,
     parsePayrollTokaXml,
     normalizePayrollBankRecords,
     normalizePayrollTokaRecords,

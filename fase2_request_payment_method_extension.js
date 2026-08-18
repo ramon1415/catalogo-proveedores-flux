@@ -9,6 +9,7 @@
     ["provider_payment", "Pago a proveedor"],
     ["online_purchase", "Compra en linea"],
     ["reimbursement", "Reembolso"],
+    ["nomina", "Nómina"],
   ]
   const paymentMethodOptions = [
     ["transfer", "Transferencia"],
@@ -21,6 +22,7 @@
     supplier_payment: "Pago a proveedor",
     online_purchase: "Compra en linea",
     reimbursement: "Reembolso",
+    nomina: "Nómina",
     deposit_refund: "Pago a proveedor",
     cash: "Pago a proveedor",
     check: "Pago a proveedor",
@@ -112,8 +114,9 @@
       requestType = document.getElementById("requestType")
     }
     const selectedType = normalizeRequestType(requestType.value || "provider_payment")
-    requestType.innerHTML = requestTypeOptions.map(([value, label]) => "<option value=\"" + value + "\">" + label + "</option>").join("")
-    requestType.value = selectedType
+    const visibleTypes = requestTypeOptions.filter(([value]) => value !== "nomina" || hasExactFinanceRole())
+    requestType.innerHTML = visibleTypes.map(([value, label]) => "<option value=\"" + value + "\">" + label + "</option>").join("")
+    requestType.value = visibleTypes.some(([value]) => value === selectedType) ? selectedType : "provider_payment"
     relabelSelect(requestType, "Tipo de solicitud *", "Define la naturaleza de la solicitud. No determina si entra a layout bancario.")
 
     let paymentMethod = document.getElementById("paymentMethod")
@@ -279,6 +282,9 @@
 
   async function submitRequestWithFase2Fields(event) {
     const form = event.currentTarget
+    // Nómina has a dedicated N2B staging contract. Never call the provider
+    // request RPC or update request_type after creation for this rail.
+    if (normalizeRequestType(value("requestType")) === "nomina") return
     if (form.dataset.fase2Submitting === "true") return
     event.preventDefault()
     event.stopImmediatePropagation()
@@ -691,7 +697,14 @@
     const key = normalize(raw)
     if (key === "online_purchase") return "online_purchase"
     if (key === "reimbursement") return "reimbursement"
+    if (key === "nomina" || key === "payroll") return "nomina"
     return "provider_payment"
+  }
+
+  function hasExactFinanceRole() {
+    return Boolean(window.FluxAuth?.hasRole?.([
+      "finance", "finanzas", "treasury", "tesoreria", "administracion"
+    ]))
   }
 
   function normalizePaymentMethod(raw) {
