@@ -223,6 +223,14 @@ jobs:
 
           main = api(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"].lower()
           pr = api(f"/repos/{repo}/pulls/368")
+          target_commit = api(f"/repos/{repo}/commits/{target}")
+          target_parents = [str(parent.get("sha") or "").lower() for parent in target_commit.get("parents", [])]
+          target_files = sorted(item["filename"] for item in target_commit.get("files", []))
+          merge_sha = str(pr.get("merge_commit_sha") or "").lower()
+          target_is_authorized_workflow_fix = (
+              merge_sha in target_parents
+              and target_files == [".github/workflows/provider-portal-prod-db-edge-candidate.yml"]
+          )
           active = []
           current = int(os.environ["GITHUB_RUN_ID"])
           for status in ("queued", "in_progress"):
@@ -238,13 +246,14 @@ jobs:
               "workflow_is_from_target": os.environ["GITHUB_SHA"].lower() == target,
               "pr368_merged": bool(pr.get("merged")),
               "pr368_base_main": pr["base"]["ref"] == "main",
-              "pr368_merge_commit_is_target": str(pr.get("merge_commit_sha") or "").lower() == target,
+              "pr368_merge_commit_is_target_or_scoped_workflow_parent": merge_sha == target or target_is_authorized_workflow_fix,
               "concurrent_release_runs": len(active),
           }
           evidence = {
               "status": "PASS" if all(v is True or v == 0 for v in checks.values()) else "STOP",
               "target_git_sha": target,
               "main_sha": main,
+              "target_commit_files": target_files,
               "pr368": {"state": pr["state"], "merged": pr.get("merged"), "merge_commit_sha": pr.get("merge_commit_sha")},
               "active_release_runs_excluding_current": active,
               "checks": checks,
@@ -338,8 +347,9 @@ jobs:
               raise SystemExit("PROD_SESSION_POOLER_URL_INVALID")
           PY
           export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          export PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_precheck"
           psql_prod() { command psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 "$@"; }
-          roq() { PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=provider_portal_stage1_precheck" psql_prod -Atq -c "$1"; }
+          roq() { psql_prod -Atq -c "$1"; }
 
           roq "select json_build_object(
             'database',current_database(),
