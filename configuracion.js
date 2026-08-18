@@ -1167,6 +1167,10 @@ function showToastSafe(title, desc, variant) {
 function errorMessage(err) { return err?.message || String(err) }
 
 
+// Cierre genérico de diálogos (botones con data-close-dialog)
+document.querySelectorAll("[data-close-dialog]").forEach((btn) =>
+  btn.addEventListener("click", () => btn.closest("dialog")?.close()))
+
 // ── Cambiar agrupación de una partida ───────────────────────────
 const NUEVO_GRUPO = "__nuevo__"
 let grupoDialogCatId = null
