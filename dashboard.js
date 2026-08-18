@@ -636,12 +636,10 @@ async function initAnualMode() {
   document.getElementById("histExitBtn")?.classList.remove("hidden")
   document.getElementById("periodLabel")?.classList.add("hidden")
   try {
-    const { data, error } = await supabaseClient
+    const data = await fetchAllRows(() => supabaseClient
       .from("historical_actuals")
       .select("period_month")
-      .order("period_month", { ascending: false })
-      .limit(5000)
-    if (error) throw error
+      .order("period_month", { ascending: false }))
     const years = [...new Set((data || []).map((r) => String(r.period_month).slice(0, 4)))]
     if (!years.length) {
       showToast("Sin histórico", "No hay datos históricos cargados todavía.", "warning")
@@ -683,11 +681,10 @@ async function enterAllYears() {
   const sub = document.getElementById("chartSubtitle")
   if (sub) sub.textContent = "Cargando todos los años..."
   try {
-    const { data, error } = await supabaseClient
+    const data = await fetchAllRows(() => supabaseClient
       .from("historical_actuals")
       .select("account_code,account_name,period_month,amount")
-      .limit(20000)
-    if (error) throw error
+      .order("period_month"))
     const anios = {}
     const cuentas = new Map()
     for (const r of data || []) {
@@ -838,13 +835,12 @@ async function enterHistYear(year) {
   const sub = document.getElementById("chartSubtitle")
   if (sub) sub.textContent = `Cargando histórico ${year}...`
   try {
-    const { data, error } = await supabaseClient
+    const data = await fetchAllRows(() => supabaseClient
       .from("historical_actuals")
       .select("account_code,account_name,period_month,amount")
       .gte("period_month", `${year}-01-01`)
       .lt("period_month", `${year + 1}-01-01`)
-      .limit(10000)
-    if (error) throw error
+      .order("period_month"))
     const meses = {}
     const cuentas = new Map()
     for (const r of data || []) {
@@ -1285,4 +1281,15 @@ function friendlyError(err) {
 
 function showToast(title, desc, variant = "success") {
   Components.showToast({ title, desc, variant, duration: 6 })
+}
+
+async function fetchAllRows(builderFactory, pageSize = 1000) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await builderFactory().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
 }

@@ -1052,20 +1052,18 @@ async function selectContpaqCompany(companyId) {
   if (!companyId) { if (body) body.innerHTML = "" ; return }
   if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Cargando catálogo...</td></tr>`
   try {
-    const [accountsR, mappingsR] = await Promise.all([
-      configClient.from("contpaq_accounts").select("code,name,is_detail").eq("company_id", companyId).limit(5000),
-      configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code,needs_review").eq("company_id", companyId).limit(2000),
+    const [accountsRows, mappingsRows] = await Promise.all([
+      fetchAllRows(() => configClient.from("contpaq_accounts").select("code,name,is_detail").eq("company_id", companyId).order("code")),
+      fetchAllRows(() => configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code,needs_review").eq("company_id", companyId).order("budget_category_id")),
     ])
-    if (accountsR.error) throw accountsR.error
-    if (mappingsR.error) throw mappingsR.error
-    contpaqState.accounts = new Map((accountsR.data || []).map((a) => [a.code, a]))
-    contpaqState.mappings = new Map((mappingsR.data || []).map((m) => [m.budget_category_id, m.contpaq_account_code]))
-    contpaqState.review = new Set((mappingsR.data || []).filter((m) => m.needs_review).map((m) => m.budget_category_id))
+    contpaqState.accounts = new Map(accountsRows.map((a) => [a.code, a]))
+    contpaqState.mappings = new Map(mappingsRows.map((m) => [m.budget_category_id, m.contpaq_account_code]))
+    contpaqState.review = new Set(mappingsRows.filter((m) => m.needs_review).map((m) => m.budget_category_id))
 
     // datalist: solo cuentas de detalle (mapeables), gasto primero
     const list = document.getElementById("contpaqAccountsList")
     if (list) {
-      const detalle = (accountsR.data || []).filter((a) => a.is_detail)
+      const detalle = accountsRows.filter((a) => a.is_detail)
       detalle.sort((a, b) => (a.code[0] === "6" ? 0 : 1) - (b.code[0] === "6" ? 0 : 1) || a.code.localeCompare(b.code))
       list.innerHTML = detalle.map((a) => `<option value="${a.code}">${a.code} — ${escHtml(a.name)}</option>`).join("")
     }
@@ -1220,3 +1218,14 @@ document.getElementById("grupoForm")?.addEventListener("submit", async (e) => {
     showToastSafe("No se pudo guardar", msg, "danger")
   }
 })
+
+async function fetchAllRows(builderFactory, pageSize = 1000) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await builderFactory().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
+}
