@@ -629,6 +629,16 @@ Deno.test("Turnstile verifier rejects wrong hostname, wrong action, invalid and 
 });
 `);
 
+for (const entry of fs.readdirSync("supabase/functions/provider-intake")) {
+  if (!entry.endsWith(".ts")) continue;
+  const file = path.join("supabase/functions/provider-intake", entry);
+  const cleaned = fs.readFileSync(file, "utf8")
+    .replaceAll("catalogo-proveedores-flux-git-dev", "flux")
+    .replaceAll("scsirgbuqjcwoaxfacth", "ucantptjhwttexzmslvm")
+    .replaceAll("Ambiente DEV", "Producci?n");
+  write(file, cleaned);
+}
+
 write("supabase/config.toml", `[functions.provider-intake]\nverify_jwt = false\n`);
 
 const fixture = String.raw`\set ON_ERROR_STOP on
