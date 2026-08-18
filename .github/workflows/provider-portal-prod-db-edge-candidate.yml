@@ -93,12 +93,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-fixture.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-fixture.sql
           for migration in $(find supabase/migrations -maxdepth 1 -type f -name '*_provider_portal_prod_*.sql' | sort); do
             echo "Applying $migration"
-            psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f "$migration"
+            psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f "$migration"
           done
-          psql -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-assertions.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d provider_portal_shadow -f scripts/qa/provider-portal-prod-shadow-assertions.sql
 
       - name: Enforce selective scope
         shell: bash

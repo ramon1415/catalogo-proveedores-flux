@@ -461,10 +461,72 @@ const t4Functions = [
 
 const t4 = `-- Provider Portal PROD forward chain T4/4: final provider-aware links and banking review.\n-- Historical V1 create/regenerate/resolve overloads and all notification producers are excluded.\n\nbegin;\n\ndo $$\nbegin\n  if public.provider_intake_runtime_mode() <> 'disabled' then\n    raise exception 'provider_portal_prod_precheck: runtime must remain disabled during install';\n  end if;\n  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='intake_links' and column_name='proveedor_id')\n     or exists (select 1 from information_schema.columns where table_schema='public' and table_name='payment_intake' and column_name='link_target_proveedor_id') then\n    raise exception 'provider_portal_prod_precheck: provider-aware column collision';\n  end if;\nend\n$$;\n\nalter table public.payment_intake_events drop constraint if exists payment_intake_events_event_type_check;\nalter table public.payment_intake_events add constraint payment_intake_events_event_type_check check (\n  event_type in ('received','status_changed','file_uploaded','file_reviewed','provider_matched',\n    'correction_requested','rejected','converted','internal_note','conversion_draft_created',\n    'conversion_draft_updated','banking_resolution')\n) not valid;\nalter table public.payment_intake_events validate constraint payment_intake_events_event_type_check;\n\nalter table public.intake_links add column proveedor_id uuid null;\nalter table public.intake_links add constraint intake_links_proveedor_id_fkey\n  foreign key (proveedor_id) references public.proveedores(id) on delete restrict;\nalter table public.payment_intake\n  add column link_target_proveedor_id uuid null,\n  add column bank_data_confirmation text null;\nalter table public.payment_intake\n  add constraint payment_intake_link_target_proveedor_id_fkey\n    foreign key (link_target_proveedor_id) references public.proveedores(id) on delete restrict,\n  add constraint payment_intake_bank_data_confirmation_check\n    check (bank_data_confirmation is null or bank_data_confirmation in ('MASTER_CONFIRMED','CHANGE_DECLARED'));\n\ndrop index public.intake_links_one_active_per_company_uidx;\ncreate unique index intake_links_one_active_generic_per_company_uidx\n  on public.intake_links(company_id) where status='active' and proveedor_id is null;\ncreate unique index intake_links_one_active_per_company_provider_uidx\n  on public.intake_links(company_id, proveedor_id) where status='active' and proveedor_id is not null;\ncreate index intake_links_proveedor_id_idx on public.intake_links(proveedor_id) where proveedor_id is not null;\ncreate index payment_intake_link_target_proveedor_id_idx\n  on public.payment_intake(link_target_proveedor_id) where link_target_proveedor_id is not null;\n\n${t4Functions.join("\n\n")}\n\ndo $$\ndeclare r record;\nbegin\n  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace\n    where n.nspname='public' and p.proname = any(array[\n      'provider_intake_mask_text','provider_intake_banking_difference_state',\n      'confirm_provider_intake_master_banking','get_provider_intake_provider_proposal',\n      'provider_intake_link_actor_authorized','provider_intake_link_require_company_access',\n      'get_provider_intake_link_management_context','revoke_provider_intake_link',\n      'find_provider_intake_link_providers','get_provider_intake_link_scope',\n      'create_provider_intake_link_v2','regenerate_provider_intake_link_v2',\n      'resolve_provider_aware_intake_link_internal','create_provider_aware_intake_internal',\n      'get_provider_intake_link_target','provider_intake_payment_draft_state'\n    ]::text[])\n  loop execute format('revoke all on function %s from public, anon, authenticated, service_role', r.signature); end loop;\nend\n$$;\n\ngrant execute on function public.confirm_provider_intake_master_banking(uuid, timestamptz, timestamptz, uuid) to authenticated;\ngrant execute on function public.get_provider_intake_provider_proposal(uuid) to authenticated;\ngrant execute on function public.get_provider_intake_link_management_context() to authenticated;\ngrant execute on function public.revoke_provider_intake_link(uuid, boolean) to authenticated;\ngrant execute on function public.find_provider_intake_link_providers(uuid, text, integer) to authenticated;\ngrant execute on function public.get_provider_intake_link_scope(uuid, uuid) to authenticated;\ngrant execute on function public.create_provider_intake_link_v2(uuid, uuid, text, integer, integer, integer) to authenticated;\ngrant execute on function public.regenerate_provider_intake_link_v2(uuid, boolean, integer) to authenticated;\ngrant execute on function public.get_provider_intake_link_target(uuid) to authenticated;\ngrant execute on function public.resolve_provider_aware_intake_link_internal(text) to service_role;\ngrant execute on function public.create_provider_aware_intake_internal(text, jsonb, text, text, text, text, text, integer) to service_role;\n\ncomment on column public.intake_links.proveedor_id is\n  'Optional server-side target provider. NULL preserves generic links.';\ncomment on column public.payment_intake.link_target_proveedor_id is\n  'Immutable intake provenance copied from the validated link target; never an automatic master match.';\n\ncommit;\n`;
 
+const t2Final = t2.replace(
+  /\ngrant execute on function public\.attach_provider_intake_files_internal[\s\S]*?grant execute on function public\.set_provider_intake_match[^;]*;\n/,
+  String.raw`
+do $$
+declare r record;
+begin
+  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname = any(array[
+      'list_provider_intakes','get_provider_intake_detail','transition_provider_intake','add_provider_intake_note',
+      'find_provider_intake_candidates','get_provider_intake_match_comparison','set_provider_intake_match'
+    ]::text[])
+  loop execute format('grant execute on function %s to authenticated', r.signature); end loop;
+  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname = any(array['attach_provider_intake_files_internal','mark_provider_intake_upload_issue_internal']::text[])
+  loop execute format('grant execute on function %s to service_role', r.signature); end loop;
+end
+$$;
+`,
+);
+
+const t3Final = t3.replace(
+  /\ngrant execute on function public\.get_provider_intake_payment_draft_context[\s\S]*?grant execute on function public\.convert_provider_intake_to_payment_request[^;]*;\n/,
+  String.raw`
+do $$
+declare r record;
+begin
+  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname = any(array[
+      'get_provider_intake_payment_draft_context','save_provider_intake_payment_draft','convert_provider_intake_to_payment_request'
+    ]::text[])
+  loop execute format('grant execute on function %s to authenticated', r.signature); end loop;
+end
+$$;
+`,
+);
+
+const t4Final = t4.replace(
+  /\ngrant execute on function public\.confirm_provider_intake_master_banking[\s\S]*?grant execute on function public\.create_provider_aware_intake_internal[^;]*;\n/,
+  String.raw`
+do $$
+declare r record;
+begin
+  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname = any(array[
+      'confirm_provider_intake_master_banking','get_provider_intake_provider_proposal',
+      'get_provider_intake_link_management_context','revoke_provider_intake_link',
+      'find_provider_intake_link_providers','get_provider_intake_link_scope',
+      'create_provider_intake_link_v2','regenerate_provider_intake_link_v2','get_provider_intake_link_target'
+    ]::text[])
+  loop execute format('grant execute on function %s to authenticated', r.signature); end loop;
+  for r in select p.oid::regprocedure as signature from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname = any(array['resolve_provider_aware_intake_link_internal','create_provider_aware_intake_internal']::text[])
+  loop execute format('grant execute on function %s to service_role', r.signature); end loop;
+end
+$$;
+`,
+);
+
+if (t2Final === t2 || t3Final === t3 || t4Final === t4) {
+  throw new Error("dynamic grant rewrite did not match generated SQL");
+}
+
 write(migrations.provider_portal_prod_runtime_control.path, t1);
-write(migrations.provider_portal_prod_core_workflow.path, t2);
-write(migrations.provider_portal_prod_draft_conversion.path, t3);
-write(migrations.provider_portal_prod_provider_aware_links.path, t4);
+write(migrations.provider_portal_prod_core_workflow.path, t2Final);
+write(migrations.provider_portal_prod_draft_conversion.path, t3Final);
+write(migrations.provider_portal_prod_provider_aware_links.path, t4Final);
 
 const edgePaths = run("git", ["ls-tree", "-r", "--name-only", SOURCE_DEV_SHA, "supabase/functions/provider-intake"])
   .trim().split("\n").filter(Boolean);
