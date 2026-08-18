@@ -15,7 +15,7 @@
     layoutLines: [],
     layouts: [],
     cashFunds: [],
-    view: "attention",
+    view: "default",
     loading: false,
   };
 
@@ -506,7 +506,14 @@
     const summaryText = document.getElementById("filterSummaryText");
     if (!summary || !summaryText) return;
 
-    if (state.view === "all") {
+    const renderPrimaryFilterState = window.FluxPaymentRequestsView?.renderFilterState;
+    if (["default", "manual"].includes(state.view) &&
+        typeof renderPrimaryFilterState === "function") {
+      renderPrimaryFilterState();
+      return;
+    }
+
+    if (state.view === "default" || state.view === "all") {
       summary.classList.add("hidden");
       summaryText.textContent = "Vista filtrada";
       return;
@@ -598,7 +605,7 @@
     const budget = document.getElementById("budgetDecisionFilter")?.value || "todos";
     const companyFilter = document.getElementById("companyFilter")?.value || "todos";
 
-    if (state.view !== "manual") return true;
+    if (state.view !== "default" && state.view !== "manual") return true;
 
     const provider = findById(state.providers, request.proveedor_id);
     const company = findById(state.companies, request.company_id);
@@ -615,8 +622,16 @@
     const budgetMatches = budget === "todos" ||
       (budget === "excepciones" ? isBudgetException(request) : request.budget_decision === budget);
 
+    const statusMatches = window.FluxPaymentRequestsView?.statusMatches;
+    const matchesStatus = typeof statusMatches === "function"
+      ? statusMatches(request, status)
+      : status === "todos" ||
+        (status === "activas"
+          ? ["submitted", "approved", "changes_requested", "finance_validation", "scheduled"].includes(request.status)
+          : request.status === status);
+
     return searchable.includes(search) &&
-      (status === "todos" || status === "activas" || request.status === status) &&
+      matchesStatus &&
       budgetMatches &&
       (companyFilter === "todos" || request.company_id === companyFilter);
   }

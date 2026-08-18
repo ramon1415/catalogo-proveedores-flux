@@ -1,0 +1,39 @@
+name: Solicitudes default active view contract
+
+'on':
+  pull_request:
+    branches:
+      - main
+    paths:
+      - solicitudes.html
+      - solicitudes.js
+      - solicitudes_workboard_extension.js
+      - config.js
+      - scripts/qa/solicitudes-default-active-view-contract.test.mjs
+      - .github/workflows/solicitudes-default-active-view-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Default active requests without hidden secondary filter
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check frontend syntax
+        run: |
+          node --check solicitudes.js
+          node --check solicitudes_workboard_extension.js
+
+      - name: Validate default view contract
+        run: node --test scripts/qa/solicitudes-default-active-view-contract.test.mjs
