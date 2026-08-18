@@ -29,6 +29,7 @@
     { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "dashboard-anual", section: "General", file: "dashboard.html", href: "./dashboard.html?view=anual", icon: "H", label: "Dashboard anual", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "config", section: "Configuracion", file: "configuracion.html", href: "./configuracion.html", icon: "C", label: "Configuracion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
   ]
@@ -39,6 +40,7 @@
   function currentModuleKey() {
     if (pageName === "configuracion.html" || pageName === "socios.html") return "config"
     if (pageName === "proveedores.html" && params.get("tab") === "cuentas-origen") return "config"
+    if (pageName === "dashboard.html" && params.get("view") === "anual") return "dashboard-anual"
     if (pageName === "ingresos.html" && params.get("tab") === "incidents") return "incidents"
     if (pageName === "ingresos.html") return "income"
     const match = modules.find((item) => item.file === pageName)

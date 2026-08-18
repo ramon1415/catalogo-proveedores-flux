@@ -1,7 +1,7 @@
 const configClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── Estado ──────────────────────────────────────────────────────
-const TAB_LABELS = { members: "Socios", originAccounts: "Cuentas origen", budgets: "Presupuestos", system: "Sistema" }
+const TAB_LABELS = { members: "Socios", originAccounts: "Cuentas origen", budgets: "Presupuestos", contpaq: "Mapeo CONTPAQ", system: "Sistema" }
 const dom = {}
 let currentTab = null
 
@@ -55,6 +55,7 @@ function cacheDom() {
     members: document.getElementById("membersPanel"),
     originAccounts: document.getElementById("originAccountsPanel"),
     budgets: document.getElementById("budgetsPanel"),
+    contpaq: document.getElementById("contpaqPanel"),
     system: document.getElementById("systemPanel"),
   }
 }
@@ -140,6 +141,7 @@ function openTab(tab) {
   if (tab === "system" && window.FluxAuth?.isSysadmin?.()) loadSystemAdministration()
 
   if (tab === "originAccounts" && !originLoaded) loadOriginAccounts()
+  if (tab === "contpaq" && !contpaqLoaded) loadContpaqMapper()
   if (tab === "members" && !sociosLoaded) loadSocios()
 }
 
@@ -1011,4 +1013,223 @@ function friendlyRoutingError(error) {
   }
   const key = Object.keys(known).find(item => message.includes(item))
   return key ? known[key] : friendlyError(error)
+}
+
+
+// ── Mapeo contable CONTPAQ (partida → cuenta) ───────────────────
+let contpaqLoaded = false
+const contpaqState = { companies: [], companyId: null, accounts: new Map(), categories: [], mappings: new Map() }
+
+async function loadContpaqMapper() {
+  contpaqLoaded = true
+  const body = document.getElementById("contpaqMapperBody")
+  try {
+    const [companiesR, categoriesR] = await Promise.all([
+      configClient.from("companies").select("id,name,active").eq("active", true).order("name"),
+      configClient.from("budget_categories").select("id,name,category,code,active").eq("active", true).order("category").order("name"),
+    ])
+    if (companiesR.error) throw companiesR.error
+    if (categoriesR.error) throw categoriesR.error
+    contpaqState.companies = companiesR.data || []
+    contpaqState.categories = categoriesR.data || []
+
+    const sel = document.getElementById("contpaqCompanySelect")
+    if (sel) {
+      sel.innerHTML = contpaqState.companies.map((c) => `<option value="${c.id}">${escHtml(c.name)}</option>`).join("")
+      sel.addEventListener("change", () => selectContpaqCompany(sel.value))
+    }
+    document.getElementById("contpaqSearch")?.addEventListener("input", renderContpaqMapper)
+    document.getElementById("contpaqFilter")?.addEventListener("change", renderContpaqMapper)
+    await selectContpaqCompany(contpaqState.companies[0]?.id || null)
+  } catch (err) {
+    if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--ruby)">${escHtml(errorMessage(err))}</td></tr>`
+  }
+}
+
+async function selectContpaqCompany(companyId) {
+  contpaqState.companyId = companyId
+  const body = document.getElementById("contpaqMapperBody")
+  if (!companyId) { if (body) body.innerHTML = "" ; return }
+  if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Cargando catálogo...</td></tr>`
+  try {
+    const [accountsRows, mappingsRows] = await Promise.all([
+      fetchAllRows(() => configClient.from("contpaq_accounts").select("code,name,is_detail").eq("company_id", companyId).order("code")),
+      fetchAllRows(() => configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code,needs_review").eq("company_id", companyId).order("budget_category_id")),
+    ])
+    contpaqState.accounts = new Map(accountsRows.map((a) => [a.code, a]))
+    contpaqState.mappings = new Map(mappingsRows.map((m) => [m.budget_category_id, m.contpaq_account_code]))
+    contpaqState.review = new Set(mappingsRows.filter((m) => m.needs_review).map((m) => m.budget_category_id))
+
+    // datalist: solo cuentas de detalle (mapeables), gasto primero
+    const list = document.getElementById("contpaqAccountsList")
+    if (list) {
+      const detalle = accountsRows.filter((a) => a.is_detail)
+      detalle.sort((a, b) => (a.code[0] === "6" ? 0 : 1) - (b.code[0] === "6" ? 0 : 1) || a.code.localeCompare(b.code))
+      list.innerHTML = detalle.map((a) => `<option value="${a.code}">${a.code} — ${escHtml(a.name)}</option>`).join("")
+    }
+    renderContpaqMapper()
+  } catch (err) {
+    if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--ruby)">${escHtml(errorMessage(err))} — ¿ya corriste el DDL del mapper en esta base?</td></tr>`
+  }
+}
+
+function renderContpaqMapper() {
+  const body = document.getElementById("contpaqMapperBody")
+  if (!body) return
+  const q = (document.getElementById("contpaqSearch")?.value || "").trim().toLowerCase()
+  const filtro = document.getElementById("contpaqFilter")?.value || "todas"
+  const cats = contpaqState.categories.filter((c) => {
+    if (q && !c.name.toLowerCase().includes(q) && !String(c.category || "").toLowerCase().includes(q)) return false
+    const mapeada = Boolean(contpaqState.accounts.get(contpaqState.mappings.get(c.id)))
+    if (filtro === "sinmapear") return !mapeada
+    if (filtro === "revisar") return contpaqState.review?.has(c.id)
+    return true
+  })
+  if (!contpaqState.accounts.size) {
+    body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Esta empresa no tiene catálogo CONTPAQ cargado.</td></tr>`
+    updateContpaqCounter(); return
+  }
+  const porGrupo = new Map()
+  for (const cat of cats) {
+    const g = cat.category || "Sin grupo"
+    if (!porGrupo.has(g)) porGrupo.set(g, [])
+    porGrupo.get(g).push(cat)
+  }
+  let html = ""
+  for (const [grupo, lista] of [...porGrupo.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"))) {
+    const mapeadas = lista.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
+    html += `<tr><td colspan="4" style="padding:8px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--accent-text);background:var(--bg-hover)">${escHtml(grupo)} <span style="color:var(--text-3);font-weight:600;text-transform:none;letter-spacing:0">· ${mapeadas}/${lista.length}</span></td></tr>`
+    html += lista.map((cat) => {
+      const code = contpaqState.mappings.get(cat.id) || ""
+      const account = code ? contpaqState.accounts.get(code) : null
+      const ok = Boolean(account)
+      const revisar = contpaqState.review?.has(cat.id)
+      return `<tr data-cat="${cat.id}" style="${ok ? (revisar ? "background:rgba(245,158,11,.07)" : "") : "background:rgba(224,62,82,.05)"}">
+        <td style="padding-left:26px"><span style="display:flex;align-items:center;gap:6px"><span class="cell-main">${escHtml(cat.name)}</span><button type="button" class="icon-btn" data-grupo-edit="${cat.id}" title="Cambiar agrupación" style="width:24px;height:24px;font-size:12px;border:0">✎</button></span></td>
+        <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
+        <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
+        <td data-map-state="${cat.id}">${!ok
+          ? `<span class="badge warning">Sin mapear</span>`
+          : revisar
+            ? `<span class="badge warning" title="Asignación automática de confianza baja — confirma o corrige la cuenta">⚠ Revisar</span>`
+            : `<span class="badge success">Mapeada</span>`}</td>
+      </tr>`
+    }).join("")
+  }
+  body.innerHTML = html
+  body.querySelectorAll("[data-map-input]").forEach((input) => {
+    input.addEventListener("change", () => saveContpaqMapping(input.dataset.mapInput, input.value.trim(), input))
+  })
+  body.querySelectorAll("[data-grupo-edit]").forEach((btn) =>
+    btn.addEventListener("click", () => openGrupoDialog(btn.dataset.grupoEdit)))
+  updateContpaqCounter()
+}
+
+function updateContpaqCounter() {
+  const el = document.getElementById("contpaqMapperCounter")
+  if (!el) return
+  const total = contpaqState.categories.length
+  const mapped = contpaqState.categories.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
+  const rev = contpaqState.review?.size || 0
+  el.textContent = `${mapped} de ${total} partidas mapeadas${mapped < total ? ` · ${total - mapped} sin mapear` : ""}${rev ? ` · ⚠ ${rev} por revisar` : ""}${mapped === total && !rev ? " · completo ✓" : ""}`
+}
+
+async function saveContpaqMapping(categoryId, code, input) {
+  const companyId = contpaqState.companyId
+  const profileId = window.FluxAuth?.getProfile?.()?.id || null
+  try {
+    if (!code) {
+      const { error } = await configClient.from("budget_account_mappings")
+        .delete().eq("company_id", companyId).eq("budget_category_id", categoryId)
+      if (error) throw error
+      contpaqState.mappings.delete(categoryId)
+    } else {
+      const account = contpaqState.accounts.get(code)
+      if (!account) { showToastSafe("Cuenta no encontrada", `"${code}" no está en el catálogo CONTPAQ de esta empresa.`, "danger"); renderContpaqMapper(); return }
+      if (!account.is_detail) { showToastSafe("Cuenta de mayor", `${code} no es cuenta de detalle — elige una cuenta hoja.`, "danger"); renderContpaqMapper(); return }
+      const { error } = await configClient.from("budget_account_mappings")
+        .upsert({ company_id: companyId, budget_category_id: categoryId, contpaq_account_code: code, needs_review: false, updated_by: profileId, updated_at: new Date().toISOString() }, { onConflict: "company_id,budget_category_id" })
+      if (error) throw error
+      contpaqState.mappings.set(categoryId, code)
+      contpaqState.review?.delete(categoryId)
+    }
+    renderContpaqMapper()
+  } catch (err) {
+    showToastSafe("No se pudo guardar", errorMessage(err), "danger")
+  }
+}
+
+function showToastSafe(title, desc, variant) {
+  if (typeof showToast === "function") showToast(title, desc, variant)
+  else alert(`${title}: ${desc}`)
+}
+
+function errorMessage(err) { return err?.message || String(err) }
+
+
+// Cierre genérico de diálogos (botones con data-close-dialog)
+document.querySelectorAll("[data-close-dialog]").forEach((btn) =>
+  btn.addEventListener("click", () => btn.closest("dialog")?.close()))
+
+// ── Cambiar agrupación de una partida ───────────────────────────
+const NUEVO_GRUPO = "__nuevo__"
+let grupoDialogCatId = null
+
+function openGrupoDialog(catId) {
+  const cat = contpaqState.categories.find((c) => c.id === catId)
+  if (!cat) return
+  grupoDialogCatId = catId
+  const sub = document.getElementById("grupoDialogPartida")
+  if (sub) sub.textContent = `${cat.name} — hoy en "${cat.category || "Sin grupo"}"`
+  const sel = document.getElementById("grupoSelect")
+  if (sel) {
+    const grupos = [...new Set(contpaqState.categories.map((c) => c.category || "Sin grupo"))].sort((a, b) => a.localeCompare(b, "es"))
+    sel.innerHTML = grupos.map((g) => `<option value="${escHtml(g)}"${g === (cat.category || "Sin grupo") ? " selected" : ""}>${escHtml(g)}</option>`).join("") +
+      `<option value="${NUEVO_GRUPO}">➕ Crear nueva agrupación...</option>`
+  }
+  document.getElementById("grupoNuevoWrap")?.classList.add("hidden")
+  const inp = document.getElementById("grupoNuevoInput")
+  if (inp) inp.value = ""
+  document.getElementById("grupoDialog")?.showModal()
+}
+
+document.getElementById("grupoSelect")?.addEventListener("change", (e) => {
+  document.getElementById("grupoNuevoWrap")?.classList.toggle("hidden", e.target.value !== NUEVO_GRUPO)
+  if (e.target.value === NUEVO_GRUPO) document.getElementById("grupoNuevoInput")?.focus()
+})
+
+document.getElementById("grupoForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const sel = document.getElementById("grupoSelect")
+  let grupo = sel?.value || ""
+  if (grupo === NUEVO_GRUPO) {
+    grupo = (document.getElementById("grupoNuevoInput")?.value || "").trim()
+    if (!grupo) { showToastSafe("Falta el nombre", "Escribe el nombre de la nueva agrupación.", "danger"); return }
+  }
+  try {
+    const { error } = await configClient.from("budget_categories")
+      .update({ category: grupo }).eq("id", grupoDialogCatId)
+    if (error) throw error
+    const cat = contpaqState.categories.find((c) => c.id === grupoDialogCatId)
+    if (cat) cat.category = grupo
+    document.getElementById("grupoDialog")?.close()
+    renderContpaqMapper()
+    showToastSafe("Agrupación actualizada", `Ahora vive en "${grupo}".`, "success")
+  } catch (err) {
+    const msg = /policy|permission|denied/i.test(errorMessage(err))
+      ? "La base aún no permite editar partidas — falta correr rls_budget_categories_write.sql"
+      : errorMessage(err)
+    showToastSafe("No se pudo guardar", msg, "danger")
+  }
+})
+
+async function fetchAllRows(builderFactory, pageSize = 1000) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await builderFactory().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
 }
