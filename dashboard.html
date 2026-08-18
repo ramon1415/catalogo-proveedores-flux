@@ -54,6 +54,12 @@
     #histGrid { display:grid; grid-template-columns:1fr 2fr; gap:12px; align-items:start; }
     #histGrid.full { grid-template-columns:1fr; }
     .hist-cuenta-col { position:sticky; left:0; background:var(--bg-card); z-index:1; }
+    tr.hist-grupo { cursor:pointer; user-select:none; }
+    tr.hist-grupo .hist-caret { display:inline-block; width:14px; font-size:10px; color:var(--text-3); transition:transform .15s; }
+    tr.hist-grupo.abierto .hist-caret { transform:rotate(90deg); }
+    tr.hist-sub td { font-size:11.5px; padding-top:4px; padding-bottom:4px; color:var(--text-2); }
+    tr.hist-sub .cell-main { font-size:11.5px; font-weight:500; }
+    tr.hist-sub .hist-cuenta-col { padding-left:34px; }
     @media(max-width:1040px){ #histGrid { grid-template-columns:1fr; } .hist-kpi-strip { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     .section-tabs { display:flex; gap:6px; flex-wrap:wrap; }
     .section-tab { min-height:32px; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-3); padding:5px 13px; font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
@@ -437,6 +443,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260818-anual2"></script>
+  <script src="./dashboard.js?v=20260818-anual3"></script>
 </body>
 </html>

@@ -676,6 +676,8 @@ async function loadHistMapeo() {
   } catch (_) { /* mapper aún no instalado en esta base */ }
 }
 
+function r2c(v) { return Math.round(v * 100) / 100 }
+
 async function enterAllYears() {
   state.histYear = "todos"
   const sub = document.getElementById("chartSubtitle")
@@ -702,58 +704,32 @@ async function enterAllYears() {
       }
     }
     const yy = Object.keys(anios).sort()
-    if (sub) sub.textContent = "Todos los años · contabilidad CONTPAQ"
+    // serie mensual continua para la gráfica (todos los meses de todos los años)
+    const mensual = {}
+    for (const r of data || []) {
+      const ym = String(r.period_month).slice(0, 7)
+      mensual[ym] = mensual[ym] || { ingresos: 0, egresos: 0 }
+      const fam = String(r.account_code || "")[0]
+      if (fam === "4") mensual[ym].ingresos += num(r.amount)
+      else if (fam === "6") mensual[ym].egresos += num(r.amount)
+    }
+    const yms = Object.keys(mensual).sort()
+    const labelsM = yms.map((ym) => {
+      const d = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1)
+      return `${d.toLocaleDateString("es-MX", { month: "short" })} ${ym.slice(2, 4)}`
+    })
+    if (sub) sub.textContent = "Todos los años · mensual · contabilidad CONTPAQ"
     state.histCuentas = { periodos: yy, etiquetas: yy, cuentas, titulo: "Histórico por cuenta — todos los años" }
-    drawAllYearsChart(yy, anios)
+    drawHistChart(labelsM, yms.map((k) => r2c(mensual[k].ingresos)), yms.map((k) => r2c(mensual[k].egresos)))
     renderAllYearsTable(yy, anios)
     renderHistKpisTotales(yy, anios)
     renderHistCuentas()
     enterHistLayout()
-    setHistLegend("todos")
+    setHistLegend(true)
   } catch (err) {
     if (sub) sub.textContent = "No se pudo cargar"
     showToast("Error al cargar histórico", friendlyError(err), "danger")
   }
-}
-
-function drawAllYearsChart(yy, anios) {
-  const canvas = document.getElementById("mainChart")
-  if (!canvas) return
-  const isDark = document.documentElement.dataset.theme !== "light"
-  const gridColor = isDark ? "rgba(255,255,255,.06)" : "rgba(0,0,0,.07)"
-  const tickColor = isDark ? "rgba(255,255,255,.35)" : "rgba(0,0,0,.4)"
-  if (state.chart) state.chart.destroy()
-  state.chart = new Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: yy,
-      datasets: [
-        { type: "bar", label: "Ingresos", data: yy.map((y) => Math.round(anios[y].ingresos)), backgroundColor: "rgba(16,185,129,.65)", borderColor: "rgba(16,185,129,.9)", borderWidth: 1, borderRadius: 4 },
-        { type: "bar", label: "Egresos", data: yy.map((y) => Math.round(anios[y].egresos)), backgroundColor: "rgba(74,124,109,.8)", borderColor: "rgba(74,124,109,.95)", borderWidth: 1, borderRadius: 4 },
-        { type: "line", label: "Neto", data: yy.map((y) => Math.round(anios[y].ingresos - anios[y].egresos)), borderColor: "rgba(245,158,11,.85)", borderWidth: 2, pointRadius: 4, pointBackgroundColor: "rgba(245,158,11,1)", tension: 0.2, fill: false },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: isDark ? "#1a1a2e" : "#fff",
-          borderColor: isDark ? "rgba(255,255,255,.12)" : "rgba(0,0,0,.1)",
-          borderWidth: 1,
-          titleColor: isDark ? "#eeeef6" : "#10111f",
-          bodyColor: isDark ? "#aaaac3" : "#50506a",
-          callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${moneyFmt.format(ctx.raw)}` },
-        },
-      },
-      scales: {
-        x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 12 } } },
-        y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 11 }, callback: (v) => `$${(v / 1e6).toFixed(1)}M` } },
-      },
-    },
-  })
 }
 
 function renderAllYearsTable(yy, anios) {
@@ -948,10 +924,20 @@ function renderHistCuentas() {
   const acum = (meses, total) => { totEgr += total; for (const k of periodos) subEgr[k] = (subEgr[k] || 0) + (meses[k] || 0) }
   if (grupos.size) {
     htmlEgr += headerRow("Egresos · estructura del presupuesto", "var(--accent-text)")
+    let gi = 0
     for (const [grupo, g] of [...grupos.entries()].sort((a, b) => b[1].total - a[1].total)) {
-      htmlEgr += fila(grupo, null, g.meses, g.total, { style: "font-weight:800;background:var(--bg-hover)" })
+      gi++
+      htmlEgr += `<tr class="hist-grupo" data-grupo="${gi}" style="font-weight:800;background:var(--bg-hover)">
+        <td class="hist-cuenta-col" style="background:var(--bg-hover)"><span class="hist-caret">▶</span><span class="cell-main">${safe(grupo)}</span><span class="muted-line" style="margin-left:14px">${g.partidas.size} partida${g.partidas.size === 1 ? "" : "s"}</span></td>
+        ${celdas(g.meses)}
+        <td style="text-align:right;font-weight:800;white-space:nowrap">${moneyFmt.format(r2(g.total))}</td>
+      </tr>`
       for (const [partida, pa] of [...g.partidas.entries()].sort((a, b) => b[1].total - a[1].total)) {
-        htmlEgr += fila(partida, null, pa.meses, pa.total, { pad: true })
+        htmlEgr += `<tr class="hist-sub hidden" data-grupo-de="${gi}">
+          <td class="hist-cuenta-col"><span class="cell-main">${safe(partida)}</span></td>
+          ${celdas(pa.meses)}
+          <td style="text-align:right;font-weight:700;white-space:nowrap">${moneyFmt.format(r2(pa.total))}</td>
+        </tr>`
       }
       acum(g.meses, g.total)
     }
@@ -970,6 +956,13 @@ function renderHistCuentas() {
       <th style="text-align:right">Total</th>
     </tr></thead>
     <tbody>${htmlIng}${htmlEgr}</tbody>`
+  tabla.querySelectorAll("tr.hist-grupo").forEach((row) => {
+    row.addEventListener("click", () => {
+      const abierto = row.classList.toggle("abierto")
+      tabla.querySelectorAll(`tr[data-grupo-de="${row.dataset.grupo}"]`).forEach((sub) =>
+        sub.classList.toggle("hidden", !abierto))
+    })
+  })
 }
 
 function setHistLegend(on) {
