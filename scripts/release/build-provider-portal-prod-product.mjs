@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 const SOURCE_MAIN_SHA = "70fd10bacea6a9f7b32a36b67906c598f96f39e0";
 const SOURCE_DEV_SHA = "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91";
-const PROVIDER_PROPOSAL_COMMIT = "b574010bd4164e7d08aabb01044c50aa353db8ce";
-const REQUEST_DEEP_LINK_COMMIT = "2512f834c0632884f8596f74e8da3e28fbef4d20";
 const PROD_PROJECT = "ucantptjhwttexzmslvm";
 const CANDIDATE_MANIFEST = "docs/ops/provider-portal-prod-product-candidate.json";
 
@@ -33,23 +31,194 @@ function replaceOnce(source, before, after, label) {
   return source.replace(before, after);
 }
 
-function applyCommitPaths(commit, files) {
-  const patch = run("git", ["diff", `${commit}^`, commit, "--", ...files]);
-  if (!patch.trim()) throw new Error("empty semantic patch for " + commit);
-  const result = spawnSync("git", ["apply", "--3way", "--whitespace=error-all", "-"], {
-    cwd: process.cwd(),
-    input: patch,
-    encoding: "utf8",
-  });
-  if (result.status !== 0) {
-    throw new Error("semantic patch failed for " + commit + ": " + (result.stderr || result.stdout));
+function integrateProviderProposal() {
+  let html = fs.readFileSync("proveedores.html", "utf8");
+  html = replaceOnce(
+    html,
+    "    .provider-csf-page .table-card tbody tr:focus-within .row-actions { opacity: 1; }",
+    `    .provider-csf-page .table-card tbody tr:focus-within .row-actions { opacity: 1; }
+    .intake-proposal { margin: 0 0 14px; padding: 13px 14px; border: 1px solid color-mix(in srgb,var(--amber) 55%,var(--border)); border-radius: 9px; background: color-mix(in srgb,var(--amber) 9%,var(--bg-card)); }
+    .intake-proposal strong { display:block; color:var(--text-1); font-size:12px; }
+    .intake-proposal p { margin:4px 0 10px; color:var(--text-2); font-size:11px; line-height:1.5; }
+    .intake-proposal-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }`,
+    "provider proposal styles",
+  );
+  html = replaceOnce(
+    html,
+    '      <div class="modal-scroll">\n        <input type="hidden" id="supplierId">',
+    `      <div class="modal-scroll">
+        <aside class="intake-proposal" id="intakeProposal" role="note" hidden>
+          <strong id="intakeProposalTitle">Datos declarados pendientes de validacion</strong>
+          <p id="intakeProposalCopy">Revisa, corrige, completa o elimina cualquier valor antes de guardar. Nada se guardara automaticamente.</p>
+          <div class="intake-proposal-actions">
+            <button class="small-btn" id="applyIntakeProposalBtn" type="button" hidden>Aplicar propuesta al formulario</button>
+            <span class="field-hint" id="intakeProposalFolio"></span>
+          </div>
+        </aside>
+        <input type="hidden" id="supplierId">`,
+    "provider proposal panel",
+  );
+  html = html.replace(/\.\/proveedores\.js\?v=[^"]+/, "./proveedores.js?v=20260818-provider-portal-prod");
+  write("proveedores.html", html);
+
+  let js = fs.readFileSync("proveedores.js", "utf8");
+  js = replaceOnce(
+    js,
+    "let providerSaveInProgress = false\n",
+    `let providerSaveInProgress = false
+const providerQuery = new URLSearchParams(window.location.search)
+const intakeProposalId = providerQuery.get("intake_id")
+const intakeProposalReturn = providerQuery.get("return") === "provider_intakes"
+let intakeProposal = null
+`,
+    "provider proposal state",
+  );
+  js = replaceOnce(
+    js,
+    '  document.getElementById("providerCsfLink")?.addEventListener("click", openCurrentCsf)',
+    '  document.getElementById("providerCsfLink")?.addEventListener("click", openCurrentCsf)\n  document.getElementById("applyIntakeProposalBtn")?.addEventListener("click", () => applyIntakeProposal(true))',
+    "provider proposal action",
+  );
+  js = replaceOnce(
+    js,
+    `  await loadSuppliers()
+  openProviderFromQuery()
+}
+
+function openProviderFromQuery() {
+  const providerId = new URLSearchParams(window.location.search).get("provider_id")
+  if (!providerId) return
+  const provider = proveedores.find((item) => item.id === providerId)
+  if (!provider) {
+    showToast("Proveedor no encontrado", "El proveedor solicitado ya no esta disponible en el catalogo.", "warning")
+    return
   }
+  window.openEditModal(providerId)
+}`,
+    `  await loadSuppliers()
+  await openProviderFromQuery()
+}
+
+async function openProviderFromQuery() {
+  const providerId = providerQuery.get("provider_id")
+  if (!providerId && !intakeProposalId) return
+  if (intakeProposalId) await loadIntakeProposal()
+  if (!providerId) {
+    if (!canManageProviders()) {
+      showToast("Sin permiso", "La administracion de proveedores corresponde a un usuario interno autorizado.", "warning")
+      return
+    }
+    openCreateModal()
+    applyIntakeProposal(false)
+    return
+  }
+  const provider = proveedores.find((item) => item.id === providerId)
+  if (!provider) {
+    showToast("Proveedor no encontrado", "El proveedor solicitado ya no esta disponible en el catalogo.", "warning")
+    return
+  }
+  window.openEditModal(providerId)
+  if (intakeProposal) showIntakeProposal(true)
+}
+
+async function loadIntakeProposal() {
+  const { data, error } = await supabaseClient.rpc("get_provider_intake_provider_proposal", {
+    p_payment_intake_id: intakeProposalId,
+  })
+  if (error || !data?.payment_intake_id) {
+    showToast("Propuesta no disponible", "No fue posible cargar los datos declarados del intake.", "warning")
+    return
+  }
+  intakeProposal = data
+}
+
+function showIntakeProposal(requireExplicitApply) {
+  if (!intakeProposal) return
+  const panel = document.getElementById("intakeProposal")
+  panel.hidden = false
+  document.getElementById("intakeProposalFolio").textContent = intakeProposal.public_folio || "Intake de proveedor"
+  document.getElementById("applyIntakeProposalBtn").hidden = !requireExplicitApply
+}
+
+function applyIntakeProposal(requireConfirmation) {
+  if (!intakeProposal) return
+  if (requireConfirmation && !confirm("Aplicar los datos declarados como propuesta editable? Ningun cambio se guardara hasta que confirmes Guardar proveedor.")) return
+  const hasBankData = Boolean(intakeProposal.bank_name || intakeProposal.bank_account || intakeProposal.bank_clabe || intakeProposal.beneficiary_name)
+  setValue("alias", intakeProposal.provider_name)
+  setValue("nombre_completo", intakeProposal.provider_name)
+  setValue("rfc", intakeProposal.provider_rfc)
+  setValue("email", intakeProposal.provider_email)
+  setValue("telefono", intakeProposal.provider_phone)
+  setValue("banco", intakeProposal.bank_name)
+  setValue("cuenta_bancaria", intakeProposal.bank_account)
+  setValue("clabe", intakeProposal.bank_clabe)
+  setValue("beneficiary_name", intakeProposal.beneficiary_name)
+  if (hasBankData) {
+    setValue("metodo_pago", "Transferencia bancaria")
+    setValue("destination_type", intakeProposal.bank_clabe ? "clabe" : "cuenta")
+  }
+  handlePaymentMethodChange()
+  handleDestinationTypeChange()
+  showIntakeProposal(false)
+  document.getElementById("intakeProposalCopy").textContent = "Propuesta cargada en el formulario. Revisa, corrige, completa o elimina cualquier valor antes de guardar."
+}`,
+    "provider proposal behavior",
+  );
+  js = replaceOnce(
+    js,
+    "  form.reset()\n  resetCsfControls()\n  currentEditingId = null",
+    `  if (intakeProposalReturn && intakeProposalId && providerId && !csfUploadFailed) {
+    const params = new URLSearchParams({ intake_id: intakeProposalId, provider_candidate_id: providerId })
+    window.location.assign(\`./provider_intakes.html?\${params.toString()}\`)
+    return
+  }
+
+  form.reset()
+  resetCsfControls()
+  currentEditingId = null`,
+    "provider proposal return",
+  );
+  js = replaceOnce(
+    js,
+    "  currentCsfPath = null\n  resetCsfControls()\n}\n\nfunction resetCsfControls()",
+    '  currentCsfPath = null\n  resetCsfControls()\n  document.getElementById("intakeProposal").hidden = true\n}\n\nfunction resetCsfControls()',
+    "provider proposal close",
+  );
+  write("proveedores.js", js);
+}
+
+function integrateRequestDeepLink() {
+  let html = fs.readFileSync("solicitudes.html", "utf8");
+  html = html.replace(/\.\/solicitudes\.js\?v=[^"]+/, "./solicitudes.js?v=20260818-provider-portal-prod");
+  write("solicitudes.html", html);
+
+  let js = fs.readFileSync("solicitudes.js", "utf8");
+  js = replaceOnce(
+    js,
+    "    await loadPaymentRequests();\n  } catch (error) {",
+    "    await loadPaymentRequests();\n    openRequestFromUrl();\n  } catch (error) {",
+    "converted request deep link load",
+  );
+  js = replaceOnce(
+    js,
+    "\nfunction cacheDom() {",
+    `
+function openRequestFromUrl() {
+  const requestId = new URLSearchParams(window.location.search).get("request_id");
+  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return;
+  if (paymentRequests.some(request => request.id === requestId)) openRequestDetail(requestId);
+}
+
+function cacheDom() {`,
+    "converted request deep link function",
+  );
+  write("solicitudes.js", js);
 }
 
 const firstBuild = !fs.existsSync(CANDIDATE_MANIFEST);
 if (firstBuild) {
-  applyCommitPaths(PROVIDER_PROPOSAL_COMMIT, ["proveedores.html", "proveedores.js"]);
-  applyCommitPaths(REQUEST_DEEP_LINK_COMMIT, ["solicitudes.html", "solicitudes.js"]);
+  integrateProviderProposal();
+  integrateRequestDeepLink();
 }
 
 for (const file of [
