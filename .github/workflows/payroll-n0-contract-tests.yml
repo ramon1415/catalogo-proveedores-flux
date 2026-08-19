@@ -6,6 +6,7 @@ on:
       - dev
     paths:
       - payroll_parser.js
+      - payroll_cover_qa_parser.js
       - payroll_capture.js
       - payroll_capture.css
       - solicitudes.html
@@ -15,6 +16,7 @@ on:
       - docs/ops/payroll-source-recovery-report.md
       - docs/ops/payroll-n3a-materialization-report.md
       - docs/ops/payroll-n3b-approval-report.md
+      - docs/ops/payroll-n3c-synthetic-cover-report.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
       - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
@@ -22,6 +24,7 @@ on:
       - scripts/qa/payroll-n2b-*.test.mjs
       - scripts/qa/payroll-n3a-*.test.mjs
       - scripts/qa/payroll-n3b-*.test.mjs
+      - scripts/qa/payroll-n3c-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
@@ -50,7 +53,7 @@ jobs:
           node-version: '22'
 
       - name: Syntax
-        run: node --check payroll_parser.js && node --check payroll_capture.js && node --check solicitudes.js && node --check fase2_request_payment_method_extension.js
+        run: node --check payroll_parser.js && node --check payroll_cover_qa_parser.js && node --check payroll_capture.js && node --check solicitudes.js && node --check fase2_request_payment_method_extension.js
 
       - name: Payroll N0, N1, and N2A contracts
         run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs scripts/qa/payroll-n2a-source-recovery-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
@@ -63,6 +66,9 @@ jobs:
 
       - name: Payroll N3B individual approval contracts
         run: node --test scripts/qa/payroll-n3b-approval-contract.test.mjs scripts/qa/payroll-n3b-approval-write-hardening-contract.test.mjs scripts/qa/payroll-n3b-post-decision-freeze-contract.test.mjs
+
+      - name: Payroll N3C synthetic cover QA contracts
+        run: node --test scripts/qa/payroll-n3c-cover-qa-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
