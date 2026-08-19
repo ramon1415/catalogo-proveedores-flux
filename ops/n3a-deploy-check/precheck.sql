@@ -11,7 +11,9 @@ select count(*)::text as payroll_capture_sessions from public.payroll_capture_se
 \echo 'payroll_capture_files_count'
 select count(*)::text as payroll_capture_files from public.payroll_capture_files;
 \echo 'payroll_private_object_count'
-select count(*)::int::text as payroll_private_object_count from storage.objects where bucket_id = 'payroll-private'::uuid;
+select count(*)::text as payroll_private_object_count
+from storage.objects o
+where o.bucket_id = (select id from storage.buckets where name = 'payroll-private' limit 1);
 \echo 'payment_requests_nomina_count'
 select count(*)::text as payment_requests_nomina from public.payment_requests where request_type='nomina';
 \echo 'payroll_channels_count'
