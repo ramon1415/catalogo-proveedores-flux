@@ -3,18 +3,20 @@
 .intake-dialog,
 .action-dialog,
 .match-dialog,
-.payment-draft-dialog,
+.payment-draft-dialog { --text-3: #9292aa; }
+
 .sidebar,
-.topbar { --text-3: #9292aa; }
+.topbar { --text-3: #8fa39a; }
 
 [data-theme="light"] .intake-page,
 [data-theme="light"] .access-state,
 [data-theme="light"] .intake-dialog,
 [data-theme="light"] .action-dialog,
 [data-theme="light"] .match-dialog,
-[data-theme="light"] .payment-draft-dialog,
+[data-theme="light"] .payment-draft-dialog { --text-3: #5f5f78; }
+
 [data-theme="light"] .sidebar,
-[data-theme="light"] .topbar { --text-3: #5f5f78; }
+[data-theme="light"] .topbar { --text-3: #66786f; }
 
 .nav-link.muted { opacity: 1; }
 body,
