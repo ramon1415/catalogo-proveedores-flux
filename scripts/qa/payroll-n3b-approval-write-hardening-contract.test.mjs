@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const hardening = fs.readFileSync(
-  'supabase/migrations/20260819150500_payroll_n3b_approval_write_hardening.sql',
+  'supabase/migrations/20260819213919_payroll_n3b_approval_write_hardening.sql',
   'utf8',
 );
 const approvalMigration = fs.readFileSync(
-  'supabase/migrations/20260819150000_payroll_n3b_individual_approval.sql',
+  'supabase/migrations/20260819213907_payroll_n3b_individual_approval.sql',
   'utf8',
 );
 
