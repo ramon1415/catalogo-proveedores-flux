@@ -16,6 +16,16 @@ test('public command accepts identifiers, never authoritative payroll data', () 
   assert.match(edge, /PAYROLL_FINANCE_REQUIRED/);
 });
 
+test('HTTP authorization contract is exact and genuine conflicts remain 409', () => {
+  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*PAYROLL_AUTH_REQUIRED[\s\S]*return 401/);
+  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*code\.endsWith\("REQUIRED"\)[\s\S]*return 403/);
+  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*return 409;[\s\S]*\}/);
+  assert.match(edge, /async function requireFinanceCaptureAccess[\s\S]*get_payroll_capture_sessions/);
+  assert.match(edge, /catch \{[\s\S]*Do not expose PostgREST details[\s\S]*throw new Error\("PAYROLL_FINANCE_REQUIRED"\)/);
+  assert.match(edge, /return response\(errorStatus\(safe\), \{ error: safe \}\)/);
+  assert.doesNotMatch(edge, /return response\(safe\.endsWith\("REQUIRED"\)/);
+});
+
 test('server redownload, byte hash, MIME, size and opaque path are mandatory', () => {
   assert.match(edge, /storage\/v1\/object\/authenticated\/payroll-private/);
   assert.match(edge, /crypto\.subtle\.digest\("SHA-256"/);

@@ -75,6 +75,29 @@ async function rpc(base: string, key: string, token: string, name: string, body:
   }, `PAYROLL_RPC_${name.toUpperCase()}_FAILED`);
 }
 
+async function requireFinanceCaptureAccess(
+  base: string,
+  serviceKey: string,
+  token: string,
+  captureSessionId: string,
+): Promise<any[]> {
+  try {
+    const visible = await rpc(base, serviceKey, token, "get_payroll_capture_sessions", {
+      p_session_id: captureSessionId,
+    });
+    if (Array.isArray(visible) && visible.length === 1) return visible;
+  } catch {
+    // The user-scoped RPC is the authority. Do not expose PostgREST details.
+  }
+  throw new Error("PAYROLL_FINANCE_REQUIRED");
+}
+
+function errorStatus(code: string): number {
+  if (code === "PAYROLL_AUTH_REQUIRED") return 401;
+  if (code.endsWith("REQUIRED")) return 403;
+  return 409;
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
   return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("");
@@ -153,10 +176,7 @@ async function handler(req: Request): Promise<Response> {
       headers: { apikey: serviceKey, Authorization: `Bearer ${token}` },
     }, "PAYROLL_AUTH_REQUIRED");
     // User-scoped RPC is the certified Finance gate. Director/SysAdmin alone fail here.
-    const visible = await rpc(base, serviceKey, token, "get_payroll_capture_sessions", {
-      p_session_id: input.capture_session_id,
-    });
-    if (!Array.isArray(visible) || visible.length !== 1) throw new Error("PAYROLL_FINANCE_REQUIRED");
+    await requireFinanceCaptureAccess(base, serviceKey, token, input.capture_session_id);
 
     const profiles = await apiJson(
       `${base}/rest/v1/profiles?select=id&auth_user_id=eq.${encodeURIComponent(user.id)}&active=eq.true&limit=1`,
@@ -194,10 +214,10 @@ async function handler(req: Request): Promise<Response> {
   } catch (error) {
     const code = error instanceof Error ? error.message : "PAYROLL_MATERIALIZATION_FAILED";
     const safe = /^PAYROLL_[A-Z0-9_]+$/.test(code) ? code : "PAYROLL_MATERIALIZATION_FAILED";
-    return response(safe.endsWith("REQUIRED") ? 403 : 409, { error: safe });
+    return response(errorStatus(safe), { error: safe });
   }
 }
 
 Deno.serve(handler);
 
-export { handler, sha256Hex, verifyFile };
+export { errorStatus, handler, requireFinanceCaptureAccess, sha256Hex, verifyFile };
