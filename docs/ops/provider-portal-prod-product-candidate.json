@@ -1,0 +1,33 @@
+{
+  "schema": "flux.provider-portal-prod-product-candidate/v1",
+  "generated_from_main_sha": "18cd2b1265038cfcd143814012bdc26746cc5ff7",
+  "derived_provider_source_dev_sha": "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91",
+  "compatible_pr_a": 368,
+  "target_prod_project": "ucantptjhwttexzmslvm",
+  "internal_pilot": "sysadmin_only",
+  "public_valid_link_without_login": true,
+  "public_token_transport": "fragment",
+  "provider_intake_notification_release_delta": 0,
+  "required_vercel_variables": {
+    "FLUX_TURNSTILE_SITE_KEY": "0x4AAAAAAEUm5Sw-pHWw-HQS",
+    "INTAKE_PRIVACY_NOTICE_URL": "https://flux.quantta.mx/aviso-privacidad-proveedores.html"
+  },
+  "turnstile_production_site_key_configured": true,
+  "legal_content_approval_pending": false,
+  "unchanged_main_sha256": {
+    "aprobaciones.html": "ff9dd2b752570ef6108eadd0c6998982a7220b2c8a383f8e6abff4917b76ea08",
+    "aprobaciones.js": "10ba5a2a9d67c396a27297a15fe5dd50090d3af7e6108634616cede760a285b9",
+    "approval_batches.html": "c9759c629c7050cdbd2531de5064e076d36d6702dd76853420ff127a8ae6eab0",
+    "approval_batches.js": "8c20574e6b3f652cc32f16ba7f844a62f1e858dfa59d90d021c134af94603482",
+    "layouts.html": "ac1149d30098fc8849b5c2dbffe3a659d71b7139f1f42164b5b7eadc7373c427",
+    "layouts.js": "a8a94f26ec75f2240e3d2823266244a1d8d188af46e3ca3f7d70bf3aa24771d3",
+    "pagos_comprobaciones.html": "eade116d050ead0b5674f202529b525875a919a1b51425f20f7b7cd48b53a3c0",
+    "pagos_comprobaciones.js": "540d0ca566acca593a75fd13806fc56122caa8239493f99822f36c4e64d1865d",
+    "efectivo.html": "c93ab872f1dd477126d378da764b3babb910105573b3e7614b9c8fed733e04e4",
+    "efectivo.js": "13b461942911e905710c213a21e0ec80993a008959a8890ee75db7e9833ce8aa",
+    "configuracion.html": "8f97bd15aada8c94e2ea327aad6b1bbe427b7c584db9e45777e9acbbe5d94227",
+    "configuracion.js": "c07a8954276bf136f94749b14e13460024f211554970aab6a6cbaa9fe0008b28"
+  },
+  "prod_deploy_executed": false,
+  "runtime_mode_changed": false
+}

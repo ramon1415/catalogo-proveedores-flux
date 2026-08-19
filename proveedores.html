@@ -44,6 +44,10 @@
       outline-offset: 2px;
     }
     .provider-csf-page .table-card tbody tr:focus-within .row-actions { opacity: 1; }
+    .intake-proposal { margin: 0 0 14px; padding: 13px 14px; border: 1px solid color-mix(in srgb,var(--amber) 55%,var(--border)); border-radius: 9px; background: color-mix(in srgb,var(--amber) 9%,var(--bg-card)); }
+    .intake-proposal strong { display:block; color:var(--text-1); font-size:12px; }
+    .intake-proposal p { margin:4px 0 10px; color:var(--text-2); font-size:11px; line-height:1.5; }
+    .intake-proposal-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     @media (hover: none) {
       .provider-csf-page .row-actions { opacity: 1; }
     }
@@ -148,6 +152,14 @@
         <button type="button" id="closeModalBtn" class="icon-btn" aria-label="Cerrar formulario de proveedor">✕</button>
       </div>
       <div class="modal-scroll">
+        <aside class="intake-proposal" id="intakeProposal" role="note" hidden>
+          <strong id="intakeProposalTitle">Datos declarados pendientes de validacion</strong>
+          <p id="intakeProposalCopy">Revisa, corrige, completa o elimina cualquier valor antes de guardar. Nada se guardara automaticamente.</p>
+          <div class="intake-proposal-actions">
+            <button class="small-btn" id="applyIntakeProposalBtn" type="button" hidden>Aplicar propuesta al formulario</button>
+            <span class="field-hint" id="intakeProposalFolio"></span>
+          </div>
+        </aside>
         <input type="hidden" id="supplierId">
         <div class="form-grid">
           <label>Alias del proveedor *<input id="alias" required placeholder="ej. ACROCARPUS"></label>
@@ -220,7 +232,7 @@
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
   <script src="./upload_helper.js?v=20260709-provider-csf"></script>
-  <script src="./proveedores.js?v=20260804-layout-completion-link"></script>
+  <script src="./proveedores.js?v=20260818-provider-portal-prod"></script>
   <script src="./fase2_request_payment_method_extension.js?v=20260805-brand-verde"></script>
 </body>
 </html>

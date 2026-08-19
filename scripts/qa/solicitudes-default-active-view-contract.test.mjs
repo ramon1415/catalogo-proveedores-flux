@@ -118,6 +118,6 @@ test("changed browser assets have coordinated cache busters", () => {
     config,
     /solicitudes_workboard_extension\.js\?v=20260818-default-active/,
   )
-  assert.match(html, /config\.js\?v=20260818-default-active/)
+  assert.match(html, /config\.js\?v=20260818-provider-portal-reconciled/)
   assert.match(html, /solicitudes\.js\?v=20260818-default-active/)
 })

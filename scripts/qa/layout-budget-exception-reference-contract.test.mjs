@@ -192,8 +192,8 @@ test("preview exposes budget authorization provenance without changing RPC signa
   assert.match(migration, /then 'live_budget'/)
   assert.match(migration, /then 'extraordinary'/)
   assert.match(migration, /candidate\.classification = 'ready_extraordinary'/)
-  const extraordinaryNull = migration.indexOf(
-    "when candidate.extraordinary_authorization_id is not null\n          then null",
+  const extraordinaryNull = migration.search(
+    /when candidate\.extraordinary_authorization_id is not null\r?\n\s+then null/,
   )
   const approvedExceptionSource = migration.indexOf(
     "when public.payment_request_has_current_approved_budget_exception(request)",
@@ -281,7 +281,7 @@ test("legacy payment method fallback matches the canonical DB contract", () => {
 
 test("cache busters deliver every changed browser asset", () => {
   assert.match(config, /solicitudes_workboard_extension\.js\?v=20260818-default-active/)
-  assert.match(solicitudesHtml, /config\.js\?v=20260818-default-active/)
+  assert.match(solicitudesHtml, /config\.js\?v=20260818-provider-portal-reconciled/)
   assert.match(layoutsHtml, /layouts\.js\?v=20260817-budget-exception-layout/)
   assert.match(layoutsHtml, /fase2_request_payment_method_extension\.js\?v=20260817-layout-method-parity/)
 })

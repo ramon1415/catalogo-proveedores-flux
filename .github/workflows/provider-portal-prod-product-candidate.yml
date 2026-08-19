@@ -1,0 +1,107 @@
+name: Provider Portal PROD Product Candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "solicitar*"
+      - "provider_intakes*"
+      - "api/provider-intake-file-url.js"
+      - "api/runtime-config.js"
+      - "config.js"
+      - "proveedores.html"
+      - "proveedores.js"
+      - "solicitudes.html"
+      - "solicitudes.js"
+      - "scripts/release/build-provider-portal-prod-product.mjs"
+      - "scripts/qa/provider-portal-prod-product-contract.test.mjs"
+      - "scripts/qa/provider-intake-file-api-contract.test.cjs"
+      - "scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs"
+      - "docs/ops/provider-portal-prod-product-**"
+      - ".github/workflows/provider-portal-prod-product-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: provider-portal-prod-product-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout product candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Fetch pinned semantic sources
+        run: |
+          git fetch --no-tags origin 18cd2b1265038cfcd143814012bdc26746cc5ff7
+          git fetch --no-tags origin c91faf703a79c02d6e9ef21a7b07ea9a0af76a91
+          git fetch --no-tags origin b574010bd4164e7d08aabb01044c50aa353db8ce
+          git fetch --no-tags origin 2512f834c0632884f8596f74e8da3e28fbef4d20
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build selective product candidate
+        run: node scripts/release/build-provider-portal-prod-product.mjs
+
+      - name: JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in solicitar-config.js solicitar-core.js solicitar.js provider_intakes.js config.js proveedores.js solicitudes.js api/provider-intake-file-url.js api/runtime-config.js; do
+            node --check "$file"
+          done
+
+      - name: Product, access, public-boundary, and normal Flux regression contract
+        run: |
+          git diff --check
+          node scripts/qa/provider-portal-prod-product-contract.test.mjs
+          node scripts/qa/provider-intake-file-api-contract.test.cjs
+          node scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
+
+      - name: Enforce no DB, notification, or unrelated release scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only 18cd2b1265038cfcd143814012bdc26746cc5ff7)"
+          if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' <<<"$changed"; then
+            echo "Forbidden Product PR scope detected" >&2
+            exit 1
+          fi
+
+      - name: Commit generated candidate to the PR branch
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add solicitar.html solicitar.css solicitar-config.js solicitar-core.js solicitar.js
+            git add provider_intakes.html provider_intakes.css provider_intakes.js
+            git add api/provider-intake-file-url.js api/runtime-config.js config.js
+            git add proveedores.html proveedores.js solicitudes.html solicitudes.js
+            git add scripts/release scripts/qa docs/ops
+            git commit -m "build: materialize selective Provider Portal PROD Product candidate"
+            git push origin "HEAD:${{ github.head_ref }}"
+          fi
+
+      - name: Candidate result
+        run: |
+          echo "SYSADMIN_ONLY_PRODUCT_GATE_PROVEN=true"
+          echo "PUBLIC_PROVIDER_LINK_BOUNDARY_PROVEN=true"
+          echo "NORMAL_FLUX_REGRESSION_PASS=true"
+          echo "PROVIDER_INTAKE_NOTIFICATION_RELEASE_DELTA=0"
+          echo "NO_PROD_MUTATIONS=true"
