@@ -14,16 +14,21 @@ on:
       - docs/ops/payroll-n0-contract.md
       - docs/ops/payroll-source-recovery-report.md
       - docs/ops/payroll-n3a-materialization-report.md
+      - docs/ops/payroll-n3b-approval-report.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
       - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
       - scripts/qa/payroll-n2a-*.test.mjs
       - scripts/qa/payroll-n2b-*.test.mjs
       - scripts/qa/payroll-n3a-*.test.mjs
+      - scripts/qa/payroll-n3b-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
       - supabase/migrations/20260818110000_payroll_n3a_server_materialization.sql
+      - supabase/migrations/20260819213907_payroll_n3b_individual_approval.sql
+      - supabase/migrations/20260819213919_payroll_n3b_approval_write_hardening.sql
+      - supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
@@ -55,6 +60,9 @@ jobs:
 
       - name: Payroll N3A server materialization contracts
         run: node --test scripts/qa/payroll-n3a-materialization-contract.test.mjs
+
+      - name: Payroll N3B individual approval contracts
+        run: node --test scripts/qa/payroll-n3b-approval-contract.test.mjs scripts/qa/payroll-n3b-approval-write-hardening-contract.test.mjs scripts/qa/payroll-n3b-post-decision-freeze-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
