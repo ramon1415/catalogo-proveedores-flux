@@ -1,3 +1,5 @@
 supabase/migrations/028_cash_fund_batch_execution_readiness.sql text eol=lf
 ops/cash-funds/apply-028-batch-readiness/03_LOAD_028_EXACT.sql text eol=lf
 scripts/qa/fixtures/payroll/BBVA_Mismo_Banco_Nomina_Sintetica_QA_Flux.txt text eol=crlf
+scripts/qa/fixtures/payroll/SPEI_Nomina_Sintetica_QA_Flux.txt text eol=crlf
+scripts/qa/fixtures/payroll/Caratula_Nomina_Sintetica_QA_Flux.xlsx binary
