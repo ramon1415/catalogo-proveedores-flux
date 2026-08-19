@@ -26,7 +26,6 @@ begin
 end;
 $precheck$;
 
--- Every payroll request after draft must carry the immutable submission snapshot.
 alter table public.payment_requests
   add constraint payment_requests_payroll_submission_snapshot_check check (
     request_type::text <> 'nomina'
@@ -65,8 +64,6 @@ revoke all on function public.payroll_request_has_valid_materialization(uuid)
 grant execute on function public.payroll_request_has_valid_materialization(uuid)
   to service_role;
 
--- Dedicated validation for the only approver mutation payroll is allowed to make:
--- materialized draft/no approver -> submitted/validated approver snapshot.
 create function public.validate_payroll_submit_transition()
 returns trigger
 language plpgsql
@@ -115,7 +112,6 @@ begin
     raise exception 'PAYROLL_APPROVAL_TIMESTAMPS_NOT_ALLOWED_AT_SUBMIT';
   end if;
 
-  -- N3B submission may not alter the server-verified payroll materialization.
   if new.company_id is distinct from old.company_id
      or new.company_bank_account_id is distinct from old.company_bank_account_id
      or new.cost_center_id is distinct from old.cost_center_id
@@ -182,8 +178,6 @@ $$;
 revoke all on function public.validate_payroll_submit_transition()
   from public, anon, authenticated;
 
--- Preserve the existing approver immutability trigger for every path except the
--- one validated payroll draft -> submitted transition above.
 drop trigger validate_payment_request_approver_scope_update on public.payment_requests;
 create trigger validate_payment_request_approver_scope_update
 before update of approver_id, approver_assignment_id, approver_selection_source,
@@ -215,9 +209,6 @@ when (
 )
 execute function public.validate_payroll_submit_transition();
 
--- Guard the direct table UPDATE surface as well as the RPC path. Authenticated
--- users currently have UPDATE privileges subject to RLS, so payroll status must
--- not be able to skip submission or an approval record in the same transaction.
 create function public.guard_payroll_request_status_transition()
 returns trigger
 language plpgsql
@@ -279,8 +270,6 @@ for each row
 when (old.request_type::text = 'nomina')
 execute function public.guard_payroll_request_status_transition();
 
--- Any payroll approval record, including one created by decide_payment_request(),
--- must belong to a submitted, materialized request and the selected approver.
 create function public.guard_payroll_approval_insert()
 returns trigger
 language plpgsql
@@ -309,11 +298,11 @@ begin
   end if;
   if new.action not in ('approved','rejected','changes_requested')
      or new.from_status is distinct from 'submitted'
-     or new.to_status is distinct from case new.action
+     or new.to_status is distinct from (case new.action
        when 'approved' then 'approved'
        when 'rejected' then 'rejected'
        when 'changes_requested' then 'changes_requested'
-     end then
+     end) then
     raise exception 'PAYROLL_INVALID_APPROVAL_DECISION';
   end if;
 
@@ -329,8 +318,6 @@ before insert on public.payment_request_approvals
 for each row
 execute function public.guard_payroll_approval_insert();
 
--- Reuse the existing payment_request.created event contract at submission time.
--- N3A deliberately skipped this event during materialization INSERT.
 create function public.enqueue_payroll_submission_notification()
 returns trigger
 language plpgsql
@@ -429,9 +416,6 @@ when (
 )
 execute function public.enqueue_payroll_submission_notification();
 
--- Explicit Finance action. Approver selection is resolved using the same pool /
--- approval_rules contract as normal requests. Retrying the same submitted request
--- is idempotent and does not fire another status transition or notification.
 create function public.submit_payroll_for_approval(
   p_payment_request_id uuid,
   p_approver_id uuid,
@@ -563,8 +547,6 @@ revoke all on function public.submit_payroll_for_approval(uuid,uuid,uuid)
 grant execute on function public.submit_payroll_for_approval(uuid,uuid,uuid)
   to authenticated, service_role;
 
--- N3B must never move payroll into weekly batches. This assertion documents the
--- dependency without redefining approval_batch_request_eligibility().
 do $postcheck$
 begin
   if to_regprocedure('public.submit_payroll_for_approval(uuid,uuid,uuid)') is null
