@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const migration = fs.readFileSync('supabase/migrations/20260819150000_payroll_n3b_individual_approval.sql', 'utf8');
+const migration = fs.readFileSync('supabase/migrations/20260819213907_payroll_n3b_individual_approval.sql', 'utf8');
 const n3a = fs.readFileSync('supabase/migrations/20260818110000_payroll_n3a_server_materialization.sql', 'utf8');
 
 test('N3B reuses individual approval and preserves weekly-batch exclusion', () => {
