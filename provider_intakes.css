@@ -3,7 +3,7 @@
 .intake-dialog,
 .action-dialog,
 .match-dialog,
-.payment-draft-dialog { --text-3: #9292aa; }
+.payment-draft-dialog { --text-3: #8fa39a; }
 
 .sidebar,
 .topbar { --text-3: #8fa39a; }
@@ -13,7 +13,7 @@
 [data-theme="light"] .intake-dialog,
 [data-theme="light"] .action-dialog,
 [data-theme="light"] .match-dialog,
-[data-theme="light"] .payment-draft-dialog { --text-3: #5f5f78; }
+[data-theme="light"] .payment-draft-dialog { --text-3: #66786f; }
 
 [data-theme="light"] .sidebar,
 [data-theme="light"] .topbar { --text-3: #66786f; }
@@ -340,7 +340,7 @@ body { overflow-x: hidden; }
 .empty-inline { margin: 0; padding: 14px; color: var(--text-3); font-size: 11px; text-align: center; }
 
 .provider-match-section { display: grid; gap: 12px; }
-.provider-match-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.provider-match-heading { display: flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .provider-match-heading h3 { margin-bottom: 4px; }
 .provider-match-helper,
 .provider-match-heading p { margin: 0; color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
