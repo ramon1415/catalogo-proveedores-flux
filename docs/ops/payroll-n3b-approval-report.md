@@ -1,8 +1,8 @@
-# Payroll N3B — Individual approval discovery and draft contract
+# Payroll N3B — Individual approval DEV certification
 
-Status: `DRAFT_PR_ONLY / DEV_DB_UNTOUCHED / PROD_UNTOUCHED`
+Status: `DEV_APPLIED_AND_CERTIFIED / PR_DRAFT / SYNTHETIC_ROLLBACK_UAT_PASS / PROD_UNTOUCHED`.
 
-Baseline DEV: `cc778e76193ab2e578ad2021d61d8b9b9329273f`.
+Git baseline DEV before N3B: `cc778e76193ab2e578ad2021d61d8b9b9329273f`.
 
 ## Product contract
 
@@ -18,13 +18,23 @@ Payroll remains excluded from weekly approval batches and from Flux-generated ba
 - `decide_payment_request()` writes `payment_request_approvals` and transitions the request to `approved`, `rejected`, or `changes_requested`.
 - `payment_request_decision_notification_event` already enqueues decision notifications after an approval record is inserted. N3B does not fork that notification engine.
 - Normal request creation selects an approver from `approver_assignments` when an active requester/company pool exists; otherwise it uses `approval_rules`.
-- `validate_payment_request_approver_scope_update` makes approver selection immutable after creation. N3B therefore adds one narrowly validated exception for the N3A state `nomina + draft + no approver` to become `submitted` with one approver snapshot.
-- `payment_requests` is directly updatable by authenticated users under RLS, so payroll status transitions need a database guard rather than relying only on UI/RPC routing.
-- `payment_request_approvals` is readable by the UI for history; decisions in `solicitudes.js` use `decide_payment_request()` rather than direct inserts.
+- `validate_payment_request_approver_scope_update` makes approver selection immutable after creation. N3B adds one narrowly validated exception for `nomina + draft + no approver` to become `submitted` with one approver snapshot.
+- `payment_requests` is directly updatable by authenticated users under RLS, so payroll status and materialized fields require database guards rather than UI-only routing.
+- `payment_request_approvals` was readable and directly writable at the table privilege surface even though the product writes decisions through `decide_payment_request()`. N3B preserves authenticated `SELECT`, revokes authenticated/anon direct DML, and keeps the existing decision RPC executable.
 
-## N3B draft design
+## Applied DEV migrations
 
-### `submit_payroll_for_approval`
+Supabase DEV ledger records exactly one application of each forward migration:
+
+1. `20260819213907_payroll_n3b_individual_approval.sql`
+2. `20260819213919_payroll_n3b_approval_write_hardening.sql`
+3. `20260819214917_payroll_n3b_post_decision_freeze.sql`
+
+The Git filenames are aligned to those authoritative remote versions. No migration repair was used.
+
+The first attempt to apply the functional migration failed inside its transaction because PL/pgSQL requires parentheses around `CASE` when used after `IS DISTINCT FROM`. The failed transaction left no migration ledger entry or partial schema. The source was corrected in Git, covered by a contract assertion, CI passed, and the corrected migration was then applied once.
+
+## `submit_payroll_for_approval`
 
 Authenticated RPC with internal Finance authorization. N3B v1 requires the submitting Finance profile to be the same profile stored as `requested_by` by N3A materialization.
 
@@ -47,9 +57,9 @@ with:
 - `approver_selection_source`
 - `submitted_at`
 
-Retrying the same submitted request with the same approver snapshot returns `already_submitted` and produces no second status transition.
+Retrying the same submitted request with the same approver snapshot returns `already_submitted` and produces no second status transition or submission notification.
 
-### One-time approver selection
+## One-time approver selection
 
 The existing approver-update trigger remains active for all normal requests and all payroll updates except the exact N3B transition. A dedicated payroll trigger validates that transition and reuses:
 
@@ -58,51 +68,87 @@ The existing approver-update trigger remains active for all normal requests and 
 - `is_payment_request_approver_for_company`
 - `payment_request_rule_allows`
 
-After submission, the existing approver immutability behavior applies again.
+After submission, approver selection and `submitted_at` are immutable.
 
-### Direct-decision bypass protection
+## Direct-decision and direct-write protection
 
-`decide_payment_request()` currently does not itself require a pre-decision request status. N3B does not fork the function. Instead it adds payroll-only database guards:
+N3B keeps `decide_payment_request()` as the approval rule engine and does not redefine it.
 
-- an approval record can be inserted only for a materialized `submitted` payroll request and only by the selected approver;
-- a direct payroll status transition from `submitted` to a decision state requires the matching approval record to have been created in the same transaction.
+Payroll-only database guards require:
 
-This keeps normal requests unchanged while preventing a payroll draft from skipping submission.
+- approval rows only for a valid materialized `submitted` payroll request;
+- the approval actor to equal the selected approver;
+- action/from/to-state consistency;
+- the matching approval row to exist in the same transaction before `submitted -> approved/rejected/changes_requested` can occur.
 
-### Submission notification
+Additionally, authenticated and anon direct `INSERT/UPDATE/DELETE` privileges on `payment_request_approvals` are revoked. Authenticated users retain `SELECT` for approval history and `EXECUTE` on `decide_payment_request()`.
 
-N3A deliberately suppresses `payment_request.created` at materialization time. Because N3B submits by UPDATE, the normal INSERT trigger would not run. N3B therefore emits the same logical notification contract at `draft -> submitted` using the existing idempotency key:
+## Materialization and post-decision freeze
+
+After N3A materialization, payroll financial/material fields are immutable at the `payment_requests` surface, including company, source account, cost center, budget context, amount, currency, requester, payroll period/subtype, provider fields, payment method, extraordinary flag, concept, description and notes.
+
+`submitted_at` is created only on the one-time `draft -> submitted` transition.
+
+After a decision, payroll status is frozen in `approved`, `rejected` or `changes_requested`. N3B does not permit transition to paid/scheduled/execution states. A later dispersion phase must explicitly introduce the next lifecycle transition.
+
+## Submission and decision notifications
+
+N3A suppresses `payment_request.created` at materialization time. N3B emits the same logical notification contract on `draft -> submitted` with idempotency key:
 
 `payment_request.created:<request_id>:approver`
 
-Materialization remains notification-free; submission creates one logical approver notification; retries do not duplicate it.
+Synthetic certification proved exactly one logical submit notification across a retry.
 
-### Decision and rejection
+Decision notifications continue through the existing:
 
-Decisions continue through `decide_payment_request()` and the existing `payment_request_decision_notification_event` trigger. Rejection changes only request/approval state and preserves:
+`payment_request_approvals -> payment_request_decision_notification_event -> enqueue_payment_request_decision_notification()`
 
-- `payroll_channels`
-- `payroll_run_files`
-- `payroll_run_lines`
-- capture provenance
-- server hashes
-- server verification summary
+Approval and rejection produced their expected decision events without employee PII in payloads.
 
-No automatic return to draft is introduced in N3B.
+## Synthetic rollback UAT
 
-## Explicit exclusions
+The DEV certification used two fully synthetic payroll model fixtures marked `NÓMINA TEST N3B - NO PAGAR`, entirely inside one explicit transaction that ended with `ROLLBACK`.
 
-N3B does not:
+Because DEV has no active Finance profile, one pre-existing inactive Finance profile was temporarily activated only inside the rollback transaction. A Finance company membership and approver assignment were also created only inside that transaction. No role, email or persistent IAM record was changed.
 
-- apply its migration in DEV;
-- create a Finance profile or temporary role;
-- materialize real payroll;
-- modify the N3A migration;
-- alter weekly approval batch eligibility;
-- generate PAGOSBBV/PAGOSINT/CIE;
-- disperse through BBVA Net Cash or TOKA;
-- reconcile payments;
-- touch PROD or `main`.
+The UAT proved:
+
+- non-Finance submit denied with `PAYROLL_FINANCE_REQUIRED`;
+- Finance submit of its own materialized payroll succeeds;
+- retry returns `already_submitted` and does not duplicate notification;
+- weekly batch eligibility remains false with `payroll_uses_separate_flow`;
+- materialized payment fields cannot be edited;
+- `submitted_at` cannot be rewritten;
+- selected approver can approve one synthetic payroll and reject another;
+- approval/rejection ledger rows are created through the existing decision RPC;
+- approval/rejection notifications are generated by the existing notification engine;
+- a second payroll decision is blocked;
+- post-decision transition to payment is blocked;
+- payroll channels, run files, run lines and materialization evidence remain intact through approval/rejection;
+- approval batch items = 0;
+- payment layout lines = 0;
+- bank actions = 0.
+
+The transaction returned `PAYROLL_N3B_SYNTHETIC_ROLLBACK_UAT / PASS` and then rolled back.
+
+## Post-UAT cleanup proof
+
+Read-only postchecks outside the UAT transaction confirmed:
+
+- payroll requests = 0;
+- capture sessions/files = 0;
+- payroll-private objects = 0;
+- payroll channels/run files/run lines = 0;
+- payroll approvals/batch items/layout lines/notifications = 0;
+- synthetic request/activity markers = 0;
+- temporary Finance membership = 0;
+- temporary approver assignment = 0;
+- the Finance profile returned to inactive;
+- active Finance profiles in DEV = 0.
+
+The dependency remains:
+
+`PAYROLL_ACTIVE_FINANCE_PROFILE_REQUIRED_BEFORE_RECURRENT_OR_REALISTIC_UAT`
 
 ## Physical-format blocker
 
@@ -116,6 +162,19 @@ Additional format states remain:
 - BBVA same-bank: `PENDING_FORMAT_CERTIFICATION`
 - TOKA XML: `CONDITIONAL / PENDING`
 
-## Target gate result
+## Explicit exclusions
 
-`PASS / PAYROLL_N3B_DISCOVERY_COMPLETE / EXISTING_INDIVIDUAL_APPROVAL_REUSE_CONFIRMED / WEEKLY_BATCH_EXCLUSION_PRESERVED / PAYROLL_ONE_TIME_APPROVER_SELECTION_READY / PAYROLL_DIRECT_DECISION_BYPASS_BLOCKED / PAYROLL_SUBMIT_CONTRACT_READY / PAYROLL_SUBMISSION_NOTIFICATION_EXACTLY_ONCE / PAYROLL_DECISION_NOTIFICATION_REUSE_CONFIRMED / PAYROLL_REJECTION_PRESERVES_MATERIALIZATION / PAYROLL_LAYOUT_ISOLATION_PRESERVED / DRAFT_PR_READY / DEV_DB_UNTOUCHED / REAL_PAYROLL_STILL_BLOCKED_BY_COVER / DISPERSION_NOT_STARTED / PROD_UNTOUCHED`
+N3B does not:
+
+- materialize a real payroll;
+- persist synthetic UAT data;
+- create or persist a Finance profile/role change;
+- alter weekly approval batch eligibility;
+- generate PAGOSBBV/PAGOSINT/CIE;
+- disperse through BBVA Net Cash or TOKA;
+- reconcile payments;
+- touch PROD or `main`.
+
+## Gate result
+
+`PASS / PAYROLL_N3B_MIGRATIONS_APPLIED_DEV / PAYROLL_N3B_APPROVAL_WRITE_HARDENED / PAYROLL_N3B_SYNTHETIC_ROLLBACK_UAT_PASS / PAYROLL_FINANCE_SUBMIT_PASS / PAYROLL_NON_FINANCE_SUBMIT_BLOCKED / PAYROLL_SUBMISSION_NOTIFICATION_EXACTLY_ONCE / PAYROLL_APPROVAL_PASS / PAYROLL_REJECTION_PASS / PAYROLL_DECISION_REPLAY_BLOCKED / PAYROLL_MATERIALIZED_REQUEST_IMMUTABLE / PAYROLL_POST_DECISION_FROZEN / WEEKLY_BATCH_EXCLUSION_PRESERVED / PAYROLL_LAYOUT_ISOLATION_PRESERVED / PAYROLL_UAT_CLEANUP_PASS / PR_DRAFT / REAL_PAYROLL_STILL_BLOCKED_BY_COVER / DISPERSION_NOT_STARTED / PROD_UNTOUCHED / MAIN_UNTOUCHED`
