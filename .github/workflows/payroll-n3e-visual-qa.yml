@@ -1,0 +1,57 @@
+name: Payroll N3E visual QA
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - nomina_qa.html
+      - payroll_qa_visual.css
+      - payroll_qa_visual_model.js
+      - payroll_qa_visual_page.js
+      - payroll_cover_qa_parser.js
+      - payroll_same_bank_qa_parser.js
+      - payroll_toka_qa_parser.js
+      - scripts/qa/fixtures/payroll/**
+      - scripts/qa/payroll-n3d-full-package-qa-contract.test.mjs
+      - scripts/qa/payroll-n3e-visual-qa-contract.test.mjs
+      - docs/ops/payroll-n3e-visual-qa-report.md
+      - .gitattributes
+      - .github/workflows/payroll-n3e-visual-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax
+        run: node --check payroll_qa_visual_model.js && node --check payroll_qa_visual_page.js && node --check payroll_cover_qa_parser.js && node --check payroll_same_bank_qa_parser.js && node --check payroll_toka_qa_parser.js
+
+      - name: N3E visual QA contract
+        run: node --test scripts/qa/payroll-n3e-visual-qa-contract.test.mjs
+
+      - name: N3D full package regression
+        run: node --test scripts/qa/payroll-n3d-full-package-qa-contract.test.mjs
+
+      - name: Existing payroll parser regression
+        run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
+
+      - name: Diff whitespace
+        run: >-
+          git diff --check HEAD^ HEAD -- .
+          ':(exclude)scripts/qa/fixtures/payroll/BBVA_Mismo_Banco_Nomina_Sintetica_QA_Flux.txt'
+          ':(exclude)scripts/qa/fixtures/payroll/SPEI_Nomina_Sintetica_QA_Flux.txt'
