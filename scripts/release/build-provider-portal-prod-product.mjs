@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
-const SOURCE_MAIN_SHA = "da196b3e28a445ef00941563b07e6d67c25a54ff";
+const SOURCE_MAIN_SHA = "18cd2b1265038cfcd143814012bdc26746cc5ff7";
 const SOURCE_DEV_SHA = "c91faf703a79c02d6e9ef21a7b07ea9a0af76a91";
 const PROD_PROJECT = "ucantptjhwttexzmslvm";
 const CANDIDATE_MANIFEST = "docs/ops/provider-portal-prod-product-candidate.json";
@@ -300,6 +300,10 @@ solicitarHtml = solicitarHtml
   .replace(/\s*<strong class="environment-badge">Ambiente DEV<\/strong>\s*/, "\n")
   .replace(/\s*<aside class="dev-banner"[\s\S]*?<\/aside>\s*/, "\n")
   .replace(/\s*<label class="check-row"><input id="dev-data-confirmed"[\s\S]*?<\/label>\s*/, "\n")
+  .replace(
+    /<label class="check-row"><input id="privacy-accepted"[\s\S]*?<\/label>/,
+    '<label class="check-row"><input id="privacy-accepted" type="checkbox" required><span>Declaro que he leído el <a id="privacy-link" href="#" target="_blank" rel="noopener noreferrer">Aviso de Privacidad para Proveedores</a> y otorgo mi consentimiento expreso para el tratamiento de los datos financieros y patrimoniales que proporcione, exclusivamente para las finalidades descritas en dicho Aviso.</span></label>',
+  )
   .replace(/\s*(?:\u00b7|\u00c2\u00b7)?\s*Ambiente DEV/g, "")
   .replaceAll("20260811-provider-aware-links", "20260818-provider-portal-prod");
 write("solicitar.html", solicitarHtml);
@@ -519,6 +523,7 @@ const allowed = new Set([
   "scripts/release/build-provider-portal-prod-product.mjs",
   "scripts/qa/provider-portal-prod-product-contract.test.mjs",
   "scripts/qa/provider-intake-file-api-contract.test.cjs",
+  "scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs",
   "scripts/qa/solicitudes-default-active-view-contract.test.mjs",
   "scripts/qa/layout-budget-exception-reference-contract.test.mjs",
   "docs/ops/provider-portal-prod-product-release.md",
@@ -538,6 +543,14 @@ for (const required of ["#token=", "no-referrer", "ucantptjhwttexzmslvm.function
   if (!all.includes(required)) fail("missing public PROD contract: " + required);
 }
 if (!publicJs.includes("if (!PUBLIC_INTAKE_CONFIG.releaseReady)")) fail("public portal does not fail closed before token use");
+for (const required of [
+  'id="privacy-accepted" type="checkbox" required',
+  "Aviso de Privacidad para Proveedores",
+  "otorgo mi consentimiento expreso",
+  "datos financieros y patrimoniales",
+]) {
+  if (!publicHtml.includes(required)) fail("approved privacy consent contract missing: " + required);
+}
 
 const shell = read("config.js");
 const page = read("provider_intakes.js");
@@ -589,7 +602,11 @@ for (const [file, expected] of Object.entries(manifest.unchanged_main_sha256)) {
   const actual = crypto.createHash("sha256").update(fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n")).digest("hex");
   if (actual !== expected) fail("normal Flux regression hash changed: " + file);
 }
-if (manifest.provider_intake_notification_release_delta !== 0 || manifest.legal_content_approval_pending !== true) fail("release manifest P0 state invalid");
+if (
+  manifest.provider_intake_notification_release_delta !== 0
+  || manifest.legal_content_approval_pending !== false
+  || manifest.turnstile_production_site_key_configured !== true
+) fail("release manifest P0 state invalid");
 console.log("PROVIDER_PORTAL_PROD_PRODUCT_CONTRACT_PASS=true");
 console.log("SYSADMIN_ONLY_PRODUCT_GATE_PROVEN=true");
 console.log("NORMAL_FLUX_REGRESSION_PASS=true");
@@ -689,11 +706,11 @@ const productManifest = {
   public_token_transport: "fragment",
   provider_intake_notification_release_delta: 0,
   required_vercel_variables: {
-    FLUX_TURNSTILE_SITE_KEY: "required_production_site_key_not_committed",
-    INTAKE_PRIVACY_NOTICE_URL: "required_https_provider_specific_url_not_committed",
+    FLUX_TURNSTILE_SITE_KEY: "0x4AAAAAAEUm5Sw-pHWw-HQS",
+    INTAKE_PRIVACY_NOTICE_URL: "https://flux.quantta.mx/aviso-privacidad-proveedores.html",
   },
-  turnstile_production_site_key_configured: false,
-  legal_content_approval_pending: true,
+  turnstile_production_site_key_configured: true,
+  legal_content_approval_pending: false,
   unchanged_main_sha256: regressionHashes,
   prod_deploy_executed: false,
   runtime_mode_changed: false,
@@ -710,15 +727,15 @@ write("docs/ops/provider-portal-prod-product-release.md", [
   "- The public provider route needs no Flux login and accepts the token only from `#token=`.",
   "- Notification release delta: **0**.",
   "",
-  "## Production configuration still required (not written by this PR)",
+  "## Production configuration certified before this PR",
   "",
-  "- `FLUX_TURNSTILE_SITE_KEY`: production Turnstile site key; test keys fail closed.",
-  "- `INTAKE_PRIVACY_NOTICE_URL`: approved HTTPS provider-intake-specific notice.",
+  "- `FLUX_TURNSTILE_SITE_KEY=0x4AAAAAAEUm5Sw-pHWw-HQS`; test keys fail closed.",
+  "- `INTAKE_PRIVACY_NOTICE_URL=https://flux.quantta.mx/aviso-privacidad-proveedores.html`.",
   "- Edge variables and secrets listed in PR A's runtime manifest.",
   "",
   "## Stop state",
   "",
-  "This Draft performs no merge, PROD deploy, env/secret write, mode change, link creation, intake creation, submit, conversion, payment, batch, or layout action.",
+  "The product release remains fail-closed while `PROVIDER_INTAKE_MODE=disabled`. Merge and automatic Vercel deployment do not authorize an environment/secret write, mode change, link creation, intake creation, submit, conversion, payment, batch, or layout action.",
 ].join("\n"));
 
 console.log(JSON.stringify({ generated: true, firstBuild, sourceMain: SOURCE_MAIN_SHA, sourceDev: SOURCE_DEV_SHA }));

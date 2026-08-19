@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 const fail = (message) => { throw new Error(message); };
 const read = (file) => fs.readFileSync(file, "utf8");
 const manifest = JSON.parse(read("docs/ops/provider-portal-prod-product-candidate.json"));
-const changed = execFileSync("git", ["diff", "--name-only", "da196b3e28a445ef00941563b07e6d67c25a54ff"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+const changed = execFileSync("git", ["diff", "--name-only", "18cd2b1265038cfcd143814012bdc26746cc5ff7"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 const allowed = new Set([
   ".github/workflows/provider-portal-prod-product-candidate.yml",
   "api/provider-intake-file-url.js", "api/runtime-config.js", "config.js",
@@ -16,6 +16,7 @@ const allowed = new Set([
   "scripts/release/build-provider-portal-prod-product.mjs",
   "scripts/qa/provider-portal-prod-product-contract.test.mjs",
   "scripts/qa/provider-intake-file-api-contract.test.cjs",
+  "scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs",
   "scripts/qa/solicitudes-default-active-view-contract.test.mjs",
   "scripts/qa/layout-budget-exception-reference-contract.test.mjs",
   "docs/ops/provider-portal-prod-product-release.md",
@@ -35,6 +36,14 @@ for (const required of ["#token=", "no-referrer", "ucantptjhwttexzmslvm.function
   if (!all.includes(required)) fail("missing public PROD contract: " + required);
 }
 if (!publicJs.includes("if (!PUBLIC_INTAKE_CONFIG.releaseReady)")) fail("public portal does not fail closed before token use");
+for (const required of [
+  'id="privacy-accepted" type="checkbox" required',
+  "Aviso de Privacidad para Proveedores",
+  "otorgo mi consentimiento expreso",
+  "datos financieros y patrimoniales",
+]) {
+  if (!publicHtml.includes(required)) fail("approved privacy consent contract missing: " + required);
+}
 
 const shell = read("config.js");
 const page = read("provider_intakes.js");
@@ -86,7 +95,11 @@ for (const [file, expected] of Object.entries(manifest.unchanged_main_sha256)) {
   const actual = crypto.createHash("sha256").update(fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n")).digest("hex");
   if (actual !== expected) fail("normal Flux regression hash changed: " + file);
 }
-if (manifest.provider_intake_notification_release_delta !== 0 || manifest.legal_content_approval_pending !== true) fail("release manifest P0 state invalid");
+if (
+  manifest.provider_intake_notification_release_delta !== 0
+  || manifest.legal_content_approval_pending !== false
+  || manifest.turnstile_production_site_key_configured !== true
+) fail("release manifest P0 state invalid");
 console.log("PROVIDER_PORTAL_PROD_PRODUCT_CONTRACT_PASS=true");
 console.log("SYSADMIN_ONLY_PRODUCT_GATE_PROVEN=true");
 console.log("NORMAL_FLUX_REGRESSION_PASS=true");

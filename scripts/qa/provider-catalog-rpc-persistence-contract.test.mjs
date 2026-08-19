@@ -18,7 +18,7 @@ const persistSource = functionSource(
   "async function persistSupplier(operation)",
   "\nfunction isPreviewEnvironment()",
 )
-const payloadBlock = persistSource.match(/const payload = \{([\s\S]*?)\n  \}\n\n  if/)
+const payloadBlock = persistSource.match(/const payload = \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  if/)
 assert.ok(payloadBlock, "Provider payload block must remain statically auditable")
 const payloadKeys = [...payloadBlock[1].matchAll(/^\s{4}([a-z_]+):/gm)].map((match) => match[1])
 const expectedPayloadKeys = [

@@ -192,8 +192,8 @@ test("preview exposes budget authorization provenance without changing RPC signa
   assert.match(migration, /then 'live_budget'/)
   assert.match(migration, /then 'extraordinary'/)
   assert.match(migration, /candidate\.classification = 'ready_extraordinary'/)
-  const extraordinaryNull = migration.indexOf(
-    "when candidate.extraordinary_authorization_id is not null\n          then null",
+  const extraordinaryNull = migration.search(
+    /when candidate\.extraordinary_authorization_id is not null\r?\n\s+then null/,
   )
   const approvedExceptionSource = migration.indexOf(
     "when public.payment_request_has_current_approved_budget_exception(request)",

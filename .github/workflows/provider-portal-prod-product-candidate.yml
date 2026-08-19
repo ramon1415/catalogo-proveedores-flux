@@ -16,6 +16,7 @@ on:
       - "scripts/release/build-provider-portal-prod-product.mjs"
       - "scripts/qa/provider-portal-prod-product-contract.test.mjs"
       - "scripts/qa/provider-intake-file-api-contract.test.cjs"
+      - "scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs"
       - "docs/ops/provider-portal-prod-product-**"
       - ".github/workflows/provider-portal-prod-product-candidate.yml"
   workflow_dispatch:
@@ -42,7 +43,7 @@ jobs:
 
       - name: Fetch pinned semantic sources
         run: |
-          git fetch --no-tags origin da196b3e28a445ef00941563b07e6d67c25a54ff
+          git fetch --no-tags origin 18cd2b1265038cfcd143814012bdc26746cc5ff7
           git fetch --no-tags origin c91faf703a79c02d6e9ef21a7b07ea9a0af76a91
           git fetch --no-tags origin b574010bd4164e7d08aabb01044c50aa353db8ce
           git fetch --no-tags origin 2512f834c0632884f8596f74e8da3e28fbef4d20
@@ -68,12 +69,13 @@ jobs:
           git diff --check
           node scripts/qa/provider-portal-prod-product-contract.test.mjs
           node scripts/qa/provider-intake-file-api-contract.test.cjs
+          node scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
 
       - name: Enforce no DB, notification, or unrelated release scope
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only da196b3e28a445ef00941563b07e6d67c25a54ff)"
+          changed="$(git diff --name-only 18cd2b1265038cfcd143814012bdc26746cc5ff7)"
           if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' <<<"$changed"; then
             echo "Forbidden Product PR scope detected" >&2
             exit 1
