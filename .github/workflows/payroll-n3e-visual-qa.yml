@@ -49,4 +49,4 @@ jobs:
         run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
 
       - name: Diff whitespace
-        run: git diff --check HEAD^ HEAD || true
+        run: git diff --check HEAD^ HEAD
