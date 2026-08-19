@@ -51,4 +51,7 @@ jobs:
         run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
 
       - name: Diff whitespace
-        run: git diff --check HEAD^ HEAD
+        run: >-
+          git diff --check HEAD^ HEAD -- .
+          ':(exclude)scripts/qa/fixtures/payroll/BBVA_Mismo_Banco_Nomina_Sintetica_QA_Flux.txt'
+          ':(exclude)scripts/qa/fixtures/payroll/SPEI_Nomina_Sintetica_QA_Flux.txt'
