@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es-MX" data-privacy-content-status="complete" data-legal-counsel-reviewed="false">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Aviso de privacidad integral | Portal de Proveedores Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #10231f;
+      --surface: #172d29;
+      --surface-2: #203a34;
+      --line: rgba(229, 229, 218, .16);
+      --accent: #cfe1cb;
+      --accent-strong: #b5ceaf;
+      --text: #f7f7f5;
+      --muted: rgba(229, 229, 218, .72);
+      --shadow: 0 24px 80px rgba(4, 15, 12, .42);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(207, 225, 203, .12), transparent 32rem),
+        radial-gradient(circle at 100% 40%, rgba(48, 91, 79, .2), transparent 38rem),
+        var(--bg);
+      color: var(--text);
+      font-family: "Plus Jakarta Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+
+    a { color: var(--accent); text-underline-offset: .18em; }
+    a:hover { color: var(--accent-strong); }
+    img { max-width: 100%; }
+    h1, h2, h3 { line-height: 1.2; letter-spacing: -.02em; }
+    h2 { margin-top: 2.5rem; padding-top: .25rem; font-size: clamp(1.35rem, 3vw, 1.75rem); }
+    h3 { margin-top: 1.5rem; font-size: 1.08rem; }
+    p, li { color: var(--muted); }
+    strong { color: var(--text); }
+
+    .site-header {
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 35, 31, .82);
+      backdrop-filter: blur(16px);
+    }
+
+    .header-inner,
+    .layout,
+    .footer-inner {
+      width: min(1120px, calc(100% - 2rem));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      min-height: 84px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+
+    .brand { display: flex; align-items: center; gap: 1rem; }
+    .brand img { width: 150px; height: auto; display: block; }
+    .brand-copy { border-left: 1px solid var(--line); padding-left: 1rem; }
+    .brand-copy strong, .brand-copy span { display: block; }
+    .brand-copy span { color: var(--muted); font-size: .78rem; }
+
+    .header-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 42px;
+      padding: .65rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: .7rem;
+      text-decoration: none;
+      font-weight: 750;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 2rem;
+      align-items: start;
+      padding: 3rem 0 4rem;
+    }
+
+    .toc {
+      position: sticky;
+      top: 1.25rem;
+      padding: 1.25rem;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: rgba(23, 45, 41, .82);
+    }
+
+    .toc h2 { margin: 0 0 .8rem; padding: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .12em; }
+    .toc ol { margin: 0; padding-left: 1.15rem; }
+    .toc li { margin: .45rem 0; font-size: .82rem; }
+    .toc a { color: var(--muted); text-decoration: none; }
+    .toc a:hover { color: var(--accent); }
+
+    .document {
+      min-width: 0;
+      padding: clamp(1.4rem, 4vw, 3.5rem);
+      border: 1px solid var(--line);
+      border-radius: 1.4rem;
+      background: linear-gradient(150deg, rgba(37, 63, 58, .78), rgba(23, 45, 41, .95));
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow { margin: 0 0 .7rem; color: var(--accent); font-size: .78rem; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 18ch; font-size: clamp(2rem, 6vw, 3.7rem); }
+    .lede { max-width: 72ch; margin-top: 1.25rem; font-size: 1.05rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; margin: 1.5rem 0 0; font-size: .82rem; }
+    .meta span { color: var(--muted); }
+
+    .summary,
+    .consent,
+    .security-note {
+      margin: 1.75rem 0;
+      padding: 1.2rem 1.3rem;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: .85rem;
+      background: rgba(16, 35, 31, .65);
+    }
+
+    .summary p,
+    .consent p,
+    .security-note p { margin: 0; }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .9rem;
+      margin: 1.2rem 0;
+    }
+
+    .data-card {
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: .8rem;
+      background: rgba(16, 35, 31, .4);
+    }
+
+    .data-card h3 { margin: 0 0 .45rem; }
+    .data-card p { margin: 0; font-size: .91rem; }
+    .document ul, .document ol { padding-left: 1.3rem; }
+    .document li + li { margin-top: .4rem; }
+
+    .contact-card {
+      display: grid;
+      gap: .35rem;
+      margin-top: 1rem;
+      padding: 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: .8rem;
+      background: rgba(16, 35, 31, .5);
+    }
+
+    .contact-card span { color: var(--muted); }
+    .site-footer { border-top: 1px solid var(--line); }
+    .footer-inner { display: flex; justify-content: space-between; gap: 1rem; padding: 1.5rem 0 2rem; font-size: .78rem; }
+    .footer-inner p { margin: 0; }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { position: static; }
+      .toc ol { columns: 2; }
+    }
+
+    @media (max-width: 620px) {
+      .header-inner, .footer-inner { align-items: flex-start; flex-direction: column; }
+      .brand-copy { display: none; }
+      .data-grid { grid-template-columns: 1fr; }
+      .toc ol { columns: 1; }
+      .document { padding: 1.25rem; border-radius: 1rem; }
+    }
+
+    @media print {
+      :root { color-scheme: light; }
+      body { background: #fff; color: #111; }
+      .site-header, .toc, .site-footer { display: none; }
+      .layout { display: block; width: 100%; padding: 0; }
+      .document { border: 0; box-shadow: none; background: #fff; color: #111; padding: 0; }
+      p, li, .meta span { color: #333; }
+      strong, h1, h2, h3 { color: #111; }
+      a { color: #111; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <img src="./assets/logo-flux-blanco.webp" alt="Flux">
+        <div class="brand-copy">
+          <strong>Portal de Proveedores</strong>
+          <span>Operado con tecnología de Quantta</span>
+        </div>
+      </div>
+      <a class="header-link" href="mailto:finanzas@soportef.com">Contacto de privacidad</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <nav class="toc" aria-label="Contenido del aviso">
+      <h2>Contenido</h2>
+      <ol>
+        <li><a href="#responsable">Responsable</a></li>
+        <li><a href="#alcance">Alcance</a></li>
+        <li><a href="#datos">Datos tratados</a></li>
+        <li><a href="#finalidades">Finalidades</a></li>
+        <li><a href="#consentimiento">Consentimiento</a></li>
+        <li><a href="#transferencias">Transferencias</a></li>
+        <li><a href="#arco">Derechos ARCO</a></li>
+        <li><a href="#conservacion">Conservación</a></li>
+        <li><a href="#seguridad">Seguridad</a></li>
+        <li><a href="#tecnologia">Tecnología</a></li>
+        <li><a href="#cambios">Cambios</a></li>
+      </ol>
+    </nav>
+
+    <article class="document">
+      <p class="eyebrow">Aviso de privacidad integral</p>
+      <h1>Portal de Proveedores Flux</h1>
+      <p class="lede">
+        Este aviso explica cómo se recaban, utilizan, protegen, conservan y, cuando corresponde, comparten los datos personales enviados para preparar y gestionar solicitudes de pago de proveedores.
+      </p>
+      <div class="meta">
+        <span><strong>Versión 1.0</strong></span>
+        <span>Entrada en vigor: <strong>18 de agosto de 2026</strong></span>
+        <span>URL prevista: <strong>flux.quantta.mx/aviso-privacidad-proveedores.html</strong></span>
+      </div>
+
+      <aside class="summary">
+        <p>
+          <strong>Resumen:</strong> el Portal recibe información directamente de la persona proveedora o de su representante, la vincula con la empresa indicada en la liga de acceso y permite a personal autorizado validar la información, relacionarla con el maestro de proveedores y preparar una solicitud de pago. No se utiliza para publicidad ni para vender datos personales.
+        </p>
+      </aside>
+
+      <section id="responsable">
+        <h2>1. Identidad y domicilio del responsable</h2>
+        <p>
+          <strong>Flux Financiera, S.A. de C.V., SOFOM E.N.R.</strong> (el “Responsable”), con domicilio para oír y recibir notificaciones en Montes Urales 760, Col. Lomas de Chapultepec, Alcaldía Miguel Hidalgo, C.P. 11000, Ciudad de México, México, es responsable del tratamiento de los datos personales descritos en este aviso.
+        </p>
+        <p>
+          <strong>Quantta</strong> opera la infraestructura, el almacenamiento, la aplicación y el soporte tecnológico de Flux como encargado del tratamiento, exclusivamente por cuenta y bajo las instrucciones del Responsable y conforme a los controles contractuales, de confidencialidad y seguridad aplicables. Quantta no determina las finalidades de negocio ni actúa como propietario de los datos.
+        </p>
+      </section>
+
+      <section id="alcance">
+        <h2>2. Alcance y personas titulares</h2>
+        <p>
+          Este aviso aplica a personas físicas proveedoras, representantes, contactos, beneficiarias de pago y personas físicas cuyos datos aparezcan en facturas o documentos soporte enviados mediante una liga válida del Portal. El Portal está dirigido a personas mayores de edad con capacidad para proporcionar la información o con facultades para actuar en nombre de la persona proveedora.
+        </p>
+      </section>
+
+      <section id="datos">
+        <h2>3. Datos personales sometidos a tratamiento</h2>
+        <div class="data-grid">
+          <div class="data-card">
+            <h3>Identificación y contacto</h3>
+            <p>Nombre o razón social, datos de identificación, nombre de contacto o representante, RFC cuando se proporcione, correo electrónico y teléfono.</p>
+          </div>
+          <div class="data-card">
+            <h3>Fiscales y de la operación</h3>
+            <p>Datos de factura o CFDI, folio, UUID fiscal, fecha, concepto, descripción, monto, moneda y fecha de pago solicitada.</p>
+          </div>
+          <div class="data-card">
+            <h3>Financieros y patrimoniales</h3>
+            <p>Banco, persona beneficiaria, cuenta bancaria, CLABE, instrucciones o confirmaciones bancarias y datos contenidos en estados de cuenta o comprobantes.</p>
+          </div>
+          <div class="data-card">
+            <h3>Documentales</h3>
+            <p>Información de facturación, factura PDF/XML, constancia fiscal, estado de cuenta, imágenes permitidas y demás documentación soporte que la persona titular decida adjuntar para validar la operación.</p>
+          </div>
+          <div class="data-card">
+            <h3>Técnicos y de seguridad</h3>
+            <p>Folio, fechas y horas, metadatos mínimos de archivo, evidencia técnica e identificadores temporales necesarios para seguridad, prevención de abuso y trazabilidad.</p>
+          </div>
+          <div class="data-card">
+            <h3>Flujo interno</h3>
+            <p>Empresa receptora, información necesaria para el alta o vinculación con el catálogo interno de proveedores, estado de revisión, observaciones, responsables internos, datos necesarios para preparar una solicitud de pago y relación con la solicitud que, en su caso, se genere.</p>
+          </div>
+        </div>
+        <p>
+          El Portal <strong>no solicita intencionalmente datos personales sensibles</strong>. No incluya información sobre salud, biometría, origen étnico, creencias, afiliación sindical, orientación sexual u otras categorías sensibles salvo que sea estrictamente necesaria, esté legalmente justificada y haya sido expresamente requerida por el Responsable.
+        </p>
+      </section>
+
+      <section id="finalidades">
+        <h2>4. Finalidades necesarias</h2>
+        <p>Los datos se tratarán para las finalidades primarias y necesarias siguientes:</p>
+        <ol>
+          <li>recibir, registrar y dar seguimiento a solicitudes y documentación de proveedores;</li>
+          <li>identificar y validar a la persona proveedora y sus datos de contacto;</li>
+          <li>revisar la información fiscal, documental y de facturación proporcionada;</li>
+          <li>validar o actualizar, mediante procesos controlados, la información declarada para el pago;</li>
+          <li>comparar la información con el catálogo interno de proveedores y documentar coincidencias o diferencias;</li>
+          <li>gestionar altas controladas o la vinculación de proveedores por personal autorizado;</li>
+          <li>preparar, guardar y, cuando sea autorizado, convertir el expediente en una solicitud interna de pago dentro del flujo normal de Flux;</li>
+          <li>contactar a la persona proveedora y atender aclaraciones relacionadas con el intake;</li>
+          <li>prevenir duplicidad, fraude, abuso, incidentes de seguridad y accesos no autorizados;</li>
+          <li>mantener trazabilidad, seguridad y controles internos; y</li>
+          <li>cumplir obligaciones legales, fiscales, contractuales o requerimientos de autoridad aplicables, así como ejercer o defender derechos.</li>
+        </ol>
+        <p><strong>No existen finalidades secundarias de mercadotecnia, publicidad o prospección comercial en este Portal.</strong></p>
+      </section>
+
+      <section id="consentimiento">
+        <h2>5. Consentimiento y datos financieros o patrimoniales</h2>
+        <p>
+          Antes de enviar el formulario, la persona titular deberá leer este aviso y otorgar su consentimiento expreso por medios electrónicos para el tratamiento de los datos financieros o patrimoniales que proporcione. El consentimiento se recabará mediante una casilla obligatoria, explícita, no premarcada y separada de cualquier finalidad secundaria. La apertura de la liga, la navegación o una carga parcial no se considerarán consentimiento. Se conservará únicamente la evidencia mínima necesaria de la aceptación asociada a la solicitud.
+        </p>
+        <aside class="consent">
+          <p><strong>Texto de aceptación:</strong> “Declaro que he leído el Aviso de Privacidad para Proveedores y otorgo mi consentimiento expreso para el tratamiento de los datos financieros y patrimoniales que proporcione, exclusivamente para las finalidades descritas en dicho Aviso.”</p>
+        </aside>
+        <p>
+          La persona titular podrá revocar su consentimiento mediante el procedimiento descrito en la sección de derechos ARCO. La revocación no tendrá efectos retroactivos y podrá impedir continuar con la solicitud cuando los datos sean necesarios para la relación jurídica o para cumplir obligaciones legales.
+        </p>
+      </section>
+
+      <section id="transferencias">
+        <h2>6. Personas encargadas, transferencias y destinatarios</h2>
+        <p>
+          <strong>Encargados tecnológicos.</strong> El Responsable podrá utilizar a Quantta y a proveedores de infraestructura, almacenamiento, seguridad, soporte y prevención de abuso o CAPTCHA que traten únicamente los datos indispensables por cuenta del Responsable, bajo sus instrucciones y sujetos a obligaciones contractuales, de confidencialidad y seguridad.
+        </p>
+        <p>
+          <strong>Transferencias a terceros.</strong> La operación actual del Portal no requiere transferir datos personales a terceros independientes para fines de publicidad o mercadotecnia. El Responsable podrá comunicar información a autoridades fiscales, administrativas o judiciales únicamente cuando exista una obligación legal o un requerimiento de autoridad competente, o cuando resulte necesario para ejercer o defender derechos conforme al marco aplicable.
+        </p>
+        <p>
+          No se venden ni se transfieren datos para publicidad. Cualquier transferencia futura que requiera consentimiento será informada previamente y contará con un mecanismo para aceptarla o rechazarla.
+        </p>
+      </section>
+
+      <section id="arco">
+        <h2>7. Derechos ARCO, revocación y limitación</h2>
+        <p>
+          La persona titular puede solicitar acceso, rectificación, cancelación u oposición al tratamiento de sus datos personales; revocar su consentimiento; o limitar el uso o divulgación de su información.
+        </p>
+        <p>
+          La solicitud deberá enviarse a <a href="mailto:finanzas@soportef.com">finanzas@soportef.com</a> con el asunto <strong>“Derechos ARCO — Portal de Proveedores”</strong> e incluir:
+        </p>
+        <ul>
+          <li>nombre de la persona titular y medio para recibir notificaciones;</li>
+          <li>documentos que acrediten identidad y, en su caso, representación legal;</li>
+          <li>derecho que desea ejercer y descripción clara de los datos involucrados;</li>
+          <li>folio de la solicitud o datos que faciliten localizarla; y</li>
+          <li>para rectificación, la modificación solicitada y documentación que la sustente.</li>
+        </ul>
+        <p>
+          El Responsable comunicará su determinación en un plazo máximo de veinte días contados desde la recepción de la solicitud y, si resulta procedente, la hará efectiva dentro de los quince días siguientes a la comunicación de la respuesta, salvo ampliaciones o excepciones legalmente aplicables.
+        </p>
+        <div class="contact-card">
+          <strong>Área responsable: Finanzas</strong>
+          <span>Correo: <a href="mailto:finanzas@soportef.com">finanzas@soportef.com</a></span>
+          <span>Domicilio: Montes Urales 760, Col. Lomas de Chapultepec, Alcaldía Miguel Hidalgo, C.P. 11000, Ciudad de México, México.</span>
+        </div>
+      </section>
+
+      <section id="conservacion">
+        <h2>8. Conservación, bloqueo y eliminación</h2>
+        <p>
+          Los datos se conservarán únicamente durante el tiempo necesario para las finalidades informadas y para cumplir obligaciones contractuales, contables, fiscales, de auditoría, seguridad y defensa jurídica. Al concluir esos periodos, los datos serán bloqueados y posteriormente eliminados o anonimizados de forma segura, salvo obligación legal de conservación.
+        </p>
+        <ul>
+          <li>Solicitudes no convertidas, rechazadas o abandonadas: 3 meses desde la última actividad o cierre del intake.</li>
+          <li>Solicitudes convertidas y expedientes de pago: 2 años conforme a la política interna definida para este Portal.</li>
+          <li>Registros técnicos y de seguridad: 10 meses.</li>
+        </ul>
+        <p>
+          Estos plazos podrán ampliarse únicamente cuando sea necesario para cumplir obligaciones legales, fiscales, contractuales, prevenir fraude, ejercer o defender derechos o atender requerimientos de autoridad. Al terminar el plazo aplicable, los datos serán bloqueados, suprimidos o eliminados según corresponda al contrato y a las obligaciones vigentes. Una solicitud de cancelación podrá no proceder mientras subsista alguna de estas obligaciones o necesidades; en ese caso se informará el motivo a la persona titular.
+        </p>
+      </section>
+
+      <section id="seguridad">
+        <h2>9. Seguridad y confidencialidad</h2>
+        <p>
+          El Responsable y sus encargados aplican medidas administrativas, técnicas y físicas razonables para proteger la información contra daño, pérdida, alteración, destrucción, acceso o uso no autorizado. Estas medidas incluyen controles de acceso y autenticación, segregación de funciones, almacenamiento privado, trazabilidad, transporte seguro cuando aplica, minimización, acceso restringido y controles para documentos y datos bancarios.
+        </p>
+        <aside class="security-note">
+          <p><strong>Importante:</strong> nunca envíe contraseñas, claves de banca electrónica, NIP, códigos de autenticación o archivos no relacionados con la solicitud. El Portal no solicita esos datos.</p>
+        </aside>
+        <p>
+          Si ocurre un incidente que afecte de forma significativa los derechos patrimoniales o morales de las personas titulares, se realizarán las notificaciones y acciones de mitigación exigidas por la normativa aplicable.
+        </p>
+      </section>
+
+      <section id="tecnologia">
+        <h2>10. Mecanismos tecnológicos</h2>
+        <p>
+          Para proteger el Portal se pueden utilizar mecanismos de seguridad, prevención de abuso, CAPTCHA, registros técnicos e identificadores temporales de sesión o enlace. La evidencia técnica se limita a lo necesario para la operación, seguridad y trazabilidad y no se utiliza para publicidad ni perfilamiento comercial.
+        </p>
+        <p>
+          El aviso deberá estar disponible mediante un vínculo visible antes del envío y el formulario permanecerá bloqueado si no puede obtener una URL de privacidad HTTPS válida. El Portal no utiliza cookies de publicidad o analítica para este flujo.
+        </p>
+      </section>
+
+      <section id="cambios">
+        <h2>11. Cambios al aviso</h2>
+        <p>
+          Las modificaciones a este aviso se publicarán en <strong>https://flux.quantta.mx/aviso-privacidad-proveedores.html</strong>, indicando la fecha y versión vigente. Cuando los cambios requieran un nuevo consentimiento —por ejemplo, nuevas finalidades, datos financieros o sensibles adicionales, o transferencias sujetas a consentimiento— éste será solicitado antes de aplicar el nuevo tratamiento.
+        </p>
+      </section>
+
+      <section id="autoridad">
+        <h2>12. Autoridad competente</h2>
+        <p>
+          Si considera vulnerado su derecho a la protección de datos personales, puede acudir ante la Secretaría Anticorrupción y Buen Gobierno o la autoridad que legalmente la sustituya, conforme a la Ley Federal de Protección de Datos Personales en Posesión de los Particulares.
+        </p>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>Portal de Proveedores Flux · Powered by Quantta</p>
+      <p>Aviso integral · Versión 1.0 · Entrada en vigor: 18 de agosto de 2026</p>
+    </div>
+  </footer>
+</body>
+</html>
