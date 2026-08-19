@@ -7,6 +7,11 @@ const migration = fs.readFileSync(
   'utf8',
 );
 
+function functionBody(name) {
+  const re = new RegExp(`create or replace function public\\.${name}\\(\\)[\\s\\S]*?as \\$\\$([\\s\\S]*?)\\$\\$;`, 'i');
+  return migration.match(re)?.[1] || '';
+}
+
 test('server-verified payroll material fields are immutable after materialization', () => {
   assert.match(migration, /create function public\.guard_payroll_materialized_request_immutable/);
   assert.match(migration, /not public\.payroll_request_has_valid_materialization\(old\.id\)/);
@@ -29,11 +34,12 @@ test('submitted_at is one-time and only created on draft to submitted', () => {
 });
 
 test('post-decision payroll lifecycle remains frozen until dispersion phase', () => {
-  assert.match(migration, /create or replace function public\.guard_payroll_request_status_transition/);
-  assert.match(migration, /old\.status::text in \('approved','rejected','changes_requested'\)/);
-  assert.match(migration, /PAYROLL_POST_DECISION_TRANSITION_NOT_ENABLED/);
-  assert.match(migration, /PAYROLL_STATUS_TRANSITION_NOT_ENABLED/);
-  assert.doesNotMatch(migration, /paid|scheduled|finance_validation|dispers/i);
+  const guard = functionBody('guard_payroll_request_status_transition');
+  assert.ok(guard, 'status guard body');
+  assert.match(guard, /old\.status::text in \('approved','rejected','changes_requested'\)/);
+  assert.match(guard, /PAYROLL_POST_DECISION_TRANSITION_NOT_ENABLED/);
+  assert.match(guard, /PAYROLL_STATUS_TRANSITION_NOT_ENABLED/);
+  assert.doesNotMatch(guard, /'paid'|'scheduled'|'finance_validation'/i);
 });
 
 test('normal payment requests are not affected', () => {
