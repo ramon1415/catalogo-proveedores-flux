@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Nómina QA | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./payroll_qa_visual.css?v=20260819-n3e">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div>
+          <div>
+            <div class="brand-title">Flux Operadora</div>
+            <div class="brand-subtitle">Nómina QA</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+          <div class="nav-section">
+            <div class="nav-section-title">Operación</div>
+            <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link"><span>S</span> Solicitudes de pago</a>
+            <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link muted"><span>L</span> Layouts de pago</a>
+            <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link muted"><span>E</span> Efectivo y comprobaciones</a>
+            <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">QA</div>
+            <a href="./nomina_qa.html" class="nav-link active"><span>N</span> Nómina QA sintética</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">General</div>
+            <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link muted"><span>D</span> Dashboard operativo</a>
+            <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobación</a>
+          </div>
+        </nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesión activa</span>
+        <button id="logoutBtn" class="secondary-btn" style="width:100%" type="button">Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">QA controlado · sin impacto bancario</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+        </div>
+      </header>
+
+      <section class="page payroll-qa-page">
+        <section class="payroll-qa-hero">
+          <div>
+            <span class="payroll-qa-kicker">DEV · QA sintético · NO PAGAR</span>
+            <h1>Nómina — recorrido visual E2E</h1>
+            <p>Valida el paquete sintético completo con los mismos contratos de matching y totales usados en Nómina, sin crear solicitudes, sin activar aprobaciones reales y sin ejecutar dispersión.</p>
+          </div>
+          <div class="payroll-qa-actions">
+            <a class="secondary-btn" href="./solicitudes.html">Volver a Solicitudes</a>
+            <button class="primary-btn" id="payrollQaValidateBtn" type="button">Validar paquete QA</button>
+          </div>
+        </section>
+
+        <div id="payrollQaGuard" class="payroll-qa-guard blocked">
+          <strong>Validando ambiente…</strong>
+          <span>La herramienta sólo debe operar fuera de Producción.</span>
+        </div>
+
+        <section class="payroll-qa-panel">
+          <div class="payroll-qa-panel-head">
+            <div>
+              <h2>Paquete sintético</h2>
+              <p>Los cuatro archivos se sirven desde el propio DEV y se aceptan únicamente si su SHA-256 coincide exactamente con el fixture certificado de QA.</p>
+            </div>
+            <span class="payroll-qa-badge">4 fixtures</span>
+          </div>
+          <div id="payrollQaFixtureGrid" class="payroll-qa-fixture-grid"></div>
+        </section>
+
+        <section class="payroll-qa-panel">
+          <div class="payroll-qa-panel-head">
+            <div>
+              <h2>Resultado de validación</h2>
+              <p>Carátula ↔ BBVA mismo banco ↔ SPEI ↔ TOKA. Los detalles sensibles sintéticos no se muestran en la vista.</p>
+            </div>
+          </div>
+          <div id="payrollQaStatus" class="payroll-qa-status pending">Pendiente de validación.</div>
+          <div id="payrollQaTotalGrid" class="payroll-qa-total-grid"></div>
+        </section>
+
+        <section class="payroll-qa-panel">
+          <div class="payroll-qa-panel-head">
+            <div>
+              <h2>Recorrido N3A → N3B</h2>
+              <p>Los pasos server-side muestran la evidencia de la UAT transaccional con rollback ya certificada; esta página no ejecuta ninguna de esas escrituras.</p>
+            </div>
+            <button class="secondary-btn payroll-qa-disabled-action" type="button" disabled title="La ejecución real requiere Finance activo y formatos físicos certificados">Ejecución real bloqueada</button>
+          </div>
+          <div id="payrollQaTimeline" class="payroll-qa-timeline"></div>
+          <div id="payrollQaEvidence" class="payroll-qa-evidence"></div>
+        </section>
+
+        <section class="payroll-qa-panel">
+          <div class="payroll-qa-panel-head">
+            <div>
+              <h2>Qué NO certifica esta pantalla</h2>
+              <p>Los fixtures prueban el modelo y la experiencia de usuario, pero no sustituyen la carátula física del despacho, el TXT real de Nómina BBVA ni el XML real de TOKA.</p>
+            </div>
+          </div>
+          <div class="payroll-qa-evidence">
+            <strong>Estado físico real preservado</strong>
+            <span>COVER_SHEET_XLSX = UNSUPPORTED_PENDING_SOURCE_CONTRACT</span>
+            <span>BBVA_SAME_BANK_TXT = PARTIAL_CONTRACT_ONLY</span>
+            <span>TOKA_XML = MISSING_PHYSICAL_SOURCE</span>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260701-reconcile"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./payroll_parser.js?v=20260817-n2b"></script>
+  <script src="./payroll_cover_qa_parser.js?v=20260819-n3c"></script>
+  <script src="./payroll_same_bank_qa_parser.js?v=20260819-n3d"></script>
+  <script src="./payroll_toka_qa_parser.js?v=20260819-n3d"></script>
+  <script src="./payroll_qa_visual_model.js?v=20260819-n3e"></script>
+  <script src="./payroll_qa_visual_page.js?v=20260819-n3e"></script>
+</body>
+</html>
