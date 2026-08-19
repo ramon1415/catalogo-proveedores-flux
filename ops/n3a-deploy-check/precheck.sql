@@ -29,11 +29,6 @@ select case
          when to_regclass('public.payment_layout_lines') is null then '0'
          else (select count(*)::text from public.payment_layout_lines where payment_request_id in (select id from public.payment_requests where request_type='nomina') )
        end as layout_lines_nomina;
-\echo 'payroll_runs_layout_count'
-select case
-         when to_regclass('public.payroll_runs') is null then '0'
-         else (select count(*)::text from public.payroll_runs)
-       end as payroll_runs;
 \echo 'notification_events_payroll_count'
 select count(*)::text as notification_events_payroll from public.notification_events where source='payment_requests' and (source_id in (select id from public.payment_requests where request_type='nomina') or payload::text like '%%"nomina"%%');
 \echo 'approval_items_nomina_count2'
