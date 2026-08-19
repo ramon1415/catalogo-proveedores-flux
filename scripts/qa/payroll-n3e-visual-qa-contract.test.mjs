@@ -37,10 +37,10 @@ test('N3E commits all four exact QA fixtures with immutable hashes', async () =>
   for (const key of Object.keys(visualModel.FIXTURES)) {
     assert.equal(parsed.hashes[key], visualModel.FIXTURES[key].sha256, key);
   }
-  assert.equal(parsed.bytes.cover.length > 0, true);
+  assert.equal(parsed.bytes.cover.length, 11502);
   assert.equal(parsed.bytes.sameBank.length, 261);
   assert.equal(parsed.bytes.spei.length, 650);
-  assert.equal(parsed.bytes.toka.length > 0, true);
+  assert.equal(parsed.bytes.toka.length, 609);
 });
 
 test('visual QA model cross-checks the full package across eight people', async () => {
@@ -117,12 +117,14 @@ test('visual page is DEV-only, role-gated and read-only', () => {
 test('real physical-format blockers remain unchanged', () => {
   const sourceRecovery = fs.readFileSync('docs/ops/payroll-source-recovery-report.md', 'utf8');
   const page = fs.readFileSync('nomina_qa.html', 'utf8');
+
+  assert.match(sourceRecovery, /## D\. Carátula XLSX[\s\S]*Contract status: `MISSING_PHYSICAL_SOURCE`/);
+  assert.match(sourceRecovery, /## E\. BBVA same bank[\s\S]*Contract status: `PARTIAL_CONTRACT_ONLY`/);
+  assert.match(sourceRecovery, /TOKA_XML = MISSING_PHYSICAL_SOURCE/);
+
   for (const state of [
     'COVER_SHEET_XLSX = UNSUPPORTED_PENDING_SOURCE_CONTRACT',
     'BBVA_SAME_BANK_TXT = PARTIAL_CONTRACT_ONLY',
     'TOKA_XML = MISSING_PHYSICAL_SOURCE',
-  ]) {
-    assert.ok(sourceRecovery.includes(state), state);
-    assert.ok(page.includes(state), state);
-  }
+  ]) assert.ok(page.includes(state), state);
 });
