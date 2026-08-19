@@ -26,8 +26,8 @@ on:
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
       - supabase/migrations/20260818110000_payroll_n3a_server_materialization.sql
-      - supabase/migrations/20260819150000_payroll_n3b_individual_approval.sql
-      - supabase/migrations/20260819150500_payroll_n3b_approval_write_hardening.sql
+      - supabase/migrations/20260819213907_payroll_n3b_individual_approval.sql
+      - supabase/migrations/20260819213919_payroll_n3b_approval_write_hardening.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
