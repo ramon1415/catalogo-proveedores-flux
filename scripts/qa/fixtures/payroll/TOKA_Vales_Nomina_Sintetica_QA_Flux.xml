@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<FluxPayrollTokaQA contractVersion="flux-synthetic-toka-qa-v1" qaOnly="true" certifiedPhysicalSource="false" currency="MXN">
+  <Metadata>
+    <Company>OPERADORA TLACATECPAN</Company>
+    <Period>Qna 15 / 2026</Period>
+    <Warning>SINTETICO QA - NO USAR PARA PAGOS</Warning>
+  </Metadata>
+  <Vouchers>
+    <Voucher rfc="PRUE040404DD4" curp="PRUE040404MDFRRS04" amount="600.00" />
+    <Voucher rfc="PRUE060606FF6" curp="PRUE060606MDFRRS06" amount="900.00" />
+    <Voucher rfc="PRUE080808HH8" curp="PRUE080808MDFRRS08" amount="600.00" />
+  </Vouchers>
+</FluxPayrollTokaQA>
