@@ -25,7 +25,10 @@ select count(*)::text as payroll_run_lines_count from public.payroll_run_lines;
 \echo 'approval_items_nomina_count'
 select count(*)::text as approval_items_nomina from public.approval_batch_items where payment_request_id in (select id from public.payment_requests where request_type='nomina');
 \echo 'layout_lines_nomina_count'
-select count(*)::text as layout_lines_nomina from public.layout_lines where request_id in (select id from public.payment_requests where request_type='nomina');
+select case
+         when to_regclass('public.payment_layout_lines') is null then '0'
+         else (select count(*)::text from public.payment_layout_lines where request_id in (select id from public.payment_requests where request_type='nomina') )
+       end as layout_lines_nomina;
 \echo 'payroll_runs_layout_count'
 select count(*)::text as payroll_runs from public.payroll_runs;
 \echo 'notification_events_payroll_count'
