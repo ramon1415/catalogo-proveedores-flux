@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const migration = fs.readFileSync(
-  'supabase/migrations/20260819154500_payroll_n3b_post_decision_freeze.sql',
+  'supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql',
   'utf8',
 );
 
