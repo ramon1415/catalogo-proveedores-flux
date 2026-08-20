@@ -1,6 +1,6 @@
 # Payroll N3F — real physical format certification
 
-Status: `REAL_PHYSICAL_EVIDENCE_RECOVERED / CONTRACTS_VERSIONED / DEV_APPLY_PENDING / PROD_UNTOUCHED`.
+Status: `REAL_PHYSICAL_EVIDENCE_RECOVERED / CONTRACTS_VERSIONED / DEV_MIGRATION_APPLIED / EDGE_DEPLOY_PENDING / PROD_UNTOUCHED`.
 
 Baseline DEV before N3F: `7eb127461ddc31b52342670ea0993295561433de`.
 
@@ -200,9 +200,9 @@ N3F does not:
 - reconcile post-bank receipts;
 - touch PROD or `main`.
 
-## Proposed DEV schema/runtime change
+## DEV schema/runtime change
 
-Migration `20260820002000_payroll_n3f_real_formats_toka_funding.sql` is a forward candidate and is not applied by the Draft gate. It:
+Migration `20260820002513_payroll_n3f_real_formats_toka_funding.sql` is applied exactly once in Supabase DEV. The Git filename is aligned to the authoritative remote ledger; no migration repair is used. It:
 
 - admits zero-net snapshot rows;
 - extends the existing `vales` channel with benefit/fee/tax/expected funding fields;
@@ -215,4 +215,4 @@ Migration `20260820002000_payroll_n3f_real_formats_toka_funding.sql` is a forwar
 
 ## Gate
 
-`REAL_PHYSICAL_CONTRACTS_IDENTIFIED / SANITIZED_TESTS_REQUIRED / DEV_MIGRATION_NOT_APPLIED / DEV_EDGE_NOT_DEPLOYED / REAL_PAYROLL_NOT_MATERIALIZED / PROD_UNTOUCHED / MAIN_UNTOUCHED`
+`REAL_PHYSICAL_CONTRACTS_IDENTIFIED / N3F_CI_PASS / N3F_MIGRATION_DRY_RUN_PASS / N3F_MIGRATION_APPLIED_DEV / N3F_LEDGER_ALIGNED / DEV_EDGE_DEPLOY_PENDING / POST_APPLY_ROLLBACK_UAT_PENDING / REAL_PAYROLL_NOT_MATERIALIZED / PROD_UNTOUCHED / MAIN_UNTOUCHED`
