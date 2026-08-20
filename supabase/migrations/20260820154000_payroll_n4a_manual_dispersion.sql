@@ -38,15 +38,17 @@ begin
     raise exception 'PAYROLL_AUTH_REQUIRED';
   end if;
 
-  select request.*, company.name
-    into v_request, v_company_name
-  from public.payment_requests request
-  join public.companies company on company.id=request.company_id
-  where request.id=p_payment_request_id;
+  select * into v_request
+  from public.payment_requests
+  where id=p_payment_request_id;
 
   if not found or v_request.request_type::text <> 'nomina' then
     raise exception 'PAYROLL_REQUEST_REQUIRED';
   end if;
+
+  select company.name into v_company_name
+  from public.companies company
+  where company.id=v_request.company_id;
 
   if not public.payroll_can_read_summary(v_request.id) then
     raise exception 'PAYROLL_SUMMARY_ACCESS_DENIED';
