@@ -2,6 +2,7 @@
 // server-downloaded bytes. Browser summaries remain diagnostic only.
 import "../../../payroll_parser.js";
 import "../../../payroll_real_formats.js";
+import "../../../payroll_real_reconcile.js";
 
 type ParserIssue = { code: string; source?: string; row?: number; field?: string };
 type SpeiRecord = { amountMinor: number; sourceAccount: string; clabe: string; employeeName: string; sourceRow: number };
@@ -18,11 +19,15 @@ type RealFormats = {
   parseCoverXlsx(input: Uint8Array): Promise<any>;
   parseSameBank108(input: Uint8Array): any;
   parseTokaCfdi(input: Uint8Array): any;
-  reconcilePackage(input: any): any;
   normalizeAccount(value: unknown): string;
   normalizeName(value: unknown): string;
 };
-declare global { var FluxPayrollParser: PayrollParser; var FluxPayrollRealFormats: RealFormats; }
+type RealReconcile = { CONTRACT_VERSION: string; reconcilePackage(input: any): any };
+declare global {
+  var FluxPayrollParser: PayrollParser;
+  var FluxPayrollRealFormats: RealFormats;
+  var FluxPayrollRealReconcile: RealReconcile;
+}
 
 const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
 const PATH_RE = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/;
@@ -76,10 +81,16 @@ async function verifyFile(base:string,serviceKey:string,context:Context,file:Cap
   throw new Error("PAYROLL_FILE_KIND_UNSUPPORTED");
 }
 
-function pickSourceAccount(context:Context,verified:Map<string,Verified>):string{
+function resolveSourceAccount(context:Context,verified:Map<string,Verified>):string{
   const candidates=normalizeAccounts(context.source_accounts);
-  const records=[...(verified.get("layout_spei")?.parsed?.records||[]),...(verified.get("layout_toka")?.parsed?.records||[])];
-  const source=records[0]?.sourceAccount||""; if(!source||!candidates.has(source)||records.some((r:any)=>r.sourceAccount!==source)) throw new Error("PAYROLL_SOURCE_ACCOUNT_MISMATCH"); return source;
+  if(!candidates.size) throw new Error("PAYROLL_SOURCE_ACCOUNT_MISMATCH");
+  const encoded=[...(verified.get("layout_spei")?.parsed?.records||[]),...(verified.get("layout_toka")?.parsed?.records||[])];
+  if(encoded.length){
+    const source=String(encoded[0]?.sourceAccount||"");
+    if(!source||!candidates.has(source)||encoded.some((record:any)=>record.sourceAccount!==source)) throw new Error("PAYROLL_SOURCE_ACCOUNT_MISMATCH");
+    return source;
+  }
+  return Array.from(candidates)[0];
 }
 
 async function handler(req:Request):Promise<Response>{
@@ -102,13 +113,13 @@ async function handler(req:Request):Promise<Response>{
     const expected=new Set(context.expected_channels||[]);
     for(const kind of ["caratula",...(expected.has("banco")?["layout_mismo_banco"]:[]),...(expected.has("spei")?["layout_spei"]:[]),...(expected.has("vales")?["layout_toka","cfdi_vales"]:[])]) if(!verified.has(kind)) throw new Error("PAYROLL_REQUIRED_FILES_MISSING");
 
-    const packageResult=globalThis.FluxPayrollRealFormats.reconcilePackage({
+    const packageResult=globalThis.FluxPayrollRealReconcile.reconcilePackage({
       cover:verified.get("caratula")?.parsed,
       sameBank:verified.get("layout_mismo_banco")?.parsed,
       spei:verified.get("layout_spei")?.parsed,
       tokaCfdi:verified.get("cfdi_vales")?.parsed,
       tokaFunding:verified.get("layout_toka")?.parsed,
-      sourceAccount:pickSourceAccount(context,verified),
+      sourceAccount:resolveSourceAccount(context,verified),
       expectedChannels:context.expected_channels,
     });
     if(!packageResult.valid||packageResult.issues.length) throw new Error("PAYROLL_SERVER_PACKAGE_VALIDATION_FAILED");
@@ -116,9 +127,9 @@ async function handler(req:Request):Promise<Response>{
     const lines=packageResult.people.map((p:any)=>({source_capture_file_id:coverFileId,source_sheet:verified.get("caratula")!.parsed.sheetName,source_row_number:p.sourceRow,extraction_version:verified.get("caratula")!.parsed.contractVersion,employee_name:p.employeeName,rfc:p.rfc,curp:p.curp,nss:p.nss,bank_name:p.bankName,bank_account:p.account,clabe:p.clabe,net_amount_minor:p.netAmountMinor,bank_amount_minor:p.bankAmountMinor,spei_amount_minor:p.speiAmountMinor,vouchers_amount_minor:p.vouchersAmountMinor}));
     const channels=packageResult.channels.map((c:any)=>({channel:c.channel,amount_minor:c.amountMinor,benefit_amount_minor:c.benefitAmountMinor??null,fee_amount_minor:c.feeAmountMinor??null,tax_amount_minor:c.taxAmountMinor??null,expected_funding_amount_minor:c.expectedFundingAmountMinor??null,funding_variance_minor:c.fundingVarianceMinor??0}));
     const verifiedFiles=Array.from(verified.values()).map(v=>v.meta);
-    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:await hashText(input.idempotency_key),p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),files:verifiedFiles,channels,lines}});
+    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:await hashText(input.idempotency_key),p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),files:verifiedFiles,channels,lines}});
     return response(200,result);
   }catch(error){ const code=error instanceof Error?error.message:"PAYROLL_MATERIALIZATION_FAILED"; const safe=/^PAYROLL_[A-Z0-9_]+$/.test(code)?code:"PAYROLL_MATERIALIZATION_FAILED"; return response(errorStatus(safe),{error:safe}); }
 }
 Deno.serve(handler);
-export {errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,pickSourceAccount};
+export {errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,resolveSourceAccount};
