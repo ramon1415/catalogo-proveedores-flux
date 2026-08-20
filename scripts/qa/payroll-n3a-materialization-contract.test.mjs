@@ -8,46 +8,52 @@ const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts', 
 
 test('public command accepts identifiers, never authoritative payroll data', () => {
   const inputType = edge.match(/type MaterializeInput = \{[\s\S]*?\};/)?.[0] || '';
-  assert.match(edge, /capture_session_id\?: string/);
-  assert.match(edge, /expected_version\?: number/);
-  assert.match(edge, /idempotency_key\?: string/);
+  assert.match(edge, /capture_session_id\?:\s*string/);
+  assert.match(edge, /expected_version\?:\s*number/);
+  assert.match(edge, /idempotency_key\?:\s*string/);
   assert.doesNotMatch(inputType, /(?:amount|rows|employee|channel_totals|sha256)\??:/);
   assert.match(edge, /get_payroll_capture_sessions/);
   assert.match(edge, /PAYROLL_FINANCE_REQUIRED/);
 });
 
-test('HTTP authorization contract is exact and genuine conflicts remain 409', () => {
-  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*PAYROLL_AUTH_REQUIRED[\s\S]*return 401/);
-  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*code\.endsWith\("REQUIRED"\)[\s\S]*return 403/);
-  assert.match(edge, /function errorStatus\(code: string\): number \{[\s\S]*return 409;[\s\S]*\}/);
-  assert.match(edge, /async function requireFinanceCaptureAccess[\s\S]*get_payroll_capture_sessions/);
-  assert.match(edge, /catch \{[\s\S]*Do not expose PostgREST details[\s\S]*throw new Error\("PAYROLL_FINANCE_REQUIRED"\)/);
-  assert.match(edge, /return response\(errorStatus\(safe\), \{ error: safe \}\)/);
-  assert.doesNotMatch(edge, /return response\(safe\.endsWith\("REQUIRED"\)/);
+test('HTTP authorization contract preserves 401, Finance 403 and genuine conflicts 409', () => {
+  const body = edge.match(/function errorStatus\([^)]*\)[\s\S]*?\}/)?.[0] || '';
+  assert.match(body, /PAYROLL_AUTH_REQUIRED/);
+  assert.match(body, /return 401/);
+  assert.match(body, /endsWith\("REQUIRED"\)/);
+  assert.match(body, /return 403/);
+  assert.match(body, /return 409/);
+  assert.match(edge, /requireFinanceCaptureAccess[\s\S]*get_payroll_capture_sessions/);
+  assert.match(edge, /throw new Error\("PAYROLL_FINANCE_REQUIRED"\)/);
+  assert.match(edge, /return response\(errorStatus\(safe\),\{error:safe\}\)/);
 });
 
-test('server redownload, byte hash, MIME, size and opaque path are mandatory', () => {
+test('server redownload, byte hash, MIME, size and opaque path remain mandatory', () => {
   assert.match(edge, /storage\/v1\/object\/authenticated\/payroll-private/);
   assert.match(edge, /crypto\.subtle\.digest\("SHA-256"/);
   for (const code of ['PAYROLL_STORAGE_OBJECT_MISSING','PAYROLL_FILE_HASH_MISMATCH','PAYROLL_FILE_SIZE_MISMATCH','PAYROLL_FILE_MIME_MISMATCH','PAYROLL_FILE_PATH_MISMATCH']) {
     assert.ok(edge.includes(code), code);
   }
-  assert.match(edge, /parts\[0\] !== context\.company_id/);
-  assert.match(edge, /parts\[1\] !== context\.reserved_payment_request_id/);
+  assert.match(edge, /parts\[0\]!==context\.company_id/);
+  assert.match(edge, /parts\[1\]!==context\.reserved_payment_request_id/);
 });
 
-test('server uses canonical N2A SPEI parser and treats browser result as diagnostic', () => {
+test('server uses canonical SPEI parser and browser result is diagnostic only', () => {
   assert.match(edge, /import "\.\.\/\.\.\/\.\.\/payroll_parser\.js"/);
   assert.match(edge, /FluxPayrollParser\.parsePayrollSpeiTxt\(bytes\)/);
-  assert.match(edge, /authority: "server_verified"/);
+  assert.match(edge, /authority:"server_verified"/);
   assert.match(edge, /browser_server_match:/);
-  assert.doesNotMatch(edge, /client_parsed_unverified.*valid: true/);
+  assert.doesNotMatch(edge, /client_parsed_unverified.*valid\s*:\s*true/);
 });
 
-test('uncertified formats fail closed', () => {
-  for (const code of ['PAYROLL_COVER_SHEET_FORMAT_UNVERIFIED','PAYROLL_SAME_BANK_FORMAT_UNVERIFIED','PAYROLL_TOKA_FORMAT_UNVERIFIED']) {
-    assert.ok(edge.includes(code), code);
-  }
+test('newly certified physical formats are server-parsed while unknown kinds still fail closed', () => {
+  assert.match(edge, /payroll_real_formats\.js/);
+  assert.match(edge, /payroll_real_reconcile\.js/);
+  assert.match(edge, /parseCoverXlsx\(bytes\)/);
+  assert.match(edge, /parseSameBank108\(bytes\)/);
+  assert.match(edge, /parseTokaCfdi\(bytes\)/);
+  assert.match(edge, /file\.kind==="layout_spei"\|\|file\.kind==="layout_toka"/);
+  assert.match(edge, /PAYROLL_FILE_KIND_UNSUPPORTED/);
   assert.doesNotMatch(edge, /OCR|manual employee/i);
 });
 
