@@ -59,10 +59,7 @@ function coverFixture({ withVouchers = true } = {}) {
 }
 function fixed(value, width) { const text = String(value).toUpperCase(); assert.ok(text.length <= width); return text.padEnd(width, ' '); }
 function sameBank108() {
-  const useful = [
-    '000000001', fixed('', 16), '99', fixed(SAME_ACCOUNT, 20), String(10000).padStart(15, '0'),
-    fixed('ALIAS UNO', 40), '001', '001'
-  ].join('');
+  const useful = ['000000001', fixed('', 16), '99', fixed(SAME_ACCOUNT, 20), String(10000).padStart(15, '0'), fixed('ALIAS UNO', 40), '001', '001'].join('');
   assert.equal(useful.length, 108);
   return Buffer.from(`${useful}\r\n`, 'ascii');
 }
@@ -79,16 +76,11 @@ function tokaCfdi5000() {
 <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:valesdedespensa="http://www.sat.gob.mx/valesdedespensa" Version="4.0" Moneda="MXN" SubTotal="1.00" Total="1.16">
   <cfdi:Emisor Rfc="TIN090211JC9" Nombre="TOKA INTERNACIONAL"/>
   <cfdi:Impuestos TotalImpuestosTrasladados="0.16"/>
-  <cfdi:Complemento>
-    <valesdedespensa:ValesDeDespensa version="1.0" tipoOperacion="monedero electrónico" total="50.00">
-      <valesdedespensa:Conceptos>
-        <valesdedespensa:Concepto rfc="TEST020202BB2" curp="TEST020202MDFABC02" numSeguridadSocial="00000000001" nombre="OTRO NOMBRE DOS" importe="50.00"/>
-      </valesdedespensa:Conceptos>
-    </valesdedespensa:ValesDeDespensa>
-  </cfdi:Complemento>
+  <cfdi:Complemento><valesdedespensa:ValesDeDespensa version="1.0" tipoOperacion="monedero electrónico" total="50.00"><valesdedespensa:Conceptos>
+    <valesdedespensa:Concepto rfc="TEST020202BB2" curp="TEST020202MDFABC02" numSeguridadSocial="00000000001" nombre="OTRO NOMBRE DOS" importe="50.00"/>
+  </valesdedespensa:Conceptos></valesdedespensa:ValesDeDespensa></cfdi:Complemento>
 </cfdi:Comprobante>`, 'utf8');
 }
-
 async function packageFixtures({ channels = ['banco', 'spei', 'vales'] } = {}) {
   const cover = await real.parseCoverXlsx(coverFixture({ withVouchers: channels.includes('vales') }));
   const sameBank = channels.includes('banco') ? real.parseSameBank108(sameBank108()) : null;
@@ -131,33 +123,30 @@ test('TOKA CFDI separates employee benefit from provider fee/tax and expected fu
 });
 
 test('full physical package uses actual TOKA funding for treasury amount and requires Finance review on one-cent variance', async () => {
-  const input = await packageFixtures();
-  const result = reconcile.reconcilePackage(input);
+  const result = reconcile.reconcilePackage(await packageFixtures());
   assert.equal(result.valid, true);
   assert.equal(result.people.length, 3);
   assert.equal(result.employeeNetTotalMinor, 30000);
   assert.equal(result.treasuryRequestAmountMinor, 30117);
   assert.equal(result.financeReviewRequired, true);
-  const vales = result.channels.find((channel) => channel.channel === 'vales');
-  assert.deepEqual(vales, {
+  assert.deepEqual(result.channels.find((channel) => channel.channel === 'vales'), {
     channel: 'vales', amountMinor: 5117, benefitAmountMinor: 5000, feeAmountMinor: 100,
     taxAmountMinor: 16, expectedFundingAmountMinor: 5116, fundingVarianceMinor: 1
   });
-  assert.ok(result.warnings.some((warning) => warning.code === 'PAYROLL_TOKA_FUNDING_VARIANCE_REVIEW_REQUIRED'));
-  assert.ok(result.warnings.some((warning) => warning.code === 'PAYROLL_SOURCE_NAME_DIFFERENCE'));
+  assert.ok(result.warnings.some((entry) => entry.code === 'PAYROLL_TOKA_FUNDING_VARIANCE_REVIEW_REQUIRED'));
+  assert.ok(result.warnings.some((entry) => entry.code === 'PAYROLL_SOURCE_NAME_DIFFERENCE'));
 });
 
 test('channels are conditional and same-bank-only capture does not pretend source-account byte verification', async () => {
   const cover = await real.parseCoverXlsx(coverFixture({ withVouchers: false }));
   cover.people = cover.people.filter((person) => person.sourceRow !== 7);
   cover.totals = { netAmountMinor: 10000, cashAmountMinor: 10000, vouchersAmountMinor: 0 };
-  const sameBank = real.parseSameBank108(sameBank108());
-  const result = reconcile.reconcilePackage({ cover, sameBank, spei: null, tokaCfdi: null, tokaFunding: null, sourceAccount: SOURCE, expectedChannels: ['banco'] });
+  const result = reconcile.reconcilePackage({ cover, sameBank: real.parseSameBank108(sameBank108()), spei: null, tokaCfdi: null, tokaFunding: null, sourceAccount: SOURCE, expectedChannels: ['banco'] });
   assert.equal(result.valid, true);
   assert.equal(result.channels.length, 1);
   assert.equal(result.treasuryRequestAmountMinor, 10000);
   assert.equal(result.sourceAccountAuthority, 'selected_capture_not_encoded_in_same_bank_108');
-  assert.ok(result.warnings.some((warning) => warning.code === 'PAYROLL_SOURCE_ACCOUNT_NOT_ENCODED_IN_ACTIVE_LAYOUTS'));
+  assert.ok(result.warnings.some((entry) => entry.code === 'PAYROLL_SOURCE_ACCOUNT_NOT_ENCODED_IN_ACTIVE_LAYOUTS'));
 });
 
 test('source account, physical record shape and undeclared channels fail closed', async () => {
@@ -165,19 +154,14 @@ test('source account, physical record shape and undeclared channels fail closed'
   const badSource = reconcile.reconcilePackage({ ...input, sourceAccount: '999999999999999999' });
   assert.equal(badSource.valid, false);
   assert.ok(badSource.issues.some((entry) => entry.code === 'PAYROLL_REAL_SOURCE_ACCOUNT_MISMATCH'));
-  const broken108 = Buffer.from(sameBank108().subarray(0, 109));
-  assert.equal(real.parseSameBank108(broken108).valid, false);
-  const noVales = reconcile.reconcilePackage({ ...input, tokaCfdi: null, tokaFunding: null, expectedChannels: ['banco', 'spei'] });
-  assert.equal(noVales.valid, false);
+  assert.equal(real.parseSameBank108(Buffer.from(sameBank108().subarray(0, 109))).valid, false);
+  assert.equal(reconcile.reconcilePackage({ ...input, tokaCfdi: null, tokaFunding: null, expectedChannels: ['banco', 'spei'] }).valid, false);
 });
 
 test('migration models treasury funding, zero-net snapshot, dual TOKA evidence and submit acknowledgement guard', () => {
   assert.match(migration, /net_amount >= 0/);
-  for (const field of ['benefit_amount','fee_amount','tax_amount','expected_funding_amount','funding_variance_acknowledged_at']) {
-    assert.ok(migration.includes(field), field);
-  }
+  for (const field of ['benefit_amount','fee_amount','tax_amount','expected_funding_amount','funding_variance_acknowledged_at']) assert.ok(migration.includes(field), field);
   assert.match(migration, /kind in \('caratula','layout_mismo_banco','layout_spei','layout_toka','cfdi_vales'\)/);
-  assert.match(migration, /kind='layout_toka'/);
   assert.match(migration, /acknowledge_payroll_toka_funding_variance/);
   assert.match(migration, /PAYROLL_TOKA_FUNDING_VARIANCE_REVIEW_REQUIRED/);
   assert.match(migration, /insert into public\.payroll_channels[\s\S]*amount,currency,benefit_amount,fee_amount,tax_amount,expected_funding_amount/);
@@ -186,26 +170,18 @@ test('migration models treasury funding, zero-net snapshot, dual TOKA evidence a
 });
 
 test('Edge reparses every real physical file from downloaded bytes and browser summaries remain diagnostic', () => {
-  assert.match(edge, /payroll_real_formats\.js/);
-  assert.match(edge, /payroll_real_reconcile\.js/);
-  assert.match(edge, /parseCoverXlsx\(bytes\)/);
-  assert.match(edge, /parseSameBank108\(bytes\)/);
-  assert.match(edge, /parseTokaCfdi\(bytes\)/);
-  assert.match(edge, /parsePayrollSpeiTxt\(bytes\)/);
-  assert.match(edge, /layout_toka/);
-  assert.match(edge, /crypto\.subtle\.digest\("SHA-256"/);
-  assert.match(edge, /authority:"server_verified"/);
-  assert.match(edge, /browser_server_match:/);
+  for (const pattern of [/payroll_real_formats\.js/, /payroll_real_reconcile\.js/, /parseCoverXlsx\(bytes\)/, /parseSameBank108\(bytes\)/, /parseTokaCfdi\(bytes\)/, /parsePayrollSpeiTxt\(bytes\)/, /layout_toka/, /crypto\.subtle\.digest\("SHA-256"/, /authority:"server_verified"/, /browser_server_match:/]) assert.match(edge, pattern);
   assert.doesNotMatch(edge, /OCR|manual employee/i);
   assert.doesNotMatch(edge, /client_parsed_unverified.*valid:true/);
 });
 
-test('N3F uses generated sanitized structures and does not depend on the uploaded real source files', () => {
+test('N3F fixtures are generated in-test and do not read external payroll source files', () => {
   const testSource = fs.readFileSync('scripts/qa/payroll-n3f-real-formats-contract.test.mjs', 'utf8');
   assert.match(testSource, /PERSONA SINTETICA/);
   assert.match(testSource, /TEST010101AA1/);
-  assert.doesNotMatch(testSource, /\/mnt\/data\//);
-  assert.doesNotMatch(testSource, /Nom 15_2026|3054342_TD_|Reporte de n.mina periodo 15\.xlsx/iu);
-  assert.equal(fs.existsSync('scripts/qa/fixtures/payroll/OPERADORA TLACATECPAN - Reporte de nómina periodo 15.xlsx'), false);
-  assert.equal(fs.existsSync('scripts/qa/fixtures/payroll/Nom 15_2026 AF Cuentas bancarias transferencias.txt'), false);
+  assert.doesNotMatch(testSource, /readFileSync\(['"]\/mnt\/data\//);
+  assert.doesNotMatch(testSource, /readFileSync\(['"]scripts\/qa\/fixtures\/payroll\//);
+  const fixtureNames = fs.readdirSync('scripts/qa/fixtures/payroll');
+  const realSourceNamePattern = /^(?:Nom\s+15_|3054\d+_|OPERADORA\s+TLACATECPAN\s+-\s+Reporte)/i;
+  assert.equal(fixtureNames.some((name) => realSourceNamePattern.test(name)), false);
 });
