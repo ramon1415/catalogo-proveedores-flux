@@ -1,0 +1,36 @@
+name: Payroll N5B budget UX tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - budget_live_frontend_guards.js
+      - budget_live_frontend_guards_base.js
+      - payroll_budget_deeplink.js
+      - nomina_presupuesto.html
+      - scripts/qa/payroll-n5b-budget-ux-contract.test.mjs
+      - docs/ops/payroll-n5b-budget-ux.md
+      - .github/workflows/payroll-n5b-budget-ux-tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: N5B syntax
+        run: node --check budget_live_frontend_guards.js && node --check budget_live_frontend_guards_base.js && node --check payroll_budget_deeplink.js
+      - name: N5B contract
+        run: node --test scripts/qa/payroll-n5b-budget-ux-contract.test.mjs
+      - name: Preserve N5A contract
+        run: node --test scripts/qa/payroll-n5a-budget-gate-contract.test.mjs
+      - name: Preserve N4A and N4B contracts
+        run: node --test scripts/qa/payroll-n4a-manual-dispersion-contract.test.mjs scripts/qa/payroll-n4b-channel-reconciliation-contract.test.mjs
