@@ -1,0 +1,34 @@
+name: Payroll N4B channel reconciliation tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - nomina_reconciliacion.html
+      - payroll_reconciliation.js
+      - supabase/functions/payroll-receipt-verify/**
+      - supabase/migrations/*payroll_n4b*.sql
+      - scripts/qa/payroll-n4b-*.test.mjs
+      - docs/ops/payroll-n4b-channel-reconciliation.md
+      - .github/workflows/payroll-n4b-channel-reconciliation-tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: UI syntax
+        run: node --check payroll_reconciliation.js
+      - name: N4B contract
+        run: node --test scripts/qa/payroll-n4b-channel-reconciliation-contract.test.mjs
