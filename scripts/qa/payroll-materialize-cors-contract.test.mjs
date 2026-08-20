@@ -24,3 +24,12 @@ test('business execution remains POST-only and JWT bearer-gated', () => {
   assert.match(source, /PAYROLL_AUTH_REQUIRED/);
   assert.match(source, /Authorization:`Bearer \$\{token\}`/);
 });
+
+test('TOKA CFDI accepts only the two standard XML MIME aliases while other files remain strict', () => {
+  assert.match(source, /function mimeMatches\(kind:string,observed:string,declared:string\)/);
+  assert.match(source, /kind===\"cfdi_vales\"/);
+  assert.match(source, /\[\"text\/xml\",\"application\/xml\"\]/);
+  assert.match(source, /actual===expected/);
+  assert.match(source, /if\(!mimeMatches\(file\.kind,mime,file\.mime_type\)\) throw new Error\(\"PAYROLL_FILE_MIME_MISMATCH\"\)/);
+  assert.doesNotMatch(source, /application\/octet-stream/);
+});
