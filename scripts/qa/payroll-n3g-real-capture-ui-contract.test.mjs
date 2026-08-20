@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const capture = fs.readFileSync('payroll_capture.js','utf8');
 const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts','utf8');
-const migration = fs.readFileSync('supabase/migrations/20260820022000_payroll_n3g_real_capture_ui_contract.sql','utf8');
+const migration = fs.readFileSync('supabase/migrations/20260820022528_payroll_n3g_real_capture_ui_contract.sql','utf8');
 
 test('N3G UI exposes the complete certified physical package without employee PII', () => {
   for (const token of ['caratula','layout_mismo_banco','layout_spei','layout_toka','cfdi_vales']) assert.match(capture,new RegExp(token));
