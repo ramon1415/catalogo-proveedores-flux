@@ -1,0 +1,84 @@
+name: PROD Hardening H1 Candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "supabase/migrations/**prod_request_number_and_legacy_backup_hardening.sql"
+      - "scripts/qa/prod-hardening-h1-*"
+      - ".github/workflows/prod-hardening-h1-candidate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-hardening-h1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-only:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: prod_hardening_h1_shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d prod_hardening_h1_shadow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Static and regression contracts
+        run: |
+          git diff --check
+          node --test scripts/qa/prod-hardening-h1-contract.test.mjs
+          node --test scripts/qa/solicitudes-default-active-view-contract.test.mjs
+
+      - name: PostgreSQL 17 disposable shadow apply
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d prod_hardening_h1_shadow -f scripts/qa/prod-hardening-h1-shadow-fixture.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d prod_hardening_h1_shadow -f supabase/migrations/20260820170602_prod_request_number_and_legacy_backup_hardening.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d prod_hardening_h1_shadow -f scripts/qa/prod-hardening-h1-shadow-assertions.sql
+
+      - name: Selective scope and secret guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$(git merge-base origin/main HEAD)"...HEAD > /tmp/h1-changed.txt
+          if grep -Ev '^(\.github/workflows/prod-hardening-h1-candidate\.yml|scripts/qa/prod-hardening-h1-(contract\.test\.mjs|shadow-(fixture|assertions)\.sql)|supabase/migrations/[0-9]+_prod_request_number_and_legacy_backup_hardening\.sql)$' /tmp/h1-changed.txt; then
+            echo "Unexpected H1 scope detected" >&2
+            exit 1
+          fi
+          if xargs -r grep -nEi '(SUPABASE_SERVICE_ROLE_KEY|RESEND_API_KEY|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@)' < /tmp/h1-changed.txt; then
+            echo "Potential secret detected" >&2
+            exit 1
+          fi
+
+      - name: Candidate result
+        run: |
+          echo "PAYMENT_REQUEST_NUMBER_UNIQUE_PASS=true"
+          echo "LEGACY_PROVIDER_BACKUP_RLS_PASS=true"
+          echo "NOTIFICATION_REGRESSION_DELTA=0"
+          echo "PROD_MUTATION=0"
