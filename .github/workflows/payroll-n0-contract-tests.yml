@@ -9,6 +9,8 @@ on:
       - payroll_cover_qa_parser.js
       - payroll_same_bank_qa_parser.js
       - payroll_toka_qa_parser.js
+      - payroll_real_formats.js
+      - payroll_real_reconcile.js
       - payroll_capture.js
       - payroll_capture.css
       - solicitudes.html
@@ -20,6 +22,7 @@ on:
       - docs/ops/payroll-n3b-approval-report.md
       - docs/ops/payroll-n3c-synthetic-cover-report.md
       - docs/ops/payroll-n3d-synthetic-package-report.md
+      - docs/ops/payroll-n3f-real-format-certification.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
       - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
@@ -29,6 +32,7 @@ on:
       - scripts/qa/payroll-n3b-*.test.mjs
       - scripts/qa/payroll-n3c-*.test.mjs
       - scripts/qa/payroll-n3d-*.test.mjs
+      - scripts/qa/payroll-n3f-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
@@ -36,6 +40,7 @@ on:
       - supabase/migrations/20260819213907_payroll_n3b_individual_approval.sql
       - supabase/migrations/20260819213919_payroll_n3b_approval_write_hardening.sql
       - supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql
+      - supabase/migrations/20260820002000_payroll_n3f_real_formats_toka_funding.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
@@ -57,7 +62,7 @@ jobs:
           node-version: '22'
 
       - name: Syntax
-        run: node --check payroll_parser.js && node --check payroll_cover_qa_parser.js && node --check payroll_same_bank_qa_parser.js && node --check payroll_toka_qa_parser.js && node --check payroll_capture.js && node --check solicitudes.js && node --check fase2_request_payment_method_extension.js
+        run: node --check payroll_parser.js && node --check payroll_cover_qa_parser.js && node --check payroll_same_bank_qa_parser.js && node --check payroll_toka_qa_parser.js && node --check payroll_real_formats.js && node --check payroll_real_reconcile.js && node --check payroll_capture.js && node --check solicitudes.js && node --check fase2_request_payment_method_extension.js
 
       - name: Payroll N0, N1, and N2A contracts
         run: node --test scripts/qa/payroll-n0-parser-contract.test.mjs scripts/qa/payroll-n0-migration-contract.test.mjs scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs scripts/qa/payroll-n2a-source-recovery-contract.test.mjs scripts/qa/payroll-n2a-spei-physical-adapter-contract.test.mjs
@@ -76,6 +81,9 @@ jobs:
 
       - name: Payroll N3D synthetic full-package QA contracts
         run: node --test scripts/qa/payroll-n3d-full-package-qa-contract.test.mjs
+
+      - name: Payroll N3F real physical format contracts
+        run: node --test scripts/qa/payroll-n3f-real-formats-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
