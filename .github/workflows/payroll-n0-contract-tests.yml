@@ -41,6 +41,7 @@ on:
       - supabase/migrations/20260819213919_payroll_n3b_approval_write_hardening.sql
       - supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql
       - supabase/migrations/20260820002513_payroll_n3f_real_formats_toka_funding.sql
+      - supabase/migrations/20260820005500_payroll_n3f_server_verification_staging.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
@@ -83,7 +84,7 @@ jobs:
         run: node --test scripts/qa/payroll-n3d-full-package-qa-contract.test.mjs
 
       - name: Payroll N3F real physical format contracts
-        run: node --test scripts/qa/payroll-n3f-real-formats-contract.test.mjs
+        run: node --test scripts/qa/payroll-n3f-real-formats-contract.test.mjs scripts/qa/payroll-n3f-staging-compat-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs
