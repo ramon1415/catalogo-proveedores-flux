@@ -25,11 +25,19 @@ test('business execution remains POST-only and JWT bearer-gated', () => {
   assert.match(source, /Authorization:`Bearer \$\{token\}`/);
 });
 
-test('TOKA CFDI accepts only the two standard XML MIME aliases while other files remain strict', () => {
+test('Storage object metadata is the MIME authority and transport Content-Type is diagnostic only', () => {
+  assert.match(source, /const objectMime=normalizeMime\(file\.object_mime\|\|""\)/);
+  assert.match(source, /!objectMime\|\|!mimeMatches\(file\.kind,objectMime,file\.mime_type\)/);
+  assert.match(source, /PAYROLL_FILE_MIME_MISMATCH/);
+  assert.match(source, /const transportMime=normalizeMime\(downloaded\.headers\.get\("content-type"\)\|\|""\)/);
+  assert.match(source, /PAYROLL_STORAGE_TRANSPORT_MIME_VARIANCE/);
+  assert.doesNotMatch(source, /if\(!mimeMatches\(file\.kind,transportMime,file\.mime_type\)\) throw/);
+});
+
+test('TOKA CFDI accepts only standard XML aliases in authoritative Storage metadata while other files remain strict', () => {
   assert.match(source, /function mimeMatches\(kind:string,observed:string,declared:string\)/);
   assert.match(source, /kind===\"cfdi_vales\"/);
   assert.match(source, /\[\"text\/xml\",\"application\/xml\"\]/);
   assert.match(source, /actual===expected/);
-  assert.match(source, /if\(!mimeMatches\(file\.kind,mime,file\.mime_type\)\) throw new Error\(\"PAYROLL_FILE_MIME_MISMATCH\"\)/);
   assert.doesNotMatch(source, /application\/octet-stream/);
 });
