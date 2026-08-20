@@ -1,0 +1,36 @@
+name: Payroll N4A manual dispersion tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - nomina_dispersion.html
+      - payroll_dispersion.js
+      - docs/ops/payroll-n4a-manual-dispersion.md
+      - scripts/qa/payroll-n4a-manual-dispersion-contract.test.mjs
+      - supabase/migrations/*_payroll_n4a_manual_dispersion.sql
+      - .github/workflows/payroll-n4a-manual-dispersion-tests.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax
+        run: node --check payroll_dispersion.js
+
+      - name: N4A contract
+        run: node --test scripts/qa/payroll-n4a-manual-dispersion-contract.test.mjs
