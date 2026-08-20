@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const migration = fs.readFileSync('supabase/migrations/20260820005500_payroll_n3f_server_verification_staging.sql', 'utf8');
+const migration = fs.readFileSync('supabase/migrations/20260820004857_payroll_n3f_server_verification_staging.sql', 'utf8');
 const n3f = fs.readFileSync('supabase/migrations/20260820002513_payroll_n3f_real_formats_toka_funding.sql', 'utf8');
 const capture = fs.readFileSync('payroll_capture.js', 'utf8');
 const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts', 'utf8');
