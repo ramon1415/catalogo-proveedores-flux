@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const migration = fs.readFileSync('supabase/migrations/20260820154000_payroll_n4a_manual_dispersion.sql','utf8');
+const migration = fs.readFileSync('supabase/migrations/20260820153819_payroll_n4a_manual_dispersion.sql','utf8');
 const ui = fs.readFileSync('payroll_dispersion.js','utf8');
 const html = fs.readFileSync('nomina_dispersion.html','utf8');
 
