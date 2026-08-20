@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const real = require('../../payroll_real_formats.js');
 const reconcile = require('../../payroll_real_reconcile.js');
 const payroll = require('../../payroll_parser.js');
-const migration = fs.readFileSync('supabase/migrations/20260820002000_payroll_n3f_real_formats_toka_funding.sql', 'utf8');
+const migration = fs.readFileSync('supabase/migrations/20260820002513_payroll_n3f_real_formats_toka_funding.sql', 'utf8');
 const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts', 'utf8');
 
 const SOURCE = '000000000000000111';
