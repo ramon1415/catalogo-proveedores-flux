@@ -53,12 +53,12 @@ test('Finance UI uses only N4A RPCs and explicitly states that Flux does not exe
   assert.match(html,/payroll_dispersion\.js/);
 });
 
-test('N4A UI exposes only aggregate request/channel data and no employee PII', () => {
+test('N4A UI exposes only aggregate request/channel data and no employee PII or failure-note content', () => {
   assert.doesNotMatch(ui,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b|bank_account/i);
   assert.match(ui,/amount_requested/);
   assert.match(ui,/dispersion_status/);
   assert.match(ui,/channel_count/);
-  assert.match(ui,/has_failure_note/);
+  assert.doesNotMatch(ui,/dispersion_note/);
 });
 
 test('migration is forward-only and contains no business-data backfill', () => {
