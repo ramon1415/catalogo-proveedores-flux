@@ -1,0 +1,37 @@
+name: DEV layout recursion QA coverage
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - scripts/qa/dev-layout-candidate-recursion-contract.test.mjs
+      - supabase/migrations/20260812210013_047_fix_dev_layout_candidate_recursion.sql
+      - .github/workflows/dev-layout-recursion-qa.yml
+  push:
+    branches:
+      - dev
+    paths:
+      - scripts/qa/dev-layout-candidate-recursion-contract.test.mjs
+      - supabase/migrations/20260812210013_047_fix_dev_layout_candidate_recursion.sql
+      - .github/workflows/dev-layout-recursion-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recursion-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run DEV layout candidate recursion regression contract
+        run: node --test scripts/qa/dev-layout-candidate-recursion-contract.test.mjs
