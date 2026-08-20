@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presupuesto de Nómina | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260805-brand-verde">
+  <style>
+    body{background:var(--bg-page);color:var(--text-1);font-family:'Plus Jakarta Sans',system-ui,sans-serif;margin:0}
+    .n5a-shell{max-width:1180px;margin:0 auto;padding:24px}.n5a-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}.n5a-top h1{font-size:26px;margin:5px 0 6px}.n5a-top p{color:var(--text-3);font-size:12.5px;max-width:760px;line-height:1.55;margin:0}.n5a-eyebrow{display:block;color:var(--accent-text);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px}.n5a-actions{display:flex;gap:8px;flex-wrap:wrap}.n5a-message{margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12px;background:var(--bg-surface)}.n5a-message[data-variant="success"]{background:var(--emerald-dim);color:var(--emerald)}.n5a-message[data-variant="warning"]{background:var(--amber-dim);color:var(--amber)}.n5a-message[data-variant="error"]{background:var(--ruby-dim);color:var(--ruby)}.n5a-grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px}.n5a-panel{border:1px solid var(--border);border-radius:15px;background:var(--bg-card);box-shadow:var(--shadow);overflow:hidden}.n5a-panel-head{padding:14px 15px;border-bottom:1px solid var(--border)}.n5a-queue{display:grid;max-height:650px;overflow:auto}.n5a-queue button{border:0;border-bottom:1px solid var(--border);padding:13px 14px;background:transparent;color:var(--text-2);text-align:left;cursor:pointer;font-family:inherit;display:grid;gap:5px}.n5a-queue button:hover,.n5a-queue button.selected{background:var(--bg-hover)}.n5a-queue button.selected{box-shadow:inset 3px 0 0 var(--accent)}.n5a-queue span{font-size:10.5px;color:var(--text-3)}.n5a-detail{padding:17px;min-height:360px}.n5a-head{display:flex;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}.n5a-head h2{margin:3px 0;font-size:20px}.n5a-head p{margin:0;color:var(--text-3);font-size:11px}.n5a-total{display:flex;justify-content:space-between;align-items:center;margin:14px 0;padding:13px;border:1px solid var(--border);border-radius:11px;background:var(--bg-input)}.n5a-total span{font-size:10px;text-transform:uppercase;color:var(--text-3);font-weight:800}.n5a-total strong{font-size:18px;color:var(--accent-text)}.n5a-warning{padding:11px 12px;border:1px solid rgba(15,118,110,.28);border-radius:10px;background:var(--accent-dim);font-size:11.5px;line-height:1.5;margin-bottom:13px}.n5a-form{display:grid;grid-template-columns:.7fr 1.3fr;gap:10px;padding:13px;border:1px solid var(--border);border-radius:12px}.n5a-form label{display:grid;gap:5px;color:var(--text-3);font-size:9.5px;text-transform:uppercase;font-weight:800}.n5a-form input,.n5a-form select{height:36px;padding:0 9px;background:var(--bg-input);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-family:inherit;min-width:0}.n5a-form .full{grid-column:1/-1}.n5a-option-preview{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.n5a-kpi{padding:10px;border:1px solid var(--border);border-radius:9px;background:rgba(255,255,255,.012)}.n5a-kpi span{display:block;color:var(--text-3);font-size:9px;text-transform:uppercase;font-weight:800}.n5a-kpi strong{display:block;margin-top:4px;font-size:12px}.n5a-form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.n5a-status{margin-top:13px;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:11.5px}.n5a-status.aprobable{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.28)}.n5a-status.bloqueado{background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.28)}.n5a-status.not_checked{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.28)}.n5a-empty{padding:28px 18px;color:var(--text-3);font-size:12px;text-align:center}@media(max-width:850px){.n5a-grid{grid-template-columns:1fr}.n5a-option-preview{grid-template-columns:1fr 1fr}}@media(max-width:600px){.n5a-top{flex-direction:column}.n5a-form{grid-template-columns:1fr}.n5a-form .full,.n5a-option-preview,.n5a-form-actions{grid-column:auto}.n5a-option-preview{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="n5a-shell">
+    <header class="n5a-top">
+      <div><span class="n5a-eyebrow">Nómina · N5A · Finance only</span><h1>Presupuesto de Nómina</h1><p>Asigna mes y partida a una Nómina ya materializada y valida disponibilidad antes de enviarla a aprobación. Flux reutiliza el presupuesto vigente; no calcula sueldos ni inventa porcentajes de provisión.</p></div>
+      <div class="n5a-actions"><a class="secondary-btn" href="./solicitudes.html">Volver a Solicitudes</a><button id="payrollBudgetRefresh" class="primary-btn" type="button">Actualizar</button></div>
+    </header>
+    <div id="payrollBudgetMessage" class="n5a-message">Preparando contexto presupuestal…</div>
+    <section class="n5a-grid">
+      <aside class="n5a-panel"><div class="n5a-panel-head"><strong>Nóminas materializadas</strong><div style="font-size:10.5px;color:var(--text-3);margin-top:3px">Borradores del usuario Finance actual.</div></div><div id="payrollBudgetQueue" class="n5a-queue"><div class="n5a-empty">Cargando…</div></div></aside>
+      <section class="n5a-panel"><div id="payrollBudgetDetail" class="n5a-detail"><div class="n5a-empty">Selecciona una Nómina.</div></div></section>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260701-reconcile"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./payroll_budget_gate.js?v=20260820-n5a"></script>
+</body>
+</html>
