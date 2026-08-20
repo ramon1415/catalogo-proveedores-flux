@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispersión de Nómina | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
+  <style>
+    body{background:var(--bg-page);color:var(--text-1);font-family:'Plus Jakarta Sans',system-ui,sans-serif;margin:0}
+    .n4a-shell{max-width:1180px;margin:0 auto;padding:24px}
+    .n4a-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}
+    .n4a-top h1{font-size:26px;margin:5px 0 6px;letter-spacing:-.5px}
+    .n4a-top p{color:var(--text-3);font-size:12.5px;max-width:720px;line-height:1.55;margin:0}
+    .n4a-eyebrow{display:block;color:var(--accent-text);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px}
+    .n4a-top-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+    .n4a-user{font-size:11px;color:var(--text-3);padding:8px 10px;border:1px solid var(--border);border-radius:8px}
+    .n4a-message{margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--text-2);background:var(--bg-surface)}
+    .n4a-message[data-variant="success"]{border-color:rgba(18,183,106,.28);background:var(--emerald-dim);color:var(--emerald)}
+    .n4a-message[data-variant="warning"]{border-color:rgba(245,158,11,.3);background:var(--amber-dim);color:var(--amber)}
+    .n4a-message[data-variant="error"]{border-color:rgba(224,62,82,.3);background:var(--ruby-dim);color:var(--ruby)}
+    .n4a-grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:start}
+    .n4a-panel{border:1px solid var(--border);border-radius:15px;background:var(--bg-card);box-shadow:var(--shadow);overflow:hidden}
+    .n4a-panel-head{padding:14px 15px;border-bottom:1px solid var(--border)}
+    .n4a-panel-head strong{display:block;font-size:12.5px}.n4a-panel-head span{display:block;color:var(--text-3);font-size:10.5px;margin-top:3px}
+    .n4a-queue{display:grid;max-height:650px;overflow:auto}
+    .n4a-queue-item{border:0;border-bottom:1px solid var(--border);padding:13px 14px;background:transparent;color:var(--text-2);text-align:left;cursor:pointer;font-family:inherit;display:grid;gap:5px}
+    .n4a-queue-item:hover,.n4a-queue-item.selected{background:var(--bg-hover)}
+    .n4a-queue-item.selected{box-shadow:inset 3px 0 0 var(--accent)}
+    .n4a-queue-item span{font-size:11px;color:var(--text-3)}
+    .n4a-queue-top{display:flex!important;justify-content:space-between;gap:8px;align-items:center}.n4a-queue-top strong{font-size:12px;color:var(--text-1)}
+    .n4a-detail{padding:17px;min-height:360px}
+    .n4a-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+    .n4a-detail-head h2{font-size:20px;margin:4px 0}.n4a-detail-head p{font-size:11px;color:var(--text-3);margin:0}
+    .n4a-total{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:14px;margin:14px 0;border:1px solid var(--border);border-radius:11px;background:var(--bg-input)}
+    .n4a-total span{font-size:10.5px;color:var(--text-3);text-transform:uppercase;font-weight:800}.n4a-total strong{font-size:18px;color:var(--accent-text)}
+    .n4a-warning{padding:11px 12px;border:1px solid rgba(245,158,11,.3);border-radius:10px;background:var(--amber-dim);color:var(--text-2);font-size:11.5px;line-height:1.5;margin-bottom:13px}
+    .n4a-channel-list{display:grid;gap:10px}
+    .n4a-channel-card{border:1px solid var(--border);border-radius:12px;padding:13px;background:rgba(255,255,255,.012)}
+    .n4a-channel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.n4a-channel-head strong{display:block;font-size:12.5px}.n4a-channel-head span{display:block;font-size:11px;color:var(--text-3);margin-top:3px}
+    .n4a-channel-meta{font-size:10.5px;color:var(--text-3);margin-top:8px}
+    .n4a-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+    .n4a-failure-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:10px;align-items:end}.n4a-failure-form.hidden{display:none}
+    .n4a-failure-form textarea{min-height:68px;padding:9px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-family:inherit;resize:vertical}
+    .n4a-failed-copy,.n4a-channel-lock{margin-top:10px;font-size:11px;color:var(--amber)}
+    .n4a-channel-lock{color:var(--emerald)}
+    .n4a-complete{margin-top:14px;padding:12px;border:1px solid rgba(18,183,106,.28);border-radius:10px;background:var(--emerald-dim);color:var(--emerald);font-size:11.5px}
+    .n4a-empty{padding:28px 18px;color:var(--text-3);font-size:12px;text-align:center}.n4a-empty.danger{color:var(--ruby)}
+    .n4a-pill{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.35px;border:1px solid var(--border);white-space:nowrap}
+    .n4a-pill.pending{background:var(--amber-dim);color:var(--amber);border-color:rgba(245,158,11,.25)}
+    .n4a-pill.partial{background:var(--accent-dim);color:var(--accent-text);border-color:rgba(15,118,110,.24)}
+    .n4a-pill.failed{background:var(--ruby-dim);color:var(--ruby);border-color:rgba(224,62,82,.25)}
+    .n4a-pill.dispersed{background:var(--emerald-dim);color:var(--emerald);border-color:rgba(18,183,106,.25)}
+    .n4a-pill.not_ready{color:var(--text-3)}
+    @media(max-width:820px){.n4a-grid{grid-template-columns:1fr}.n4a-queue{max-height:320px}.n4a-top{flex-direction:column}.n4a-top-actions{justify-content:flex-start}.n4a-failure-form{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <main class="n4a-shell">
+    <header class="n4a-top">
+      <div>
+        <span class="n4a-eyebrow">Nómina · N4A · Finance only</span>
+        <h1>Dispersión manual por canal</h1>
+        <p>Registra en Flux el resultado de una dispersión ejecutada fuera del sistema. Esta pantalla no genera layouts, no se conecta al banco y no ejecuta pagos.</p>
+      </div>
+      <div class="n4a-top-actions">
+        <span class="n4a-user" id="payrollDispersionUser">Sesión</span>
+        <a href="./solicitudes.html" class="secondary-btn">Volver a Solicitudes</a>
+        <button type="button" id="payrollDispersionRefresh" class="primary-btn">Actualizar</button>
+      </div>
+    </header>
+
+    <div id="payrollDispersionMessage" class="n4a-message" data-variant="neutral">Preparando dispersión de Nómina…</div>
+
+    <section class="n4a-grid">
+      <aside class="n4a-panel">
+        <div class="n4a-panel-head"><strong>Nóminas aprobadas</strong><span>Máximo 50 corridas con materialización válida.</span></div>
+        <div id="payrollDispersionQueue" class="n4a-queue"><div class="n4a-empty">Cargando…</div></div>
+      </aside>
+      <section class="n4a-panel">
+        <div id="payrollDispersionDetail" class="n4a-detail"><div class="n4a-empty">Selecciona una Nómina.</div></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260701-reconcile"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./payroll_dispersion.js?v=20260820-n4a"></script>
+</body>
+</html>
