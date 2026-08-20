@@ -44,7 +44,7 @@ on:
       - supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql
       - supabase/migrations/20260820002513_payroll_n3f_real_formats_toka_funding.sql
       - supabase/migrations/20260820004857_payroll_n3f_server_verification_staging.sql
-      - supabase/migrations/20260820022000_payroll_n3g_real_capture_ui_contract.sql
+      - supabase/migrations/20260820022528_payroll_n3g_real_capture_ui_contract.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
