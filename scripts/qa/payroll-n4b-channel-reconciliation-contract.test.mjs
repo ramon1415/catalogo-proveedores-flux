@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const migration=fs.readFileSync('supabase/migrations/20260820170000_payroll_n4b_channel_receipt_reconciliation.sql','utf8');
-const grantMigration=fs.readFileSync('supabase/migrations/20260820170100_payroll_n4b_storage_helper_execute.sql','utf8');
+const migration=fs.readFileSync('supabase/migrations/20260820160925_payroll_n4b_channel_receipt_reconciliation.sql','utf8');
+const grantMigration=fs.readFileSync('supabase/migrations/20260820161058_payroll_n4b_storage_helper_execute.sql','utf8');
 const migrations=migration+'\n'+grantMigration;
 const edge=fs.readFileSync('supabase/functions/payroll-receipt-verify/index.ts','utf8');
 const ui=fs.readFileSync('payroll_reconciliation.js','utf8');
