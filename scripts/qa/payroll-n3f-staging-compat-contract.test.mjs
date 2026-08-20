@@ -28,13 +28,16 @@ test('SPEI keeps the existing browser diagnostic contract while server remains f
   assert.match(edge, /browser_server_match:/);
 });
 
-test('existing capture UI remains compatible because only SPEI sends client parser metadata', () => {
-  assert.match(capture, /p_parser_version: slot === 'layout_spei' \? summary\.parserVersion : null/);
-  assert.match(capture, /p_parser_contract: slot === 'layout_spei' \? summary\.contractVersion : null/);
-  assert.match(capture, /p_record_count: slot === 'layout_spei' \? summary\.recordCount : null/);
-  assert.match(capture, /p_total_amount_minor: slot === 'layout_spei' \? summary\.totalAmountMinor : null/);
-  assert.match(capture, /uploadable: true/);
-  assert.match(capture, /status: 'blocked'/);
+test('evolved capture UI preserves N3F authority: only SPEI persists client parser metadata', () => {
+  assert.match(capture, /p_parser_version:slot==='layout_spei'\?summary\.parserVersion:null/);
+  assert.match(capture, /p_parser_contract:slot==='layout_spei'\?summary\.contractVersion:null/);
+  assert.match(capture, /p_record_count:slot==='layout_spei'\?summary\.recordCount:null/);
+  assert.match(capture, /p_total_amount_minor:slot==='layout_spei'\?summary\.totalAmountMinor:null/);
+  assert.match(capture, /server_verification_pending/);
+  assert.match(capture, /slot === 'layout_toka'/);
+  assert.match(capture, /parsePayrollSpeiTxt\(buffer\)/);
+  assert.doesNotMatch(capture, /p_parser_version:slot==='layout_toka'/);
+  assert.doesNotMatch(capture, /p_parser_contract:slot==='layout_toka'/);
 });
 
 test('real TOKA still requires both funding and CFDI evidence at the server-side inventory boundary', () => {
@@ -42,6 +45,7 @@ test('real TOKA still requires both funding and CFDI evidence at the server-side
   assert.match(n3f, /kind='cfdi_vales'/);
   assert.match(n3f, /'vales'=any\(v_session\.expected_channels\)/);
   assert.match(edge, /expected\.has\("vales"\)\?\["layout_toka","cfdi_vales"\]/);
+  assert.match(capture, /channels\.includes\('vales'\)\?\['layout_toka','cfdi_vales'\]/);
 });
 
 test('forward migration is zero-state, forward-only and contains no business-data backfill', () => {

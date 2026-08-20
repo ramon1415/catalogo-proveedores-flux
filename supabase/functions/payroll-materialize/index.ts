@@ -1,4 +1,4 @@
-// N3F server trust boundary: all payroll physical formats are parsed from
+// N3G server trust boundary: all payroll physical formats are parsed from
 // server-downloaded bytes. Browser summaries remain diagnostic only.
 import "../../../payroll_parser.js";
 import "../../../payroll_real_formats.js";
@@ -102,8 +102,18 @@ async function handler(req:Request):Promise<Response>{
     await requireFinanceCaptureAccess(base,serviceKey,token,input.capture_session_id);
     const profiles=await apiJson(`${base}/rest/v1/profiles?select=id&auth_user_id=eq.${encodeURIComponent(user.id)}&active=eq.true&limit=1`,{headers:{apikey:serviceKey,Authorization:`Bearer ${serviceKey}`}},"PAYROLL_ACTOR_PROFILE_REQUIRED");
     if(!Array.isArray(profiles)||profiles.length!==1) throw new Error("PAYROLL_ACTOR_PROFILE_REQUIRED");
+    const idempotencyHash=await hashText(input.idempotency_key);
     const context=await rpc(base,serviceKey,serviceKey,"get_payroll_materialization_context_internal",{p_capture_session_id:input.capture_session_id,p_expected_version:input.expected_version}) as Context;
-    if(context.capture_state==="materialized") throw new Error("PAYROLL_CAPTURE_ALREADY_MATERIALIZED");
+
+    if(context.capture_state==="materialized"){
+      const replay=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{
+        p_capture_session_id:context.id,
+        p_expected_version:context.version,
+        p_idempotency_key_hash:idempotencyHash,
+        p_server_result:{}
+      });
+      return response(200,replay);
+    }
     if(new Date(context.expires_at).getTime()<=Date.now()) throw new Error("PAYROLL_CAPTURE_EXPIRED");
     if(!context.cost_center_id) throw new Error("PAYROLL_CAPTURE_ACCOUNTING_CONTEXT_REQUIRED");
     if(!context.files.length) throw new Error("PAYROLL_REQUIRED_FILES_MISSING");
@@ -127,7 +137,7 @@ async function handler(req:Request):Promise<Response>{
     const lines=packageResult.people.map((p:any)=>({source_capture_file_id:coverFileId,source_sheet:verified.get("caratula")!.parsed.sheetName,source_row_number:p.sourceRow,extraction_version:verified.get("caratula")!.parsed.contractVersion,employee_name:p.employeeName,rfc:p.rfc,curp:p.curp,nss:p.nss,bank_name:p.bankName,bank_account:p.account,clabe:p.clabe,net_amount_minor:p.netAmountMinor,bank_amount_minor:p.bankAmountMinor,spei_amount_minor:p.speiAmountMinor,vouchers_amount_minor:p.vouchersAmountMinor}));
     const channels=packageResult.channels.map((c:any)=>({channel:c.channel,amount_minor:c.amountMinor,benefit_amount_minor:c.benefitAmountMinor??null,fee_amount_minor:c.feeAmountMinor??null,tax_amount_minor:c.taxAmountMinor??null,expected_funding_amount_minor:c.expectedFundingAmountMinor??null,funding_variance_minor:c.fundingVarianceMinor??0}));
     const verifiedFiles=Array.from(verified.values()).map(v=>v.meta);
-    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:await hashText(input.idempotency_key),p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),files:verifiedFiles,channels,lines}});
+    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:idempotencyHash,p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),files:verifiedFiles,channels,lines}});
     return response(200,result);
   }catch(error){ const code=error instanceof Error?error.message:"PAYROLL_MATERIALIZATION_FAILED"; const safe=/^PAYROLL_[A-Z0-9_]+$/.test(code)?code:"PAYROLL_MATERIALIZATION_FAILED"; return response(errorStatus(safe),{error:safe}); }
 }

@@ -23,6 +23,7 @@ on:
       - docs/ops/payroll-n3c-synthetic-cover-report.md
       - docs/ops/payroll-n3d-synthetic-package-report.md
       - docs/ops/payroll-n3f-real-format-certification.md
+      - docs/ops/payroll-n3g-real-capture-ui.md
       - scripts/qa/fixtures/payroll/**
       - scripts/qa/payroll-n0-*.test.mjs
       - scripts/qa/payroll-n1-trigger-forward-fix-contract.test.mjs
@@ -33,6 +34,7 @@ on:
       - scripts/qa/payroll-n3c-*.test.mjs
       - scripts/qa/payroll-n3d-*.test.mjs
       - scripts/qa/payroll-n3f-*.test.mjs
+      - scripts/qa/payroll-n3g-*.test.mjs
       - supabase/migrations/20260814170907_payroll_n0_foundation_contract.sql
       - supabase/migrations/20260814183429_fix_payroll_request_total_trigger.sql
       - supabase/migrations/20260817162934_payroll_n2b_capture_sessions.sql
@@ -42,6 +44,7 @@ on:
       - supabase/migrations/20260819214917_payroll_n3b_post_decision_freeze.sql
       - supabase/migrations/20260820002513_payroll_n3f_real_formats_toka_funding.sql
       - supabase/migrations/20260820004857_payroll_n3f_server_verification_staging.sql
+      - supabase/migrations/20260820022528_payroll_n3g_real_capture_ui_contract.sql
       - supabase/functions/payroll-materialize/**
       - .github/workflows/payroll-n0-contract-tests.yml
   workflow_dispatch:
@@ -85,6 +88,9 @@ jobs:
 
       - name: Payroll N3F real physical format contracts
         run: node --test scripts/qa/payroll-n3f-real-formats-contract.test.mjs scripts/qa/payroll-n3f-staging-compat-contract.test.mjs
+
+      - name: Payroll N3G real capture UI contracts
+        run: node --test scripts/qa/payroll-n3g-real-capture-ui-contract.test.mjs
 
       - name: Existing bank and receipt parser regressions
         run: node --test scripts/qa/bbva-cie-layout-contract.test.mjs scripts/qa/payment-batch-parser-core.test.mjs

@@ -14,7 +14,7 @@ const fileTableDefinition = migration.match(
   /create table public\.payroll_capture_files \(([\s\S]*?)\n\);/i
 )?.[1] || '';
 const payrollHiddenFieldIds = capture.match(
-  /const fieldIds = \[([\s\S]*?)\n\s*\];/
+  /const fieldIds\s*=\s*\[([^\]]*)\]/
 )?.[1] || '';
 const storageSelectFunction = migration.match(
   /create function public\.payroll_capture_storage_select_allowed\(p_name text\)([\s\S]*?)\$\$;/i
@@ -63,7 +63,7 @@ test('private Storage uses an opaque reserved path, no XLSM, no update/delete an
   assert.doesNotMatch(html, /accept="[^"]*\.xlsm/i);
 });
 
-test('capability matrix is fail-closed except for the certified SPEI parser', () => {
+test('N2B foundation remains fail-closed except for the certified SPEI browser diagnostic', () => {
   assert.match(migration, /unsupported_pending_source_contract/);
   assert.match(migration, /pending_format_certification/);
   assert.match(migration, /supported_certified/);
@@ -86,27 +86,27 @@ test('capability matrix is fail-closed except for the certified SPEI parser', ()
   assert.doesNotMatch(capture, /parsePayrollSameBank|parseCoverSheet|parsePayrollTokaXml\s*\(/);
 });
 
-test('Nómina has a dedicated Finance-only submit path and cannot enter approval/layout generation', () => {
+test('Nómina remains Finance-only and isolated from normal request/layout/batch/payment execution paths as N3G evolves the post-capture gate', () => {
   assert.match(requestTypeExtension, /\["nomina", "Nómina"\]/);
   assert.match(requestTypeExtension, /normalizeRequestType\(value\("requestType"\)\) === "nomina"\) return/);
   assert.match(capture, /event\.stopImmediatePropagation\(\)/);
-  assert.doesNotMatch(capture, /create_payment_request|decide_payment_request|create_payment_layout|approval_batch|notification_event/);
-  assert.match(capture, /approval\.disabled = true/);
-  assert.match(capture, /Validación completa — flujo de aprobación pendiente de habilitar/);
-  assert.match(parser, /PAYROLL_N3_NOT_ENABLED/);
   assert.match(capture, /FINANCE_ROLES = \['finance', 'finanzas', 'treasury', 'tesoreria', 'administracion'\]/);
   assert.doesNotMatch(capture, /isAdminFinance/);
-  assert.match(capture, /p_expected_version: state\.sessionVersion/);
+  assert.doesNotMatch(capture, /create_payment_request|decide_payment_request|create_payment_layout|approval_batch|notification_event|mark.*paid|dispers/i);
+  assert.match(capture, /client\.functions\.invoke\('payroll-materialize'/);
+  assert.match(capture, /submit_payroll_for_approval/);
+  assert.match(capture, /expected_version:expectedVersion/);
 });
 
-test('payroll mode keeps shared concept and notes visible while hiding only field labels', () => {
+test('payroll mode keeps shared concept and notes in the dedicated capture while hiding only normal-payment field labels', () => {
   assert.ok(payrollHiddenFieldIds);
   assert.doesNotMatch(payrollHiddenFieldIds, /['"](?:description|notes)['"]/);
-  assert.match(capture, /const target = control\.closest\('label'\);/);
+  assert.match(capture, /control\.closest\('label'\)/);
   assert.doesNotMatch(capture, /control\.closest\('\.form-section'\)/);
-  assert.match(capture, /descriptionSection\.querySelector\('h3'\)\.textContent = 'Concepto \/ descripci.n'/);
-  assert.match(capture, /\['requestProviderSection', 'requestVisitContextSection'\]/);
-  assert.match(capture, /document\.getElementById\(id\)\?\.classList\.toggle\('hidden', payroll\)/);
+  assert.match(capture, /p_concept:dom\.description\.value\.trim\(\)/);
+  assert.match(capture, /p_notes:dom\.notes\.value\.trim\(\)\|\|null/);
+  assert.match(capture, /\['requestProviderSection','requestVisitContextSection'\]/);
+  assert.match(capture, /classList\.toggle\('hidden',payroll\)/);
   assert.doesNotMatch(capture, /requestProviderSection[^\n]*closest\('\.form-section'\)/);
   assert.match(
     captureCss,
@@ -114,20 +114,16 @@ test('payroll mode keeps shared concept and notes visible while hiding only fiel
   );
 });
 
-test('UI and persisted summaries avoid employee rows and sensitive banking output', () => {
-  assert.match(capture, /La vista no muestra nombres, RFC, CURP, NSS, cuentas, CLABE ni referencias/);
+test('UI and persisted staging summaries avoid employee rows and sensitive employee banking output', () => {
+  assert.match(capture, /(?:Esta )?vista no muestra nombres, RFC, CURP, NSS, cuentas, CLABE ni referencias/i);
   assert.match(capture, /Cuenta enmascarada/);
   assert.doesNotMatch(capture, /localStorage|sessionStorage|console\.(?:log|debug|info|warn|error)/);
   assert.doesNotMatch(migration, /jsonb\s+(?:not\s+null\s+)?(?:default\s+[^,]+)?[,\n]/i);
   assert.doesNotMatch(migration, /storage_path[^\n]*jsonb|parser[^\n]*jsonb/i);
   assert.match(capture, /recordCount/);
   assert.match(capture, /totalAmountMinor/);
-  assert.match(
-    capture,
-    /dom\.speiCount\.textContent = \['parsed', 'client_parsed_unverified'\]\.includes\(spei\?\.status\)/
-  );
-  assert.match(capture, /aria-label="Seleccionar TXT SPEI"/);
-  assert.match(capture, /aria-describedby="payrollSpeiStatus"/);
+  assert.match(capture, /const spei=state\.files\.layout_spei/);
+  assert.match(capture, /fileCard\('layout_spei','SPEI TXT'/);
   assert.ok(storageSelectFunction);
   assert.match(storageSelectFunction, /join public\.payroll_capture_sessions session on session\.id = file\.session_id/);
   assert.match(storageSelectFunction, /session\.expires_at > now\(\)/);
