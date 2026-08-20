@@ -1,0 +1,434 @@
+name: Supabase PROD exact main migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run the zero-write preflight or the separately authorized exact apply
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - apply
+      expected_main_sha:
+        description: Exact current main commit (40 lowercase hex characters)
+        required: true
+        type: string
+      expected_migration_version:
+        description: Exact Supabase ledger version
+        required: true
+        type: string
+      expected_migration_sha256:
+        description: Exact SHA-256 of the canonical migration bytes
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the exact fixed PROD project ref
+        required: true
+        type: string
+      confirm_apply:
+        description: Apply only - type APPLY-EXACT-MIGRATION-20260820170602
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-prod-main-exact-migration
+  cancel-in-progress: false
+
+jobs:
+  exact-migration:
+    name: Exact-ledger PROD ${{ inputs.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: supabase-production
+    env:
+      EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+      EXPECTED_PROD_NAME: financieraflux
+      TARGET_VERSION: "20260820170602"
+      TARGET_PATH: supabase/migrations/20260820170602_prod_request_number_and_legacy_backup_hardening.sql
+      TARGET_SHA256: 58c2cc6d1532ca53a53e6550356c2988bf3f45e556df66bb7ec826f950ea390d
+      TARGET_NAME: prod_request_number_and_legacy_backup_hardening
+      SUPABASE_CLI_VERSION: 2.114.0
+
+    steps:
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/prod-main-exact-migration"
+          mkdir -p "$evidence"
+          printf 'EVIDENCE_DIR=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$evidence/result.txt"
+
+      - name: Fail closed on inputs and current main authority
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          INPUT_VERSION: ${{ inputs.expected_migration_version }}
+          INPUT_SHA256: ${{ inputs.expected_migration_sha256 }}
+          CONFIRM_PROD: ${{ inputs.confirm_prod }}
+          CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.request
+
+          evidence = pathlib.Path(os.environ["EVIDENCE_DIR"])
+
+          def stop(code, details=None):
+              payload = {"status": "STOP", "code": code}
+              if details:
+                  payload.update(details)
+              (evidence / "github-authority.json").write_text(json.dumps(payload, indent=2) + "\n")
+              (evidence / "result.txt").write_text(f"STOP / {code}\n")
+              raise SystemExit(code)
+
+          mode = os.environ["MODE"]
+          expected_sha = os.environ["EXPECTED_MAIN_SHA"].lower()
+          if mode not in ("preflight", "apply"):
+              stop("MODE_INVALID")
+          if not re.fullmatch(r"[0-9a-f]{40}", expected_sha):
+              stop("EXPECTED_MAIN_SHA_INVALID")
+          if os.environ["GITHUB_EVENT_NAME"] != "workflow_dispatch":
+              stop("WORKFLOW_DISPATCH_REQUIRED")
+          if os.environ["GITHUB_REF"] != "refs/heads/main":
+              stop("MAIN_REF_REQUIRED")
+          if os.environ["INPUT_VERSION"] != os.environ["TARGET_VERSION"]:
+              stop("EXACT_MIGRATION_VERSION_MISMATCH")
+          if os.environ["INPUT_SHA256"].lower() != os.environ["TARGET_SHA256"]:
+              stop("EXACT_MIGRATION_SHA_MISMATCH")
+          if os.environ["CONFIRM_PROD"] != os.environ["EXPECTED_PROD_REF"]:
+              stop("PROD_CONFIRMATION_MISMATCH")
+          if mode == "apply" and os.environ["CONFIRM_APPLY"] != "APPLY-EXACT-MIGRATION-20260820170602":
+              stop("EXPLICIT_APPLY_CONFIRMATION_REQUIRED")
+          if mode == "preflight" and os.environ["CONFIRM_APPLY"]:
+              stop("APPLY_CONFIRMATION_FORBIDDEN_IN_PREFLIGHT")
+
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/git/ref/heads/main",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "flux-prod-exact-migration",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              live_main = json.load(response)["object"]["sha"].lower()
+          checks = {
+              "expected_is_live_main": expected_sha == live_main,
+              "workflow_sha_is_live_main": os.environ["GITHUB_SHA"].lower() == live_main,
+          }
+          if not all(checks.values()):
+              stop("MAIN_DRIFT", {"expected_main_sha": expected_sha, "live_main_sha": live_main, "checks": checks})
+          (evidence / "github-authority.json").write_text(json.dumps({
+              "status": "PASS",
+              "mode": mode,
+              "main_sha": live_main,
+              "checks": checks,
+          }, indent=2) + "\n")
+          PY
+
+      - name: Checkout exact current main SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.expected_main_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify immutable checkout and migration identity
+        shell: bash
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          INPUT_VERSION: ${{ inputs.expected_migration_version }}
+          INPUT_SHA256: ${{ inputs.expected_migration_sha256 }}
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA" ]] || fail CHECKOUT_SHA_DRIFT
+          [[ -f "$TARGET_PATH" ]] || fail MIGRATION_FILE_MISSING
+          filename="$(basename "$TARGET_PATH")"
+          version="${filename%%_*}"
+          actual_sha="$(sha256sum "$TARGET_PATH" | awk '{print $1}')"
+          [[ "$version" = "$TARGET_VERSION" ]] || fail MIGRATION_FILENAME_VERSION_MISMATCH
+          [[ "$version" = "$INPUT_VERSION" ]] || fail MIGRATION_INPUT_VERSION_MISMATCH
+          [[ "$actual_sha" = "$TARGET_SHA256" ]] || fail MIGRATION_CANONICAL_SHA_MISMATCH
+          [[ "$actual_sha" = "${INPUT_SHA256,,}" ]] || fail MIGRATION_INPUT_SHA_MISMATCH
+          printf '%s  %s\n' "$actual_sha" "$TARGET_PATH" > "$EVIDENCE_DIR/migration-sha256.txt"
+
+      - name: Verify fixed Supabase PROD identity
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]] || fail SUPABASE_ACCESS_TOKEN_MISSING
+          [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || fail PROD_DATABASE_URL_MISSING
+          [[ "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF" ]] || fail PROD_PROJECT_VARIABLE_MISMATCH
+          printf '::add-mask::%s\n' "$SUPABASE_ACCESS_TOKEN"
+          printf '::add-mask::%s\n' "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF" > "$RUNNER_TEMP/prod-project.json"
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.parse
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          project = json.loads(pathlib.Path(os.environ["RUNNER_TEMP"] + "/prod-project.json").read_text())
+          url = urllib.parse.urlsplit(os.environ["SUPABASE_PROD_SESSION_POOLER_DB_URL"])
+          username = urllib.parse.unquote(url.username or "")
+          checks = {
+              "project_ref": str(project.get("id") or project.get("ref") or "") == os.environ["EXPECTED_PROD_REF"],
+              "project_name": project.get("name") == os.environ["EXPECTED_PROD_NAME"],
+              "project_status": project.get("status") == "ACTIVE_HEALTHY",
+              "pooler_scheme": url.scheme in ("postgres", "postgresql"),
+              "pooler_host": (url.hostname or "").lower().endswith(".pooler.supabase.com"),
+              "pooler_user": username == "postgres." + os.environ["EXPECTED_PROD_REF"],
+              "pooler_tls_port": url.port == 5432,
+              "pooler_password_present": bool(url.password),
+          }
+          payload = {"status": "PASS" if all(checks.values()) else "STOP", "project_ref": os.environ["EXPECTED_PROD_REF"], "project_name": project.get("name"), "project_status": project.get("status"), "checks": checks}
+          (root / "prod-identity.json").write_text(json.dumps(payload, indent=2) + "\n")
+          if payload["status"] != "PASS":
+              (root / "result.txt").write_text("STOP / PROD_IDENTITY_MISMATCH\n")
+              raise SystemExit("PROD_IDENTITY_MISMATCH")
+          PY
+          rm -f "$RUNNER_TEMP/prod-project.json"
+
+      - name: Install pinned Supabase CLI and PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" --version
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" db push --help >/dev/null
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+
+      - name: Read-only PROD precheck and exact-one dry run
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          printf '::add-mask::%s\n' "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          snapshot_sql="$RUNNER_TEMP/h2-snapshot.sql"
+          cat > "$snapshot_sql" <<'SQL'
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260820170602'),
+            'history_count',(select count(*) from supabase_migrations.schema_migrations),
+            'payment_requests_count',(select count(*) from public.payment_requests),
+            'request_number_nulls',(select count(*) from public.payment_requests where request_number is null),
+            'duplicate_groups',(select count(*) from (select request_number from public.payment_requests where request_number is not null group by request_number having count(*) > 1) d),
+            'duplicate_rows',(select coalesce(sum(n - 1),0) from (select count(*) n from public.payment_requests where request_number is not null group by request_number having count(*) > 1) d),
+            'request_number_unique_count',(select count(*) from pg_constraint c where c.conrelid='public.payment_requests'::regclass and c.contype='u' and c.conkey=array[(select attnum from pg_attribute where attrelid='public.payment_requests'::regclass and attname='request_number')]::smallint[]),
+            'request_number_not_null',(select attnotnull from pg_attribute where attrelid='public.payment_requests'::regclass and attname='request_number'),
+            'payment_requests_digest',(select md5(coalesce(string_agg(md5(to_jsonb(p)::text),'' order by p.id::text),'')) from public.payment_requests p),
+            'request_numbers_digest',(select md5(coalesce(string_agg(md5(coalesce(p.request_number,'<NULL>')),'' order by p.id::text),'')) from public.payment_requests p),
+            'sequence_last_value',(select last_value from public.payment_request_number_seq),
+            'sequence_is_called',(select is_called from public.payment_request_number_seq),
+            'zzbackup_rows',(select count(*) from public.zzbackup_proveedores_20260709),
+            'zzbackup_digest',(select md5(coalesce(string_agg(md5(to_jsonb(z)::text),'' order by to_jsonb(z)::text),'')) from public.zzbackup_proveedores_20260709 z),
+            'zzbackup_rls',(select relrowsecurity from pg_class where oid='public.zzbackup_proveedores_20260709'::regclass),
+            'zzbackup_policies',(select count(*) from pg_policies where schemaname='public' and tablename='zzbackup_proveedores_20260709'),
+            'zzbackup_anon_privileges',(select count(*) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p where has_table_privilege('anon','public.zzbackup_proveedores_20260709',p)),
+            'zzbackup_authenticated_privileges',(select count(*) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p where has_table_privilege('authenticated','public.zzbackup_proveedores_20260709',p)),
+            'zzbackup_service_role_all',(select bool_and(has_table_privilege('service_role','public.zzbackup_proveedores_20260709',p)) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p),
+            'zzbackup_postgres_all',(select bool_and(has_table_privilege('postgres','public.zzbackup_proveedores_20260709',p)) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p),
+            'provider_runtime_mode',(select mode from public.provider_intake_runtime_control where singleton is true),
+            'notification_events_count',(select count(*) from public.notification_events),
+            'notification_events_digest',(select md5(coalesce(string_agg(md5(to_jsonb(n)::text),'' order by n.id::text),'')) from public.notification_events n),
+            'notification_attempts_count',(select count(*) from public.notification_delivery_attempts)
+          );
+          rollback;
+          SQL
+          PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=h2_r1_prewrite' \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -f "$snapshot_sql" > "$EVIDENCE_DIR/prewrite.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          value = json.loads((root / "prewrite.json").read_text())
+          checks = {
+              "migration_absent": value["target_ledger_count"] == 0,
+              "request_numbers_complete": value["request_number_nulls"] == 0,
+              "request_numbers_unique_in_data": value["duplicate_groups"] == 0 and value["duplicate_rows"] == 0,
+              "unique_constraint_not_yet_present": value["request_number_unique_count"] == 0,
+              "request_number_remains_nullable": value["request_number_not_null"] is False,
+              "backup_rls_not_yet_enabled": value["zzbackup_rls"] is False,
+              "backup_has_no_policies": value["zzbackup_policies"] == 0,
+              "provider_runtime_unchanged": value["provider_runtime_mode"] == "sysadmin_only",
+          }
+          (root / "precheck.json").write_text(json.dumps({"status": "PASS" if all(checks.values()) else "STOP", "checks": checks}, indent=2) + "\n")
+          if not all(checks.values()):
+              (root / "result.txt").write_text("STOP / PROD_PRECHECK_FAILED\n")
+              raise SystemExit("PROD_PRECHECK_FAILED")
+          PY
+
+          release_dir="$RUNNER_TEMP/exact-ledger-release"
+          mkdir -p "$release_dir/supabase/migrations"
+          printf 'project_id = "prod-main-exact-migration"\n' > "$release_dir/supabase/config.toml"
+          PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=h2_r1_history' \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "begin transaction read only; select version from supabase_migrations.schema_migrations order by version; rollback;" \
+            > "$RUNNER_TEMP/prod-history.txt"
+          while IFS= read -r version; do
+            [[ "$version" =~ ^[0-9]+$ ]] || fail REMOTE_MIGRATION_HISTORY_INVALID
+            [[ "$version" != "$TARGET_VERSION" ]] || fail MIGRATION_ALREADY_APPLIED
+            : > "$release_dir/supabase/migrations/${version}_remote_history.sql"
+          done < "$RUNNER_TEMP/prod-history.txt"
+          cp "$TARGET_PATH" "$release_dir/$TARGET_PATH"
+          printf 'RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
+
+          (
+            cd "$release_dir"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push \
+              --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+              --dry-run --include-all 2>&1 | tee "$EVIDENCE_DIR/dry-run.txt"
+          )
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          versions = sorted(set(re.findall(r"(?<!\d)(\d{14})(?!\d)", (root / "dry-run.txt").read_text())))
+          expected = [os.environ["TARGET_VERSION"]]
+          payload = {"status": "PASS" if versions == expected else "STOP", "pending_count": len(versions), "pending_versions": versions}
+          (root / "dry-run.json").write_text(json.dumps(payload, indent=2) + "\n")
+          if payload["status"] != "PASS":
+              (root / "result.txt").write_text("STOP / DRY_RUN_PENDING_SET_MISMATCH\n")
+              raise SystemExit("DRY_RUN_PENDING_SET_MISMATCH")
+          PY
+
+          PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=h2_r1_postdry' \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -f "$snapshot_sql" > "$EVIDENCE_DIR/post-dry-run.json"
+          cmp --silent "$EVIDENCE_DIR/prewrite.json" "$EVIDENCE_DIR/post-dry-run.json" || fail PROD_MUTATION_DETECTED
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          value = json.loads((root / "post-dry-run.json").read_text())
+          if value["target_ledger_count"] != 0:
+              raise SystemExit("MIGRATION_LEDGER_CHANGED_DURING_PREFLIGHT")
+          (root / "preflight-result.json").write_text(json.dumps({
+              "status": "PASS",
+              "main_sha_match": True,
+              "prod_identity_match": True,
+              "migration_ledger_count_before": 0,
+              "dry_run_pending_count": 1,
+              "dry_run_pending_version": os.environ["TARGET_VERSION"],
+              "business_writes": 0,
+              "prod_schema_writes": 0,
+          }, indent=2) + "\n")
+          PY
+
+      - name: Apply exact migration from the proven release mirror
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          printf '::add-mask::%s\n' "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          (
+            cd "$RELEASE_DIR"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push \
+              --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+              --include-all --yes 2>&1 | tee "$EVIDENCE_DIR/apply.txt"
+          )
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "begin transaction read only; select version from supabase_migrations.schema_migrations order by version; rollback;" \
+            > "$RUNNER_TEMP/prod-history-after.txt"
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/post-apply.json"
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260820170602' and name='prod_request_number_and_legacy_backup_hardening'),
+            'payment_requests_count',(select count(*) from public.payment_requests),
+            'request_number_nulls',(select count(*) from public.payment_requests where request_number is null),
+            'duplicate_groups',(select count(*) from (select request_number from public.payment_requests where request_number is not null group by request_number having count(*) > 1) d),
+            'request_number_unique_valid',(select count(*)=1 from pg_constraint c where c.conrelid='public.payment_requests'::regclass and c.contype='u' and c.convalidated and c.conkey=array[(select attnum from pg_attribute where attrelid='public.payment_requests'::regclass and attname='request_number')]::smallint[]),
+            'request_number_not_null',(select attnotnull from pg_attribute where attrelid='public.payment_requests'::regclass and attname='request_number'),
+            'payment_requests_digest',(select md5(coalesce(string_agg(md5(to_jsonb(p)::text),'' order by p.id::text),'')) from public.payment_requests p),
+            'request_numbers_digest',(select md5(coalesce(string_agg(md5(coalesce(p.request_number,'<NULL>')),'' order by p.id::text),'')) from public.payment_requests p),
+            'sequence_last_value',(select last_value from public.payment_request_number_seq),
+            'sequence_is_called',(select is_called from public.payment_request_number_seq),
+            'zzbackup_rows',(select count(*) from public.zzbackup_proveedores_20260709),
+            'zzbackup_digest',(select md5(coalesce(string_agg(md5(to_jsonb(z)::text),'' order by to_jsonb(z)::text),'')) from public.zzbackup_proveedores_20260709 z),
+            'zzbackup_rls',(select relrowsecurity from pg_class where oid='public.zzbackup_proveedores_20260709'::regclass),
+            'zzbackup_policies',(select count(*) from pg_policies where schemaname='public' and tablename='zzbackup_proveedores_20260709'),
+            'zzbackup_anon_privileges',(select count(*) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p where has_table_privilege('anon','public.zzbackup_proveedores_20260709',p)),
+            'zzbackup_authenticated_privileges',(select count(*) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p where has_table_privilege('authenticated','public.zzbackup_proveedores_20260709',p)),
+            'zzbackup_service_role_all',(select bool_and(has_table_privilege('service_role','public.zzbackup_proveedores_20260709',p)) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p),
+            'zzbackup_postgres_all',(select bool_and(has_table_privilege('postgres','public.zzbackup_proveedores_20260709',p)) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p),
+            'provider_runtime_mode',(select mode from public.provider_intake_runtime_control where singleton is true),
+            'notification_events_count',(select count(*) from public.notification_events),
+            'notification_events_digest',(select md5(coalesce(string_agg(md5(to_jsonb(n)::text),'' order by n.id::text),'')) from public.notification_events n),
+            'notification_attempts_count',(select count(*) from public.notification_delivery_attempts)
+          );
+          rollback;
+          SQL
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ["EVIDENCE_DIR"])
+          before = json.loads((root / "prewrite.json").read_text())
+          after = json.loads((root / "post-apply.json").read_text())
+          history_before = [x for x in pathlib.Path(os.environ["RUNNER_TEMP"] + "/prod-history.txt").read_text().splitlines() if x]
+          history_after = [x for x in pathlib.Path(os.environ["RUNNER_TEMP"] + "/prod-history-after.txt").read_text().splitlines() if x]
+          added = sorted(set(history_after) - set(history_before))
+          checks = {
+              "exact_ledger_row": after["target_ledger_count"] == 1,
+              "exact_history_delta": len(history_after) == len(history_before) + 1 and added == [os.environ["TARGET_VERSION"]],
+              "request_number_unique": after["request_number_unique_valid"] is True,
+              "request_number_remains_nullable": after["request_number_not_null"] is False,
+              "request_numbers_unchanged": after["request_numbers_digest"] == before["request_numbers_digest"],
+              "payment_requests_unchanged": after["payment_requests_count"] == before["payment_requests_count"] and after["payment_requests_digest"] == before["payment_requests_digest"],
+              "request_sequence_unchanged": after["sequence_last_value"] == before["sequence_last_value"] and after["sequence_is_called"] == before["sequence_is_called"],
+              "backup_rows_unchanged": after["zzbackup_rows"] == before["zzbackup_rows"] and after["zzbackup_digest"] == before["zzbackup_digest"],
+              "backup_rls_enabled": after["zzbackup_rls"] is True,
+              "backup_policies_zero": after["zzbackup_policies"] == 0,
+              "backup_public_roles_revoked": after["zzbackup_anon_privileges"] == 0 and after["zzbackup_authenticated_privileges"] == 0,
+              "backup_privileged_roles_preserved": after["zzbackup_service_role_all"] is True and after["zzbackup_postgres_all"] is True,
+              "provider_runtime_unchanged": after["provider_runtime_mode"] == before["provider_runtime_mode"],
+              "notifications_unchanged": after["notification_events_count"] == before["notification_events_count"] and after["notification_events_digest"] == before["notification_events_digest"] and after["notification_attempts_count"] == before["notification_attempts_count"],
+          }
+          payload = {"status": "PASS" if all(checks.values()) else "STOP", "migrations_applied_this_run": len(added), "applied_versions": added, "checks": checks}
+          (root / "apply-result.json").write_text(json.dumps(payload, indent=2) + "\n")
+          if payload["status"] != "PASS":
+              (root / "result.txt").write_text("STOP / POST_APPLY_CONTRACT_FAILED\n")
+              raise SystemExit("POST_APPLY_CONTRACT_FAILED")
+          (root / "result.txt").write_text("PASS / EXACT_MIGRATION_APPLIED\n")
+          PY
+
+      - name: Record preflight-only PASS
+        if: inputs.mode == 'preflight'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'PASS / PREFLIGHT_ONLY / APPLY_NOT_EXECUTED' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Remove transient sensitive files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/prod-project.json" "$RUNNER_TEMP/h2-snapshot.sql"
+          rm -rf "$RUNNER_TEMP/exact-ledger-release"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: prod-main-exact-migration-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 14
