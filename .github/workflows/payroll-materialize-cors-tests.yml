@@ -1,0 +1,37 @@
+name: Payroll materialize CORS tests
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'supabase/functions/payroll-materialize/index.ts'
+      - 'scripts/qa/payroll-materialize-cors-contract.test.mjs'
+      - '.github/workflows/payroll-materialize-cors-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: CORS contract
+        run: node --test scripts/qa/payroll-materialize-cors-contract.test.mjs
+      - name: Preserve N3G capture contract
+        run: node --test scripts/qa/payroll-n3g-real-capture-ui-contract.test.mjs
+      - name: Diff check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git diff --check "$BASE_SHA"...HEAD -- \
+            supabase/functions/payroll-materialize/index.ts \
+            scripts/qa/payroll-materialize-cors-contract.test.mjs \
+            .github/workflows/payroll-materialize-cors-tests.yml

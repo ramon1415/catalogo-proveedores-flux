@@ -29,7 +29,12 @@ declare global {
   var FluxPayrollRealReconcile: RealReconcile;
 }
 
-const JSON_HEADERS = { "Content-Type": "application/json", "Cache-Control": "no-store" };
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+const JSON_HEADERS = { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" };
 const PATH_RE = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/;
 type MaterializeInput = { capture_session_id?: string; expected_version?: number; idempotency_key?: string };
 type CaptureFile = { id:string; kind:string; channel:string|null; storage_bucket:string; storage_path:string; mime_type:string; size_bytes:number; sha256:string; capability_code:string; parser_version:string|null; parser_contract:string|null; record_count:number|null; total_amount_minor:number|null; object_size:number|null; object_mime:string|null };
@@ -94,6 +99,7 @@ function resolveSourceAccount(context:Context,verified:Map<string,Verified>):str
 }
 
 async function handler(req:Request):Promise<Response>{
+  if(req.method==="OPTIONS") return new Response(null,{status:204,headers:CORS_HEADERS});
   if(req.method!=="POST") return response(405,{error:"METHOD_NOT_ALLOWED"});
   try{
     const base=requiredEnv("SUPABASE_URL"),serviceKey=requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),token=bearer(req); const input=await req.json() as MaterializeInput;
@@ -142,4 +148,4 @@ async function handler(req:Request):Promise<Response>{
   }catch(error){ const code=error instanceof Error?error.message:"PAYROLL_MATERIALIZATION_FAILED"; const safe=/^PAYROLL_[A-Z0-9_]+$/.test(code)?code:"PAYROLL_MATERIALIZATION_FAILED"; return response(errorStatus(safe),{error:safe}); }
 }
 Deno.serve(handler);
-export {errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,resolveSourceAccount};
+export {CORS_HEADERS,errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,resolveSourceAccount};
