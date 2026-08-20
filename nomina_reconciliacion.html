@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conciliación de Nómina | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260805-brand-verde">
+  <style>
+    body{background:var(--bg-page);color:var(--text-1);font-family:'Plus Jakarta Sans',system-ui,sans-serif;margin:0}.n4b-shell{max-width:1180px;margin:0 auto;padding:24px}.n4b-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:20px}.n4b-top h1{font-size:26px;margin:5px 0 6px}.n4b-top p{color:var(--text-3);font-size:12.5px;max-width:760px;line-height:1.55;margin:0}.n4b-eyebrow{display:block;color:var(--accent-text);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px}.n4b-actions{display:flex;gap:8px;flex-wrap:wrap}.n4b-message{margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12px;background:var(--bg-surface)}.n4b-message[data-variant="success"]{background:var(--emerald-dim);color:var(--emerald)}.n4b-message[data-variant="warning"]{background:var(--amber-dim);color:var(--amber)}.n4b-message[data-variant="error"]{background:var(--ruby-dim);color:var(--ruby)}.n4b-grid{display:grid;grid-template-columns:330px minmax(0,1fr);gap:16px}.n4b-panel{border:1px solid var(--border);border-radius:15px;background:var(--bg-card);box-shadow:var(--shadow);overflow:hidden}.n4b-panel-head{padding:14px 15px;border-bottom:1px solid var(--border)}.n4b-queue{display:grid;max-height:650px;overflow:auto}.n4b-queue button{border:0;border-bottom:1px solid var(--border);padding:13px 14px;background:transparent;color:var(--text-2);text-align:left;cursor:pointer;font-family:inherit;display:grid;gap:5px}.n4b-queue button:hover,.n4b-queue button.selected{background:var(--bg-hover)}.n4b-queue button.selected{box-shadow:inset 3px 0 0 var(--accent)}.n4b-detail{padding:17px;min-height:360px}.n4b-head{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px}.n4b-total{display:flex;justify-content:space-between;align-items:center;margin:14px 0;padding:13px;border:1px solid var(--border);border-radius:11px;background:var(--bg-input)}.n4b-total strong{font-size:18px;color:var(--accent-text)}.n4b-warning{padding:11px 12px;border:1px solid rgba(245,158,11,.3);border-radius:10px;background:var(--amber-dim);font-size:11.5px;line-height:1.5;margin-bottom:13px}.n4b-list{display:grid;gap:10px}.n4b-card{border:1px solid var(--border);border-radius:12px;padding:13px}.n4b-card-head{display:flex;justify-content:space-between;gap:10px}.n4b-card-head span{color:var(--text-3);font-size:11px}.n4b-form{display:grid;grid-template-columns:1.2fr .7fr .8fr 1fr;gap:8px;margin-top:11px}.n4b-form label{font-size:9.5px;color:var(--text-3);font-weight:700;text-transform:uppercase;display:grid;gap:4px}.n4b-form input{height:34px;padding:0 9px;background:var(--bg-input);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-family:inherit;min-width:0}.n4b-form .full{grid-column:1/-1}.n4b-form-actions{display:flex;justify-content:flex-end;margin-top:9px}.n4b-pill{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:9.5px;font-weight:800;text-transform:uppercase;border:1px solid var(--border)}.n4b-pill.reconciled,.n4b-pill.paid{background:var(--emerald-dim);color:var(--emerald)}.n4b-pill.pending{background:var(--amber-dim);color:var(--amber)}.n4b-complete{margin-top:14px;padding:12px;border:1px solid rgba(18,183,106,.28);border-radius:10px;background:var(--emerald-dim);color:var(--emerald);display:flex;align-items:center;justify-content:space-between;gap:12px}.n4b-empty{padding:28px 18px;color:var(--text-3);font-size:12px;text-align:center}.n4b-meta{font-size:10.5px;color:var(--text-3);margin-top:7px}@media(max-width:900px){.n4b-grid{grid-template-columns:1fr}.n4b-form{grid-template-columns:1fr 1fr}}@media(max-width:600px){.n4b-top{flex-direction:column}.n4b-form{grid-template-columns:1fr}.n4b-form .full{grid-column:auto}.n4b-complete{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="n4b-shell">
+    <header class="n4b-top">
+      <div><span class="n4b-eyebrow">Nómina · N4B · Finance only</span><h1>Comprobantes y conciliación por canal</h1><p>Sube el comprobante PDF posterior a la dispersión, registra importe/fecha/referencia y concilia cada canal. Flux verifica el archivo, pero no usa OCR y no ejecuta pagos.</p></div>
+      <div class="n4b-actions"><a class="secondary-btn" href="./nomina_dispersion.html">Dispersión</a><a class="secondary-btn" href="./solicitudes.html">Solicitudes</a><button id="payrollReconciliationRefresh" class="primary-btn" type="button">Actualizar</button></div>
+    </header>
+    <div id="payrollReconciliationMessage" class="n4b-message">Preparando conciliación…</div>
+    <section class="n4b-grid">
+      <aside class="n4b-panel"><div class="n4b-panel-head"><strong>Nóminas dispersadas</strong><div class="n4b-meta">Sólo corridas aprobadas y materializadas.</div></div><div id="payrollReconciliationQueue" class="n4b-queue"><div class="n4b-empty">Cargando…</div></div></aside>
+      <section class="n4b-panel"><div id="payrollReconciliationDetail" class="n4b-detail"><div class="n4b-empty">Selecciona una Nómina.</div></div></section>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260701-reconcile"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./payroll_reconciliation.js?v=20260820-n4b"></script>
+</body>
+</html>
