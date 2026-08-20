@@ -51,6 +51,17 @@ function errorStatus(code:string):number { if(code==="PAYROLL_AUTH_REQUIRED") re
 async function sha256Hex(bytes:Uint8Array):Promise<string>{ const digest=await crypto.subtle.digest("SHA-256",bytes.slice().buffer as ArrayBuffer); return Array.from(new Uint8Array(digest)).map(v=>v.toString(16).padStart(2,"0")).join(""); }
 async function hashText(value:string):Promise<string>{ return sha256Hex(new TextEncoder().encode(value)); }
 function normalizeAccounts(values:Array<string|null>|null):Set<string>{ return new Set((values||[]).map(v=>String(v||"").replace(/\D/g,"")).filter(Boolean).map(v=>v.padStart(18,"0"))); }
+function normalizeMime(value:string):string { return String(value||"").split(";")[0].trim().toLowerCase(); }
+function mimeMatches(kind:string,observed:string,declared:string):boolean {
+  const actual=normalizeMime(observed),expected=normalizeMime(declared);
+  if(!actual) return true;
+  if(actual===expected) return true;
+  if(kind==="cfdi_vales"){
+    const xmlMimes=new Set(["text/xml","application/xml"]);
+    return xmlMimes.has(actual)&&xmlMimes.has(expected);
+  }
+  return false;
+}
 function safeMeta(file:CaptureFile,digest:string,parserVersion:string,parserContract:string,recordCount:number,totalAmountMinor:number){ return {capture_file_id:file.id,kind:file.kind,authority:"server_verified",sha256:digest,parser_version:parserVersion,parser_contract:parserContract,record_count:recordCount,total_amount_minor:totalAmountMinor,browser_server_match:file.record_count===recordCount&&file.total_amount_minor===totalAmountMinor}; }
 
 async function verifyFile(base:string,serviceKey:string,context:Context,file:CaptureFile):Promise<Verified>{
@@ -62,7 +73,7 @@ async function verifyFile(base:string,serviceKey:string,context:Context,file:Cap
   const downloaded=await fetch(`${base}/storage/v1/object/authenticated/payroll-private/${path}`,{headers:{apikey:serviceKey,Authorization:`Bearer ${serviceKey}`}});
   if(!downloaded.ok) throw new Error("PAYROLL_STORAGE_OBJECT_MISSING");
   const bytes=new Uint8Array(await downloaded.arrayBuffer()); if(bytes.byteLength!==Number(file.size_bytes)) throw new Error("PAYROLL_FILE_SIZE_MISMATCH");
-  const mime=(downloaded.headers.get("content-type")||"").split(";")[0].toLowerCase(); if(mime&&mime!==file.mime_type.toLowerCase()) throw new Error("PAYROLL_FILE_MIME_MISMATCH");
+  const mime=normalizeMime(downloaded.headers.get("content-type")||""); if(!mimeMatches(file.kind,mime,file.mime_type)) throw new Error("PAYROLL_FILE_MIME_MISMATCH");
   const digest=await sha256Hex(bytes); if(digest!==file.sha256) throw new Error("PAYROLL_FILE_HASH_MISMATCH");
 
   if(file.kind==="caratula"){
@@ -148,4 +159,4 @@ async function handler(req:Request):Promise<Response>{
   }catch(error){ const code=error instanceof Error?error.message:"PAYROLL_MATERIALIZATION_FAILED"; const safe=/^PAYROLL_[A-Z0-9_]+$/.test(code)?code:"PAYROLL_MATERIALIZATION_FAILED"; return response(errorStatus(safe),{error:safe}); }
 }
 Deno.serve(handler);
-export {CORS_HEADERS,errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,resolveSourceAccount};
+export {CORS_HEADERS,errorStatus,handler,requireFinanceCaptureAccess,sha256Hex,verifyFile,resolveSourceAccount,mimeMatches};
