@@ -2,6 +2,7 @@
   "use strict";
 
   const BASE_SRC = "./budget_live_frontend_guards_base.js?v=20260707-detail-loop-fix";
+  const COMPANY_SCOPE_FIX_SRC = "./payroll_company_scope_fix.js?v=20260820-shadow-scope";
   const FINANCE_ROLES = ["finance","finanzas","treasury","tesoreria","administracion"];
   const N5B_STYLE_ID = "payroll-n5b-budget-ux-style";
   const state = { requestId:null, budgetReady:null, lastSignature:null, timer:null, observer:null };
@@ -12,6 +13,11 @@
   base.onload = initN5B;
   base.onerror = initN5B;
   document.head.appendChild(base);
+
+  const companyScopeFix = document.createElement("script");
+  companyScopeFix.src = COMPANY_SCOPE_FIX_SRC;
+  companyScopeFix.async = false;
+  document.head.appendChild(companyScopeFix);
 
   function initN5B() {
     if ((location.pathname.split("/").pop() || "").toLowerCase() !== "solicitudes.html") return;
