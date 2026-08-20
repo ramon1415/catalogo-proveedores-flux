@@ -8,19 +8,20 @@
   async function init(){
     if((location.pathname.split('/').pop()||'').toLowerCase()!=='solicitudes.html')return;
     if(window.FluxAuth?.ready)await window.FluxAuth.ready();
-    const requestType=document.getElementById('requestType');
+    const requestType=await waitForElement('requestType');
     if(!requestType)return;
-    installBridge();
-    requestType.addEventListener('change',syncVisibility);
+    requestType.addEventListener('change',async()=>{await ensureBridge();syncVisibility();});
+    await ensureBridge();
     syncVisibility();
   }
 
-  function installBridge(){
-    if(document.getElementById('payrollCompanyScopeBridge'))return;
+  async function ensureBridge(){
+    const existing=document.getElementById('payrollCompanyScopeBridge');
+    if(existing){syncFromSource();return existing;}
     const source=document.getElementById('companyId');
-    const sourceAccount=document.getElementById('payrollSourceAccount');
+    const sourceAccount=await waitForElement('payrollSourceAccount');
     const grid=sourceAccount?.closest('.form-grid');
-    if(!source||!grid)return;
+    if(!source||!grid)return null;
 
     const wrapper=document.createElement('label');
     wrapper.id='payrollCompanyScopeBridge';
@@ -35,6 +36,7 @@
     source.addEventListener('change',syncFromSource);
     new MutationObserver(syncFromSource).observe(source,{childList:true,subtree:true});
     syncFromSource();
+    return wrapper;
   }
 
   function syncVisibility(){
@@ -57,5 +59,19 @@
       });
     }
     mirror.value=source.value||'';
+  }
+
+  function waitForElement(id){
+    const existing=document.getElementById(id);
+    if(existing)return Promise.resolve(existing);
+    return new Promise(resolve=>{
+      const observer=new MutationObserver(()=>{
+        const element=document.getElementById(id);
+        if(!element)return;
+        observer.disconnect();
+        resolve(element);
+      });
+      observer.observe(document.documentElement,{childList:true,subtree:true});
+    });
   }
 })();
