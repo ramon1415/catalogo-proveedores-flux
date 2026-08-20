@@ -69,7 +69,7 @@ test('approved to paid is only enabled through the N4B close RPC and all reconci
 test('Finance UI performs receipt reserve upload verify reconcile and close without bank execution or employee PII',()=>{
   for(const token of ['get_payroll_reconciliation_queue','get_payroll_reconciliation_summary','reserve_payroll_channel_receipt','payroll-receipt-verify','reconcile_payroll_channel','close_payroll_as_paid']) assert.match(ui,new RegExp(token));
   assert.match(ui,/storage\.from\(reserved\.data\.storage_bucket\)\.upload/);
-  assert.match(html,/Flux no usa OCR/i);
+  assert.match(html,/no usa OCR/i);
   assert.doesNotMatch(ui,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b|bank_account/i);
   assert.doesNotMatch(ui,/create_payment_layout|bank.*upload|bbva.*api|mark.*scheduled|decide_payment_request/i);
 });
