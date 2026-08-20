@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const migration=fs.readFileSync('supabase/migrations/20260820170000_payroll_n4b_channel_receipt_reconciliation.sql','utf8');
+const grantMigration=fs.readFileSync('supabase/migrations/20260820170100_payroll_n4b_storage_helper_execute.sql','utf8');
+const migrations=migration+'\n'+grantMigration;
 const edge=fs.readFileSync('supabase/functions/payroll-receipt-verify/index.ts','utf8');
 const ui=fs.readFileSync('payroll_reconciliation.js','utf8');
 const html=fs.readFileSync('nomina_reconciliacion.html','utf8');
@@ -30,7 +32,7 @@ test('private storage upload is bound to a reserved payroll_run_files receipt ro
   assert.match(migration,/file\.storage_path=p_name/);
   assert.match(migration,/file\.parsing_status='pending'/);
   assert.match(migration,/channel\.dispersion_status='dispersed'/);
-  assert.match(migration,/grant execute on function public\.payroll_run_file_storage_insert_allowed\(text\) to authenticated/);
+  assert.match(migrations,/grant execute on function public\.payroll_run_file_storage_insert_allowed\(text\) to authenticated/);
 });
 
 test('server verifier downloads bytes and enforces size MIME SHA256 PDF header and EOF without OCR',()=>{
@@ -72,11 +74,11 @@ test('Finance UI performs receipt reserve upload verify reconcile and close with
   assert.doesNotMatch(ui,/create_payment_layout|bank.*upload|bbva.*api|mark.*scheduled|decide_payment_request/i);
 });
 
-test('N4B migration has no business-data backfill and internal verifier is service-role only',()=>{
-  assert.doesNotMatch(migration,/insert into public\.payment_requests/i);
-  assert.doesNotMatch(migration,/insert into public\.payroll_channels/i);
-  assert.doesNotMatch(migration,/delete from public\./i);
-  assert.doesNotMatch(migration,/truncate/i);
+test('N4B migrations have no business-data backfill and internal verifier is service-role only',()=>{
+  assert.doesNotMatch(migrations,/insert into public\.payment_requests/i);
+  assert.doesNotMatch(migrations,/insert into public\.payroll_channels/i);
+  assert.doesNotMatch(migrations,/delete from public\./i);
+  assert.doesNotMatch(migrations,/truncate/i);
   assert.match(migration,/PAYROLL_RECEIPT_SERVICE_ROLE_REQUIRED/);
   assert.match(migration,/grant execute on function public\.confirm_payroll_channel_receipt_internal\(uuid,text,bigint,text\) to service_role/);
   assert.match(migration,/revoke all on function public\.confirm_payroll_channel_receipt_internal\(uuid,text,bigint,text\) from public,anon,authenticated/);
