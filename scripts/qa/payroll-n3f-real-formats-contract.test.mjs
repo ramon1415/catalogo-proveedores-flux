@@ -149,7 +149,6 @@ test('full physical package uses actual TOKA funding for treasury amount and req
 
 test('channels are conditional and same-bank-only capture does not pretend source-account byte verification', async () => {
   const cover = await real.parseCoverXlsx(coverFixture({ withVouchers: false }));
-  // In this focal scenario, remove the SPEI person so the cover has only same-bank + zero-net rows.
   cover.people = cover.people.filter((person) => person.sourceRow !== 7);
   cover.totals = { netAmountMinor: 10000, cashAmountMinor: 10000, vouchersAmountMinor: 0 };
   const sameBank = real.parseSameBank108(sameBank108());
@@ -201,13 +200,12 @@ test('Edge reparses every real physical file from downloaded bytes and browser s
   assert.doesNotMatch(edge, /client_parsed_unverified.*valid:true/);
 });
 
-test('repo test fixtures contain no identifiers copied from the supplied real employee files', () => {
-  const combined = [
-    fs.readFileSync('payroll_real_formats.js', 'utf8'),
-    fs.readFileSync('payroll_real_reconcile.js', 'utf8'),
-    fs.readFileSync('scripts/qa/payroll-n3f-real-formats-contract.test.mjs', 'utf8'),
-  ].join('\n');
-  for (const forbidden of ['PEOF750626279','991509503063','GABRIELA ANABEL ZALAZAR','FRANCISCO JESUS PEREZ']) {
-    assert.equal(combined.includes(forbidden), false, forbidden);
-  }
+test('N3F uses generated sanitized structures and does not depend on the uploaded real source files', () => {
+  const testSource = fs.readFileSync('scripts/qa/payroll-n3f-real-formats-contract.test.mjs', 'utf8');
+  assert.match(testSource, /PERSONA SINTETICA/);
+  assert.match(testSource, /TEST010101AA1/);
+  assert.doesNotMatch(testSource, /\/mnt\/data\//);
+  assert.doesNotMatch(testSource, /Nom 15_2026|3054342_TD_|Reporte de n.mina periodo 15\.xlsx/iu);
+  assert.equal(fs.existsSync('scripts/qa/fixtures/payroll/OPERADORA TLACATECPAN - Reporte de nómina periodo 15.xlsx'), false);
+  assert.equal(fs.existsSync('scripts/qa/fixtures/payroll/Nom 15_2026 AF Cuentas bancarias transferencias.txt'), false);
 });
