@@ -1,0 +1,130 @@
+name: Supabase DEV Payroll Materialize Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_dev:
+        description: "Type the DEV Supabase project ref to confirm the target"
+        required: true
+        type: string
+      expected_dev_sha:
+        description: "Exact current dev commit SHA to deploy"
+        required: true
+        type: string
+      confirm_mode:
+        description: "Type deploy_payroll_materialize_dev"
+        required: true
+        default: "deploy_payroll_materialize_dev"
+        type: string
+      confirm_function:
+        description: "Type payroll-materialize"
+        required: true
+        default: "payroll-materialize"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-dev-payroll-materialize-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy payroll-materialize to Supabase DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+    env:
+      SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
+      FUNCTION_NAME: payroll-materialize
+      EXPECTED_INDEX_BLOB: 971a6b2c24669fbd5923a0399b91aa090a2af166
+      EXPECTED_PARSER_BLOB: 26239f2a2f93c95011a93cdeb99e730e998b232e
+      EXPECTED_FORMATS_BLOB: 5addef2e617af14581a170725aa075c606bb5673
+      EXPECTED_RECONCILE_BLOB: 77d0b17c74a8be53f912a4554fd09550de6793fc
+      CONFIRM_DEV: ${{ inputs.confirm_dev }}
+      EXPECTED_DEV_SHA: ${{ inputs.expected_dev_sha }}
+      CONFIRM_MODE: ${{ inputs.confirm_mode }}
+      CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
+      EVIDENCE_DIR: /tmp/payroll-materialize-dev-deploy
+
+    steps:
+      - name: Validate immutable DEV target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/dev" ]] || { echo "::error::dev branch required"; exit 1; }
+          [[ "$CONFIRM_DEV" == "$SUPABASE_PROJECT_ID" ]] || { echo "::error::DEV project confirmation mismatch"; exit 1; }
+          [[ "$CONFIRM_MODE" == "deploy_payroll_materialize_dev" ]] || { echo "::error::mode confirmation mismatch"; exit 1; }
+          [[ "$CONFIRM_FUNCTION" == "$FUNCTION_NAME" ]] || { echo "::error::function confirmation mismatch"; exit 1; }
+          [[ "$EXPECTED_DEV_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::expected_dev_sha invalid"; exit 1; }
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]] || { echo "::error::SUPABASE_ACCESS_TOKEN missing"; exit 1; }
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          [[ "$live_dev" == "$EXPECTED_DEV_SHA" ]] || { echo "::error::dev drift"; exit 1; }
+          [[ "$GITHUB_SHA" == "$EXPECTED_DEV_SHA" ]] || { echo "::error::dispatch SHA drift"; exit 1; }
+
+      - name: Checkout exact DEV SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.expected_dev_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact bundle identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            supabase/functions/payroll-materialize/index.ts
+            payroll_parser.js
+            payroll_real_formats.js
+            payroll_real_reconcile.js
+          )
+          for file in "${files[@]}"; do [[ -f "$file" ]] || { echo "::error::missing $file"; exit 1; }; done
+          [[ "$(git hash-object supabase/functions/payroll-materialize/index.ts)" == "$EXPECTED_INDEX_BLOB" ]] || { echo "::error::index blob mismatch"; exit 1; }
+          [[ "$(git hash-object payroll_parser.js)" == "$EXPECTED_PARSER_BLOB" ]] || { echo "::error::parser blob mismatch"; exit 1; }
+          [[ "$(git hash-object payroll_real_formats.js)" == "$EXPECTED_FORMATS_BLOB" ]] || { echo "::error::formats blob mismatch"; exit 1; }
+          [[ "$(git hash-object payroll_real_reconcile.js)" == "$EXPECTED_RECONCILE_BLOB" ]] || { echo "::error::reconcile blob mismatch"; exit 1; }
+          python3 - <<'PY'
+          import pathlib, tomllib
+          config = tomllib.loads(pathlib.Path('supabase/config.toml').read_text())
+          item = config.get('functions', {}).get('payroll-materialize')
+          if item is not None and item.get('verify_jwt') is False:
+              raise SystemExit('payroll-materialize verify_jwt may not be disabled')
+          PY
+          mkdir -p "$EVIDENCE_DIR"
+          git rev-parse HEAD > "$EVIDENCE_DIR/git-sha.txt"
+          for file in "${files[@]}"; do printf '%s  %s\n' "$(git hash-object "$file")" "$file"; done > "$EVIDENCE_DIR/bundle-blobs.txt"
+
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+
+      - name: Deploy exact payroll-materialize bundle to DEV
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          [[ "$live_dev" == "$EXPECTED_DEV_SHA" ]] || { echo "::error::dev drift before deploy"; exit 1; }
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          supabase functions deploy "$FUNCTION_NAME" --project-ref "$SUPABASE_PROJECT_ID" \
+            > "$EVIDENCE_DIR/deploy-stdout.txt" 2> "$EVIDENCE_DIR/deploy-stderr.txt"
+          cat "$EVIDENCE_DIR/deploy-stdout.txt"
+          cat "$EVIDENCE_DIR/deploy-stderr.txt"
+
+      - name: Upload sanitized deploy evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: payroll-materialize-dev-deploy-evidence
+          path: /tmp/payroll-materialize-dev-deploy
+          if-no-files-found: warn
+          retention-days: 14
