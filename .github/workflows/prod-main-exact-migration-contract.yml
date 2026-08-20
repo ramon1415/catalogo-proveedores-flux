@@ -1,0 +1,63 @@
+name: PROD exact migration control-plane contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/supabase-prod-main-exact-migration.yml"
+      - ".github/workflows/prod-main-exact-migration-contract.yml"
+      - "scripts/qa/prod-main-exact-migration-release-contract.test.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate workflow syntax and focal contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path, aliases: true) }' \
+            .github/workflows/supabase-prod-main-exact-migration.yml \
+            .github/workflows/prod-main-exact-migration-contract.yml
+          node --check scripts/qa/prod-main-exact-migration-release-contract.test.mjs
+          node --test scripts/qa/prod-main-exact-migration-release-contract.test.mjs
+          git diff --check
+
+      - name: Enforce exact PR scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA"...HEAD | sort > "$RUNNER_TEMP/changed.txt"
+          cat > "$RUNNER_TEMP/allowed.txt" <<'EOF'
+          .github/workflows/prod-main-exact-migration-contract.yml
+          .github/workflows/supabase-prod-main-exact-migration.yml
+          scripts/qa/prod-main-exact-migration-release-contract.test.mjs
+          EOF
+          sort -o "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/allowed.txt"
+          diff -u "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/changed.txt"
+
+      - name: Scan control-plane source for embedded secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            .github/workflows/supabase-prod-main-exact-migration.yml
+            .github/workflows/prod-main-exact-migration-contract.yml
+            scripts/qa/prod-main-exact-migration-release-contract.test.mjs
+          )
+          if grep -En '(sb_secret_[A-Za-z0-9_-]+|postgres(ql)?://[^$[:space:]]+:[^$[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)' "${files[@]}"; then
+            echo 'Embedded secret-like value detected' >&2
+            exit 1
+          fi
