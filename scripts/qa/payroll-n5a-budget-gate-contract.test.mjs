@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 
-const migration=fs.readFileSync('supabase/migrations/20260820163000_payroll_n5a_budget_gate.sql','utf8');
+const migration=fs.readFileSync('supabase/migrations/20260820164338_payroll_n5a_budget_gate.sql','utf8');
 const ui=fs.readFileSync('payroll_budget_gate.js','utf8');
 const html=fs.readFileSync('nomina_presupuesto.html','utf8');
 
