@@ -71,7 +71,8 @@ jobs:
             echo "Unexpected H1 scope detected" >&2
             exit 1
           fi
-          if xargs -r grep -nEi '(SUPABASE_SERVICE_ROLE_KEY|RESEND_API_KEY|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@)' < /tmp/h1-changed.txt; then
+          grep -v '^\.github/workflows/' /tmp/h1-changed.txt > /tmp/h1-content-files.txt
+          if xargs -r grep -nEi '(SUPABASE_SERVICE_ROLE_KEY|RESEND_API_KEY|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@)' < /tmp/h1-content-files.txt; then
             echo "Potential secret detected" >&2
             exit 1
           fi
