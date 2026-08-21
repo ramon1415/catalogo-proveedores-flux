@@ -8,6 +8,7 @@ const manifest = JSON.parse(read("docs/ops/provider-portal-prod-product-candidat
 const scopeBase = process.env.PRODUCT_SCOPE_BASE || manifest.generated_from_main_sha;
 const changed = execFileSync("git", ["diff", "--name-only", `${scopeBase}...HEAD`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 const allowed = new Set([
+  ".github/workflows/provider-portal-prod-db-edge-candidate.yml",
   ".github/workflows/provider-portal-prod-product-candidate.yml",
   "api/provider-intake-file-url.js", "api/runtime-config.js", "config.js",
   "approval_batches.html", "aprobaciones.html", "comprobantes_batch.html",
