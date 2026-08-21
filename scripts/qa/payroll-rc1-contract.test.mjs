@@ -80,9 +80,14 @@ test('RC1 TOKA accounting feed separates vouchers, fee, VAT and signed variance 
   assert.doesNotMatch(feedFunction,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
 });
 
-test('RC1 CONTPAQ feed cannot export before payment confirmation and reconciliation',()=>{
+test('RC1 CONTPAQ mappings are scoped to cost center and exact source bank account and export stays gated',()=>{
   assert.match(feedFunction,/PAYROLL_CONTPAQ_PAID_REQUIRED/);
   assert.match(feedFunction,/PAYROLL_CONTPAQ_RECONCILIATION_REQUIRED/);
-  assert.match(migration,/payroll_contpaq_role_mappings/);
+  assert.match(feedFunction,/payroll_contpaq_account_for_role_internal\(v_request\.company_id,v_request\.cost_center_id/);
+  assert.match(feedFunction,/payroll_contpaq_bank_account_internal\(v_request\.company_bank_account_id\)/);
+  assert.match(migration,/primary key\(company_id,cost_center_id,role\)/);
+  assert.match(migration,/payroll_contpaq_bank_mappings/);
+  assert.match(migration,/company_bank_account_id uuid primary key/);
   assert.match(migration,/PAYROLL_CONTPAQ_MAPPING_REQUIRED/);
+  assert.match(migration,/PAYROLL_CONTPAQ_BANK_MAPPING_REQUIRED/);
 });
