@@ -1,7 +1,7 @@
 const configClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 // ── Estado ──────────────────────────────────────────────────────
-const TAB_LABELS = { members: "Socios", originAccounts: "Cuentas origen", budgets: "Presupuestos", system: "Sistema" }
+const TAB_LABELS = { members: "Socios", originAccounts: "Cuentas origen", budgets: "Presupuestos", contpaq: "Mapeo CONTPAQ", system: "Sistema" }
 const dom = {}
 let currentTab = null
 
@@ -26,7 +26,6 @@ let routingCompanies = []
 let routingMemberships = []
 let routingAssignments = []
 let routingApprovers = []
-let extraordinaryFaculties = []
 
 // ── Init ────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", initConfigurationPage)
@@ -56,6 +55,7 @@ function cacheDom() {
     members: document.getElementById("membersPanel"),
     originAccounts: document.getElementById("originAccountsPanel"),
     budgets: document.getElementById("budgetsPanel"),
+    contpaq: document.getElementById("contpaqPanel"),
     system: document.getElementById("systemPanel"),
   }
 }
@@ -97,8 +97,6 @@ function bindEvents() {
   document.getElementById("routingAssignmentCompany")?.addEventListener("change", loadRoutingApproverOptions)
   document.getElementById("routingAssignmentForm")?.addEventListener("submit", saveRoutingAssignment)
   document.getElementById("routingAssignmentsTableBody")?.addEventListener("click", handleRoutingAssignmentAction)
-  document.getElementById("extraordinaryFacultyForm")?.addEventListener("submit", saveExtraordinaryFaculty)
-  document.getElementById("extraordinaryFacultiesTableBody")?.addEventListener("click", handleExtraordinaryFacultyAction)
 }
 
 // ── Tab logic ────────────────────────────────────────────────────
@@ -143,6 +141,7 @@ function openTab(tab) {
   if (tab === "system" && window.FluxAuth?.isSysadmin?.()) loadSystemAdministration()
 
   if (tab === "originAccounts" && !originLoaded) loadOriginAccounts()
+  if (tab === "contpaq" && !contpaqLoaded) loadContpaqMapper()
   if (tab === "members" && !sociosLoaded) loadSocios()
 }
 
@@ -611,7 +610,7 @@ function groupFromRoleNames(roleNames) {
 async function loadUsers() {
   const tbody = document.getElementById("usersTableBody")
   if (!tbody) return
-  tbody.innerHTML = `<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando…</td></tr>`
+  tbody.innerHTML = `<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text-3)">Cargando…</td></tr>`
 
   try {
     // Traer todos los profiles con sus roles
@@ -641,7 +640,7 @@ async function loadUsers() {
 
     renderUsersTable()
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(err.message)}</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(err.message)}</td></tr>`
   }
 }
 
@@ -659,7 +658,7 @@ function renderUsersTable() {
   })
 
   if (!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin resultados.</td></tr>`
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Sin resultados.</td></tr>`
     return
   }
 
@@ -668,6 +667,10 @@ function renderUsersTable() {
       <td>
         <span class="cell-main">${escHtml(u.full_name || "Sin nombre")}</span>
         <span class="cell-sub">${escHtml(u.email || "")}</span>
+      </td>
+      <td>
+        ${Components.badge(u.active === true ? "Activo" : "Inactivo", u.active === true ? "success" : "neutral")}
+        ${u.active === true ? "" : `<span class="cell-sub">Este perfil conserva historial, pero no puede agregarse a una membresía ni utilizarse como aprobador.</span>`}
       </td>
       <td>${u.roleNames.length ? escHtml(u.roleNames.join(", ")) : Components.badge("Sin rol", "neutral")}</td>
       <td>${Components.badge(GROUP_LABELS[u.group] || u.group, GROUP_BADGE[u.group] || "neutral")}</td>
@@ -695,7 +698,7 @@ function openAssignRole(profileId, currentGroup) {
   if (!user) return
   assigningProfileId = profileId
   document.getElementById("assignRoleSubtitle").textContent =
-    `${user.full_name || user.email} — rol actual: ${GROUP_LABELS[currentGroup] || currentGroup}`
+    `${user.full_name || user.email} - rol actual: ${GROUP_LABELS[currentGroup] || currentGroup}. Perfil ${user.active === true ? "activo" : "inactivo"}; cambiar el rol no modifica este estado.`
   // Preselect current group radio
   const roleMap = { sysadmin: "sysadmin", admin_finance: "finance", direction: "director", operation: "solicitante", pending: "pending" }
   const currentValue = roleMap[currentGroup] || "pending"
@@ -741,7 +744,14 @@ async function saveAssignRole() {
       if (ie) throw ie
     }
 
-    showToast("Rol actualizado", "El acceso del usuario fue actualizado correctamente.", "success")
+    const updatedUser = allUsers.find((user) => user.id === assigningProfileId)
+    showToast(
+      "Rol actualizado",
+      updatedUser?.active === true
+        ? "El acceso del usuario fue actualizado correctamente."
+        : "El rol se guardó, pero el perfil continúa inactivo y sin acceso operativo.",
+      "success"
+    )
     closeAssignRole()
     await loadSystemAdministration()
   } catch (err) {
@@ -755,7 +765,6 @@ async function saveAssignRole() {
 async function loadSystemAdministration() {
   await loadUsers()
   await loadApproverRoutingAdmin()
-  await loadExtraordinaryFaculties()
 }
 
 async function loadApproverRoutingAdmin() {
@@ -789,19 +798,15 @@ async function loadApproverRoutingAdmin() {
 
 function populateRoutingBaseSelectors() {
   const profileOptions = `<option value="">Seleccionar usuario...</option>` +
-    allUsers.filter(user => user.active !== false).map(user => `<option value="${escHtml(user.id)}">${escHtml(user.full_name || user.email || "Sin nombre")}</option>`).join("")
+    allUsers.filter(user => user.active === true).map(user => `<option value="${escHtml(user.id)}">${escHtml(user.full_name || user.email || "Sin nombre")}</option>`).join("")
   const companyOptions = `<option value="">Seleccionar empresa...</option>` +
     routingCompanies.map(company => `<option value="${escHtml(company.id)}">${escHtml(company.legal_name || company.name || "Sin empresa")}</option>`).join("")
   const membershipProfile = document.getElementById("routingMembershipProfile")
   const membershipCompany = document.getElementById("routingMembershipCompany")
   const requester = document.getElementById("routingRequester")
-  const facultyProfile = document.getElementById("extraordinaryFacultyProfile")
-  const facultyCompany = document.getElementById("extraordinaryFacultyCompany")
   if (membershipProfile) membershipProfile.innerHTML = profileOptions
   if (membershipCompany) membershipCompany.innerHTML = companyOptions
   if (requester) requester.innerHTML = profileOptions.replace("Seleccionar usuario...", "Seleccionar solicitante...")
-  if (facultyProfile) facultyProfile.innerHTML = profileOptions.replace("Seleccionar usuario...", "Seleccionar perfil...")
-  if (facultyCompany) facultyCompany.innerHTML = companyOptions
 }
 
 function renderRoutingMemberships() {
@@ -813,7 +818,7 @@ function renderRoutingMemberships() {
   }
   tbody.innerHTML = routingMemberships.map(row => `
     <tr>
-      <td><span class="cell-main">${escHtml(row.profile_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.profile_email || "")}</span></td>
+      <td><span class="cell-main">${escHtml(row.profile_name || "Sin nombre")}</span><span class="cell-sub">${escHtml(row.profile_email || "")}</span>${allUsers.find((user) => user.id === row.profile_id)?.active === true ? "" : `<span class="cell-sub" style="color:var(--ruby)">Perfil inactivo; se conserva solo por historial.</span>`}</td>
       <td>${escHtml(row.company_name || "Sin empresa")}</td>
       <td>${Components.badge(row.active ? "Activa" : "Inactiva", row.active ? "success" : "neutral")}</td>
       <td><button type="button" class="small-btn" data-routing-membership-id="${escHtml(row.id)}">${row.active ? "Desactivar" : "Activar"}</button></td>
@@ -986,103 +991,6 @@ async function handleRoutingAssignmentAction(event) {
   }
 }
 
-async function loadExtraordinaryFaculties() {
-  const tbody = document.getElementById("extraordinaryFacultiesTableBody")
-  if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Cargando facultades...</td></tr>`
-  const { data, error } = await configClient.rpc("list_extraordinary_profile_faculties")
-  if (error) {
-    extraordinaryFaculties = []
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--ruby)">${escHtml(friendlyExtraordinaryFacultyError(error))}</td></tr>`
-    return
-  }
-  extraordinaryFaculties = Array.isArray(data) ? data : []
-  renderExtraordinaryFaculties()
-}
-
-function renderExtraordinaryFaculties() {
-  const tbody = document.getElementById("extraordinaryFacultiesTableBody")
-  if (!tbody) return
-  if (!extraordinaryFaculties.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin facultades extraordinarias configuradas. No se sembró ningún perfil.</td></tr>`
-    return
-  }
-  tbody.innerHTML = extraordinaryFaculties.map(row => `
-    <tr>
-      <td><strong>${escHtml(row.profile_name || "Perfil")}</strong></td>
-      <td>${escHtml(row.company_name || "Empresa")}</td>
-      <td><span class="badge ${row.enabled ? "success" : "neutral"}">${row.enabled ? "Vigente" : "Revocada"}</span></td>
-      <td>${escHtml(row.reason || "—")}</td>
-      <td><button type="button" class="small-btn ${row.enabled ? "danger" : ""}" data-extraordinary-faculty-profile="${escHtml(row.profile_id)}" data-extraordinary-faculty-company="${escHtml(row.company_id)}" data-extraordinary-faculty-enabled="${row.enabled ? "false" : "true"}">${row.enabled ? "Revocar" : "Conceder"}</button></td>
-    </tr>
-  `).join("")
-}
-
-async function saveExtraordinaryFaculty(event) {
-  event.preventDefault()
-  const profileId = document.getElementById("extraordinaryFacultyProfile")?.value || ""
-  const companyId = document.getElementById("extraordinaryFacultyCompany")?.value || ""
-  const reason = document.getElementById("extraordinaryFacultyReason")?.value.trim() || ""
-  if (!profileId || !companyId || reason.length < 10) {
-    return showToast("Datos incompletos", "Selecciona perfil, empresa y captura un motivo de al menos 10 caracteres.", "warning")
-  }
-  await persistExtraordinaryFaculty(profileId, companyId, true, reason)
-}
-
-async function handleExtraordinaryFacultyAction(event) {
-  const button = event.target.closest("[data-extraordinary-faculty-profile]")
-  if (!button) return
-  const reason = document.getElementById("extraordinaryFacultyReason")?.value.trim() || ""
-  if (reason.length < 10) {
-    document.getElementById("extraordinaryFacultyReason")?.focus()
-    return showToast("Motivo requerido", "Captura arriba el motivo de la concesión o revocación.", "warning")
-  }
-  await persistExtraordinaryFaculty(
-    button.dataset.extraordinaryFacultyProfile,
-    button.dataset.extraordinaryFacultyCompany,
-    button.dataset.extraordinaryFacultyEnabled === "true",
-    reason,
-  )
-}
-
-async function persistExtraordinaryFaculty(profileId, companyId, enabled, reason) {
-  const button = document.getElementById("saveExtraordinaryFacultyBtn")
-  if (button) button.disabled = true
-  try {
-    const { error } = await configClient.rpc("set_extraordinary_profile_faculty", {
-      p_profile_id: profileId,
-      p_company_id: companyId,
-      p_enabled: enabled,
-      p_reason: reason,
-    })
-    if (error) throw error
-    showToast(
-      enabled ? "Facultad concedida" : "Facultad revocada",
-      enabled
-        ? "El perfil podrá solicitar tratamiento extraordinario sólo en esta empresa."
-        : "El perfil dejó de tener facultad extraordinaria en esta empresa.",
-      enabled ? "success" : "warning",
-    )
-    document.getElementById("extraordinaryFacultyReason").value = ""
-    await loadExtraordinaryFaculties()
-  } catch (error) {
-    showToast("No se pudo guardar", friendlyExtraordinaryFacultyError(error), "danger")
-  } finally {
-    if (button) button.disabled = false
-  }
-}
-
-function friendlyExtraordinaryFacultyError(error) {
-  const raw = String(error?.message || error || "Error no identificado")
-  const known = {
-    sysadmin_role_required: "Sólo SysAdmin puede administrar facultades.",
-    extraordinary_faculty_reason_required: "Captura un motivo de 10 a 500 caracteres.",
-    active_profile_required: "El perfil debe estar activo.",
-    active_company_membership_required: "El perfil necesita una membresía activa en la empresa.",
-  }
-  const key = Object.keys(known).find(item => raw.includes(item))
-  return key ? known[key] : raw
-}
-
 function setRoutingAssignmentHelp(message, isError = false) {
   const element = document.getElementById("routingAssignmentHelp")
   if (!element) return
@@ -1099,9 +1007,229 @@ function friendlyRoutingError(error) {
     approver_company_membership_required: "El usuario no pertenece a la empresa o su membresía no está activa.",
     approver_role_required: "El usuario no tiene rol finance/director.",
     approver_not_eligible_for_company: "El aprobador debe ser finance/director y pertenecer a la empresa.",
+    profile_not_found_or_inactive: "Solo los perfiles activos pueden recibir una membresía.",
     requester_cannot_be_own_pool_approver: "El solicitante no puede agregarse como su propio aprobador.",
     approver_already_configured: "Este aprobador ya está configurado para el solicitante y la empresa.",
   }
   const key = Object.keys(known).find(item => message.includes(item))
   return key ? known[key] : friendlyError(error)
+}
+
+
+// ── Mapeo contable CONTPAQ (partida → cuenta) ───────────────────
+let contpaqLoaded = false
+const contpaqState = { companies: [], companyId: null, accounts: new Map(), categories: [], mappings: new Map() }
+
+async function loadContpaqMapper() {
+  contpaqLoaded = true
+  const body = document.getElementById("contpaqMapperBody")
+  try {
+    const [companiesR, categoriesR] = await Promise.all([
+      configClient.from("companies").select("id,name,active").eq("active", true).order("name"),
+      configClient.from("budget_categories").select("id,name,category,code,active").eq("active", true).order("category").order("name"),
+    ])
+    if (companiesR.error) throw companiesR.error
+    if (categoriesR.error) throw categoriesR.error
+    contpaqState.companies = companiesR.data || []
+    contpaqState.categories = categoriesR.data || []
+
+    const sel = document.getElementById("contpaqCompanySelect")
+    if (sel) {
+      sel.innerHTML = contpaqState.companies.map((c) => `<option value="${c.id}">${escHtml(c.name)}</option>`).join("")
+      sel.addEventListener("change", () => selectContpaqCompany(sel.value))
+    }
+    document.getElementById("contpaqSearch")?.addEventListener("input", renderContpaqMapper)
+    document.getElementById("contpaqFilter")?.addEventListener("change", renderContpaqMapper)
+    await selectContpaqCompany(contpaqState.companies[0]?.id || null)
+  } catch (err) {
+    if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--ruby)">${escHtml(errorMessage(err))}</td></tr>`
+  }
+}
+
+async function selectContpaqCompany(companyId) {
+  contpaqState.companyId = companyId
+  const body = document.getElementById("contpaqMapperBody")
+  if (!companyId) { if (body) body.innerHTML = "" ; return }
+  if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Cargando catálogo...</td></tr>`
+  try {
+    const [accountsRows, mappingsRows] = await Promise.all([
+      fetchAllRows(() => configClient.from("contpaq_accounts").select("code,name,is_detail").eq("company_id", companyId).order("code")),
+      fetchAllRows(() => configClient.from("budget_account_mappings").select("budget_category_id,contpaq_account_code,needs_review").eq("company_id", companyId).order("budget_category_id")),
+    ])
+    contpaqState.accounts = new Map(accountsRows.map((a) => [a.code, a]))
+    contpaqState.mappings = new Map(mappingsRows.map((m) => [m.budget_category_id, m.contpaq_account_code]))
+    contpaqState.review = new Set(mappingsRows.filter((m) => m.needs_review).map((m) => m.budget_category_id))
+
+    // datalist: solo cuentas de detalle (mapeables), gasto primero
+    const list = document.getElementById("contpaqAccountsList")
+    if (list) {
+      const detalle = accountsRows.filter((a) => a.is_detail)
+      detalle.sort((a, b) => (a.code[0] === "6" ? 0 : 1) - (b.code[0] === "6" ? 0 : 1) || a.code.localeCompare(b.code))
+      list.innerHTML = detalle.map((a) => `<option value="${a.code}">${a.code} — ${escHtml(a.name)}</option>`).join("")
+    }
+    renderContpaqMapper()
+  } catch (err) {
+    if (body) body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--ruby)">${escHtml(errorMessage(err))} — ¿ya corriste el DDL del mapper en esta base?</td></tr>`
+  }
+}
+
+function renderContpaqMapper() {
+  const body = document.getElementById("contpaqMapperBody")
+  if (!body) return
+  const q = (document.getElementById("contpaqSearch")?.value || "").trim().toLowerCase()
+  const filtro = document.getElementById("contpaqFilter")?.value || "todas"
+  const cats = contpaqState.categories.filter((c) => {
+    if (q && !c.name.toLowerCase().includes(q) && !String(c.category || "").toLowerCase().includes(q)) return false
+    const mapeada = Boolean(contpaqState.accounts.get(contpaqState.mappings.get(c.id)))
+    if (filtro === "sinmapear") return !mapeada
+    if (filtro === "revisar") return contpaqState.review?.has(c.id)
+    return true
+  })
+  if (!contpaqState.accounts.size) {
+    body.innerHTML = `<tr><td colspan="4" style="padding:44px;text-align:center;color:var(--text-3)">Esta empresa no tiene catálogo CONTPAQ cargado.</td></tr>`
+    updateContpaqCounter(); return
+  }
+  const porGrupo = new Map()
+  for (const cat of cats) {
+    const g = cat.category || "Sin grupo"
+    if (!porGrupo.has(g)) porGrupo.set(g, [])
+    porGrupo.get(g).push(cat)
+  }
+  let html = ""
+  for (const [grupo, lista] of [...porGrupo.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"))) {
+    const mapeadas = lista.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
+    html += `<tr><td colspan="4" style="padding:8px 14px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--accent-text);background:var(--bg-hover)">${escHtml(grupo)} <span style="color:var(--text-3);font-weight:600;text-transform:none;letter-spacing:0">· ${mapeadas}/${lista.length}</span></td></tr>`
+    html += lista.map((cat) => {
+      const code = contpaqState.mappings.get(cat.id) || ""
+      const account = code ? contpaqState.accounts.get(code) : null
+      const ok = Boolean(account)
+      const revisar = contpaqState.review?.has(cat.id)
+      return `<tr data-cat="${cat.id}" style="${ok ? (revisar ? "background:rgba(245,158,11,.07)" : "") : "background:rgba(224,62,82,.05)"}">
+        <td style="padding-left:26px"><span style="display:flex;align-items:center;gap:6px"><span class="cell-main">${escHtml(cat.name)}</span><button type="button" class="icon-btn" data-grupo-edit="${cat.id}" title="Cambiar agrupación" style="width:24px;height:24px;font-size:12px;border:0">✎</button></span></td>
+        <td><input list="contpaqAccountsList" data-map-input="${cat.id}" value="${escHtml(code)}" placeholder="Código o buscar..." class="form-control" style="width:100%;font-variant-numeric:tabular-nums"></td>
+        <td data-map-name="${cat.id}" style="color:var(--text-2)">${account ? escHtml(account.name) : "—"}</td>
+        <td data-map-state="${cat.id}">${!ok
+          ? `<span class="badge warning">Sin mapear</span>`
+          : revisar
+            ? `<span class="badge warning" title="Asignación automática de confianza baja — confirma o corrige la cuenta">⚠ Revisar</span>`
+            : `<span class="badge success">Mapeada</span>`}</td>
+      </tr>`
+    }).join("")
+  }
+  body.innerHTML = html
+  body.querySelectorAll("[data-map-input]").forEach((input) => {
+    input.addEventListener("change", () => saveContpaqMapping(input.dataset.mapInput, input.value.trim(), input))
+  })
+  body.querySelectorAll("[data-grupo-edit]").forEach((btn) =>
+    btn.addEventListener("click", () => openGrupoDialog(btn.dataset.grupoEdit)))
+  updateContpaqCounter()
+}
+
+function updateContpaqCounter() {
+  const el = document.getElementById("contpaqMapperCounter")
+  if (!el) return
+  const total = contpaqState.categories.length
+  const mapped = contpaqState.categories.filter((c) => contpaqState.accounts.get(contpaqState.mappings.get(c.id))).length
+  const rev = contpaqState.review?.size || 0
+  el.textContent = `${mapped} de ${total} partidas mapeadas${mapped < total ? ` · ${total - mapped} sin mapear` : ""}${rev ? ` · ⚠ ${rev} por revisar` : ""}${mapped === total && !rev ? " · completo ✓" : ""}`
+}
+
+async function saveContpaqMapping(categoryId, code, input) {
+  const companyId = contpaqState.companyId
+  const profileId = window.FluxAuth?.getProfile?.()?.id || null
+  try {
+    if (!code) {
+      const { error } = await configClient.from("budget_account_mappings")
+        .delete().eq("company_id", companyId).eq("budget_category_id", categoryId)
+      if (error) throw error
+      contpaqState.mappings.delete(categoryId)
+    } else {
+      const account = contpaqState.accounts.get(code)
+      if (!account) { showToastSafe("Cuenta no encontrada", `"${code}" no está en el catálogo CONTPAQ de esta empresa.`, "danger"); renderContpaqMapper(); return }
+      if (!account.is_detail) { showToastSafe("Cuenta de mayor", `${code} no es cuenta de detalle — elige una cuenta hoja.`, "danger"); renderContpaqMapper(); return }
+      const { error } = await configClient.from("budget_account_mappings")
+        .upsert({ company_id: companyId, budget_category_id: categoryId, contpaq_account_code: code, needs_review: false, updated_by: profileId, updated_at: new Date().toISOString() }, { onConflict: "company_id,budget_category_id" })
+      if (error) throw error
+      contpaqState.mappings.set(categoryId, code)
+      contpaqState.review?.delete(categoryId)
+    }
+    renderContpaqMapper()
+  } catch (err) {
+    showToastSafe("No se pudo guardar", errorMessage(err), "danger")
+  }
+}
+
+function showToastSafe(title, desc, variant) {
+  if (typeof showToast === "function") showToast(title, desc, variant)
+  else alert(`${title}: ${desc}`)
+}
+
+function errorMessage(err) { return err?.message || String(err) }
+
+
+// Cierre genérico de diálogos (botones con data-close-dialog)
+document.querySelectorAll("[data-close-dialog]").forEach((btn) =>
+  btn.addEventListener("click", () => btn.closest("dialog")?.close()))
+
+// ── Cambiar agrupación de una partida ───────────────────────────
+const NUEVO_GRUPO = "__nuevo__"
+let grupoDialogCatId = null
+
+function openGrupoDialog(catId) {
+  const cat = contpaqState.categories.find((c) => c.id === catId)
+  if (!cat) return
+  grupoDialogCatId = catId
+  const sub = document.getElementById("grupoDialogPartida")
+  if (sub) sub.textContent = `${cat.name} — hoy en "${cat.category || "Sin grupo"}"`
+  const sel = document.getElementById("grupoSelect")
+  if (sel) {
+    const grupos = [...new Set(contpaqState.categories.map((c) => c.category || "Sin grupo"))].sort((a, b) => a.localeCompare(b, "es"))
+    sel.innerHTML = grupos.map((g) => `<option value="${escHtml(g)}"${g === (cat.category || "Sin grupo") ? " selected" : ""}>${escHtml(g)}</option>`).join("") +
+      `<option value="${NUEVO_GRUPO}">➕ Crear nueva agrupación...</option>`
+  }
+  document.getElementById("grupoNuevoWrap")?.classList.add("hidden")
+  const inp = document.getElementById("grupoNuevoInput")
+  if (inp) inp.value = ""
+  document.getElementById("grupoDialog")?.showModal()
+}
+
+document.getElementById("grupoSelect")?.addEventListener("change", (e) => {
+  document.getElementById("grupoNuevoWrap")?.classList.toggle("hidden", e.target.value !== NUEVO_GRUPO)
+  if (e.target.value === NUEVO_GRUPO) document.getElementById("grupoNuevoInput")?.focus()
+})
+
+document.getElementById("grupoForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const sel = document.getElementById("grupoSelect")
+  let grupo = sel?.value || ""
+  if (grupo === NUEVO_GRUPO) {
+    grupo = (document.getElementById("grupoNuevoInput")?.value || "").trim()
+    if (!grupo) { showToastSafe("Falta el nombre", "Escribe el nombre de la nueva agrupación.", "danger"); return }
+  }
+  try {
+    const { error } = await configClient.from("budget_categories")
+      .update({ category: grupo }).eq("id", grupoDialogCatId)
+    if (error) throw error
+    const cat = contpaqState.categories.find((c) => c.id === grupoDialogCatId)
+    if (cat) cat.category = grupo
+    document.getElementById("grupoDialog")?.close()
+    renderContpaqMapper()
+    showToastSafe("Agrupación actualizada", `Ahora vive en "${grupo}".`, "success")
+  } catch (err) {
+    const msg = /policy|permission|denied/i.test(errorMessage(err))
+      ? "La base aún no permite editar partidas — falta correr rls_budget_categories_write.sql"
+      : errorMessage(err)
+    showToastSafe("No se pudo guardar", msg, "danger")
+  }
+})
+
+async function fetchAllRows(builderFactory, pageSize = 1000) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await builderFactory().range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data || []))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
 }

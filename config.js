@@ -682,6 +682,8 @@ try {
       members: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.DIRECTION],
       originAccounts: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
       budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+      // Mapeo CONTPAQ — en pruebas: solo sysadmin hasta liberar a finanzas
+      contpaq: [ROLE_GROUPS.SYSADMIN],
       system: [ROLE_GROUPS.SYSADMIN],
     }
     return (tabGroups[tab] || []).includes(group)
