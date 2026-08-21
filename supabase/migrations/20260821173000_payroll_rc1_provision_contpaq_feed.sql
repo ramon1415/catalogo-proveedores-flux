@@ -32,26 +32,42 @@ create table if not exists public.payroll_provision_entries (
   created_by uuid references public.profiles(id)
 );
 
+-- Expense-side accounts are scoped by Company + Cost Center because the chart
+-- can use different detail accounts for different operating locations.
 create table if not exists public.payroll_contpaq_role_mappings (
   company_id uuid not null references public.companies(id) on delete cascade,
-  role text not null check (role in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance','bank_credit')),
+  cost_center_id uuid not null references public.cost_centers(id) on delete cascade,
+  role text not null check (role in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance')),
   contpaq_account_code text not null,
   updated_by uuid references public.profiles(id),
   updated_at timestamptz not null default now(),
-  primary key(company_id,role),
+  primary key(company_id,cost_center_id,role),
+  foreign key(company_id,contpaq_account_code) references public.contpaq_accounts(company_id,code)
+);
+
+-- Bank credit is scoped by the exact source bank account selected on the payroll request.
+create table if not exists public.payroll_contpaq_bank_mappings (
+  company_bank_account_id uuid primary key references public.company_bank_accounts(id) on delete cascade,
+  company_id uuid not null references public.companies(id) on delete cascade,
+  contpaq_account_code text not null,
+  updated_by uuid references public.profiles(id),
+  updated_at timestamptz not null default now(),
   foreign key(company_id,contpaq_account_code) references public.contpaq_accounts(company_id,code)
 );
 
 alter table public.payroll_provision_settings enable row level security;
 alter table public.payroll_provision_entries enable row level security;
 alter table public.payroll_contpaq_role_mappings enable row level security;
+alter table public.payroll_contpaq_bank_mappings enable row level security;
 
 revoke all on public.payroll_provision_settings from public,anon,authenticated;
 revoke all on public.payroll_provision_entries from public,anon,authenticated;
 revoke all on public.payroll_contpaq_role_mappings from public,anon,authenticated;
+revoke all on public.payroll_contpaq_bank_mappings from public,anon,authenticated;
 grant select on public.payroll_provision_settings to authenticated;
 grant select on public.payroll_provision_entries to authenticated;
 grant select on public.payroll_contpaq_role_mappings to authenticated;
+grant select on public.payroll_contpaq_bank_mappings to authenticated;
 
 drop policy if exists payroll_provision_settings_finance_read on public.payroll_provision_settings;
 create policy payroll_provision_settings_finance_read on public.payroll_provision_settings for select to authenticated
@@ -63,6 +79,10 @@ using (public.payroll_has_finance_pii_access() and public.has_active_company_mem
 
 drop policy if exists payroll_contpaq_role_mappings_finance_read on public.payroll_contpaq_role_mappings;
 create policy payroll_contpaq_role_mappings_finance_read on public.payroll_contpaq_role_mappings for select to authenticated
+using (public.payroll_has_finance_pii_access() and public.has_active_company_membership(public.current_profile_id(),company_id));
+
+drop policy if exists payroll_contpaq_bank_mappings_finance_read on public.payroll_contpaq_bank_mappings;
+create policy payroll_contpaq_bank_mappings_finance_read on public.payroll_contpaq_bank_mappings for select to authenticated
 using (public.payroll_has_finance_pii_access() and public.has_active_company_membership(public.current_profile_id(),company_id));
 
 create or replace function public.configure_payroll_provision(
@@ -95,6 +115,7 @@ grant execute on function public.configure_payroll_provision(uuid,numeric) to au
 
 create or replace function public.configure_payroll_contpaq_role(
   p_company_id uuid,
+  p_cost_center_id uuid,
   p_role text,
   p_contpaq_account_code text
 ) returns jsonb
@@ -104,18 +125,45 @@ declare v_actor uuid:=public.current_profile_id();
 begin
   if v_actor is null or not public.payroll_has_finance_pii_access() then raise exception 'PAYROLL_FINANCE_REQUIRED'; end if;
   if not public.has_active_company_membership(v_actor,p_company_id) then raise exception 'PAYROLL_COMPANY_MEMBERSHIP_REQUIRED'; end if;
-  if p_role not in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance','bank_credit') then raise exception 'PAYROLL_CONTPAQ_ROLE_INVALID'; end if;
+  if not exists(select 1 from public.company_cost_centers where company_id=p_company_id and cost_center_id=p_cost_center_id and active) then
+    raise exception 'PAYROLL_COST_CENTER_SCOPE_REQUIRED';
+  end if;
+  if p_role not in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance') then raise exception 'PAYROLL_CONTPAQ_ROLE_INVALID'; end if;
   if not exists(select 1 from public.contpaq_accounts where company_id=p_company_id and code=p_contpaq_account_code and is_detail) then
     raise exception 'PAYROLL_CONTPAQ_DETAIL_ACCOUNT_REQUIRED';
   end if;
-  insert into public.payroll_contpaq_role_mappings(company_id,role,contpaq_account_code,updated_by,updated_at)
-  values(p_company_id,p_role,p_contpaq_account_code,v_actor,now())
-  on conflict(company_id,role) do update set contpaq_account_code=excluded.contpaq_account_code,updated_by=v_actor,updated_at=now();
-  return jsonb_build_object('status','configured','company_id',p_company_id,'role',p_role,'contpaq_account_code',p_contpaq_account_code);
+  insert into public.payroll_contpaq_role_mappings(company_id,cost_center_id,role,contpaq_account_code,updated_by,updated_at)
+  values(p_company_id,p_cost_center_id,p_role,p_contpaq_account_code,v_actor,now())
+  on conflict(company_id,cost_center_id,role) do update set contpaq_account_code=excluded.contpaq_account_code,updated_by=v_actor,updated_at=now();
+  return jsonb_build_object('status','configured','company_id',p_company_id,'cost_center_id',p_cost_center_id,'role',p_role,'contpaq_account_code',p_contpaq_account_code);
 end;
 $$;
-revoke all on function public.configure_payroll_contpaq_role(uuid,text,text) from public,anon;
-grant execute on function public.configure_payroll_contpaq_role(uuid,text,text) to authenticated;
+revoke all on function public.configure_payroll_contpaq_role(uuid,uuid,text,text) from public,anon;
+grant execute on function public.configure_payroll_contpaq_role(uuid,uuid,text,text) to authenticated;
+
+create or replace function public.configure_payroll_contpaq_bank(
+  p_company_bank_account_id uuid,
+  p_contpaq_account_code text
+) returns jsonb
+language plpgsql security definer set search_path='public','pg_temp'
+as $$
+declare v_actor uuid:=public.current_profile_id(); v_company_id uuid;
+begin
+  if v_actor is null or not public.payroll_has_finance_pii_access() then raise exception 'PAYROLL_FINANCE_REQUIRED'; end if;
+  select company_id into v_company_id from public.company_bank_accounts where id=p_company_bank_account_id and active;
+  if v_company_id is null then raise exception 'PAYROLL_SOURCE_BANK_ACCOUNT_REQUIRED'; end if;
+  if not public.has_active_company_membership(v_actor,v_company_id) then raise exception 'PAYROLL_COMPANY_MEMBERSHIP_REQUIRED'; end if;
+  if not exists(select 1 from public.contpaq_accounts where company_id=v_company_id and code=p_contpaq_account_code and is_detail) then
+    raise exception 'PAYROLL_CONTPAQ_DETAIL_ACCOUNT_REQUIRED';
+  end if;
+  insert into public.payroll_contpaq_bank_mappings(company_bank_account_id,company_id,contpaq_account_code,updated_by,updated_at)
+  values(p_company_bank_account_id,v_company_id,p_contpaq_account_code,v_actor,now())
+  on conflict(company_bank_account_id) do update set company_id=excluded.company_id,contpaq_account_code=excluded.contpaq_account_code,updated_by=v_actor,updated_at=now();
+  return jsonb_build_object('status','configured','company_id',v_company_id,'company_bank_account_id',p_company_bank_account_id,'contpaq_account_code',p_contpaq_account_code);
+end;
+$$;
+revoke all on function public.configure_payroll_contpaq_bank(uuid,text) from public,anon;
+grant execute on function public.configure_payroll_contpaq_bank(uuid,text) to authenticated;
 
 create or replace function public.post_payroll_provision_internal(
   p_payment_request_id uuid,
@@ -208,20 +256,35 @@ $$;
 revoke all on function public.get_payroll_provision_summary(uuid) from public,anon;
 grant execute on function public.get_payroll_provision_summary(uuid) to authenticated;
 
-create or replace function public.payroll_contpaq_account_for_role_internal(p_company_id uuid,p_role text)
+create or replace function public.payroll_contpaq_account_for_role_internal(p_company_id uuid,p_cost_center_id uuid,p_role text)
 returns text language plpgsql security definer set search_path='public','pg_temp'
 as $$
 declare v_code text;
 begin
   select m.contpaq_account_code into v_code from public.payroll_contpaq_role_mappings m
   join public.contpaq_accounts a on a.company_id=m.company_id and a.code=m.contpaq_account_code and a.is_detail
-  where m.company_id=p_company_id and m.role=p_role;
+  where m.company_id=p_company_id and m.cost_center_id=p_cost_center_id and m.role=p_role;
   if v_code is null then raise exception 'PAYROLL_CONTPAQ_MAPPING_REQUIRED: %',p_role; end if;
   return v_code;
 end;
 $$;
-revoke all on function public.payroll_contpaq_account_for_role_internal(uuid,text) from public,anon,authenticated;
-grant execute on function public.payroll_contpaq_account_for_role_internal(uuid,text) to service_role;
+revoke all on function public.payroll_contpaq_account_for_role_internal(uuid,uuid,text) from public,anon,authenticated;
+grant execute on function public.payroll_contpaq_account_for_role_internal(uuid,uuid,text) to service_role;
+
+create or replace function public.payroll_contpaq_bank_account_internal(p_company_bank_account_id uuid)
+returns text language plpgsql security definer set search_path='public','pg_temp'
+as $$
+declare v_code text;
+begin
+  select m.contpaq_account_code into v_code from public.payroll_contpaq_bank_mappings m
+  join public.contpaq_accounts a on a.company_id=m.company_id and a.code=m.contpaq_account_code and a.is_detail
+  where m.company_bank_account_id=p_company_bank_account_id;
+  if v_code is null then raise exception 'PAYROLL_CONTPAQ_BANK_MAPPING_REQUIRED'; end if;
+  return v_code;
+end;
+$$;
+revoke all on function public.payroll_contpaq_bank_account_internal(uuid) from public,anon,authenticated;
+grant execute on function public.payroll_contpaq_bank_account_internal(uuid) to service_role;
 
 create or replace function public.get_payroll_contpaq_feed(p_payment_request_id uuid)
 returns jsonb
@@ -251,27 +314,27 @@ begin
   v_variance:=v_actual_toka-v_expected_toka;
 
   if v_cash>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'cash_payroll_expense');
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'cash_payroll_expense');
     v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','cash_payroll_expense','account_code',v_code,'debit',v_cash,'credit',0,'concept','Nómina en efectivo'));
     v_debits:=v_debits+v_cash;
   end if;
   if v_benefit>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'vouchers_expense');
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'vouchers_expense');
     v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','vouchers_expense','account_code',v_code,'debit',v_benefit,'credit',0,'concept','Vales de despensa'));
     v_debits:=v_debits+v_benefit;
   end if;
   if v_fee>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'toka_fee_expense');
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'toka_fee_expense');
     v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','toka_fee_expense','account_code',v_code,'debit',v_fee,'credit',0,'concept','Comisión TOKA'));
     v_debits:=v_debits+v_fee;
   end if;
   if v_tax>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'input_vat');
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'input_vat');
     v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','input_vat','account_code',v_code,'debit',v_tax,'credit',0,'concept','IVA acreditable TOKA'));
     v_debits:=v_debits+v_tax;
   end if;
   if v_variance<>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'toka_variance');
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'toka_variance');
     if v_variance>0 then
       v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','toka_variance','account_code',v_code,'debit',v_variance,'credit',0,'concept','Variación fondeo TOKA'));
       v_debits:=v_debits+v_variance;
@@ -281,16 +344,17 @@ begin
     end if;
   end if;
 
-  v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,'bank_credit');
+  if v_request.company_bank_account_id is null then raise exception 'PAYROLL_SOURCE_BANK_ACCOUNT_REQUIRED'; end if;
+  v_seq:=v_seq+1; v_code:=public.payroll_contpaq_bank_account_internal(v_request.company_bank_account_id);
   v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','bank_credit','account_code',v_code,'debit',0,'credit',v_request.amount_requested,'concept','Salida Tesorería nómina'));
   v_credits:=v_credits+v_request.amount_requested;
 
   if round(v_debits-v_credits,2)<>0 then raise exception 'PAYROLL_CONTPAQ_UNBALANCED_FEED'; end if;
   return jsonb_build_object('contract_version','payroll-contpaq-feed-v1','source_type','payroll','payment_request_id',v_request.id,
     'request_number',v_request.request_number,'company_id',v_request.company_id,'cost_center_id',v_request.cost_center_id,
-    'period_start',v_request.payroll_period_start,'period_end',v_request.payroll_period_end,'accounting_date',v_request.paid_at::date,
-    'currency','MXN','treasury_outflow',v_request.amount_requested,'debit_total',v_debits,'credit_total',v_credits,'lines',v_lines,
-    'contains_employee_pii',false);
+    'company_bank_account_id',v_request.company_bank_account_id,'period_start',v_request.payroll_period_start,'period_end',v_request.payroll_period_end,
+    'accounting_date',v_request.paid_at::date,'currency','MXN','treasury_outflow',v_request.amount_requested,
+    'debit_total',v_debits,'credit_total',v_credits,'lines',v_lines,'contains_employee_pii',false);
 end;
 $$;
 revoke all on function public.get_payroll_contpaq_feed(uuid) from public,anon;
