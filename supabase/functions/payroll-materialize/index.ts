@@ -1,8 +1,9 @@
-// N3G server trust boundary: all payroll physical formats are parsed from
-// server-downloaded bytes. Browser summaries remain diagnostic only.
+// N3G/RC1 server trust boundary: all payroll physical formats and the provision base
+// are parsed from server-downloaded bytes. Browser summaries remain diagnostic only.
 import "../../../payroll_parser.js";
 import "../../../payroll_real_formats.js";
 import "../../../payroll_real_reconcile.js";
+import "../../../payroll_provision_base.js";
 
 type ParserIssue = { code: string; source?: string; row?: number; field?: string };
 type SpeiRecord = { amountMinor: number; sourceAccount: string; clabe: string; employeeName: string; sourceRow: number };
@@ -23,10 +24,12 @@ type RealFormats = {
   normalizeName(value: unknown): string;
 };
 type RealReconcile = { CONTRACT_VERSION: string; reconcilePackage(input: any): any };
+type ProvisionBase = { CONTRACT_VERSION:string; parseProvisionBaseXlsx(input:Uint8Array):Promise<{valid:boolean;baseAmountMinor:number|null;rowCount:number;issues:string[]}> };
 declare global {
   var FluxPayrollParser: PayrollParser;
   var FluxPayrollRealFormats: RealFormats;
   var FluxPayrollRealReconcile: RealReconcile;
+  var FluxPayrollProvisionBase: ProvisionBase;
 }
 
 const CORS_HEADERS = {
@@ -81,6 +84,10 @@ async function verifyFile(base:string,serviceKey:string,context:Context,file:Cap
 
   if(file.kind==="caratula"){
     const parsed=await globalThis.FluxPayrollRealFormats.parseCoverXlsx(bytes); if(!parsed.valid) throw new Error("PAYROLL_COVER_SHEET_SERVER_PARSE_FAILED");
+    const provision=await globalThis.FluxPayrollProvisionBase.parseProvisionBaseXlsx(bytes);
+    if(!provision.valid||!Number.isSafeInteger(provision.baseAmountMinor)||Number(provision.baseAmountMinor)<=0) throw new Error("PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED");
+    parsed.provisionBaseAmountMinor=provision.baseAmountMinor;
+    parsed.provisionBaseRowCount=provision.rowCount;
     return {meta:safeMeta(file,digest,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,parsed.contractVersion,parsed.people.length,parsed.totals.netAmountMinor),parsed};
   }
   if(file.kind==="layout_mismo_banco"){
@@ -153,11 +160,14 @@ async function handler(req:Request):Promise<Response>{
       expectedChannels:context.expected_channels,
     });
     if(!packageResult.valid||packageResult.issues.length) throw new Error("PAYROLL_SERVER_PACKAGE_VALIDATION_FAILED");
+    const coverParsed=verified.get("caratula")!.parsed;
+    const provisionBaseAmountMinor=Number(coverParsed.provisionBaseAmountMinor);
+    if(!Number.isSafeInteger(provisionBaseAmountMinor)||provisionBaseAmountMinor<=0) throw new Error("PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED");
     const coverFileId=verified.get("caratula")!.meta.capture_file_id;
-    const lines=packageResult.people.map((p:any)=>({source_capture_file_id:coverFileId,source_sheet:verified.get("caratula")!.parsed.sheetName,source_row_number:p.sourceRow,extraction_version:verified.get("caratula")!.parsed.contractVersion,employee_name:p.employeeName,rfc:p.rfc,curp:p.curp,nss:p.nss,bank_name:p.bankName,bank_account:p.account,clabe:p.clabe,net_amount_minor:p.netAmountMinor,bank_amount_minor:p.bankAmountMinor,spei_amount_minor:p.speiAmountMinor,vouchers_amount_minor:p.vouchersAmountMinor}));
+    const lines=packageResult.people.map((p:any)=>({source_capture_file_id:coverFileId,source_sheet:coverParsed.sheetName,source_row_number:p.sourceRow,extraction_version:coverParsed.contractVersion,employee_name:p.employeeName,rfc:p.rfc,curp:p.curp,nss:p.nss,bank_name:p.bankName,bank_account:p.account,clabe:p.clabe,net_amount_minor:p.netAmountMinor,bank_amount_minor:p.bankAmountMinor,spei_amount_minor:p.speiAmountMinor,vouchers_amount_minor:p.vouchersAmountMinor}));
     const channels=packageResult.channels.map((c:any)=>({channel:c.channel,amount_minor:c.amountMinor,benefit_amount_minor:c.benefitAmountMinor??null,fee_amount_minor:c.feeAmountMinor??null,tax_amount_minor:c.taxAmountMinor??null,expected_funding_amount_minor:c.expectedFundingAmountMinor??null,funding_variance_minor:c.fundingVarianceMinor??0}));
     const verifiedFiles=Array.from(verified.values()).map(v=>v.meta);
-    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:idempotencyHash,p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),files:verifiedFiles,channels,lines}});
+    const result=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{p_capture_session_id:context.id,p_expected_version:context.version,p_idempotency_key_hash:idempotencyHash,p_server_result:{contract_version:globalThis.FluxPayrollParser.PARSER_VERSION,valid:true,issues:[],warnings:packageResult.warnings,capture_session_id:context.id,capture_version:context.version,actor_profile_id:profiles[0].id,verified_at:new Date().toISOString(),parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION,globalThis.FluxPayrollProvisionBase.CONTRACT_VERSION],finance_review_required:Boolean(packageResult.financeReviewRequired),provision_base_amount_minor:provisionBaseAmountMinor,files:verifiedFiles,channels,lines}});
     return response(200,result);
   }catch(error){ const code=error instanceof Error?error.message:"PAYROLL_MATERIALIZATION_FAILED"; const safe=/^PAYROLL_[A-Z0-9_]+$/.test(code)?code:"PAYROLL_MATERIALIZATION_FAILED"; return response(errorStatus(safe),{error:safe}); }
 }
