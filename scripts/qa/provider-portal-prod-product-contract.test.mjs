@@ -5,14 +5,18 @@ import { execFileSync } from "node:child_process";
 const fail = (message) => { throw new Error(message); };
 const read = (file) => fs.readFileSync(file, "utf8");
 const manifest = JSON.parse(read("docs/ops/provider-portal-prod-product-candidate.json"));
-const changed = execFileSync("git", ["diff", "--name-only", "18cd2b1265038cfcd143814012bdc26746cc5ff7"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+const scopeBase = process.env.PRODUCT_SCOPE_BASE || manifest.generated_from_main_sha;
+const changed = execFileSync("git", ["diff", "--name-only", `${scopeBase}...HEAD`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 const allowed = new Set([
   ".github/workflows/provider-portal-prod-product-candidate.yml",
   "api/provider-intake-file-url.js", "api/runtime-config.js", "config.js",
+  "approval_batches.html", "aprobaciones.html", "comprobantes_batch.html",
+  "configuracion.html", "dashboard.html", "efectivo.html", "ingresos.html",
+  "layouts.html", "pagos_comprobaciones.html",
   "provider_intakes.html", "provider_intakes.css", "provider_intakes.js",
   "proveedores.html", "proveedores.js", "solicitar.html", "solicitar.css",
-  "solicitar-config.js", "solicitar-core.js", "solicitar.js",
-  "solicitudes.html", "solicitudes.js",
+  "solicitar-config.js", "solicitar-core.js", "solicitar.js", "socios.html",
+  "solicitudes.html", "solicitudes.js", "ux2_shared.css",
   "scripts/release/build-provider-portal-prod-product.mjs",
   "scripts/qa/provider-portal-prod-product-contract.test.mjs",
   "scripts/qa/provider-intake-file-api-contract.test.cjs",
@@ -24,6 +28,25 @@ const allowed = new Set([
 ]);
 for (const file of changed) if (!allowed.has(file)) fail("unexpected product scope: " + file);
 if (changed.some((file) => file.startsWith("supabase/migrations/") || /notification|n8n|payroll/i.test(file))) fail("forbidden release scope detected");
+
+const sharedCssCacheOnly = new Set([
+  "approval_batches.html", "aprobaciones.html", "comprobantes_batch.html",
+  "configuracion.html", "dashboard.html", "efectivo.html", "ingresos.html",
+  "layouts.html", "pagos_comprobaciones.html", "proveedores.html", "socios.html",
+  "solicitudes.html",
+]);
+for (const file of changed.filter((name) => sharedCssCacheOnly.has(name))) {
+  const diff = execFileSync("git", ["diff", "--unified=0", `${scopeBase}...HEAD`, "--", file], { encoding: "utf8" });
+  const contentLines = diff.split("\n").filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---)/.test(line));
+  if (contentLines.length !== 2 || contentLines.some((line) => !/ux2_shared\.css\?v=202608(?:05-brand-verde|18-modal-fix)/.test(line))) {
+    fail("non-cache shared shell change: " + file);
+  }
+}
+if (changed.includes("ux2_shared.css")) {
+  const diff = execFileSync("git", ["diff", "--unified=0", `${scopeBase}...HEAD`, "--", "ux2_shared.css"], { encoding: "utf8" });
+  const contentLines = diff.split("\n").filter((line) => /^\+/.test(line) && !/^\+\+\+/.test(line) && line !== "+");
+  if (contentLines.length !== 1 || contentLines[0] !== "+dialog:modal{margin:auto}") fail("unexpected shared modal fix");
+}
 
 const publicHtml = read("solicitar.html");
 const publicJs = read("solicitar.js");
@@ -92,6 +115,7 @@ if (!workboard.includes("window.FluxPaymentRequestsView?.statusMatches")) fail("
 if (!read("solicitudes.html").includes('config.js?v=20260818-provider-portal-reconciled')) fail("combined config cache buster missing");
 
 for (const [file, expected] of Object.entries(manifest.unchanged_main_sha256)) {
+  if (sharedCssCacheOnly.has(file)) continue;
   const actual = crypto.createHash("sha256").update(fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n")).digest("hex");
   if (actual !== expected) fail("normal Flux regression hash changed: " + file);
 }
