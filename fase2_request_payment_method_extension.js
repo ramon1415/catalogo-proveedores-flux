@@ -467,18 +467,32 @@
     }
   }
 
+  let enrichDetailTimer = null
+  let enrichDetailInFlight = false
+
   function patchRequestDetail() {
     const detail = document.getElementById("detailContent")
     if (!detail) return
-    const observer = new MutationObserver(() => window.setTimeout(enrichRequestDetail, 120))
+    // DEBOUNCE: antes cada mutación agendaba su propia llamada; al abrir el
+    // detalle se disparan varias seguidas y todas terminaban insertando.
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(enrichDetailTimer)
+      enrichDetailTimer = window.setTimeout(enrichRequestDetail, 120)
+    })
     observer.observe(detail, { childList: true, subtree: true })
   }
 
   async function enrichRequestDetail() {
+    if (enrichDetailInFlight) return
     const detail = document.getElementById("detailContent")
     const title = document.getElementById("detailTitle")?.textContent?.trim()
     const client = getClient()
     if (!detail || !title || !client || detail.querySelector("[data-fase2-detail]") || !title.startsWith("SOL-")) return
+    // Candado SÍNCRONO: la verificación de arriba ocurre ANTES del await y la
+    // inserción DESPUÉS; sin este flag, varias llamadas concurrentes pasaban el
+    // guard mientras esperaban la consulta y todas insertaban su tira (el bug
+    // de los chips repetidos en el detalle).
+    enrichDetailInFlight = true
     try {
       const { data, error } = await client
         .from("payment_requests")
@@ -486,6 +500,10 @@
         .eq("request_number", title)
         .maybeSingle()
       if (error || !data) return
+      // Re-verificar: el DOM pudo cambiar durante el await (otra apertura, o
+      // que el título ya no corresponda a esta consulta).
+      if (detail.querySelector("[data-fase2-detail]")) return
+      if (document.getElementById("detailTitle")?.textContent?.trim() !== title) return
       detail.insertAdjacentHTML("afterbegin", `
         <div class="fase2-detail-strip" data-fase2-detail>
           <span>${miniBadge(requestTypeLabel(data.request_type), "info")}</span>
@@ -494,6 +512,8 @@
       `)
     } catch (_) {
       // Solo mejora visual.
+    } finally {
+      enrichDetailInFlight = false
     }
   }
 
