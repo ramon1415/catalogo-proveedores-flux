@@ -242,6 +242,8 @@ try {
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "provider-intakes", section: "Operacion", file: "provider_intakes.html", href: "./provider_intakes.html", icon: "T", label: "Solicitudes de proveedores", groups: [ROLE_GROUPS.SYSADMIN], sensitive: true, runtimeGate: "provider-intake" },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    // Dashboard anual — en pruebas: visible solo para sysadmin hasta liberar
+    { key: "dashboard-anual", section: "General", file: "dashboard.html", href: "./dashboard.html?view=anual", icon: "H", label: "Dashboard anual", groups: [ROLE_GROUPS.SYSADMIN] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "approval-batches", section: "General", file: "approval_batches.html", href: "./approval_batches.html", icon: "C", label: "Cortes semanales", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "config", section: "Configuracion", file: "configuracion.html", href: "./configuracion.html", icon: "C", label: "Configuracion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
@@ -631,6 +633,7 @@ try {
     if (pageName === "configuracion.html") return "config"
     if (pageName === "socios.html") return "config"
     if (pageName === "proveedores.html" && urlParams.get("tab") === "cuentas-origen") return "config"
+    if (pageName === "dashboard.html" && urlParams.get("view") === "anual") return "dashboard-anual"
     if (pageName === "ingresos.html" && urlParams.get("tab") === "incidents") return "incidents"
     if (pageName === "ingresos.html") return "income"
     const match = modules.find((item) => item.file === pageName)
