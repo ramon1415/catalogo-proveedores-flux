@@ -5,6 +5,7 @@ import test from 'node:test';
 const capture = fs.readFileSync('payroll_capture.js','utf8');
 const polish = fs.readFileSync('payroll_shadow_ux_polish.js','utf8');
 const guards = fs.readFileSync('budget_live_frontend_guards.js','utf8');
+const solicitudes = fs.readFileSync('solicitudes.html','utf8');
 const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts','utf8');
 const migration = fs.readFileSync('supabase/migrations/20260820022528_payroll_n3g_real_capture_ui_contract.sql','utf8');
 
@@ -62,7 +63,8 @@ test('TOKA variance acknowledgement and individual approver submission reuse N3F
 
 test('shadow-run polish makes server verification, materialized totals and draft stop state explicit', () => {
   assert.doesNotThrow(() => new Function(polish));
-  assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux-v2/);
+  assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux-v3/);
+  assert.match(solicitudes,/budget_live_frontend_guards\.js\?v=20260821-payroll-shadow-final-r4/);
   assert.match(polish,/Pendiente de validación server-side/);
   assert.match(polish,/Archivo privado recibido · servidor pendiente/);
   assert.match(polish,/Verificado por servidor/);
@@ -75,6 +77,14 @@ test('shadow-run polish makes server verification, materialized totals and draft
   assert.match(polish,/Tesorería/);
   assert.match(polish,/TOKA presenta diferencia de/);
   assert.match(polish,/requiere revisión de Finanzas/);
+});
+
+test('final shadow polish cannot starve synchronization under continuous DOM mutations', () => {
+  assert.match(polish,/function scheduleSync\(\)\{\s*if\(state\.timer!==null\)return;/);
+  assert.match(polish,/state\.timer=null;\s*runSync\(\)/);
+  assert.match(polish,/window\.setTimeout\(runSync,delay\)/);
+  assert.match(polish,/function setText\(element,value\)/);
+  assert.doesNotMatch(polish,/function scheduleSync\(\)\{\s*clearTimeout\(state\.timer\)/);
 });
 
 test('final shadow polish retries aggregate metadata until the authenticated client is ready', () => {
