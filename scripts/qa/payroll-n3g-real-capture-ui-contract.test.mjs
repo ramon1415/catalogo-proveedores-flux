@@ -64,7 +64,7 @@ test('TOKA variance acknowledgement and individual approver submission reuse N3F
 test('shadow-run polish makes server verification, materialized totals and draft stop state explicit', () => {
   assert.doesNotThrow(() => new Function(polish));
   assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux-v3/);
-  assert.match(solicitudes,/budget_live_frontend_guards\.js\?v=20260821-payroll-shadow-final-r4/);
+  assert.match(solicitudes,/budget_live_frontend_guards\.js\?v=20260821-payroll-shadow-final-r3/);
   assert.match(polish,/Pendiente de validación server-side/);
   assert.match(polish,/Archivo privado recibido · servidor pendiente/);
   assert.match(polish,/Verificado por servidor/);
