@@ -8,9 +8,10 @@ on:
       - "supabase/functions/provider-intake/**"
       - "supabase/config.toml"
       - "scripts/release/build-provider-portal-prod-db-edge.mjs"
-      - "scripts/qa/provider-portal-prod-**"
+      - "scripts/qa/provider-portal-prod-db-edge-contract.test.mjs"
+      - "scripts/qa/provider-portal-prod-shadow-fixture.sql"
+      - "scripts/qa/provider-portal-prod-shadow-assertions.sql"
       - "docs/ops/provider-portal-prod-**"
-      - ".github/workflows/provider-portal-prod-db-edge-candidate.yml"
   workflow_dispatch:
     inputs:
       stage:

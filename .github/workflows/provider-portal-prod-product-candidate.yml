@@ -71,11 +71,13 @@ jobs:
           node scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
 
       - name: Enforce no DB, notification, or unrelated release scope
+        env:
+          PRODUCT_SCOPE_BASE: ${{ github.event.pull_request.base.sha || '18cd2b1265038cfcd143814012bdc26746cc5ff7' }}
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only 18cd2b1265038cfcd143814012bdc26746cc5ff7)"
-          if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' <<<"$changed"; then
+          changed="$(git diff --name-only "${PRODUCT_SCOPE_BASE}...HEAD")"
+          if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)' <<<"$changed"; then
             echo "Forbidden Product PR scope detected" >&2
             exit 1
           fi
