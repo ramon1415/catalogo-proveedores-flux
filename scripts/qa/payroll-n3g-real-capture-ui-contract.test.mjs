@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const capture = fs.readFileSync('payroll_capture.js','utf8');
+const polish = fs.readFileSync('payroll_shadow_ux_polish.js','utf8');
+const guards = fs.readFileSync('budget_live_frontend_guards.js','utf8');
 const edge = fs.readFileSync('supabase/functions/payroll-materialize/index.ts','utf8');
 const migration = fs.readFileSync('supabase/migrations/20260820022528_payroll_n3g_real_capture_ui_contract.sql','utf8');
 
@@ -56,6 +58,37 @@ test('TOKA variance acknowledgement and individual approver submission reuse N3F
   assert.match(capture,/list_payment_request_approver_options/);
   assert.match(capture,/submit_payroll_for_approval/);
   assert.doesNotMatch(capture,/decide_payment_request/);
+});
+
+test('shadow-run polish makes server verification, materialized totals and draft stop state explicit', () => {
+  assert.doesNotThrow(() => new Function(polish));
+  assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux/);
+  assert.match(polish,/Pendiente de validación server-side/);
+  assert.match(polish,/Archivo privado recibido · servidor pendiente/);
+  assert.match(polish,/Verificado por servidor/);
+  assert.match(polish,/Borrador — no enviado a aprobación ni pago/);
+  assert.match(polish,/Corrida verificada por servidor/);
+  assert.match(polish,/line_count/);
+  assert.match(polish,/empleados/);
+  assert.match(polish,/canales/);
+  assert.match(polish,/Tesorería/);
+  assert.match(polish,/TOKA presenta diferencia de/);
+  assert.match(polish,/requiere revisión de Finanzas/);
+});
+
+test('shadow-run polish removes the duplicate visible company context without changing its source value', () => {
+  assert.match(polish,/payrollCompanyScopeBridge/);
+  assert.match(polish,/companyId/);
+  assert.match(polish,/payroll-shadow-base-context-hidden/);
+  assert.match(polish,/Boolean\(payroll&&bridge\)/);
+  assert.match(polish,/Empresa de la corrida\. Se captura una sola vez aquí/);
+  assert.doesNotMatch(polish,/\.value\s*=\s*[^;]*company/i);
+});
+
+test('shadow-run polish is read-only UX and cannot advance payroll workflow', () => {
+  assert.match(polish,/get_payroll_capture_sessions/);
+  assert.doesNotMatch(polish,/submit_payroll_for_approval|acknowledge_payroll_toka_funding_variance|functions\.invoke|\.insert\(|\.update\(|\.delete\(/);
+  assert.doesNotMatch(polish,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
 });
 
 test('N3G does not introduce dispersion, payment execution, bank upload, batch approval, or PROD behavior', () => {
