@@ -526,26 +526,45 @@
     } catch (_) {}
   }
 
+  let enrichDetailTimer = null
+  let enrichDetailInFlight = false
+
   function patchRequestDetail() {
     const detail = document.getElementById("detailContent")
     if (!detail) return
-    new MutationObserver(() => window.setTimeout(enrichRequestDetail, 120)).observe(detail, { childList: true, subtree: true })
+    // DEBOUNCE: antes cada mutación agendaba su propia llamada; al abrir el
+    // detalle se disparan varias seguidas y todas terminaban insertando.
+    new MutationObserver(() => {
+      window.clearTimeout(enrichDetailTimer)
+      enrichDetailTimer = window.setTimeout(enrichRequestDetail, 120)
+    }).observe(detail, { childList: true, subtree: true })
   }
 
   async function enrichRequestDetail() {
+    if (enrichDetailInFlight) return
     const detail = document.getElementById("detailContent")
     const title = document.getElementById("detailTitle")?.textContent?.trim()
     const client = getClient()
     if (!detail || !title || !client || detail.querySelector("[data-fase2-detail]") || !title.startsWith("SOL-")) return
+    // Candado SÍNCRONO: la verificación de arriba ocurre ANTES del await y la
+    // inserción DESPUÉS; sin este flag, varias llamadas concurrentes pasaban el
+    // guard mientras esperaban la consulta y todas insertaban su tira (chips
+    // repetidos en el detalle).
+    enrichDetailInFlight = true
     try {
       const { data, error } = await client.from("payment_requests").select("request_type,payment_method").eq("request_number", title).maybeSingle()
       if (error || !data) return
+      // Re-verificar: el DOM pudo cambiar durante el await.
+      if (detail.querySelector("[data-fase2-detail]")) return
+      if (document.getElementById("detailTitle")?.textContent?.trim() !== title) return
       const strip = document.createElement("div")
       strip.className = "fase2-detail-strip"
       strip.dataset.fase2Detail = "true"
       strip.innerHTML = "<span>Tipo de solicitud: " + miniBadge(requestTypeLabel(data.request_type), "info") + "</span><span>Metodo de pago: " + miniBadge(paymentMethodLabel(data.payment_method), paymentMethodVariant(data.payment_method)) + "</span>"
       detail.insertAdjacentElement("afterbegin", strip)
-    } catch (_) {}
+    } catch (_) {} finally {
+      enrichDetailInFlight = false
+    }
   }
 
   function patchRequestedAmountCard() {
