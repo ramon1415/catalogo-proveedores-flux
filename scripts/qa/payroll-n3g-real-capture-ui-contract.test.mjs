@@ -62,13 +62,14 @@ test('TOKA variance acknowledgement and individual approver submission reuse N3F
 
 test('shadow-run polish makes server verification, materialized totals and draft stop state explicit', () => {
   assert.doesNotThrow(() => new Function(polish));
-  assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux/);
+  assert.match(guards,/payroll_shadow_ux_polish\.js\?v=20260821-shadow-run-ux-v2/);
   assert.match(polish,/Pendiente de validación server-side/);
   assert.match(polish,/Archivo privado recibido · servidor pendiente/);
   assert.match(polish,/Verificado por servidor/);
   assert.match(polish,/Borrador — no enviado a aprobación ni pago/);
   assert.match(polish,/Corrida verificada por servidor/);
-  assert.match(polish,/line_count/);
+  assert.match(polish,/server_verification_summary\?\.line_count/);
+  assert.match(polish,/expected_channels/);
   assert.match(polish,/empleados/);
   assert.match(polish,/canales/);
   assert.match(polish,/Tesorería/);
@@ -76,18 +77,38 @@ test('shadow-run polish makes server verification, materialized totals and draft
   assert.match(polish,/requiere revisión de Finanzas/);
 });
 
-test('shadow-run polish removes the duplicate visible company context without changing its source value', () => {
+test('final shadow polish retries aggregate metadata until the authenticated client is ready', () => {
+  assert.match(polish,/if\(!c\)\{scheduleMetaRetry\(\);return;\}/);
+  assert.match(polish,/state\.metaLoadingFor=sessionId/);
+  assert.match(polish,/state\.metaLoadedFor=sessionId/);
+  assert.match(polish,/state\.metaLoadedFor=null/);
+  assert.match(polish,/scheduleMetaRetry/);
+  assert.match(polish,/characterData:true/);
+});
+
+test('materialized capture replaces write-looking footer actions with a read-only stop state', () => {
+  assert.match(polish,/Materializada · solo lectura/);
+  assert.match(polish,/payroll-shadow-materialized-action-hidden/);
+  assert.match(polish,/submitRequestBtn/);
+  assert.match(polish,/payrollMaterializeBtn/);
+  assert.match(polish,/La captura está congelada/);
+});
+
+test('shadow-run polish removes duplicate visible company capture and renders inherited budget context', () => {
   assert.match(polish,/payrollCompanyScopeBridge/);
   assert.match(polish,/companyId/);
   assert.match(polish,/payroll-shadow-base-context-hidden/);
-  assert.match(polish,/Boolean\(payroll&&bridge\)/);
   assert.match(polish,/Empresa de la corrida\. Se captura una sola vez aquí/);
+  assert.match(polish,/clasificaci\[oó\]n presupuestal/);
+  assert.match(polish,/Empresa heredada de la corrida/);
+  assert.match(polish,/Presupuesto reutiliza este contexto/);
+  assert.match(polish,/payroll-shadow-budget-company-hidden/);
   assert.doesNotMatch(polish,/\.value\s*=\s*[^;]*company/i);
 });
 
 test('shadow-run polish is read-only UX and cannot advance payroll workflow', () => {
   assert.match(polish,/get_payroll_capture_sessions/);
-  assert.doesNotMatch(polish,/submit_payroll_for_approval|acknowledge_payroll_toka_funding_variance|functions\.invoke|\.insert\(|\.update\(|\.delete\(/);
+  assert.doesNotMatch(polish,/submit_payroll_for_approval|acknowledge_payroll_toka_funding_variance|set_payroll_budget_context|refresh_payroll_budget_validation|functions\.invoke|\.insert\(|\.update\(|\.delete\(/);
   assert.doesNotMatch(polish,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
 });
 
