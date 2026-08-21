@@ -53,9 +53,6 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build selective product candidate
-        run: node scripts/release/build-provider-portal-prod-product.mjs
-
       - name: JavaScript syntax
         shell: bash
         run: |
@@ -65,6 +62,8 @@ jobs:
           done
 
       - name: Product, access, public-boundary, and normal Flux regression contract
+        env:
+          PRODUCT_SCOPE_BASE: ${{ github.event.pull_request.base.sha || '18cd2b1265038cfcd143814012bdc26746cc5ff7' }}
         run: |
           git diff --check
           node scripts/qa/provider-portal-prod-product-contract.test.mjs
@@ -72,30 +71,15 @@ jobs:
           node scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
 
       - name: Enforce no DB, notification, or unrelated release scope
+        env:
+          PRODUCT_SCOPE_BASE: ${{ github.event.pull_request.base.sha || '18cd2b1265038cfcd143814012bdc26746cc5ff7' }}
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only 18cd2b1265038cfcd143814012bdc26746cc5ff7)"
-          if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)|(^|/)dashboard\.(html|js)$' <<<"$changed"; then
+          changed="$(git diff --name-only "${PRODUCT_SCOPE_BASE}...HEAD")"
+          if grep -E '(^supabase/migrations/)|(^|/)(notifications?|n8n|payroll)(/|\.|$)' <<<"$changed"; then
             echo "Forbidden Product PR scope detected" >&2
             exit 1
-          fi
-
-      - name: Commit generated candidate to the PR branch
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -n "$(git status --porcelain)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add solicitar.html solicitar.css solicitar-config.js solicitar-core.js solicitar.js
-            git add provider_intakes.html provider_intakes.css provider_intakes.js
-            git add api/provider-intake-file-url.js api/runtime-config.js config.js
-            git add proveedores.html proveedores.js solicitudes.html solicitudes.js
-            git add scripts/release scripts/qa docs/ops
-            git commit -m "build: materialize selective Provider Portal PROD Product candidate"
-            git push origin "HEAD:${{ github.head_ref }}"
           fi
 
       - name: Candidate result

@@ -7,9 +7,11 @@
   <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
   <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./ux2_shared.css">
-  <link rel="stylesheet" href="./provider_intakes.css?v=20260811-provider-aware-links">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-modal-fix">
+  <link rel="stylesheet" href="./provider_intakes.css?v=20260821-link-modal-ux">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Saltar al contenido</a>
@@ -482,24 +484,49 @@
         <div>
           <p class="eyebrow">Portal público seguro</p>
           <h2 id="linkManagementTitle">Generar liga de proveedor</h2>
-          <p>Selecciona la empresa y a quién se enviará la liga.</p>
+          <p>Selecciona empresa y destinatario para generar o administrar una liga segura.</p>
         </div>
         <button class="icon-btn" id="closeLinkManagementBtn" type="button" aria-label="Cerrar administración de liga">✕</button>
       </header>
       <div class="dialog-scroll link-management-content">
-        <label class="link-management-field">
-          <span>1. Empresa</span>
-          <select id="linkCompany" aria-describedby="linkCompanyState"></select>
-        </label>
-        <p class="link-company-state" id="linkCompanyState" role="status" aria-live="polite"></p>
-        <fieldset class="link-recipient-fieldset">
-          <legend>2. ¿A quién enviarás la liga?</legend>
-          <label><input type="radio" name="linkRecipient" value="existing" checked> Proveedor existente</label>
-          <label><input type="radio" name="linkRecipient" value="generic"> Proveedor nuevo / no identificado</label>
+        <section class="link-step link-company-step" aria-labelledby="linkCompanyStepTitle">
+          <div class="link-step-heading">
+            <span class="link-step-number" aria-hidden="true">1</span>
+            <div>
+              <h3 id="linkCompanyStepTitle">Empresa</h3>
+              <p>Define la empresa que recibirá la solicitud.</p>
+            </div>
+          </div>
+          <label class="link-management-field">
+            <span class="sr-only">Empresa autorizada</span>
+            <select id="linkCompany" aria-describedby="linkCompanyState"></select>
+          </label>
+          <p class="link-company-state" id="linkCompanyState" role="status" aria-live="polite"></p>
+        </section>
+        <fieldset class="link-recipient-fieldset link-step">
+          <legend>
+            <span class="link-step-number" aria-hidden="true">2</span>
+            <span><strong>¿A quién enviarás la liga?</strong><small>Elige el tipo de destinatario.</small></span>
+          </legend>
+          <label class="link-recipient-option">
+            <input type="radio" name="linkRecipient" value="existing" checked>
+            <span><strong>Proveedor existente</strong><small>Busca un proveedor activo y confírmalo.</small></span>
+          </label>
+          <label class="link-recipient-option">
+            <input type="radio" name="linkRecipient" value="generic">
+            <span><strong>Proveedor nuevo / no identificado</strong><small>La identificación se completará durante el triage.</small></span>
+          </label>
         </fieldset>
-        <section class="link-provider-picker" id="linkProviderPicker" aria-labelledby="linkProviderPickerTitle">
+        <section class="link-provider-picker link-step" id="linkProviderPicker" aria-labelledby="linkProviderPickerTitle">
+          <div class="link-step-heading">
+            <span class="link-step-number" aria-hidden="true">3</span>
+            <div>
+              <h3 id="linkProviderPickerTitle">Proveedor</h3>
+              <p>Busca y confirma el proveedor destinatario.</p>
+            </div>
+          </div>
           <label class="link-management-field" for="linkProviderSearch">
-            <span id="linkProviderPickerTitle">3. Proveedor</span>
+            <span class="sr-only">Buscar proveedor</span>
             <input id="linkProviderSearch" type="search" maxlength="120" autocomplete="off" placeholder="Buscar por nombre, alias o RFC" aria-describedby="linkProviderSearchHint">
           </label>
           <small id="linkProviderSearchHint">Escribe al menos 2 caracteres. La selección siempre es explícita.</small>
@@ -507,28 +534,40 @@
         </section>
         <section class="link-provider-summary" id="linkProviderSummary" aria-live="polite" hidden></section>
         <section class="link-current-state" id="linkCurrentState" aria-live="polite"></section>
-        <form id="linkCreateForm">
-          <div class="link-form-grid">
-            <label><span>5. Vigencia</span><select id="linkDuration"><option value="24">24 horas</option><option value="72" selected>72 horas</option><option value="168">7 días</option></select></label>
-            <label><span>6. Etiqueta interna <small>(opcional)</small></span><input id="linkLabel" maxlength="120" placeholder="Ej. Facturas agosto"></label>
+        <form class="link-create-form" id="linkCreateForm">
+          <div class="link-form-heading">
+            <span class="link-section-label">Configuración de la liga</span>
+            <p>Define vigencia y referencia interna antes de generar.</p>
           </div>
-          <p class="link-section-label">7. Límites del enlace</p>
+          <div class="link-form-grid">
+            <label><span>Vigencia</span><select id="linkDuration"><option value="24">24 horas</option><option value="72" selected>72 horas</option><option value="168">7 días</option></select></label>
+            <label><span>Etiqueta interna <small>(opcional)</small></span><input id="linkLabel" maxlength="120" placeholder="Ej. Facturas agosto"></label>
+          </div>
+          <p class="link-section-label">Límites del enlace</p>
           <div class="link-runtime-contract" id="linkRuntimeContract"></div>
           <p class="field-error" id="linkManagementError" role="alert"></p>
-          <button class="primary-btn" id="createLinkBtn" type="submit">8. Generar liga</button>
+          <button class="primary-btn link-create-button" id="createLinkBtn" type="submit">Generar liga</button>
         </form>
         <section class="link-one-time-result" id="linkOneTimeResult" hidden>
-          <strong>Liga lista para compartir</strong>
-          <p>Esta liga se muestra completa únicamente ahora. Guárdala o compártela de forma segura. El token viaja en el fragmento <code>#token=</code>.</p>
+          <div class="link-result-heading">
+            <span class="link-result-icon" aria-hidden="true">✓</span>
+            <div>
+              <span class="link-section-label">Resultado</span>
+              <strong>Liga lista para compartir</strong>
+            </div>
+          </div>
+          <p>Esta URL se muestra completa sólo en este momento. Guárdala o compártela de forma segura.</p>
           <textarea id="linkPublicUrl" rows="3" readonly aria-label="URL pública de proveedor"></textarea>
           <button class="primary-btn" id="copyLinkBtn" type="button">Copiar liga</button>
-          <span id="copyLinkStatus" role="status" aria-live="polite"></span>
+          <span class="link-copy-status" id="copyLinkStatus" role="status" aria-live="polite"></span>
         </section>
       </div>
       <footer class="dialog-footer link-management-footer">
         <button class="secondary-btn danger-action" id="revokeLinkBtn" type="button" hidden>Revocar liga</button>
-        <button class="secondary-btn" id="regenerateLinkBtn" type="button" hidden>Regenerar liga</button>
-        <button class="secondary-btn" id="doneLinkManagementBtn" type="button">Cerrar</button>
+        <div class="link-management-footer-actions">
+          <button class="secondary-btn" id="regenerateLinkBtn" type="button" hidden>Regenerar liga</button>
+          <button class="secondary-btn" id="doneLinkManagementBtn" type="button">Cerrar</button>
+        </div>
       </footer>
     </div>
   </dialog>
@@ -538,6 +577,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20260811-provider-intake-link-access"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./provider_intakes.js?v=20260811-provider-aware-links"></script>
+  <script src="./provider_intakes.js?v=20260821-link-modal-ux"></script>
 </body>
 </html>

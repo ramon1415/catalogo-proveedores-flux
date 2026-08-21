@@ -2548,7 +2548,7 @@ function selectLinkProvider(provider) {
   state.linkProviderResults = []
   state.linkScope = null
   dom.linkProviderSearch.value = provider.alias || provider.legal_name || "Proveedor seleccionado"
-  dom.linkProviderSearchHint.textContent = "Proveedor seleccionado explícitamente."
+  dom.linkProviderSearchHint.textContent = "Proveedor confirmado."
   dom.linkLabel.value = ""
   renderLinkProviderResults()
   renderLinkProviderSummary()
@@ -2564,11 +2564,12 @@ function renderLinkProviderSummary() {
   const title = element("div", "link-provider-summary-heading", "")
   title.append(
     element("div", "", ""),
-    element("button", "secondary-btn", "Cambiar proveedor"),
+    element("button", "small-btn", "Cambiar proveedor"),
   )
   title.firstChild.append(
-    element("span", "link-section-label", "4. Proveedor seleccionado"),
+    element("span", "link-section-label", "4. Resumen"),
     element("strong", "", provider.alias || provider.legal_name || "Proveedor"),
+    element("small", "link-provider-confirmed", "Proveedor confirmado"),
   )
   title.lastChild.type = "button"
   title.lastChild.addEventListener("click", () => {
@@ -2621,33 +2622,57 @@ function renderLinkManagement() {
   dom.linkManagementError.textContent = ""
   dom.linkRuntimeContract.textContent = `Contrato vigente: ${defaults.max_files || 3} archivos · ${defaults.max_file_mb || 10} MB por archivo · ${defaults.max_total_mb || 12} MB totales · ${defaults.max_submissions_per_day || 20} envíos diarios · ${linkAllowedTypesLabel(defaults.allowed_file_types)}.`
   dom.linkCurrentState.replaceChildren()
+  dom.linkCurrentState.className = "link-current-state"
 
   if (!hasAuthorizedCompanies) {
+    dom.linkCurrentState.classList.add("link-current-state-empty")
     dom.linkCurrentState.append(
       element("strong", "", "Sin empresas autorizadas"),
       element("p", "", "No tienes empresas autorizadas para generar ligas de proveedor."),
     )
   } else if (!company) {
+    dom.linkCurrentState.classList.add("link-current-state-empty")
     dom.linkCurrentState.append(
       element("strong", "", "Selecciona una empresa"),
       element("p", "", "Elige una empresa autorizada para habilitar el destinatario y la búsqueda de proveedor."),
     )
   } else if (!scopeReady) {
+    dom.linkCurrentState.classList.add("link-current-state-empty")
     dom.linkCurrentState.append(
       element("strong", "", "Selecciona un proveedor"),
       element("p", "", "Busca y confirma a quién se enviará la liga. No se seleccionará ningún resultado automáticamente."),
     )
   } else if (state.linkScope?.error) {
+    dom.linkCurrentState.classList.add("link-current-state-error")
     dom.linkCurrentState.append(element("p", "field-error", state.linkScope.error))
   } else if (isActive) {
-    dom.linkCurrentState.append(
+    dom.linkCurrentState.classList.add("link-current-state-active")
+    const heading = element("div", "link-current-state-heading", "")
+    const headingCopy = element("div", "", "")
+    headingCopy.append(
+      element("span", "link-section-label", "Estado actual"),
       element("strong", "", isExisting ? "Liga activa para este proveedor" : "Liga genérica activa para esta empresa"),
-      element("p", "", `${company.name}${isExisting ? ` · ${state.linkSelectedProvider.alias || state.linkSelectedProvider.legal_name}` : " · Proveedor nuevo / no identificado"}.`),
-      element("p", "", `${link.label} · prefijo ${link.token_prefix} · vence ${formatDateTime(link.expires_at)}.`),
-      element("p", "", `${numberFormat(link.current_intakes)} intake${Number(link.current_intakes) === 1 ? "" : "s"} creado${Number(link.current_intakes) === 1 ? "" : "s"} con esta liga.`),
-      element("small", "", "El token completo no se almacena ni puede recuperarse. Regenera la liga para obtener una nueva URL de una sola visualización."),
+    )
+    heading.append(headingCopy, element("span", "link-status-badge", "Activa"))
+    const metadata = element("dl", "link-current-meta", "")
+    ;[
+      ["Destinatario", `${company.name}${isExisting ? ` · ${state.linkSelectedProvider.alias || state.linkSelectedProvider.legal_name}` : " · Proveedor nuevo / no identificado"}`],
+      ["Etiqueta", link.label || "Sin etiqueta"],
+      ["Prefijo del token", link.token_prefix || "—"],
+      ["Vencimiento", formatDateTime(link.expires_at)],
+      ["Envíos recibidos", `${numberFormat(link.current_intakes)} intake${Number(link.current_intakes) === 1 ? "" : "s"}`],
+    ].forEach(([label, value]) => {
+      const row = element("div", "", "")
+      row.append(element("dt", "", label), element("dd", "", value))
+      metadata.append(row)
+    })
+    dom.linkCurrentState.append(
+      heading,
+      metadata,
+      element("small", "link-security-note", "El token completo no se almacena ni puede recuperarse. Regenera la liga para obtener una nueva URL de una sola visualización."),
     )
   } else {
+    dom.linkCurrentState.classList.add("link-current-state-empty")
     dom.linkCurrentState.append(
       element("strong", "", link?.status === "expired" ? "La liga anterior expiró" : "Sin liga activa"),
       element("p", "", "Puedes crear una liga nueva para este destinatario sin crear intakes, proveedores ni solicitudes de pago."),
@@ -2778,7 +2803,7 @@ async function copyManagedLink() {
   if (!dom.linkPublicUrl.value) return
   try {
     await navigator.clipboard.writeText(dom.linkPublicUrl.value)
-    dom.copyLinkStatus.textContent = "Liga copiada."
+    dom.copyLinkStatus.textContent = "✓ Liga copiada"
   } catch {
     dom.linkPublicUrl.focus()
     dom.linkPublicUrl.select()
