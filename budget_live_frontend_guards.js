@@ -3,7 +3,7 @@
 
   const BASE_SRC = "./budget_live_frontend_guards_base.js?v=20260707-detail-loop-fix";
   const COMPANY_SCOPE_FIX_SRC = "./payroll_company_scope_fix.js?v=20260820-shadow-scope";
-  const SHADOW_UX_POLISH_SRC = "./payroll_shadow_ux_polish.js?v=20260821-shadow-run-ux-v2";
+  const SHADOW_UX_POLISH_SRC = "./payroll_shadow_ux_polish.js?v=20260821-shadow-run-ux-v3";
   const FINANCE_ROLES = ["finance","finanzas","treasury","tesoreria","administracion"];
   const N5B_STYLE_ID = "payroll-n5b-budget-ux-style";
   const state = { requestId:null, budgetReady:null, lastSignature:null, timer:null, observer:null };

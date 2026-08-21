@@ -49,12 +49,20 @@
   }
 
   function schedulePulse(){
-    [0,120,360,800,1600].forEach(delay=>window.setTimeout(scheduleSync,delay));
+    [0,120,360,800,1600].forEach(delay=>window.setTimeout(runSync,delay));
   }
 
   function scheduleSync(){
-    clearTimeout(state.timer);
-    state.timer=setTimeout(syncAll,60);
+    if(state.timer!==null)return;
+    state.timer=setTimeout(()=>{
+      state.timer=null;
+      runSync();
+    },60);
+  }
+
+  function runSync(){
+    try{syncAll();}
+    catch(error){console.warn('[Payroll Shadow UX] sync failed',error);}
   }
 
   function syncAll(){
@@ -108,7 +116,8 @@
         anchor.insertAdjacentElement('afterend',card);
       }
       const name=currentCompanyLabel();
-      card.innerHTML='<span>Empresa heredada de la corrida</span><strong>'+escapeHtml(name||'Empresa seleccionada')+'</strong><small>La empresa ya quedó fijada al materializar. Presupuesto reutiliza este contexto; no se vuelve a capturar aquí.</small>';
+      const html='<span>Empresa heredada de la corrida</span><strong>'+escapeHtml(name||'Empresa seleccionada')+'</strong><small>La empresa ya quedó fijada al materializar. Presupuesto reutiliza este contexto; no se vuelve a capturar aquí.</small>';
+      if(card.innerHTML!==html)card.innerHTML=html;
     });
   }
 
@@ -201,10 +210,8 @@
 
     const renderedChannels=document.querySelectorAll('#payrollChannelSummary .payroll-n3g-channel').length;
     const channels=Number.isInteger(state.channelCount)?state.channelCount:renderedChannels;
-    const channelCount=document.getElementById('payrollShadowChannelCount');
-    if(channelCount)channelCount.textContent=channels>0?String(channels):'—';
-    const employeeCount=document.getElementById('payrollShadowEmployeeCount');
-    if(employeeCount)employeeCount.textContent=Number.isInteger(state.lineCount)?String(state.lineCount):'—';
+    setText(document.getElementById('payrollShadowChannelCount'),channels>0?String(channels):'—');
+    setText(document.getElementById('payrollShadowEmployeeCount'),Number.isInteger(state.lineCount)?String(state.lineCount):'—');
     syncRunMeta(channels);
     syncVarianceTitle();
     refreshSessionMeta();
@@ -219,7 +226,7 @@
     if(Number.isInteger(state.lineCount))parts.push(state.lineCount+' empleados');
     if(channels>0)parts.push(channels+' canales');
     if(treasury&&treasury!=='—')parts.push(treasury+' Tesorería');
-    target.textContent=parts.length?parts.join(' · '):'Resumen materializado pendiente de lectura visual.';
+    setText(target,parts.length?parts.join(' · '):'Resumen materializado pendiente de lectura visual.');
   }
 
   function syncVarianceTitle(){
@@ -233,7 +240,7 @@
     const next=amount
       ? 'TOKA presenta diferencia de '+amount+' — requiere revisión de Finanzas'
       : 'TOKA presenta una diferencia — requiere revisión de Finanzas';
-    if(title.textContent!==next)title.textContent=next;
+    setText(title,next);
   }
 
   async function refreshSessionMeta(){
@@ -251,12 +258,10 @@
       const expectedChannels=Array.isArray(session?.expected_channels)?session.expected_channels.length:null;
       state.channelCount=Number.isInteger(expectedChannels)&&expectedChannels>0?expectedChannels:null;
       if(Number.isInteger(state.lineCount))state.metaLoadedFor=sessionId;
-      const employeeCount=document.getElementById('payrollShadowEmployeeCount');
-      if(employeeCount)employeeCount.textContent=Number.isInteger(state.lineCount)?String(state.lineCount):'—';
+      setText(document.getElementById('payrollShadowEmployeeCount'),Number.isInteger(state.lineCount)?String(state.lineCount):'—');
       const renderedChannels=document.querySelectorAll('#payrollChannelSummary .payroll-n3g-channel').length;
       const channels=Number.isInteger(state.channelCount)?state.channelCount:renderedChannels;
-      const channelCount=document.getElementById('payrollShadowChannelCount');
-      if(channelCount)channelCount.textContent=channels>0?String(channels):'—';
+      setText(document.getElementById('payrollShadowChannelCount'),channels>0?String(channels):'—');
       syncRunMeta(channels);
       syncVarianceTitle();
     }catch(_){
@@ -272,6 +277,10 @@
   function scheduleMetaRetry(){
     clearTimeout(state.retryTimer);
     state.retryTimer=setTimeout(scheduleSync,450);
+  }
+
+  function setText(element,value){
+    if(element&&element.textContent!==value)element.textContent=value;
   }
 
   function injectStyles(){
