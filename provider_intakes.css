@@ -95,7 +95,8 @@ body { overflow-x: hidden; }
 .banking-comparison-item span { color:var(--text-3); font-size:10.5px; }
 .banking-resolution-actions { display:flex; flex-wrap:wrap; gap:8px; }
 
-.link-management-dialog { width:min(780px,calc(100vw - 32px)); overflow:hidden; }
+.link-management-dialog { width:min(780px,calc(100vw - 32px)); overflow:hidden; background:var(--bg-card); color:var(--text-1); border:1px solid var(--border); border-radius:12px; box-shadow:0 28px 100px rgba(0,0,0,.48); }
+.link-management-dialog::backdrop { background:rgba(3,8,14,.76); backdrop-filter:blur(3px); }
 .link-management-shell { width:100%; max-height:min(820px,calc(100vh - 32px)); overflow:hidden; }
 .link-management-dialog .dialog-header,.link-management-dialog .dialog-footer{flex:0 0 auto;background:var(--bg-card);z-index:2}
 .link-management-content { display:grid; min-height:0; gap:14px; overflow-y:auto; overflow-x:hidden; padding:18px 20px; scrollbar-gutter:stable; }
