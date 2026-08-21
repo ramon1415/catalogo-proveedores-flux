@@ -7,6 +7,7 @@ const require=createRequire(import.meta.url);
 const provision=require('../../payroll_provision_base.js');
 const edge=fs.readFileSync('supabase/functions/payroll-materialize/index.ts','utf8');
 const migration=fs.readFileSync('supabase/migrations/20260821173000_payroll_rc1_provision_contpaq_feed.sql','utf8');
+const feedFunction=(migration.match(/create or replace function public\.get_payroll_contpaq_feed[\s\S]*?\n\$\$;\n/)||[''])[0];
 
 function le16(v){return Buffer.from([v&255,(v>>>8)&255]);}
 function le32(v){return Buffer.from([v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255]);}
@@ -69,18 +70,19 @@ test('RC1 provision is idempotent per payroll request and accumulates into month
 });
 
 test('RC1 TOKA accounting feed separates vouchers, fee, VAT and signed variance while preserving one operational channel',()=>{
-  for(const role of ['cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance','bank_credit']) assert.ok(migration.includes(role),role);
-  assert.match(migration,/v_variance:=v_actual_toka-v_expected_toka/);
-  assert.match(migration,/if v_variance>0 then/);
-  assert.match(migration,/credit',abs\(v_variance\)/);
-  assert.match(migration,/PAYROLL_CONTPAQ_UNBALANCED_FEED/);
-  assert.match(migration,/'contains_employee_pii',false/);
-  assert.doesNotMatch(migration,/get_payroll_contpaq_feed[\s\S]*employee_name|get_payroll_contpaq_feed[\s\S]*\brfc\b|get_payroll_contpaq_feed[\s\S]*\bcurp\b/i);
+  assert.ok(feedFunction.length>0);
+  for(const role of ['cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance','bank_credit']) assert.ok(feedFunction.includes(role),role);
+  assert.match(feedFunction,/v_variance:=v_actual_toka-v_expected_toka/);
+  assert.match(feedFunction,/if v_variance>0 then/);
+  assert.match(feedFunction,/credit',abs\(v_variance\)/);
+  assert.match(feedFunction,/PAYROLL_CONTPAQ_UNBALANCED_FEED/);
+  assert.match(feedFunction,/'contains_employee_pii',false/);
+  assert.doesNotMatch(feedFunction,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
 });
 
 test('RC1 CONTPAQ feed cannot export before payment confirmation and reconciliation',()=>{
-  assert.match(migration,/PAYROLL_CONTPAQ_PAID_REQUIRED/);
-  assert.match(migration,/PAYROLL_CONTPAQ_RECONCILIATION_REQUIRED/);
+  assert.match(feedFunction,/PAYROLL_CONTPAQ_PAID_REQUIRED/);
+  assert.match(feedFunction,/PAYROLL_CONTPAQ_RECONCILIATION_REQUIRED/);
   assert.match(migration,/payroll_contpaq_role_mappings/);
   assert.match(migration,/PAYROLL_CONTPAQ_MAPPING_REQUIRED/);
 });
