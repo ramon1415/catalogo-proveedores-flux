@@ -295,7 +295,7 @@ function pdfPageContent(document: ApprovalBatchDocument, pageIndex: number, page
   out += textCommand("F2", 20, left, top - 12, "FLUX OPERADORA", "1 1 1");
   out += textCommand("F1", 9, left, top - 31, "Corte semanal para autorizacion", "0.82 0.90 0.85");
   out += rightAlignedTextCommand("F2", 10, right, top - 10, `Pagina ${pageIndex + 1} de ${pageCount}`, "1 1 1");
-  out += rightAlignedTextCommand("F1", 8, right, top - 29, `Generado ${formatDateTime(new Date().toISOString())}`, "0.82 0.90 0.85");
+  out += rightAlignedTextCommand("F1", 8, right, top - 29, `Enviado ${formatDateTime(batch.submitted_at)}`, "0.82 0.90 0.85");
 
   out += textCommand("F2", 16, left, 498, batch.label || "Corte semanal", "0.086 0.196 0.176");
   out += textCommand("F1", 9, left, 480, `Empresa: ${batch.company || "No disponible"}`);

@@ -68,7 +68,9 @@ function sampleEvent() {
 test("PDF is a valid multi-page, ASCII-safe Flux document", async () => {
   const document = sampleDocument(23);
   const { bytes, pageCount } = generateApprovalBatchPdfBytes(document);
+  const replay = generateApprovalBatchPdfBytes(document);
   const text = new TextDecoder().decode(bytes);
+  assert.deepEqual(replay.bytes, bytes, "the same event snapshot must produce identical PDF bytes on retry");
 
   assert.equal(pageCount, 3);
   assert.equal(text.slice(0, 8), "%PDF-1.4");
