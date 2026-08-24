@@ -16,6 +16,12 @@ assert.match(bootstrap, /pageName !== "configuracion\.html"/)
 assert.match(bootstrap, /contpaq_mapper_extension\.js\?v=20260824-clean-tree/)
 assert.match(extension, /PAGE !== "configuracion\.html"/)
 
+// La URL directa debe sobrevivir al router de tabs existente y solo activarse para Adm/SysAdmin.
+assert.match(bootstrap, /contpaqRequestedAtLoad/)
+assert.match(bootstrap, /document\.getElementById\("contpaqMapperTab"\)/)
+assert.match(bootstrap, /FluxAuth\?\.isAdminFinance/)
+assert.match(bootstrap, /new MutationObserver\(activate\)/)
+
 // Permisos decididos: SysAdmin + Administración/Finanzas; Dirección queda fuera.
 assert.match(extension, /FluxAuth\?\.isAdminFinance/)
 assert.match(extension, /Adm\/SysAdmin/)
