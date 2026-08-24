@@ -182,7 +182,7 @@ test("dispatcher sends exactly one submitted event to the selected Director with
 
 test("migration is exclusive, strict-cutoff, service-only, and does not replay history", async () => {
   const migration = await readFile(
-    new URL("../../supabase/migrations/20260824191500_approval_batch_submitted_email_pdf_prod.sql", import.meta.url),
+    new URL("../../supabase/migrations/20260824200842_approval_batch_submitted_email_pdf_prod.sql", import.meta.url),
     "utf8",
   );
   assert.match(migration, /event\.event_type = 'approval_batch\.submitted'/);
