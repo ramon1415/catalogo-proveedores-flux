@@ -1,0 +1,29 @@
+name: CONTPAQ mapper contract
+
+on:
+  pull_request:
+    paths:
+      - "nav_first_paint_bootstrap.js"
+      - "contpaq_mapper_extension.js"
+      - "configuracion.html"
+      - "configuracion.js"
+      - "supabase/migrations/*contpaq_mapper*"
+      - "scripts/qa/contpaq-mapper-contract.test.mjs"
+      - ".github/workflows/contpaq-mapper-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check nav_first_paint_bootstrap.js
+          node --check contpaq_mapper_extension.js
+          node --check scripts/qa/contpaq-mapper-contract.test.mjs
+      - name: CONTPAQ mapper contract
+        run: node scripts/qa/contpaq-mapper-contract.test.mjs

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "company": {
+    "environment": "prod",
+    "company_id": "REPLACE_AFTER_PRECHECK",
+    "name": "Operadora",
+    "legal_name": "REPLACE_FROM_PROD",
+    "rfc": "REPLACE_FROM_PROD"
+  },
+  "catalog": {
+    "source_owner": "Denise",
+    "source_system": "CONTPAQ",
+    "source_file_name": "REPLACE_WITH_REAL_SOURCE_FILE",
+    "source_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "parsed_file_name": "REPLACE_WITH_VERSIONED_PARSED_FIXTURE",
+    "parsed_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "account_count": 1646,
+    "required_columns": [
+      "code",
+      "name",
+      "is_detail",
+      "sat_group",
+      "cta_sup",
+      "cta_mayor",
+      "tipo",
+      "rubro_nif",
+      "activo",
+      "sincronizado_el"
+    ],
+    "token_order_preserved": true,
+    "codes_normalized_without_hyphens": true
+  },
+  "mappings": {
+    "source_file_name": "REPLACE_WITH_VERSIONED_MAPPING_SEED",
+    "source_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "mapping_count": 87,
+    "exact_name_count": 22,
+    "judgment_count": 65,
+    "distinct_account_count": 63,
+    "needs_review_count": 6,
+    "validated_existing_count": 63,
+    "validated_leaf_count": 63,
+    "validated_detail_count": 63,
+    "validated_expense_count": 63
+  },
+  "approval": {
+    "prepared_by": "REPLACE",
+    "reviewed_by": "REPLACE",
+    "approved_at": "REPLACE_ISO_8601",
+    "release_ticket": "86bbkfvmm"
+  }
+}
