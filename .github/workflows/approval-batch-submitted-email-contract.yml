@@ -1,0 +1,62 @@
+name: Approval batch submitted email and PDF contract
+
+'on':
+  pull_request:
+    paths:
+      - 'supabase/functions/approval-batch-submitted-dispatcher/**'
+      - 'supabase/migrations/*approval_batch_submitted_email_pdf_prod.sql'
+      - 'scripts/qa/approval-batch-submitted-email-contract.test.mjs'
+      - '.github/workflows/approval-batch-submitted-email-contract.yml'
+      - '.github/workflows/supabase-prod-approval-batch-submitted-recovery.yml'
+      - 'docs/ops/approval-batch-submitted-email-prod.md'
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'supabase/functions/approval-batch-submitted-dispatcher/**'
+      - 'supabase/migrations/*approval_batch_submitted_email_pdf_prod.sql'
+      - 'scripts/qa/approval-batch-submitted-email-contract.test.mjs'
+      - '.github/workflows/approval-batch-submitted-email-contract.yml'
+      - '.github/workflows/supabase-prod-approval-batch-submitted-recovery.yml'
+      - 'docs/ops/approval-batch-submitted-email-prod.md'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Submitted Director email + PDF
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Run focused contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test scripts/qa/approval-batch-submitted-email-contract.test.mjs
+
+      - name: Static scope and secret scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          ! grep -R -E \
+            're_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@' \
+            supabase/functions/approval-batch-submitted-dispatcher \
+            supabase/migrations/*approval_batch_submitted_email_pdf_prod.sql \
+            scripts/qa/approval-batch-submitted-email-contract.test.mjs \
+            .github/workflows/supabase-prod-approval-batch-submitted-recovery.yml \
+            docs/ops/approval-batch-submitted-email-prod.md
+          echo 'PASS / APPROVAL_BATCH_SUBMITTED_EMAIL_PDF_CONTRACT'
