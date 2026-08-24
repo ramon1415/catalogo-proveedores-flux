@@ -586,7 +586,7 @@ export async function readDispatchOptions(req: Request, runtime: Runtime): Promi
   if (cutoff.getTime() > Date.now() + 300_000) throw new Error("approval_batch_submitted_cutoff_in_future");
   return {
     limit: clampLimit(body.limit),
-    createdAtAfter: cutoff.toISOString(),
+    createdAtAfter: cutoffValue,
   };
 }
 
