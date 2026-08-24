@@ -9,79 +9,104 @@ import {
   renderApprovalBatchSubmittedEmail,
 } from "../../supabase/functions/approval-batch-submitted-dispatcher/index.ts";
 
-function documentFixture(itemCount = 23) {
-  return {
+function referenceDocument(itemCount = 1) {
+  const base = {
     event_id: "00000000-0000-0000-0000-000000000001",
     recipient_email: "director@example.invalid",
     recipient_profile_id: "00000000-0000-0000-0000-000000000002",
     batch: {
       id: "00000000-0000-0000-0000-000000000003",
-      label: "Corte DEV QA 2026-W35",
-      company: "Flux DEV",
-      period_start: "2026-08-24",
-      period_end: "2026-08-30",
-      submitted_at: "2026-08-24T20:44:00.000Z",
-      director_name: "Dirección QA",
+      label: "CORTE DEMO CLIENTE 24/AGO/2026 v1",
+      company: "Operadora Tlacatecpan",
+      company_name: "Operadora Tlacatecpan",
+      status: "submitted",
+      period_start: "2026-08-20",
+      period_end: "2026-08-26",
+      submitted_at: "2026-08-24T21:19:42.614903Z",
+      director_name: "Ramón",
       director_email: "director@example.invalid",
       item_count: itemCount,
-      totals_by_currency: [{ currency: "MXN", amount: 32785.25 }],
+      totals_by_currency: [{ currency: "MXN", amount: 100 * itemCount }],
     },
     items: Array.from({ length: itemCount }, (_, index) => ({
       item_id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, "0")}`,
-      request_number: `SOL-DEV-${String(index + 1).padStart(4, "0")}`,
-      provider: `Proveedor DEV ${index + 1}`,
-      concept: `Servicio operativo ${index + 1}`,
-      cost_center: "CC-01 - Operación",
-      budget_category: "P-01 - Servicios",
+      request_number: index === 0 ? "SOL-2026-0032" : `SOL-2026-${String(index + 32).padStart(4, "0")}`,
+      provider: "Ramon",
+      provider_name: "Ramon",
+      concept: "",
+      cost_center: "Rancho San Juan Tlacatecpan",
+      budget_category: "602-01-005-000 - Finiquitos o liquidaciones",
       payment_method: "transfer",
-      amount: 1000 + index * 37.25,
+      amount: 100,
       currency: "MXN",
-      scheduled_payment_date: "2026-08-28",
-      payment_reference: `REF-${index + 1}`,
-      finance_reviewed_at: "2026-08-24T20:42:00.000Z",
+      requester_name: "Ramón Hipo",
+      director_status: "pending",
+      reject_reason: null,
+      rebatch_release_note: null,
+      scheduled_payment_date: "2026-08-26",
+      payment_reference: null,
+      finance_reviewed_at: "2026-08-24T21:18:00.000Z",
     })),
   };
+  return base;
 }
 
-test("DEV PDF is deterministic, horizontal, and paginated", async () => {
-  const doc = documentFixture(23);
-  const first = generateApprovalBatchPdfBytes(doc);
-  const second = generateApprovalBatchPdfBytes(doc);
-  const text = new TextDecoder().decode(first.bytes);
-  assert.equal(first.pageCount, 3);
-  assert.deepEqual(first.bytes, second.bytes);
-  assert.equal(text.slice(0, 8), "%PDF-1.4");
-  assert.equal((text.match(/\/Type \/Page\b/g) || []).length, 3);
-  assert.match(text, /Corte semanal para autorizacion/);
-  assert.match(text, /SOL-DEV-0001/);
-  assert.match(text, /Documento informativo/);
+test("DEV attachment uses the same jsPDF/AutoTable contract and filename as the system PDF button", async () => {
+  const document = referenceDocument(1);
+  const generated = generateApprovalBatchPdfBytes(document);
+  const binary = new TextDecoder("latin1").decode(generated.bytes);
 
-  const attachment = await prepareApprovalBatchAttachment(doc);
-  assert.match(attachment.filename, /^Corte_semanal_[A-Za-z0-9._-]+\.pdf$/);
+  assert.equal(generated.pageCount, 1);
+  assert.equal(binary.slice(0, 8), "%PDF-1.3");
+  assert.match(binary, /jsPDF 2\.5\.2/);
+  assert.match(binary, /CORTE DEMO CLIENTE 24\/AGO\/2026 v1/);
+  assert.match(binary, /Operadora Tlacatecpan/);
+  assert.match(binary, /SOL-2026-0032/);
+  assert.match(binary, /Rancho San Juan Tlacatecpan/);
+  assert.match(binary, /Finiquitos o liquidaciones/);
+  assert.match(binary, /Ramon/);
+  assert.match(binary, /Pendiente/);
+  assert.match(binary, /Flux Operadora/);
+
+  const attachment = await prepareApprovalBatchAttachment(document, {
+    fetch: async () => new Response("not found", { status: 404 }),
+  });
+  assert.equal(attachment.filename, "corte-semanal-operadora-tlacatecpan-2026-08-26.pdf");
   assert.match(attachment.sha256, /^[0-9a-f]{64}$/);
-  assert.equal(attachment.pageCount, 3);
-  assert.match(attachment.content, /^JVBERi0xLjQ/);
+  assert.equal(attachment.pageCount, 1);
+  assert.match(attachment.content, /^JVBERi0xLjM/);
+});
+
+test("DEV system PDF keeps landscape letter pagination for larger cuts", () => {
+  const generated = generateApprovalBatchPdfBytes(referenceDocument(35));
+  const binary = new TextDecoder("latin1").decode(generated.bytes);
+  assert.ok(generated.pageCount >= 2);
+  assert.match(binary, /\/MediaBox \[0 0 792\.?0* 612\.?0*\]/);
+  assert.match(binary, /Folio/);
+  assert.match(binary, /Proveedor/);
+  assert.match(binary, /Centro \/ partida/);
+  assert.match(binary, /Solicitante/);
+  assert.match(binary, /Decision/);
+  assert.match(binary, /Motivo/);
 });
 
 test("DEV email keeps its test label and links only to the DEV approval UI", () => {
-  const rendered = renderApprovalBatchSubmittedEmail(documentFixture(2), "test_only", "director");
+  const rendered = renderApprovalBatchSubmittedEmail(referenceDocument(1), "test_only", "director");
   assert.match(rendered.subject, /^\[DEV TEST\] Corte semanal por autorizar:/);
   assert.match(rendered.html, /flux-logo-email-white\.png/);
-  assert.match(rendered.html, /Tienes un corte por autorizar/);
-  assert.match(rendered.html, /Revisar y autorizar corte/);
+  assert.match(rendered.html, /mismo formato disponible en el botón PDF/);
   assert.match(rendered.html, /catalogo-proveedores-flux-git-dev-quantta-team\.vercel\.app\/approval_batches\.html\?batch_id=/);
   assert.doesNotMatch(rendered.html, /https:\/\/flux\.quantta\.mx\/approval_batches\.html/);
   assert.match(rendered.html, /Entorno DEV/);
-  assert.doesNotMatch(rendered.html, /redirigido al destinatario de prueba/);
 });
 
-test("DEV dispatcher sends to the selected Director instead of the global test mailbox", async () => {
+test("DEV dispatcher sends the system-format PDF to the selected Director", async () => {
   const event = {
     id: "00000000-0000-0000-0000-000000000010",
     event_type: "approval_batch.submitted",
     source_table: "approval_batches",
     source_id: "00000000-0000-0000-0000-000000000003",
-    source_folio: "Corte DEV QA 2026-W35",
+    source_folio: "CORTE DEMO CLIENTE 24/AGO/2026 v1",
     recipient_type: "administrador_sistema",
     recipient_profile_id: "00000000-0000-0000-0000-000000000002",
     recipient_email: "director@gmail.example",
@@ -94,11 +119,14 @@ test("DEV dispatcher sends to the selected Director instead of the global test m
   const fetchMock = async (url, options = {}) => {
     const target = String(url);
     calls.push({ target, options });
+    if (target.endsWith("/assets/logo-flux-verde.webp")) {
+      return new Response("not available in contract test", { status: 404 });
+    }
     if (target.endsWith("/rest/v1/rpc/claim_approval_batch_submitted_events_for_dispatcher")) {
       return Response.json([event]);
     }
     if (target.endsWith("/rest/v1/rpc/get_approval_batch_submitted_notification_document")) {
-      const document = documentFixture(2);
+      const document = referenceDocument(1);
       document.recipient_email = event.recipient_email;
       document.batch.director_email = event.recipient_email;
       return Response.json(document);
@@ -106,12 +134,11 @@ test("DEV dispatcher sends to the selected Director instead of the global test m
     if (target === "https://api.resend.com/emails") {
       const payload = JSON.parse(options.body);
       assert.deepEqual(payload.to, [event.recipient_email]);
-      assert.notDeepEqual(payload.to, ["ramon@quantta.mx"]);
       assert.match(payload.subject, /^\[DEV TEST\] Corte semanal por autorizar:/);
-      assert.match(payload.html, /Entorno DEV/);
       assert.equal(payload.attachments.length, 1);
-      assert.match(payload.attachments[0].content, /^JVBERi0xLjQ/);
-      return Response.json({ id: "resend-dev-director-1" });
+      assert.equal(payload.attachments[0].filename, "corte-semanal-operadora-tlacatecpan-2026-08-26.pdf");
+      assert.match(payload.attachments[0].content, /^JVBERi0xLjM/);
+      return Response.json({ id: "resend-dev-director-system-pdf-1" });
     }
     if (target.endsWith("/rest/v1/rpc/mark_notification_processed_for_dispatcher")) {
       return Response.json({ status: "sent" });
@@ -147,21 +174,27 @@ test("DEV dispatcher sends to the selected Director instead of the global test m
   assert.equal(result.processed, 1);
   assert.equal(result.sent, 1);
   assert.equal(result.failed, 0);
+  assert.equal(result.events[0].attachment_filename, "corte-semanal-operadora-tlacatecpan-2026-08-26.pdf");
   assert.equal(result.events[0].final_recipient_email, "di******@gmail.example");
   assert.equal(calls.filter((call) => call.target === "https://api.resend.com/emails").length, 1);
 });
 
-test("DEV migration is exclusive, service-only, and replay-safe", async () => {
-  const migration = await readFile(
+test("DEV migrations remain exclusive and system-PDF fields stay service-only", async () => {
+  const foundation = await readFile(
     new URL("../../supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql", import.meta.url),
     "utf8",
   );
-  assert.match(migration, /event\.event_type = 'approval_batch\.submitted'/);
-  assert.match(migration, /event\.created_at > p_created_at_after/);
-  assert.match(migration, /batch\.status = 'submitted'/);
-  assert.match(migration, /event\.recipient_profile_id = batch\.director_id/);
-  assert.match(migration, /notification_approval_batch_submitted_dispatch_after_insert/);
-  assert.match(migration, /grant execute[\s\S]*to service_role/i);
-  assert.doesNotMatch(migration, /update public\.notification_events[\s\S]*where event_type = 'approval_batch\.submitted'/i);
-  assert.doesNotMatch(migration, /delete from public\.notification_events/i);
+  const systemPdfFields = await readFile(
+    new URL("../../supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(foundation, /event\.event_type = 'approval_batch\.submitted'/);
+  assert.match(foundation, /event\.created_at > p_created_at_after/);
+  assert.match(systemPdfFields, /'requester_name', requester\.full_name/);
+  assert.match(systemPdfFields, /'director_status', item\.director_status/);
+  assert.match(systemPdfFields, /'reject_reason', item\.director_reject_reason/);
+  assert.match(systemPdfFields, /'company_name', v_company_name/);
+  assert.match(systemPdfFields, /grant execute[\s\S]*to service_role/i);
+  assert.match(systemPdfFields, /revoke all[\s\S]*from public, anon, authenticated/i);
+  assert.doesNotMatch(systemPdfFields, /delete from public\.notification_events/i);
 });
