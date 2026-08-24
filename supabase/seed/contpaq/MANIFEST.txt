@@ -1,0 +1,49 @@
+Semilla contable — generada por scripts/generar_seed_contable.mjs
+Reproducible: mismo commit + mismas fuentes = mismos hashes.
+
+operadora
+  fuente      fixtures/OPT - Catalogo de cuentas.xls
+  sha256      b7d1e138f19aa7bfae8750f99bf6302ed767a7240e5fa64eb464549623396182
+  cuentas     1646 (1402 de detalle)
+  con árbol   1646
+  con tipo    1646
+  rubros NIF  1440
+  csv         data/seed/catalogo_operadora.csv  sha256 8a461f10752b4eed82df2d336934b21056de5684b22e573fee492654bf5707c6
+  sql         data/seed/catalogo_operadora.sql  sha256 3c68d1579e68b694975d460325d156226d93a46986036c35afbce1d7e77ba4a8
+
+soporte_fersana
+  fuente      fixtures/SF - Catalogo de cuentas.xls
+  sha256      442b5b482e7180af8295d0778b75dfa0a7786684349cb4689683135bddc506e0
+  cuentas     694 (638 de detalle)
+  con árbol   694
+  con tipo    694
+  rubros NIF  272
+  csv         data/seed/catalogo_soporte_fersana.csv  sha256 3ad1f6d56a8831e4ad60c1eacfb4d83dc3d9f9f43ae6caa3d85c734bcea8dd29
+  sql         data/seed/catalogo_soporte_fersana.sql  sha256 6ed6a7373b54ebba3c70d884bb46c102f2bec7b06a88e120cb2d942152bf389b
+
+flux_financiera
+  fuente      fixtures/FF - Catalogo de cuentas.xls
+  sha256      5322e3f576795c4c432cb43084c6716613a80d4582f56ba083ca846b4f3d2f03
+  cuentas     1013 (924 de detalle)
+  con árbol   1013
+  con tipo    1013
+  rubros NIF  507
+  csv         data/seed/catalogo_flux_financiera.csv  sha256 dc57a76943ff7ea37312ce1f6109aa1c75e59ad369d0ffa33ab3ed21578a2ea3
+  sql         data/seed/catalogo_flux_financiera.sql  sha256 283143efdc9e887ad6c33445b148b2dd7521df6c904f57cf5d77502dbc5d5dec
+
+mapeos partida→cuenta (Operadora)
+  fuente      data/seed/mapeos_operadora.json (export de DEV, aplicado y validado)
+  sha256      1a5d5d0c35bf6838b6f3bc0aa465378fff84859e152321761131e94dfd4fa4c2
+  mapeos      87 (22 nombre_exacto · 65 criterio · 6 needs_review)
+  validación  63 cuentas distintas: existen, son hoja, CtaMayor=2, tipo=G
+  csv         data/seed/mapeos_operadora.csv  sha256 827ee2cab2e42f4f7c37fab715c2dc3750bbb621a176909fc79be9a72d63e55a
+  sql         data/seed/mapeos_operadora.sql  sha256 abb102d2c0469a5baafda3ab7f50201afad01889bfa7bdc394291eabc140bd23
+
+NOTA sobre las razones textuales
+  Las razones escritas al construir el seed original (ago-2026) NO están
+  versionadas: se perdieron con el scratchpad de esa sesión. NO se
+  reconstruyen por heurística. Lo verificable y reproducible es:
+    · el par partida→cuenta (aplicado y validado en DEV)
+    · el método derivado por comparación normalizada de nombres
+    · las 6 banderas needs_review
+  La derivación reproduce la partición original exacta: 22 / 65.

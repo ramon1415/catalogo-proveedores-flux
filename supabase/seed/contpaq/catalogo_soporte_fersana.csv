@@ -1,0 +1,695 @@
+codigo,codigo_norm,nombre,cta_sup,cta_mayor,tipo,rubro_nif,agrupador_sat,es_detalle
+0000100,0000100,ACTIVO,0000000,2,A,,,false
+0000110,0000110,CIRCULANTE,0000100,3,A,,,false
+1000000,1000000,Fondo Fijo Caja,0000110,1,A,,,false
+1000001,1000001,Ana Falcón Zamudio,1000000,2,A,,,true
+1010000,1010000,Caja,0000110,1,A,,,false
+1010001,1010001,Fondo Revolvente,1010000,2,A,,,true
+1020000,1020000,Bancos,0000110,1,A,,,false
+1020001,1020001,"HSBC Mexico, S. A.",1020000,2,A,,,true
+1020002,1020002,"BBVA Bancomer,S.A.",1020000,2,A,,,true
+1020003,1020003,Fondo de Inversión,1020000,2,A,1101.01,102.01,true
+1030000,1030000,Clientes,0000110,1,A,,,false
+1030001,1030001,Lourdes Sanchez Navarro R.,1030000,2,A,,,true
+1030003,1030003,"Panera el Roble, S. A. de C. V.",1030000,2,A,,,true
+1030005,1030005,"Dezdez Capital, S. A. de C. V.",1030000,2,A,,,true
+1030006,1030006,Domini Paola Valdez y Alaniz,1030000,2,A,,,true
+1030008,1030008,"Marcas Coronado, S. A. de C. V.",1030000,2,A,,,true
+1030009,1030009,"Sureste Atalaya, S. A. de C. V. SOFO",1030000,2,A,,,true
+1030002,1030002,"DDX, S. A. de C. V.",1030000,2,A,,,true
+1030004,1030004,"Servicios y Logística ABC, S. A. de C. V.",1030000,2,A,,,true
+1030007,1030007,"Alimentos Congelados el Roble, S. A. de C. V.",1030000,2,A,,,true
+1030010,1030010,"Zarco Capital, S. A. de C. V.",1030000,2,A,,,true
+1030011,1030011,"Capitales Orinoco, S. A. de C. V.",1030000,2,A,,,true
+1030012,1030012,"Inmobiliaria Zehcnas, S. A. de C. V.",1030000,2,A,,,true
+1030013,1030013,"Fondo de Marcas,S.A. de C.V.",1030000,2,A,,,true
+1030014,1030014,Airis de Mexico S.A. de C.V.,1030000,2,A,,,true
+1030015,1030015,"Compañia Administradora del Golfo,S.C.",1030000,2,A,,,true
+1030016,1030016,"Capitales el Roble, S.A. de C.V.",1030000,2,A,,,true
+1030017,1030017,"Corporacion Mexicana el Roble, S.A. de C.V.",1030000,2,A,,,true
+1030018,1030018,"Capital Integral, S.A. de C.V.",1030000,2,A,,,true
+1030019,1030019,"La Galarza Capitales, S.A. de C.V.",1030000,2,A,,,true
+1030020,1030020,Lorenzo Juan Antonio Cue Sanchez Navarro,1030000,2,A,,,true
+1030021,1030021,Hakuna Mangusta LLC,1030000,2,A,,,true
+1030022,1030022,Almudena Cue Loizaga,1030000,2,A,,,true
+1030023,1030023,Beatriz Sanchez Navarro Redo,1030000,2,A,,,true
+1039999,1039999,Clientes Varios,1030000,2,A,,,true
+1030024,1030024,BSW Tratamientos Sustentables de Agua de la Baja,1030000,2,A,,,true
+1030025,1030025,Bluepath SA de CV,1030000,2,A,,,true
+1030026,1030026,Ma. de Lourdes del Sagrado Corazon Sanchez,1030000,2,A,,,true
+1030027,1030027,Jose Francisco Enrique Pintado Rivero,1030000,2,A,,,true
+1030028,1030028,Mercedes Sanchez Navarro,1030000,2,A,,,true
+1030029,1030029,Beatriz Alejandra Pintado Sanchez Navarro,1030000,2,A,,,true
+1030030,1030030,Dionisio Lopez Vazquez,1030000,2,A,,,true
+1030031,1030031,Propiedades y Activos sa de cv,1030000,2,A,,,true
+1030032,1030032,Angelica Marquez Picazo,1030000,2,A,,,true
+1030033,1030033,Felipe Fernandez Sanchez Navarro,1030000,2,A,,,true
+1030034,1030034,"Aurum Financiera, SA de CV SOFOM ENR",1030000,2,A,,,true
+1030035,1030035,Co Plataforma de Investigacion Generativa AC,1030000,2,A,,,true
+1030036,1030036,Prometheus Servicios Administrativos,1030000,2,A,,,true
+1030037,1030037,"Connovo, S.A.P.I. de C.V.",1030000,2,A,1105.03,105.01,true
+1030038,1030038,"Tecnorural,S.A.P.I. de C.V.",1030000,2,A,1105.03,105.01,true
+1030039,1030039,Juan Alejandro Fernandez Sanchez Navarro,1030000,2,A,1105.03,105.01,true
+1030040,1030040,Hipocampus Centro de Aprendizaje S.A.P.I. de C.V.,1030000,2,A,1105.03,105.01,true
+1030041,1030041,"Social Venture Exchange Mexico, S.A.P.I. de C.V.",1030000,2,A,1105.03,105.01,true
+1030042,1030042,"Kaya Impacto, S.A.P.I. de C.V.",1030000,2,A,1105.03,105.01,true
+1030043,1030043,"Flux Financiera, S.A. de C.V. SOFOM ENR",1030000,2,A,1105.03,105.01,true
+1030044,1030044,Flux Arrendadora,1030000,2,A,1105.03,105.01,true
+1030045,1030045,Co Capital de Impacto Social Mexico,1030000,2,A,1105.03,105.01,true
+1030046,1030046,"Sensecube Mexico, A.C.",1030000,2,A,1105.03,105.01,true
+1030047,1030047,Jose Juan Jorge Pintado Sanchez Navarro,1030000,2,A,1105.03,105.01,true
+1030048,1030048,Hola Edtech S.A.P.I. de C.V.,1030000,2,A,1105.03,105.01,true
+1030049,1030049,"Contacto Interactivo, S.C.",1030000,2,A,1105.03,105.01,true
+1030050,1030050,Empresas Beneficio e Interes Colectivo A.C.,1030000,2,A,1105.03,105.01,true
+1030051,1030051,"Donar, S.A. de C.V.",1030000,2,A,1105.03,105.01,true
+1030052,1030052,Luis Gerardo Salvador Leon Bermejillo Crespo,1030000,2,A,1105.03,105.01,true
+1030053,1030053,Margarita Elena Bustamante Abed,1030000,2,A,1105.03,105.01,true
+1030054,1030054,MM San Antonio La Isla S.A.P.I. de C.V.,1030000,2,A,1105.03,105.01,true
+1030055,1030055,"Operadora Tlacatecpan, S.A.de C.V.",1030000,2,A,1105.03,105.01,true
+1030056,1030056,"AU Capital Servicios y Leasing, S.A.P.I. de C.V.",1030000,2,A,1105.03,105.01,true
+1030057,1030057,Futuro Azul S. de R.L. de C.V.,1030000,2,A,1105.03,105.01,true
+1030058,1030058,"Asociación de Colonos Mil Cumbres 165, A.C.",1030000,2,A,1105.03,105.01,true
+1030059,1030059,Blanca Estela Sepulveda Alavez,1030000,2,A,1105.03,105.01,true
+1030060,1030060,"BEA, S.A de C.V.",1030000,2,A,1105.03,105.01,true
+1030061,1030061,Juan Sanchez Navarro Redo,1030000,2,A,1105.03,105.01,true
+1030062,1030062,Exsan de Mèxico,1030000,2,A,1105.03,105.01,true
+1030063,1030063,Flux Arrendadora,1030000,2,A,1105.03,105.01,true
+1030064,1030064,Fidel Alejandro García Sepulveda,1030000,2,A,1105.03,105.01,true
+1030065,1030065,Arca Tuetano,1030000,2,A,1105.03,105.01,true
+1030066,1030066,Operadora de Plazas Comerciales San Lucas,1030000,2,A,1105.03,105.01,true
+1040000,1040000,Invesion en Acciones,0000110,1,A,,,false
+1040001,1040001,"Derivados Industrializados del Cafe,S.A. de C.V.",1040000,2,A,,,true
+1040002,1040002,"Administracion Fersana, S.A. de C.V.",1040000,2,A,1205.02,188.02,true
+1040003,1040003,"Método de Participación Administración Fersana, S.",1040000,2,A,1205.02,188.02,true
+1050000,1050000,Deudores Diversos,0000110,1,A,,,false
+1050003,1050003,Ma. de Lourdes Sanchez Navarro,1050000,2,A,,,true
+1050004,1050004,"Coppel,S.A.de C.V.",1050000,2,A,,,true
+1050005,1050005,Gerardo Gonzalez Olmos,1050000,2,A,,,true
+1050006,1050006,Efectivale S.de R.L.de C.V.,1050000,2,A,,,true
+1050007,1050007,"Productos Metalicos Steele, S.A. de C.V.",1050000,2,A,,,true
+1050008,1050008,Peninsula Motors S.A. de C.V.,1050000,2,A,,,true
+1050009,1050009,Sureste Atalaya S.A. de C.V. SOFOM ENR,1050000,2,A,,,true
+1050010,1050010,Beatriz Alejandra Pintado Sanchez Navarro,1050000,2,A,,,true
+1050011,1050011,Jose Alberto Cabral Martínez,1050000,2,A,,,true
+1050012,1050012,Claroscuro,1050000,2,A,,,true
+1050013,1050013,Jose Daniel Labardini,1050000,2,A,,,true
+1050014,1050014,"Altus Credit, S.A. de C.V. SOFOM ENR",1050000,2,A,,,true
+1050015,1050015,GLC CO S.A. de C.V.,1050000,2,A,,,true
+1050016,1050016,Deudores Varios,1050000,2,A,,,true
+1050017,1050017,Xavier Cortina,1050000,2,A,,,true
+1050018,1050018,Manuel Escalante,1050000,2,A,,,true
+1050019,1050019,Gerardo Rincon,1050000,2,A,,,true
+1050020,1050020,Carmen Garrido,1050000,2,A,1107.03,107.01,true
+1050021,1050021,Jorge Delgado,1050000,2,A,1107,107,true
+1050022,1050022,HDI Seguros S.A. de C.V.,1050000,2,A,1107,107,true
+1050023,1050023,Josue Murillo Rodriguez,1050000,2,A,1107,107,true
+1050024,1050024,Jose Silvano Ubaldo Fernandez Moales,1050000,2,A,1107,107,true
+1050025,1050025,Claudia Yanin Navarrete Sanchez,1050000,2,A,1107,107,true
+1050026,1050026,Yosselin Castro Garcia,1050000,2,A,1107,107,true
+1050027,1050027,Yulma Chavez de la Rosa,1050000,2,A,1107,107,true
+1050028,1050028,Felipe Fernandez Sanchez Navarro,1050000,2,A,1107,107,true
+1050029,1050029,"Inmobiliaria Zehcnas, S.A. de C.V.",1050000,2,A,1107,107,true
+1050030,1050030,"Alimentos Congelados el Roble, S.A. de C.V.",1050000,2,A,1122.01,107.05,true
+1050031,1050031,"Administración Fersana, S.A. de C.V.",1050000,2,A,1107,107,true
+1050032,1050032,"Servicios y Logistica ABC, S.A. de C.V.",1050000,2,A,1107.01,107.03,true
+1050033,1050033,"Flux Financiera, S.A. de C.V. SOFOM",1050000,2,A,1107.01,107.03,true
+1050034,1050034,"Exsan de Mèxico, S.A. de C.V.",1050000,2,A,,107,true
+1050035,1050035,"Capitales Orinoco, S.A. de C.V.",1050000,2,A,,107,true
+1050036,1050036,Energèticos en Red Electrònica,1050000,2,A,,107,true
+1050037,1050037,PPTY,1050000,2,A,,107,true
+1050038,1050038,Informática Poware,1050000,2,A,,107,true
+1050039,1050039,AXA Seguros,1050000,2,A,,107,true
+1050040,1050040,ANA Compañía de Seguros,1050000,2,A,,107,true
+1050041,1050041,Dezdez Capital,1050000,2,A,,107,true
+1060000,1060000,IVA Acreditable,0000110,1,A,,,false
+1060001,1060001,I. V. A. Acreditable Pagado,1060000,2,A,,,true
+1060002,1060002,I. V. A. Por Acreditar,1060000,2,A,,,true
+1060003,1060003,I.V.A Retenido,1060000,2,A,1103.01,118.01,true
+1070000,1070000,Depositos en Garantia,0000110,1,A,,,false
+1070001,1070001,Issac Rayek Khabie,1070000,2,A,1109.04,120.01,true
+1070002,1070002,Moises Rayek Khabie,1070000,2,A,1122.01,109.23,true
+1070003,1070003,Contrato de Fideicomiso,1070000,2,A,1202,184,true
+1070004,1070004,Torre Esmeralda,1070000,2,A,1202,184,true
+1070005,1070005,Oficina 103 Monte Pelvoux,1070000,2,A,1203.07,184.02,true
+1070006,1070006,Oficina 104 Monte Pelvoux,1070000,2,A,1203.07,184.02,true
+1070007,1070007,Promotora Montural,1070000,2,A,,184,true
+1070008,1070008,CFE Montes Urales 760,1070000,2,A,,184,true
+1080000,1080000,Rentas Ant.,0000110,1,A,,,false
+1080001,1080001,Promotora Montural,1080000,2,A,1109.01,109.05,true
+1090000,1090000,Anticipo a Proveedores,0000110,1,A,,,false
+1090001,1090001,Altus Credit S.A de C.V,1090000,2,A,,,true
+1090002,1090002,A&A SYNERGY SA DE CV,1090000,2,A,,,true
+1090003,1090003,ST17 Muebles SAS de CV,1090000,2,A,1109.04,120.01,true
+1090004,1090004,"Blanco Carrillo, S.C.",1090000,2,A,1109.04,120.01,true
+1090005,1090005,Camino del Sol Automotriz de Tijuana S de R.L. de,1090000,2,A,1109.04,120.01,true
+1090006,1090006,Office Depot,1090000,2,A,1109.04,120.01,true
+1090007,1090007,"BXMAS Seguros, S.A. de C.V.",1090000,2,A,1109.04,120.01,true
+1090008,1090008,Teresita Loana Vazquez Cantu,1090000,2,A,1109.04,120.01,true
+1090009,1090009,"Dinamica Integral Zega, S.A. de C.V.",1090000,2,A,1109.04,120.01,true
+1090010,1090010,CHUBB Seguros,1090000,2,A,1109.04,120.01,true
+1090011,1090011,"Servicios y Logistica ABC, S.A de C.V.",1090000,2,A,1109.04,120.01,true
+1090012,1090012,Bortobren S.A. de C.V.,1090000,2,A,1109.04,120.01,true
+1090013,1090013,"KDV Grupo Empresarial, S.A. de C.V.",1090000,2,A,1109.04,120.01,true
+1090014,1090014,NSU Proteccion,1090000,2,A,1109.04,120.01,true
+1090015,1090015,"Feles Sistemas, S.A. de C.V.",1090000,2,A,1109.04,120.01,true
+1090016,1090016,"Toka Internacional, S.A.P.I. de C.V.",1090000,2,A,1109.04,120.01,true
+1090017,1090017,Juan Mario Flores,1090000,2,A,1109.04,120.01,true
+1090018,1090018,Informàtica Poware S.C.,1090000,2,A,,109,true
+1090019,1090019,Soluciones Adm. Becma,1090000,2,A,1109.04,120.01,true
+1090020,1090020,Flux Financiera,1090000,2,A,1109.04,120.01,true
+1090021,1090021,Grupo Nacional Provinsial,1090000,2,A,1109.04,120.01,true
+1090022,1090022,Promotora Muntural,1090000,2,A,,120.01,true
+1090023,1090023,Jose Daniel Labardini,1090000,2,A,1109.04,120.01,true
+1100000,1100000,Impuestos a Favor,0000110,1,A,,,false
+1100001,1100001,ISR Retenido por Bancos,1100000,2,A,,,true
+1100002,1100002,IVA a Favor 2019,1100000,2,A,1103,113,true
+1100003,1100003,IVA a Favor 2020,1100000,2,A,1103,113,true
+1100004,1100004,IVA a Favor 2021,1100000,2,A,1103.01,113.01,true
+1100010,1100010,Subsidio al Empleo,1100000,2,A,1103,113,true
+1100005,1100005,IVA a favor de años anteriores,1100000,2,A,1103,113,true
+1100011,1100011,ISR a Favor 2023,1100000,2,A,,113,true
+1100012,1100012,ISR a Favor 2024,1100000,2,A,,113,true
+1100013,1100013,IVA a Favor 2025,1100000,2,A,,113,true
+1100014,1100014,ISR a favor 2025,1100000,2,A,1103.01,113.02,true
+1100015,1100015,IVA a Favor 2026,1100000,2,A,,113,true
+0000120,0000120,FIJO,0000100,3,A,,,false
+1200000,1200000,Mobiliario y Equipo de oficina,0000120,1,A,,,false
+1200001,1200001,Maq.de Escribir Brother GX-675 OSP,1200000,2,A,,,true
+1200002,1200002,Telefono Alambrico Panasonic T 7716,1200000,2,A,,,true
+1200003,1200003,"Escritorio ""L"" Metalico Color Gris",1200000,2,A,,,true
+1200004,1200004,Silla de Trabajo Aero sin soporte lumbar,1200000,2,A,,,true
+1200005,1200005,Archivero 4 Gabetas Ana,1200000,2,A,,,true
+1200006,1200006,2 Sillas sin soporte Lumbar,1200000,2,A,,,true
+1200007,1200007,Archivero Movil Metalico,1200000,2,A,,,true
+1200008,1200008,Escritorios Cruceta,1200000,2,A,,,true
+1200009,1200009,Escritorios Marcas Coronado,1200000,2,A,1201.08,155.01,true
+1210000,1210000,Depreciación Acumulada de Mob y Eq. oficina,0000120,1,B,,,true
+1220000,1220000,Equipo de Transporte,0000120,1,A,,,false
+1220001,1220001,Toyota 4 Runner V LTD 2007,1220000,2,A,,,true
+1220002,1220002,Dodge Durango 2008,1220000,2,A,,,true
+1220003,1220003,Toyota Land Cruiser 2008,1220000,2,A,,,true
+1220004,1220004,Toyota 4 Runner 2005,1220000,2,A,,,true
+1220005,1220005,Jeep Cherokee 2013,1220000,2,A,,,true
+1220006,1220006,Blindaje Camioneta Cherokee,1220000,2,A,,,true
+1220007,1220007,Unidad Seminueva Camioneta BMW,1220000,2,A,,,true
+1230000,1230000,Depreciación Acumulada Equipo Transporte,0000120,1,B,,,false
+1230001,1230001,Depreciación Equipo de Transporte,1230000,2,B,,,true
+1240000,1240000,Equipo de cómputo,0000120,1,A,,,false
+1240001,1240001,Laptop CPQ Presario CQ43,1240000,2,A,,,true
+1240002,1240002,Software Contable,1240000,2,A,,,true
+1240003,1240003,Multifuncional Brother MFC-8890DW,1240000,2,A,,,true
+1240004,1240004,Laptop HP G4-1365LA Core 13,1240000,2,A,,,true
+1240005,1240005,PC Dell Inspiron 620S,1240000,2,A,,,true
+1240006,1240006,Contpaq de 2 a 3 Usuarios F-1567,1240000,2,A,,,true
+1240007,1240007,PC Semp 145.2.8 GB,1240000,2,A,,,true
+1240008,1240008,"Monitor LCD Acer 18.5"" Wide Negro",1240000,2,A,,,true
+1240009,1240009,Microsoft Office 2010 Home Bussines,1240000,2,A,,,true
+1240010,1240010,Camar IP Trendnet TV IP121W Inalambrica,1240000,2,A,,,true
+1240011,1240011,Contpaq I Nominas,1240000,2,A,,,true
+1240012,1240012,PC Inspirion 3647 Monitor AOC Led Office 2013,1240000,2,A,,,true
+1240013,1240013,NTBK HEW ProBk 440i5-4200M 4G 750G,1240000,2,A,,,true
+1240014,1240014,Multifuncional Brother MFC8950DW,1240000,2,A,,,true
+1240015,1240015,Actualización a 3 usuarios,1240000,2,A,,,true
+1240016,1240016,NTBK HEW ProBook 440 G2 i5-4210U (LAP ANA),1240000,2,A,1201.10,156.01,true
+1240017,1240017,HP Chromebook 14 G4 CEL N2840 Syst 4G 16G,1240000,2,A,1201.10,156.01,true
+1240018,1240018,Logitech PTZ Camera,1240000,2,A,,156.01,true
+1240019,1240019,2 Laptop Vivobook 14,1240000,2,A,1201.10,156.01,true
+1250018,1250018,Logitech PTZ Camera,1240000,2,A,1201.10,156.01,true
+1250000,1250000,Depreciación acumulada Eq. cómputo,0000120,1,B,,,true
+1260000,1260000,Edificios,0000120,1,A,,,true
+1270000,1270000,Depreciación Acumulada Edificios,0000120,1,B,,,true
+1280000,1280000,Terrenos,0000120,1,A,,,true
+1300000,1300000,Depreciación acumulada de Eq. de Servicios,0000120,1,A,,,true
+0000140,0000140,DIFERIDO,0000100,3,A,,,false
+1400000,1400000,Gastos de Organización,0000140,1,A,,,true
+1410000,1410000,Gastos de Instalación y Adaptación,0000140,1,A,,,true
+1420000,1420000,Impuestos Anticipados,0000140,1,A,,,true
+1430000,1430000,Gastos Anticipados,0000140,1,A,,,false
+1430001,1430001,G. Workspace,1430000,2,A,1208.01,173.01,true
+1430002,1430002,Dominios,1430000,2,A,1208.01,173.01,true
+1430003,1430003,Microsoft 365,1430000,2,A,1208.01,173.01,true
+1500000,1500000,Amortización Gastos Organización,0000140,1,B,,,true
+1510000,1510000,Amortización Gastos Instalación y Adaptación,0000140,1,B,,,true
+0000200,0000200,PASIVO,0000000,2,D,,,false
+0000210,0000210,CIRCULANTE,0000200,3,D,,,false
+2000000,2000000,PROVEEDORES,0000210,1,D,,,false
+2000002,2000002,Jose Adolfo Hernandez Rodriguez,2000000,2,D,,,true
+2000012,2000012,"Smart Tracker, S. A. de C. V.",2000000,2,D,,,true
+2000001,2000001,"Servicios Empresariales de Alta Calidad, S. A. de",2000000,2,D,,,true
+2000003,2000003,Jose Manuel Vaca Elguero,2000000,2,D,,,true
+2000004,2000004,Teresa Sanchez Granados,2000000,2,D,,,true
+2000005,2000005,Bluepath SA de CV,2000000,2,D,,,true
+2000006,2000006,"Edenred Mexico,S.A. de C.V.",2000000,2,D,,,true
+2000007,2000007,Martinez Serrano Y Rangel Bang S.C.,2000000,2,D,,,true
+2000008,2000008,"Metropolitana Compañia de Seguros,S.A.",2000000,2,D,,,true
+2000009,2000009,Maria Patricia Parra Garcia,2000000,2,D,,,true
+2000013,2000013,"Coppel, S.A.de C.V.",2000000,2,D,,,true
+2000014,2000014,Ana Compañia de Seguros SA de CV,2000000,2,D,,,true
+2000015,2000015,"Marcas Coronado, S.A. de C.V.",2000000,2,D,,,true
+2000016,2000016,"Despacho Tavel, S.C.",2000000,2,D,,,true
+2000017,2000017,Maria del Rosario Aviña Buitron,2000000,2,D,,,true
+2000018,2000018,Seguros Atlas S.A.,2000000,2,D,,,true
+2000019,2000019,Vadum S.A. de C.V.,2000000,2,D,,,true
+2000020,2000020,"Jones Day Mexico,S.C.",2000000,2,D,,,true
+2000021,2000021,Dezdez Capital S.A. de C.V.,2000000,2,D,,,true
+2000022,2000022,Efectivale S. de R. L. de C.V.,2000000,2,D,,,true
+2000023,2000023,"Sureste Atalaya, S.A. de C.V. Sofom ENR",2000000,2,D,,,true
+2000024,2000024,"HDI Seguros, S.A. de C.V.",2000000,2,D,,,true
+2000025,2000025,"Correo Lomas Reforma, S.A. de C.V.",2000000,2,D,,,true
+2000026,2000026,"Inmobiliaria JEM, S.A. de C.V.",2000000,2,D,,,true
+2000027,2000027,"Aba Seguros, S.A de C.V.",2000000,2,D,,,true
+2000028,2000028,"Grupo Adypro, S.A. de C.V.",2000000,2,D,,,true
+2000029,2000029,"Turanzas,Bravo & Ambrosi",2000000,2,D,,,true
+2000030,2000030,Zarco Capital S.A. de C.V.,2000000,2,D,,,true
+2000031,2000031,Bettinger Asesores S.C.,2000000,2,D,,,true
+2000032,2000032,Carlos Nuñez Saucedo,2000000,2,D,,,true
+2000033,2000033,"Altus Credit, S.A. de C.V.SOFOM ENR",2000000,2,D,,,true
+2000034,2000034,"Chevez, Ruiz, Zamarripa y Cia. S.C.",2000000,2,D,,,true
+2000035,2000035,NSC Asesores S.A. de C.V.,2000000,2,D,,,true
+2000036,2000036,"AIG Seguros Mexico, S.A. de C.V.",2000000,2,D,,,true
+2000037,2000037,"Escobar y Gorostieta, S.C.",2000000,2,D,,,true
+2000038,2000038,"Smart Servicios Profesionales de Monitoreo, S.C.",2000000,2,D,,,true
+2000039,2000039,"Leadership Advisor, S.C.",2000000,2,D,,,true
+2000040,2000040,Martin del Campo Souza Diego Joaquin Ramon Ramiro,2000000,2,D,,,true
+2000041,2000041,Bennett Jones LLP,2000000,2,D,,,true
+2000042,2000042,"MAPFRE TEPEYAC, S. A.",2000000,2,D,,,true
+2000043,2000043,Seguros Imbursa SA,2000000,2,D,,,true
+2000044,2000044,COMERCIALIZADORA ALUS SA DE CV,2000000,2,D,,,true
+2000045,2000045,AUTOMOTRIZ NIHON SA DE CV,2000000,2,D,,,true
+2000046,2000046,Airis de Mexico S.A de C.V,2000000,2,D,,,true
+2000047,2000047,Municipio de Los Cabos,2000000,2,D,,,true
+2000048,2000048,"Panera el Roble, sa de cv",2000000,2,D,,,true
+2000049,2000049,"Grupo Asacer, sa de cv",2000000,2,D,,,true
+2000050,2000050,A&A SYNERGY SA DE CV,2000000,2,D,,,true
+2000051,2000051,"Peninsula Motors, SA de CV",2000000,2,D,,,true
+2000052,2000052,Greenberg Traurig SC,2000000,2,D,,,true
+2000053,2000053,Direccion de Ingresos de la Secretaria de BCS,2000000,2,D,,,true
+2000054,2000054,Diego Manuel Ramirez Nuñez,2000000,2,D,,,true
+2000055,2000055,Federal Express Holdings Mexico,2000000,2,D,,,true
+2000056,2000056,Proveedora de Perosnal Estrategica SA de CV,2000000,2,D,,,true
+2000057,2000057,AF Servicios y Leasing SA de CV,2000000,2,D,,,true
+2000058,2000058,Juan Jose Ludlow Saldivar,2000000,2,D,2102.03,201.01,true
+2000059,2000059,Office Depot de Mexico SA de CV,2000000,2,D,2102.03,201.01,true
+2000060,2000060,Grupo Consent SA de CV,2000000,2,D,2102.03,201.01,true
+2000061,2000061,"Glc Co, SA de CV",2000000,2,D,2102.03,201.01,true
+2000062,2000062,Herramientas 7-24 SA de CV,2000000,2,D,2102.03,201.01,true
+2000063,2000063,"Zamia Asesoria Profesional, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000064,2000064,"Feles Sistemas, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000065,2000065,Cocina Urbana S.A. de C.V.,2000000,2,D,2102.03,201.01,true
+2000066,2000066,International Trading E&E S.A. de C.V.,2000000,2,D,2102.03,201.01,true
+2000067,2000067,Isaac Rayek Khabie,2000000,2,D,2102.03,201.01,true
+2000068,2000068,"Miguel A. Valenzuela Arquitectos, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000069,2000069,Moises Rayek Khabie,2000000,2,D,2102.03,201.01,true
+2000070,2000070,Jefatura de Policia Industrial del Estado de Mexic,2000000,2,D,2102.03,201.01,true
+2000071,2000071,Automoviles Dinamicos S de R.L.de C.V.,2000000,2,D,2102.03,201.01,true
+2000072,2000072,Omar Gonzalez Segura,2000000,2,D,2102.03,201.01,true
+2000073,2000073,Bayern Motors S.A. de C.V.,2000000,2,D,2102.03,201.01,true
+2000074,2000074,Comision Federal de Electricidad,2000000,2,D,2102.03,201.01,true
+2000075,2000075,Servicios y Logisitca ABC S.A. de C.V.,2000000,2,D,2102.03,201.01,true
+2000076,2000076,"Limpieza y Servicio Alge, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000077,2000077,ST17 Muebles SAS de CV,2000000,2,D,2102.03,201.01,true
+2000078,2000078,"Blanco Carrillo, S.C.",2000000,2,D,2102.03,201.01,true
+2000079,2000079,"Propuesta, S.A de C.V.",2000000,2,D,2102.03,201.01,true
+2000080,2000080,"Capacitacion y Consultoria GIDEF, S.C.",2000000,2,D,2102.03,201.01,true
+2000081,2000081,"Nauda, S.A.P.I. de C.V.",2000000,2,D,2102.03,201.01,true
+2000082,2000082,"Juridicos Gardupe, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000083,2000083,"Servicios Contables GASAR, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000084,2000084,"AXA Seguros, S.A de C.V.",2000000,2,D,2102.03,201.01,true
+2000085,2000085,Argelia Zuñiga Rocha,2000000,2,D,2102.03,201.01,true
+2000086,2000086,Yudith Rosmar Garcia Gonzalez,2000000,2,D,2102.03,201.01,true
+2000087,2000087,"Trevor Phillips Enterprises, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000088,2000088,"Dinamica Integral Zega, S.A. DE C.V.",2000000,2,D,2102.03,201.01,true
+2000089,2000089,"Estrategias de Negocios Mojo, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000090,2000090,"People Empowerment and Developmen, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000091,2000091,"Escalante Nelson, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000092,2000092,"IDONE de Mexico, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000093,2000093,"Wood`s Muebles para Oficina, S.A.",2000000,2,D,2102.03,201.01,true
+2000094,2000094,Miguel Angel Ramirez Flores,2000000,2,D,2102.03,201.01,true
+2000095,2000095,FDC Mexico City S. de R.L. de C.V.,2000000,2,D,2102.03,201.01,true
+2000096,2000096,"Comercializadora Camipro, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000097,2000097,"Informatica Poware, S.C.",2000000,2,D,2102.03,201.01,true
+2000098,2000098,"Randstad Mexico, S de R.L. de C.V.",2000000,2,D,2102.03,201.01,true
+2000099,2000099,Teresita Loana Vazquez Cantu,2000000,2,D,2102.03,201.01,true
+2000100,2000100,Michael Page International Mexico,2000000,2,D,2102.03,201.01,true
+2000101,2000101,"Workbeat, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000102,2000102,"Mundo Limpio Institucional, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000103,2000103,"CMB Soluciones Administrativas, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000104,2000104,"Chubb Seguros Mexico, S.A.",2000000,2,D,2102.03,201.01,true
+2000105,2000105,Delne Arriaga Hidalgo,2000000,2,D,2102.03,201.01,true
+2000106,2000106,Cynthia Morales villareal,2000000,2,D,2102.03,201.01,true
+2000107,2000107,Gamelearn Mexico S. de R.L. de C.V.,2000000,2,D,2102.03,201.01,true
+2000108,2000108,"Aymerich Business & Consulting, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000109,2000109,"Ludicorp, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000110,2000110,"Commute Technoligies, S.A.P.I. de C.V.",2000000,2,D,2102.03,201.01,true
+2000111,2000111,Mark Lawrence Foster,2000000,2,D,2102.03,201.01,true
+2000112,2000112,"Constructora Interestatal del Caribe, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000113,2000113,Hector Ramon Fernandez Montiel,2000000,2,D,2102.03,201.01,true
+2000114,2000114,Contrato de Fideicomiso de Adm. e Inversion IDENT,2000000,2,D,2102.03,201.01,true
+2000115,2000115,"Administracion Fersana, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000116,2000116,"Solucuiones Administrativas BECMA, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000117,2000117,"NSU Proteccion, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000118,2000118,Torre Esmeralda S.A de C.V.,2000000,2,D,2102.03,201.01,true
+2000119,2000119,BSN Bufete Sanchez Navarro,2000000,2,D,2102.03,201.01,true
+2000120,2000120,"Prometheus Technology, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000121,2000121,Operaciones de Negocios Falrejos,2000000,2,D,2102.03,201.01,true
+2000122,2000122,JAJER Entrepreneur,2000000,2,D,2102.03,201.01,true
+2000123,2000123,Proyectos e Inovacion Rejaj,2000000,2,D,2102.03,201.01,true
+2000124,2000124,"KDV Grup Empresarial, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000125,2000125,"Bortobren, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000126,2000126,"RMZH, S.C.",2000000,2,D,2102.03,201.01,true
+2000127,2000127,"Flux Financiera, S.A. de C.V. SOFOM ENR",2000000,2,D,2102.03,201.01,true
+2000128,2000128,"Ramirez Patiño, S.C.",2000000,2,D,2102.03,201.01,true
+2000129,2000129,"Toka Internacional, S.A.P.I de C.V.",2000000,2,D,2102.03,201.01,true
+2000130,2000130,"Habilee, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000131,2000131,Dyro Integracion S. de R.L. de C.V.,2000000,2,D,2102.03,201.01,true
+2000132,2000132,"Worky, S.A.P.I. de C.V.",2000000,2,D,2102.03,201.01,true
+2000133,2000133,Pure Water Technology,2000000,2,D,2102.03,201.01,true
+2000134,2000134,"BS Administradora de Salud, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000135,2000135,Nueva Walmart,2000000,2,D,2102.03,201.01,true
+2000136,2000136,Zascita de México S.A. de C.V.,2000000,2,D,2102.03,201.01,true
+2000137,2000137,Kristian Michelle Alba Proa,2000000,2,D,2102.03,201.01,true
+2000138,2000138,Polidiomas,2000000,2,D,2102.03,201.01,true
+2000139,2000139,Jose Daniel Labardini Schettino,2000000,2,D,2102.03,201.01,true
+2000140,2000140,"Etegrity, S.A. de C.V.",2000000,2,D,2102.03,201.01,true
+2000141,2000141,Tojoolal,2000000,2,D,2102.03,201.01,true
+2000142,2000142,Gabriel Miranda Brito,2000000,2,D,2102.03,201.01,true
+2000143,2000143,Soluciones de Evaluación para el Trabajo,2000000,2,D,2102.03,201.01,true
+2000144,2000144,Rocio Dìaz Gonzàlez,2000000,2,D,2102.03,201.01,true
+2000145,2000145,Regiane Administrative,2000000,2,D,2102.03,201.01,true
+2000146,2000146,Plan General Zero Mector,2000000,2,D,2102.03,201.01,true
+2000147,2000147,Flux Arrendadora,2000000,2,D,2102.03,201.01,true
+2000148,2000148,Lisette Carolina Montefusco,2000000,2,D,2102.03,201.01,true
+2000149,2000149,Promotora Montural,2000000,2,D,2102.03,201.01,true
+2000150,2000150,Carlos Tejeda Moller,2000000,2,D,2102.03,201.01,true
+2000151,2000151,Cesar Alejandro Muñoz García,2000000,2,D,,201.01,true
+2000152,2000152,Fernando Hernandez Farfan,2000000,2,D,2102.03,201.01,true
+2000153,2000153,Goji Technologi,2000000,2,D,2102.03,201.01,true
+2000154,2000154,Tech Bukers,2000000,2,D,,201.01,true
+2010000,2010000,ACREEDORES DIVERSOS,0000210,1,D,,,false
+2010002,2010002,Felipe Fernandez S. N.,2010000,2,D,,,true
+2010003,2010003,Lourdes Sanchez Navarro Redo,2010000,2,D,,,true
+2010004,2010004,Juan A. Fernandez S. N.,2010000,2,D,,,true
+2010005,2010005,"Dezdez Capital, S.A. de C.V.",2010000,2,D,,,true
+2010006,2010006,Dionicio Lopez Vazquez,2010000,2,D,,,true
+2010007,2010007,Beatriz Sanchez Navarro,2010000,2,D,,,true
+2010008,2010008,"Sureste Atalaya, S.A. de C.V. SOFOM ENR",2010000,2,D,,,true
+2010009,2010009,Sierra Candela,2010000,2,D,2105.03,205.02,true
+2010010,2010010,"Capitales Orinoco, S.A. de C.V.",2010000,2,D,2105.03,205.02,true
+2010011,2010011,Yulma Chavez de la Rosa,2010000,2,D,2105.03,205.02,true
+2010012,2010012,Informàtica Poware,2010000,2,D,,205,true
+2020000,2020000,IMPUESTOS POR PAGAR,0000210,1,D,,,false
+2021000,2021000,IVA Por Pagar,2020000,2,D,,,true
+2022000,2022000,IMPAC,2020000,2,D,,,true
+2023000,2023000,ISR,2020000,2,D,,,false
+2023001,2023001,ISR por Pagar,2023000,2,D,2106.01,213.03,true
+2023002,2023002,ISR Extraodinario,2023000,2,D,2106.01,213.03,true
+2024000,2024000,Provision Impuesto sobre Nómina,2020000,2,D,,,true
+2025000,2025000,IMSS,2020000,2,D,,,false
+2025001,2025001,Cuota Obrera IMSS,2025000,2,D,,601.26,true
+2025002,2025002,Cuota Obrera IMSS Cestanía y Vejez,2025000,2,D,,601.26,true
+2025003,2025003,Cuota Patronal IMSS,2025000,2,D,,601.26,true
+2025004,2025004,Cuota Patronal Aportación INFONAVIT,2025000,2,D,,601.26,true
+2025005,2025005,Cuota Patronal IMSS RCV,2025000,2,D,,601.26,true
+2025006,2025006,Cestanía Patronal,2025000,2,D,2108.01,211.01,true
+2026000,2026000,Préstamo INFONAVIT,2020000,2,D,,,true
+2027000,2027000,Préstamo FONACOT,2020000,2,D,,,true
+2028000,2028000,10% Retención Honorarios,2020000,2,D,,,true
+2029000,2029000,IVA retenido,2020000,2,D,,,true
+2021001,2021001,I. V. A. por préstamos,2020000,2,D,,,true
+2028001,2028001,10% Retencion por Arrendamiento,2020000,2,D,,119,true
+2028002,2028002,ISR Asimilados,2020000,2,D,2106.01,213.03,true
+2028003,2028003,Retencion del 6%,2020000,2,D,2109.01,216,true
+2030000,2030000,DOCUMENTOS POR PAGAR,0000210,1,D,,,false
+2031000,2031000,Bancarios,2030000,2,D,,,true
+2032000,2032000,Particulares,2030000,2,D,,,true
+2033000,2033000,Vales de Despensa,2030000,2,D,2101.01,202.01,true
+2034000,2034000,Donativos por pagar,2030000,2,D,2101.01,202.01,true
+2040000,2040000,IVA Trasladado Pendiente,0000210,1,D,,,true
+2050000,2050000,Anticipos de Clientes,0000210,1,D,,,false
+2050001,2050001,Co-Plataforma de Investigacion Generativa A.C.,2050000,2,D,2107.03,206.01,true
+2050002,2050002,"Dezdez Capital, S.A de C.V.",2050000,2,D,2107.03,206.01,true
+2050003,2050003,"Capitales Orinoco, S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050004,2050004,"Panera el Roble, S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050005,2050005,Mercedes Sanchez Navarro,2050000,2,D,2107.03,206.01,true
+2050006,2050006,"Inmobiliaria Zehcnas, S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050007,2050007,"Prometheus Technology, S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050008,2050008,"Servicios y Logisitica ABC ,S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050009,2050009,"Flux Financiera, S.A. de C.V.",2050000,2,D,2107.03,206.01,true
+2050010,2050010,Ma. de Lourdes Sanchez Navarro,2050000,2,D,2107.03,206.01,true
+2050011,2050011,Felipe Fernandez Sanchez Navarro,2050000,2,D,2107.03,206.01,true
+2050012,2050012,Publico en General,2050000,2,D,2107.03,206.01,true
+2050013,2050013,Dionisio Lopez,2050000,2,D,2107.03,206.01,true
+2050014,2050014,Beatriz Sanchez Navarro Redo,2050000,2,D,2107.03,206.01,true
+2050015,2050015,Juan Sanchez Navarro Redo,2050000,2,D,2107.03,206.01,true
+2050016,2050016,Property,2050000,2,D,2107.03,206.01,true
+2060000,2060000,Rentas Anticipadas,0000210,1,D,,,false
+2060001,2060001,Renta Anticipada de Flux Financiera,2060000,2,D,,109.05,true
+2070000,2070000,Depositos en Garantia,0000210,1,D,,,false
+2070001,2070001,Deposito en Garantia de Flux Financiera,2070000,2,D,2107.03,206.01,true
+2070002,2070002,"Deposito en Garantia de Promtheus Technology, S.A.",2070000,2,D,2110.01,218.01,true
+2070003,2070003,CO-Plataforma de Investigacion,2070000,2,D,,184.01,true
+2070004,2070004,CO Capital de impacto,2070000,2,D,,184.01,true
+2070005,2070005,"Servicios y Logisitica ABC, S.A. de C.V.",2070000,2,D,,184,true
+2070006,2070006,Capitales Orinoco,2070000,2,D,,184,true
+2070007,2070007,Inmobiliaria Zehcnas,2070000,2,D,,184,true
+2070008,2070008,"Bluepath, S.A. de C.V.",2070000,2,D,,184,true
+2080000,2080000,PTU por Pagar,0000210,1,D,,,true
+2090000,2090000,SUELDOS,0000210,1,D,,601.01,false
+2090001,2090001,Sueldos por pagar,2090000,2,D,,601.01,true
+2090002,2090002,Pensión Alimenticia (IMSS e ISR),2090000,2,D,,601.01,true
+2090003,2090003,Aguinaldo por pagar,2090000,2,D,2108.01,210.03,true
+2090004,2090004,Prima Vacacional,2090000,2,D,,603.01,true
+2090005,2090005,Vacaciones,2090000,2,D,,604.01,true
+0000220,0000220,FIJO,0000200,3,D,,,false
+2200000,2200000,Acreedores Hipotecarios,0000220,1,D,,,true
+2210000,2210000,Creditos Bancarios,0000220,1,D,,,true
+0000230,0000230,DIFERIDO,0000200,3,D,,,false
+2300000,2300000,Intereses cobrados por adelantado,0000230,1,D,,,true
+0000400,0000400,RESULTADOS ACREDORAS,0000000,2,H,,,false
+4000000,4000000,Servicios,0000400,1,H,,,true
+4010000,4010000,Productos Financieros,0000400,1,H,,,true
+4020000,4020000,Venta Activos Fijos,0000400,1,H,,,false
+4020001,4020001,Venta de Equipo de Transporte,4020000,2,H,,,true
+4020002,4020002,Venta de Mobiliario,4020000,2,H,4101.01,401.16,true
+4030000,4030000,Ingresos por Servicios,0000400,1,H,,,false
+4031000,4031000,Ingresos por Servicios,4030000,4,H,,,false
+4031001,4031001,Ingresos Financieros y Contables,4031000,2,H,,,true
+4031002,4031002,Ingresos Administrativos,4031000,2,H,,,true
+4031003,4031003,Auditorìa,4031000,2,H,4101.01,401.16,true
+4031004,4031004,Servicios Operativos,4031000,2,H,,,true
+4031005,4031005,Ingresos por Reemboso de Gtos.,4031000,2,H,,,true
+4031006,4031006,Ingresos por Servicios Profesionales,4031000,2,H,,,true
+4031007,4031007,Ingresos No Acumulables,4031000,2,H,,,true
+4031008,4031008,Gestión Administrativa,4031000,2,H,,,true
+4031009,4031009,Ingresos por Mtto. de Equipo de Computo,4031000,2,H,,,true
+4031010,4031010,Servicios Marketing,4031000,2,H,,,true
+4031014,4031014,Recuperacion Gastos Alpes 305,4031000,2,H,4101.01,401.16,true
+4031011,4031011,Ingresos Trabajos de Instalacion,4031000,2,H,,,true
+4031012,4031012,Gestión Administrativa de Seguro,4031000,2,H,,,true
+4031013,4031013,Consultoria para Desarrollo de Proyectos,4031000,3,H,,,true
+4031015,4031015,Adecuaciones Alpes 305,4031000,2,H,4101.01,401.16,true
+4031016,4031016,Subarrendamiento Torre Esmeralda,4031000,2,H,4101.01,401.16,true
+4031017,4031017,Subarrendamiento,4031000,2,H,4101.01,401.16,true
+4031018,4031018,Servicio de Consultorìa de Negocios y Adm. Co.,4031000,2,H,4101.01,401.16,true
+4031019,4031019,Gasolina,4031000,2,H,,401.16,true
+4031020,4031020,Renta Servidor,4031000,2,H,4101.01,401.16,true
+4031021,4031021,Jardinería,4031000,2,H,4101.01,401.01,true
+4031022,4031022,Servicios Legales,4031000,2,H,4101.01,401.01,true
+4031023,4031023,Auditora Operativa,4031000,2,H,4101.01,401.01,true
+4031024,4031024,Choferes,4031000,2,H,4101.01,401.01,true
+4031025,4031025,Limpieza Oficina,4031000,2,H,4101.01,401.01,true
+4031026,4031026,Dispensador,4031000,2,H,4101.01,401.01,true
+4031027,4031027,Servicio de R.H.,4031000,2,H,4101.01,401.01,true
+4031028,4031028,Diseño de Comunicados,4031000,2,H,4101.01,401.01,true
+4031029,4031029,Adm. Equipo de Seguridad,4031000,2,H,4101.01,401.01,true
+4031030,4031030,Worky,4031000,2,H,4101.01,401.01,true
+4031031,4031031,Asesoría Laboral,4031000,2,H,4101.01,401.01,true
+4031032,4031032,Libros,4031000,2,H,,401.01,true
+4031033,4031033,Seguro Automòvil,4031000,2,H,,401.01,true
+4031034,4031034,Servicios Google,4031000,2,H,,401.16,true
+4031035,4031035,Mtto. Automotriz,4031000,2,H,,401.16,true
+4031036,4031036,Sistema REM,4031000,2,H,,401.16,true
+4031037,4031037,Seguros de Gastos Mèdicos,4031000,2,H,,401.16,true
+4031038,4031038,Cursos y Capacitaciòn,4031000,2,H,,401,true
+4031039,4031039,Servicios de Inversión,4031000,2,H,,401.16,true
+4031040,4031040,Domicilio Fiscal,4031000,2,H,,401.16,true
+4031041,4031041,Gestión de portafilio,4031000,2,H,,401.16,true
+4031042,4031042,Administración de Activos,4031000,2,H,4101.01,401.16,true
+4031043,4031043,Gastos de Activos,4031000,2,H,4101.01,401.16,true
+4031044,4031044,Servicios Estratégicos y BD,4031000,2,H,,401.16,true
+4040000,4040000,Intereses Cobrados,0000400,1,H,,,true
+4050000,4050000,Descuentos sobre Servicios,0000400,1,H,,,true
+4060000,4060000,Ingresos cobros Ejercicios Anteriores,0000400,2,H,,,true
+4070000,4070000,Otros Ingresos,0000400,2,H,,,false
+4070001,4070001,Participacion en asociadas,4070000,2,H,5401.01,609.01,true
+4070002,4070002,Descuento Despensa Onerosa,4070000,2,H,4101.12,403.01,true
+4070003,4070003,Otros Ingresos,4070000,2,H,4101.12,403.01,true
+4070004,4070004,Intereses Devengados,4070000,2,H,5301.01,702.04,true
+4080000,4080000,Intereses Ganados (Bancos),0000400,2,H,,,true
+4090000,4090000,Ingresos por Actualizacion,0000400,2,H,4101.12,403.04,true
+6000000,6000000,PRODUCTOS FINANCIEROS,0000000,1,H,,,false
+6000001,6000001,Intereses Exsan,6000000,2,H,,,true
+6000002,6000002,Intereses Devengados,6000000,2,H,,,true
+6000003,6000003,Intereses Cobrados,6000000,2,H,,,true
+0000500,0000500,RESULTADOS DEUDORAS,0000000,2,G,,,false
+5010000,5010000,GASTOS DE SERVICIO,0000500,1,G,,,false
+5010100,5010100,Sueldos y Salarios,5010000,2,G,,,false
+5010101,5010101,Sueldos,5010100,2,G,5201.01,601.01,true
+5010102,5010102,Retroactivo,5010100,2,G,5201.01,601.01,true
+5010200,5010200,Vacaciones,5010000,2,G,,,false
+5010201,5010201,Vacaciones Disfrutadas,5010200,2,G,5201.02,603.06,true
+5010202,5010202,Vacaciones Pagadas,5010200,2,G,5201.02,603.06,true
+5010203,5010203,Vacaciones Proporcionales,5010200,2,G,5201.02,603.06,true
+5010300,5010300,Prov. Aguinaldo,5010000,2,G,,,true
+5010400,5010400,Seguro Social (Cuota Patronal),5010000,2,G,,,false
+5010401,5010401,Cuota Patronal IMSS,5010400,2,G,5201.01,601.26,true
+5010402,5010402,Couta Patronal IMSS RCV,5010400,2,G,5201.01,601.26,true
+5040403,5040403,Cestanía Patronal,5010400,2,G,5201.01,601.26,true
+5010403,5010403,Cestanìa Patronal,5010400,2,G,5102.01,605.28,true
+5010500,5010500,Vales de Despensa,5010000,2,G,,,true
+5010600,5010600,Gratificacón por separación,5010000,2,G,,,true
+5010700,5010700,Otras Percepciones,5010000,2,G,,,true
+5010800,5010800,Comisiones de vales,5010000,2,G,,,true
+5010900,5010900,Cuota patronal aportación INFONAVIT,5010000,2,G,,,true
+5011000,5011000,Indemnización,5010000,2,G,,,false
+5011001,5011001,Prima de Antiguedad,5011000,2,G,5201.01,601.11,true
+5011100,5011100,Reparto de utilidaddes,5010000,2,G,,,true
+5011200,5011200,Primas Vacacionales,5010000,2,G,,,false
+5011201,5011201,Prov. Prima Vacacional,5011200,2,G,5201.01,601.07,true
+5011300,5011300,Impuesto Estatal,5010000,2,G,,,true
+5011400,5011400,Gastos de Viaje,5010000,2,G,,,true
+5019100,5019100,Partidas no Deducibes,5010000,2,G,,,true
+5019200,5019200,Gastos Varios,5010000,2,G,,,true
+5020000,5020000,GASTOS FINANCIEROS,0000500,1,G,,,false
+5020100,5020100,Intereses a Cargo,5020000,2,G,,,true
+5030000,5030000,GASTOS ADMINISTRATIVOS,0000500,1,G,,,false
+5030100,5030100,Servicios Profesionales y legal,5030000,2,G,,,true
+5030200,5030200,Cuotas y suscripciones,5030000,2,G,,,true
+5030300,5030300,Tenencias,5030000,2,G,,,true
+5030400,5030400,Comisiones Bancarias,5030000,2,G,,,true
+5030500,5030500,Depreciaciones,5030000,2,G,,,true
+5030600,5030600,Amortizaciones,5030000,2,G,,,true
+5030700,5030700,Primas de seguro,5030000,2,G,,,true
+5030800,5030800,Cursos y Capacitacion,5030000,2,G,,,true
+5030900,5030900,Impuestos,5030000,2,G,,,true
+5031000,5031000,Papelería y Utíles,5030000,2,G,,,true
+5031100,5031100,Gastos Legales,5030000,2,G,,,true
+5031200,5031200,Mantenimiento Automotriz,5030000,2,G,,,true
+5031300,5031300,Honorarios,5030000,2,G,,,true
+5031400,5031400,Teléfonos,5030000,2,G,,,true
+5031500,5031500,Gastos de Viaje,5030000,2,G,,,true
+5039100,5039100,Partidas no Deducibles,5030000,2,G,,,true
+5039200,5039200,Gastos Varios,5030000,2,G,,,true
+5031600,5031600,Vales de Gasolina,5030000,2,G,,,true
+5031700,5031700,Blindaje,5030000,2,G,,,true
+5031800,5031800,Servicios de Logistica,5030000,2,G,,,true
+5031900,5031900,Renta,5030000,2,G,,,true
+5032000,5032000,Mantenimiento Inmueble,5030000,2,G,,,true
+5032100,5032100,Derechos,5030000,2,G,,,true
+5032200,5032200,"Turanzas, Bravo & Ambrosi S.C.",5030000,2,G,,,true
+5032300,5032300,Despacho Tavel S.C.,5030000,2,G,,,true
+5032400,5032400,Bettinger Asesores S.C.,5030000,2,G,,,true
+5032500,5032500,Comision por Apertura,5030000,2,G,,,true
+5032600,5032600,Renta Automivil,5030000,2,G,,,true
+5032700,5032700,"Chevez, Ruiz, Zamarripa y Cia., S.C.",5030000,2,G,,,true
+5032800,5032800,NSC Asesores S.A. de C.V.,5030000,2,G,,,true
+5032900,5032900,"Escobar y Gorostieta, S.C.",5030000,2,G,,,true
+5033000,5033000,Jose Manuel Vaca Elguero,5030000,2,G,,,true
+5033100,5033100,Martin del Campo Souza Diego Joaquin Ramon Ramiro,5030000,2,G,,,true
+5033200,5033200,Jose Dabiel Labardini Schettino,5030000,2,G,,,true
+5033300,5033300,Andres Cuenca Huerta,5030000,2,G,,,true
+5033400,5033400,Akerman LLP,5030000,2,G,,,true
+5033500,5033500,Bennett Jones LLP,5030000,2,G,,,true
+5033600,5033600,Mantenimiento Equipo de Computo,5030000,2,G,,,true
+5033700,5033700,Por recuperacion de gastos,5030000,2,G,,,true
+5033800,5033800,GreenbergTraurig,5030000,2,G,,,true
+5033900,5033900,Activos Fijos Menores,5030000,2,G,,,true
+5034000,5034000,Activos Fijos Menores Bluepath,5030000,2,G,,,true
+5034100,5034100,Reparacion y Mantto Bluepath,5030000,2,G,,,true
+5034200,5034200,Renta Equipo de Computo,5030000,2,G,,,true
+5034300,5034300,"Aig Seguros Mexico, sa de cv",5030000,2,G,,,true
+5034400,5034400,"Panera el Roble, sa de cv",5030000,2,G,,,true
+5034500,5034500,RENTA MENSUAL DEL SOFTWARE,5030000,2,G,,,true
+5034600,5034600,Correos y Mensajeria,5030000,2,G,,,true
+5034700,5034700,Actualizaciones y Recargos,5030000,2,G,,,true
+5034800,5034800,Diego Manuel Ramirez Nuñez,5030000,2,G,,,true
+5034900,5034900,Efectivale (VALES DE DESPENSA),5030000,2,G,,,true
+5035000,5035000,Asesoria,5030000,2,G,,,true
+5036000,5036000,Enseres,5030000,2,G,5201.02,603.15,true
+5035100,5035100,Comisiones Efectivale,5030000,2,G,5301.06,701.10,true
+5035200,5035200,Recuperacion de Gastos,5030000,2,G,5201.02,603.32,true
+5035300,5035300,Registro de Marcas,5030000,2,G,,174,true
+5035400,5035400,Adecuaciones Alpes 305,5030000,2,G,,603,true
+5035500,5035500,Seguridad Alpes 305,5030000,2,G,,603,true
+5035600,5035600,Luz,5030000,2,G,5201.02,603.73,true
+5035700,5035700,Asimilados a Salarios,5030000,2,G,5201.01,601.31,true
+5035800,5035800,Dispensador de Agua,5030000,2,G,5201.01,601.84,true
+5036100,5036100,"Workbeat, S.A. de C.V.",5030000,2,G,,603,true
+5036200,5036200,Servicio de Escolta,5030000,2,G,5201.01,601.32,true
+5036300,5036300,Renta Torre Esmeralda,5030000,2,G,,603,true
+5036400,5036400,Arrendamiento de Licencias de Software,5030000,2,G,5201.02,603.64,true
+5036500,5036500,Aseoría Recursos Humanos,5030000,2,G,,603,true
+5039500,5039500,Participación en Subsidiarias,5030000,2,G,5401.01,608.01,true
+5036600,5036600,Reclutamiento de Personal,5030000,2,G,,177.01,true
+5036700,5036700,Asesorìa Laboral,5030000,2,G,,603,true
+5036800,5036800,Servicio de Diseño,5030000,2,G,,603,true
+5036900,5036900,Consultoría,5030000,2,G,,603,true
+5037000,5037000,Certificados de regalo,5030000,2,G,5201.02,603.82,true
+5037100,5037100,"Worky, S.A.P.I. de C.V.",5030000,2,G,,603,true
+5037200,5037200,No deducibles nòmina,5030000,2,G,5201.01,601.83,true
+5037300,5037300,PTU del Ejercicio,5030000,2,G,5201.02,603.82,true
+5037400,5037400,Cuentas Incobrables,5030000,2,G,,603.82,true
+5037500,5037500,Renta Servidor y Mtto.,5030000,2,G,,603,true
+5037600,5037600,Actualización y Mtto. Contpaq,5030000,2,G,,603,true
+5037700,5037700,Sofware para Propiedades,5030000,2,G,,603,true
+5037800,5037800,Recargos,5030000,2,G,5201.02,603.59,true
+5037900,5037900,Gastos Montes Urales,5030000,2,G,,603,true
+5039600,5039600,Contraloría,5030000,2,G,,603,true
+5039700,5039700,Donativo,5030000,2,G,,603,true
+5038000,5038000,Branding,5030000,2,G,,603.82,true
+5038100,5038100,Tech Bukers,5030000,2,G,,603,true
+5038200,5038200,Página Web,5030000,2,G,,603,true
+5040000,5040000,Costo Venta,0000500,1,G,,,true
+5050000,5050000,Compras,0000500,1,G,,,true
+5060000,5060000,Gastos sobre compras,0000500,1,G,,,true
+5070000,5070000,Costo de Venta Activos Fijos,0000500,1,G,,,true
+5080000,5080000,Devoluciones sobre Ventas,0000500,1,G,,,true
+5090000,5090000,Descuentos sobre Compras,0000500,1,H,,,true
+0000300,0000300,CAPITAL,0000000,3,F,,,false
+0000310,0000310,Capital Social,0000300,1,F,,,false
+3101000,3101000,Capital Fijo,0000310,4,F,,,false
+3101001,3101001,"Capitales Orinoco, S. A. de C. V.",3101000,2,F,,,true
+3101002,3101002,Felipe Fernandez Sanchez Navarro,3101000,2,F,,,true
+3101003,3101003,Juan Alejandro Fernandez Sanchez Navarro,3101000,2,F,,,true
+3102000,3102000,Capital Variable,0000310,4,F,,,false
+3102001,3102001,"Capitales Orinoco, S. A. de C. V.",3102000,2,F,,,true
+3102002,3102002,Felipe Fernandez Sanchez Navarro,3102000,2,F,,,true
+3102003,3102003,Juan Alejandro Fernandez Sanchez Navarro,3102000,2,F,,,true
+0000320,0000320,Reserva Legal,0000300,1,F,,,true
+0000330,0000330,Resultado Ejercicios Anteriores,0000300,1,F,,,false
+3300001,3300001,Ejercicio 2010,0000330,2,F,,,true
+3300002,3300002,Ejercicio 2011,0000330,2,F,,,true
+3300003,3300003,Ejercicio 2012,0000330,2,F,,,true
+3300004,3300004,Ejercicio 2013,0000330,2,F,,,true
+3300005,3300005,Ejercicio 2014,0000330,2,F,3102,304,true
+3300006,3300006,Ejercicio 2015,0000330,2,F,3102,304,true
+3300007,3300007,Ejercicio 2016,0000330,2,F,3102,304,true
+3300008,3300008,Ejercicio 2017,0000330,2,F,3103.01,304.03,true
+3300009,3300009,Ejercicio 2018,0000330,2,F,3102,304,true
+3300010,3300010,Ejercicio 2019,0000330,2,F,3103.01,304.03,true
+3300011,3300011,Ejercicio 2020,0000330,2,F,3102.01,304.01,true
+3300012,3300012,Ejercicio 2021,0000330,2,F,3102,305,true
+3300013,3300013,Ejercicio 2022,0000330,2,F,3102,304,true
+3300014,3300014,Ejercicio 2023,0000330,2,F,,304,true
+3300015,3300015,Ejercicio 2024,0000330,2,F,3102.01,304.01,true
+3300016,3300016,Ejercicio 2025,0000330,2,F,,304,true
+0000340,0000340,Resultado del Ejercicio,0000300,1,F,,,true
+0000350,0000350,Aportaciones para Futuros Aumentos,0000300,1,F,,,false
+3500001,3500001,"Capitales Orinoco, S. A. de C. V.",0000350,2,F,,,true
+3500002,3500002,Felipe Fernandez Sanchez Navarro,0000350,2,F,,,true
+3500003,3500003,Juan Fernandez Sanchez Navarro,0000350,2,F,,,true
+3500004,3500004,Dezdez Capital S.A de C.V,0000350,2,F,,,true
+3600000,3600000,Aportaciones Suscritas no Pagadas,0000300,1,E,,,false
+3600001,3600001,"Capitales Orinoco, SA de CV",3600000,2,E,,,true
+3600002,3600002,Felipe Fernandez Sanchez Navarro,3600000,2,E,,,true
+3600003,3600003,Juan Fernandez Sanchez Navarro,3600000,2,E,,,true

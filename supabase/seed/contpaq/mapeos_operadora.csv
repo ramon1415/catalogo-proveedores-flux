@@ -1,0 +1,88 @@
+partida_code,partida,grupo,cuenta,cuenta_nombre,metodo,evidencia,needs_review
+AUTO-RSJT-2026-ROW-101,Alimento de animales,Animales,60204005000,Consumibles Animales,criterio,tokens compartidos: animales,false
+AUTO-RSJT-2026-ROW-102,Herrajes,Animales,60208005000,Mantenimiento caballos,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-100,Veterinario,Animales,60204002000,Veterinario,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-107,Aportacionea a la comunidad,Aportaciones Comunidad,60207004000,Vinculación comunitaria,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-105,Aportaciones Consumo Electrico,Aportaciones Comunidad,60207003000,Aportaciones Consumo Electrico,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-106,Aportaciones Monjas,Aportaciones Comunidad,60207002000,Aportaciones Monjas,nombre_exacto,nombres idénticos tras normalizar,false
+602-08-011-000,Arrendamiento Pick Up JAC,Arrendamiento Vehículos,60202012000,Renta Automóvil,criterio,sin coincidencia léxica — asignación conceptual,false
+602-08-003-000,Combustible Campo,Combustible,60204012000,Combustible Campo,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-073,Combustible Casa grande,Combustible,60204011000,Combustible Casa Grande,nombre_exacto,nombres idénticos tras normalizar,false
+602-08-004-000,Combustible Seguridad,Combustible,60204013000,Combustible Seguridad,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-092,Aulado de cortinas,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-087,cobija electricas,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-093,colchones,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,sin coincidencia léxica — asignación conceptual,false
+602-08-018-000,cristaleria,Compras de casa (Adquisiciones),60206001000,Compra de Cristaleria y Art. de Cocina,criterio,tokens compartidos: cristaleria,false
+AUTO-RSJT-2026-ROW-091,edredones,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,sin coincidencia léxica — asignación conceptual,false
+602-09-000-000,manteleria,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,tokens compartidos: manteleria,false
+AUTO-RSJT-2026-ROW-094,Renovación equipo de computo Oficina,Compras de casa (Adquisiciones),60202009000,Mantenimiento Eqpo. de Computo,criterio,tokens compartidos: computo,false
+602-08-012-000,toallas,Compras de casa (Adquisiciones),60208001000,Mantenimiento blancos y manteleria,criterio,sin coincidencia léxica — asignación conceptual,false
+OP-003,Gastos extraordinarios,Dirección,60202002000,Gastos Corporativos,criterio,tokens compartidos: gastos,true
+602-02-002-000,Licencias de Software,Gastos de Administración y Corporativos,60382000005,Renta de Software,criterio,tokens compartidos: software,false
+AUTO-RSJT-2026-ROW-034,Mantenimiento Corporativo (Legal),Gastos de Administración y Corporativos,60202003000,Gastos Legales,criterio,sin coincidencia léxica — asignación conceptual,false
+602-02-001-000,Servicios de Personal,Gastos de Administración y Corporativos,60202006000,Worky,criterio,sin coincidencia léxica — asignación conceptual,true
+AUTO-RSJT-2026-ROW-035,Servicios Financieros y Contables,Gastos de Administración y Corporativos,60332000000,Servicios Contables,criterio,"tokens compartidos: servicios, contables",false
+AUTO-RSJT-2026-ROW-031,Servicio Seguridad,Gastos de Seguridad,60203004000,Servicio Seguridad,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-110,Adquisiciòn de herramientas,Herramientas,60205001000,Adquisiciòn de herramientas,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-111,Adquisiciòn de uniformes,Herramientas,60277000000,Uniformes,criterio,tokens compartidos: uniformes,false
+AUTO-RSJT-2026-ROW-113,Reparación / compra electrodomésticos,Herramientas,60202010000,Activos Menores,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-112,Reparacion de herramienta,Herramientas,60205002000,Reparacion de herramienta,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-040,Articulos de limpieza,Mantenimientos,60204014000,Articulos de limpieza,nombre_exacto,nombres idénticos tras normalizar,false
+602-04-011-000,Mantenimiento alberca,Mantenimientos,60256000000,Mantenimiento y conservación,criterio,tokens compartidos: mantenimiento,false
+AUTO-RSJT-2026-ROW-048,Mantenimiento bombas,Mantenimientos,60208010000,Mantenimiento bombas,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-059,Mantenimiento camaras,Mantenimientos,60208015000,Mantenimiento Eqpo. de Comunicacion,criterio,tokens compartidos: mantenimiento,false
+AUTO-RSJT-2026-ROW-050,Mantenimiento copetes alberca,Mantenimientos,60256000000,Mantenimiento y conservación,criterio,tokens compartidos: mantenimiento,false
+AUTO-RSJT-2026-ROW-052,mantenimiento cortadoras grandes,Mantenimientos,60205003000,Herramientas de jardineria,criterio,sin coincidencia léxica — asignación conceptual,false
+602-03-004-000,Mantenimiento de lavadoras y secadoras,Mantenimientos,60208008000,Mantenimiento Lavanderia,criterio,tokens compartidos: mantenimiento,false
+AUTO-RSJT-2026-ROW-045,Mantenimiento equipos refrigeración,Mantenimientos,60208009000,Mantto equipos refrigeración,criterio,"tokens compartidos: equipos, refrigeracion",false
+AUTO-RSJT-2026-ROW-057,Mantenimiento invernadero,Mantenimientos,60208017000,Mantenimiento invernadero,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-055,Mantenimiento Invernadero,Mantenimientos,60208017000,Mantenimiento invernadero,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-054,Mantenimiento Motos,Mantenimientos,60208014000,Mantenimiento Moto,criterio,tokens compartidos: mantenimiento,false
+AUTO-RSJT-2026-ROW-053,Mantenimiento pintura,Mantenimientos,60208011000,Mantenimiento pintura,nombre_exacto,nombres idénticos tras normalizar,false
+602-05-001-000,Mantenimiento Planta de emergencia,Mantenimientos,60208018000,Mantenimeinto Planta de emergencia,criterio,"tokens compartidos: planta, emergencia",false
+602-04-012-000,Mantenimiento planta de luz,Mantenimientos,60208018000,Mantenimeinto Planta de emergencia,criterio,tokens compartidos: planta,false
+602-03-000-000,Mantenimiento Pozos,Mantenimientos,60208002000,Mantenimiento Pozos,nombre_exacto,nombres idénticos tras normalizar,false
+602-03-005-000,Mantenimiento tractores,Mantenimientos,60208004000,Mantenimiento tractores,nombre_exacto,nombres idénticos tras normalizar,false
+602-04-006-000,Mantenimiento trasformadores,Mantenimientos,60208019000,Infraestructura e instalaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+602-03-001-000,Mantenimiento Vehiculos,Mantenimientos,60207005000,Mantenimiento Vehìculos,nombre_exacto,nombres idénticos tras normalizar,false
+602-05-000-000,Mantenimineto Extintores,Mantenimientos,60208016000,Mantenimineto Extintores,nombre_exacto,nombres idénticos tras normalizar,false
+602-04-005-000,Mantto equipos hidroneumáticos,Mantenimientos,60208010000,Mantenimiento bombas,criterio,sin coincidencia léxica — asignación conceptual,false
+OP-001,Mantenimiento general,Operación,60256000000,Mantenimiento y conservación,criterio,tokens compartidos: mantenimiento,false
+OP-002,Servicios y suministros,Operación,60204017000,Consumibles Campo,criterio,sin coincidencia léxica — asignación conceptual,true
+AUTO-RSJT-2026-ROW-116,Peajes,Peajes,60204004000,Peajes,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-097,Prediales 2026,Prediales 2026,60207007000,Prediales,criterio,tokens compartidos: prediales,false
+AUTO-RSJT-2026-ROW-068,cambio de techo de oficina,Proyectos Especiales,60208019000,Infraestructura e instalaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-063,Compra de desmalezadoras,Proyectos Especiales,60205001000,Adquisiciòn de herramientas,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-064,compra de lavadora y/o secadora,Proyectos Especiales,60202010000,Activos Menores,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-062,compra de podadora,Proyectos Especiales,60205001000,Adquisiciòn de herramientas,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-066,cortadora de pasto grande,Proyectos Especiales,60205001000,Adquisiciòn de herramientas,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-065,pintura de alberca,Proyectos Especiales,60208011000,Mantenimiento pintura,criterio,tokens compartidos: pintura,false
+AUTO-RSJT-2026-ROW-069,remplazamiento de tanque de gas,Proyectos Especiales,60208019000,Infraestructura e instalaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-067,Suministro y colocacion Cámaras Casa Barbara,Proyectos Especiales,60208019000,Infraestructura e instalaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-070,Sustitución vigas Casa Lorenzo,Proyectos Especiales,60208019000,Infraestructura e instalaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+REC-RSJT-2026-001,Gastos visitas rancho,Recuperable,60204016000,Gastos por recuperar,criterio,tokens compartidos: gastos,false
+602-01-006-000,Aguinaldos,Recursos Humanos,60201006000,Aguinaldos,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-013,"Carga Social (IMSS, Infonavit, AFORES)",Recursos Humanos,60201002000,Cuota Patronal IMSS,criterio,tokens compartidos: imss,true
+AUTO-RSJT-2026-ROW-018,Cartas antecedentes No Penales,Recursos Humanos,60202007000,Gestión de Tramites,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-020,Cursos Externos de Capacitación,Recursos Humanos,60201007000,Capacitaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-026,Elaboracion e inscripción Reglamento Trabajo,Recursos Humanos,60202003000,Gastos Legales,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-019,Exámenes médicos,Recursos Humanos,60217000000,Servicio médico,criterio,sin coincidencia léxica — asignación conceptual,false
+602-01-005-000,Finiquitos o liquidaciones,Recursos Humanos,60201005000,Liquidaciones,criterio,tokens compartidos: liquidaciones,false
+AUTO-RSJT-2026-ROW-025,Identificadores,Recursos Humanos,60201008000,Apoyo a personal,criterio,sin coincidencia léxica — asignación conceptual,true
+AUTO-RSJT-2026-ROW-014,ISN,Recursos Humanos,60201004000,Impuesto Sobre Nomina,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-015,ISR,Recursos Humanos,60202005000,Impuestos,criterio,sin coincidencia léxica — asignación conceptual,true
+AUTO-RSJT-2026-ROW-021,Materiales para Capacitación,Recursos Humanos,60201007000,Capacitaciones,criterio,sin coincidencia léxica — asignación conceptual,false
+602-01-001-000,Nómina,Recursos Humanos,60201001000,Sueldos,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-023,Posada,Recursos Humanos,60382000002,Gastos de fin de Año,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-016,Primas vacacionales,Recursos Humanos,60201014000,Prov. P. Vacacional,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-017,Reclutamiento en Campo,Recursos Humanos,60382000004,Reclutamiento de Personal,criterio,tokens compartidos: reclutamiento,false
+AUTO-RSJT-2026-ROW-022,Reconocimientos por desempeño,Recursos Humanos,60201008000,Apoyo a personal,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-024,Regalos fin de año,Recursos Humanos,60382000002,Gastos de fin de Año,criterio,"tokens compartidos: fin, ano",false
+AUTO-RSJT-2026-ROW-027,Software RRHH,Recursos Humanos,60202006000,Worky,criterio,sin coincidencia léxica — asignación conceptual,false
+AUTO-RSJT-2026-ROW-010,Vales de despensa,Recursos Humanos,60201010000,Vales de despensa,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-028,Viáticos RRHH,Recursos Humanos,60249000000,Viáticos y gastos de viaje,criterio,tokens compartidos: viaticos,false
+AUTO-RSJT-2026-ROW-119,Seguros vehículos,Seguros 2026,60208020000,Seguros Equipo de Transporte,criterio,tokens compartidos: seguros,false
+602-08-006-000,CFE,Servicios,60252000000,Energía eléctrica,criterio,sin coincidencia léxica — asignación conceptual,false
+602-08-007-000,Consumo Gas,Servicios,60204003000,Consumo Gas,nombre_exacto,nombres idénticos tras normalizar,false
+AUTO-RSJT-2026-ROW-078,sky,Servicios,60207009000,Televisión,criterio,sin coincidencia léxica — asignación conceptual,false
+602-08-005-000,Telmex,Servicios,60207008000,Comunicaciones,criterio,sin coincidencia léxica — asignación conceptual,false
