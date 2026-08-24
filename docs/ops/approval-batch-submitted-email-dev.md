@@ -19,7 +19,9 @@ El adjunto replica el contrato de `approval_batches.js`:
 - mismos campos y etiquetas de estado que usa la interfaz;
 - mismo footer `Flux Operadora — corte semanal`;
 - mismo naming: `corte-semanal-<empresa>-<period_end>.pdf`;
-- logo del sistema obtenido desde `/assets/logo-flux-verde.webp`; si el asset no pudiera cargarse, el PDF conserva el resto del contrato.
+- wordmark Flux verde embebido como PNG 300x120, igual al asset que usa el exportador del frontend.
+
+El logo se embebe directamente en el runtime de la Edge Function. No depende de decodificar WebP ni de una descarga remota al generar el PDF; esto evita el rectángulo vacío observado en DEV.
 
 La Edge Function ya no mantiene un segundo diseño de PDF. El adjunto y el PDF descargable desde la UI representan el mismo corte con la misma estructura visual y datos.
 
@@ -60,6 +62,7 @@ APPROVAL_BATCH_SUBMITTED_DELIVERY_MODE=director
 - Claim, documento y cancelación son service-role-only.
 - Idempotencia Resend: `approval-batch-submitted/<notification_event_id>`.
 - PDF generado en memoria; no se publica en Storage.
+- Logo PNG embebido localmente en la Edge Function; sin dependencia WebP para el wordmark.
 - Máximo cinco eventos por ejecución.
 - La respuesta reporta `delivery_mode`, destinatarios enmascarados, filename, SHA-256, tamaño y páginas del adjunto.
 
@@ -67,6 +70,9 @@ APPROVAL_BATCH_SUBMITTED_DELIVERY_MODE=director
 
 - `supabase/functions/approval-batch-submitted-dispatcher/index.ts`
 - `supabase/functions/approval-batch-submitted-dispatcher/deno.json`
+- `supabase/functions/approval-batch-submitted-dispatcher/jspdf_edge.ts`
+- `supabase/functions/approval-batch-submitted-dispatcher/pdf_logo.ts`
+- `supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed.ts`
 - `supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql`
 - `supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql`
 - `scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs`
@@ -81,8 +87,9 @@ Crear un corte DEV **nuevo** después del despliegue, agregar al menos una solic
 2. asunto `[DEV TEST]`;
 3. botón al corte exacto en DEV;
 4. nombre del PDF igual al que usa el botón `PDF` del sistema;
-5. encabezado, 8 columnas, datos, estado y footer equivalentes al PDF descargable de la UI;
-6. un único intento de entrega.
+5. logo Flux verde visible en la esquina superior derecha, sin rectángulo vacío;
+6. encabezado, 8 columnas, datos, estado y footer equivalentes al PDF descargable de la UI;
+7. un único intento de entrega.
 
 No reutilizar un evento ya `sent`; crear un corte nuevo preserva idempotencia y trazabilidad.
 

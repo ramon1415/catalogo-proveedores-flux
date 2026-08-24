@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { jsPDF } from "jspdf";
 
 import {
   generateApprovalBatchPdfBytes,
@@ -8,6 +9,8 @@ import {
   prepareApprovalBatchAttachment,
   renderApprovalBatchSubmittedEmail,
 } from "../../supabase/functions/approval-batch-submitted-dispatcher/index.ts";
+import { SYSTEM_PDF_LOGO_DATA_URL } from "../../supabase/functions/approval-batch-submitted-dispatcher/pdf_logo.ts";
+import { addEmbeddedSystemPdfLogo } from "../../supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed.ts";
 
 function referenceDocument(itemCount = 1) {
   const base = {
@@ -75,6 +78,20 @@ test("DEV attachment uses the same jsPDF/AutoTable contract and filename as the 
   assert.match(attachment.sha256, /^[0-9a-f]{64}$/);
   assert.equal(attachment.pageCount, 1);
   assert.match(attachment.content, /^JVBERi0xLjM/);
+});
+
+test("embedded Flux wordmark is a valid 300x120 PNG and creates a PDF image object", () => {
+  const base64 = SYSTEM_PDF_LOGO_DATA_URL.split(",")[1];
+  const png = Buffer.from(base64, "base64");
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
+  addEmbeddedSystemPdfLogo(doc);
+  const binary = new TextDecoder("latin1").decode(new Uint8Array(doc.output("arraybuffer")));
+
+  assert.match(binary, /\/Subtype \/Image/);
+  assert.match(binary, /\/Width 300/);
+  assert.match(binary, /\/Height 120/);
 });
 
 test("DEV system PDF keeps landscape letter pagination for larger cuts", () => {
