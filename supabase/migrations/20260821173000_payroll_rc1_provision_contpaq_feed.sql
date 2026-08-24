@@ -1,5 +1,6 @@
--- Payroll RC1: automatic provision + normalized CONTPAQ accounting feed.
+-- Payroll RC1: automatic provision + normalized CONTPAQ accounting feeds.
 -- DEV-first. No historical payroll backfill. Existing materialized shadow evidence remains untouched.
+-- Accounting correction: payment discharges payroll liabilities; provision policy remains configurable/dynamic until Denise confirms the live ~17% criterion.
 
 insert into public.budget_categories(code,name,active)
 values('PAYROLL_PROVISION','Provisiones de nómina',true)
@@ -7,12 +8,25 @@ on conflict(code) do nothing;
 
 create table if not exists public.payroll_provision_settings (
   company_id uuid primary key references public.companies(id) on delete cascade,
-  combined_factor numeric(12,8) not null check (combined_factor > 0 and combined_factor < 1),
+  calculation_policy text not null default 'pending' check (calculation_policy in ('pending','configured_components','server_calculated_components')),
+  configured_aguinaldo_factor numeric(12,8),
+  configured_vacation_premium_factor numeric(12,8),
   budget_category_id uuid not null references public.budget_categories(id),
   posting_month_rule text not null default 'period_end_month' check (posting_month_rule='period_end_month'),
   active boolean not null default true,
   updated_by uuid references public.profiles(id),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  check (
+    (calculation_policy='pending' and configured_aguinaldo_factor is null and configured_vacation_premium_factor is null)
+    or
+    (calculation_policy='server_calculated_components' and configured_aguinaldo_factor is null and configured_vacation_premium_factor is null)
+    or
+    (calculation_policy='configured_components'
+      and configured_aguinaldo_factor is not null and configured_aguinaldo_factor >= 0
+      and configured_vacation_premium_factor is not null and configured_vacation_premium_factor >= 0
+      and configured_aguinaldo_factor + configured_vacation_premium_factor > 0
+      and configured_aguinaldo_factor + configured_vacation_premium_factor < 1)
+  )
 );
 
 create table if not exists public.payroll_provision_entries (
@@ -24,20 +38,31 @@ create table if not exists public.payroll_provision_entries (
   budget_line_id uuid not null references public.budget_lines(id),
   provision_month date not null,
   provision_base_amount numeric(18,2) not null check (provision_base_amount > 0),
+  calculation_policy text not null check (calculation_policy in ('configured_components','server_calculated_components')),
+  policy_version text not null,
+  aguinaldo_factor numeric(12,8) not null check (aguinaldo_factor >= 0),
+  vacation_premium_factor numeric(12,8) not null check (vacation_premium_factor >= 0),
   combined_factor numeric(12,8) not null check (combined_factor > 0 and combined_factor < 1),
+  aguinaldo_amount numeric(18,2) not null check (aguinaldo_amount >= 0),
+  vacation_premium_amount numeric(18,2) not null check (vacation_premium_amount >= 0),
   provision_amount numeric(18,2) not null check (provision_amount > 0),
   budget_line_amount_before numeric(18,2) not null,
   budget_line_amount_after numeric(18,2) not null,
   created_at timestamptz not null default now(),
-  created_by uuid references public.profiles(id)
+  created_by uuid references public.profiles(id),
+  check (combined_factor = aguinaldo_factor + vacation_premium_factor),
+  check (provision_amount = aguinaldo_amount + vacation_premium_amount)
 );
 
--- Expense-side accounts are scoped by Company + Cost Center because the chart
--- can use different detail accounts for different operating locations.
+-- Company + Cost Center mappings. Payment roles discharge liabilities; provision roles create the daily provision entry.
 create table if not exists public.payroll_contpaq_role_mappings (
   company_id uuid not null references public.companies(id) on delete cascade,
   cost_center_id uuid not null references public.cost_centers(id) on delete cascade,
-  role text not null check (role in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance')),
+  role text not null check (role in (
+    'salary_payable','vouchers_payable','toka_fee_expense','input_vat','toka_variance',
+    'provision_aguinaldo_expense','provision_aguinaldo_liability',
+    'provision_vacation_premium_expense','provision_vacation_premium_liability'
+  )),
   contpaq_account_code text not null,
   updated_by uuid references public.profiles(id),
   updated_at timestamptz not null default now(),
@@ -87,7 +112,9 @@ using (public.payroll_has_finance_pii_access() and public.has_active_company_mem
 
 create or replace function public.configure_payroll_provision(
   p_company_id uuid,
-  p_combined_factor numeric
+  p_calculation_policy text,
+  p_aguinaldo_factor numeric default null,
+  p_vacation_premium_factor numeric default null
 ) returns jsonb
 language plpgsql security definer set search_path='public','pg_temp'
 as $$
@@ -97,21 +124,33 @@ declare
 begin
   if v_actor is null or not public.payroll_has_finance_pii_access() then raise exception 'PAYROLL_FINANCE_REQUIRED'; end if;
   if not public.has_active_company_membership(v_actor,p_company_id) then raise exception 'PAYROLL_COMPANY_MEMBERSHIP_REQUIRED'; end if;
-  if p_combined_factor is null or p_combined_factor<=0 or p_combined_factor>=1 then raise exception 'PAYROLL_PROVISION_FACTOR_INVALID'; end if;
+  if p_calculation_policy not in ('configured_components','server_calculated_components') then raise exception 'PAYROLL_PROVISION_POLICY_INVALID'; end if;
+  if p_calculation_policy='configured_components' then
+    if p_aguinaldo_factor is null or p_vacation_premium_factor is null
+       or p_aguinaldo_factor<0 or p_vacation_premium_factor<0
+       or p_aguinaldo_factor+p_vacation_premium_factor<=0
+       or p_aguinaldo_factor+p_vacation_premium_factor>=1 then raise exception 'PAYROLL_PROVISION_FACTOR_INVALID'; end if;
+  else
+    if p_aguinaldo_factor is not null or p_vacation_premium_factor is not null then raise exception 'PAYROLL_PROVISION_SERVER_POLICY_MUST_NOT_STORE_FACTORS'; end if;
+  end if;
   select id into v_category_id from public.budget_categories where code='PAYROLL_PROVISION' and active;
   if v_category_id is null then raise exception 'PAYROLL_PROVISION_CATEGORY_REQUIRED'; end if;
-  insert into public.payroll_provision_settings(company_id,combined_factor,budget_category_id,posting_month_rule,active,updated_by,updated_at)
-  values(p_company_id,p_combined_factor,v_category_id,'period_end_month',true,v_actor,now())
-  on conflict(company_id) do update set combined_factor=excluded.combined_factor,budget_category_id=excluded.budget_category_id,
-    posting_month_rule='period_end_month',active=true,updated_by=v_actor,updated_at=now();
+  insert into public.payroll_provision_settings(company_id,calculation_policy,configured_aguinaldo_factor,configured_vacation_premium_factor,budget_category_id,posting_month_rule,active,updated_by,updated_at)
+  values(p_company_id,p_calculation_policy,p_aguinaldo_factor,p_vacation_premium_factor,v_category_id,'period_end_month',true,v_actor,now())
+  on conflict(company_id) do update set calculation_policy=excluded.calculation_policy,
+    configured_aguinaldo_factor=excluded.configured_aguinaldo_factor,
+    configured_vacation_premium_factor=excluded.configured_vacation_premium_factor,
+    budget_category_id=excluded.budget_category_id,posting_month_rule='period_end_month',active=true,updated_by=v_actor,updated_at=now();
   insert into public.activity_log(entity_type,entity_id,action,old_values,new_values,performed_by,notes)
-  values('payroll_provision_config',p_company_id,'configure',null,jsonb_build_object('redacted',true,'operation','configure_payroll_provision'),v_actor,
-    'Payroll provision factor configured; activity log omits the factor value.');
-  return jsonb_build_object('status','configured','company_id',p_company_id,'budget_category_id',v_category_id,'posting_month_rule','period_end_month');
+  values('payroll_provision_config',p_company_id,'configure',null,
+    jsonb_build_object('redacted',true,'operation','configure_payroll_provision','calculation_policy',p_calculation_policy),v_actor,
+    'Payroll provision policy configured; activity log omits factor values.');
+  return jsonb_build_object('status','configured','company_id',p_company_id,'calculation_policy',p_calculation_policy,
+    'budget_category_id',v_category_id,'posting_month_rule','period_end_month');
 end;
 $$;
-revoke all on function public.configure_payroll_provision(uuid,numeric) from public,anon;
-grant execute on function public.configure_payroll_provision(uuid,numeric) to authenticated;
+revoke all on function public.configure_payroll_provision(uuid,text,numeric,numeric) from public,anon;
+grant execute on function public.configure_payroll_provision(uuid,text,numeric,numeric) to authenticated;
 
 create or replace function public.configure_payroll_contpaq_role(
   p_company_id uuid,
@@ -128,7 +167,11 @@ begin
   if not exists(select 1 from public.company_cost_centers where company_id=p_company_id and cost_center_id=p_cost_center_id and active) then
     raise exception 'PAYROLL_COST_CENTER_SCOPE_REQUIRED';
   end if;
-  if p_role not in ('cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance') then raise exception 'PAYROLL_CONTPAQ_ROLE_INVALID'; end if;
+  if p_role not in (
+    'salary_payable','vouchers_payable','toka_fee_expense','input_vat','toka_variance',
+    'provision_aguinaldo_expense','provision_aguinaldo_liability',
+    'provision_vacation_premium_expense','provision_vacation_premium_liability'
+  ) then raise exception 'PAYROLL_CONTPAQ_ROLE_INVALID'; end if;
   if not exists(select 1 from public.contpaq_accounts where company_id=p_company_id and code=p_contpaq_account_code and is_detail) then
     raise exception 'PAYROLL_CONTPAQ_DETAIL_ACCOUNT_REQUIRED';
   end if;
@@ -167,7 +210,10 @@ grant execute on function public.configure_payroll_contpaq_bank(uuid,text) to au
 
 create or replace function public.post_payroll_provision_internal(
   p_payment_request_id uuid,
-  p_base_amount_minor bigint
+  p_base_amount_minor bigint,
+  p_server_aguinaldo_factor numeric default null,
+  p_server_vacation_premium_factor numeric default null,
+  p_policy_version text default null
 ) returns jsonb
 language plpgsql security definer set search_path='public','pg_temp'
 as $$
@@ -178,7 +224,13 @@ declare
   v_budget_version public.budget_versions%rowtype;
   v_budget_month date;
   v_base numeric(18,2);
+  v_aguinaldo_factor numeric(12,8);
+  v_vacation_factor numeric(12,8);
+  v_combined_factor numeric(12,8);
+  v_aguinaldo numeric(18,2);
+  v_vacation numeric(18,2);
   v_provision numeric(18,2);
+  v_policy_version text;
   v_before numeric(18,2):=0;
   v_after numeric(18,2);
   v_budget_line_id uuid;
@@ -189,7 +241,8 @@ begin
 
   select * into v_existing from public.payroll_provision_entries where payment_request_id=p_payment_request_id;
   if found then
-    return jsonb_build_object('status','already_posted','payment_request_id',p_payment_request_id,'provision_amount',v_existing.provision_amount);
+    return jsonb_build_object('status','already_posted','payment_request_id',p_payment_request_id,'provision_amount',v_existing.provision_amount,
+      'calculation_policy',v_existing.calculation_policy,'policy_version',v_existing.policy_version);
   end if;
 
   select * into v_request from public.payment_requests where id=p_payment_request_id for update;
@@ -197,7 +250,27 @@ begin
   if v_request.payroll_period_end is null or v_request.cost_center_id is null then raise exception 'PAYROLL_PROVISION_CONTEXT_REQUIRED'; end if;
 
   select * into v_setting from public.payroll_provision_settings where company_id=v_request.company_id and active;
-  if not found then raise exception 'PAYROLL_PROVISION_CONFIG_REQUIRED'; end if;
+  if not found or v_setting.calculation_policy='pending' then raise exception 'PAYROLL_PROVISION_POLICY_REQUIRED'; end if;
+
+  if v_setting.calculation_policy='configured_components' then
+    v_aguinaldo_factor:=v_setting.configured_aguinaldo_factor;
+    v_vacation_factor:=v_setting.configured_vacation_premium_factor;
+    v_policy_version:='configured-components-v1';
+  elsif v_setting.calculation_policy='server_calculated_components' then
+    v_aguinaldo_factor:=p_server_aguinaldo_factor;
+    v_vacation_factor:=p_server_vacation_premium_factor;
+    v_policy_version:=nullif(btrim(coalesce(p_policy_version,'')),'');
+    if v_aguinaldo_factor is null or v_vacation_factor is null or v_policy_version is null then
+      raise exception 'PAYROLL_PROVISION_SERVER_CALCULATION_REQUIRED';
+    end if;
+  else
+    raise exception 'PAYROLL_PROVISION_POLICY_REQUIRED';
+  end if;
+
+  if v_aguinaldo_factor<0 or v_vacation_factor<0
+     or v_aguinaldo_factor+v_vacation_factor<=0
+     or v_aguinaldo_factor+v_vacation_factor>=1 then raise exception 'PAYROLL_PROVISION_FACTOR_INVALID'; end if;
+  v_combined_factor:=v_aguinaldo_factor+v_vacation_factor;
 
   select count(*) into v_count from public.budget_versions where active and year=extract(year from v_request.payroll_period_end)::integer;
   if v_count<>1 then raise exception 'PAYROLL_PROVISION_ACTIVE_BUDGET_VERSION_REQUIRED'; end if;
@@ -206,7 +279,9 @@ begin
 
   v_budget_month:=date_trunc('month',v_request.payroll_period_end)::date;
   v_base:=p_base_amount_minor/100.0;
-  v_provision:=round(v_base*v_setting.combined_factor,2);
+  v_aguinaldo:=round(v_base*v_aguinaldo_factor,2);
+  v_vacation:=round(v_base*v_vacation_factor,2);
+  v_provision:=v_aguinaldo+v_vacation;
   if v_provision<=0 then raise exception 'PAYROLL_PROVISION_AMOUNT_INVALID'; end if;
 
   select id,amount into v_budget_line_id,v_before from public.budget_lines
@@ -223,20 +298,24 @@ begin
   end if;
 
   insert into public.payroll_provision_entries(payment_request_id,company_id,cost_center_id,budget_version_id,budget_category_id,budget_line_id,
-    provision_month,provision_base_amount,combined_factor,provision_amount,budget_line_amount_before,budget_line_amount_after,created_by)
+    provision_month,provision_base_amount,calculation_policy,policy_version,aguinaldo_factor,vacation_premium_factor,combined_factor,
+    aguinaldo_amount,vacation_premium_amount,provision_amount,budget_line_amount_before,budget_line_amount_after,created_by)
   values(v_request.id,v_request.company_id,v_request.cost_center_id,v_budget_version.id,v_setting.budget_category_id,v_budget_line_id,
-    v_budget_month,v_base,v_setting.combined_factor,v_provision,v_before,v_after,v_request.requested_by);
+    v_budget_month,v_base,v_setting.calculation_policy,v_policy_version,v_aguinaldo_factor,v_vacation_factor,v_combined_factor,
+    v_aguinaldo,v_vacation,v_provision,v_before,v_after,v_request.requested_by);
 
   insert into public.activity_log(entity_type,entity_id,action,old_values,new_values,performed_by,notes)
-  values('payroll_provision',v_request.id,'post',null,jsonb_build_object('redacted',true,'operation','automatic_payroll_provision'),v_request.requested_by,
-    'Automatic payroll provision posted from server-derived cover base. Activity log omits salary/base/factor values.');
+  values('payroll_provision',v_request.id,'post',null,
+    jsonb_build_object('redacted',true,'operation','automatic_payroll_provision','calculation_policy',v_setting.calculation_policy,'policy_version',v_policy_version),
+    v_request.requested_by,'Automatic payroll provision posted from server-derived cover base. Activity log omits salary/base/factor values.');
 
   return jsonb_build_object('status','posted','payment_request_id',v_request.id,'provision_amount',v_provision,'provision_month',v_budget_month,
+    'aguinaldo_amount',v_aguinaldo,'vacation_premium_amount',v_vacation,'calculation_policy',v_setting.calculation_policy,'policy_version',v_policy_version,
     'budget_category_id',v_setting.budget_category_id,'budget_line_id',v_budget_line_id);
 end;
 $$;
-revoke all on function public.post_payroll_provision_internal(uuid,bigint) from public,anon,authenticated;
-grant execute on function public.post_payroll_provision_internal(uuid,bigint) to service_role;
+revoke all on function public.post_payroll_provision_internal(uuid,bigint,numeric,numeric,text) from public,anon,authenticated;
+grant execute on function public.post_payroll_provision_internal(uuid,bigint,numeric,numeric,text) to service_role;
 
 create or replace function public.get_payroll_provision_summary(p_payment_request_id uuid)
 returns jsonb
@@ -249,7 +328,9 @@ begin
   where e.payment_request_id=p_payment_request_id and public.has_active_company_membership(v_actor,pr.company_id);
   if not found then return jsonb_build_object('status','not_posted','payment_request_id',p_payment_request_id); end if;
   return jsonb_build_object('status','posted','payment_request_id',v_entry.payment_request_id,'provision_month',v_entry.provision_month,
-    'provision_base_amount',v_entry.provision_base_amount,'combined_factor',v_entry.combined_factor,'provision_amount',v_entry.provision_amount,
+    'provision_base_amount',v_entry.provision_base_amount,'calculation_policy',v_entry.calculation_policy,'policy_version',v_entry.policy_version,
+    'aguinaldo_factor',v_entry.aguinaldo_factor,'vacation_premium_factor',v_entry.vacation_premium_factor,'combined_factor',v_entry.combined_factor,
+    'aguinaldo_amount',v_entry.aguinaldo_amount,'vacation_premium_amount',v_entry.vacation_premium_amount,'provision_amount',v_entry.provision_amount,
     'budget_line_amount_before',v_entry.budget_line_amount_before,'budget_line_amount_after',v_entry.budget_line_amount_after);
 end;
 $$;
@@ -286,6 +367,7 @@ $$;
 revoke all on function public.payroll_contpaq_bank_account_internal(uuid) from public,anon,authenticated;
 grant execute on function public.payroll_contpaq_bank_account_internal(uuid) to service_role;
 
+-- Payment feed: discharge payroll liabilities, never re-book payroll/vales expense.
 create or replace function public.get_payroll_contpaq_feed(p_payment_request_id uuid)
 returns jsonb
 language plpgsql security definer set search_path='public','pg_temp'
@@ -314,13 +396,13 @@ begin
   v_variance:=v_actual_toka-v_expected_toka;
 
   if v_cash>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'cash_payroll_expense');
-    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','cash_payroll_expense','account_code',v_code,'debit',v_cash,'credit',0,'concept','Nómina en efectivo'));
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'salary_payable');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','salary_payable','account_code',v_code,'debit',v_cash,'credit',0,'concept','Pago nómina · descarga pasivo sueldos'));
     v_debits:=v_debits+v_cash;
   end if;
   if v_benefit>0 then
-    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'vouchers_expense');
-    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','vouchers_expense','account_code',v_code,'debit',v_benefit,'credit',0,'concept','Vales de despensa'));
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'vouchers_payable');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','vouchers_payable','account_code',v_code,'debit',v_benefit,'credit',0,'concept','Pago vales · descarga pasivo'));
     v_debits:=v_debits+v_benefit;
   end if;
   if v_fee>0 then
@@ -350,7 +432,7 @@ begin
   v_credits:=v_credits+v_request.amount_requested;
 
   if round(v_debits-v_credits,2)<>0 then raise exception 'PAYROLL_CONTPAQ_UNBALANCED_FEED'; end if;
-  return jsonb_build_object('contract_version','payroll-contpaq-feed-v1','source_type','payroll','payment_request_id',v_request.id,
+  return jsonb_build_object('contract_version','payroll-contpaq-payment-feed-v2','source_type','payroll_payment','payment_request_id',v_request.id,
     'request_number',v_request.request_number,'company_id',v_request.company_id,'cost_center_id',v_request.cost_center_id,
     'company_bank_account_id',v_request.company_bank_account_id,'period_start',v_request.payroll_period_start,'period_end',v_request.payroll_period_end,
     'accounting_date',v_request.paid_at::date,'currency','MXN','treasury_outflow',v_request.amount_requested,
@@ -359,6 +441,53 @@ end;
 $$;
 revoke all on function public.get_payroll_contpaq_feed(uuid) from public,anon;
 grant execute on function public.get_payroll_contpaq_feed(uuid) to authenticated;
+
+-- Provision feed: separate aguinaldo and vacation-premium daily entries. No account numbers are hard-coded.
+create or replace function public.get_payroll_provision_contpaq_feed(p_payment_request_id uuid)
+returns jsonb
+language plpgsql security definer set search_path='public','pg_temp'
+as $$
+declare
+  v_actor uuid:=public.current_profile_id();
+  v_request public.payment_requests%rowtype;
+  v_entry public.payroll_provision_entries%rowtype;
+  v_lines jsonb:='[]'::jsonb; v_seq integer:=0; v_debits numeric(18,2):=0; v_credits numeric(18,2):=0; v_code text;
+begin
+  if v_actor is null or not public.payroll_has_finance_pii_access() then raise exception 'PAYROLL_FINANCE_REQUIRED'; end if;
+  select * into v_request from public.payment_requests where id=p_payment_request_id;
+  if not found or v_request.request_type::text<>'nomina' then raise exception 'PAYROLL_REQUEST_REQUIRED'; end if;
+  if not public.has_active_company_membership(v_actor,v_request.company_id) then raise exception 'PAYROLL_COMPANY_MEMBERSHIP_REQUIRED'; end if;
+  select * into v_entry from public.payroll_provision_entries where payment_request_id=v_request.id;
+  if not found then raise exception 'PAYROLL_PROVISION_NOT_POSTED'; end if;
+
+  if v_entry.aguinaldo_amount>0 then
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'provision_aguinaldo_expense');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','provision_aguinaldo_expense','account_code',v_code,'debit',v_entry.aguinaldo_amount,'credit',0,'concept','Provisión aguinaldo'));
+    v_debits:=v_debits+v_entry.aguinaldo_amount;
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'provision_aguinaldo_liability');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','provision_aguinaldo_liability','account_code',v_code,'debit',0,'credit',v_entry.aguinaldo_amount,'concept','Pasivo provisión aguinaldo'));
+    v_credits:=v_credits+v_entry.aguinaldo_amount;
+  end if;
+
+  if v_entry.vacation_premium_amount>0 then
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'provision_vacation_premium_expense');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','provision_vacation_premium_expense','account_code',v_code,'debit',v_entry.vacation_premium_amount,'credit',0,'concept','Provisión prima vacacional'));
+    v_debits:=v_debits+v_entry.vacation_premium_amount;
+    v_seq:=v_seq+1; v_code:=public.payroll_contpaq_account_for_role_internal(v_request.company_id,v_request.cost_center_id,'provision_vacation_premium_liability');
+    v_lines:=v_lines||jsonb_build_array(jsonb_build_object('sequence',v_seq,'role','provision_vacation_premium_liability','account_code',v_code,'debit',0,'credit',v_entry.vacation_premium_amount,'concept','Pasivo provisión prima vacacional'));
+    v_credits:=v_credits+v_entry.vacation_premium_amount;
+  end if;
+
+  if round(v_debits-v_credits,2)<>0 then raise exception 'PAYROLL_PROVISION_CONTPAQ_UNBALANCED_FEED'; end if;
+  return jsonb_build_object('contract_version','payroll-contpaq-provision-feed-v1','source_type','payroll_provision','payment_request_id',v_request.id,
+    'request_number',v_request.request_number,'company_id',v_request.company_id,'cost_center_id',v_request.cost_center_id,
+    'period_start',v_request.payroll_period_start,'period_end',v_request.payroll_period_end,'accounting_date',v_request.payroll_period_end,
+    'currency','MXN','provision_amount',v_entry.provision_amount,'calculation_policy',v_entry.calculation_policy,'policy_version',v_entry.policy_version,
+    'debit_total',v_debits,'credit_total',v_credits,'lines',v_lines,'contains_employee_pii',false);
+end;
+$$;
+revoke all on function public.get_payroll_provision_contpaq_feed(uuid) from public,anon;
+grant execute on function public.get_payroll_provision_contpaq_feed(uuid) to authenticated;
 
 -- Make provision part of the same transaction as server-verified materialization.
 create or replace function public.materialize_payroll_capture_internal(p_capture_session_id uuid, p_expected_version integer, p_idempotency_key_hash text, p_server_result jsonb)
@@ -448,7 +577,13 @@ begin
   where c.payment_request_id=v_request_id and f.payroll_channel_id=c.id
     and f.kind=case c.channel when 'banco' then 'layout_mismo_banco' when 'spei' then 'layout_spei' else 'layout_toka' end;
 
-  v_provision:=public.post_payroll_provision_internal(v_request_id,(p_server_result->>'provision_base_amount_minor')::bigint);
+  v_provision:=public.post_payroll_provision_internal(
+    v_request_id,
+    (p_server_result->>'provision_base_amount_minor')::bigint,
+    nullif(p_server_result->>'provision_aguinaldo_factor','')::numeric,
+    nullif(p_server_result->>'provision_vacation_premium_factor','')::numeric,
+    nullif(p_server_result->>'provision_policy_version','')
+  );
 
   select coalesce(jsonb_agg(w->>'code'),'[]'::jsonb) into v_warning_codes
   from jsonb_array_elements(coalesce(p_server_result->'warnings','[]'::jsonb)) w;
@@ -457,7 +592,8 @@ begin
     server_verification_summary=jsonb_build_object('contract_version','payroll-normalized-v1','file_count',jsonb_array_length(p_server_result->'files'),
       'line_count',jsonb_array_length(p_server_result->'lines'),'parser_versions',p_server_result->'parser_versions','verified_at',p_server_result->>'verified_at',
       'warning_codes',v_warning_codes,'finance_review_required',coalesce((p_server_result->>'finance_review_required')::boolean,false),
-      'provision_base_amount_minor',(p_server_result->>'provision_base_amount_minor')::bigint,'provision_status',v_provision->>'status'),
+      'provision_base_amount_minor',(p_server_result->>'provision_base_amount_minor')::bigint,'provision_status',v_provision->>'status',
+      'provision_calculation_policy',v_provision->>'calculation_policy','provision_policy_version',v_provision->>'policy_version'),
     version=version+1,updated_at=now(),updated_by=(p_server_result->>'actor_profile_id')::uuid where id=v_session.id;
 
   insert into public.activity_log(entity_type,entity_id,action,old_values,new_values,performed_by,notes)
@@ -468,7 +604,8 @@ begin
      or exists(select 1 from public.approval_batch_items where payment_request_id=v_request_id)
   then raise exception 'payroll_materialization_side_effect_detected'; end if;
   return jsonb_build_object('status','materialized','payment_request_id',v_request_id,
-    'finance_review_required',coalesce((p_server_result->>'finance_review_required')::boolean,false),'provision_status',v_provision->>'status');
+    'finance_review_required',coalesce((p_server_result->>'finance_review_required')::boolean,false),
+    'provision_status',v_provision->>'status','provision_calculation_policy',v_provision->>'calculation_policy');
 end;
 $$;
 
