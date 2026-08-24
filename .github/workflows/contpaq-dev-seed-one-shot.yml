@@ -1,11 +1,6 @@
 name: CONTPAQ DEV seed one-shot
 
 on:
-  push:
-    branches:
-      - codex/flux-slice-03-contpaq-mapper-clean
-    paths:
-      - .github/workflows/contpaq-dev-seed-one-shot.yml
   pull_request:
     types: [synchronize]
     branches:
@@ -18,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: contpaq-dev-seed-one-shot-repository-secrets
-  cancel-in-progress: true
+  group: contpaq-dev-seed-one-shot
+  cancel-in-progress: false
 
 jobs:
   seed-operadora-dev:
@@ -28,7 +23,7 @@ jobs:
     timeout-minutes: 20
     if: >-
       github.repository == 'ramon1415/catalogo-proveedores-flux' &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/codex/flux-slice-03-contpaq-mapper-clean') ||
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/flux-slice-03-contpaq-mapper-clean') ||
        (github.event_name == 'pull_request' && github.head_ref == 'codex/flux-slice-03-contpaq-mapper-clean'))
     env:
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
