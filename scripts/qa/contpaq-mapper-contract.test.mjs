@@ -9,6 +9,7 @@ const configurationHtml = read("configuracion.html")
 const configurationJs = read("configuracion.js")
 const schema = read("supabase/migrations/20260824213154_contpaq_mapper_schema_tree.sql")
 const audit = read("supabase/migrations/20260824214309_contpaq_mapper_audit_hardening.sql")
+const scope = read("supabase/migrations/20260824215209_contpaq_mapper_trigger_scope_hardening.sql")
 
 // Integración aislada: no sustituye la pantalla viva de Configuración.
 assert.match(bootstrap, /pageName !== "configuracion\.html"/)
@@ -67,6 +68,14 @@ assert.match(audit, /v_actor := public\.current_profile_id\(\)/)
 assert.match(audit, /NEW\.updated_by := v_actor/)
 assert.match(audit, /NEW\.updated_at := now\(\)/)
 assert.match(audit, /mapping_reason IS NULL OR char_length\(mapping_reason\) <= 1000/)
+
+// Cualquier UPDATE pasa por el guard, preserva created_at y exige razón para criterio/revisión.
+assert.match(scope, /BEFORE INSERT OR UPDATE\s+ON public\.budget_account_mappings/)
+assert.doesNotMatch(scope, /UPDATE OF company_id, contpaq_account_code/)
+assert.match(scope, /mapping_method <> 'judgment' AND NOT needs_review/)
+assert.match(scope, /contpaq_mapping_reason_required/)
+assert.match(scope, /NEW\.created_at := OLD\.created_at/)
+assert.match(scope, /NOT VALID/)
 
 // Gobernanza extraordinaria vigente: debe sobrevivir intacta a esta rebanada.
 assert.match(configurationHtml, /id="extraordinaryFacultySection"/)
