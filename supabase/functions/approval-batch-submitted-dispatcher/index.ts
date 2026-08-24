@@ -1,11 +1,11 @@
 import {
   SYSTEM_PDF_GENERATOR,
   generateApprovalBatchPdfBytes,
-  prepareApprovalBatchAttachment,
   systemCompanyName,
   systemFormatDate,
   systemFormatMoney,
 } from "./system_pdf.ts";
+import { prepareApprovalBatchAttachment } from "./system_pdf_attachment.ts";
 
 export { generateApprovalBatchPdfBytes, prepareApprovalBatchAttachment };
 
