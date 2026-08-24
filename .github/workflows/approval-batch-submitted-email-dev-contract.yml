@@ -1,0 +1,81 @@
+name: Approval batch submitted DEV email and PDF contract
+
+'on':
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - 'supabase/functions/approval-batch-submitted-dispatcher/**'
+      - 'supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql'
+      - 'scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs'
+      - 'docs/ops/approval-batch-submitted-email-dev.md'
+      - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: approval-batch-submitted-email-dev-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: DEV submitted Director email + PDF
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Run focused executable contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --experimental-strip-types --test \
+            scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs
+
+      - name: Validate DEV-only scope and scan for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+
+          mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+
+          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
+            echo '::error::DEV submitted-batch change contains a non-authorized path.'
+            exit 1
+          fi
+
+          mapfile -t scannable < <(printf '%s\n' "${changed[@]}" | grep -Ev '\.(png|jpg|jpeg|gif|webp|pdf)$' || true)
+          if (( ${#scannable[@]} )); then
+            ! grep -R -E \
+              "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@" \
+              "${scannable[@]}"
+            ! grep -R -E 'C:\\Users\\|/Users/|/home/' "${scannable[@]}"
+          fi
+
+          grep -q 'catalogo-proveedores-flux-git-dev-quantta-team.vercel.app' \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          ! grep -q 'const FLUX_URL = "https://flux.quantta.mx"' \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          grep -q 'event.created_at > p_created_at_after' \
+            supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql
+
+          echo 'scope=DEV_only'
+          echo 'send_mode_runtime=test_only'
+          echo 'historical_replay=blocked'
+          echo 'secret_scan=pass'
