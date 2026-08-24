@@ -23,6 +23,100 @@
     removeOrphanFluxAvatars()
   }
 
+  // Dashboard anual: el enlace, la URL directa y el copy se controlan aquí
+  // para no reemplazar config.js con una versión anterior de las rebanadas.
+  const annualParams = new URLSearchParams(window.location.search)
+  const annualPage = (window.location.pathname.split("/").pop() || "").toLowerCase() === "dashboard.html"
+    && annualParams.get("view") === "anual"
+
+  function cachedFluxGroup() {
+    try {
+      return String(JSON.parse(sessionStorage.getItem("flux-role-state-v1") || "null")?.group || "")
+    } catch (_) {
+      return ""
+    }
+  }
+
+  function syncAnnualDashboardNav(allowed) {
+    const nav = document.querySelector(".sidebar .nav")
+    if (!nav) return
+    let link = nav.querySelector('[data-flux-nav-key="dashboard-anual"]')
+    if (!allowed) {
+      link?.remove()
+      return
+    }
+
+    const generalSection = Array.from(nav.querySelectorAll(".nav-section")).find((section) =>
+      String(section.querySelector(".nav-section-title")?.textContent || "").trim().toLowerCase() === "general"
+    )
+    if (!generalSection) return
+
+    if (!link) {
+      link = document.createElement("a")
+      link.href = "./dashboard.html?view=anual"
+      link.dataset.fluxNavKey = "dashboard-anual"
+      link.className = "nav-link muted"
+      link.innerHTML = "<span>H</span> Dashboard anual"
+      const approvals = generalSection.querySelector('[data-flux-nav-key="approvals"]')
+      if (approvals) generalSection.insertBefore(link, approvals)
+      else generalSection.appendChild(link)
+    }
+
+    link.classList.toggle("active", annualPage)
+    link.classList.toggle("muted", !annualPage)
+    if (annualPage) {
+      const operational = nav.querySelector('[data-flux-nav-key="dashboard"]')
+      operational?.classList.remove("active")
+      operational?.classList.add("muted")
+    }
+  }
+
+  function applyAnnualDashboardCopy() {
+    if (!annualPage) return
+    document.title = "Dashboard anual | Flux Operadora"
+    const title = document.querySelector(".page-header h1")
+    const subtitle = document.querySelector(".page-header p")
+    if (title && title.textContent !== "Dashboard anual") title.textContent = "Dashboard anual"
+    const copy = "Ejercicios históricos por familia de cuenta contable: ingresos y egresos por año, mes y cuenta."
+    if (subtitle && subtitle.textContent !== copy) subtitle.textContent = copy
+  }
+
+  function installAnnualDashboardGuard() {
+    if (!annualPage || !window.FluxAuth?.ready || window.FluxAuth.__annualDashboardGuardInstalled) return
+    const originalReady = window.FluxAuth.ready.bind(window.FluxAuth)
+    window.FluxAuth.ready = async function guardedAnnualDashboardReady() {
+      const result = await originalReady()
+      if (!window.FluxAuth?.isSysadmin?.()) {
+        window.location.replace("./dashboard.html")
+        return new Promise(() => {})
+      }
+      syncAnnualDashboardNav(true)
+      return result
+    }
+    window.FluxAuth.__annualDashboardGuardInstalled = true
+  }
+
+  syncAnnualDashboardNav(cachedFluxGroup() === "sysadmin")
+  document.addEventListener("flux:roles-ready", () => {
+    const allowed = window.FluxAuth?.isSysadmin?.() === true
+    syncAnnualDashboardNav(allowed)
+    if (annualPage && !allowed) window.location.replace("./dashboard.html")
+  })
+
+  const finishAnnualSetup = () => {
+    installAnnualDashboardGuard()
+    applyAnnualDashboardCopy()
+    if (!annualPage || !document.body) return
+    const observer = new MutationObserver(applyAnnualDashboardCopy)
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    window.setTimeout(() => observer.disconnect(), 2500)
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", finishAnnualSetup, { once: true })
+  } else {
+    finishAnnualSetup()
+  }
+
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
   if (nav.children.length) {
@@ -53,6 +147,7 @@
     { key: "incidents", section: "Operacion", file: "ingresos.html", href: "./ingresos.html?tab=incidents", icon: "V", label: "Incidencias", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "providers", section: "Operacion", file: "proveedores.html", href: "./proveedores.html", icon: "P", label: "Proveedores", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "dashboard", section: "General", file: "dashboard.html", href: "./dashboard.html", icon: "D", label: "Dashboard operativo", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
+    { key: "dashboard-anual", section: "General", file: "dashboard.html", href: "./dashboard.html?view=anual", icon: "H", label: "Dashboard anual", groups: [ROLE_GROUPS.SYSADMIN] },
     { key: "approvals", section: "General", file: "aprobaciones.html", href: "./aprobaciones.html", icon: "A", label: "Cola de aprobacion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
     { key: "config", section: "Configuracion", file: "configuracion.html", href: "./configuracion.html", icon: "C", label: "Configuracion", groups: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION] },
   ]
@@ -63,6 +158,7 @@
   function currentModuleKey() {
     if (pageName === "configuracion.html" || pageName === "socios.html") return "config"
     if (pageName === "proveedores.html" && params.get("tab") === "cuentas-origen") return "config"
+    if (pageName === "dashboard.html" && params.get("view") === "anual") return "dashboard-anual"
     if (pageName === "ingresos.html" && params.get("tab") === "incidents") return "incidents"
     if (pageName === "ingresos.html") return "income"
     const match = modules.find((item) => item.file === pageName)
@@ -98,6 +194,7 @@
   function deriveKeyFromHref(href) {
     const cleanHref = String(href || "").replace(/^\.\//, "")
     if (cleanHref === "configuracion.html" || cleanHref === "socios.html") return "config"
+    if (cleanHref === "dashboard.html?view=anual") return "dashboard-anual"
     if (cleanHref === "ingresos.html?tab=incidents") return "incidents"
     if (cleanHref.startsWith("ingresos.html")) return "income"
     const match = modules.find((item) => item.href.replace(/^\.\//, "") === cleanHref || item.file === cleanHref)
@@ -137,7 +234,7 @@
   }
 
   function fallbackModules() {
-    return modules.filter((item) => !item.hidden && !item.sensitive)
+    return modules.filter((item) => !item.hidden && !item.sensitive && item.key !== "dashboard-anual")
   }
 
   function readCachedNavHtml() {
