@@ -1,0 +1,97 @@
+name: Apply CONTPAQ evidence UI separation
+
+on:
+  push:
+    branches:
+      - codex/flux-slice-03-contpaq-mapper-clean
+    paths:
+      - .github/workflows/contpaq-ui-evidence-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    if: github.repository == 'ramon1415/catalogo-proveedores-flux'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/flux-slice-03-contpaq-mapper-clean
+      - name: Separate evidence from formal reason
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('contpaq_mapper_extension.js')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+            (
+              '    reason: "contpaqMapperReason",\n    review: "contpaqMapperNeedsReview",',
+              '    evidence: "contpaqMapperEvidence",\n    reason: "contpaqMapperReason",\n    review: "contpaqMapperNeedsReview",'
+            ),
+            (
+              '      .contpaq-dialog-grid textarea{padding:9px 11px;min-height:92px;resize:vertical}\n',
+              '      .contpaq-dialog-grid textarea{padding:9px 11px;min-height:92px;resize:vertical}\n      .contpaq-dialog-grid textarea[readonly]{opacity:.78;cursor:not-allowed;resize:none;background:var(--bg-surface)}\n      .contpaq-field-note{font-size:10.5px;font-weight:500;line-height:1.45;color:var(--text-3);text-transform:none;letter-spacing:0}\n'
+            ),
+            (
+              '          <label class="contpaq-check"><input id="${IDS.review}" type="checkbox">Requiere revisión de Finanzas</label>\n          <label class="full">Razón / evidencia<textarea id="${IDS.reason}" maxlength="1000" placeholder="Explica el criterio o la fuente del mapeo"></textarea></label>',
+              '          <label class="contpaq-check"><input id="${IDS.review}" type="checkbox">Requiere revisión de Finanzas</label>\n          <label class="full">Evidencia técnica del seed<textarea id="${IDS.evidence}" readonly aria-readonly="true" placeholder="Sin evidencia derivada"></textarea><span class="contpaq-field-note">Dato reproducible generado desde los nombres de partida y cuenta. No equivale a una aprobación de Finanzas.</span></label>\n          <label class="full">Razón formal de Finanzas<textarea id="${IDS.reason}" maxlength="1000" placeholder="Captura la justificación aprobada por Finanzas"></textarea><span class="contpaq-field-note">Es obligatoria para resolver una bandera de revisión o crear un criterio nuevo sin evidencia versionada.</span></label>'
+            ),
+            (
+              'fetchAll(() => state.client.from("budget_account_mappings").select("id,company_id,budget_category_id,contpaq_account_code,needs_review,mapping_method,mapping_reason,created_at,updated_at,updated_by").eq("company_id", companyId).order("budget_category_id")),',
+              'fetchAll(() => state.client.from("budget_account_mappings").select("id,company_id,budget_category_id,contpaq_account_code,needs_review,mapping_method,mapping_evidence,mapping_reason,created_at,updated_at,updated_by").eq("company_id", companyId).order("budget_category_id")),'
+            ),
+            (
+              '    $(IDS.method).value = mapping?.mapping_method || "manual"\n    $(IDS.reason).value = mapping?.mapping_reason || ""\n    $(IDS.review).checked = mapping?.needs_review === true',
+              '    $(IDS.method).value = mapping?.mapping_method || "manual"\n    $(IDS.evidence).value = mapping?.mapping_evidence || ""\n    $(IDS.reason).value = mapping?.mapping_reason || ""\n    $(IDS.review).checked = mapping?.needs_review === true'
+            ),
+            (
+              '    const method = $(IDS.method)?.value || "manual"\n    const reason = text($(IDS.reason)?.value).trim()\n    const needsReview = $(IDS.review)?.checked === true',
+              '    const mapping = state.mappings.get(category.id)\n    const method = $(IDS.method)?.value || "manual"\n    const evidence = text(mapping?.mapping_evidence).trim()\n    const reason = text($(IDS.reason)?.value).trim()\n    const needsReview = $(IDS.review)?.checked === true\n    const wasReview = mapping?.needs_review === true'
+            ),
+            (
+              '    if ((method === "judgment" || needsReview) && reason.length < 8) {\n      showToast("Falta la razón", "Documenta el criterio con al menos 8 caracteres.", "warning")\n      return\n    }',
+              '    if (wasReview && !needsReview && reason.length < 8) {\n      showToast("Falta la razón formal", "Para resolver la revisión, Finanzas debe documentar su decisión con al menos 8 caracteres.", "warning")\n      return\n    }\n    if ((method === "judgment" || needsReview) && evidence.length < 8 && reason.length < 8) {\n      showToast("Falta sustento", "Captura una razón formal con al menos 8 caracteres. La evidencia técnica solo puede venir de una semilla versionada.", "warning")\n      return\n    }'
+            ),
+            (
+              '        mapping_method: method,\n        mapping_reason: reason || null,\n        updated_by: state.profileId,\n        updated_at: new Date().toISOString(),',
+              '        mapping_method: method,\n        mapping_reason: reason || null,'
+            ),
+            (
+              '    if (/contpaq_mapping_account_inactive/i.test(message)) return "La cuenta está inactiva."\n    if (/row-level security|permission denied|42501/i.test(message)) return "Tu rol o membresía de empresa no permite esta operación."',
+              '    if (/contpaq_mapping_account_inactive/i.test(message)) return "La cuenta está inactiva."\n    if (/contpaq_mapping_review_reason_required/i.test(message)) return "Para resolver una revisión, captura una razón formal de Finanzas."\n    if (/contpaq_mapping_evidence_required/i.test(message)) return "Este criterio requiere evidencia versionada o una razón formal."\n    if (/contpaq_mapping_evidence_server_managed/i.test(message)) return "La evidencia técnica es administrada por el servidor y no puede editarse desde el navegador."\n    if (/contpaq_mapper_company_access_denied/i.test(message)) return "Tu rol o membresía de empresa no permite usar el mapper CONTPAQ."\n    if (/row-level security|permission denied|42501/i.test(message)) return "Tu rol o membresía de empresa no permite esta operación."'
+            ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected one occurrence, found {count}: {old[:100]!r}')
+              text = text.replace(old, new)
+
+          forbidden = [
+              'Razón / evidencia',
+              'updated_by: state.profileId',
+              'updated_at: new Date().toISOString()',
+          ]
+          for token in forbidden:
+              if token in text:
+                  raise SystemExit(f'Forbidden legacy UI token remains: {token}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+          node --check contpaq_mapper_extension.js
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git add contpaq_mapper_extension.js
+          git diff --cached --check
+          git commit -m "Separate CONTPAQ seed evidence from formal finance reason"
+          git push origin HEAD:codex/flux-slice-03-contpaq-mapper-clean
