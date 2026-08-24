@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "jspdf": "npm:jspdf@2.5.2",
+    "jspdf-autotable": "./jspdf_autotable_adapter.ts",
+    "jspdf-autotable-package": "npm:jspdf-autotable@3.8.4"
+  }
+}

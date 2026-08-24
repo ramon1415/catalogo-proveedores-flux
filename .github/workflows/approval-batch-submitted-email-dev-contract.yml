@@ -1,4 +1,4 @@
-name: Approval batch submitted DEV email and PDF contract
+name: Approval batch submitted DEV email and system PDF contract
 
 'on':
   pull_request:
@@ -6,7 +6,7 @@ name: Approval batch submitted DEV email and PDF contract
       - dev
     paths:
       - 'supabase/functions/approval-batch-submitted-dispatcher/**'
-      - 'supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql'
+      - 'supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev.sql'
       - 'scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs'
       - 'docs/ops/approval-batch-submitted-email-dev.md'
       - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
@@ -20,9 +20,9 @@ concurrency:
 
 jobs:
   contract:
-    name: DEV submitted Director email + PDF
+    name: DEV selected Director email + exact system PDF
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
 
     steps:
       - name: Check out source
@@ -37,13 +37,62 @@ jobs:
           node-version: '22.16.0'
           cache: ''
 
-      - name: Run focused executable contract
+      - name: Install the exact system PDF libraries and runtime adapter
         shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock --ignore-scripts \
+            jspdf@2.5.2 \
+            jspdf-autotable-package@npm:jspdf-autotable@3.8.4
+
+          mkdir -p node_modules/jspdf-autotable
+          cat > node_modules/jspdf-autotable/package.json <<'JSON'
+          {
+            "name": "jspdf-autotable",
+            "private": true,
+            "type": "module",
+            "exports": "./index.mjs"
+          }
+          JSON
+          cat > node_modules/jspdf-autotable/index.mjs <<'JS'
+          import * as packageModule from "jspdf-autotable-package";
+          const candidate =
+            packageModule.autoTable ||
+            packageModule.default?.autoTable ||
+            packageModule.default?.default ||
+            packageModule.default;
+          if (typeof candidate !== "function") throw new Error("jspdf_autotable_export_not_available");
+          export const autoTable = candidate;
+          export default candidate;
+          JS
+
+          npm ls --depth=0 --json > "$RUNNER_TEMP/pdf-dependencies.json"
+          PDF_DEPENDENCIES="$RUNNER_TEMP/pdf-dependencies.json" node - <<'NODE'
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync(process.env.PDF_DEPENDENCIES, 'utf8'));
+          const dependencies = data.dependencies || {};
+          const versions = {
+            jspdf: dependencies.jspdf?.version,
+            autotable: dependencies['jspdf-autotable-package']?.version,
+          };
+          if (versions.jspdf !== '2.5.2' || versions.autotable !== '3.8.4') {
+            console.error(versions);
+            process.exit(1);
+          }
+          console.log(versions);
+          NODE
+
+      - name: Run focused executable contract and create visual artifact
+        shell: bash
+        env:
+          APPROVAL_BATCH_PDF_SAMPLE_PATH: ${{ runner.temp }}/corte-semanal-operadora-tlacatecpan-2026-08-26.pdf
         run: |
           set -euo pipefail
           node --version
           node --experimental-strip-types --test \
             scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs
+          test -s "$APPROVAL_BATCH_PDF_SAMPLE_PATH"
+          file "$APPROVAL_BATCH_PDF_SAMPLE_PATH"
 
       - name: Validate DEV-only scope and scan for secrets
         shell: bash
@@ -54,7 +103,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_renderer\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::DEV submitted-batch change contains a non-authorized path.'
             exit 1
@@ -68,14 +117,34 @@ jobs:
             ! grep -R -E 'C:\\Users\\|/Users/|/home/' "${scannable[@]}"
           fi
 
-          grep -q 'catalogo-proveedores-flux-git-dev-quantta-team.vercel.app' \
-            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          grep -q 'approval_batches.js/exportPdf@jspdf-2.5.2+autotable-3.8.4' \
+            supabase/functions/approval-batch-submitted-dispatcher/system_pdf_renderer.ts
+          grep -q 'export \* from "./system_pdf_renderer.ts"' \
+            supabase/functions/approval-batch-submitted-dispatcher/system_pdf.ts
+          grep -q 'npm:jspdf@2.5.2' \
+            supabase/functions/approval-batch-submitted-dispatcher/deno.json
+          grep -q 'npm:jspdf-autotable@3.8.4' \
+            supabase/functions/approval-batch-submitted-dispatcher/deno.json
+          grep -q 'jspdf_autotable_export_not_available' \
+            supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter.ts
+          grep -q 'signature.startsWith("%PDF-1.")' \
+            supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment.ts
+          grep -q "'requester_name'" \
+            supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev.sql
           ! grep -q 'const FLUX_URL = "https://flux.quantta.mx"' \
             supabase/functions/approval-batch-submitted-dispatcher/index.ts
-          grep -q 'event.created_at > p_created_at_after' \
-            supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql
 
           echo 'scope=DEV_only'
-          echo 'send_mode_runtime=test_only'
+          echo 'recipient=selected_Director'
+          echo 'pdf_contract=approval_batches_system_export'
           echo 'historical_replay=blocked'
           echo 'secret_scan=pass'
+
+      - name: Upload system-PDF parity sample
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dev-submitted-email-system-pdf-${{ github.run_id }}
+          path: ${{ runner.temp }}/corte-semanal-operadora-tlacatecpan-2026-08-26.pdf
+          if-no-files-found: error
+          retention-days: 14
