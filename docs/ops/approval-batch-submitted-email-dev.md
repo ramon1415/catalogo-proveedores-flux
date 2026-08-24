@@ -19,14 +19,16 @@ El adjunto replica el contrato de `approval_batches.js`:
 - mismos campos y etiquetas de estado que usa la interfaz;
 - mismo footer `Flux Operadora — corte semanal`;
 - mismo naming: `corte-semanal-<empresa>-<period_end>.pdf`;
-- logo del sistema obtenido desde `/assets/logo-flux-verde.webp`; si el asset no pudiera cargarse, el PDF sigue generándose igual que el fallback del frontend.
+- logo del sistema obtenido desde `/assets/logo-flux-verde.webp`; si el asset no pudiera cargarse, el PDF conserva el resto del contrato.
 
-La Edge Function no mantiene un segundo diseño de PDF. El objetivo del contrato es que el adjunto y el PDF descargable desde la UI representen el mismo corte con la misma estructura visual y datos.
+La Edge Function ya no mantiene un segundo diseño de PDF. El adjunto y el PDF descargable desde la UI representan el mismo corte con la misma estructura visual y datos.
 
 ## Estado DEV
 
 - Proyecto: `scsirgbuqjcwoaxfacth`.
 - Edge Function: `approval-batch-submitted-dispatcher`.
+- Migración base: `20260824204217_approval_batch_submitted_email_pdf_dev.sql`.
+- Migración de paridad PDF, ledger autoritativo: `20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql`.
 - Cutoff exclusivo: `2026-08-24T20:43:14.805243Z`.
 - Modo visual: `test_only`; asunto conserva `[DEV TEST]`.
 - Delivery mode: `director`; destinatario final = correo vigente del Director seleccionado.
@@ -66,7 +68,7 @@ APPROVAL_BATCH_SUBMITTED_DELIVERY_MODE=director
 - `supabase/functions/approval-batch-submitted-dispatcher/index.ts`
 - `supabase/functions/approval-batch-submitted-dispatcher/deno.json`
 - `supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql`
-- `supabase/migrations/20260824224500_approval_batch_submitted_system_pdf_fields_dev.sql`
+- `supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql`
 - `scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs`
 - `.github/workflows/approval-batch-submitted-email-dev-contract.yml`
 - Recovery: `.github/workflows/supabase-dev-approval-batch-submitted-recovery.yml` en `main`.
