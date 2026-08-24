@@ -23,6 +23,7 @@ y no sustituye la autorización en el sistema.
 - Backfill: cero.
 - Replay histórico: cero.
 - Idempotencia Resend: `approval-batch-submitted/<notification_event_id>`.
+- Reintento determinista: el mismo snapshot produce exactamente los mismos bytes del PDF.
 - Límite por ejecución: cinco eventos.
 - Adjuntos: se generan en memoria; no se publican en Storage ni se registran en logs.
 - El dispatcher existente de `payment_receipt.linked` no cambia.
