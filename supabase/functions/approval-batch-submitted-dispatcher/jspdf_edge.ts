@@ -1,5 +1,5 @@
 import { jsPDF as CoreJsPDF } from "jspdf-core";
-import { addEmbeddedSystemPdfLogo } from "./pdf_logo.ts";
+import { addEmbeddedSystemPdfLogo } from "./pdf_logo_embed.ts";
 
 // Deno/Edge shim: jsPDF's WebP path rendered the Flux wordmark as a blank rectangle.
 // Inject the exact PNG wordmark at construction time and suppress the legacy WebP logo call.
