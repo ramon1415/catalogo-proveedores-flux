@@ -185,7 +185,7 @@ test("DEV migrations remain exclusive and system-PDF fields stay service-only", 
     "utf8",
   );
   const systemPdfFields = await readFile(
-    new URL("../../supabase/migrations/20260824224500_approval_batch_submitted_system_pdf_fields_dev.sql", import.meta.url),
+    new URL("../../supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql", import.meta.url),
     "utf8",
   );
   assert.match(foundation, /event\.event_type = 'approval_batch\.submitted'/);
