@@ -1,0 +1,121 @@
+name: Supabase DEV Submitted Batch Director Email Recovery
+
+'on':
+  schedule:
+    - cron: '1-56/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-dev-approval-batch-submitted-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover DEV submitted-batch Director emails
+    if: github.ref == 'refs/heads/main' && vars.NOTIFICATION_DEV_SCHEDULER_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: DEV
+
+    env:
+      EXPECTED_PROJECT_REF: scsirgbuqjcwoaxfacth
+      FUNCTION_URL: https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/approval-batch-submitted-dispatcher
+      ACTIVATION_CUTOFF: '2026-08-24T20:43:14.805243Z'
+      DISPATCH_LIMIT: '5'
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+
+    steps:
+      - name: Validate fixed DEV recovery contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${FUNCTION_URL}" = "https://${EXPECTED_PROJECT_REF}.supabase.co/functions/v1/approval-batch-submitted-dispatcher"
+          test "${ACTIVATION_CUTOFF}" = "2026-08-24T20:43:14.805243Z"
+          test "${DISPATCH_LIMIT}" = "5"
+          test -n "${NOTIFICATION_DISPATCHER_SECRET}"
+          echo "::add-mask::${NOTIFICATION_DISPATCHER_SECRET}"
+          echo "environment=DEV"
+          echo "event_type=approval_batch.submitted_only"
+          echo "mode_expected=test_only"
+          echo "historical_replay=blocked_by_exclusive_cutoff"
+
+      - name: Invoke dedicated DEV dispatcher once
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="${RUNNER_TEMP}/approval-batch-submitted-response.json"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST "${FUNCTION_URL}" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: ${NOTIFICATION_DISPATCHER_SECRET}" \
+            --data "{\"created_at_after\":\"${ACTIVATION_CUTOFF}\",\"limit\":${DISPATCH_LIMIT}}")"
+          test "${http_code}" -ge 200
+          test "${http_code}" -lt 300
+
+          RESPONSE_FILE="${response_file}" python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          path = os.environ["RESPONSE_FILE"]
+          with open(path, encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          processed = data.get("processed")
+          sent = data.get("sent")
+          failed = data.get("failed")
+          cancelled = data.get("cancelled")
+          mode = data.get("mode")
+          event_type = data.get("event_type")
+          events = data.get("events") if isinstance(data.get("events"), list) else []
+
+          valid_counts = (
+              isinstance(processed, int)
+              and isinstance(sent, int)
+              and isinstance(failed, int)
+              and isinstance(cancelled, int)
+              and 0 <= processed <= 5
+              and sent + failed + cancelled == processed
+          )
+          valid_events = len(events) == processed and all(
+              event.get("event_type") == "approval_batch.submitted"
+              and event.get("status") in ("sent", "failed", "cancelled")
+              for event in events
+          )
+          sent_events = [event for event in events if event.get("status") == "sent"]
+          valid_sent = all(
+              bool(event.get("provider_message_id"))
+              and isinstance(event.get("attachment_size_bytes"), int)
+              and event.get("attachment_size_bytes", 0) > 0
+              and isinstance(event.get("attachment_pages"), int)
+              and event.get("attachment_pages", 0) >= 1
+              and bool(re.fullmatch(r"[0-9a-f]{64}", str(event.get("attachment_sha256") or "")))
+              for event in sent_events
+          )
+
+          safe = {
+              "processed": processed,
+              "sent": sent,
+              "failed": failed,
+              "cancelled": cancelled,
+              "mode": mode,
+              "event_type": event_type,
+              "sent_with_pdf": len(sent_events),
+          }
+          print(json.dumps(safe, sort_keys=True))
+
+          try:
+              os.remove(path)
+          except FileNotFoundError:
+              pass
+
+          if mode != "test_only" or event_type != "approval_batch.submitted" or not valid_counts or not valid_events or not valid_sent:
+              sys.exit(1)
+          PY
