@@ -117,6 +117,20 @@
     finishAnnualSetup()
   }
 
+  // Rebanada 03: extensión aislada. No reemplaza configuracion.html ni
+  // configuracion.js, por lo que preserva la gobernanza extraordinaria vigente.
+  function loadContpaqMapperExtension() {
+    const pageName = (window.location.pathname.split("/").pop() || "").toLowerCase()
+    if (pageName !== "configuracion.html") return
+    if (document.querySelector('script[data-flux-extension="contpaq-mapper"]')) return
+    const script = document.createElement("script")
+    script.src = "./contpaq_mapper_extension.js?v=20260824-clean-tree"
+    script.async = false
+    script.dataset.fluxExtension = "contpaq-mapper"
+    document.head.appendChild(script)
+  }
+  loadContpaqMapperExtension()
+
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
   if (nav.children.length) {
