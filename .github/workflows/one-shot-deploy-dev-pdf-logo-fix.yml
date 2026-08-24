@@ -1,0 +1,95 @@
+name: One-shot deploy DEV submitted PDF logo opaque fix
+
+'on':
+  pull_request:
+    branches:
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - '.github/workflows/one-shot-deploy-dev-pdf-logo-fix.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-shot-deploy-dev-pdf-logo-opaque-fix
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy approval-batch submitted PDF opaque logo fix to DEV
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'ops/deploy-dev-pdf-logo-opaque-20260824' &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: DEV
+
+    env:
+      PROJECT_REF: scsirgbuqjcwoaxfacth
+      FUNCTION_NAME: approval-batch-submitted-dispatcher
+      SUPABASE_CLI_VERSION: 2.114.0
+
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate one-shot scope and merged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_EVENT_NAME}" = "pull_request"
+          test "${GITHUB_BASE_REF}" = "dev"
+          test "${GITHUB_HEAD_REF}" = "ops/deploy-dev-pdf-logo-opaque-20260824"
+          test "${PROJECT_REF}" = "scsirgbuqjcwoaxfacth"
+          test "${FUNCTION_NAME}" = "approval-batch-submitted-dispatcher"
+
+          mapfile -t changed < <(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD | sort)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/one-shot-deploy-dev-pdf-logo-fix.yml"
+
+          grep -q '"jspdf": "./jspdf_edge.ts"' \
+            supabase/functions/approval-batch-submitted-dispatcher/deno.json
+          grep -q 'SYSTEM_PDF_LOGO_DATA_URL' \
+            supabase/functions/approval-batch-submitted-dispatcher/pdf_logo.ts
+          grep -q 'opaque palette and no alpha' \
+            supabase/functions/approval-batch-submitted-dispatcher/pdf_logo.ts
+          grep -q 'addEmbeddedSystemPdfLogo' \
+            supabase/functions/approval-batch-submitted-dispatcher/jspdf_edge.ts
+          grep -q '"PNG"' \
+            supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed.ts
+
+      - name: Deploy only the DEV Edge Function
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN}"
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
+
+          npx --yes "supabase@${SUPABASE_CLI_VERSION}" functions deploy "${FUNCTION_NAME}" \
+            --project-ref "${PROJECT_REF}" \
+            --no-verify-jwt
+
+          npx --yes "supabase@${SUPABASE_CLI_VERSION}" functions list \
+            --project-ref "${PROJECT_REF}" > "${RUNNER_TEMP}/functions.txt"
+          grep -q "${FUNCTION_NAME}" "${RUNNER_TEMP}/functions.txt"
+
+          printf '%s\n' 'PASS / DEV_PDF_LOGO_OPAQUE_EDGE_DEPLOYED'
+          printf '%s\n' 'scope=edge_function_only'
+          printf '%s\n' 'database_changed=NO'
+          printf '%s\n' 'prod_changed=NO'
+
+      - name: Remove transient files
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/functions.txt"
