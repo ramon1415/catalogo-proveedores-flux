@@ -6,7 +6,7 @@ const read = (path) => fs.readFileSync(path, "utf8")
 const nav = read("nav_first_paint_bootstrap.js")
 const html = read("dashboard.html")
 const dashboard = read("dashboard.js")
-const migration = read("supabase/migrations/20260824213000_historical_actuals_sysadmin_rls.sql")
+const migration = read("supabase/migrations/20260824212048_historical_actuals_sysadmin_rls.sql")
 
 assert.match(nav, /data-flux-nav-key=\\?"dashboard-anual\\?"/)
 assert.match(nav, /FluxAuth\?\.isSysadmin/)
