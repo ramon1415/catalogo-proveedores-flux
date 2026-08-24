@@ -103,7 +103,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_renderer\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::DEV submitted-batch change contains a non-authorized path.'
             exit 1
@@ -118,6 +118,8 @@ jobs:
           fi
 
           grep -q 'approval_batches.js/exportPdf@jspdf-2.5.2+autotable-3.8.4' \
+            supabase/functions/approval-batch-submitted-dispatcher/system_pdf_renderer.ts
+          grep -q 'export \* from "./system_pdf_renderer.ts"' \
             supabase/functions/approval-batch-submitted-dispatcher/system_pdf.ts
           grep -q 'npm:jspdf@2.5.2' \
             supabase/functions/approval-batch-submitted-dispatcher/deno.json
