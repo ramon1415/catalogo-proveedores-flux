@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Validate immutable one-shot scope
@@ -51,6 +51,7 @@ jobs:
           test "${GITHUB_HEAD_REF}" = "ops/update-dev-test-recipient-ramon-20260824"
           test "${PROJECT_REF}" = "scsirgbuqjcwoaxfacth"
           test "${TARGET_PROFILE_ID}" = "5c203bf6-9040-47c3-b89f-cd25f72f14dd"
+          git cat-file -e "${{ github.event.pull_request.base.sha }}^{commit}"
           mapfile -t changed < <(git diff --name-only "${{ github.event.pull_request.base.sha }}"..HEAD | sort)
           test "${#changed[@]}" -eq 1
           test "${changed[0]}" = ".github/workflows/one-shot-update-dev-notification-test-recipient.yml"
