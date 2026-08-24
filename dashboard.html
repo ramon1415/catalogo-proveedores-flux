@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-modal-fix">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-hygiene">
   <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
   <style>
     .kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
@@ -41,6 +41,29 @@
     .panel-header h2 { font-size:13px; font-weight:700; color:var(--text-1); margin:0; }
     .panel-sub { font-size:11px; color:var(--text-3); margin-top:1px; }
     .dash-grid { display:grid; grid-template-columns:1.3fr .7fr; gap:12px; }
+    /* Los controles nativos (select de años, input de mes) siguen el tema */
+    [data-theme="dark"] { color-scheme: dark; }
+    [data-theme="light"] { color-scheme: light; }
+    /* Vista anual: ocultar lo operativo desde el primer paint (sin flash) */
+    .anual-boot #kpiGrid, .anual-boot #tabsBlock, .anual-boot #dashGrid, .anual-boot #periodLabel,
+    .anual-boot #expensesTab, .anual-boot #ytdTab, .anual-boot #incomeTab, .anual-boot #cashTab, .anual-boot #incidentsTab { display:none !important; }
+    /* Modo histórico */
+    .compact-rows tbody td { padding:6px 14px; }
+    .compact-rows tfoot td { padding:8px 14px; border-top:1px solid var(--border-strong); }
+    .hist-kpi-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .hist-kpi { background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:8px 14px; display:flex; align-items:baseline; gap:8px; }
+    .hist-kpi span { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--text-3); }
+    .hist-kpi strong { font-size:15px; font-variant-numeric:tabular-nums; }
+    #histGrid { display:grid; grid-template-columns:minmax(430px,1fr) 2fr; gap:12px; align-items:start; }
+    #histGrid.full { grid-template-columns:1fr; }
+    .hist-cuenta-col { position:sticky; left:0; background:var(--bg-card); z-index:2; box-shadow:2px 0 0 var(--border); }
+    tr.hist-grupo { cursor:pointer; user-select:none; }
+    tr.hist-grupo .hist-caret { display:inline-block; width:14px; font-size:10px; color:var(--text-3); transition:transform .15s; }
+    tr.hist-grupo.abierto .hist-caret { transform:rotate(90deg); }
+    tr.hist-sub td { font-size:11.5px; padding-top:4px; padding-bottom:4px; color:var(--text-2); }
+    tr.hist-sub .cell-main { font-size:11.5px; font-weight:500; }
+    tr.hist-sub .hist-cuenta-col { padding-left:34px; }
+    @media(max-width:1040px){ #histGrid { grid-template-columns:1fr; } .hist-kpi-strip { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     .section-tabs { display:flex; gap:6px; flex-wrap:wrap; }
     .section-tab { min-height:32px; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-3); padding:5px 13px; font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
     .section-tab.active { color:var(--accent-text); border-color:rgba(94,234,212,.28); background:var(--accent-dim); }
@@ -57,6 +80,7 @@
     .chart-legend-item { display:flex; align-items:center; gap:5px; }
     .chart-legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
   </style>
+  <script>if (new URLSearchParams(location.search).get("view") === "anual") document.documentElement.classList.add("anual-boot")</script>
 </head>
 <body>
   <div class="app-shell">
@@ -66,27 +90,27 @@
           <div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div>
           <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Dashboard operativo</div></div>
         </div>
-              <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
-        <div class="nav-section">
-          <div class="nav-section-title">OPERACION</div>
-          <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link"><span>S</span> Solicitudes de pago</a>
-          <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link"><span>L</span> Layouts de pago</a>
-          <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link"><span>E</span> Efectivo y comprobaciones</a>
-          <a href="./ingresos.html" data-flux-nav-key="income" class="nav-link"><span>I</span> Ingresos</a>
-          <a href="./ingresos.html" data-flux-nav-key="incidents" class="nav-link"><span>V</span> Incidencias</a>
-          <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link"><span>P</span> Proveedores</a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-title">GENERAL</div>
-          <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link active"><span>D</span> Dashboard operativo</a>
-          <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link"><span>A</span> Cola de aprobacion</a>
-        </div>
-        <div class="nav-section">
-          <div class="nav-section-title">CONFIGURACION</div>
-          <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link"><span>C</span> Configuracion</a>
-        </div>
-      </nav>
-      <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+        <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+          <div class="nav-section">
+            <div class="nav-section-title">Operacion</div>
+            <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link muted"><span>S</span> Solicitudes de pago</a>
+            <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link muted"><span>L</span> Layouts de pago</a>
+            <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link muted"><span>E</span> Efectivo y comprobaciones</a>
+            <a href="./ingresos.html?tab=income" data-flux-nav-key="income" class="nav-link muted"><span>I</span> Ingresos</a>
+            <a href="./ingresos.html?tab=incidents" data-flux-nav-key="incidents" class="nav-link muted"><span>V</span> Incidencias</a>
+            <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link muted"><span>P</span> Proveedores</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">General</div>
+            <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link active"><span>D</span> Dashboard operativo</a>
+            <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link muted"><span>A</span> Cola de aprobacion</a>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-title">Configuracion</div>
+            <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link muted"><span>C</span> Configuracion</a>
+          </div>
+        </nav>
+        <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
       </div>
       <div class="user-card">
         <p id="userName">Usuario</p>
@@ -100,7 +124,7 @@
         <div class="topbar-kicker">Operacion, cierre y reporte mensual</div>
         <div class="topbar-user">
           <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
-          <div class="avatar">FL</div>
+          
         </div>
       </header>
 
@@ -111,10 +135,15 @@
             <p>Ejecucion presupuestal, cobranza, efectivo y cierre mensual.</p>
           </div>
           <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
-            <label style="display:flex;flex-direction:column;gap:4px">
+            <label id="periodLabel" style="display:flex;flex-direction:column;gap:4px">
               <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3)">Periodo</span>
               <input id="periodInput" type="month" style="min-height:34px;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text-1);padding:0 10px;font:inherit;font-size:12.5px;outline:none">
             </label>
+            <label id="histYearWrap" class="hidden" style="display:flex;flex-direction:column;gap:4px">
+              <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--accent-text)">Año</span>
+              <select id="histYearSelect" style="min-height:34px;background:var(--bg-input);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-1);padding:0 10px;font:inherit;font-size:13px;font-weight:700;outline:none"></select>
+            </label>
+            <button id="histExitBtn" class="secondary-btn hidden" type="button" style="font-size:12px">Año en curso</button>
             <button id="refreshBtn" class="secondary-btn" type="button">Actualizar</button>
             <button id="exportBtn" class="secondary-btn" type="button">Exportar</button>
             <button id="historyBtn" class="secondary-btn" type="button">Historial</button>
@@ -123,8 +152,16 @@
 
         <span id="lastUpdated" style="font-size:11px;color:var(--text-3);text-align:right;margin-top:-10px"></span>
 
+        <!-- KPI histórico (delgado, solo en modo histórico) -->
+        <div id="histKpiStrip" class="hist-kpi-strip hidden">
+          <div class="hist-kpi"><span>Ingresos</span><strong id="histKpiIngresos" style="color:var(--emerald)">$0</strong></div>
+          <div class="hist-kpi"><span>Egresos</span><strong id="histKpiEgresos" style="color:var(--accent-text)">$0</strong></div>
+          <div class="hist-kpi"><span>Neto</span><strong id="histKpiNeto">$0</strong></div>
+          <div class="hist-kpi"><span>Gasto prom/mes</span><strong id="histKpiPromedio">$0</strong></div>
+        </div>
+
         <!-- KPI cards -->
-        <div class="kpi-grid">
+        <div class="kpi-grid" id="kpiGrid">
           <div class="kpi-card accent">
             <div class="kpi-label">Ejecucion presupuestal</div>
             <div class="kpi-value" id="kpiExecuted">$0</div>
@@ -159,8 +196,8 @@
               <div class="panel-sub" id="chartSubtitle">Cargando datos del año...</div>
             </div>
             <div class="chart-legend">
-              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(20,184,166,.75)"></div>Ejecutado</div>
-              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(20,184,166,.22);outline:1px dashed rgba(20,184,166,.5);outline-offset:1px"></div>Presupuesto</div>
+              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(74,124,109,.85)"></div>Ejecutado</div>
+              <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(74,124,109,.25);outline:1px dashed rgba(74,124,109,.55);outline-offset:1px"></div>Presupuesto</div>
               <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(16,185,129,.85)"></div>Cobrado</div>
               <div class="chart-legend-item"><div class="chart-legend-dot" style="background:rgba(16,185,129,.25);outline:1px dashed rgba(16,185,129,.5);outline-offset:1px"></div>Esperado</div>
             </div>
@@ -170,9 +207,40 @@
           </div>
         </div>
 
+        <!-- Histórico (se muestra al elegir un año en ⋯): tabla 1/3 + cobranza 2/3 -->
+        <div id="histGrid" class="hidden">
+          <div id="histPanel" class="table-card compact-rows">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+              <div>
+                <div style="font-size:13px;font-weight:800" id="histPanelTitle">Histórico</div>
+                <div style="font-size:10.5px;color:var(--text-3)">Contabilidad CONTPAQ · 4xx / 6xx</div>
+              </div>
+            </div>
+            <div id="histMensualWrap" class="table-wrapper" style="min-height:auto;max-height:none">
+              <table style="min-width:400px">
+                <thead id="histTableHead"><tr><th>Mes</th><th style="text-align:right">Ingresos</th><th style="text-align:right">Egresos</th><th style="text-align:right">Neto</th></tr></thead>
+                <tbody id="histTableBody"></tbody>
+                <tfoot id="histTableFoot"></tfoot>
+              </table>
+            </div>
+          </div>
+          <div id="histMemberSlot"></div>
+        </div>
+
+        <!-- Histórico por cuenta (matriz completa, debajo de mensual + cobranza) -->
+        <div id="histCuentasPanel" class="table-card compact-rows hidden">
+          <div style="padding:11px 14px;border-bottom:1px solid var(--border)">
+            <div style="font-size:13px;font-weight:800" id="histCuentasTitle">Histórico por cuenta</div>
+            <div style="font-size:10.5px;color:var(--text-3)">Ordenado por monto · código de cuenta al pasar el mouse</div>
+          </div>
+          <div class="table-wrapper" style="min-height:auto;max-height:560px">
+            <table id="histCuentasTable" style="min-width:0"></table>
+          </div>
+        </div>
+
         <!-- Dashboard grid: cobranza + cierre -->
-        <div class="dash-grid">
-          <div class="chart-card">
+        <div class="dash-grid" id="dashGrid">
+          <div class="chart-card" id="memberCard">
             <div class="panel-header">
               <div>
                 <h2>Cobranza por socio</h2>
@@ -215,7 +283,7 @@
         </div>
 
         <!-- Tabs secundarios -->
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div id="tabsBlock" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <div class="section-tabs">
             <button class="section-tab active" data-tab="expenses" type="button">Gastos del mes</button>
             <button class="section-tab" data-tab="ytd" type="button">YTD</button>
@@ -378,6 +446,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="./config.js?v=20260624-static-nav"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./dashboard.js?v=20260610-chart-demo"></script>
+  <script src="./dashboard.js?v=20260818-anual10"></script>
 </body>
 </html>
