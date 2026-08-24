@@ -20,6 +20,7 @@
     dialogTitle: "contpaqMapperDialogTitle",
     accountInput: "contpaqMapperAccountInput",
     method: "contpaqMapperMethod",
+    evidence: "contpaqMapperEvidence",
     reason: "contpaqMapperReason",
     review: "contpaqMapperNeedsReview",
     validation: "contpaqMapperValidation",
@@ -99,6 +100,8 @@
       .contpaq-dialog-grid label.full{grid-column:1/-1}
       .contpaq-dialog-grid input,.contpaq-dialog-grid select,.contpaq-dialog-grid textarea{min-height:36px;padding:0 11px;background:var(--bg-input);border:1px solid var(--border);border-radius:7px;color:var(--text-1);font-size:12.5px;outline:none}
       .contpaq-dialog-grid textarea{padding:9px 11px;min-height:92px;resize:vertical}
+      .contpaq-dialog-grid textarea[readonly]{opacity:.78;cursor:not-allowed;resize:none;background:var(--bg-surface)}
+      .contpaq-field-note{font-size:10.5px;font-weight:500;line-height:1.45;color:var(--text-3);text-transform:none;letter-spacing:0}
       .contpaq-check{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important;text-transform:none!important;font-size:12.5px!important;color:var(--text-2)!important}
       .contpaq-check input{min-height:auto!important;width:15px;height:15px;accent-color:var(--accent)}
       @media(max-width:900px){#${IDS.panel} .contpaq-toolbar{grid-template-columns:1fr}.contpaq-dialog-grid{grid-template-columns:1fr}.contpaq-dialog-grid label.full{grid-column:auto}}
@@ -172,7 +175,8 @@
           <label class="full">Cuenta CONTPAQ<input id="${IDS.accountInput}" list="${IDS.datalist}" autocomplete="off" placeholder="Código — nombre"></label>
           <label>Método<select id="${IDS.method}"><option value="exact_name">Coincidencia exacta</option><option value="judgment">Criterio contable</option><option value="manual">Manual</option><option value="imported">Importado</option></select></label>
           <label class="contpaq-check"><input id="${IDS.review}" type="checkbox">Requiere revisión de Finanzas</label>
-          <label class="full">Razón / evidencia<textarea id="${IDS.reason}" maxlength="1000" placeholder="Explica el criterio o la fuente del mapeo"></textarea></label>
+          <label class="full">Evidencia técnica del seed<textarea id="${IDS.evidence}" readonly aria-readonly="true" placeholder="Sin evidencia derivada"></textarea><span class="contpaq-field-note">Dato reproducible generado desde los nombres de partida y cuenta. No equivale a una aprobación de Finanzas.</span></label>
+          <label class="full">Razón formal de Finanzas<textarea id="${IDS.reason}" maxlength="1000" placeholder="Captura la justificación aprobada por Finanzas"></textarea><span class="contpaq-field-note">Es obligatoria para resolver una bandera de revisión o crear un criterio nuevo sin evidencia versionada.</span></label>
           <div id="${IDS.validation}" class="notice-v2 neutral full" role="status" aria-live="polite"></div>
         </div>
         <div class="modal-actions"><button type="button" id="${IDS.remove}" class="small-btn danger">Quitar mapeo</button><button type="button" id="${IDS.save}" class="primary-btn">Guardar mapeo</button></div>
@@ -303,7 +307,7 @@
       const [categoriesResult, accounts, mappings] = await Promise.all([
         state.client.from("budget_categories").select("id,name,category,code,active").eq("active", true).order("category").order("name"),
         fetchAll(() => state.client.from("contpaq_account_mapper_candidates").select("company_id,code,name,is_detail,sat_group,cta_sup,cta_mayor,tipo,rubro_nif,activo,sincronizado_el,es_hoja,elegible_mapper").eq("company_id", companyId).order("code")),
-        fetchAll(() => state.client.from("budget_account_mappings").select("id,company_id,budget_category_id,contpaq_account_code,needs_review,mapping_method,mapping_reason,created_at,updated_at,updated_by").eq("company_id", companyId).order("budget_category_id")),
+        fetchAll(() => state.client.from("budget_account_mappings").select("id,company_id,budget_category_id,contpaq_account_code,needs_review,mapping_method,mapping_evidence,mapping_reason,created_at,updated_at,updated_by").eq("company_id", companyId).order("budget_category_id")),
       ])
       if (categoriesResult.error) throw categoriesResult.error
       state.categories = categoriesResult.data || []
@@ -519,6 +523,7 @@
     $(IDS.dialogTitle).textContent = category.name
     $(IDS.accountInput).value = account ? `${account.code} — ${account.name}` : mapping?.contpaq_account_code || ""
     $(IDS.method).value = mapping?.mapping_method || "manual"
+    $(IDS.evidence).value = mapping?.mapping_evidence || ""
     $(IDS.reason).value = mapping?.mapping_reason || ""
     $(IDS.review).checked = mapping?.needs_review === true
     $(IDS.remove).disabled = !mapping
@@ -560,9 +565,12 @@
     if (!category || !state.companyId) return
     const code = normalizeCode($(IDS.accountInput)?.value)
     const account = state.accounts.get(code)
+    const mapping = state.mappings.get(category.id)
     const method = $(IDS.method)?.value || "manual"
+    const evidence = text(mapping?.mapping_evidence).trim()
     const reason = text($(IDS.reason)?.value).trim()
     const needsReview = $(IDS.review)?.checked === true
+    const wasReview = mapping?.needs_review === true
 
     if (!account) {
       showToast("Cuenta no encontrada", "Elige una cuenta del catálogo CONTPAQ de esta empresa.", "danger")
@@ -572,8 +580,12 @@
       showToast("Cuenta no elegible", "Debe estar activa, sincronizada, ser CtaMayor=2, tipo G y no tener hijos.", "danger")
       return
     }
-    if ((method === "judgment" || needsReview) && reason.length < 8) {
-      showToast("Falta la razón", "Documenta el criterio con al menos 8 caracteres.", "warning")
+    if (wasReview && !needsReview && reason.length < 8) {
+      showToast("Falta la razón formal", "Para resolver la revisión, Finanzas debe documentar su decisión con al menos 8 caracteres.", "warning")
+      return
+    }
+    if ((method === "judgment" || needsReview) && evidence.length < 8 && reason.length < 8) {
+      showToast("Falta sustento", "Captura una razón formal con al menos 8 caracteres. La evidencia técnica solo puede venir de una semilla versionada.", "warning")
       return
     }
 
@@ -586,8 +598,6 @@
         needs_review: needsReview,
         mapping_method: method,
         mapping_reason: reason || null,
-        updated_by: state.profileId,
-        updated_at: new Date().toISOString(),
       }
       const { error } = await state.client.from("budget_account_mappings").upsert(payload, { onConflict: "company_id,budget_category_id" })
       if (error) throw error
@@ -680,6 +690,10 @@
     if (/contpaq_mapping_account_not_detail/i.test(message)) return "La cuenta no es de detalle (CtaMayor=2)."
     if (/contpaq_mapping_account_not_expense/i.test(message)) return "La cuenta no es de naturaleza gasto (tipo G)."
     if (/contpaq_mapping_account_inactive/i.test(message)) return "La cuenta está inactiva."
+    if (/contpaq_mapping_review_reason_required/i.test(message)) return "Para resolver una revisión, captura una razón formal de Finanzas."
+    if (/contpaq_mapping_evidence_required/i.test(message)) return "Este criterio requiere evidencia versionada o una razón formal."
+    if (/contpaq_mapping_evidence_server_managed/i.test(message)) return "La evidencia técnica es administrada por el servidor y no puede editarse desde el navegador."
+    if (/contpaq_mapper_company_access_denied/i.test(message)) return "Tu rol o membresía de empresa no permite usar el mapper CONTPAQ."
     if (/row-level security|permission denied|42501/i.test(message)) return "Tu rol o membresía de empresa no permite esta operación."
     return message
   }
