@@ -7,8 +7,9 @@ on:
       - "contpaq_mapper_extension.js"
       - "configuracion.html"
       - "configuracion.js"
-      - "supabase/migrations/*contpaq_mapper*"
+      - "supabase/migrations/*contpaq*"
       - "scripts/qa/contpaq-mapper-contract.test.mjs"
+      - "scripts/qa/contpaq-mapper-hardening-contract.test.mjs"
       - ".github/workflows/contpaq-mapper-contract.yml"
   workflow_dispatch:
 
@@ -25,5 +26,8 @@ jobs:
           node --check nav_first_paint_bootstrap.js
           node --check contpaq_mapper_extension.js
           node --check scripts/qa/contpaq-mapper-contract.test.mjs
-      - name: CONTPAQ mapper contract
+          node --check scripts/qa/contpaq-mapper-hardening-contract.test.mjs
+      - name: CONTPAQ mapper base contract
         run: node scripts/qa/contpaq-mapper-contract.test.mjs
+      - name: CONTPAQ mapper hardening contract
+        run: node scripts/qa/contpaq-mapper-hardening-contract.test.mjs
