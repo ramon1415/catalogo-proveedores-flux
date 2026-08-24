@@ -1,0 +1,511 @@
+name: One-shot PROD activate submitted-batch Director email from main
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/one-shot-activate-approval-batch-submitted-email-prod-main.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-shot-prod-approval-batch-submitted-email-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Deploy, migrate, zero-replay smoke, activate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: supabase-production
+    env:
+      SOURCE_MAIN_SHA: 0d81ebc27bbd95c5f5fdcb8cd9250f87f1e84ccc
+      WORKFLOW_PATH: .github/workflows/one-shot-activate-approval-batch-submitted-email-prod-main.yml
+      EXPECTED_PROJECT_REF: ucantptjhwttexzmslvm
+      EXPECTED_PROJECT_NAME: financieraflux
+      FUNCTION_NAME: approval-batch-submitted-dispatcher
+      FUNCTION_URL: https://ucantptjhwttexzmslvm.supabase.co/functions/v1/approval-batch-submitted-dispatcher
+      EXPECTED_FUNCTION_BLOB: 212cc8d2bd862757bbd7f48ded3b9ff3ef0839f2
+      TARGET_VERSION: '20260824191500'
+      TARGET_NAME: approval_batch_submitted_email_pdf_prod
+      TARGET_PATH: supabase/migrations/20260824191500_approval_batch_submitted_email_pdf_prod.sql
+      TARGET_MIGRATION_SHA256: 30b85256156c35b55c117b2d74670c35d88c85b0c40822b635859f69c1a12c55
+      SUPABASE_CLI_VERSION: 2.114.0
+
+    steps:
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/approval-batch-submitted-prod-release"
+          mkdir -p "$evidence"
+          printf 'EVIDENCE_DIR=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$evidence/result.txt"
+
+      - name: Check out exact main release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Validate one-file release trigger and immutable product sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ "$GITHUB_EVENT_NAME" = "push" ]] || fail PUSH_EVENT_REQUIRED
+          [[ "$GITHUB_REF" = "refs/heads/main" ]] || fail MAIN_REF_REQUIRED
+          [[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]] || fail CHECKOUT_SHA_DRIFT
+          git cat-file -e "$SOURCE_MAIN_SHA^{commit}" || fail SOURCE_MAIN_COMMIT_MISSING
+          mapfile -t delta < <(git diff --name-only "$SOURCE_MAIN_SHA"..HEAD | sort)
+          [[ "${#delta[@]}" = "1" ]] || fail UNEXPECTED_MAIN_DELTA_COUNT
+          [[ "${delta[0]}" = "$WORKFLOW_PATH" ]] || fail UNEXPECTED_MAIN_DELTA_PATH
+          [[ "$(git hash-object "supabase/functions/$FUNCTION_NAME/index.ts")" = "$EXPECTED_FUNCTION_BLOB" ]] || fail FUNCTION_BLOB_DRIFT
+          [[ -f "$TARGET_PATH" ]] || fail MIGRATION_FILE_MISSING
+          [[ "$(sha256sum "$TARGET_PATH" | awk '{print $1}')" = "$TARGET_MIGRATION_SHA256" ]] || fail MIGRATION_SHA_DRIFT
+          printf '{"status":"PASS","release_sha":"%s","source_sha":"%s","delta":["%s"]}\n' \
+            "$GITHUB_SHA" "$SOURCE_MAIN_SHA" "${delta[0]}" > "$EVIDENCE_DIR/github-authority.json"
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Run focused contract and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test scripts/qa/approval-batch-submitted-email-contract.test.mjs \
+            | tee "$EVIDENCE_DIR/contract-tests.txt"
+          git diff --check
+          printf '%s  %s\n' "$TARGET_MIGRATION_SHA256" "$TARGET_PATH" > "$EVIDENCE_DIR/migration-sha256.txt"
+          printf '%s  %s\n' "$EXPECTED_FUNCTION_BLOB" "supabase/functions/$FUNCTION_NAME/index.ts" > "$EVIDENCE_DIR/function-git-blob.txt"
+
+      - name: Install pinned Supabase CLI and PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" --version | tee "$EVIDENCE_DIR/supabase-version.txt"
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+
+      - name: Verify fixed PROD identity and capture immutable baseline
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]] || fail SUPABASE_ACCESS_TOKEN_MISSING
+          [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || fail PROD_DATABASE_URL_MISSING
+          [[ "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROJECT_REF" ]] || fail PROD_PROJECT_VARIABLE_MISMATCH
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+
+          curl --silent --show-error --fail \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROJECT_REF" > "$RUNNER_TEMP/prod-project.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          project = json.loads(pathlib.Path(os.environ['RUNNER_TEMP'] + '/prod-project.json').read_text())
+          checks = {
+              'project_ref': str(project.get('id') or project.get('ref') or '') == os.environ['EXPECTED_PROJECT_REF'],
+              'project_name': project.get('name') == os.environ['EXPECTED_PROJECT_NAME'],
+              'project_status': project.get('status') == 'ACTIVE_HEALTHY',
+          }
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          root.joinpath('prod-identity.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / PROD_IDENTITY_MISMATCH\n')
+              raise SystemExit('PROD_IDENTITY_MISMATCH')
+          PY
+          rm -f "$RUNNER_TEMP/prod-project.json"
+
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/precheck.json"
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260824191500'),
+            'target_claim_present',to_regprocedure('public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)') is not null,
+            'target_document_present',to_regprocedure('public.get_approval_batch_submitted_notification_document(uuid,text)') is not null,
+            'target_cancel_present',to_regprocedure('public.cancel_approval_batch_submitted_event_for_dispatcher(uuid,text,text)') is not null,
+            'target_wakeup_present',to_regprocedure('public.notification_approval_batch_submitted_dispatch_wakeup_internal()') is not null,
+            'target_trigger_count',(select count(*) from pg_trigger where tgrelid='public.notification_events'::regclass and tgname='notification_approval_batch_submitted_dispatch_after_insert' and not tgisinternal),
+            'target_vault_names',(select count(*) from vault.decrypted_secrets where name = any(array[
+              'notification_approval_batch_submitted_dispatcher_url',
+              'notification_approval_batch_submitted_cutoff_at',
+              'notification_approval_batch_submitted_immediate_enabled',
+              'notification_approval_batch_submitted_recovery_enabled'
+            ]::text[])),
+            'submitted_total',(select count(*) from public.notification_events where event_type='approval_batch.submitted'),
+            'submitted_pending',(select count(*) from public.notification_events where event_type='approval_batch.submitted' and status='pending'),
+            'submitted_nonpending',(select count(*) from public.notification_events where event_type='approval_batch.submitted' and status<>'pending'),
+            'submitted_attempts',(select count(*) from public.notification_delivery_attempts attempt join public.notification_events event on event.id=attempt.notification_event_id where event.event_type='approval_batch.submitted'),
+            'submitted_digest',(select md5(coalesce(string_agg(concat_ws('|',id::text,status,attempt_count::text,coalesce(processed_at::text,''),coalesce(last_error,''),coalesce(updated_at::text,'')),'|' order by id),'')) from public.notification_events where event_type='approval_batch.submitted'),
+            'current_submitted_batches',(select count(*) from public.approval_batches where status='submitted'),
+            'receipt_wakeup_hash',md5(pg_get_functiondef('public.notification_receipt_linked_dispatch_wakeup_internal()'::regprocedure)),
+            'created_wakeup_hash',md5(pg_get_functiondef('public.notification_payment_request_created_dispatch_wakeup_internal()'::regprocedure))
+          );
+          rollback;
+          SQL
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          value = json.loads(root.joinpath('precheck.json').read_text())
+          checks = {
+              'migration_absent': value['target_ledger_count'] == 0,
+              'objects_absent': not any(value[k] for k in ['target_claim_present','target_document_present','target_cancel_present','target_wakeup_present']) and value['target_trigger_count'] == 0,
+              'vault_absent': value['target_vault_names'] == 0,
+              'historical_exact': value['submitted_total'] == 7 and value['submitted_pending'] == 7 and value['submitted_nonpending'] == 0 and value['submitted_attempts'] == 0,
+              'no_live_submitted_batch': value['current_submitted_batches'] == 0,
+          }
+          root.joinpath('precheck-result.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / PROD_PRECHECK_FAILED\n')
+              raise SystemExit('PROD_PRECHECK_FAILED')
+          PY
+
+      - name: Rehearse exact migration transaction and roll it back
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          python3 - <<'PY'
+          import os, pathlib
+          source = pathlib.Path(os.environ['TARGET_PATH']).read_text()
+          stripped = source.strip()
+          if not stripped.lower().startswith('begin;') or not stripped.lower().endswith('commit;'):
+              raise SystemExit('migration_outer_transaction_contract_missing')
+          body = stripped[len('begin;'):]
+          final = body.lower().rfind('commit;')
+          if final < 0 or body[final + len('commit;'):].strip():
+              raise SystemExit('migration_final_commit_contract_invalid')
+          pathlib.Path(os.environ['RUNNER_TEMP'] + '/approval-batch-submitted-rehearsal.sql').write_text('begin;\n' + body[:final] + '\nrollback;\n')
+          PY
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f "$RUNNER_TEMP/approval-batch-submitted-rehearsal.sql" \
+            > "$EVIDENCE_DIR/rollback-rehearsal.txt"
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/post-rehearsal.json"
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260824191500'),
+            'target_claim_present',to_regprocedure('public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)') is not null,
+            'target_document_present',to_regprocedure('public.get_approval_batch_submitted_notification_document(uuid,text)') is not null,
+            'target_cancel_present',to_regprocedure('public.cancel_approval_batch_submitted_event_for_dispatcher(uuid,text,text)') is not null,
+            'target_wakeup_present',to_regprocedure('public.notification_approval_batch_submitted_dispatch_wakeup_internal()') is not null,
+            'target_trigger_count',(select count(*) from pg_trigger where tgrelid='public.notification_events'::regclass and tgname='notification_approval_batch_submitted_dispatch_after_insert' and not tgisinternal),
+            'submitted_digest',(select md5(coalesce(string_agg(concat_ws('|',id::text,status,attempt_count::text,coalesce(processed_at::text,''),coalesce(last_error,''),coalesce(updated_at::text,'')),'|' order by id),'')) from public.notification_events where event_type='approval_batch.submitted')
+          );
+          rollback;
+          SQL
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          before = json.loads(root.joinpath('precheck.json').read_text())
+          after = json.loads(root.joinpath('post-rehearsal.json').read_text())
+          checks = {
+              'ledger_unchanged': after['target_ledger_count'] == 0,
+              'objects_rolled_back': not any(after[k] for k in ['target_claim_present','target_document_present','target_cancel_present','target_wakeup_present']) and after['target_trigger_count'] == 0,
+              'historical_rows_unchanged': after['submitted_digest'] == before['submitted_digest'],
+          }
+          root.joinpath('rollback-rehearsal-result.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / ROLLBACK_REHEARSAL_FAILED\n')
+              raise SystemExit('ROLLBACK_REHEARSAL_FAILED')
+          PY
+
+      - name: Deploy only the exact new Edge Function
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions deploy "$FUNCTION_NAME" \
+            --project-ref "$EXPECTED_PROJECT_REF" \
+            --no-verify-jwt \
+            --use-api 2>&1 | tee "$EVIDENCE_DIR/function-deploy.txt"
+
+      - name: Prove exact-one migration dry run and apply
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          release_dir="$RUNNER_TEMP/approval-batch-submitted-release"
+          mkdir -p "$release_dir/supabase/migrations"
+          printf 'project_id = "approval-batch-submitted-prod-release"\n' > "$release_dir/supabase/config.toml"
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "begin transaction read only; select version from supabase_migrations.schema_migrations order by version; rollback;" \
+            > "$RUNNER_TEMP/prod-history-before.txt"
+          while IFS= read -r version; do
+            [[ "$version" =~ ^[0-9]+$ ]] || fail REMOTE_MIGRATION_HISTORY_INVALID
+            [[ "$version" != "$TARGET_VERSION" ]] || fail MIGRATION_ALREADY_APPLIED
+            : > "$release_dir/supabase/migrations/${version}_remote_history.sql"
+          done < "$RUNNER_TEMP/prod-history-before.txt"
+          cp "$TARGET_PATH" "$release_dir/$TARGET_PATH"
+          (
+            cd "$release_dir"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+              --dry-run --include-all 2>&1 | tee "$EVIDENCE_DIR/migration-dry-run.txt"
+          )
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          versions = sorted(set(re.findall(r'(?<!\d)(\d{14})(?!\d)', root.joinpath('migration-dry-run.txt').read_text())))
+          expected = [os.environ['TARGET_VERSION']]
+          payload = {'status':'PASS' if versions == expected else 'STOP','pending_versions':versions}
+          root.joinpath('migration-dry-run.json').write_text(json.dumps(payload, indent=2) + '\n')
+          if payload['status'] != 'PASS':
+              root.joinpath('result.txt').write_text('STOP / DRY_RUN_PENDING_SET_MISMATCH\n')
+              raise SystemExit('DRY_RUN_PENDING_SET_MISMATCH')
+          PY
+          (
+            cd "$release_dir"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" \
+              --include-all --yes 2>&1 | tee "$EVIDENCE_DIR/migration-apply.txt"
+          )
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "begin transaction read only; select version from supabase_migrations.schema_migrations order by version; rollback;" \
+            > "$RUNNER_TEMP/prod-history-after.txt"
+          python3 - <<'PY'
+          import json, os, pathlib
+          before = [x for x in pathlib.Path(os.environ['RUNNER_TEMP'] + '/prod-history-before.txt').read_text().splitlines() if x]
+          after = [x for x in pathlib.Path(os.environ['RUNNER_TEMP'] + '/prod-history-after.txt').read_text().splitlines() if x]
+          added = sorted(set(after) - set(before))
+          payload = {'status':'PASS' if len(after) == len(before) + 1 and added == [os.environ['TARGET_VERSION']] else 'STOP','applied_versions':added}
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          root.joinpath('migration-history-delta.json').write_text(json.dumps(payload, indent=2) + '\n')
+          if payload['status'] != 'PASS':
+              root.joinpath('result.txt').write_text('STOP / MIGRATION_HISTORY_DELTA_INVALID\n')
+              raise SystemExit('MIGRATION_HISTORY_DELTA_INVALID')
+          PY
+
+      - name: Verify post-apply objects and unchanged historical queue
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/post-apply.json"
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260824191500' and name='approval_batch_submitted_email_pdf_prod'),
+            'target_claim_present',to_regprocedure('public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)') is not null,
+            'target_document_present',to_regprocedure('public.get_approval_batch_submitted_notification_document(uuid,text)') is not null,
+            'target_cancel_present',to_regprocedure('public.cancel_approval_batch_submitted_event_for_dispatcher(uuid,text,text)') is not null,
+            'target_wakeup_present',to_regprocedure('public.notification_approval_batch_submitted_dispatch_wakeup_internal()') is not null,
+            'target_trigger_count',(select count(*) from pg_trigger where tgrelid='public.notification_events'::regclass and tgname='notification_approval_batch_submitted_dispatch_after_insert' and not tgisinternal),
+            'anon_claim_execute',has_function_privilege('anon','public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)','EXECUTE'),
+            'authenticated_claim_execute',has_function_privilege('authenticated','public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)','EXECUTE'),
+            'service_claim_execute',has_function_privilege('service_role','public.claim_approval_batch_submitted_events_for_dispatcher(integer,text,timestamptz)','EXECUTE'),
+            'submitted_total',(select count(*) from public.notification_events where event_type='approval_batch.submitted'),
+            'submitted_pending',(select count(*) from public.notification_events where event_type='approval_batch.submitted' and status='pending'),
+            'submitted_attempts',(select count(*) from public.notification_delivery_attempts attempt join public.notification_events event on event.id=attempt.notification_event_id where event.event_type='approval_batch.submitted'),
+            'submitted_digest',(select md5(coalesce(string_agg(concat_ws('|',id::text,status,attempt_count::text,coalesce(processed_at::text,''),coalesce(last_error,''),coalesce(updated_at::text,'')),'|' order by id),'')) from public.notification_events where event_type='approval_batch.submitted'),
+            'current_submitted_batches',(select count(*) from public.approval_batches where status='submitted'),
+            'receipt_wakeup_hash',md5(pg_get_functiondef('public.notification_receipt_linked_dispatch_wakeup_internal()'::regprocedure)),
+            'created_wakeup_hash',md5(pg_get_functiondef('public.notification_payment_request_created_dispatch_wakeup_internal()'::regprocedure))
+          );
+          rollback;
+          SQL
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          before = json.loads(root.joinpath('precheck.json').read_text())
+          after = json.loads(root.joinpath('post-apply.json').read_text())
+          checks = {
+              'exact_ledger': after['target_ledger_count'] == 1,
+              'objects_present': all(after[k] for k in ['target_claim_present','target_document_present','target_cancel_present','target_wakeup_present']) and after['target_trigger_count'] == 1,
+              'service_only_claim': not after['anon_claim_execute'] and not after['authenticated_claim_execute'] and after['service_claim_execute'],
+              'historical_queue_unchanged': after['submitted_total'] == 7 and after['submitted_pending'] == 7 and after['submitted_attempts'] == 0 and after['submitted_digest'] == before['submitted_digest'],
+              'no_live_submitted_batch': after['current_submitted_batches'] == 0,
+              'existing_wakeups_unchanged': after['receipt_wakeup_hash'] == before['receipt_wakeup_hash'] and after['created_wakeup_hash'] == before['created_wakeup_hash'],
+          }
+          root.joinpath('post-apply-result.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / POST_APPLY_CONTRACT_FAILED\n')
+              raise SystemExit('POST_APPLY_CONTRACT_FAILED')
+          PY
+
+      - name: Create fresh cutoff with activation flags disabled
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          activation_cutoff="$(date -u +'%Y-%m-%dT%H:%M:%S.%6NZ')"
+          printf 'ACTIVATION_CUTOFF=%s\n' "$activation_cutoff" >> "$GITHUB_ENV"
+          printf '%s\n' "$activation_cutoff" > "$EVIDENCE_DIR/activation-cutoff.txt"
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -v function_url="$FUNCTION_URL" -v cutoff="$activation_cutoff" <<'SQL' > "$EVIDENCE_DIR/vault-create.txt"
+          begin;
+          select vault.create_secret(:'function_url', 'notification_approval_batch_submitted_dispatcher_url', 'Flux submitted-batch Director dispatcher URL');
+          select vault.create_secret(:'cutoff', 'notification_approval_batch_submitted_cutoff_at', 'Flux submitted-batch exclusive activation cutoff');
+          select vault.create_secret('false', 'notification_approval_batch_submitted_immediate_enabled', 'Flux submitted-batch immediate wake-up gate');
+          select vault.create_secret('false', 'notification_approval_batch_submitted_recovery_enabled', 'Flux submitted-batch recovery gate');
+          commit;
+          SQL
+
+      - name: Execute authenticated zero-pending smoke with flags disabled
+        shell: bash
+        env:
+          NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$NOTIFICATION_DISPATCHER_SECRET" ]]
+          echo "::add-mask::$NOTIFICATION_DISPATCHER_SECRET"
+          response="$EVIDENCE_DIR/smoke.json"
+          http_code="$(curl --silent --show-error \
+            --output "$response" --write-out '%{http_code}' \
+            --request POST "$FUNCTION_URL" \
+            --header 'Content-Type: application/json' \
+            --header "x-notification-dispatcher-secret: $NOTIFICATION_DISPATCHER_SECRET" \
+            --data "{\"created_at_after\":\"$ACTIVATION_CUTOFF\",\"limit\":1}")"
+          [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          data = json.loads(root.joinpath('smoke.json').read_text())
+          checks = {
+              'mode_real': data.get('mode') == 'real',
+              'event_type_exclusive': data.get('event_type') == 'approval_batch.submitted',
+              'zero_processed': data.get('processed') == 0,
+              'zero_sent': data.get('sent') == 0,
+              'zero_failed': data.get('failed') == 0,
+              'zero_cancelled': data.get('cancelled') == 0,
+          }
+          root.joinpath('smoke-result.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / ZERO_PENDING_SMOKE_FAILED\n')
+              raise SystemExit('ZERO_PENDING_SMOKE_FAILED')
+          PY
+
+      - name: Activate immediate wake-up and five-minute recovery
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/vault-activate.txt"
+          begin;
+          select vault.update_secret((select id from vault.decrypted_secrets where name='notification_approval_batch_submitted_immediate_enabled'),'true',null,'Flux submitted-batch immediate wake-up gate enabled');
+          select vault.update_secret((select id from vault.decrypted_secrets where name='notification_approval_batch_submitted_recovery_enabled'),'true',null,'Flux submitted-batch recovery gate enabled');
+          commit;
+          SQL
+
+      - name: Final read-only production certification
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -v cutoff="$ACTIVATION_CUTOFF" -v function_url="$FUNCTION_URL" <<'SQL' > "$EVIDENCE_DIR/final-certification.json"
+          begin transaction read only;
+          select json_build_object(
+            'target_ledger_count',(select count(*) from supabase_migrations.schema_migrations where version='20260824191500' and name='approval_batch_submitted_email_pdf_prod'),
+            'vault_count',(select count(*) from vault.decrypted_secrets where name = any(array[
+              'notification_approval_batch_submitted_dispatcher_url',
+              'notification_approval_batch_submitted_cutoff_at',
+              'notification_approval_batch_submitted_immediate_enabled',
+              'notification_approval_batch_submitted_recovery_enabled'
+            ]::text[])),
+            'immediate_enabled',(select decrypted_secret from vault.decrypted_secrets where name='notification_approval_batch_submitted_immediate_enabled'),
+            'recovery_enabled',(select decrypted_secret from vault.decrypted_secrets where name='notification_approval_batch_submitted_recovery_enabled'),
+            'submitted_total',(select count(*) from public.notification_events where event_type='approval_batch.submitted'),
+            'submitted_pending',(select count(*) from public.notification_events where event_type='approval_batch.submitted' and status='pending'),
+            'submitted_attempts',(select count(*) from public.notification_delivery_attempts attempt join public.notification_events event on event.id=attempt.notification_event_id where event.event_type='approval_batch.submitted'),
+            'submitted_digest',(select md5(coalesce(string_agg(concat_ws('|',id::text,status,attempt_count::text,coalesce(processed_at::text,''),coalesce(last_error,''),coalesce(updated_at::text,'')),'|' order by id),'')) from public.notification_events where event_type='approval_batch.submitted'),
+            'historical_after_cutoff',(select count(*) from public.notification_events where event_type='approval_batch.submitted' and created_at > :'cutoff'::timestamptz),
+            'eligible_after_cutoff',(select count(*) from public.notification_events event join public.approval_batches batch on batch.id=event.source_id where event.event_type='approval_batch.submitted' and event.created_at > :'cutoff'::timestamptz and event.status in ('pending','failed') and batch.status='submitted'),
+            'current_submitted_batches',(select count(*) from public.approval_batches where status='submitted'),
+            'function_url_matches',(select decrypted_secret = :'function_url' from vault.decrypted_secrets where name='notification_approval_batch_submitted_dispatcher_url'),
+            'cutoff_matches',(select decrypted_secret = :'cutoff' from vault.decrypted_secrets where name='notification_approval_batch_submitted_cutoff_at')
+          );
+          rollback;
+          SQL
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          before = json.loads(root.joinpath('precheck.json').read_text())
+          final = json.loads(root.joinpath('final-certification.json').read_text())
+          checks = {
+              'exact_ledger': final['target_ledger_count'] == 1,
+              'vault_complete': final['vault_count'] == 4 and final['function_url_matches'] is True and final['cutoff_matches'] is True,
+              'gates_enabled': final['immediate_enabled'] == 'true' and final['recovery_enabled'] == 'true',
+              'historical_queue_untouched': final['submitted_total'] == 7 and final['submitted_pending'] == 7 and final['submitted_attempts'] == 0 and final['submitted_digest'] == before['submitted_digest'],
+              'strict_cutoff_zero_replay': final['historical_after_cutoff'] == 0 and final['eligible_after_cutoff'] == 0,
+              'no_live_submitted_batch': final['current_submitted_batches'] == 0,
+          }
+          root.joinpath('final-result.json').write_text(json.dumps({'status':'PASS' if all(checks.values()) else 'STOP','checks':checks}, indent=2) + '\n')
+          if not all(checks.values()):
+              root.joinpath('result.txt').write_text('STOP / FINAL_CERTIFICATION_FAILED\n')
+              raise SystemExit('FINAL_CERTIFICATION_FAILED')
+          root.joinpath('result.txt').write_text('PASS / APPROVAL_BATCH_SUBMITTED_EMAIL_PDF_PROD_ACTIVE / ZERO_HISTORICAL_REPLAY\n')
+          PY
+
+      - name: Emergency-disable gates on any failure
+        if: failure()
+        shell: bash
+        env:
+          SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+        run: |
+          set +e
+          [[ -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" ]] || exit 0
+          echo "::add-mask::$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq <<'SQL' > "$EVIDENCE_DIR/emergency-disable.txt" 2>&1
+          do $block$
+          declare v_id uuid;
+          begin
+            select id into v_id from vault.decrypted_secrets where name='notification_approval_batch_submitted_immediate_enabled';
+            if v_id is not null then perform vault.update_secret(v_id,'false',null,'Emergency-disabled after release failure'); end if;
+            select id into v_id from vault.decrypted_secrets where name='notification_approval_batch_submitted_recovery_enabled';
+            if v_id is not null then perform vault.update_secret(v_id,'false',null,'Emergency-disabled after release failure'); end if;
+          end
+          $block$;
+          SQL
+          printf '%s\n' 'STOP / RELEASE_FAILED / GATES_EMERGENCY_DISABLED' > "$EVIDENCE_DIR/result.txt"
+          exit 0
+
+      - name: Remove transient files
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f "$RUNNER_TEMP/approval-batch-submitted-rehearsal.sql" "$RUNNER_TEMP/prod-project.json" \
+            "$RUNNER_TEMP/prod-history-before.txt" "$RUNNER_TEMP/prod-history-after.txt"
+          rm -rf "$RUNNER_TEMP/approval-batch-submitted-release"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: approval-batch-submitted-prod-release-${{ github.run_id }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          retention-days: 30
