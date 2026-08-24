@@ -103,7 +103,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::DEV submitted-batch change contains a non-authorized path.'
             exit 1
@@ -125,6 +125,8 @@ jobs:
             supabase/functions/approval-batch-submitted-dispatcher/deno.json
           grep -q 'jspdf_autotable_export_not_available' \
             supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter.ts
+          grep -q 'signature.startsWith("%PDF-1.")' \
+            supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment.ts
           grep -q "'requester_name'" \
             supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev.sql
           ! grep -q 'const FLUX_URL = "https://flux.quantta.mx"' \
