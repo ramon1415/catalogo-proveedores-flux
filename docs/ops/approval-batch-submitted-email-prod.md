@@ -14,6 +14,19 @@ La nueva ruta exclusiva envía al correo vigente de ese Director:
 La decisión oficial continúa registrándose dentro de Flux. El PDF es informativo
 y no sustituye la autorización en el sistema.
 
+## Estado PROD certificado — 24 de agosto de 2026
+
+- Supabase PROD: `ucantptjhwttexzmslvm` / `financieraflux`.
+- Edge Function: `approval-batch-submitted-dispatcher`, versión `1`, `ACTIVE`, `verify_jwt=false` con secreto interno obligatorio.
+- Migración autoritativa: `20260824200842_approval_batch_submitted_email_pdf_prod.sql`, aplicada exactamente una vez.
+- Cutoff exclusivo: `2026-08-24T20:09:43.572799Z`.
+- Wake-up inmediato: `true`.
+- Recovery de cinco minutos: `true`.
+- Smoke autenticado: HTTP `200`, `processed=0`, `sent=0`, `failed=0`, `cancelled=0`.
+- Históricos preservados: `7 pending`, `0 delivery attempts`, `0` filas posteriores al cutoff.
+- Cortes actualmente en `submitted`: `0`; el siguiente corte real será el primer E2E productivo.
+- `payment_receipt.linked` y `payment_request.created`: sin cambios.
+
 ## Seguridad y aislamiento
 
 - Evento permitido: únicamente `approval_batch.submitted`.
@@ -48,17 +61,17 @@ y no sustituye la autorización en el sistema.
 Se reutiliza `notification_dispatcher_secret`, ya existente, únicamente como
 secreto HMAC/API interno entre PostgreSQL/GitHub Actions y la Edge Function.
 
-## Orden de liberación
+## Orden de liberación ejecutado
 
-1. Ejecutar contrato focal y validar visualmente un PDF de varias páginas.
-2. Desplegar la Edge Function con `verify_jwt=false`; la función valida el secreto interno.
-3. Aplicar la migración forward-only con los nuevos RPC/trigger, aún sin flags de activación.
-4. Crear un cutoff fresco posterior a todos los eventos históricos.
-5. Configurar URL, cutoff y flags inicialmente en `false`.
-6. Invocar la función una vez y comprobar `processed=0`.
-7. Activar `immediate_enabled=true` y `recovery_enabled=true`.
-8. Verificar que los siete eventos históricos permanezcan sin intento.
-9. El siguiente corte real enviado por Finanzas debe producir exactamente un correo al Director seleccionado.
+1. Contrato focal y PDF de varias páginas: PASS.
+2. Edge Function desplegada con `verify_jwt=false` y secreto interno: PASS.
+3. Migración forward-only aplicada mediante Supabase: PASS.
+4. Cutoff fresco posterior a todos los eventos históricos: PASS.
+5. URL y flags creados inicialmente en `false`: PASS.
+6. Smoke con `processed=0`: PASS.
+7. `immediate_enabled=true` y `recovery_enabled=true`: PASS.
+8. Siete eventos históricos sin intento: PASS.
+9. Pendiente operativo: enviar el siguiente corte real y confirmar recepción del Director.
 
 ## Rollback operativo
 
