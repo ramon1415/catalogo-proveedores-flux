@@ -1,0 +1,166 @@
+name: One-shot finalize PROD submitted-cut PDF release v3
+
+'on':
+  push:
+    branches:
+      - release/approval-batch-submitted-system-pdf-prod-20260824
+    paths:
+      - '.github/workflows/one-shot-build-prod-submitted-pdf-release-v3.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-build-prod-submitted-pdf-release-v3
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    name: Finalize exact six-file PROD release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APPROVED_DEV_SHA: 2155ca17641eb4f59e56524ab8a7f664975a21af
+      EXPECTED_MAIN_SHA: 103add103d56805b146be67d0f2d224e79deefb8
+      PROD_MIGRATION_VERSION: '20260824233945'
+      RELEASE_BRANCH: release/approval-batch-submitted-system-pdf-prod-20260824
+    steps:
+      - name: Check out exact release branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate immutable ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "${RELEASE_BRANCH}"
+          git fetch --no-tags origin main "${APPROVED_DEV_SHA}"
+          test "$(git merge-base HEAD origin/main)" = "${EXPECTED_MAIN_SHA}"
+          test "$(git rev-parse origin/main)" = "${EXPECTED_MAIN_SHA}"
+          git cat-file -e "${APPROVED_DEV_SHA}^{commit}"
+
+      - name: Rebuild exact approved product state
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='supabase/functions/approval-batch-submitted-dispatcher'
+          mkdir -p "${base}"
+          for file in index.ts deno.json jspdf_edge.ts pdf_logo_embed.ts pdf_logo.ts; do
+            git show "${APPROVED_DEV_SHA}:${base}/${file}" > "${base}/${file}"
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('supabase/functions/approval-batch-submitted-dispatcher/index.ts')
+          text = path.read_text()
+          dev_worker = 'edge-approval-batch-submitted-dev'
+          dev_url = 'https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app'
+          assert text.count(dev_worker) >= 1
+          assert text.count(dev_url) == 1
+          text = text.replace(dev_worker, 'edge-approval-batch-submitted-prod')
+          text = text.replace(dev_url, 'https://flux.quantta.mx')
+          assert dev_worker not in text
+          assert dev_url not in text
+          path.write_text(text)
+          PY
+
+          src='supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql'
+          dst="supabase/migrations/${PROD_MIGRATION_VERSION}_approval_batch_submitted_system_pdf_fields_prod.sql"
+          git show "${APPROVED_DEV_SHA}:${src}" > "${dst}"
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('supabase/migrations/20260824233945_approval_batch_submitted_system_pdf_fields_prod.sql')
+          text = path.read_text()
+          text = text.replace('edge-approval-batch-submitted-dev', 'edge-approval-batch-submitted-prod')
+          text = text.replace("is 'DEV submitted-batch email document", "is 'PROD submitted-batch email document")
+          assert 'edge-approval-batch-submitted-dev' not in text
+          assert "is 'DEV submitted-batch" not in text
+          path.write_text(text)
+          PY
+
+      - name: Prove exact DEV parity plus PROD substitutions
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='supabase/functions/approval-batch-submitted-dispatcher'
+          for file in deno.json jspdf_edge.ts pdf_logo_embed.ts pdf_logo.ts; do
+            git show "${APPROVED_DEV_SHA}:${base}/${file}" > "${RUNNER_TEMP}/${file}"
+            cmp -s "${RUNNER_TEMP}/${file}" "${base}/${file}"
+          done
+
+          git show "${APPROVED_DEV_SHA}:${base}/index.ts" > "${RUNNER_TEMP}/expected-index.ts"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'expected-index.ts'
+          text = path.read_text()
+          text = text.replace('edge-approval-batch-submitted-dev', 'edge-approval-batch-submitted-prod')
+          text = text.replace('https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app', 'https://flux.quantta.mx')
+          path.write_text(text)
+          PY
+          cmp -s "${RUNNER_TEMP}/expected-index.ts" "${base}/index.ts"
+
+          git show "${APPROVED_DEV_SHA}:supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql" > "${RUNNER_TEMP}/expected-migration.sql"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'expected-migration.sql'
+          text = path.read_text()
+          text = text.replace('edge-approval-batch-submitted-dev', 'edge-approval-batch-submitted-prod')
+          text = text.replace("is 'DEV submitted-batch email document", "is 'PROD submitted-batch email document")
+          path.write_text(text)
+          PY
+          cmp -s "${RUNNER_TEMP}/expected-migration.sql" "supabase/migrations/${PROD_MIGRATION_VERSION}_approval_batch_submitted_system_pdf_fields_prod.sql"
+
+          grep -q 'const FLUX_URL = "https://flux.quantta.mx"' "${base}/index.ts"
+          grep -q 'edge-approval-batch-submitted-prod' "${base}/index.ts"
+          grep -q '"jspdf": "./jspdf_edge.ts"' "${base}/deno.json"
+          grep -q 'addEmbeddedSystemPdfLogo' "${base}/jspdf_edge.ts"
+          grep -q 'SYSTEM_PDF_LOGO_DATA_URL' "${base}/pdf_logo.ts"
+          grep -q 'PROD submitted-batch email document' "supabase/migrations/${PROD_MIGRATION_VERSION}_approval_batch_submitted_system_pdf_fields_prod.sql"
+          git diff --check
+
+      - name: Remove all temporary release builders
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/one-shot-build-prod-submitted-pdf-release.yml
+          rm -f .github/workflows/one-shot-build-prod-submitted-pdf-release-v2.yml
+          rm -f .github/workflows/one-shot-build-prod-submitted-pdf-release-v3.yml
+
+      - name: Commit only the six product files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+
+          mapfile -t final_changed < <(git diff --cached --name-only origin/main | sort)
+          printf 'FINAL_DIFF_COUNT=%s\n' "${#final_changed[@]}"
+          printf '%s\n' "${final_changed[@]}"
+          test "${#final_changed[@]}" -eq 6
+
+          expected=(
+            'supabase/functions/approval-batch-submitted-dispatcher/deno.json'
+            'supabase/functions/approval-batch-submitted-dispatcher/index.ts'
+            'supabase/functions/approval-batch-submitted-dispatcher/jspdf_edge.ts'
+            'supabase/functions/approval-batch-submitted-dispatcher/pdf_logo.ts'
+            'supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed.ts'
+            'supabase/migrations/20260824233945_approval_batch_submitted_system_pdf_fields_prod.sql'
+          )
+          for path in "${expected[@]}"; do
+            printf '%s\n' "${final_changed[@]}" | grep -Fxq "${path}"
+          done
+          if printf '%s\n' "${final_changed[@]}" | grep -q '^\.github/workflows/'; then
+            echo '::error::temporary workflow leaked into final diff'
+            exit 1
+          fi
+
+          git status --short
+          git commit -m 'Release approved submitted-cut system PDF to PROD'
+          git push origin HEAD:"${RELEASE_BRANCH}"
