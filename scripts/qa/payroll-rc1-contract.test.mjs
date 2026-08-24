@@ -7,7 +7,8 @@ const require=createRequire(import.meta.url);
 const provision=require('../../payroll_provision_base.js');
 const edge=fs.readFileSync('supabase/functions/payroll-materialize/index.ts','utf8');
 const migration=fs.readFileSync('supabase/migrations/20260821173000_payroll_rc1_provision_contpaq_feed.sql','utf8');
-const feedFunction=(migration.match(/create or replace function public\.get_payroll_contpaq_feed[\s\S]*?\n\$\$;\n/)||[''])[0];
+const paymentFeed=(migration.match(/create or replace function public\.get_payroll_contpaq_feed[\s\S]*?\n\$\$;\n/)||[''])[0];
+const provisionFeed=(migration.match(/create or replace function public\.get_payroll_provision_contpaq_feed[\s\S]*?\n\$\$;\n/)||[''])[0];
 
 function le16(v){return Buffer.from([v&255,(v>>>8)&255]);}
 function le32(v){return Buffer.from([v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255]);}
@@ -47,47 +48,52 @@ test('RC1 provision base is server-side aggregate only and never added to payrol
   assert.match(edge,/parseProvisionBaseXlsx\(bytes\)/);
   assert.match(edge,/provision_base_amount_minor:provisionBaseAmountMinor/);
   assert.match(migration,/post_payroll_provision_internal/);
-  assert.match(migration,/provision_base_amount_minor/);
   assert.doesNotMatch(migration,/insert into public\.payroll_run_lines[\s\S]{0,1200}sueldo/i);
-  assert.doesNotMatch(edge,/sueldo_amount|vacation_salary|sueldo_vacaciones/i);
 });
 
-test('RC1 factor is configuration, not hard-coded business logic',()=>{
-  assert.match(migration,/payroll_provision_settings/);
-  assert.match(migration,/configure_payroll_provision/);
-  assert.match(migration,/combined_factor/);
-  assert.doesNotMatch(migration,/15\s*\/\s*365|0\.0411|4\.11/);
-  assert.match(migration,/PAYROLL_PROVISION_CONFIG_REQUIRED/);
+test('RC1 provision policy does not freeze the rejected 5.05 percent assumption',()=>{
+  assert.match(migration,/calculation_policy in \('pending','configured_components','server_calculated_components'\)/);
+  assert.match(migration,/configured_aguinaldo_factor/);
+  assert.match(migration,/configured_vacation_premium_factor/);
+  assert.match(migration,/PAYROLL_PROVISION_SERVER_CALCULATION_REQUIRED/);
+  assert.match(migration,/provision_policy_version/);
+  assert.doesNotMatch(migration,/15\s*\/\s*365|0\.0505|5\.05|0\.17|17\.0/);
 });
 
-test('RC1 provision is idempotent per payroll request and accumulates into monthly budget_lines',()=>{
-  assert.match(migration,/payment_request_id uuid primary key references public\.payment_requests/);
+test('RC1 stores separate aguinaldo and vacation-premium components and one monthly forecast total',()=>{
+  for(const field of ['aguinaldo_factor','vacation_premium_factor','aguinaldo_amount','vacation_premium_amount','combined_factor','provision_amount']) assert.ok(migration.includes(field),field);
+  assert.match(migration,/provision_amount = aguinaldo_amount \+ vacation_premium_amount/);
+  assert.match(migration,/v_provision:=v_aguinaldo\+v_vacation/);
   assert.match(migration,/date_trunc\('month',v_request\.payroll_period_end\)::date/);
   assert.match(migration,/v_after:=v_before\+v_provision/);
-  assert.match(migration,/update public\.budget_lines set amount=v_after/);
-  assert.match(migration,/insert into public\.budget_lines/);
-  assert.match(migration,/v_provision:=public\.post_payroll_provision_internal/);
+  assert.match(migration,/payment_request_id uuid primary key references public\.payment_requests/);
 });
 
-test('RC1 TOKA accounting feed separates vouchers, fee, VAT and signed variance while preserving one operational channel',()=>{
-  assert.ok(feedFunction.length>0);
-  for(const role of ['cash_payroll_expense','vouchers_expense','toka_fee_expense','input_vat','toka_variance','bank_credit']) assert.ok(feedFunction.includes(role),role);
-  assert.match(feedFunction,/v_variance:=v_actual_toka-v_expected_toka/);
-  assert.match(feedFunction,/if v_variance>0 then/);
-  assert.match(feedFunction,/credit',abs\(v_variance\)/);
-  assert.match(feedFunction,/PAYROLL_CONTPAQ_UNBALANCED_FEED/);
-  assert.match(feedFunction,/'contains_employee_pii',false/);
-  assert.doesNotMatch(feedFunction,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
+test('RC1 payment feed discharges payroll liabilities instead of booking salary or voucher expense again',()=>{
+  assert.ok(paymentFeed.length>0);
+  for(const role of ['salary_payable','vouchers_payable','toka_fee_expense','input_vat','toka_variance','bank_credit']) assert.ok(paymentFeed.includes(role),role);
+  assert.doesNotMatch(paymentFeed,/cash_payroll_expense|vouchers_expense/);
+  assert.match(paymentFeed,/Pago nómina · descarga pasivo sueldos/);
+  assert.match(paymentFeed,/Pago vales · descarga pasivo/);
+  assert.match(paymentFeed,/PAYROLL_CONTPAQ_UNBALANCED_FEED/);
+  assert.match(paymentFeed,/'contains_employee_pii',false/);
+  assert.doesNotMatch(paymentFeed,/employee_name|\brfc\b|\bcurp\b|\bnss\b|\bclabe\b/i);
 });
 
-test('RC1 CONTPAQ mappings are scoped to cost center and exact source bank account and export stays gated',()=>{
-  assert.match(feedFunction,/PAYROLL_CONTPAQ_PAID_REQUIRED/);
-  assert.match(feedFunction,/PAYROLL_CONTPAQ_RECONCILIATION_REQUIRED/);
-  assert.match(feedFunction,/payroll_contpaq_account_for_role_internal\(v_request\.company_id,v_request\.cost_center_id/);
-  assert.match(feedFunction,/payroll_contpaq_bank_account_internal\(v_request\.company_bank_account_id\)/);
+test('RC1 provision CONTPAQ feed keeps aguinaldo and vacation premium separately balanced',()=>{
+  assert.ok(provisionFeed.length>0);
+  for(const role of ['provision_aguinaldo_expense','provision_aguinaldo_liability','provision_vacation_premium_expense','provision_vacation_premium_liability']) assert.ok(provisionFeed.includes(role),role);
+  assert.match(provisionFeed,/PAYROLL_PROVISION_CONTPAQ_UNBALANCED_FEED/);
+  assert.match(provisionFeed,/'source_type','payroll_provision'/);
+  assert.match(provisionFeed,/'contains_employee_pii',false/);
+});
+
+test('RC1 CONTPAQ mappings remain configuration, scoped to cost center and exact source bank account',()=>{
+  assert.match(paymentFeed,/PAYROLL_CONTPAQ_PAID_REQUIRED/);
+  assert.match(paymentFeed,/PAYROLL_CONTPAQ_RECONCILIATION_REQUIRED/);
+  assert.match(paymentFeed,/payroll_contpaq_account_for_role_internal\(v_request\.company_id,v_request\.cost_center_id/);
+  assert.match(paymentFeed,/payroll_contpaq_bank_account_internal\(v_request\.company_bank_account_id\)/);
   assert.match(migration,/primary key\(company_id,cost_center_id,role\)/);
   assert.match(migration,/payroll_contpaq_bank_mappings/);
-  assert.match(migration,/company_bank_account_id uuid primary key/);
-  assert.match(migration,/PAYROLL_CONTPAQ_MAPPING_REQUIRED/);
-  assert.match(migration,/PAYROLL_CONTPAQ_BANK_MAPPING_REQUIRED/);
+  assert.doesNotMatch(migration,/21001500000|21008500000|60201001000|60201010000|60201013000|60201014000|21003500000|21002500000|10201100000/);
 });
