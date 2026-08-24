@@ -7,7 +7,7 @@ name: Approval batch submitted DEV email and PDF contract
     paths:
       - 'supabase/functions/approval-batch-submitted-dispatcher/**'
       - 'supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql'
-      - 'supabase/migrations/20260824224500_approval_batch_submitted_system_pdf_fields_dev.sql'
+      - 'supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql'
       - 'scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs'
       - 'docs/ops/approval-batch-submitted-email-dev.md'
       - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
@@ -63,7 +63,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(supabase/migrations/20260824224500_approval_batch_submitted_system_pdf_fields_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::DEV submitted-batch change contains a non-authorized path.'
             exit 1
@@ -88,10 +88,11 @@ jobs:
           grep -q 'event.created_at > p_created_at_after' \
             supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql
           grep -q "'requester_name', requester.full_name" \
-            supabase/migrations/20260824224500_approval_batch_submitted_system_pdf_fields_dev.sql
+            supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql
 
           echo 'scope=DEV_only'
           echo 'pdf_contract=approval_batches.js_jsPDF_2.5.2_autoTable_3.8.4'
+          echo 'migration_ledger=20260824224716'
           echo 'send_mode_runtime=test_only'
           echo 'historical_replay=blocked'
           echo 'secret_scan=pass'
