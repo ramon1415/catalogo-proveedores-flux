@@ -115,6 +115,7 @@ test("dispatcher sends exactly one submitted event to the selected Director with
       const payload = JSON.parse(options.body);
       assert.deepEqual(Object.keys(payload).sort(), ["p_created_at_after", "p_limit", "p_worker_id"]);
       assert.equal(payload.p_limit, 1);
+      assert.equal(payload.p_created_at_after, "2026-08-24T18:00:00.123456Z");
       return Response.json([sampleEvent()]);
     }
     if (target.endsWith("/rest/v1/rpc/get_approval_batch_submitted_notification_document")) {
@@ -150,7 +151,7 @@ test("dispatcher sends exactly one submitted event to the selected Director with
       "Content-Type": "application/json",
       "x-notification-dispatcher-secret": "test-secret",
     },
-    body: JSON.stringify({ created_at_after: "2026-08-24T18:00:00.000Z", limit: 1 }),
+    body: JSON.stringify({ created_at_after: "2026-08-24T18:00:00.123456Z", limit: 1 }),
   });
 
   const response = await handleRequest(request, {
