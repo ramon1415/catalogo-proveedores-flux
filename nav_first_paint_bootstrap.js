@@ -119,6 +119,8 @@
 
   // Rebanada 03: extensión aislada. No reemplaza configuracion.html ni
   // configuracion.js, por lo que preserva la gobernanza extraordinaria vigente.
+  const contpaqRequestedAtLoad = new URLSearchParams(window.location.search).get("tab") === "contpaq"
+
   function loadContpaqMapperExtension() {
     const pageName = (window.location.pathname.split("/").pop() || "").toLowerCase()
     if (pageName !== "configuracion.html") return
@@ -129,7 +131,39 @@
     script.dataset.fluxExtension = "contpaq-mapper"
     document.head.appendChild(script)
   }
+
+  function installContpaqRequestedRouteBridge() {
+    if (!contpaqRequestedAtLoad) return
+    let activated = false
+    let observer = null
+
+    const activate = () => {
+      if (activated || window.FluxAuth?.isAdminFinance?.() !== true) return false
+      const tab = document.getElementById("contpaqMapperTab")
+      if (!tab || tab.disabled || tab.hidden) return false
+      activated = true
+      observer?.disconnect()
+      tab.click()
+      return true
+    }
+
+    const watch = () => {
+      if (activate() || observer || !document.documentElement) return
+      observer = new MutationObserver(activate)
+      observer.observe(document.documentElement, { childList: true, subtree: true })
+      window.setTimeout(() => observer?.disconnect(), 5000)
+    }
+
+    document.addEventListener("flux:roles-ready", watch, { once: true })
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", watch, { once: true })
+    } else {
+      watch()
+    }
+  }
+
   loadContpaqMapperExtension()
+  installContpaqRequestedRouteBridge()
 
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
