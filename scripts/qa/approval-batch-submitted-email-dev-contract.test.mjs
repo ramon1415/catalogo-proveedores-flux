@@ -93,10 +93,11 @@ test("DEV attachment reproduces the PDF exported by approval_batches.js", async 
   assert.match(attachment.sha256, /^[0-9a-f]{64}$/);
   assert.ok(attachment.sizeBytes > 10_000);
   assert.match(attachment.content, /^JVBERi0xL/);
-  assert.match(pdfAscii(Buffer.from(attachment.content, "base64")), /SOL-2026-0032/);
+  const attachmentBytes = Buffer.from(attachment.content, "base64");
+  assert.match(pdfAscii(attachmentBytes), /SOL-2026-0032/);
 
   const output = process.env.APPROVAL_BATCH_PDF_SAMPLE_PATH;
-  if (output) await writeFile(output, generated.bytes);
+  if (output) await writeFile(output, attachmentBytes);
 });
 
 test("DEV system PDF keeps the same jsPDF/AutoTable pagination contract", () => {
@@ -201,12 +202,19 @@ test("DEV dispatcher sends the system PDF to the selected Director", async () =>
 });
 
 test("DEV dependency and database contracts are pinned to the system PDF", async () => {
-  const deno = JSON.parse(await readFile(
-    new URL("../../supabase/functions/approval-batch-submitted-dispatcher/deno.json", import.meta.url),
-    "utf8",
-  ));
+  const root = new URL("../../supabase/functions/approval-batch-submitted-dispatcher/", import.meta.url);
+  const deno = JSON.parse(await readFile(new URL("deno.json", root), "utf8"));
   assert.equal(deno.imports.jspdf, "npm:jspdf@2.5.2");
-  assert.equal(deno.imports["jspdf-autotable"], "npm:jspdf-autotable@3.8.4");
+  assert.equal(deno.imports["jspdf-autotable"], "./jspdf_autotable_adapter.ts");
+  assert.equal(deno.imports["jspdf-autotable-package"], "npm:jspdf-autotable@3.8.4");
+
+  const autoTableAdapter = await readFile(new URL("jspdf_autotable_adapter.ts", root), "utf8");
+  assert.match(autoTableAdapter, /packageModule\.default\?\.default/);
+  assert.match(autoTableAdapter, /export const autoTable = candidate/);
+
+  const attachmentAdapter = await readFile(new URL("system_pdf_attachment.ts", root), "utf8");
+  assert.match(attachmentAdapter, /signature\.startsWith\("%PDF-1\."\)/);
+  assert.match(attachmentAdapter, /corte-semanal-/);
 
   const migration = await readFile(
     new URL("../../supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev.sql", import.meta.url),
