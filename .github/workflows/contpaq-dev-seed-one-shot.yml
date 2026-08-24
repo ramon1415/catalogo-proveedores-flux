@@ -6,6 +6,12 @@ on:
       - codex/flux-slice-03-contpaq-mapper-clean
     paths:
       - .github/workflows/contpaq-dev-seed-one-shot.yml
+  pull_request:
+    types: [synchronize]
+    branches:
+      - codex/flux-slice-02-dashboard-anual-clean
+    paths:
+      - .github/workflows/contpaq-dev-seed-one-shot.yml
   workflow_dispatch:
 
 permissions:
@@ -21,7 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     timeout-minutes: 20
-    if: github.repository == 'ramon1415/catalogo-proveedores-flux' && github.ref == 'refs/heads/codex/flux-slice-03-contpaq-mapper-clean'
+    if: >-
+      github.repository == 'ramon1415/catalogo-proveedores-flux' &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/codex/flux-slice-03-contpaq-mapper-clean') ||
+       (github.event_name == 'pull_request' && github.head_ref == 'codex/flux-slice-03-contpaq-mapper-clean'))
     env:
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
@@ -54,7 +63,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${OPS_EVIDENCE_DIR}"
-          bash ops/contpaq-mapper/apply-dev-seed.sh 2>&1 | tee "${OPS_EVIDENCE_DIR}/run.log"
+          EFFECTIVE_BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          GITHUB_REF_NAME="${EFFECTIVE_BRANCH}" bash ops/contpaq-mapper/apply-dev-seed.sh 2>&1 | tee "${OPS_EVIDENCE_DIR}/run.log"
 
       - name: Upload sanitized evidence
         if: always()
