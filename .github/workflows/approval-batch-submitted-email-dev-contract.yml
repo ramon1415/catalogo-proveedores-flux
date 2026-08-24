@@ -43,7 +43,21 @@ jobs:
           set -euo pipefail
           npm install --no-save --no-package-lock --ignore-scripts \
             jspdf@2.5.2 jspdf-autotable@3.8.4
-          node -e "const a=require('jspdf/package.json').version; const b=require('jspdf-autotable/package.json').version; if(a!=='2.5.2'||b!=='3.8.4') process.exit(1); console.log({jspdf:a,autotable:b})"
+          npm ls --depth=0 --json > "$RUNNER_TEMP/pdf-dependencies.json"
+          PDF_DEPENDENCIES="$RUNNER_TEMP/pdf-dependencies.json" node - <<'NODE'
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync(process.env.PDF_DEPENDENCIES, 'utf8'));
+          const dependencies = data.dependencies || {};
+          const versions = {
+            jspdf: dependencies.jspdf?.version,
+            autotable: dependencies['jspdf-autotable']?.version,
+          };
+          if (versions.jspdf !== '2.5.2' || versions.autotable !== '3.8.4') {
+            console.error(versions);
+            process.exit(1);
+          }
+          console.log(versions);
+          NODE
 
       - name: Run focused executable contract and create visual artifact
         shell: bash
@@ -98,7 +112,7 @@ jobs:
           echo 'secret_scan=pass'
 
       - name: Upload system-PDF parity sample
-        if: always()
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: dev-submitted-email-system-pdf-${{ github.run_id }}
