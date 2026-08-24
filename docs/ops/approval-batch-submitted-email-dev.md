@@ -17,13 +17,15 @@ El adjunto ya no usa un renderer alterno. La Edge Function replica exactamente e
 - `jsPDF 2.5.2`;
 - `jspdf-autotable 3.8.4`;
 - carta horizontal;
-- mismo wordmark Flux;
+- mismo wordmark Flux RGBA embebido en el sistema;
 - mismo título, empresa, periodo y estado;
 - mismas columnas: Folio, Proveedor, Centro / partida, Metodo, Monto, Solicitante, Decision y Motivo;
 - mismos estilos de tabla y pie `Flux Operadora — corte semanal`;
 - mismo nombre de archivo: `corte-semanal-<empresa>-<periodo_fin>.pdf`.
 
 La función de documento devuelve los mismos campos que consume el PDF del sistema, incluyendo `company_name`, `status`, `provider_name`, `requester_name`, `director_status`, `reject_reason` y `rebatch_release_note`.
+
+El CI genera un PDF de referencia con el caso de Operadora Tlacatecpan y lo conserva como artefacto para validar la paridad visual antes del despliegue.
 
 ## Estado operativo
 
@@ -68,7 +70,10 @@ APPROVAL_BATCH_SUBMITTED_DELIVERY_MODE=test_recipient
 ## Componentes
 
 - `supabase/functions/approval-batch-submitted-dispatcher/index.ts`
-- `supabase/functions/approval-batch-submitted-dispatcher/system_pdf.ts`
+- `supabase/functions/approval-batch-submitted-dispatcher/system_pdf.ts` — entrada de compatibilidad.
+- `supabase/functions/approval-batch-submitted-dispatcher/system_pdf_renderer.ts` — renderer exacto del PDF del sistema.
+- `supabase/functions/approval-batch-submitted-dispatcher/system_pdf_attachment.ts` — nombre, firma, hash y base64 del adjunto.
+- `supabase/functions/approval-batch-submitted-dispatcher/jspdf_autotable_adapter.ts` — compatibilidad de exportación en Edge Runtime.
 - `supabase/functions/approval-batch-submitted-dispatcher/deno.json`
 - `supabase/migrations/20260824215919_approval_batch_submitted_system_pdf_parity_dev.sql`
 - `scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs`
