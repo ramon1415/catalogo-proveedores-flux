@@ -126,7 +126,7 @@
     if (pageName !== "configuracion.html") return
     if (document.querySelector('script[data-flux-extension="contpaq-mapper"]')) return
     const script = document.createElement("script")
-    script.src = "./contpaq_mapper_extension.js?v=20260824-clean-tree"
+    script.src = "./contpaq_mapper_extension.js?v=20260825-graph-nn"
     script.async = false
     script.dataset.fluxExtension = "contpaq-mapper"
     document.head.appendChild(script)
@@ -162,7 +162,18 @@
     }
   }
 
+  function loadAnnualBudgetBucketPatch() {
+    if (!annualPage) return
+    if (document.querySelector('script[data-flux-extension="annual-budget-buckets"]')) return
+    const script = document.createElement("script")
+    script.src = "./dashboard_bucket_patch.js?v=20260825-graph-nn"
+    script.async = false
+    script.dataset.fluxExtension = "annual-budget-buckets"
+    document.head.appendChild(script)
+  }
+
   loadContpaqMapperExtension()
+  loadAnnualBudgetBucketPatch()
   installContpaqRequestedRouteBridge()
 
   const nav = document.querySelector(".sidebar .nav")
