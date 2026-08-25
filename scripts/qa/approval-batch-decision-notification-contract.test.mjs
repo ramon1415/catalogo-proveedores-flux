@@ -3,9 +3,12 @@ import fs from "node:fs";
 
 const migrationPath =
   "supabase/migrations/20260825025522_approval_batch_decision_submitter_email_pdf.sql";
+const wakeupMigrationPath =
+  "supabase/migrations/20260825032139_approval_batch_decision_wakeup_dev.sql";
 const dispatcherPath = process.env.DISPATCHER_PATH ||
   "supabase/functions/notification-dispatcher/index.ts";
 const migration = fs.readFileSync(migrationPath, "utf8");
+const wakeupMigration = fs.readFileSync(wakeupMigrationPath, "utf8");
 const dispatcher = fs.readFileSync(dispatcherPath, "utf8");
 const deno = JSON.parse(
   fs.readFileSync(
@@ -46,7 +49,25 @@ assert.match(
 );
 assert.match(dispatcher, /claim_payment_request_created_events_for_dispatcher/);
 assert.match(dispatcher, /createdAtAfterExclusive/);
+assert.match(dispatcher, /claim_approval_batch_decision_events_for_dispatcher/);
+assert.match(dispatcher, /decisionOnly/);
 assert.equal(deno.imports["jspdf-core"], "npm:jspdf@2.5.2");
 assert.equal(deno.imports["jspdf-autotable"], "npm:jspdf-autotable@3.8.4");
+
+assert.match(wakeupMigration, /event\.created_at > p_created_at_after/);
+assert.match(
+  wakeupMigration,
+  /event\.recipient_profile_id = batch\.submitted_by/,
+);
+assert.match(wakeupMigration, /notification_approval_batch_decision_cutoff_at/);
+assert.match(
+  wakeupMigration,
+  /notification_approval_batch_decision_immediate_enabled/,
+);
+assert.match(
+  wakeupMigration,
+  /notification_approval_batch_decision_dispatch_after_insert/,
+);
+assert.ok(!wakeupMigration.includes("set status = 'pending'"));
 
 console.log("approval batch decision notification contract: PASS");
