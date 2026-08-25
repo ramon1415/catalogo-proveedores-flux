@@ -264,4 +264,3 @@ comment on function public.notification_approval_batch_decision_dispatch_wakeup_
   'Best-effort post-commit PROD wake-up for new final weekly-cut decision events using an independent immutable cutoff.';
 
 commit;
-
