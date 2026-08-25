@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const migrationPath =
+  "supabase/migrations/20260825025522_approval_batch_decision_submitter_email_pdf.sql";
+const dispatcherPath = "supabase/functions/notification-dispatcher/index.ts";
+const migration = fs.readFileSync(migrationPath, "utf8");
+const dispatcher = fs.readFileSync(dispatcherPath, "utf8");
+const deno = JSON.parse(
+  fs.readFileSync(
+    "supabase/functions/notification-dispatcher/deno.json",
+    "utf8",
+  ),
+);
+
+assert.ok(
+  migration.includes("new.status in ('approved', 'partially_approved')"),
+);
+assert.ok(migration.includes("profile.id = new.submitted_by"));
+assert.ok(migration.includes("v_submitter.id, v_submitter.email"));
+assert.ok(
+  migration.includes("coalesce(new.submitted_by::text, 'missing_submitter')"),
+);
+assert.doesNotMatch(migration, /flux_finance_roles/);
+assert.doesNotMatch(migration, /for v_recipient in/i);
+assert.match(migration, /get_approval_batch_decision_notification_document/);
+assert.ok(
+  migration.includes("recipient_profile_id is distinct from v_submitter.id"),
+);
+assert.match(migration, /from public, anon, authenticated/);
+assert.match(migration, /to service_role/);
+
+assert.match(dispatcher, /approval_batch.approved/);
+assert.match(dispatcher, /approval_batch.partially_approved/);
+assert.match(dispatcher, /prepareApprovalBatchDecisionAttachment/);
+assert.match(dispatcher, /get_approval_batch_decision_notification_document/);
+assert.match(dispatcher, /"Decision", "Motivo"/);
+assert.match(dispatcher, /PDF final adjunto incluye la decisión y el motivo/);
+assert.match(dispatcher, /max-width:560px/);
+assert.match(dispatcher, /Flux Operadora &middot; Powered by Quantta/);
+assert.match(dispatcher, /Idempotency-Key/);
+assert.equal(deno.imports["jspdf-core"], "npm:jspdf@2.5.2");
+assert.equal(deno.imports["jspdf-autotable"], "npm:jspdf-autotable@3.8.4");
+
+console.log("approval batch decision notification contract: PASS");
