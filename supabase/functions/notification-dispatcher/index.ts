@@ -514,7 +514,10 @@ function renderApprovalBatchDecisionEmail(
     ? `${textValue(payload.period_start) || ""} - ${textValue(payload.period_end) || ""}`
     : null;
   const totals = moneyTotals(payload.totals_by_currency);
-  const targetUrl = `${FLUX_URL}/approval_batches.html?batch_id=${encodeURIComponent(String(event.source_id || ""))}`;
+  const fluxUrl = sendMode === "test_only"
+    ? "https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app"
+    : FLUX_URL;
+  const targetUrl = `${fluxUrl}/approval_batches.html?batch_id=${encodeURIComponent(String(event.source_id || ""))}`;
   const intro = event.event_type === "approval_batch.approved"
     ? "Dirección aprobó el corte semanal que enviaste."
     : "Dirección concluyó el corte semanal que enviaste con partidas rechazadas.";
@@ -1165,4 +1168,3 @@ if (edgeRuntime) {
     fetch: globalThis.fetch.bind(globalThis),
   }));
 }
-
