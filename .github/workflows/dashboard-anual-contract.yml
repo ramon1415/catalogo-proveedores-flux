@@ -1,0 +1,27 @@
+name: Dashboard anual contract
+
+on:
+  pull_request:
+    paths:
+      - "dashboard.html"
+      - "dashboard.js"
+      - "nav_first_paint_bootstrap.js"
+      - "supabase/migrations/*historical_actuals*"
+      - "scripts/qa/dashboard-anual-contract.test.mjs"
+      - ".github/workflows/dashboard-anual-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check nav_first_paint_bootstrap.js
+          node --check dashboard.js
+      - name: Dashboard anual contract
+        run: node scripts/qa/dashboard-anual-contract.test.mjs
