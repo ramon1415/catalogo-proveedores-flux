@@ -1010,10 +1010,18 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
 
     const createdOnly = options.eventTypes.length === 1 &&
       options.eventTypes[0] === "payment_request.created";
+    const decisionEventTypes = new Set([
+      "approval_batch.approved",
+      "approval_batch.partially_approved",
+    ]);
+    const decisionOnly = options.eventTypes.length > 0 &&
+      options.eventTypes.every((eventType) => decisionEventTypes.has(eventType));
     const claimRpcName = createdOnly
       ? "claim_payment_request_created_events_for_dispatcher"
+      : decisionOnly
+      ? "claim_approval_batch_decision_events_for_dispatcher"
       : "claim_notification_events_for_dispatcher_v2";
-    const claimPayload = createdOnly
+    const claimPayload = createdOnly || decisionOnly
       ? {
         p_limit: options.limit,
         p_worker_id: workerId,
@@ -1157,5 +1165,4 @@ if (edgeRuntime) {
     fetch: globalThis.fetch.bind(globalThis),
   }));
 }
-
 
