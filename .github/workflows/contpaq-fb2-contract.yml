@@ -1,10 +1,12 @@
-name: CONTPAQ FB-2 contract
+name: CONTPAQ FB-2 / FB-3 contract
 
 on:
   pull_request:
     paths:
       - "contpaq_cfdi_validation.js"
+      - "contpaq_mapping_candidates.js"
       - "scripts/qa/contpaq-fb2-cfdi-validation.test.mjs"
+      - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
       - "docs/architecture/contpaq-fb2-fb3-dev-contract.md"
       - ".github/workflows/contpaq-fb2-contract.yml"
   workflow_dispatch:
@@ -19,6 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: JavaScript syntax
-        run: node --check contpaq_cfdi_validation.js
+        run: |
+          node --check contpaq_cfdi_validation.js
+          node --check contpaq_mapping_candidates.js
       - name: FB-2 validation contract
         run: node --test scripts/qa/contpaq-fb2-cfdi-validation.test.mjs
+      - name: FB-3 candidate contract
+        run: node --test scripts/qa/contpaq-fb3-mapping-candidates.test.mjs
