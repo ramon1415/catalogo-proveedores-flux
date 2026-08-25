@@ -51,6 +51,10 @@ assert.match(dispatcher, /claim_payment_request_created_events_for_dispatcher/);
 assert.match(dispatcher, /createdAtAfterExclusive/);
 assert.match(dispatcher, /claim_approval_batch_decision_events_for_dispatcher/);
 assert.match(dispatcher, /decisionOnly/);
+assert.match(
+  dispatcher,
+  /catalogo-proveedores-flux-git-dev-quantta-team\.vercel\.app/,
+);
 assert.equal(deno.imports["jspdf-core"], "npm:jspdf@2.5.2");
 assert.equal(deno.imports["jspdf-autotable"], "npm:jspdf-autotable@3.8.4");
 
