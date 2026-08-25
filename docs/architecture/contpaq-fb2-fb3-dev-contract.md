@@ -97,23 +97,46 @@ Mantener como fuente canónica del mapper general:
 - `contpaq_accounts`
 - `budget_account_mappings`
 
-Reglas ya resueltas:
+Reglas/insumos ya resueltos:
 
-- banco → cuenta: por número real de cuenta embebido/verificado contra catálogo/layout;
+- criterio bancario: el número real puede aparecer embebido en el nombre de la cuenta CONTPAQ y debe validarse contra la cuenta de origen de Flux; no se considera match universal hasta que exista `company_id`, identificador bancario suficiente y catálogo de esa empresa;
 - Fersana: usar árbol explícito del catálogo/seed; nunca inferir padre por prefijo numérico;
 - Flux Financiera: seed versionado disponible;
 - TOKA diferencia en contra → `602-83-000-000`;
 - TOKA diferencia a favor → `401-38-000-000`;
-- IdProveedor: padrón CONTPAQ disponible por RFC.
+- IdProveedor: padrón CONTPAQ disponible por RFC, pero debe integrarse como identidad CONTPAQ por empresa, no reemplazar el catálogo de Flux.
 
 Pendientes:
 
 - proveedor → cuenta contable: candidato/`needs_review` hasta evidencia de pólizas o validación de Finanzas;
 - Tax Resolver/retenciones: bloqueado por Denise; no hardcodear 213/216.
 
+## Proveedores — coexistencia legacy/canónico
+
+El DEV actual confirma que `payment_requests.proveedor_id` referencia `public.proveedores(id)` (catálogo legacy). No debe migrarse implícitamente a `public.providers` como parte de FB-3.
+
+Inventario read-only observado al diseñar la rebanada:
+
+- `proveedores` legacy: 44 filas; 5 con RFC;
+- `providers` canónico: 1 fila; 1 con RFC;
+- solapamiento por RFC entre ambos catálogos: 1.
+
+Por tanto, el padrón CONTPAQ de terceros debe vivir en una capa separada por empresa, por ejemplo `contpaq_third_parties`, y enlazarse al `proveedor_id` legacy mediante un mapping auditable (`provider_contpaq_identity_mappings`). El match automático solo puede aceptarse con RFC normalizado exacto y unicidad; el resto queda `needs_review`.
+
+Esta capa puede conservar `id_contpaq`, RFC, nombre y atributos fiscales de CONTPAQ sin contaminar ni reemplazar los catálogos operativos de Flux.
+
 ## Banco y Nómina
 
 Evitar dos fuentes de verdad. Antes de crear un mapping bancario general, reconciliarlo con `payroll_contpaq_bank_mappings` del RC1. La recomendación es que un mapping genérico de `company_bank_accounts` sea la fuente común y que Nómina lo consuma cuando aplique, manteniendo roles específicos de Nómina solo para cuentas que realmente son exclusivas del flujo.
+
+Inventario read-only del DEV al diseñar esta rebanada:
+
+- 8 cuentas bancarias activas;
+- 3 legacy sin `company_id`;
+- 5 con `company_id`;
+- en Operadora hay 3 cuentas activas y, contra el catálogo actualmente cargado, 1 tiene match único por número completo y 2 no tienen candidato; no hay ambiguas.
+
+Consecuencia: no crear mappings automáticos por `last4` ni por nombre parcial. Solo exact-match con identificador suficiente; faltantes quedan pendientes de configuración/catálogo.
 
 ## Gates
 
@@ -130,9 +153,10 @@ FB-3 puede considerarse listo para UAT cuando:
 
 1. mappings resueltos están cargables/configurables sin duplicar fuentes;
 2. Fersana respeta árbol explícito;
-3. TOKA/banco pasan contra casos reales documentados;
+3. TOKA/banco pasan contra casos reales documentados y los faltantes bancarios quedan pendientes, no inferidos;
 4. proveedor→cuenta no confirmado permanece `needs_review`;
-5. no se habilita FB-7.
+5. identidad CONTPAQ de proveedor no reemplaza `proveedores`/`providers`;
+6. no se habilita FB-7.
 
 ## Producción
 
