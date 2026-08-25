@@ -1,15 +1,3 @@
-import { jsPDF } from "jspdf";
-import autoTableModule from "jspdf-autotable";
-
-const autoTableCandidates: unknown[] = [
-  autoTableModule,
-  (autoTableModule as unknown as { default?: unknown }).default,
-  (autoTableModule as unknown as { autoTable?: unknown }).autoTable,
-];
-const autoTable = autoTableCandidates.find((candidate) => typeof candidate === "function") as
-  | ((doc: jsPDF, options: Record<string, unknown>) => void)
-  | undefined;
-
 type NotificationEvent = {
   id: string;
   event_type: string;
@@ -412,70 +400,6 @@ async function fetchApprovalBatchPdfLogo(fetchFn: typeof fetch): Promise<Uint8Ar
   }
 }
 
-function approvalBatchDecisionRows(document: ApprovalBatchDecisionDocument): string[][] {
-  return document.items.map((item) => [
-    item.request_number || "-",
-    item.provider_name || item.provider || "-",
-    `${item.cost_center || "-"}
-${item.budget_category || "-"}`,
-    item.payment_method || "-",
-    money(item.amount, item.currency) || "-",
-    item.requester_name || "-",
-    approvalBatchItemStatusLabel(item.director_status),
-    `${item.reject_reason || "-"}${item.rebatch_release_note ? `
-Reingreso: ${item.rebatch_release_note}` : ""}`,
-  ]);
-}
-
-export function generateApprovalBatchDecisionPdfBytes(
-  document: ApprovalBatchDecisionDocument,
-  logoBytes: Uint8Array | null = null,
-): { bytes: Uint8Array; pageCount: number } {
-  if (!autoTable) throw new Error("jspdf_autotable_adapter_unavailable");
-
-  const batch = document.batch;
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
-  const pageWidth = doc.internal.pageSize.getWidth();
-
-  if (logoBytes?.length) {
-    try {
-      doc.addImage(logoBytes, "WEBP", pageWidth - 36 - 80, 22, 80, 32);
-    } catch {
-      // Preserve a valid PDF if the public logo cannot be decoded.
-    }
-  }
-
-  doc.setTextColor(23, 45, 41);
-  doc.setFontSize(15);
-  doc.text(String(batch.label || "Corte semanal"), 36, 36);
-  doc.setFontSize(9);
-  doc.setTextColor(96, 110, 104);
-  doc.text(
-    `${batch.company_name || batch.company || "-"} | ${batch.period_start || "-"} a ${batch.period_end || "-"} | ${approvalBatchDecisionLabel(batch.status)}`,
-    36,
-    53,
-  );
-
-  autoTable(doc, {
-    startY: 68,
-    head: [["Folio", "Proveedor", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]],
-    body: approvalBatchDecisionRows(document),
-    styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", textColor: [21, 33, 29] },
-    headStyles: { fillColor: [23, 45, 41], textColor: [247, 247, 245] },
-    alternateRowStyles: { fillColor: [244, 246, 241] },
-    didDrawPage: () => {
-      doc.setFontSize(7.5);
-      doc.setTextColor(150, 160, 155);
-      doc.text("Flux Operadora — decisión final del corte semanal", 36, doc.internal.pageSize.getHeight() - 18);
-    },
-  });
-
-  return {
-    bytes: new Uint8Array(doc.output("arraybuffer")),
-    pageCount: doc.getNumberOfPages(),
-  };
-}
-
 async function prepareApprovalBatchDecisionAttachment(
   fetchFn: typeof fetch,
   supabaseUrl: string,
@@ -491,6 +415,9 @@ async function prepareApprovalBatchDecisionAttachment(
     { p_notification_event_id: eventId, p_worker_id: workerId },
   );
   const logoBytes = await fetchApprovalBatchPdfLogo(fetchFn);
+  const { generateApprovalBatchDecisionPdfBytes } = await import(
+    "./approval_batch_decision_pdf.ts"
+  );
   const { bytes } = generateApprovalBatchDecisionPdfBytes(document, logoBytes);
   if (bytes.length < 100 || bytes.length > MAX_APPROVAL_BATCH_ATTACHMENT_BYTES) {
     throw new Error("approval_batch_decision_pdf_size_invalid");
