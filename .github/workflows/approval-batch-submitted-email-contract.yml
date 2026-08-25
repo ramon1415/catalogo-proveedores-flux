@@ -41,6 +41,14 @@ jobs:
           node-version: '22.16.0'
           cache: ''
 
+      - name: Install exact PDF contract dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false --ignore-scripts \
+            jspdf@2.5.2 jspdf-autotable@3.8.4
+          npm ls jspdf jspdf-autotable
+
       - name: Run focused contract
         shell: bash
         run: |
