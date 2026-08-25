@@ -78,4 +78,3 @@ assert.match(wakeupMigration, /PROD activation cutoff/);
 assert.match(wakeupMigration, /edge-notification-dispatcher-prod/);
 
 console.log("approval batch decision PROD notification contract: PASS");
-
