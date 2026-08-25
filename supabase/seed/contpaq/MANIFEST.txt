@@ -37,7 +37,7 @@ mapeos partida→cuenta (Operadora)
   mapeos      87 (22 nombre_exacto · 65 criterio · 6 needs_review)
   validación  63 cuentas distintas: existen, son hoja, CtaMayor=2, tipo=G
   csv         data/seed/mapeos_operadora.csv  sha256 827ee2cab2e42f4f7c37fab715c2dc3750bbb621a176909fc79be9a72d63e55a
-  sql         data/seed/mapeos_operadora.sql  sha256 abb102d2c0469a5baafda3ab7f50201afad01889bfa7bdc394291eabc140bd23
+  sql         data/seed/mapeos_operadora.sql  sha256 713241dfa5e64f0599b82e86655b64930cbdae9abcc1def887982b921a8486bc
 
 NOTA sobre las razones textuales
   Las razones escritas al construir el seed original (ago-2026) NO están
@@ -47,3 +47,29 @@ NOTA sobre las razones textuales
     · el método derivado por comparación normalizada de nombres
     · las 6 banderas needs_review
   La derivación reproduce la partición original exacta: 22 / 65.
+
+renglones ejecutivos (capa 4)
+  fuente      data/contpaq/mapeo_renglones_ejecutivos.csv
+  sha256      49a3626f4343f2aec3947132fe0c9fe5fc996d388dd071b11d020d82e4672a05
+  Operadora Tlacatecpan
+    etiquetas   95 · balance 19 · resultados 10 · anexos 4
+    sql       data/seed/renglones_operadora_tlacatecpan.sql  sha256 aa9727c600a722a80c5fec54fb62e6fc4968b6729257049e897dea27c2872931
+  Adm. Fersana
+    etiquetas   96 · balance 19 · resultados 10 · anexos 4
+    sql       data/seed/renglones_adm_fersana.sql  sha256 eafc69ee28f5a3295da2f7340ac4b57e433c6e8251900d4ee97ef4dd34718811
+  Dezdez
+    etiquetas  377 · balance 21 · resultados 15 · anexos 8
+    sql       data/seed/renglones_dezdez.sql  sha256 b19483da222308f0654f90b3330308c03fa640cf5a51eb79fe84884ea3e93e6e
+  Operardora de Plazas
+    etiquetas  114 · balance 12 · resultados 2 · anexos 5
+    sql       data/seed/renglones_operardora_de_plazas.sql  sha256 3e762c5acea4e087521213ebec7fb54a620be8fe4e6e9c5b5b637f50021bce58
+  Orinoco
+    etiquetas  285 · balance 20 · resultados 5 · anexos 9
+    sql       data/seed/renglones_orinoco.sql  sha256 858f40122d1cf103f1c3089427ce3b4a326caaac738ffb2af5784fd05a53758b
+  Soporte Fersana
+    etiquetas  396 · balance 23 · resultados 5 · anexos 6
+    sql       data/seed/renglones_soporte_fersana.sql  sha256 dff59792e8af47ad32bd14de766a9e0113a285119c70ed9b6887c61f08798001
+  Zehcnas
+    etiquetas  114 · balance 14 · resultados 3 · anexos 5
+    sql       data/seed/renglones_zehcnas.sql  sha256 3f27318afadc16f594600e1c1fe51af9429b09aabb121e0e6d1b1d277a788e91
+  TOTAL       1477 etiquetas en 7 empresas

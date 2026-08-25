@@ -96,4 +96,4 @@ values
   (:company_id, (select id from budget_categories where code = '602-08-007-000' limit 1), '60204003000', false),  -- nombre_exacto · Consumo Gas → Consumo Gas
   (:company_id, (select id from budget_categories where code = 'AUTO-RSJT-2026-ROW-078' limit 1), '60207009000', false),  -- criterio · sky → Televisión
   (:company_id, (select id from budget_categories where code = '602-08-005-000' limit 1), '60207008000', false)  -- criterio · Telmex → Comunicaciones
-on conflict (company_id, budget_category_id) do nothing;
+on conflict (company_id, budget_category_id, contpaq_account_code) do nothing;
