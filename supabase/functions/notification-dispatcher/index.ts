@@ -1,4 +1,4 @@
-﻿type NotificationEvent = {
+type NotificationEvent = {
   id: string;
   event_type: string;
   source_table: string | null;
@@ -47,12 +47,54 @@ type NotificationAttachment = {
   filename: string;
 };
 
+
+type ApprovalBatchDecisionDocument = {
+  event_id: string;
+  recipient_email: string;
+  recipient_profile_id: string;
+  batch: {
+    id: string;
+    label: string;
+    company: string | null;
+    company_name: string | null;
+    status: "approved" | "partially_approved";
+    period_start: string | null;
+    period_end: string | null;
+    submitted_at: string | null;
+    decided_at: string | null;
+    director_name: string | null;
+    item_count: number;
+    approved_count: number;
+    rejected_count: number;
+    totals_by_currency: Array<{ currency: string; amount: number | string }>;
+  };
+  items: Array<{
+    request_number: string | null;
+    provider: string | null;
+    provider_name: string | null;
+    cost_center: string | null;
+    budget_category: string | null;
+    payment_method: string | null;
+    amount: number | string | null;
+    currency: string | null;
+    requester_name: string | null;
+    director_status: string | null;
+    reject_reason: string | null;
+    rebatch_release_note: string | null;
+  }>;
+};
+
 type PreparedAttachment = {
   filename: string;
   content: string;
   sha256: string;
   sizeBytes: number;
 };
+
+
+const FLUX_URL = "https://flux.quantta.mx";
+const SYSTEM_PDF_LOGO_URL = `${FLUX_URL}/assets/logo-flux-verde.webp`;
+const MAX_APPROVAL_BATCH_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const allowedEventTypes = new Set([
   "payment_request.created",
@@ -309,6 +351,140 @@ export function notificationRecipientRoles(event: NotificationEvent): string[] {
 }
 
 
+function approvalBatchDecisionLabel(status: unknown): string {
+  return status === "approved" ? "Aprobado" : "Aprobado con rechazos";
+}
+
+function approvalBatchItemStatusLabel(status: unknown): string {
+  return ({
+    approved: "Aprobada por Dirección",
+    rejected: "Rechazada por Dirección",
+    pending: "Pendiente",
+  } as Record<string, string>)[String(status || "")] || String(status || "-");
+}
+
+function formatDecisionDate(value: unknown): string {
+  const text = textValue(value);
+  if (!text) return "No disponible";
+  const parsed = new Date(text);
+  if (!Number.isFinite(parsed.getTime())) return text;
+  return parsed.toLocaleString("es-MX", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/Mexico_City",
+  });
+}
+
+function approvalBatchDecisionFileStem(batch: ApprovalBatchDecisionDocument["batch"]): string {
+  const company = String(batch.company_name || batch.company || "empresa")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return `corte-semanal-final-${company}-${batch.period_end || "sin-fecha"}`;
+}
+
+async function fetchApprovalBatchPdfLogo(fetchFn: typeof fetch): Promise<Uint8Array | null> {
+  try {
+    const response = await fetchFn(SYSTEM_PDF_LOGO_URL, { cache: "no-store" });
+    if (!response.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.length ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function prepareApprovalBatchDecisionAttachment(
+  fetchFn: typeof fetch,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  eventId: string,
+  workerId: string,
+): Promise<PreparedAttachment> {
+  const document = await callRpc<ApprovalBatchDecisionDocument>(
+    fetchFn,
+    supabaseUrl,
+    serviceRoleKey,
+    "get_approval_batch_decision_notification_document",
+    { p_notification_event_id: eventId, p_worker_id: workerId },
+  );
+  const logoBytes = await fetchApprovalBatchPdfLogo(fetchFn);
+  const { generateApprovalBatchDecisionPdfBytes } = await import(
+    "./approval_batch_decision_pdf.ts"
+  );
+  const { bytes } = generateApprovalBatchDecisionPdfBytes(document, logoBytes);
+  if (bytes.length < 100 || bytes.length > MAX_APPROVAL_BATCH_ATTACHMENT_BYTES) {
+    throw new Error("approval_batch_decision_pdf_size_invalid");
+  }
+  const signature = new TextDecoder().decode(bytes.subarray(0, 8));
+  if (!signature.startsWith("%PDF-1.")) throw new Error("approval_batch_decision_pdf_signature_invalid");
+  return {
+    filename: `${approvalBatchDecisionFileStem(document.batch)}.pdf`,
+    content: bytesToBase64(bytes),
+    sha256: await sha256Hex(bytes),
+    sizeBytes: bytes.length,
+  };
+}
+
+function renderApprovalBatchDecisionEmail(
+  event: NotificationEvent,
+  sendMode: string,
+): { subject: string; text: string; html: string } {
+  const payload = event.payload || {};
+  const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
+  const subject = `${subjectPrefix}${event.subject || baseSubject(event)}`;
+  const decision = approvalBatchDecisionLabel(payload.status);
+  const period = payload.period_start || payload.period_end
+    ? `${textValue(payload.period_start) || ""} - ${textValue(payload.period_end) || ""}`
+    : null;
+  const totals = moneyTotals(payload.totals_by_currency);
+  const fluxUrl = sendMode === "test_only"
+    ? "https://catalogo-proveedores-flux-git-dev-quantta-team.vercel.app"
+    : FLUX_URL;
+  const targetUrl = `${fluxUrl}/approval_batches.html?batch_id=${encodeURIComponent(String(event.source_id || ""))}`;
+  const intro = event.event_type === "approval_batch.approved"
+    ? "Dirección aprobó el corte semanal que enviaste."
+    : "Dirección concluyó el corte semanal que enviaste con partidas rechazadas.";
+  const rows = [
+    ["Corte", payload.batch_label || event.source_folio],
+    ["Empresa", payload.company],
+    ["Periodo", period],
+    ["Resultado", decision],
+    ["Pagos incluidos", payload.item_count],
+    ["Aprobados", payload.approved_count],
+    ["Rechazados", payload.rejected_count],
+    ["Total", totals],
+    ["Director", payload.director_name],
+    ["Fecha de decisión", formatDecisionDate(payload.decided_at)],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+
+  const text = [
+    intro,
+    "El PDF final adjunto incluye la decisión y el motivo de cada partida.",
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Abrir corte en Flux: ${targetUrl}`,
+    ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."] : []),
+  ].join("\n");
+
+  const htmlRows = rows.map(([label, value]) =>
+    `<tr><td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td></tr>`
+  ).join("");
+  const testBanner = sendMode === "test_only"
+    ? '<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>'
+    : "";
+
+  const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="background:#16322d;padding:20px 28px;">${String(EMAIL_LOGO_HTML)}</td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Decisión del corte semanal</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;">${escapeHtml(intro)}</p><p style="margin:0 0 16px;font-size:14px;line-height:1.5;">El PDF final adjunto incluye la decisión y el motivo de cada partida.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;"><tr><td bgcolor="#16322d" style="border-radius:6px;"><a href="${targetUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Abrir corte en Flux</a></td></tr></table>${testBanner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
+  return { subject, text, html };
+}
+
 function renderPaymentRequestCreatedEmail(
   event: NotificationEvent,
   sendMode: string,
@@ -490,6 +666,9 @@ export function renderEmail(event: NotificationEvent, sendMode: string): { subje
   }
   if (event.event_type === "payment_receipt.linked") {
     return renderReceiptLinkedEmail(event, sendMode);
+  }
+  if (event.event_type === "approval_batch.approved" || event.event_type === "approval_batch.partially_approved") {
+    return renderApprovalBatchDecisionEmail(event, sendMode);
   }
   const payload = event.payload || {};
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
@@ -764,10 +943,18 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
 
     const createdOnly = options.eventTypes.length === 1 &&
       options.eventTypes[0] === "payment_request.created";
+    const decisionEventTypes = new Set([
+      "approval_batch.approved",
+      "approval_batch.partially_approved",
+    ]);
+    const decisionOnly = options.eventTypes.length > 0 &&
+      options.eventTypes.every((eventType) => decisionEventTypes.has(eventType));
     const claimRpcName = createdOnly
       ? "claim_payment_request_created_events_for_dispatcher"
+      : decisionOnly
+      ? "claim_approval_batch_decision_events_for_dispatcher"
       : "claim_notification_events_for_dispatcher_v2";
-    const claimPayload = createdOnly
+    const claimPayload = createdOnly || decisionOnly
       ? {
         p_limit: options.limit,
         p_worker_id: workerId,
@@ -806,6 +993,17 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
             supabaseUrl,
             serviceRoleKey,
             event.id,
+          );
+        } else if (
+          event.event_type === "approval_batch.approved" ||
+          event.event_type === "approval_batch.partially_approved"
+        ) {
+          attachment = await prepareApprovalBatchDecisionAttachment(
+            runtime.fetch,
+            supabaseUrl,
+            serviceRoleKey,
+            event.id,
+            workerId,
           );
         }
 
