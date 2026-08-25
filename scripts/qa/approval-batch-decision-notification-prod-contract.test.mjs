@@ -7,9 +7,13 @@ const wakeupMigrationPath =
   "supabase/migrations/20260825040140_approval_batch_decision_wakeup_prod.sql";
 const dispatcherPath = process.env.DISPATCHER_PATH ||
   "supabase/functions/notification-dispatcher/index.prod.ts";
+const pdfModulePath =
+  "supabase/functions/notification-dispatcher/approval_batch_decision_pdf.ts";
 const migration = fs.readFileSync(migrationPath, "utf8");
 const wakeupMigration = fs.readFileSync(wakeupMigrationPath, "utf8");
 const dispatcher = fs.readFileSync(dispatcherPath, "utf8");
+const pdfModule = fs.readFileSync(pdfModulePath, "utf8");
+const decisionImplementation = `${dispatcher}\n${pdfModule}`;
 const deno = JSON.parse(
   fs.readFileSync(
     "supabase/functions/notification-dispatcher/deno.json",
@@ -38,7 +42,7 @@ assert.match(dispatcher, /approval_batch.approved/);
 assert.match(dispatcher, /approval_batch.partially_approved/);
 assert.match(dispatcher, /prepareApprovalBatchDecisionAttachment/);
 assert.match(dispatcher, /get_approval_batch_decision_notification_document/);
-assert.match(dispatcher, /"Decision", "Motivo"/);
+assert.match(decisionImplementation, /"Decision", "Motivo"/);
 assert.match(dispatcher, /PDF final adjunto incluye la decisión y el motivo/);
 assert.match(dispatcher, /max-width:560px/);
 assert.match(dispatcher, /Flux Operadora &middot; Powered by Quantta/);
