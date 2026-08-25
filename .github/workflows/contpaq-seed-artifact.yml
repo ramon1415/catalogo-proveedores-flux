@@ -34,7 +34,7 @@ jobs:
           8a461f10752b4eed82df2d336934b21056de5684b22e573fee492654bf5707c6  supabase/seed/contpaq/catalogo_operadora.csv
           3c68d1579e68b694975d460325d156226d93a46986036c35afbce1d7e77ba4a8  supabase/seed/contpaq/catalogo_operadora.sql
           827ee2cab2e42f4f7c37fab715c2dc3750bbb621a176909fc79be9a72d63e55a  supabase/seed/contpaq/mapeos_operadora.csv
-          abb102d2c0469a5baafda3ab7f50201afad01889bfa7bdc394291eabc140bd23  supabase/seed/contpaq/mapeos_operadora.sql
+          713241dfa5e64f0599b82e86655b64930cbdae9abcc1def887982b921a8486bc  supabase/seed/contpaq/mapeos_operadora.sql
           HASHES
           sha256sum -c /tmp/expected.sha256
           test "$(( $(wc -l < supabase/seed/contpaq/catalogo_operadora.csv) - 1 ))" -eq 1646
