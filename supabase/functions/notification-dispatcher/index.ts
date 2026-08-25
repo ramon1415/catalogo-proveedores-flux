@@ -1,4 +1,16 @@
-﻿type NotificationEvent = {
+import { jsPDF } from "jspdf";
+import autoTableModule from "jspdf-autotable";
+
+const autoTableCandidates: unknown[] = [
+  autoTableModule,
+  (autoTableModule as unknown as { default?: unknown }).default,
+  (autoTableModule as unknown as { autoTable?: unknown }).autoTable,
+];
+const autoTable = autoTableCandidates.find((candidate) => typeof candidate === "function") as
+  | ((doc: jsPDF, options: Record<string, unknown>) => void)
+  | undefined;
+
+type NotificationEvent = {
   id: string;
   event_type: string;
   source_table: string | null;
@@ -46,12 +58,54 @@ type NotificationAttachment = {
   filename: string;
 };
 
+
+type ApprovalBatchDecisionDocument = {
+  event_id: string;
+  recipient_email: string;
+  recipient_profile_id: string;
+  batch: {
+    id: string;
+    label: string;
+    company: string | null;
+    company_name: string | null;
+    status: "approved" | "partially_approved";
+    period_start: string | null;
+    period_end: string | null;
+    submitted_at: string | null;
+    decided_at: string | null;
+    director_name: string | null;
+    item_count: number;
+    approved_count: number;
+    rejected_count: number;
+    totals_by_currency: Array<{ currency: string; amount: number | string }>;
+  };
+  items: Array<{
+    request_number: string | null;
+    provider: string | null;
+    provider_name: string | null;
+    cost_center: string | null;
+    budget_category: string | null;
+    payment_method: string | null;
+    amount: number | string | null;
+    currency: string | null;
+    requester_name: string | null;
+    director_status: string | null;
+    reject_reason: string | null;
+    rebatch_release_note: string | null;
+  }>;
+};
+
 type PreparedAttachment = {
   filename: string;
   content: string;
   sha256: string;
   sizeBytes: number;
 };
+
+
+const FLUX_URL = "https://flux.quantta.mx";
+const SYSTEM_PDF_LOGO_URL = `${FLUX_URL}/assets/logo-flux-verde.webp`;
+const MAX_APPROVAL_BATCH_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const allowedEventTypes = new Set([
   "payment_request.created",
@@ -297,6 +351,199 @@ export function notificationRecipientRoles(event: NotificationEvent): string[] {
   return [...new Set(value.map((role) => String(role).trim()).filter(Boolean))];
 }
 
+
+function approvalBatchDecisionLabel(status: unknown): string {
+  return status === "approved" ? "Aprobado" : "Aprobado con rechazos";
+}
+
+function approvalBatchItemStatusLabel(status: unknown): string {
+  return ({
+    approved: "Aprobada por Dirección",
+    rejected: "Rechazada por Dirección",
+    pending: "Pendiente",
+  } as Record<string, string>)[String(status || "")] || String(status || "-");
+}
+
+function formatDecisionDate(value: unknown): string {
+  const text = textValue(value);
+  if (!text) return "No disponible";
+  const parsed = new Date(text);
+  if (!Number.isFinite(parsed.getTime())) return text;
+  return parsed.toLocaleString("es-MX", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/Mexico_City",
+  });
+}
+
+function approvalBatchDecisionFileStem(batch: ApprovalBatchDecisionDocument["batch"]): string {
+  const company = String(batch.company_name || batch.company || "empresa")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return `corte-semanal-final-${company}-${batch.period_end || "sin-fecha"}`;
+}
+
+async function fetchApprovalBatchPdfLogo(fetchFn: typeof fetch): Promise<Uint8Array | null> {
+  try {
+    const response = await fetchFn(SYSTEM_PDF_LOGO_URL, { cache: "no-store" });
+    if (!response.ok) return null;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.length ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+function approvalBatchDecisionRows(document: ApprovalBatchDecisionDocument): string[][] {
+  return document.items.map((item) => [
+    item.request_number || "-",
+    item.provider_name || item.provider || "-",
+    `${item.cost_center || "-"}
+${item.budget_category || "-"}`,
+    item.payment_method || "-",
+    money(item.amount, item.currency) || "-",
+    item.requester_name || "-",
+    approvalBatchItemStatusLabel(item.director_status),
+    `${item.reject_reason || "-"}${item.rebatch_release_note ? `
+Reingreso: ${item.rebatch_release_note}` : ""}`,
+  ]);
+}
+
+export function generateApprovalBatchDecisionPdfBytes(
+  document: ApprovalBatchDecisionDocument,
+  logoBytes: Uint8Array | null = null,
+): { bytes: Uint8Array; pageCount: number } {
+  if (!autoTable) throw new Error("jspdf_autotable_adapter_unavailable");
+
+  const batch = document.batch;
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  if (logoBytes?.length) {
+    try {
+      doc.addImage(logoBytes, "WEBP", pageWidth - 36 - 80, 22, 80, 32);
+    } catch {
+      // Preserve a valid PDF if the public logo cannot be decoded.
+    }
+  }
+
+  doc.setTextColor(23, 45, 41);
+  doc.setFontSize(15);
+  doc.text(String(batch.label || "Corte semanal"), 36, 36);
+  doc.setFontSize(9);
+  doc.setTextColor(96, 110, 104);
+  doc.text(
+    `${batch.company_name || batch.company || "-"} | ${batch.period_start || "-"} a ${batch.period_end || "-"} | ${approvalBatchDecisionLabel(batch.status)}`,
+    36,
+    53,
+  );
+
+  autoTable(doc, {
+    startY: 68,
+    head: [["Folio", "Proveedor", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]],
+    body: approvalBatchDecisionRows(document),
+    styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", textColor: [21, 33, 29] },
+    headStyles: { fillColor: [23, 45, 41], textColor: [247, 247, 245] },
+    alternateRowStyles: { fillColor: [244, 246, 241] },
+    didDrawPage: () => {
+      doc.setFontSize(7.5);
+      doc.setTextColor(150, 160, 155);
+      doc.text("Flux Operadora — decisión final del corte semanal", 36, doc.internal.pageSize.getHeight() - 18);
+    },
+  });
+
+  return {
+    bytes: new Uint8Array(doc.output("arraybuffer")),
+    pageCount: doc.getNumberOfPages(),
+  };
+}
+
+async function prepareApprovalBatchDecisionAttachment(
+  fetchFn: typeof fetch,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  eventId: string,
+  workerId: string,
+): Promise<PreparedAttachment> {
+  const document = await callRpc<ApprovalBatchDecisionDocument>(
+    fetchFn,
+    supabaseUrl,
+    serviceRoleKey,
+    "get_approval_batch_decision_notification_document",
+    { p_notification_event_id: eventId, p_worker_id: workerId },
+  );
+  const logoBytes = await fetchApprovalBatchPdfLogo(fetchFn);
+  const { bytes } = generateApprovalBatchDecisionPdfBytes(document, logoBytes);
+  if (bytes.length < 100 || bytes.length > MAX_APPROVAL_BATCH_ATTACHMENT_BYTES) {
+    throw new Error("approval_batch_decision_pdf_size_invalid");
+  }
+  const signature = new TextDecoder().decode(bytes.subarray(0, 8));
+  if (!signature.startsWith("%PDF-1.")) throw new Error("approval_batch_decision_pdf_signature_invalid");
+  return {
+    filename: `${approvalBatchDecisionFileStem(document.batch)}.pdf`,
+    content: bytesToBase64(bytes),
+    sha256: await sha256Hex(bytes),
+    sizeBytes: bytes.length,
+  };
+}
+
+function renderApprovalBatchDecisionEmail(
+  event: NotificationEvent,
+  sendMode: string,
+): { subject: string; text: string; html: string } {
+  const payload = event.payload || {};
+  const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
+  const subject = `${subjectPrefix}${event.subject || baseSubject(event)}`;
+  const decision = approvalBatchDecisionLabel(payload.status);
+  const period = payload.period_start || payload.period_end
+    ? `${textValue(payload.period_start) || ""} - ${textValue(payload.period_end) || ""}`
+    : null;
+  const totals = moneyTotals(payload.totals_by_currency);
+  const targetUrl = `${FLUX_URL}/approval_batches.html?batch_id=${encodeURIComponent(String(event.source_id || ""))}`;
+  const intro = event.event_type === "approval_batch.approved"
+    ? "Dirección aprobó el corte semanal que enviaste."
+    : "Dirección concluyó el corte semanal que enviaste con partidas rechazadas.";
+  const rows = [
+    ["Corte", payload.batch_label || event.source_folio],
+    ["Empresa", payload.company],
+    ["Periodo", period],
+    ["Resultado", decision],
+    ["Pagos incluidos", payload.item_count],
+    ["Aprobados", payload.approved_count],
+    ["Rechazados", payload.rejected_count],
+    ["Total", totals],
+    ["Director", payload.director_name],
+    ["Fecha de decisión", formatDecisionDate(payload.decided_at)],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+
+  const text = [
+    intro,
+    "El PDF final adjunto incluye la decisión y el motivo de cada partida.",
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Abrir corte en Flux: ${targetUrl}`,
+    ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."] : []),
+  ].join("\n");
+
+  const htmlRows = rows.map(([label, value]) =>
+    `<tr><td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td></tr>`
+  ).join("");
+  const testBanner = sendMode === "test_only"
+    ? '<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>'
+    : "";
+
+  const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Decisión del corte semanal</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;">${escapeHtml(intro)}</p><p style="margin:0 0 16px;font-size:14px;line-height:1.5;">El PDF final adjunto incluye la decisión y el motivo de cada partida.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;"><tr><td bgcolor="#16322d" style="border-radius:6px;"><a href="${targetUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Abrir corte en Flux</a></td></tr></table>${testBanner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
+  return { subject, text, html };
+}
+
 function renderReceiptLinkedEmail(
   event: NotificationEvent,
   sendMode: string,
@@ -393,6 +640,9 @@ function renderReceiptLinkedEmail(
 export function renderEmail(event: NotificationEvent, sendMode: string): { subject: string; text: string; html: string } {
   if (event.event_type === "payment_receipt.linked") {
     return renderReceiptLinkedEmail(event, sendMode);
+  }
+  if (event.event_type === "approval_batch.approved" || event.event_type === "approval_batch.partially_approved") {
+    return renderApprovalBatchDecisionEmail(event, sendMode);
   }
   const payload = event.payload || {};
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
@@ -696,6 +946,17 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
             supabaseUrl,
             serviceRoleKey,
             event.id,
+          );
+        } else if (
+          event.event_type === "approval_batch.approved" ||
+          event.event_type === "approval_batch.partially_approved"
+        ) {
+          attachment = await prepareApprovalBatchDecisionAttachment(
+            runtime.fetch,
+            supabaseUrl,
+            serviceRoleKey,
+            event.id,
+            workerId,
           );
         }
 
