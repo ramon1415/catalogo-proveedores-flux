@@ -3,7 +3,8 @@ import fs from "node:fs";
 
 const migrationPath =
   "supabase/migrations/20260825025522_approval_batch_decision_submitter_email_pdf.sql";
-const dispatcherPath = "supabase/functions/notification-dispatcher/index.ts";
+const dispatcherPath = process.env.DISPATCHER_PATH ||
+  "supabase/functions/notification-dispatcher/index.ts";
 const migration = fs.readFileSync(migrationPath, "utf8");
 const dispatcher = fs.readFileSync(dispatcherPath, "utf8");
 const deno = JSON.parse(
@@ -39,6 +40,12 @@ assert.match(dispatcher, /PDF final adjunto incluye la decisión y el motivo/);
 assert.match(dispatcher, /max-width:560px/);
 assert.match(dispatcher, /Flux Operadora &middot; Powered by Quantta/);
 assert.match(dispatcher, /Idempotency-Key/);
+assert.match(
+  dispatcher,
+  /payment_request_created_dispatch_scope_must_be_exclusive/,
+);
+assert.match(dispatcher, /claim_payment_request_created_events_for_dispatcher/);
+assert.match(dispatcher, /createdAtAfterExclusive/);
 assert.equal(deno.imports["jspdf-core"], "npm:jspdf@2.5.2");
 assert.equal(deno.imports["jspdf-autotable"], "npm:jspdf-autotable@3.8.4");
 
