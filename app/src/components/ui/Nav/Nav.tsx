@@ -3,14 +3,21 @@ import s from './Nav.module.css'
 import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
+import { useModules } from '../../../lib/moduleAccess'
 import { IcUser, IcLogout } from '../icons'
-import { NAV_SECTIONS } from './navModel'
 import { CompanySwitcher } from './CompanySwitcher'
+import { NAV_SECTIONS } from './navModel'
 
 export function Nav() {
   const { profile, session, group, signOut } = useAuth()
+  const { isEnabled } = useModules()
   const sections = NAV_SECTIONS
-    .map((section) => ({ ...section, items: section.items.filter((item) => item.groups.includes(group)) }))
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) => item.groups.includes(group) && (!item.moduleKey || isEnabled(item.moduleKey)),
+      ),
+    }))
     .filter((section) => section.items.length > 0)
 
   return (
