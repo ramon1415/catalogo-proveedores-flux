@@ -4,6 +4,7 @@ import Login from './pages/Login'
 import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
 import ProveedoresPage from './features/proveedores/ProveedoresPage'
+import EfectivoPage from './features/efectivo/EfectivoPage'
 
 export default function App() {
   const { session, loading } = useAuth()
@@ -15,10 +16,10 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/proveedores" replace />} />
         <Route path="proveedores" element={<ProveedoresPage />} />
+        <Route path="efectivo" element={<EfectivoPage />} />
         {/* Secciones aún no migradas: puente a la app vanilla. */}
         <Route path="solicitudes" element={<SectionPending />} />
         <Route path="layouts" element={<SectionPending />} />
-        <Route path="efectivo" element={<SectionPending />} />
         <Route path="ingresos" element={<SectionPending />} />
         <Route path="incidencias" element={<SectionPending />} />
         <Route path="dashboard" element={<SectionPending />} />

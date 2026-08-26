@@ -22,7 +22,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, vanillaHref: '/solicitudes.html' },
       { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, vanillaHref: '/layouts.html' },
-      { key: 'efectivo', label: 'Efectivo', path: '/efectivo', icon: <IcEfectivo />, vanillaHref: '/efectivo.html' },
+      { key: 'efectivo', label: 'Efectivo', path: '/efectivo', icon: <IcEfectivo />, migrated: true },
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, vanillaHref: '/ingresos.html?tab=income' },
       { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, vanillaHref: '/ingresos.html?tab=incidents' },
       { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, migrated: true },
