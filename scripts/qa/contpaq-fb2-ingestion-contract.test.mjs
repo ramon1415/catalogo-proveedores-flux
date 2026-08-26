@@ -29,6 +29,13 @@ test('FB-2 browser-derived facts are explicitly client_unverified and cannot be 
   assert.match(migration, /No es fuente autoritativa para FB-7\/contabilidad/i)
 })
 
+test('FB-2 created_by is server-controlled and absent from browser payload', () => {
+  assert.match(migration, /created_by uuid not null default public\.current_profile_id\(\) references public\.profiles\(id\)/i)
+  assert.match(migration, /created_by = public\.current_profile_id\(\)/i)
+  assert.doesNotMatch(ingestion, /created_by\s*:/)
+  assert.doesNotMatch(upload, /createdBy/)
+})
+
 test('FB-2 malformed CFDI is persisted as invalid and never rethrown as a request failure', () => {
   assert.match(ingestion, /error instanceof CfdiParseError/)
   assert.match(ingestion, /parse_status: parseError \? ['"]invalid['"]/)
