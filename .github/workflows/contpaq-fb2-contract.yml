@@ -3,9 +3,12 @@ name: CONTPAQ FB-2 / FB-3 contract
 on:
   pull_request:
     paths:
-      - "contpaq_cfdi_validation.js"
+      - "lib/parsers/**"
+      - "lib/contpaq/**"
+      - "upload_helper.js"
       - "contpaq_mapping_candidates.js"
-      - "scripts/qa/contpaq-fb2-cfdi-validation.test.mjs"
+      - "supabase/migrations/20260826153000_payment_request_cfdi_facts.sql"
+      - "scripts/qa/contpaq-fb2-*.test.mjs"
       - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
       - "docs/architecture/contpaq-fb2-fb3-dev-contract.md"
       - ".github/workflows/contpaq-fb2-contract.yml"
@@ -22,9 +25,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: JavaScript syntax
         run: |
-          node --check contpaq_cfdi_validation.js
+          node --check upload_helper.js
           node --check contpaq_mapping_candidates.js
+          node --input-type=module --check < lib/parsers/cfdiCore.js
+          node --input-type=module --check < lib/parsers/cfdiBrowser.js
+          node --input-type=module --check < lib/contpaq/cfdiValidation.js
+          node --input-type=module --check < lib/contpaq/cfdiIngestion.js
+      - name: FB-2 parser contract
+        run: node --test scripts/qa/contpaq-fb2-parser-contract.test.mjs
       - name: FB-2 validation contract
         run: node --test scripts/qa/contpaq-fb2-cfdi-validation.test.mjs
+      - name: FB-2 ingestion and RLS contract
+        run: node --test scripts/qa/contpaq-fb2-ingestion-contract.test.mjs
       - name: FB-3 candidate contract
         run: node --test scripts/qa/contpaq-fb3-mapping-candidates.test.mjs
