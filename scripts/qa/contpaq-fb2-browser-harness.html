@@ -7,6 +7,7 @@
 <body data-status="pending">pending</body>
 <script type="module">
 import { parseCfdiXml, CfdiParseError } from '../../lib/parsers/cfdiBrowser.js'
+import { validateCfdiAgainstRequest } from '../../lib/contpaq/cfdiValidation.js'
 
 const body = document.body
 const checks = []
@@ -42,10 +43,36 @@ try {
     assert(Boolean(parsed.emisor?.rfc), `${path}:emisor_rfc`)
     assert(Boolean(parsed.receptor?.rfc), `${path}:receptor_rfc`)
     assert(Number.isFinite(parsed.comprobante?.total), `${path}:total`)
+
+    if (path.endsWith('cfdi-pago20.xml')) {
+      assert(parsed.comprobante.tipoDeComprobante === 'P', 'rep:tipo')
+      assert(parsed.comprobante.total === 0, 'rep:raw_total_zero')
+      assert(parsed.comprobante.moneda === 'XXX', 'rep:raw_currency_xxx')
+      assert(parsed.pagosTotales?.montoTotalPagos === 62391.01, 'rep:monto_total_pagos')
+      assert(parsed.pagos?.[0]?.monedaP === 'MXN', 'rep:moneda_p')
+      assert(parsed.pagos?.[0]?.montoP === 62391.01, 'rep:monto_p')
+
+      const validation = validateCfdiAgainstRequest(parsed, {
+        companyRfc: parsed.receptor.rfc,
+        providerRfc: parsed.emisor.rfc,
+        currency: 'MXN',
+        amountRequested: 62391.01,
+      })
+      assert(validation.status === 'parsed', 'rep:validation_parsed')
+      assert(validation.comparison?.currency === 'MXN', 'rep:effective_currency')
+      assert(validation.comparison?.total === 62391.01, 'rep:effective_total')
+      assert(!validation.reviewReasons.includes('currency_mismatch'), 'rep:no_currency_mismatch')
+      assert(!validation.reviewReasons.includes('total_mismatch'), 'rep:no_total_mismatch')
+    }
   }
 
   expectTypedError(() => parseCfdiXml(''), 'empty')
   expectTypedError(() => parseCfdiXml('<root/>'), 'not_cfdi')
+  expectTypedError(
+    () => parseCfdiXml('<!DOCTYPE foo [<!ENTITY x "boom">]><root>&x;</root>'),
+    'doctype',
+    /DOCTYPE rechazado/,
+  )
   expectTypedError(
     () => parseCfdiXml('<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" Version="3.3" Fecha="2026-08-25T10:00:00" TipoDeComprobante="I"><cfdi:Emisor Rfc="AAA010101AAA"/><cfdi:Receptor Rfc="BBB010101BBB"/></cfdi:Comprobante>'),
     'unsupported_33',
