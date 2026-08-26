@@ -17,7 +17,8 @@ body { background: var(--bg); color: var(--text-1); font-family: var(--font); fo
 .center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .muted { color: var(--text-3); }
 .card { width: min(100%, 440px); background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 12px; }
-.card.login { text-align: center; }
+.card.login { text-align: center; align-items: center; gap: 6px; padding-top: 32px; }
+.login-logo { height: 34px; width: auto; object-fit: contain; margin-bottom: 6px; }
 .card h1 { font-size: 26px; font-weight: 600; }
 .card h2 { font-size: 17px; font-weight: 600; margin-bottom: 2px; }
 .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

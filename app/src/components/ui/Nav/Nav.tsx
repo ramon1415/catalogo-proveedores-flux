@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import s from './Nav.module.css'
+import isotipo from '../../../assets/favicon-512.png'
+import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useCompany } from '../../../lib/company'
 import {
@@ -35,8 +37,8 @@ export function Nav({ active = 'solicitudes', onNavigate }: { active?: string; o
   return (
     <aside className={s.rail}>
       <div className={s.brand}>
-        <img className={s.iso} src="/favicon-512.png" alt="Flux" />
-        <img className={s.full} src="/logo-flux-verde.webp" alt="Flux" />
+        <img className={s.iso} src={isotipo} alt="Flux" />
+        <img className={s.full} src={logoFull} alt="Flux" />
         {companyName && (
           <div className={`${s.ctx} ${s.txt}`}><b>{companyName.split(' ')[0]}</b>{companyName.split(' ').slice(1).join(' ')}</div>
         )}
