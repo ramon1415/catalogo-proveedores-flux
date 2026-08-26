@@ -20,7 +20,6 @@ export type NavItem = {
   icon: ReactNode
   groups: RoleGroup[]
   migrated?: boolean
-  // Página vanilla equivalente (para redirigir mientras la sección no está migrada).
   vanillaHref?: string
 }
 
@@ -33,7 +32,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, vanillaHref: '/solicitudes.html' },
       { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, vanillaHref: '/layouts.html' },
       { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE, vanillaHref: '/comprobantes_batch.html' },
-      { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, vanillaHref: '/efectivo.html' },
+      { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, migrated: true },
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, vanillaHref: '/ingresos.html?tab=income' },
       { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, vanillaHref: '/ingresos.html?tab=incidents' },
       { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, migrated: true },
