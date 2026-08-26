@@ -9,6 +9,7 @@ on:
       - "contpaq_mapping_candidates.js"
       - "supabase/migrations/20260826153000_payment_request_cfdi_facts.sql"
       - "scripts/qa/contpaq-fb2-*.test.mjs"
+      - "scripts/qa/contpaq-fb2-browser-harness.html"
       - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
       - "docs/architecture/contpaq-fb2-fb3-dev-contract.md"
       - ".github/workflows/contpaq-fb2-contract.yml"
@@ -20,7 +21,7 @@ permissions:
 jobs:
   contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
       - name: JavaScript syntax
@@ -37,5 +38,33 @@ jobs:
         run: node --test scripts/qa/contpaq-fb2-cfdi-validation.test.mjs
       - name: FB-2 ingestion and RLS contract
         run: node --test scripts/qa/contpaq-fb2-ingestion-contract.test.mjs
+      - name: FB-2 browser runtime contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 >/tmp/fb2-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          browser=""
+          for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              browser="$candidate"
+              break
+            fi
+          done
+          if [ -z "$browser" ]; then
+            echo "No Chrome/Chromium binary found on runner" >&2
+            exit 1
+          fi
+
+          for _ in {1..20}; do
+            if curl -fsS http://127.0.0.1:8765/scripts/qa/contpaq-fb2-browser-harness.html >/dev/null; then break; fi
+            sleep 0.25
+          done
+
+          output="$($browser --headless=new --no-sandbox --disable-gpu --virtual-time-budget=5000 --dump-dom http://127.0.0.1:8765/scripts/qa/contpaq-fb2-browser-harness.html 2>/tmp/fb2-browser.err)"
+          printf '%s\n' "$output"
+          grep -q 'data-status="pass"' <<<"$output"
       - name: FB-3 candidate contract
         run: node --test scripts/qa/contpaq-fb3-mapping-candidates.test.mjs
