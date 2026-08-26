@@ -39,6 +39,51 @@ function initFileUpload(id) {
   return { getFile: () => fileInput.files[0] || null, reset };
 }
 
+function isXmlUpload(file) {
+  const type = String(file?.type || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return type === "text/xml" || type === "application/xml" || name.endsWith(".xml");
+}
+
+/**
+ * FB-2: después de subir un XML de una Solicitud, intenta extraer y persistir
+ * hechos CFDI. Este análisis es deliberadamente no bloqueante: si falla, el
+ * archivo ya subido y la solicitud siguen siendo válidos y vinculables.
+ */
+async function tryIngestRequestCfdi(file, folder, storagePath, client) {
+  if (!isXmlUpload(file)) return null;
+  const match = String(folder || "").match(/^solicitudes\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+  if (!match) return null;
+
+  try {
+    const { ingestRequestCfdi } = await import("./lib/contpaq/cfdiIngestion.js?v=20260826-fb2");
+    const result = await ingestRequestCfdi({
+      file,
+      paymentRequestId: match[1],
+      storagePath,
+      client,
+      createdBy: window.FluxAuth?.getProfile?.()?.id || null,
+    });
+
+    window.dispatchEvent(new CustomEvent("flux:cfdi-ingestion", { detail: result }));
+    if (result?.parseError && typeof window.showToast === "function") {
+      window.showToast("CFDI requiere revisión", result.parseError, "warning");
+    } else if (result?.validation?.status === "review_required" && typeof window.showToast === "function") {
+      window.showToast("CFDI requiere revisión", "El XML se guardó, pero uno o más datos no coinciden con la solicitud.", "warning");
+    }
+    return result;
+  } catch (error) {
+    console.warn("[Flux][CONTPAQ][FB-2] El archivo se subió, pero la ingestión CFDI no pudo completarse.", error);
+    window.dispatchEvent(new CustomEvent("flux:cfdi-ingestion", {
+      detail: { skipped: false, ingestionError: error?.message || String(error) },
+    }));
+    if (typeof window.showToast === "function") {
+      window.showToast("Archivo vinculado", "El XML se guardó; el análisis CFDI quedó pendiente de revisión.", "warning");
+    }
+    return null;
+  }
+}
+
 /**
  * Sube un archivo a Supabase Storage en payment-receipts/{folder}/{timestamp}_{random}.{ext}
  * Devuelve el storage path (string) o lanza error.
@@ -56,6 +101,8 @@ async function uploadReceipt(file, folder) {
     upsert: false,
   });
   if (error) throw new Error(`Error al subir archivo: ${error.message}`);
+
+  await tryIngestRequestCfdi(file, folder, path, client);
   return path;
 }
 
