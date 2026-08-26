@@ -81,6 +81,11 @@ bloquear la creación (`isMissingFase2ColumnError`).
   (`can_authorize_extraordinary`, `authorization_block_reason`).
 
 ## Extensiones runtime folded-in (antes MutationObserver/patches)
+- `solicitudes_ux1_extension.js`: orden final del formulario (**Datos del pago →
+  Proveedor / beneficiario → Clasificación presupuestal → Contexto operativo →
+  Datos de entrega → Revisión final**), asociación opcional de visita/incidencia
+  durante la creación y marcador trazable en `notes`. Reproducido en
+  `RequestModal`.
 - `fase2_request_payment_method_extension.js`: campos **Tipo de solicitud** y
   **Método de pago**, sección **Datos de entrega** (efectivo/cheque), método
   preferido del proveedor al seleccionarlo, alta rápida de proveedor (`+`),

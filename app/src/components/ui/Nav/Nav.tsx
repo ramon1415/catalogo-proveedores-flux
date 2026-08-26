@@ -32,7 +32,12 @@ export function Nav() {
         {sections.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
-            {sec.items.map((it) => (
+            {sec.items.map((it) => it.vanillaHref ? (
+              <a key={it.key} href={it.vanillaHref} className={s.item}>
+                {it.icon}
+                <span className={s.txt}>{it.label}</span>
+              </a>
+            ) : (
               <NavLink
                 key={it.key}
                 to={it.path}
