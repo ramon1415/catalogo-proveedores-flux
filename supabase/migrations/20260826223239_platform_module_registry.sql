@@ -60,8 +60,8 @@ create table public.company_modules (
 
 create index company_modules_company_idx
   on public.company_modules(company_id);
-create index company_modules_module_idx
-  on public.company_modules(module_key);
+create index company_modules_module_version_idx
+  on public.company_modules(module_key, version);
 create index company_modules_updated_by_idx
   on public.company_modules(updated_by);
 
@@ -87,19 +87,31 @@ create policy modules_select on public.modules
   for select to authenticated
   using (true);
 
-create policy modules_admin_write on public.modules
-  for all to authenticated
+create policy modules_admin_insert on public.modules
+  for insert to authenticated
+  with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy modules_admin_update on public.modules
+  for update to authenticated
   using ((select current_user_has_role(flux_sysadmin_roles())))
   with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy modules_admin_delete on public.modules
+  for delete to authenticated
+  using ((select current_user_has_role(flux_sysadmin_roles())));
 
 create policy module_releases_select on public.module_releases
   for select to authenticated
   using (true);
 
-create policy module_releases_admin_write on public.module_releases
-  for all to authenticated
+create policy module_releases_admin_insert on public.module_releases
+  for insert to authenticated
+  with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy module_releases_admin_update on public.module_releases
+  for update to authenticated
   using ((select current_user_has_role(flux_sysadmin_roles())))
   with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy module_releases_admin_delete on public.module_releases
+  for delete to authenticated
+  using ((select current_user_has_role(flux_sysadmin_roles())));
 
 create policy company_modules_select on public.company_modules
   for select to authenticated
@@ -113,10 +125,16 @@ create policy company_modules_select on public.company_modules
     or (select current_user_has_role(flux_sysadmin_roles()))
   );
 
-create policy company_modules_admin_write on public.company_modules
-  for all to authenticated
+create policy company_modules_admin_insert on public.company_modules
+  for insert to authenticated
+  with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy company_modules_admin_update on public.company_modules
+  for update to authenticated
   using ((select current_user_has_role(flux_sysadmin_roles())))
   with check ((select current_user_has_role(flux_sysadmin_roles())));
+create policy company_modules_admin_delete on public.company_modules
+  for delete to authenticated
+  using ((select current_user_has_role(flux_sysadmin_roles())));
 
 insert into public.modules (module_key, name, kind) values
   ('solicitudes',   'Solicitudes de pago',        'shared'),
