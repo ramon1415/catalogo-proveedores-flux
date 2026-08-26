@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "jspdf": "./jspdf_edge.ts",
+    "jspdf-core": "npm:jspdf@2.5.2",
+    "jspdf-autotable": "npm:jspdf-autotable@3.8.4"
+  }
+}
