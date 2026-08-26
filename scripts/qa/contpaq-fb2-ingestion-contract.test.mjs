@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const ingestion = fs.readFileSync('lib/contpaq/cfdiIngestion.js', 'utf8')
 const upload = fs.readFileSync('upload_helper.js', 'utf8')
-const migration = fs.readFileSync('supabase/migrations/20260826153000_payment_request_cfdi_facts.sql', 'utf8')
+const migration = fs.readFileSync('supabase/migrations/20260826160401_payment_request_cfdi_facts.sql', 'utf8')
 
 test('FB-2 ingestion consumes the browser parser and the shared validator only', () => {
   assert.match(ingestion, /from ['"]\.\.\/parsers\/cfdiBrowser\.js['"]/)
