@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -48,7 +48,8 @@ const MONTH_LONG = (year: number, m: number) => new Date(year, m - 1, 1).toLocal
 
 export default function DashboardPage() {
   const [params] = useSearchParams()
-  const anualMode = params.get('view') === 'anual'
+  const { pathname } = useLocation()
+  const anualMode = pathname === '/dashboard-anual' || params.get('view') === 'anual'
   const { group } = useAuth()
   const { showToast } = useToast()
   const canView = canViewDashboard(group)
@@ -405,7 +406,7 @@ export default function DashboardPage() {
                   <option value="todos">Todos los años</option>
                 </select>
               </label>
-              <a className={s.secondaryBtn} href="/dashboard">Año en curso</a>
+              <Link className={s.secondaryBtn} to="/dashboard">Año en curso</Link>
             </>
           )}
           <button className={s.secondaryBtn} type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? 'Cargando...' : 'Actualizar'}</button>
@@ -686,7 +687,7 @@ export default function DashboardPage() {
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
                 <h2>Efectivo y comprobaciones</h2>
-                <a className={s.secondaryBtn} href="/efectivo">Ver modulo completo</a>
+                <Link className={s.secondaryBtn} to="/efectivo">Ver modulo completo</Link>
               </div>
               <div className={s.miniGrid}>
                 {[['Fondos activos', whole(cash.active_cash_funds)], ['Pendientes', whole(cash.pending_cash_reconciliation)], ['En revision', whole(cash.cash_in_review)], ['Vencidos', whole(cash.overdue_cash_funds)], ['Monto entregado', money(cash.cash_assigned_amount)], ['Monto comprobado', money(cash.cash_verified_amount)], ['Monto pendiente', money(cash.cash_pending_amount)]].map(([l, v]) => (
@@ -705,7 +706,7 @@ export default function DashboardPage() {
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
                 <h2>Incidencias y facturas</h2>
-                <a className={s.secondaryBtn} href="/ingresos">Ver modulo completo</a>
+                <Link className={s.secondaryBtn} to="/ingresos">Ver modulo completo</Link>
               </div>
               <div className={s.miniGrid}>
                 {[['Incidencias abiertas', whole(inc.open_incidents)], ['Incidencias cobradas', whole(inc.paid_incidents)], ['Facturas emitidas', whole(inc.issued_invoices)], ['Facturas pendientes', whole(inc.pending_invoices)]].map(([l, v]) => (

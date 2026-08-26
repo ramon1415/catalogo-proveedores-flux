@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import Login from './pages/Login'
+import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
 
 // Code-splitting por ruta: cada feature carga bajo demanda.
@@ -30,9 +31,13 @@ export default function App() {
           <Route path="ingresos" element={<IngresosPage />} />
           <Route path="incidencias" element={<IngresosPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="dashboard-anual" element={<DashboardPage />} />
           <Route path="solicitudes" element={<SolicitudesPage />} />
           <Route path="layouts" element={<LayoutsPage />} />
           <Route path="configuracion" element={<ConfiguracionPage />} />
+          <Route path="comprobantes-batch" element={<SectionPending />} />
+          <Route path="solicitudes-proveedores" element={<SectionPending />} />
+          <Route path="cortes-semanales" element={<SectionPending />} />
           <Route path="*" element={<Navigate to="/solicitudes" replace />} />
         </Route>
       </Routes>
