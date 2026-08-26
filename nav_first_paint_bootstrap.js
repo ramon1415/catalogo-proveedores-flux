@@ -117,6 +117,65 @@
     finishAnnualSetup()
   }
 
+  // Rebanada 03: extensión aislada. No reemplaza configuracion.html ni
+  // configuracion.js, por lo que preserva la gobernanza extraordinaria vigente.
+  const contpaqRequestedAtLoad = new URLSearchParams(window.location.search).get("tab") === "contpaq"
+
+  function loadContpaqMapperExtension() {
+    const pageName = (window.location.pathname.split("/").pop() || "").toLowerCase()
+    if (pageName !== "configuracion.html") return
+    if (document.querySelector('script[data-flux-extension="contpaq-mapper"]')) return
+    const script = document.createElement("script")
+    script.src = "./contpaq_mapper_extension.js?v=20260825-graph-nn"
+    script.async = false
+    script.dataset.fluxExtension = "contpaq-mapper"
+    document.head.appendChild(script)
+  }
+
+  function installContpaqRequestedRouteBridge() {
+    if (!contpaqRequestedAtLoad) return
+    let activated = false
+    let observer = null
+
+    const activate = () => {
+      if (activated || window.FluxAuth?.isAdminFinance?.() !== true) return false
+      const tab = document.getElementById("contpaqMapperTab")
+      if (!tab || tab.disabled || tab.hidden) return false
+      activated = true
+      observer?.disconnect()
+      tab.click()
+      return true
+    }
+
+    const watch = () => {
+      if (activate() || observer || !document.documentElement) return
+      observer = new MutationObserver(activate)
+      observer.observe(document.documentElement, { childList: true, subtree: true })
+      window.setTimeout(() => observer?.disconnect(), 5000)
+    }
+
+    document.addEventListener("flux:roles-ready", watch, { once: true })
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", watch, { once: true })
+    } else {
+      watch()
+    }
+  }
+
+  function loadAnnualBudgetBucketPatch() {
+    if (!annualPage) return
+    if (document.querySelector('script[data-flux-extension="annual-budget-buckets"]')) return
+    const script = document.createElement("script")
+    script.src = "./dashboard_bucket_patch.js?v=20260825-graph-nn"
+    script.async = false
+    script.dataset.fluxExtension = "annual-budget-buckets"
+    document.head.appendChild(script)
+  }
+
+  loadContpaqMapperExtension()
+  loadAnnualBudgetBucketPatch()
+  installContpaqRequestedRouteBridge()
+
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
   if (nav.children.length) {

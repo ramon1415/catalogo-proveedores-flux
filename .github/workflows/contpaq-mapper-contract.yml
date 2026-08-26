@@ -1,0 +1,38 @@
+name: CONTPAQ mapper contract
+
+on:
+  pull_request:
+    paths:
+      - "nav_first_paint_bootstrap.js"
+      - "contpaq_mapper_extension.js"
+      - "dashboard_bucket_patch.js"
+      - "configuracion.html"
+      - "configuracion.js"
+      - "supabase/migrations/*contpaq*"
+      - "supabase/migrations/20260825221900_contpaq_mapper_legacy_review_unblock.sql"
+      - "supabase/migrations/20260825221930_contpaq_mapper_edge_review_deprecation.sql"
+      - "supabase/migrations/20260825222000_contpaq_mapper_graph_reviews.sql"
+      - "scripts/qa/contpaq-mapper-contract.test.mjs"
+      - "scripts/qa/contpaq-mapper-hardening-contract.test.mjs"
+      - ".github/workflows/contpaq-mapper-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check nav_first_paint_bootstrap.js
+          node --check contpaq_mapper_extension.js
+          node --check dashboard_bucket_patch.js
+          node --check scripts/qa/contpaq-mapper-contract.test.mjs
+          node --check scripts/qa/contpaq-mapper-hardening-contract.test.mjs
+      - name: CONTPAQ mapper base contract
+        run: node scripts/qa/contpaq-mapper-contract.test.mjs
+      - name: CONTPAQ mapper hardening contract
+        run: node scripts/qa/contpaq-mapper-hardening-contract.test.mjs
