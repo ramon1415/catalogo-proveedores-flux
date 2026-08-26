@@ -8,6 +8,7 @@ on:
       - "upload_helper.js"
       - "contpaq_mapping_candidates.js"
       - "supabase/migrations/20260826160401_payment_request_cfdi_facts.sql"
+      - "supabase/migrations/20260826160958_payment_request_cfdi_facts_created_by_idx.sql"
       - "scripts/qa/contpaq-fb2-*.test.mjs"
       - "scripts/qa/contpaq-fb2-browser-harness.html"
       - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
@@ -45,24 +46,15 @@ jobs:
           python3 -m http.server 8765 >/tmp/fb2-http.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-
           browser=""
           for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
-            if command -v "$candidate" >/dev/null 2>&1; then
-              browser="$candidate"
-              break
-            fi
+            if command -v "$candidate" >/dev/null 2>&1; then browser="$candidate"; break; fi
           done
-          if [ -z "$browser" ]; then
-            echo "No Chrome/Chromium binary found on runner" >&2
-            exit 1
-          fi
-
+          if [ -z "$browser" ]; then echo "No Chrome/Chromium binary found on runner" >&2; exit 1; fi
           for _ in {1..20}; do
             if curl -fsS http://127.0.0.1:8765/scripts/qa/contpaq-fb2-browser-harness.html >/dev/null; then break; fi
             sleep 0.25
           done
-
           output="$($browser --headless=new --no-sandbox --disable-gpu --virtual-time-budget=5000 --dump-dom http://127.0.0.1:8765/scripts/qa/contpaq-fb2-browser-harness.html 2>/tmp/fb2-browser.err)"
           printf '%s\n' "$output"
           grep -q 'data-status="pass"' <<<"$output"
