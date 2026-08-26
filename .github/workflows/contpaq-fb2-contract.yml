@@ -14,21 +14,6 @@ on:
       - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
       - "docs/architecture/contpaq-fb2-fb3-dev-contract.md"
       - ".github/workflows/contpaq-fb2-contract.yml"
-  push:
-    branches:
-      - "feature/contpaq-fb2-fb3-dev"
-    paths:
-      - "lib/parsers/**"
-      - "lib/contpaq/**"
-      - "upload_helper.js"
-      - "contpaq_mapping_candidates.js"
-      - "supabase/migrations/20260826160401_payment_request_cfdi_facts.sql"
-      - "supabase/migrations/20260826160958_payment_request_cfdi_facts_created_by_idx.sql"
-      - "scripts/qa/contpaq-fb2-*.test.mjs"
-      - "scripts/qa/contpaq-fb2-browser-harness.html"
-      - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
-      - "docs/architecture/contpaq-fb2-fb3-dev-contract.md"
-      - ".github/workflows/contpaq-fb2-contract.yml"
   workflow_dispatch:
 
 permissions:
