@@ -43,6 +43,22 @@ y los mapeos `on conflict do nothing` (no pisan lo que se haya hecho a mano).
 - Los 63 códigos distintos pasan los cinco candados: existen, son hoja del
   árbol, son `cta_mayor = 2` y son `tipo = G`
 
+## Alcance de esta carpeta
+
+Contiene **el catálogo contable y los mapeos partida→cuenta**, que es lo que
+este PR necesita.
+
+**No contiene la capa de renglones ejecutivos** (cuenta → renglón de
+presentación). Esa es otra capa del modelo: el *bucket presupuestal* agrupa
+partidas y cuentas para comparar contra presupuesto, mientras que el *renglón
+ejecutivo* agrupa cuentas para presentar un estado financiero. Se parecen y
+conviene no confundirlas.
+
+Sus artefactos viven en el repo de origen, en `data/seed/renglones_<empresa>.sql`,
+y entran con las tareas de estados financieros — no con el mapper.
+
+El `MANIFEST.txt` de esta carpeta es un **extracto** del completo por esa razón.
+
 ## Nota sobre las razones textuales
 
 Las razones línea-por-línea del seed de juicio original (agosto) **no están
