@@ -68,6 +68,25 @@ async function resolveRoles(profileId: string): Promise<string[]> {
     .filter(Boolean)
 }
 
+// Empresas del usuario, desde profile_company_memberships (RLS: el usuario ve las
+// propias). El rol es global (user_roles), no por-empresa; se adjunta para display.
+async function resolveMemberships(profileId: string, roleForDisplay: string): Promise<Membership[]> {
+  const { data, error } = await supabase
+    .from('profile_company_memberships')
+    .select('company_id, active, companies(id, name, legal_name, active)')
+    .eq('profile_id', profileId)
+    .eq('active', true)
+  if (error) return []
+  return (data ?? [])
+    .filter((m: any) => m.companies && m.companies.active !== false)
+    .map((m: any) => ({
+      company_id: m.company_id,
+      company_name: m.companies.name || m.companies.legal_name || 'Empresa',
+      role: roleForDisplay,
+    }))
+    .sort((a, b) => a.company_name.localeCompare(b.company_name))
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -115,13 +134,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       setRoles(r)
       setGroup(groupFromRoles(r))
-      // Placeholder de empresa: hoy el RBAC es global (una sola empresa, Operadora).
-      // Migrar a memberships(profile_id, company_id, role) con el multi-empresa (F5).
-      setMemberships(
-        r.length
-          ? [{ company_id: 'operadora', company_name: 'Operadora Tlacatecpan', role: r[0] }]
-          : [],
-      )
+      // Empresas reales del usuario (profile_company_memberships). El rol es global.
+      const mem = await resolveMemberships(prof.id, r[0] ?? groupFromRoles(r))
+      if (cancelled) return
+      setMemberships(mem)
     })()
     return () => {
       cancelled = true
