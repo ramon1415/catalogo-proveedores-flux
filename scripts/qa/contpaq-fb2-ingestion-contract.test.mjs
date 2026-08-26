@@ -21,6 +21,14 @@ test('FB-2 persistence maps the certified nested comprobante shape without inven
   assert.match(ingestion, /normalized_facts: parsed \|\| \{\}/)
 })
 
+test('FB-2 browser-derived facts are explicitly client_unverified and cannot be mistaken for accounting evidence', () => {
+  assert.match(ingestion, /CFDI_VERIFICATION_STATUS = ['"]client_unverified['"]/)
+  assert.match(ingestion, /verification_status: CFDI_VERIFICATION_STATUS/)
+  assert.match(migration, /verification_status text not null default 'client_unverified'/i)
+  assert.match(migration, /check \(verification_status = 'client_unverified'\)/i)
+  assert.match(migration, /No es fuente autoritativa para FB-7\/contabilidad/i)
+})
+
 test('FB-2 malformed CFDI is persisted as invalid and never rethrown as a request failure', () => {
   assert.match(ingestion, /error instanceof CfdiParseError/)
   assert.match(ingestion, /parse_status: parseError \? ['"]invalid['"]/)
@@ -33,9 +41,10 @@ test('FB-2 hook activates only for XML under solicitudes/{uuid}', () => {
   assert.match(upload, /type === ['"]text\/xml['"] \|\| type === ['"]application\/xml['"] \|\| name\.endsWith\(['"]\.xml['"]\)/)
   assert.match(upload, /\^solicitudes\\\/\(\[0-9a-f\]/)
   assert.match(upload, /await tryIngestRequestCfdi\(file, folder, path, client\)/)
+  assert.match(migration, /storage_path like \('solicitudes\/' \|\| payment_request_id::text \|\| '\/%'\)/i)
 })
 
-test('FB-2 table is idempotent by request + source SHA and keeps CFDI UUID as searchable evidence, not hard unique', () => {
+test('FB-2 table is idempotent by request + source SHA and keeps CFDI UUID searchable, not hard unique', () => {
   assert.match(migration, /unique \(payment_request_id, source_sha256\)/i)
   assert.match(migration, /on public\.payment_request_cfdi_facts\(company_id, cfdi_uuid\)[\s\S]*where cfdi_uuid is not null/i)
   assert.doesNotMatch(migration, /unique\s*\([^)]*cfdi_uuid/i)
