@@ -176,6 +176,13 @@ test("page removes the fragment and never uses persistent browser storage", asyn
   assert.doesNotMatch(html + js, /anon[_-]?key|SUPABASE_ANON_KEY/i);
 });
 
+test("approved states offer a clear continuation or safe exit", async () => {
+  const js = await readFile(new URL("../../approval_batch_quick_approve.js", import.meta.url), "utf8");
+  assert.match(js, /elements\.review\.textContent = "Continuar en Flux"/);
+  assert.match(js, /Puedes cerrar esta ventana con seguridad o continuar en Flux\./);
+  assert.doesNotMatch(js, /window\.close\(/);
+});
+
 test("migration preserves the UI RPC and enforces one-time, all-pending and trigger-owned notification", async () => {
   const sql = await readFile(
     new URL("../../supabase/migrations/20260826201712_approval_batch_quick_approve_dev.sql", import.meta.url),
