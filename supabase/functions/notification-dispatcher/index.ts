@@ -114,6 +114,24 @@ const allowedEventTypes = new Set([
 
 const EMAIL_LOGO_URL = "https://flux.quantta.mx/assets/email/flux-logo-email-white.png";
 const EMAIL_LOGO_HTML = `<img src="${EMAIL_LOGO_URL}" width="110" alt="Flux" style="display:block;width:110px;max-width:100%;height:auto;border:0;" />`;
+const approvalBatchDecisionEventTypes = new Set([
+  "approval_batch.approved",
+  "approval_batch.partially_approved",
+]);
+
+export function resolveFinalRecipient(
+  eventType: string,
+  intendedRecipient: string,
+  sendMode: string,
+  testEmail: string,
+): string {
+  // The decision claim and document RPCs validate this address against the
+  // batch's active submitted_by profile before Resend is called. Preserve that
+  // business recipient while preserving the configured routing for every
+  // other notification type.
+  if (approvalBatchDecisionEventTypes.has(eventType)) return intendedRecipient;
+  return sendMode === "test_only" ? testEmail : intendedRecipient;
+}
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -471,14 +489,14 @@ function renderApprovalBatchDecisionEmail(
     ...rows.map(([label, value]) => `${label}: ${value}`),
     "",
     `Abrir corte en Flux: ${targetUrl}`,
-    ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."] : []),
+    ...(sendMode === "test_only" ? ["", "Modo DEV TEST: este correo fue enviado al usuario que generó el corte."] : []),
   ].join("\n");
 
   const htmlRows = rows.map(([label, value]) =>
     `<tr><td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td></tr>`
   ).join("");
   const testBanner = sendMode === "test_only"
-    ? '<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>'
+    ? '<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue enviado al usuario que generó el corte.</div>'
     : "";
 
   const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="background:#16322d;padding:20px 28px;">${String(EMAIL_LOGO_HTML)}</td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Decisión del corte semanal</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;">${escapeHtml(intro)}</p><p style="margin:0 0 16px;font-size:14px;line-height:1.5;">El PDF final adjunto incluye la decisión y el motivo de cada partida.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;"><tr><td bgcolor="#16322d" style="border-radius:6px;"><a href="${targetUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Abrir corte en Flux</a></td></tr></table>${testBanner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
@@ -943,12 +961,8 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
 
     const createdOnly = options.eventTypes.length === 1 &&
       options.eventTypes[0] === "payment_request.created";
-    const decisionEventTypes = new Set([
-      "approval_batch.approved",
-      "approval_batch.partially_approved",
-    ]);
     const decisionOnly = options.eventTypes.length > 0 &&
-      options.eventTypes.every((eventType) => decisionEventTypes.has(eventType));
+      options.eventTypes.every((eventType) => approvalBatchDecisionEventTypes.has(eventType));
     const claimRpcName = createdOnly
       ? "claim_payment_request_created_events_for_dispatcher"
       : decisionOnly
@@ -981,7 +995,12 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
 
     for (const event of events) {
       const intendedRecipient = event.recipient_email;
-      const finalRecipient = sendMode === "test_only" ? testEmail : intendedRecipient;
+      const finalRecipient = resolveFinalRecipient(
+        event.event_type,
+        intendedRecipient,
+        sendMode,
+        testEmail,
+      );
       const rendered = renderEmail(event, sendMode);
       let providerMessageId: string | null = null;
       let attachment: PreparedAttachment | undefined;

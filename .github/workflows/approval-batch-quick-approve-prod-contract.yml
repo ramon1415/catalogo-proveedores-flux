@@ -1,0 +1,66 @@
+name: Approval batch Quick Approval PROD contract
+
+'on':
+  pull_request:
+    branches: [main]
+    paths:
+      - 'approval_batch_quick_approve.*'
+      - 'supabase/functions/approval-batch-quick-approve/**'
+      - 'supabase/functions/approval-batch-submitted-dispatcher/**'
+      - 'supabase/functions/notification-dispatcher/**'
+      - 'supabase/migrations/20260826225903_approval_batch_quick_approve_prod.sql'
+      - 'scripts/qa/approval-batch-quick-approve-contract.test.mjs'
+      - 'docs/ops/approval-batch-quick-approve-prod.md'
+      - '.github/workflows/approval-batch-quick-approve-prod-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+      - name: Install pinned PDF dependencies
+        run: npm install --no-save --package-lock=false --ignore-scripts jspdf@2.5.2 jspdf-autotable@3.8.4
+      - name: Run focal and notification regressions
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test \
+            scripts/qa/approval-batch-quick-approve-contract.test.mjs \
+            scripts/qa/approval-batch-submitted-email-contract.test.mjs
+          DISPATCHER_PATH=supabase/functions/notification-dispatcher/index.ts \
+            node scripts/qa/approval-batch-decision-notification-prod-contract.test.mjs
+          node --experimental-strip-types --input-type=module -e \
+            "await import('./supabase/functions/approval-batch-quick-approve/index.ts')"
+          node --check approval_batch_quick_approve.js
+      - name: Validate PROD isolation and secrets
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          allowed='^((approval_batch_quick_approve\.(html|css|js))|(supabase/config\.toml)|(supabase/functions/approval-batch-quick-approve/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/notification-dispatcher/index\.ts)|(supabase/migrations/20260826225903_approval_batch_quick_approve_prod\.sql)|(scripts/qa/approval-batch-quick-approve-contract\.test\.mjs)|(docs/ops/approval-batch-quick-approve-prod\.md)|(\.github/workflows/approval-batch-quick-approve-prod-contract\.yml))$'
+          ! printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .
+          grep -R -q 'https://flux.quantta.mx' \
+            approval_batch_quick_approve.{html,js} \
+            supabase/functions/approval-batch-quick-approve/index.ts \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          ! grep -R -E 'scsirgbuqjcwoaxfacth|catalogo-proveedores-flux-git-dev' \
+            approval_batch_quick_approve.{html,js} \
+            supabase/functions/approval-batch-quick-approve/index.ts \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts \
+            supabase/migrations/20260826225903_approval_batch_quick_approve_prod.sql
+          ! grep -R -E 're_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@' \
+            approval_batch_quick_approve.{html,css,js} \
+            supabase/functions/approval-batch-quick-approve \
+            supabase/functions/approval-batch-submitted-dispatcher \
+            supabase/functions/notification-dispatcher \
+            supabase/migrations/20260826225903_approval_batch_quick_approve_prod.sql
