@@ -1,0 +1,43 @@
+name: React app CI
+
+on:
+  push:
+    branches:
+      - 'feature/carlos-*'
+    paths:
+      - 'app/**'
+      - '.github/workflows/react-app-ci.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/react-app-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

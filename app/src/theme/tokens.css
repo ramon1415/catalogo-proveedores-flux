@@ -1,0 +1,34 @@
+:root {
+  --bg: #0e1c19; --bg-surface: #122421; --bg-card: #172d29; --bg-hover: rgba(229,229,218,.045);
+  --bg-input: #101f1c; --border: rgba(229,229,218,.08); --border-strong: rgba(229,229,218,.14);
+  --accent: #cfe1cb; --accent-contrast: #172d29;
+  --text-1: #f4f6f4; --text-2: #aeb9b2; --text-3: #6f807a;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+:root[data-theme="light"] {
+  --bg: #f7f7f5; --bg-surface: #ecede5; --bg-card: #fff; --bg-hover: rgba(23,45,41,.03);
+  --bg-input: #f1f2ea; --border: rgba(23,45,41,.1); --border-strong: rgba(23,45,41,.17);
+  --accent: #2b4c44; --accent-contrast: #fff;
+  --text-1: #15211d; --text-2: #4d5f58; --text-3: #82928a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text-1); font-family: var(--font); font-size: 14px; -webkit-font-smoothing: antialiased; }
+.center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.muted { color: var(--text-3); }
+.card { width: min(100%, 440px); background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 12px; }
+.card.login { text-align: center; align-items: center; gap: 6px; padding-top: 32px; }
+.login-logo { height: 34px; width: auto; object-fit: contain; margin-bottom: 6px; }
+.card h1 { font-size: 26px; font-weight: 600; }
+.card h2 { font-size: 17px; font-weight: 600; margin-bottom: 2px; }
+.row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.row .k { color: var(--text-3); min-width: 130px; }
+.row code { color: var(--text-3); font-family: var(--mono); font-size: 11.5px; }
+select { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-1); padding: 6px 10px; font: inherit; font-size: 13px; }
+.btn { min-height: 40px; padding: 10px 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; cursor: pointer; margin-top: 8px; }
+.btn:hover { background: var(--bg-hover); color: var(--text-1); }
+.btn.primary { background: var(--accent); color: var(--accent-contrast); border: 0; }
+.phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.phead h1 { font-size: 19px; font-weight: 600; letter-spacing: -.2px; }
+.phead p { font-size: 12px; margin-top: 3px; }
+.card.wide { width: 100%; max-width: none; gap: 6px; }
