@@ -1,10 +1,18 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import Login from './pages/Login'
-import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
-import ProveedoresPage from './features/proveedores/ProveedoresPage'
-import EfectivoPage from './features/efectivo/EfectivoPage'
+
+// Code-splitting por ruta: cada feature carga bajo demanda.
+const ProveedoresPage = lazy(() => import('./features/proveedores/ProveedoresPage'))
+const EfectivoPage = lazy(() => import('./features/efectivo/EfectivoPage'))
+const AprobacionesPage = lazy(() => import('./features/aprobaciones/AprobacionesPage'))
+const ConfiguracionPage = lazy(() => import('./features/configuracion/ConfiguracionPage'))
+const IngresosPage = lazy(() => import('./features/ingresos/IngresosPage'))
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'))
+const SolicitudesPage = lazy(() => import('./features/solicitudes/SolicitudesPage'))
+const LayoutsPage = lazy(() => import('./features/layouts/LayoutsPage'))
 
 export default function App() {
   const { session, loading } = useAuth()
@@ -12,21 +20,22 @@ export default function App() {
   if (!session) return <Login />
 
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<Navigate to="/proveedores" replace />} />
-        <Route path="proveedores" element={<ProveedoresPage />} />
-        <Route path="efectivo" element={<EfectivoPage />} />
-        {/* Secciones aún no migradas: puente a la app vanilla. */}
-        <Route path="solicitudes" element={<SectionPending />} />
-        <Route path="layouts" element={<SectionPending />} />
-        <Route path="ingresos" element={<SectionPending />} />
-        <Route path="incidencias" element={<SectionPending />} />
-        <Route path="dashboard" element={<SectionPending />} />
-        <Route path="aprobaciones" element={<SectionPending />} />
-        <Route path="configuracion" element={<SectionPending />} />
-        <Route path="*" element={<Navigate to="/proveedores" replace />} />
-      </Route>
-    </Routes>
+    <Suspense fallback={<div className="center muted">Cargando…</div>}>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<Navigate to="/solicitudes" replace />} />
+          <Route path="proveedores" element={<ProveedoresPage />} />
+          <Route path="efectivo" element={<EfectivoPage />} />
+          <Route path="aprobaciones" element={<AprobacionesPage />} />
+          <Route path="ingresos" element={<IngresosPage />} />
+          <Route path="incidencias" element={<IngresosPage />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="solicitudes" element={<SolicitudesPage />} />
+          <Route path="layouts" element={<LayoutsPage />} />
+          <Route path="configuracion" element={<ConfiguracionPage />} />
+          <Route path="*" element={<Navigate to="/solicitudes" replace />} />
+        </Route>
+      </Routes>
+    </Suspense>
   )
 }

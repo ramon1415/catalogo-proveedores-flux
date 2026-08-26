@@ -20,25 +20,25 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Operación',
     items: [
-      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, vanillaHref: '/solicitudes.html' },
-      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, vanillaHref: '/layouts.html' },
+      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, migrated: true },
+      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, migrated: true },
       { key: 'efectivo', label: 'Efectivo', path: '/efectivo', icon: <IcEfectivo />, migrated: true },
-      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, vanillaHref: '/ingresos.html?tab=income' },
-      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, vanillaHref: '/ingresos.html?tab=incidents' },
+      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, migrated: true },
+      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, migrated: true },
       { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, migrated: true },
     ],
   },
   {
     title: 'General',
     items: [
-      { key: 'dashboard', label: 'Dashboard', path: '/dashboard', icon: <IcDashboard />, vanillaHref: '/dashboard.html' },
-      { key: 'aprobaciones', label: 'Aprobaciones', path: '/aprobaciones', icon: <IcAprobaciones />, vanillaHref: '/aprobaciones.html' },
+      { key: 'dashboard', label: 'Dashboard', path: '/dashboard', icon: <IcDashboard />, migrated: true },
+      { key: 'aprobaciones', label: 'Aprobaciones', path: '/aprobaciones', icon: <IcAprobaciones />, migrated: true },
     ],
   },
   {
     title: 'Configuración',
     items: [
-      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, vanillaHref: '/configuracion.html' },
+      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, migrated: true },
     ],
   },
 ]
