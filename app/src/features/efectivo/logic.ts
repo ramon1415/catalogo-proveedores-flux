@@ -118,12 +118,29 @@ export function computeStats(d: CashData) {
 // ── Filtros de la tabla ────────────────────────────────
 export type CashFilters = { query: string; status: string; method: string; responsibleId: string; companyId: string }
 
+function matchesStatusFilter(fund: CashFund, status: string, reviewFundIds: Set<string>): boolean {
+  if (status === 'todos') return true
+  if (status === 'activos') return ACTIVE_FUND_STATUSES.includes(fund.status || '')
+  if (status === 'pendientes') return PENDING_FUND_STATUSES.includes(fund.status || '')
+  if (status === 'en_revision') return reviewFundIds.has(fund.id)
+  if (status === 'con_pendiente') {
+    return !['closed', 'cancelled'].includes(fund.status || '') && numberValue(fund.pending_amount) > 0
+  }
+  return fund.status === status
+}
+
 export function filterFunds(
   d: CashData,
   f: CashFilters,
   helpers: { paymentRequestById: (id: string | null) => PaymentRequest | null; profileName: (id: string | null) => string; companyName: (id: string | null) => string },
 ): CashFund[] {
   const q = normalize(f.query)
+  const reviewFundIds = new Set(
+    [
+      ...d.cashFunds.filter((fund) => fund.status === 'receipt_review').map((fund) => fund.id),
+      ...d.reconciliations.filter((rec) => rec.status === 'submitted').map((rec) => rec.cash_fund_id),
+    ].filter(Boolean) as string[],
+  )
   return d.cashFunds.filter((fund) => {
     const request = helpers.paymentRequestById(fund.payment_request_id)
     const searchable = normalize(
@@ -131,7 +148,7 @@ export function filterFunds(
     )
     return (
       searchable.includes(q) &&
-      (f.status === 'todos' || fund.status === f.status) &&
+      matchesStatusFilter(fund, f.status, reviewFundIds) &&
       (f.method === 'todos' || fund.delivery_method === f.method) &&
       (f.responsibleId === 'todos' || fund.responsible_profile_id === f.responsibleId) &&
       (f.companyId === 'todos' || fund.company_id === f.companyId)

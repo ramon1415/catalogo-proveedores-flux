@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { formatDate, formatDateTime, numberValue } from '../../lib/format'
@@ -113,14 +114,14 @@ export function DetailModal({
       try {
         const row = await getApproverDetails(request.id)
         if (cancelled) return
-        if (!row?.profile_id) setApproverRouting('Sin revisor asignado')
+        if (!row?.profile_id) setApproverRouting('Aprobador no registrado')
         else {
           const roles = Array.isArray(row.eligible_roles) && row.eligible_roles.length ? ` · ${row.eligible_roles.join(', ')}` : ''
           const source = row.source === 'assigned' ? ' · Configurado por administración' : row.source === 'approval_rules' ? ' · Elegible por reglas' : ''
           setApproverRouting(`${row.display_name || 'Sin nombre'}${roles}${source}`)
         }
       } catch {
-        if (!cancelled) setApproverRouting('No disponible')
+        if (!cancelled) setApproverRouting('Aprobador no registrado')
       }
 
       // Approval history
@@ -642,7 +643,7 @@ function CashFundSection({ context, fund, request, method, onCreate }: {
       </div>
       <div className={s.decisionActions}>
         {canCreate && <button type="button" className={`${s.decisionBtn} ${s.approve}`} onClick={onCreate}>{method === 'check' ? 'Registrar entrega de cheque' : 'Registrar entrega de efectivo'}</button>}
-        <a className={`${s.decisionBtn} ${s.change}`} href={`/efectivo${fund ? `?fund_id=${fund.id}` : ''}`}>Ver en Efectivo y comprobaciones</a>
+        <Link className={`${s.decisionBtn} ${s.change}`} to={`/efectivo${fund ? `?fund_id=${fund.id}` : ''}`}>Ver en Efectivo y comprobaciones</Link>
       </div>
     </section>
   )

@@ -20,7 +20,10 @@
 
 /* Stats */
 .statsGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
-.statCard { background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 12px; padding: 14px 16px; }
+.statCard { width: 100%; appearance: none; font: inherit; text-align: left; color: inherit; cursor: pointer; background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 12px; padding: 14px 16px; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
+.statCard:hover { background: var(--bg-hover); transform: translateY(-1px); }
+.statCard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.statCard.selected { background: var(--bg-hover); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .statCard p { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
 .statCard strong { display: block; margin-top: 6px; font-size: 22px; font-weight: 700; color: var(--text-1); }
 .statCard.accent { border-left-color: var(--accent); }

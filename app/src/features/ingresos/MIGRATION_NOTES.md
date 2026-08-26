@@ -1,40 +1,27 @@
 # Migración: Ingresos e Incidencias (vanilla → React)
 
-Fuente vanilla: `ingresos.html` + `ingresos.js` (una sola pantalla con 6 sub-tabs internos).
-Destino: `app/src/features/ingresos/`. Default export **`IngresosPage`** en `IngresosPage.tsx`.
+Fuente de datos vanilla: `ingresos.html` + `ingresos.js`.
+Destino: `app/src/features/ingresos/`. Ambas rutas comparten lógica y modales, pero se presentan
+como módulos operativos independientes para conservar el alcance visible de DEV/PROD.
 
 ## Rutas
-El coordinador enruta AMBOS paths a `<IngresosPage/>`:
-- `/ingresos` → tab interno inicial **Balance** (`dashboard`) = lado "income".
-- `/incidencias` → tab interno inicial **Incidencias** (`incidents`).
+- `/ingresos`: balance, socios, periodos y cuotas, cobros y facturas de mantenimiento.
+- `/incidencias`: métricas, filtros y tabla de incidencias; no expone contenido de cuotas.
 
-Derivación del tab (dentro del componente):
-```
-routeTab = (location.pathname === '/incidencias' || searchParams.tab === 'incidents')
-             ? 'incidents' : 'dashboard'
-```
-- `useLocation()` decide por path; `useSearchParams()` honra `?tab=income|incidents` si viene.
-- `?tab=income` (o cualquier valor distinto de `incidents`) cae en `dashboard`.
-- Un `useEffect([routeTab])` re-siembra el tab al cambiar la ruta; el usuario puede cambiar
-  libremente entre los 6 tabs internos después (igual que el vanilla, que siempre mostraba los 6).
+El coordinador todavía puede reutilizar `<IngresosPage/>`, pero `useLocation()` selecciona la
+superficie y el loader correspondientes. El query param `?tab=` no mezcla ambos módulos.
 
-> Nota de paridad: el vanilla NUNCA leía `?tab` en `ingresos.js` (arrancaba siempre en `dashboard`);
-> el `?tab` solo marcaba el ítem de nav. Aquí se usa para sembrar el tab inicial, según lo pedido.
+## Superficies
+- Ingresos: `dashboard` (Balance) · `members` (Socios) · `periods` (Periodos y cuotas) ·
+  `payments` (Cuotas) · `invoices` (Facturas de cuotas).
+- Incidencias: tabla directa con cards filtrables (total, abiertas, facturadas, cobradas y monto
+  pendiente), búsqueda, estatus, tipo de receptor y fecha.
 
-## Tabs internos (idénticos al vanilla)
-`dashboard` (Balance) · `members` (Socios) · `periods` (Periodos y cuotas) · `payments` (Cuotas) ·
-`incidents` (Incidencias) · `invoices` (Facturas). Todos viven en `IngresosPage`.
-
-## Tablas leídas (`loadIngresosData`, todas en paralelo — falla si cualquiera falla, como el vanilla)
-- `members` (order full_name asc)
-- `billing_periods` (order cutoff_date desc)
-- `maintenance_fee_charges` (order created_at desc)
-- `maintenance_fee_payments` (order created_at desc) — cargada por paridad de red; **no se renderiza**.
-- `incident_charges` (order incident_date desc)
-- `invoices` (order issue_date desc)
-- `companies` (id,name,legal_name,active)
-- `cost_centers` (id,name,code,company_id,active)
-- `budget_categories` (id,code,name,category,budget_type,active)
+## Tablas leídas (`loadIngresosData`)
+Las fuentes se aíslan por módulo para evitar que una consulta ajena bloquee la pantalla:
+- Ingresos: `members`, `billing_periods`, `maintenance_fee_charges`,
+  `maintenance_fee_payments`, facturas `maintenance_fee` y catálogos auxiliares.
+- Incidencias: `members`, `incident_charges`, facturas `incident` y catálogos auxiliares.
 
 ## Escrituras directas a tabla
 - `members` insert / update (payload con `updated_at`; update cuando se edita, insert si nuevo).
@@ -65,10 +52,9 @@ Bucket `payment-receipts`. Path `<folder>/<Date.now()>_<rand>.<ext>` (rand = `Ma
 NO exigen perfil (paridad exacta). Si falta perfil → toast "Perfil no identificado".
 
 ## Filtro rápido (stat cards)
-Cada card es un botón (`applyCard`): cambia de tab + fija un select de estatus + setea `quick`.
-`quick` además restringe el render (socios→solo activos, cobros→pendiente>0, incidencias→open/invoiced,
-facturas→issued). Franja "Vista filtrada" con botón "Ver todo" (`clearQuick` resetea los 4 selects de
-estatus a `todos` y limpia `quick`). La card seleccionada se resalta cuando `card === quick`.
+- Ingresos: cada card cambia al tab operativo correspondiente y aplica el filtro relacionado.
+- Incidencias: cada card filtra la tabla directa por total, abierta, facturada, cobrada o pendiente
+  de cobro (`open` + `invoiced`). La selección queda resaltada.
 
 ## Errores
 - `rpcError()`: mapa de ~24 códigos conocidos (billing_period_*, charge_*, invoice_*, etc.) → mensaje es-MX;
@@ -82,7 +68,6 @@ estatus a `todos` y limpia `quick`). La card seleccionada se resalta cuando `car
 3. **Estado de error de carga**: el vanilla dejaba los placeholders "Cargando..." tras un error y solo
    lanzaba toast. Aquí se muestra "No se pudo cargar." en las tablas + el mismo toast (mejor UX, mismo
    comportamiento de datos: no se rendel nada).
-4. **Tab inicial por ruta**: divergencia intencional vs vanilla (siempre `dashboard`) para soportar el
-   deep-link `/incidencias` pedido. Los 6 tabs siguen accesibles.
+4. **Separación por ruta**: `/ingresos` y `/incidencias` comparten infraestructura, no contenido.
 5. **`fee_factor`**: `formatFactor` con `maximumFractionDigits:3` (igual que `formatNum` del vanilla).
 6. Puentes `window.*Modal` del vanilla (para el patch UX legacy) no se portan: eran acoplamiento DOM.

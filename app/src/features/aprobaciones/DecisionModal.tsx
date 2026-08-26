@@ -75,7 +75,7 @@ export function DecisionModal({
     setApprover('Cargando...')
     getApproverDetails(request.id)
       .then((row) => { if (!cancelled) setApprover(approverDetailLabel(row)) })
-      .catch(() => { if (!cancelled) setApprover('No disponible') })
+      .catch(() => { if (!cancelled) setApprover('Aprobador no registrado') })
     return () => { cancelled = true }
   }, [request.id])
 

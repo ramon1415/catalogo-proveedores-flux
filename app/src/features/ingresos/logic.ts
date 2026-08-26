@@ -165,7 +165,7 @@ export function filterIncidents(d: IngresosData, f: IncidentFilters, quick: stri
   const q = normalize(f.query)
   return d.incidents.filter((i) =>
     (!q || normalize([lk.incidentReceiver(i), i.external_rfc, i.description, lk.memberName(i.referred_by_member_id)].join(' ')).includes(q)) &&
-    (f.status === 'todos' || i.status === f.status) &&
+    (f.status === 'todos' || (f.status === 'pending_collection' ? OPEN_INCIDENTS.includes(i.status || '') : i.status === f.status)) &&
     (f.receiver === 'todos' || lk.receiverType(i) === f.receiver) &&
     (!f.date || String(i.incident_date).slice(0, 10) === f.date) &&
     (quick !== 'openIncidents' || OPEN_INCIDENTS.includes(i.status || '')),
