@@ -62,7 +62,6 @@ async function tryIngestRequestCfdi(file, folder, storagePath, client) {
       paymentRequestId: match[1],
       storagePath,
       client,
-      createdBy: window.FluxAuth?.getProfile?.()?.id || null,
     });
 
     window.dispatchEvent(new CustomEvent("flux:cfdi-ingestion", { detail: result }));
