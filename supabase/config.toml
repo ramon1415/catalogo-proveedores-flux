@@ -1,2 +1,5 @@
 [functions.provider-intake]
 verify_jwt = false
+
+[functions.approval-batch-quick-approve]
+verify_jwt = false

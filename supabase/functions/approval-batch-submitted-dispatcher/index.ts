@@ -15,6 +15,8 @@ const FLUX_URL = "https://flux.quantta.mx";
 const SYSTEM_PDF_LOGO_URL = `${FLUX_URL}/assets/logo-flux-verde.webp`;
 const MAX_DISPATCH_LIMIT = 5;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const DEFAULT_QUICK_APPROVAL_TTL_HOURS = 72;
+const MAX_QUICK_APPROVAL_TTL_HOURS = 168;
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -142,6 +144,53 @@ async function sha256Hex(bytes) {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+function bytesToBase64Url(bytes) {
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function utf8ToBase64Url(value) {
+  return bytesToBase64Url(new TextEncoder().encode(value));
+}
+
+export async function signQuickApprovalToken(material, secret) {
+  if (typeof secret !== "string" || secret.trim().length < 32) {
+    throw new Error("quick_approval_secret_invalid");
+  }
+  const payload = {
+    version: material.version,
+    notification_event_id: material.notification_event_id,
+    batch_id: material.batch_id,
+    director_id: material.director_id,
+    submitted_at: material.submitted_at,
+    snapshot_hash: material.snapshot_hash,
+    expires_at: material.expires_at,
+    jti: material.jti,
+  };
+  const payloadSegment = utf8ToBase64Url(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret.trim()),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payloadSegment),
+  ));
+  return `${payloadSegment}.${bytesToBase64Url(signature)}`;
+}
+
+function quickApprovalTtlSeconds(runtime) {
+  const raw = optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_TTL_HOURS", String(DEFAULT_QUICK_APPROVAL_TTL_HOURS));
+  const hours = Number(raw);
+  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_QUICK_APPROVAL_TTL_HOURS) {
+    throw new Error("quick_approval_ttl_invalid");
+  }
+  return hours * 3600;
+}
+
 async function fetchSystemPdfLogo(fetchFn) {
   try {
     const response = await fetchFn(SYSTEM_PDF_LOGO_URL, { cache: "no-store" });
@@ -230,7 +279,12 @@ export async function prepareApprovalBatchAttachment(
   };
 }
 
-export function renderApprovalBatchSubmittedEmail(document, sendMode, deliveryMode = "test_recipient") {
+export function renderApprovalBatchSubmittedEmail(
+  document,
+  sendMode,
+  deliveryMode = "test_recipient",
+  quickApprovalUrl = null,
+) {
   const batch = document.batch;
   const prefix = sendMode === "test_only" ? "[DEV TEST] " : "";
   const subject = `${prefix}Corte semanal por autorizar: ${batch.label}`;
@@ -249,12 +303,32 @@ export function renderApprovalBatchSubmittedEmail(document, sendMode, deliveryMo
       : "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."
     : "";
 
+  if (!quickApprovalUrl) {
+    const text = [
+      "Tienes un corte semanal por autorizar.", "",
+      "Finanzas envio un corte semanal que requiere tu revision y decision en Flux.",
+      "El PDF adjunto usa el mismo formato disponible en el botón PDF del corte.", "",
+      ...summaryRows.map(([label, value]) => `${label}: ${value}`), "",
+      `Revisar y autorizar: ${targetUrl}`,
+      ...(devNotice ? ["", devNotice] : []),
+    ].join("\n");
+    const htmlRows = summaryRows.map(([label, value]) =>
+      `<tr><td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escapeHtml(label)}</td><td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td></tr>`
+    ).join("");
+    const banner = devNotice
+      ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">${escapeHtml(devNotice)}</div>`
+      : "";
+    const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;"><img src="${EMAIL_LOGO_URL}" width="110" alt="Flux" style="display:block;width:110px;max-width:100%;height:auto;border:0;" /></td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Tienes un corte por autorizar</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;color:#1f2926;">Finanzas envió un corte semanal que requiere tu revisión y decisión en Flux.</p><p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">El PDF adjunto usa el mismo formato disponible en el botón PDF del corte.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;"><tr><td bgcolor="#16322d" style="border-radius:6px;"><a href="${targetUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Revisar y autorizar corte</a></td></tr></table>${banner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
+    return { subject, text, html };
+  }
+
   const text = [
-    "Tienes un corte semanal por autorizar.", "",
-    "Finanzas envio un corte semanal que requiere tu revision y decision en Flux.",
-    "El PDF adjunto usa el mismo formato disponible en el botón PDF del corte.", "",
-    ...summaryRows.map(([label, value]) => `${label}: ${value}`), "",
-    `Revisar y autorizar: ${targetUrl}`,
+    "Tienes un corte por autorizar", "",
+    "Finanzas envió un corte semanal que requiere tu revisión y decisión.",
+    "Puedes revisar el detalle completo en Flux o aprobar el corte completo mediante la aprobación rápida.",
+    "", ...summaryRows.map(([label, value]) => `${label}: ${value}`), "",
+    `Revisar corte: ${targetUrl}`,
+    `Aprobar corte: ${quickApprovalUrl}`, "", "La aprobación rápida autoriza todas las partidas pendientes del corte.",
     ...(devNotice ? ["", devNotice] : []),
   ].join("\n");
 
@@ -264,8 +338,46 @@ export function renderApprovalBatchSubmittedEmail(document, sendMode, deliveryMo
   const banner = devNotice
     ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">${escapeHtml(devNotice)}</div>`
     : "";
-  const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;"><img src="${EMAIL_LOGO_URL}" width="110" alt="Flux" style="display:block;width:110px;max-width:100%;height:auto;border:0;" /></td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Tienes un corte por autorizar</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;color:#1f2926;">Finanzas envió un corte semanal que requiere tu revisión y decisión en Flux.</p><p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">El PDF adjunto usa el mismo formato disponible en el botón PDF del corte.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;"><tr><td bgcolor="#16322d" style="border-radius:6px;"><a href="${targetUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Revisar y autorizar corte</a></td></tr></table>${banner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
+  const intro = '<p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">Puedes revisar el detalle completo en Flux o aprobar el corte completo mediante la aprobación rápida.</p>';
+  const quickButton = `<tr><td style="padding-top:10px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="#176b50" align="center" style="border-radius:6px;"><a href="${escapeHtml(quickApprovalUrl)}" style="display:block;min-height:44px;padding:13px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:18px;text-decoration:none;box-sizing:border-box;">Aprobar corte</a></td></tr></table></td></tr>`;
+  const quickNotice = '<p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:#68716d;">La aprobación rápida autoriza todas las partidas pendientes del corte.</p>';
+  const html = `<!doctype html><html lang="es"><body style="margin:0;padding:0;background:#eef1e9;"><div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;"><tr><td align="center" style="padding:24px 12px 18px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;"><tr><td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;"><img src="${EMAIL_LOGO_URL}" width="110" alt="Flux" style="display:block;width:110px;max-width:100%;height:auto;border:0;" /></td></tr><tr><td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;"><h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Tienes un corte por autorizar</h1><p style="margin:0 0 10px;font-size:14px;line-height:1.5;color:#1f2926;">Finanzas envió un corte semanal que requiere tu revisión y decisión.</p>${intro}<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:22px;"><tr><td><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="#16322d" align="center" style="border-radius:6px;"><a href="${targetUrl}" style="display:block;min-height:44px;padding:13px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:18px;text-decoration:none;box-sizing:border-box;">Revisar corte</a></td></tr></table></td></tr>${quickButton}</table>${quickNotice}${banner}</td></tr></table><div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux Operadora &middot; Powered by Quantta</div></td></tr></table></body></html>`;
   return { subject, text, html };
+}
+
+async function buildQuickApprovalUrl(event, workerId, runtime, supabaseUrl, serviceRoleKey) {
+  if (optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_ENABLED", "false").toLowerCase() !== "true") {
+    return null;
+  }
+  try {
+    let secret = optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_SECRET");
+    if (secret.length < 32) {
+      const config = await callRpc(
+        runtime.fetch,
+        supabaseUrl,
+        serviceRoleKey,
+        "get_approval_batch_quick_approval_runtime_config",
+        {},
+      );
+      secret = typeof config?.secret === "string" ? config.secret.trim() : "";
+    }
+    if (secret.length < 32) return null;
+    const material = await callRpc(
+      runtime.fetch,
+      supabaseUrl,
+      serviceRoleKey,
+      "get_approval_batch_quick_approval_token_material",
+      {
+        p_notification_event_id: event.id,
+        p_worker_id: workerId,
+        p_ttl_seconds: quickApprovalTtlSeconds(runtime),
+      },
+    );
+    const token = await signQuickApprovalToken(material, secret);
+    return `${FLUX_URL}/approval_batch_quick_approve.html#token=${token}`;
+  } catch {
+    return null;
+  }
 }
 
 async function safeResponseText(response) {
@@ -403,7 +515,19 @@ export async function handleRequest(req, runtime) {
           "get_approval_batch_submitted_notification_document",
           { p_notification_event_id: event.id, p_worker_id: workerId },
         );
-        const rendered = renderApprovalBatchSubmittedEmail(document, sendMode, deliveryMode);
+        const quickApprovalUrl = await buildQuickApprovalUrl(
+          event,
+          workerId,
+          runtime,
+          supabaseUrl,
+          serviceRoleKey,
+        );
+        const rendered = renderApprovalBatchSubmittedEmail(
+          document,
+          sendMode,
+          deliveryMode,
+          quickApprovalUrl,
+        );
         const attachment = await prepareApprovalBatchAttachment(document, runtime);
         providerMessageId = await sendResendEmail({
           fetchFn: runtime.fetch,
