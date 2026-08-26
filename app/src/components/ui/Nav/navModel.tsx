@@ -29,12 +29,12 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Operación',
     items: [
-      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, vanillaHref: '/solicitudes.html' },
-      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, vanillaHref: '/layouts.html' },
+      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, migrated: true },
+      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, migrated: true },
       { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE, vanillaHref: '/comprobantes_batch.html' },
       { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, migrated: true },
-      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, vanillaHref: '/ingresos.html?tab=income' },
-      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, vanillaHref: '/ingresos.html?tab=incidents' },
+      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, migrated: true },
+      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, migrated: true },
       { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, migrated: true },
       { key: 'solicitudes-proveedores', label: 'Solicitudes de proveedores', path: '/solicitudes-proveedores', icon: <IcProviderIntakes />, groups: MANAGE, vanillaHref: '/provider_intakes.html' },
     ],
@@ -42,16 +42,16 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'General',
     items: [
-      { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, vanillaHref: '/dashboard.html' },
-      { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, vanillaHref: '/dashboard.html?view=anual' },
-      { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, vanillaHref: '/aprobaciones.html' },
+      { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, migrated: true },
+      { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, migrated: true },
+      { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, migrated: true },
       { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE, vanillaHref: '/approval_batches.html' },
     ],
   },
   {
     title: 'Configuración',
     items: [
-      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, groups: MANAGE, vanillaHref: '/configuracion.html' },
+      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, groups: MANAGE, migrated: true },
     ],
   },
 ]

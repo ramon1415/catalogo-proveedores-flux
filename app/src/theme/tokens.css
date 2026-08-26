@@ -1,7 +1,9 @@
 :root {
   --bg: #0e1c19; --bg-surface: #122421; --bg-card: #172d29; --bg-hover: rgba(229,229,218,.045);
   --bg-input: #101f1c; --border: rgba(229,229,218,.08); --border-strong: rgba(229,229,218,.14);
-  --accent: #cfe1cb; --accent-contrast: #172d29;
+  --accent: #cfe1cb; --accent-contrast: #172d29; --accent-text: #cfe1cb;
+  --emerald: #12b76a; --amber: #f59e0b; --ruby: #e03e52; --violet: #8b5cf6;
+  --accent-dim: rgba(207,225,203,.13); --emerald-dim: rgba(18,183,106,.12); --amber-dim: rgba(245,158,11,.13); --ruby-dim: rgba(224,62,82,.11); --violet-dim: rgba(139,92,246,.13);
   --text-1: #f4f6f4; --text-2: #aeb9b2; --text-3: #6f807a;
   --font: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -9,7 +11,9 @@
 :root[data-theme="light"] {
   --bg: #f7f7f5; --bg-surface: #ecede5; --bg-card: #fff; --bg-hover: rgba(23,45,41,.03);
   --bg-input: #f1f2ea; --border: rgba(23,45,41,.1); --border-strong: rgba(23,45,41,.17);
-  --accent: #2b4c44; --accent-contrast: #fff;
+  --accent: #2b4c44; --accent-contrast: #fff; --accent-text: #2b4c44;
+  --emerald: #0d9f57; --amber: #d48806; --ruby: #c93047; --violet: #7c3aed;
+  --accent-dim: rgba(37,63,58,.09); --emerald-dim: rgba(13,159,87,.1); --amber-dim: rgba(212,136,6,.1); --ruby-dim: rgba(201,48,71,.09); --violet-dim: rgba(124,58,237,.1);
   --text-1: #15211d; --text-2: #4d5f58; --text-3: #82928a;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
