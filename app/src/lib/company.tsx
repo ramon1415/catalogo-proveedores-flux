@@ -24,7 +24,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const [companyId, setCompanyId] = useState<string | null>(() => sessionStorage.getItem(KEY))
 
   useEffect(() => {
-    if (!companyId && memberships.length) setCompany(memberships[0].company_id)
+    if (!memberships.length) return
+    const known = memberships.some((m) => m.company_id === companyId)
+    // Sin empresa activa, o con una persistida que ya no pertenece al usuario → primera.
+    if (!companyId || !known) setCompany(memberships[0].company_id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberships])
 
