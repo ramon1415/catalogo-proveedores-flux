@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { resolveFinalRecipient } from "../../supabase/functions/notification-dispatcher/index.ts";
 
 const migrationPath =
   "supabase/migrations/20260825025522_approval_batch_decision_submitter_email_pdf.sql";
@@ -51,6 +52,34 @@ assert.match(dispatcher, /claim_payment_request_created_events_for_dispatcher/);
 assert.match(dispatcher, /createdAtAfterExclusive/);
 assert.match(dispatcher, /claim_approval_batch_decision_events_for_dispatcher/);
 assert.match(dispatcher, /decisionOnly/);
+assert.equal(
+  resolveFinalRecipient(
+    "approval_batch.approved",
+    "submitter@example.com",
+    "test_only",
+    "qa@example.com",
+  ),
+  "submitter@example.com",
+);
+assert.equal(
+  resolveFinalRecipient(
+    "approval_batch.partially_approved",
+    "submitter@example.com",
+    "test_only",
+    "qa@example.com",
+  ),
+  "submitter@example.com",
+);
+assert.equal(
+  resolveFinalRecipient(
+    "payment_receipt.linked",
+    "requester@example.com",
+    "test_only",
+    "qa@example.com",
+  ),
+  "qa@example.com",
+);
+assert.match(dispatcher, /enviado al usuario que generó el corte/);
 assert.match(
   dispatcher,
   /catalogo-proveedores-flux-git-dev-quantta-team\.vercel\.app/,
