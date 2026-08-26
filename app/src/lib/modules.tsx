@@ -92,6 +92,26 @@ export const MODULE_BY_KEY: Record<string, ModuleDef> = Object.fromEntries(
   MODULE_REGISTRY.map((m) => [m.key, m]),
 )
 
+// Orden de secciones en el nav.
+export const SECTION_ORDER: NavSectionName[] = ['Operación', 'General', 'Configuración']
+
+// Agrupa una lista de módulos por sección, respetando SECTION_ORDER.
+export function groupBySection(defs: ModuleDef[]): { title: NavSectionName; items: ModuleDef[] }[] {
+  return SECTION_ORDER.map((title) => ({ title, items: defs.filter((m) => m.section === title) })).filter(
+    (s) => s.items.length > 0,
+  )
+}
+
+// Módulo cuya ruta (o extraPath) corresponde al pathname actual.
+export function moduleForPath(pathname: string): ModuleDef | undefined {
+  return MODULE_REGISTRY.find(
+    (m) =>
+      pathname === m.path ||
+      pathname.startsWith(m.path + '/') ||
+      (m.extraPaths ?? []).some((p) => pathname === p || pathname.startsWith(p + '/')),
+  )
+}
+
 // Última versión conocida en código por módulo (para comparar contra la versión
 // fijada del tenant y detectar "atrasado" en el tablero de plataforma, F5.d).
 export const CODE_VERSIONS: Record<string, number> = Object.fromEntries(

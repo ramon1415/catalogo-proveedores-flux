@@ -3,12 +3,15 @@ import s from './Nav.module.css'
 import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
+import { useModules } from '../../../lib/moduleAccess'
+import { groupBySection } from '../../../lib/modules'
 import { IcUser, IcLogout } from '../icons'
-import { NAV_SECTIONS } from './navModel'
 import { CompanySwitcher } from './CompanySwitcher'
 
 export function Nav() {
   const { profile, session, signOut } = useAuth()
+  const { enabled } = useModules()
+  const sections = groupBySection(enabled)
 
   return (
     <aside className={s.rail}>
@@ -19,7 +22,7 @@ export function Nav() {
       <CompanySwitcher />
 
       <nav className={s.nav}>
-        {NAV_SECTIONS.map((sec) => (
+        {sections.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => (

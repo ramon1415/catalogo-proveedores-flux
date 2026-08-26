@@ -2,11 +2,11 @@ import { Outlet, useLocation } from 'react-router-dom'
 import s from './AppShell.module.css'
 import { Nav } from './Nav/Nav'
 import { IcTheme } from './icons'
-import { itemForPath } from './Nav/navModel'
+import { moduleForPath } from '../../lib/modules'
 
 export function AppShell() {
   const { pathname } = useLocation()
-  const item = itemForPath(pathname)
+  const item = moduleForPath(pathname)
   const kicker = item ? `${item.label}` : 'Plataforma'
 
   function toggleTheme() {
