@@ -89,7 +89,7 @@ function paymentTree() {
 test('FB-2 parser core has zero imports and no executable Node/browser/network dependencies', () => {
   const runtime = executableSource(coreSource)
   assert.doesNotMatch(runtime, /^\s*import\s/m)
-  assert.doesNotMatch(runtime, /\brequire\s*\(|node:|\bfs\b|DOMParser|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
+  assert.doesNotMatch(runtime, /fast-xml-parser|\brequire\s*\(|node:|\bfs\b|DOMParser|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
 })
 
 test('FB-2 browser entry imports only the core, handles parsererror and rejects DOCTYPE before DOMParser', () => {
@@ -100,7 +100,7 @@ test('FB-2 browser entry imports only the core, handles parsererror and rejects 
   assert.match(runtime, /XML con DOCTYPE rechazado/)
   assert.match(runtime, /new DOMParser\(\)\.parseFromString/)
   assert.match(runtime, /querySelector\(['"]parsererror['"]\)/)
-  assert.doesNotMatch(runtime, /\brequire\s*\(|node:|\bfs\b|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
+  assert.doesNotMatch(runtime, /fast-xml-parser|\brequire\s*\(|node:|\bfs\b|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
 })
 
 test('FB-2 core parses the certified nested shape used by Flux adapter', () => {
