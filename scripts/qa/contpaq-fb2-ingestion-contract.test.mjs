@@ -13,13 +13,14 @@ test('FB-2 ingestion consumes the browser parser and shared validator only', () 
   assert.doesNotMatch(ingestion, /fast-xml-parser|node:|\bfs\b|tax_resolver|213-|216-/i)
 })
 
-test('FB-2 persistence maps certified nested comprobante shape', () => {
-  assert.match(ingestion, /const comprobante = parsed\?\.comprobante \|\| \{\}/)
+test('FB-2 persistence stores effective comparison amount/currency, not misleading raw REP 0/XXX', () => {
+  assert.match(ingestion, /const comparison = validation\?\.comparison \|\| null/)
   assert.match(ingestion, /issued_at: comprobante\.fecha \|\| null/)
-  assert.match(ingestion, /currency: comprobante\.moneda \|\| null/)
+  assert.match(ingestion, /currency: comparison\?\.comparable \? comparison\.currency \|\| null : null/)
   assert.match(ingestion, /subtotal: comprobante\.subTotal \?\? null/)
-  assert.match(ingestion, /total: comprobante\.total \?\? null/)
+  assert.match(ingestion, /total: comparison\?\.comparable \? comparison\.total \?\? null : null/)
   assert.match(ingestion, /normalized_facts: parsed \|\| \{\}/)
+  assert.match(ingestion, /CFDI_PARSER_VERSION = ['"]cfdi-browser-6605c95-flux-rep-v2['"]/)
 })
 
 test('FB-2 browser facts remain client_unverified', () => {
@@ -49,9 +50,13 @@ test('FB-2 hook only activates for XML under solicitudes UUID scope', () => {
   assert.match(migration, /storage_path like \('solicitudes\/' \|\| payment_request_id::text \|\| '\/%'\)/i)
 })
 
-test('FB-2 table is idempotent by request + source SHA', () => {
+test('FB-2 table is idempotent by request + source SHA and UUID collisions are review signals, not hard unique', () => {
   assert.match(migration, /unique \(payment_request_id, source_sha256\)/i)
   assert.doesNotMatch(migration, /unique\s*\([^)]*cfdi_uuid/i)
+  assert.match(ingestion, /cfdi_uuid_duplicate_request/)
+  assert.match(ingestion, /cfdi_uuid_seen_in_other_visible_request/)
+  assert.match(ingestion, /\.eq\(['"]company_id['"], companyId\)/)
+  assert.match(ingestion, /\.eq\(['"]cfdi_uuid['"], cfdiUuid\)/)
 })
 
 test('FB-2 RLS is forced and no client UPDATE or DELETE is granted', () => {
