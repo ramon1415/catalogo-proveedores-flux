@@ -1,6 +1,12 @@
 name: React app CI
 
 on:
+  push:
+    branches:
+      - 'feature/carlos-*'
+    paths:
+      - 'app/**'
+      - '.github/workflows/react-app-ci.yml'
   pull_request:
     paths:
       - 'app/**'
