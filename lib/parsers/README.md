@@ -4,61 +4,57 @@ Entregado para **FB-2**: parsear el CFDI al adjuntarlo y precargar la solicitud.
 
 Sin DDL, sin Tax Resolver, sin fixtures reales.
 
-## Los tres archivos
+## Archivos
 
 | Archivo | Qué es | Importa |
 |---|---|---|
-| `cfdiCore.js` | La lógica fiscal y los helpers de acceso al árbol | **nada** |
-| `cfdiBrowser.js` | Entrada para el navegador: `DOMParser` nativo | solo `cfdiCore.js` |
+| `cfdiCore.js` | Lógica fiscal y helpers de acceso al árbol | **nada** |
+| `cfdiBrowser.js` | Entrada navegador: `DOMParser` nativo | solo `cfdiCore.js` |
 
-`cfdiCore.js` **no importa nada** — ni npm, ni Node, ni APIs del navegador.
-Por eso los dos entornos lo pueden cargar sin arrastrarse dependencias.
+`cfdiCore.js` no importa npm, Node ni APIs del navegador.
 
-En el repo del módulo existe además `cfdi.js`, la entrada para Node que usa
-`fast-xml-parser`. **No se incluye aquí a propósito:** la app no tiene bundler
-y ese import rompe en el navegador con
-`Failed to resolve module specifier "fast-xml-parser"`.
+En el repo del módulo existe además `cfdi.js`, entrada Node con
+`fast-xml-parser`. No se incluye aquí porque la app no tiene bundler.
 
 ## Uso
 
 ```js
 import { parseCfdiXml, CfdiParseError } from './lib/parsers/cfdiBrowser.js';
-
-try {
-  const cfdi = parseCfdiXml(await archivo.text());
-  // cfdi.emisor.rfc · cfdi.comprobante.total · cfdi.uuid · cfdi.impuestos …
-} catch (e) {
-  if (e instanceof CfdiParseError) mostrarError(e.message);
-}
+const cfdi = parseCfdiXml(await archivo.text());
 ```
 
-Es un módulo ES: la etiqueta que lo cargue necesita `type="module"`.
+## Shape relevante
 
-## Qué extrae
+Además de `version`, `comprobante`, `emisor`, `receptor`, `impuestos`, `uuid`,
+`cfdiRelacionados`, `pagos` y `nomina`, el hardening de FB-2 expone:
 
-`version` · `comprobante` (serie, folio, fecha, forma y método de pago, moneda,
-tipo de cambio, subtotal, total) · `emisor` (RFC, nombre, régimen fiscal) ·
-`receptor` (RFC, nombre, uso CFDI) · `impuestos` (traslados y **retenciones**) ·
-`uuid` · `cfdiRelacionados` · `pagos` (complemento 2.0 con documentos
-relacionados y saldos) · `nomina`.
+- `pagosTotales.montoTotalPagos`;
+- `pagos[].monedaP`;
+- `pagos[].tipoCambioP`;
+- `pagos[].montoP`.
 
-## Verificación
+Esto permite que un CFDI tipo **P / REP** se compare por su monto/moneda
+efectivos y no por `Comprobante.Total=0` / `Moneda=XXX`.
 
-Los tres fixtures producen en el navegador una salida **idéntica byte a byte**
-a la de Node, comparando el JSON completo. Y los cuatro casos de error se
-comportan igual en ambos: vacío, no-es-CFDI, versión 3.3 rechazada, XML mal
-formado.
+## Seguridad navegador
 
-Los fixtures son **sintéticos**, construidos para prueba. El RFC
-`OPT150312QV1` y sus contrapartes no corresponden a ninguna empresa del grupo.
+- `DOMParser` parsererror → `CfdiParseError`.
+- `<!DOCTYPE>` se rechaza antes de parsear.
+- sin red, IA ni resolución contable.
 
-## Detalle que conviene conocer
+## Origen y divergencia controlada
 
-`DOMParser` **no lanza** ante XML inválido: devuelve un documento con un nodo
-`<parsererror>`. `cfdiBrowser` lo detecta y lanza `CfdiParseError`, para que el
-contrato de errores sea el mismo en los dos entornos.
+La entrega original provino de:
 
-## Origen
-
-`carlosquantta/flux-contpaq-export` · rama `feat/motor-agregacion` · commit
+`carlosquantta/flux-contpaq-export` · `feat/motor-agregacion` ·
 `6605c95a5145a45746460be0c319fc9da5cb38f6` · suite 104/104.
+
+Después del review de Carlos en PR #422 se añadió hardening local para REP/P y
+DOCTYPE. Por eso **esta copia ya no debe describirse como byte-idéntica al
+upstream `6605c95`**. La versión de ingestión se identifica como
+`cfdi-browser-6605c95-flux-rep-v2`.
+
+Pendiente antes de cerrar el gate: backportear estos cambios al módulo fuente y
+volver a establecer una única versión certificada para Node/navegador.
+
+Los fixtures incluidos son sintéticos.
