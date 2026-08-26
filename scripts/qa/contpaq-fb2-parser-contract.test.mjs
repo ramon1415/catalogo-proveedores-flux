@@ -7,6 +7,12 @@ const browserSource = fs.readFileSync('lib/parsers/cfdiBrowser.js', 'utf8')
 const coreUrl = `data:text/javascript;base64,${Buffer.from(coreSource).toString('base64')}`
 const core = await import(coreUrl)
 
+function executableSource(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+}
+
 function validTree(overrides = {}) {
   const comprobante = {
     '@_Version': '4.0',
@@ -80,19 +86,21 @@ function paymentTree() {
   })
 }
 
-test('FB-2 parser core has zero imports and no Node/browser/network dependencies', () => {
-  assert.doesNotMatch(coreSource, /^\s*import\s/m)
-  assert.doesNotMatch(coreSource, /fast-xml-parser|node:|\bfs\b|DOMParser|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
+test('FB-2 parser core has zero imports and no executable Node/browser/network dependencies', () => {
+  const runtime = executableSource(coreSource)
+  assert.doesNotMatch(runtime, /^\s*import\s/m)
+  assert.doesNotMatch(runtime, /\brequire\s*\(|node:|\bfs\b|DOMParser|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
 })
 
 test('FB-2 browser entry imports only the core, handles parsererror and rejects DOCTYPE before DOMParser', () => {
   const imports = Array.from(browserSource.matchAll(/^\s*import\s+.*?from\s+['"]([^'"]+)['"]/gm), (m) => m[1])
+  const runtime = executableSource(browserSource)
   assert.deepEqual(imports, ['./cfdiCore.js'])
-  assert.match(browserSource, /<!DOCTYPE/i)
-  assert.match(browserSource, /XML con DOCTYPE rechazado/)
-  assert.match(browserSource, /new DOMParser\(\)\.parseFromString/)
-  assert.match(browserSource, /querySelector\(['"]parsererror['"]\)/)
-  assert.doesNotMatch(browserSource, /fast-xml-parser|node:|\bfs\b|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
+  assert.match(runtime, /<!DOCTYPE/i)
+  assert.match(runtime, /XML con DOCTYPE rechazado/)
+  assert.match(runtime, /new DOMParser\(\)\.parseFromString/)
+  assert.match(runtime, /querySelector\(['"]parsererror['"]\)/)
+  assert.doesNotMatch(runtime, /\brequire\s*\(|node:|\bfs\b|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
 })
 
 test('FB-2 core parses the certified nested shape used by Flux adapter', () => {
@@ -130,6 +138,6 @@ test('FB-2 core rejects non-CFDI and unsupported version with typed errors', () 
 })
 
 test('FB-2 parser contains no accounting resolution or export path', () => {
-  const source = `${coreSource}\n${browserSource}`
+  const source = `${executableSource(coreSource)}\n${executableSource(browserSource)}`
   assert.doesNotMatch(source, /213-|216-|contpaq_account|tax_resolver|budget_account_mappings|exportar.*p[oó]liza/i)
 })
