@@ -194,3 +194,20 @@ test("migration preserves the UI RPC and enforces one-time, all-pending and trig
   assert.match(sql, /force row level security/i);
   assert.match(sql, /revoke all[\s\S]*from public, anon, authenticated/i);
 });
+
+
+test("service-role hotfix reads PostgREST JSON claims and keeps public roles denied", async () => {
+  const sql = await readFile(
+    new URL(
+      "../../supabase/migrations/20260826214616_approval_batch_quick_service_role_claims_hotfix.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(sql, /auth\.jwt\(\)\s*->>\s*'role'/i);
+  assert.match(sql, /request\.jwt\.claim\.role/i);
+  assert.match(sql, /v_request_role\s*<>\s*'service_role'/i);
+  assert.match(sql, /session_user\s*<>\s*'service_role'/i);
+  assert.match(sql, /revoke all[\s\S]*from public, anon, authenticated, service_role/i);
+  assert.doesNotMatch(sql, /grant execute[\s\S]*to (?:public|anon|authenticated)/i);
+});
