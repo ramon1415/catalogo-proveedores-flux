@@ -1,11 +1,13 @@
-import type { ReactNode } from 'react'
-import { useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
 import s from './AppShell.module.css'
 import { Nav } from './Nav/Nav'
 import { IcTheme } from './icons'
+import { itemForPath } from './Nav/navModel'
 
-export function AppShell({ kicker, children }: { kicker?: string; children: ReactNode }) {
-  const [active, setActive] = useState('solicitudes')
+export function AppShell() {
+  const { pathname } = useLocation()
+  const item = itemForPath(pathname)
+  const kicker = item ? `${item.label}` : 'Plataforma'
 
   function toggleTheme() {
     const el = document.documentElement
@@ -14,13 +16,15 @@ export function AppShell({ kicker, children }: { kicker?: string; children: Reac
 
   return (
     <>
-      <Nav active={active} onNavigate={setActive} />
+      <Nav />
       <div className={s.content}>
         <div className={s.topbar}>
-          <div className={s.kick}>{kicker ?? 'Operación · Solicitudes'}</div>
+          <div className={s.kick}>{kicker}</div>
           <button className={s.iconbtn} title="Tema claro / oscuro" onClick={toggleTheme}><IcTheme /></button>
         </div>
-        <div className={s.page}>{children}</div>
+        <div className={s.page}>
+          <Outlet />
+        </div>
       </div>
     </>
   )

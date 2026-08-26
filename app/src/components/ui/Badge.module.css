@@ -1,0 +1,18 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.success { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.neutral { background: var(--bg-hover); color: var(--text-3); border-color: var(--border); }
+.info    { background: color-mix(in srgb, #6ea8fe 15%, transparent); color: #9ec3ff; border-color: color-mix(in srgb, #6ea8fe 30%, transparent); }
+.warning { background: color-mix(in srgb, var(--amber, #e0a53a) 16%, transparent); color: var(--amber, #e0a53a); border-color: color-mix(in srgb, var(--amber, #e0a53a) 32%, transparent); }
+.danger  { background: color-mix(in srgb, var(--ruby, #e05a6a) 15%, transparent); color: var(--ruby, #e05a6a); border-color: color-mix(in srgb, var(--ruby, #e05a6a) 30%, transparent); }
