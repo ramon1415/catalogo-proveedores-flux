@@ -24,7 +24,8 @@ create table if not exists public.payment_request_cfdi_facts (
   normalized_facts jsonb not null default '{}'::jsonb,
   validation_result jsonb not null default '{}'::jsonb,
   parse_error text,
-  created_by uuid references public.profiles(id),
+  -- La autoría la determina Postgres; el navegador no la envía.
+  created_by uuid not null default public.current_profile_id() references public.profiles(id),
   created_at timestamptz not null default now(),
   constraint payment_request_cfdi_facts_request_hash_key unique (payment_request_id, source_sha256),
   constraint payment_request_cfdi_facts_storage_scope_check check (
@@ -83,6 +84,7 @@ for insert
 to authenticated
 with check (
   verification_status = 'client_unverified'
+  and created_by = public.current_profile_id()
   and exists (
     select 1
     from public.payment_requests pr
@@ -103,3 +105,5 @@ comment on table public.payment_request_cfdi_facts is
   'FB-2: preview fiscal CLIENT_UNVERIFIED del CFDI adjunto. No es fuente autoritativa para FB-7/contabilidad hasta revalidación server-side.';
 comment on column public.payment_request_cfdi_facts.verification_status is
   'FB-2 solo permite client_unverified. Una fase futura server-side deberá crear/promover evidencia autoritativa antes de exportar.';
+comment on column public.payment_request_cfdi_facts.created_by is
+  'Perfil autenticado resuelto server-side mediante current_profile_id(); no es controlado por el navegador.';
