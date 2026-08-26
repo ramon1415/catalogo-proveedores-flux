@@ -13,6 +13,7 @@ Integrar la captura de hechos fiscales CFDI (FB-2) y completar mappings contable
 - No reemplazar `payment_requests.invoice_storage_path` en esta rebanada; se mantiene compatibilidad con el archivo actual.
 - No reutilizar `payment_documents` / `payment_document_extractions` para CFDI: esas tablas están acopladas a lotes/comprobantes bancarios (`batch_id`, `page_number`, campos BBVA).
 - No guardar XML completo en tablas; el original permanece en Supabase Storage.
+- El parseo browser es **preview**, no evidencia contable autoritativa.
 
 ## FB-2 — parser certificado recibido
 
@@ -69,6 +70,18 @@ El parser extrae hechos. No resuelve cuentas CONTPAQ, no decide retenciones y no
 
 Formato no soportado / archivo no CFDI / XML mal formado produce `CfdiParseError` controlado. Flux no modifica el core recibido para adaptarlo a la UI: el adapter consume su shape certificado.
 
+## FB-2 — frontera de confianza
+
+El parser corre en el navegador. Por diseño, un cliente autorizado podría alterar el JSON antes de enviarlo aunque el XML real permanezca en Storage.
+
+Por ello:
+
+- toda fila creada en esta fase lleva `verification_status = 'client_unverified'`;
+- la tabla solo acepta ese estado;
+- estos hechos sirven para precarga, comparación y revisión UX;
+- **FB-7 y cualquier contabilidad futura no pueden tratarlos como autoritativos**;
+- una fase posterior deberá revalidar server-side el XML original antes de promover evidencia contable.
+
 ## FB-2 — validación contra Solicitud
 
 `lib/contpaq/cfdiValidation.js` compara únicamente hechos que Flux ya conoce:
@@ -92,7 +105,7 @@ Dato de referencia faltante en Flux → warning, no bloqueo. Esto es necesario p
 - solo carpeta `solicitudes/{payment_request_id}`;
 - carga `lib/contpaq/cfdiIngestion.js` por `import()` dinámico;
 - parsea y valida;
-- persiste hechos fiscales;
+- persiste preview fiscal `client_unverified`;
 - devuelve siempre el `storage_path` si la carga a Storage ya fue exitosa.
 
 Por tanto, un error de parseo/ingestión **no revierte ni rompe la creación de la solicitud ni el vínculo del archivo**. Queda auditado como `invalid` o como análisis pendiente.
@@ -115,6 +128,7 @@ Columnas estables extraídas para búsqueda/validación:
 - `source_sha256`
 - `parser_version`
 - `parse_status` (`parsed`, `review_required`, `invalid`)
+- `verification_status = client_unverified`
 - `cfdi_version`
 - `cfdi_uuid`
 - `issued_at timestamp without time zone` — CFDI `Fecha` no incluye zona horaria
@@ -131,6 +145,7 @@ Columnas estables extraídas para búsqueda/validación:
 Restricciones:
 
 - idempotencia única por `(payment_request_id, source_sha256)`;
+- `storage_path` debe vivir bajo `solicitudes/{payment_request_id}/...`;
 - `cfdi_uuid` queda indexado por compañía, **no hard-unique**, hasta definir formalmente duplicados/sustituciones/cancelaciones;
 - evidencia cliente inmutable: `authenticated` recibe `SELECT, INSERT`, no `UPDATE/DELETE`;
 - RLS habilitada y forzada;
@@ -192,10 +207,11 @@ FB-2 puede considerarse listo para UAT cuando:
 1. parser certificado Feeder-A está versionado/consumible desde Flux;
 2. contratos parser + validación + ingestión pasan CI;
 3. migración `payment_request_cfdi_facts` aplica en DEV y RLS negativos pasan;
-4. XML subido en Solicitudes genera hechos fiscales deterministas e idempotentes;
+4. XML subido en Solicitudes genera preview fiscal determinista e idempotente;
 5. archivo no XML no dispara parser;
 6. XML inválido no rompe la creación de la solicitud y queda error controlado;
-7. no existe lógica de Tax Resolver ni exportación en esta rebanada.
+7. toda evidencia browser permanece `client_unverified`;
+8. no existe lógica de Tax Resolver ni exportación en esta rebanada.
 
 FB-3 puede considerarse listo para UAT cuando:
 
