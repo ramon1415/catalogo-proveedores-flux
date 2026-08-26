@@ -1,0 +1,7 @@
+.content { margin-left: 66px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.topbar { height: 56px; border-bottom: 1px solid var(--border); background: var(--bg-surface); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0; }
+.kick { font-size: 11px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); }
+.iconbtn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border); background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
+.iconbtn:hover { background: var(--bg-hover); color: var(--text-1); }
+.iconbtn svg { width: 17px; height: 17px; }
+.page { flex: 1; overflow: auto; padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 18px; }
