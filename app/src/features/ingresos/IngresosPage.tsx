@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -34,13 +34,10 @@ export default function IngresosPage() {
   const { profile } = useAuth()
   const { showToast } = useToast()
   const location = useLocation()
-  const [params] = useSearchParams()
-
   const profileId = (profile as { id?: string } | null)?.id ?? null
 
-  // ── Tab derivado del router: /incidencias o ?tab=incidents => incidents, si no dashboard (income) ──
-  const routeTab: IngresosTab =
-    location.pathname === '/incidencias' || params.get('tab') === 'incidents' ? 'incidents' : 'dashboard'
+  const isIncidentsPage = location.pathname === '/incidencias'
+  const routeTab: IngresosTab = isIncidentsPage ? 'incidents' : 'dashboard'
 
   const [data, setData] = useState<IngresosData | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -65,11 +62,13 @@ export default function IngresosPage() {
   // Reseed del tab cuando cambia la ruta (deep-link).
   useEffect(() => {
     setTab(routeTab)
+    setQuick(null)
   }, [routeTab])
 
   async function reload() {
+    setStatus('loading')
     try {
-      const d = await loadIngresosData()
+      const d = await loadIngresosData(isIncidentsPage ? 'incidents' : 'income')
       setData(d)
       setPeriodId((prev) => prev ?? d.periods[0]?.id ?? null)
       setStatus('ready')
@@ -82,7 +81,7 @@ export default function IngresosPage() {
   useEffect(() => {
     reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [isIncidentsPage])
 
   // Clamp del filtro de periodo (paridad con fillCatalogs: vuelve a "todos" si el periodo ya no existe).
   useEffect(() => {
@@ -93,6 +92,17 @@ export default function IngresosPage() {
   const lookups = useMemo(() => (data ? makeLookups(data) : null), [data])
   const stats = useMemo(() => (data ? computeStats(data) : null), [data])
   const dashboard = useMemo(() => (data ? computeDashboard(data) : null), [data])
+  const incidentStats = useMemo(() => {
+    const rows = data?.incidents ?? []
+    const pending = rows.filter((i) => ['open', 'invoiced'].includes(i.status || ''))
+    return {
+      total: rows.length,
+      open: rows.filter((i) => i.status === 'open').length,
+      invoiced: rows.filter((i) => i.status === 'invoiced').length,
+      paid: rows.filter((i) => i.status === 'paid').length,
+      pendingAmount: pending.reduce((sum, i) => sum + numberValue(i.amount), 0),
+    }
+  }, [data])
 
   const memberRows = useMemo(() => (data ? filterMembers(data, memberFilters, quick) : []), [data, memberFilters, quick])
   const paymentRows = useMemo(
@@ -125,6 +135,10 @@ export default function IngresosPage() {
     setPaymentFilters((f) => ({ ...f, status: 'todos' }))
     setIncidentFilters((f) => ({ ...f, status: 'todos' }))
     setInvoiceFilters((f) => ({ ...f, status: 'todos' }))
+  }
+
+  function applyIncidentCard(statusFilter: string) {
+    setIncidentFilters((f) => ({ ...f, status: statusFilter }))
   }
 
   async function onGenerateFees() {
@@ -214,43 +228,64 @@ export default function IngresosPage() {
     <>
       <div className={s.phead}>
         <div>
-          <h1>Ingresos e incidencias</h1>
-          <p className="muted">Controla cuotas de mantenimiento, periodos de cobro, pagos, balance e incidencias.</p>
+          <h1>{isIncidentsPage ? 'Incidencias' : 'Ingresos'}</h1>
+          <p className="muted">
+            {isIncidentsPage
+              ? 'Registra y da seguimiento a cargos recuperables de socios o externos.'
+              : 'Controla socios, periodos de cobro, cuotas, pagos y facturacion.'}
+          </p>
         </div>
         <button className={s.secondaryBtn} onClick={reload}>Actualizar</button>
       </div>
 
       {/* Stat cards */}
-      <div className={s.statsGrid}>
-        <button type="button" className={cardClass('accent', 'members')} onClick={() => applyCard('members')}>
-          <p>Socios activos</p><strong>{stats?.activeMembers ?? 0}</strong>
-        </button>
-        <button type="button" className={cardClass('warning', 'pendingFees')} onClick={() => applyCard('pendingFees')}>
-          <p>Cuotas pendientes</p><strong>{stats?.pendingCharges ?? 0}</strong>
-        </button>
-        <button type="button" className={cardClass('violet', 'pendingAmount')} onClick={() => applyCard('pendingAmount')}>
-          <p>Monto pendiente</p><strong>{compactCurrency(stats?.pendingAmount ?? 0)}</strong>
-        </button>
-        <button type="button" className={cardClass('info', 'openIncidents')} onClick={() => applyCard('openIncidents')}>
-          <p>Incidencias abiertas</p><strong>{stats?.openIncidents ?? 0}</strong>
-        </button>
-        <button type="button" className={cardClass('danger', 'pendingInvoices')} onClick={() => applyCard('pendingInvoices')}>
-          <p>Facturas pendientes</p><strong>{stats?.pendingInvoices ?? 0}</strong>
-        </button>
-      </div>
+      {isIncidentsPage ? (
+        <div className={s.statsGrid}>
+          <button type="button" className={`${s.statCard} ${s.accent} ${incidentFilters.status === 'todos' ? s.selected : ''}`} onClick={() => applyIncidentCard('todos')}>
+            <p>Total incidencias</p><strong>{incidentStats.total}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.warning} ${incidentFilters.status === 'open' ? s.selected : ''}`} onClick={() => applyIncidentCard('open')}>
+            <p>Abiertas</p><strong>{incidentStats.open}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.info} ${incidentFilters.status === 'invoiced' ? s.selected : ''}`} onClick={() => applyIncidentCard('invoiced')}>
+            <p>Facturadas</p><strong>{incidentStats.invoiced}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.accent} ${incidentFilters.status === 'paid' ? s.selected : ''}`} onClick={() => applyIncidentCard('paid')}>
+            <p>Cobradas</p><strong>{incidentStats.paid}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.violet} ${incidentFilters.status === 'pending_collection' ? s.selected : ''}`} onClick={() => applyIncidentCard('pending_collection')}>
+            <p>Monto pendiente</p><strong>{compactCurrency(incidentStats.pendingAmount)}</strong>
+          </button>
+        </div>
+      ) : (
+        <div className={s.statsGrid}>
+          <button type="button" className={cardClass('accent', 'members')} onClick={() => applyCard('members')}>
+            <p>Socios activos</p><strong>{stats?.activeMembers ?? 0}</strong>
+          </button>
+          <button type="button" className={cardClass('warning', 'pendingFees')} onClick={() => applyCard('pendingFees')}>
+            <p>Cuotas pendientes</p><strong>{stats?.pendingCharges ?? 0}</strong>
+          </button>
+          <button type="button" className={cardClass('violet', 'pendingAmount')} onClick={() => applyCard('pendingAmount')}>
+            <p>Monto pendiente</p><strong>{compactCurrency(stats?.pendingAmount ?? 0)}</strong>
+          </button>
+          <button type="button" className={cardClass('danger', 'pendingInvoices')} onClick={() => applyCard('pendingInvoices')}>
+            <p>Facturas pendientes</p><strong>{stats?.pendingInvoices ?? 0}</strong>
+          </button>
+        </div>
+      )}
 
       {/* Tabs internos */}
-      <div className={s.ingTabs} role="tablist">
+      {!isIncidentsPage && <div className={s.ingTabs} role="tablist">
         {([
           ['dashboard', 'Balance'], ['members', 'Socios'], ['periods', 'Periodos y cuotas'],
-          ['payments', 'Cuotas'], ['incidents', 'Incidencias'], ['invoices', 'Facturas'],
+          ['payments', 'Cuotas'], ['invoices', 'Facturas'],
         ] as [IngresosTab, string][]).map(([key, label]) => (
           <button key={key} type="button" className={`${s.ingTab} ${tab === key ? s.active : ''}`} onClick={() => setTab(key)}>{label}</button>
         ))}
-      </div>
+      </div>}
 
       {/* Filtro rápido */}
-      {quick && (
+      {!isIncidentsPage && quick && (
         <div className={s.filterStrip}>
           <span>{quickFilterLabel(quick)}</span>
           <button type="button" className={s.smallBtn} onClick={clearQuick}>Ver todo</button>
@@ -258,15 +293,14 @@ export default function IngresosPage() {
       )}
 
       {/* ── Dashboard ── */}
-      {tab === 'dashboard' && (
+      {!isIncidentsPage && tab === 'dashboard' && (
         <div className={s.dashboardGrid}>
           <div className={s.tableCard}>
-            <div className={s.panelHeader}><div><h2>Resumen operativo</h2><p>Lectura rapida de cobranza, incidencias y facturas.</p></div></div>
+            <div className={s.panelHeader}><div><h2>Resumen operativo</h2><p>Lectura rapida de cobranza y facturas de cuotas.</p></div></div>
             <div className={s.summaryList}>
               <SummaryRow label="Cuotas esperadas" value={formatCurrency(dashboard?.expected ?? 0)} />
               <SummaryRow label="Cuotas cobradas" value={formatCurrency(dashboard?.collected ?? 0)} />
               <SummaryRow label="Cuotas pendientes" value={formatCurrency(dashboard?.pending ?? 0)} />
-              <SummaryRow label="Incidencias abiertas / facturadas" value={formatCurrency(dashboard?.inc ?? 0)} />
               <SummaryRow label="Facturas emitidas pendientes" value={formatCurrency(dashboard?.inv ?? 0)} />
             </div>
           </div>
@@ -275,14 +309,13 @@ export default function IngresosPage() {
             <div className={`${s.summaryList} ${s.summaryListTight}`}>
               <button type="button" className={s.secondaryBtn} onClick={() => setMemberModal({ member: null })}>+ Nuevo socio</button>
               <button type="button" className={s.secondaryBtn} onClick={() => setPeriodModal(true)}>+ Nuevo periodo</button>
-              <button type="button" className={s.secondaryBtn} onClick={() => setIncidentModal(true)}>+ Nueva incidencia</button>
             </div>
           </div>
         </div>
       )}
 
       {/* ── Socios ── */}
-      {tab === 'members' && (
+      {!isIncidentsPage && tab === 'members' && (
         <div className={s.tableCard}>
           <div className={s.panelHeader}>
             <div><h2>Socios</h2><p>Catalogo de titulares y factores para cuotas de mantenimiento.</p></div>
@@ -332,7 +365,7 @@ export default function IngresosPage() {
       )}
 
       {/* ── Periodos y cuotas ── */}
-      {tab === 'periods' && (
+      {!isIncidentsPage && tab === 'periods' && (
         <>
           <div className={s.tableCard}>
             <div className={s.panelHeader}>
@@ -385,7 +418,7 @@ export default function IngresosPage() {
       )}
 
       {/* ── Cobros (Cuotas) ── */}
-      {tab === 'payments' && (
+      {!isIncidentsPage && tab === 'payments' && (
         <div className={s.tableCard}>
           <div className={s.panelHeader}><div><h2>Cobros pendientes</h2><p>Cuotas con saldo pendiente para registrar cobros parciales o finales.</p></div></div>
           <div className={s.toolbar}>
@@ -417,7 +450,7 @@ export default function IngresosPage() {
       )}
 
       {/* ── Incidencias ── */}
-      {tab === 'incidents' && (
+      {isIncidentsPage && (
         <div className={s.tableCard}>
           <div className={s.panelHeader}>
             <div><h2>Incidencias</h2><p>Cargos recuperables a socios o externos.</p></div>
@@ -430,6 +463,7 @@ export default function IngresosPage() {
             </div>
             <select value={incidentFilters.status} onChange={(e) => setIncidentFilters((f) => ({ ...f, status: e.target.value }))}>
               <option value="todos">Estatus: Todos</option>
+              <option value="pending_collection">Pendiente de cobro</option>
               <option value="open">Abierta</option>
               <option value="invoiced">Facturada</option>
               <option value="paid">Cobrada</option>
@@ -486,19 +520,14 @@ export default function IngresosPage() {
       )}
 
       {/* ── Facturas ── */}
-      {tab === 'invoices' && (
+      {!isIncidentsPage && tab === 'invoices' && (
         <div className={s.tableCard}>
-          <div className={s.panelHeader}><div><h2>Facturas</h2><p>Registro operativo de facturas emitidas y pagadas. No timbra CFDI.</p></div></div>
+          <div className={s.panelHeader}><div><h2>Facturas de cuotas</h2><p>Registro operativo de facturas de mantenimiento emitidas y pagadas. No timbra CFDI.</p></div></div>
           <div className={s.toolbar}>
             <div className={s.searchBox}>
               <IcSearch size={16} />
               <input type="search" value={invoiceFilters.query} onChange={(e) => setInvoiceFilters((f) => ({ ...f, query: e.target.value }))} placeholder="Buscar por receptor, RFC o folio..." />
             </div>
-            <select value={invoiceFilters.type} onChange={(e) => setInvoiceFilters((f) => ({ ...f, type: e.target.value }))}>
-              <option value="todos">Tipo: Todos</option>
-              <option value="maintenance_fee">Cuota</option>
-              <option value="incident">Incidencia</option>
-            </select>
             <select value={invoiceFilters.status} onChange={(e) => setInvoiceFilters((f) => ({ ...f, status: e.target.value }))}>
               <option value="todos">Estatus: Todos</option>
               <option value="issued">Emitida</option>
