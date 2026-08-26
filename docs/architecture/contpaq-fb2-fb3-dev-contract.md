@@ -1,6 +1,6 @@
 # CONTPAQ FB-2 / FB-3 — contrato de integración DEV
 
-Estado: diseño DEV-first. No habilita exportación CONTPAQ ni toca PROD.
+Estado: DEV-first. No habilita exportación CONTPAQ ni toca PROD.
 
 ## Objetivo
 
@@ -14,81 +14,128 @@ Integrar la captura de hechos fiscales CFDI (FB-2) y completar mappings contable
 - No reutilizar `payment_documents` / `payment_document_extractions` para CFDI: esas tablas están acopladas a lotes/comprobantes bancarios (`batch_id`, `page_number`, campos BBVA).
 - No guardar XML completo en tablas; el original permanece en Supabase Storage.
 
-## FB-2 — contrato del parser
+## FB-2 — parser certificado recibido
 
-Flux debe consumir el parser CFDI 4.0 ya certificado en Feeder-A mediante una API browser-ready, determinista y sin red/IA.
+Handoff recibido en PR #422, commit `53eaa4a`.
 
-Interfaz esperada:
+Origen declarado por Carlos:
+
+- `carlosquantta/flux-contpaq-export`
+- rama `feat/motor-agregacion`
+- core origen `6605c95`
+- suite del módulo: `104/104`
+- equivalencia navegador vs Node declarada: 3/3 fixtures sintéticos byte-a-byte.
+
+La app Flux no tiene bundler. Por ello no puede importar directamente la entrada Node que usa `fast-xml-parser`. El handoff separa:
+
+- `lib/parsers/cfdiCore.js`: regla fiscal, cero imports;
+- `lib/parsers/cfdiBrowser.js`: `DOMParser` nativo → mismo contrato de árbol → mismo core.
+
+La entrada browser detecta explícitamente `<parsererror>` porque `DOMParser` no lanza ante XML mal formado.
+
+Shape certificado consumido por Flux:
 
 ```js
-parseCfdiXml(input) -> {
+parseCfdiXml(xml) -> {
   version,
-  uuid,
-  fecha,
-  moneda,
-  tipoCambio,
-  subtotal,
-  descuento,
-  total,
+  comprobante: {
+    serie,
+    folio,
+    fecha,
+    tipoDeComprobante,
+    metodoPago,
+    formaPago,
+    moneda,
+    tipoCambio,
+    subTotal,
+    total
+  },
   emisor: { rfc, nombre, regimenFiscal },
-  receptor: { rfc, nombre, regimenFiscal, usoCfdi },
-  conceptos: [...],
-  traslados: [...],
-  retenciones: [...],
-  impuestos: {...}
+  receptor: { rfc, nombre, usoCfdi },
+  impuestos: {
+    traslados: [...],
+    retenciones: [...],
+    totalTrasladados,
+    totalRetenidos
+  },
+  uuid,
+  cfdiRelacionados: [...],
+  pagos,
+  nomina
 }
 ```
 
 El parser extrae hechos. No resuelve cuentas CONTPAQ, no decide retenciones y no genera póliza.
 
-Formato no soportado / archivo no CFDI: resultado controlado o error tipado según el contrato Feeder-A. CFDI reconocido pero inválido: error tipado y mensaje accionable.
+Formato no soportado / archivo no CFDI / XML mal formado produce `CfdiParseError` controlado. Flux no modifica el core recibido para adaptarlo a la UI: el adapter consume su shape certificado.
 
-## FB-2 — persistencia propuesta
+## FB-2 — validación contra Solicitud
 
-Crear una entidad fiscal específica de solicitud, separada de las extracciones bancarias. Nombre sugerido: `payment_request_cfdi_facts`.
+`lib/contpaq/cfdiValidation.js` compara únicamente hechos que Flux ya conoce:
 
-Campos mínimos:
+- CFDI 4.0;
+- UUID presente;
+- RFC receptor vs RFC de empresa, cuando la empresa tenga RFC configurado;
+- RFC emisor vs RFC de proveedor legacy, cuando exista;
+- moneda;
+- total con tolerancia de $0.01.
 
-- `id uuid`
-- `payment_request_id uuid`
-- `company_id uuid`
-- `storage_path text`
-- `source_sha256 text`
-- `parser_version text`
-- `parse_status text` (`parsed`, `review_required`, `invalid`)
-- `cfdi_version text`
-- `cfdi_uuid text`
-- `issued_at timestamptz`
-- `currency text`
-- `exchange_rate numeric`
-- `subtotal numeric`
-- `discount numeric`
-- `total numeric`
-- `emitter_rfc text`
-- `emitter_name text`
-- `emitter_tax_regime text`
-- `receiver_rfc text`
-- `receiver_name text`
-- `receiver_tax_regime text`
-- `receiver_cfdi_use text`
-- `concepts jsonb`
-- `transferred_taxes jsonb`
-- `withheld_taxes jsonb`
-- `normalized_facts jsonb`
-- auditoría (`created_at`, `updated_at`, `created_by`)
+Mismatch conocido → `review_required`.
+
+Dato de referencia faltante en Flux → warning, no bloqueo. Esto es necesario porque el DEV actual solo tiene RFC en 2/5 empresas activas y 5/44 proveedores legacy.
+
+## FB-2 — integración con uploader actual
+
+`upload_helper.js` sigue siendo el único uploader. Después de una carga exitosa:
+
+- solo XML;
+- solo carpeta `solicitudes/{payment_request_id}`;
+- carga `lib/contpaq/cfdiIngestion.js` por `import()` dinámico;
+- parsea y valida;
+- persiste hechos fiscales;
+- devuelve siempre el `storage_path` si la carga a Storage ya fue exitosa.
+
+Por tanto, un error de parseo/ingestión **no revierte ni rompe la creación de la solicitud ni el vínculo del archivo**. Queda auditado como `invalid` o como análisis pendiente.
+
+La necesidad futura de soportar PDF + XML simultáneos se resolverá en una rebanada documental aparte; no se fuerza dentro de FB-2 para evitar romper el contrato singular actual.
+
+## FB-2 — persistencia versionada
+
+Migración:
+
+`20260826153000_payment_request_cfdi_facts.sql`
+
+Entidad: `payment_request_cfdi_facts`.
+
+Columnas estables extraídas para búsqueda/validación:
+
+- `payment_request_id`
+- `company_id`
+- `storage_path`
+- `source_sha256`
+- `parser_version`
+- `parse_status` (`parsed`, `review_required`, `invalid`)
+- `cfdi_version`
+- `cfdi_uuid`
+- `issued_at timestamp without time zone` — CFDI `Fecha` no incluye zona horaria
+- `currency`
+- `subtotal`
+- `total`
+- `emitter_rfc`
+- `receiver_rfc`
+- `normalized_facts jsonb` — conserva el output completo certificado
+- `validation_result jsonb`
+- `parse_error`
+- auditoría (`created_by`, `created_at`)
 
 Restricciones:
 
-- única por `(payment_request_id, source_sha256)` para idempotencia de ingestión;
-- `cfdi_uuid` único por compañía cuando no sea nulo, sujeto a validar la semántica final de sustituciones/cancelaciones;
-- RLS por membresía activa de `company_id` y rol autorizado; no usar `TO authenticated` como autorización suficiente;
+- idempotencia única por `(payment_request_id, source_sha256)`;
+- `cfdi_uuid` queda indexado por compañía, **no hard-unique**, hasta definir formalmente duplicados/sustituciones/cancelaciones;
+- evidencia cliente inmutable: `authenticated` recibe `SELECT, INSERT`, no `UPDATE/DELETE`;
+- RLS habilitada y forzada;
+- políticas heredan visibilidad/escritura de la solicitud padre y validan el mismo `company_id`;
 - ningún campo de cuenta contable en esta tabla.
-
-## Compatibilidad con archivos actuales
-
-El flujo actual ya acepta XML en `upload_helper.js` y guarda el path en `payment_requests.invoice_storage_path`. FB-2 debe engancharse después de una carga XML exitosa y parsear el mismo archivo, sin crear un segundo uploader.
-
-La necesidad futura de soportar PDF + XML simultáneos se resolverá en una rebanada documental aparte; no se fuerza dentro de FB-2 para evitar romper el contrato singular actual.
 
 ## FB-3 — mappings
 
@@ -143,11 +190,12 @@ Consecuencia: no crear mappings automáticos por `last4` ni por nombre parcial. 
 FB-2 puede considerarse listo para UAT cuando:
 
 1. parser certificado Feeder-A está versionado/consumible desde Flux;
-2. XML subido en Solicitudes genera hechos fiscales deterministas e idempotentes;
-3. archivo no XML no dispara parser;
-4. XML inválido no rompe la creación de la solicitud y queda revisión/error controlado;
-5. RLS y aislamiento por compañía pasan negativos;
-6. no existe lógica de Tax Resolver ni exportación en esta rebanada.
+2. contratos parser + validación + ingestión pasan CI;
+3. migración `payment_request_cfdi_facts` aplica en DEV y RLS negativos pasan;
+4. XML subido en Solicitudes genera hechos fiscales deterministas e idempotentes;
+5. archivo no XML no dispara parser;
+6. XML inválido no rompe la creación de la solicitud y queda error controlado;
+7. no existe lógica de Tax Resolver ni exportación en esta rebanada.
 
 FB-3 puede considerarse listo para UAT cuando:
 
