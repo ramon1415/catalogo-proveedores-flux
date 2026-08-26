@@ -17,4 +17,3 @@ export function jsPDF(...args) {
 }
 
 jsPDF.API = CoreJsPDF.API;
-

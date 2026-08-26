@@ -297,4 +297,3 @@ comment on function public.get_approval_batch_decision_notification_document(uui
   is 'Service-only final weekly-cut decision document for the single submitted_by recipient.';
 
 commit;
-

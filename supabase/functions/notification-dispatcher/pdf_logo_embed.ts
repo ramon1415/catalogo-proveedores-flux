@@ -5,4 +5,3 @@ export function addEmbeddedSystemPdfLogo(doc) {
   doc.addImage(SYSTEM_PDF_LOGO_DATA_URL, "PNG", pageWidth - 36 - 80, 22, 80, 32);
   return doc;
 }
-
