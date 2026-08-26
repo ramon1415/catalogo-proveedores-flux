@@ -31,6 +31,7 @@ export default function App() {
         <Route index element={<Navigate to="/proveedores" replace />} />
         <Route path="proveedores" element={<ProveedoresPage />} />
         <Route path="efectivo" element={<EfectivoPage />} />
+        {/* Secciones aún no migradas: puente a la app vanilla. */}
         {LEGACY_ROUTES.map((path) => <Route key={path} path={path} element={<SectionPending />} />)}
         <Route path="*" element={<Navigate to="/proveedores" replace />} />
       </Route>
