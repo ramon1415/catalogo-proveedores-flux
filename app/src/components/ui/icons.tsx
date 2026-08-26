@@ -10,6 +10,9 @@ export const IcSolicitudes = ({ size }: P) => (
 export const IcLayouts = ({ size }: P) => (
   <svg {...svg(size)}><polygon points="12 3 21 8 12 13 3 8" /><polyline points="3 12 12 17 21 12" /><polyline points="3 16 12 21 21 16" /></svg>
 )
+export const IcReceiptBatches = ({ size }: P) => (
+  <svg {...svg(size)}><rect x="6" y="3" width="12" height="15" rx="2" /><path d="M9 8h6M9 12h4" /><path d="m14.5 16 1.5 1.5 3-3" /><path d="M4 7v12a2 2 0 0 0 2 2h9" /></svg>
+)
 export const IcEfectivo = ({ size }: P) => (
   <svg {...svg(size)}><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.4" /></svg>
 )
@@ -22,11 +25,20 @@ export const IcIncidencias = ({ size }: P) => (
 export const IcProveedores = ({ size }: P) => (
   <svg {...svg(size)}><rect x="4" y="4" width="16" height="16" rx="1.5" /><path d="M9 20v-4h6v4" /><line x1="8" y1="8" x2="8.01" y2="8" /><line x1="12" y1="8" x2="12.01" y2="8" /><line x1="16" y1="8" x2="16.01" y2="8" /></svg>
 )
+export const IcProviderIntakes = ({ size }: P) => (
+  <svg {...svg(size)}><path d="M7 3h8l3 3v15H7z" /><path d="M15 3v4h4" /><circle cx="12" cy="12" r="2" /><path d="M9 18c.4-2 1.5-3 3-3s2.6 1 3 3" /></svg>
+)
 export const IcDashboard = ({ size }: P) => (
   <svg {...svg(size)}><rect x="3" y="3" width="7" height="7" rx="1.3" /><rect x="14" y="3" width="7" height="7" rx="1.3" /><rect x="3" y="14" width="7" height="7" rx="1.3" /><rect x="14" y="14" width="7" height="7" rx="1.3" /></svg>
 )
+export const IcDashboardAnnual = ({ size }: P) => (
+  <svg {...svg(size)}><path d="M4 20h16" /><rect x="5" y="12" width="3" height="6" rx=".5" /><rect x="10.5" y="8" width="3" height="10" rx=".5" /><rect x="16" y="4" width="3" height="14" rx=".5" /></svg>
+)
 export const IcAprobaciones = ({ size }: P) => (
   <svg {...svg(size)}><circle cx="12" cy="12" r="9" /><path d="M8 12l2.8 2.8L16 9" /></svg>
+)
+export const IcApprovalBatches = ({ size }: P) => (
+  <svg {...svg(size)}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /><path d="m8 15 2.2 2.2L16 12" /></svg>
 )
 export const IcConfig = ({ size }: P) => (
   <svg {...svg(size)}><line x1="4" y1="8" x2="20" y2="8" /><circle cx="9" cy="8" r="2.3" /><line x1="4" y1="16" x2="20" y2="16" /><circle cx="15" cy="16" r="2.3" /></svg>

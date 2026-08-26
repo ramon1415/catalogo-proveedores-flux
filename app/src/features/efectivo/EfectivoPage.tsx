@@ -10,7 +10,7 @@ import {
 import type { CashBlockResult } from './api'
 import {
   makeLookups, computeStats, filterFunds, fundStatusBadge, canReview as canReviewRoles,
-  friendlyError, rlsHint,
+  friendlyRpcError, rlsHint,
 } from './logic'
 import type { CashFilters } from './logic'
 import type { CashData, ReviewAction, ProfileLite } from './types'
@@ -75,6 +75,13 @@ export default function EfectivoPage() {
     return filterFunds(data, filters, lookups)
   }, [data, lookups, filters])
 
+  function toggleStatusFilter(nextStatus: string) {
+    setFilters((current) => ({
+      ...current,
+      status: current.status === nextStatus ? 'todos' : nextStatus,
+    }))
+  }
+
   function ensureProfile(): boolean {
     if (currentProfile?.id) return true
     showToast('Perfil no identificado', 'No se pudo identificar tu perfil de usuario.', 'error')
@@ -88,7 +95,7 @@ export default function EfectivoPage() {
       showToast('Comprobación creada', 'Comprobación creada en borrador.', 'success')
       await reload()
     } catch (error: any) {
-      showToast('No se pudo crear comprobación', friendlyError(error), 'error')
+      showToast('No se pudo crear comprobación', friendlyRpcError(error), 'error')
     }
   }
 
@@ -102,7 +109,7 @@ export default function EfectivoPage() {
       const result = await verifyCashBlock(profileId)
       setBlockResults((prev) => ({ ...prev, [fundId]: result }))
     } catch (error) {
-      showToast('No se pudo verificar', friendlyError(error), 'error')
+      showToast('No se pudo verificar', friendlyRpcError(error), 'error')
       setBlockResults((prev) => {
         const next = { ...prev }
         delete next[fundId]
@@ -139,11 +146,21 @@ export default function EfectivoPage() {
 
       {stats && (
         <div className={s.statsGrid}>
-          <div className={`${s.statCard} ${s.accent}`}><p>Fondos activos</p><strong>{stats.activeCount}</strong></div>
-          <div className={`${s.statCard} ${s.warning}`}><p>Pendientes de comprobar</p><strong>{stats.pendingCount}</strong></div>
-          <div className={`${s.statCard} ${s.info}`}><p>En revisión</p><strong>{stats.reviewCount}</strong></div>
-          <div className={`${s.statCard} ${s.success}`}><p>Cerrados</p><strong>{stats.closedCount}</strong></div>
-          <div className={`${s.statCard} ${s.violet}`}><p>Monto pendiente</p><strong>{compactCurrency(stats.pendingAmount)}</strong></div>
+          <button type="button" className={`${s.statCard} ${s.accent} ${filters.status === 'activos' ? s.selected : ''}`} aria-pressed={filters.status === 'activos'} onClick={() => toggleStatusFilter('activos')}>
+            <p>Fondos activos</p><strong>{stats.activeCount}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.warning} ${filters.status === 'pendientes' ? s.selected : ''}`} aria-pressed={filters.status === 'pendientes'} onClick={() => toggleStatusFilter('pendientes')}>
+            <p>Pendientes de comprobar</p><strong>{stats.pendingCount}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.info} ${filters.status === 'en_revision' ? s.selected : ''}`} aria-pressed={filters.status === 'en_revision'} onClick={() => toggleStatusFilter('en_revision')}>
+            <p>En revisión</p><strong>{stats.reviewCount}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.success} ${filters.status === 'closed' ? s.selected : ''}`} aria-pressed={filters.status === 'closed'} onClick={() => toggleStatusFilter('closed')}>
+            <p>Cerrados</p><strong>{stats.closedCount}</strong>
+          </button>
+          <button type="button" className={`${s.statCard} ${s.violet} ${filters.status === 'con_pendiente' ? s.selected : ''}`} aria-pressed={filters.status === 'con_pendiente'} onClick={() => toggleStatusFilter('con_pendiente')}>
+            <p>Monto pendiente</p><strong>{compactCurrency(stats.pendingAmount)}</strong>
+          </button>
         </div>
       )}
 
@@ -155,6 +172,10 @@ export default function EfectivoPage() {
           </div>
           <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
             <option value="todos">Estatus: Todos</option>
+            <option value="activos">Fondos activos</option>
+            <option value="pendientes">Pendientes de comprobar</option>
+            <option value="en_revision">En revisión</option>
+            <option value="con_pendiente">Con monto pendiente</option>
             <option value="active">Activo</option>
             <option value="pending_receipt">Pendiente de comprobar</option>
             <option value="blocked">Bloqueado</option>

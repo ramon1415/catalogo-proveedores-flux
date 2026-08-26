@@ -6,9 +6,16 @@ name: Approval batch submitted DEV email and PDF contract
       - dev
     paths:
       - 'supabase/functions/approval-batch-submitted-dispatcher/**'
+      - 'supabase/functions/approval-batch-quick-approve/**'
+      - 'supabase/config.toml'
+      - 'approval_batch_quick_approve.html'
+      - 'approval_batch_quick_approve.css'
+      - 'approval_batch_quick_approve.js'
+      - 'supabase/migrations/20260826201712_approval_batch_quick_approve_dev.sql'
       - 'supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql'
       - 'supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql'
       - 'scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs'
+      - 'scripts/qa/approval-batch-quick-approve-contract.test.mjs'
       - 'docs/ops/approval-batch-submitted-email-dev.md'
       - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
 
@@ -52,7 +59,12 @@ jobs:
           set -euo pipefail
           node --version
           node --experimental-strip-types --test \
-            scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs
+            scripts/qa/approval-batch-submitted-email-dev-contract.test.mjs \
+            scripts/qa/approval-batch-quick-approve-contract.test.mjs
+
+          node --experimental-strip-types --input-type=module -e \
+            "await import('./supabase/functions/approval-batch-quick-approve/index.ts')"
+          node --check approval_batch_quick_approve.js
 
       - name: Validate DEV-only scope and scan for secrets
         shell: bash
@@ -63,7 +75,7 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_edge\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/pdf_logo\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed\.ts)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((approval_batch_quick_approve\.(html|css|js))|(supabase/config\.toml)|(supabase/functions/approval-batch-quick-approve/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/index\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/deno\.json)|(supabase/functions/approval-batch-submitted-dispatcher/jspdf_edge\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/pdf_logo\.ts)|(supabase/functions/approval-batch-submitted-dispatcher/pdf_logo_embed\.ts)|(supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev\.sql)|(supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev\.sql)|(supabase/migrations/20260826201712_approval_batch_quick_approve_dev\.sql)|(scripts/qa/approval-batch-submitted-email-dev-contract\.test\.mjs)|(scripts/qa/approval-batch-quick-approve-contract\.test\.mjs)|(docs/ops/approval-batch-submitted-email-dev\.md)|(docs/ops/approval-batch-quick-approve-dev\.md)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::DEV submitted-batch change contains a non-authorized path.'
             exit 1
@@ -97,6 +109,14 @@ jobs:
             supabase/migrations/20260824204217_approval_batch_submitted_email_pdf_dev.sql
           grep -q "'requester_name', requester.full_name" \
             supabase/migrations/20260824224716_approval_batch_submitted_system_pdf_fields_dev.sql
+          grep -q 'approval_batch_quick_approve.html#token=' \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          ! grep -q 'approval_batch_quick_approve.html?token=' \
+            supabase/functions/approval-batch-submitted-dispatcher/index.ts
+          grep -q 'force row level security' \
+            supabase/migrations/20260826201712_approval_batch_quick_approve_dev.sql
+          ! grep -R -E 'localStorage|sessionStorage|document\.cookie' \
+            approval_batch_quick_approve.{html,js}
 
           echo 'scope=DEV_only'
           echo 'pdf_contract=approval_batches.js_jsPDF_2.5.2_autoTable_3.8.4'
