@@ -10,7 +10,7 @@ import {
 import type { CashBlockResult } from './api'
 import {
   makeLookups, computeStats, filterFunds, fundStatusBadge, canReview as canReviewRoles,
-  friendlyError, friendlyRpcError, rlsHint,
+  friendlyRpcError, rlsHint,
 } from './logic'
 import type { CashFilters } from './logic'
 import type { CashData, ReviewAction, ProfileLite } from './types'
