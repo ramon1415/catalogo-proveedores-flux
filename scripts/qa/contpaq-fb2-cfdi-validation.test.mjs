@@ -9,7 +9,7 @@ const api = await import(dataUrl)
 const baseFacts = {
   version: '4.0',
   uuid: '11111111-2222-3333-4444-555555555555',
-  comprobante: { moneda: 'MXN', total: 1000 },
+  comprobante: { tipoDeComprobante: 'I', moneda: 'MXN', total: 1000 },
   emisor: { rfc: 'AAA010101AAA' },
   receptor: { rfc: 'BBB010101BBB' },
 }
@@ -26,13 +26,14 @@ test('FB-2 exact parser shape remains parsed and requires no review', () => {
   assert.equal(result.status, 'parsed')
   assert.deepEqual(result.reviewReasons, [])
   assert.equal(result.checks.filter((item) => item.result === 'pass').length, 6)
+  assert.equal(result.comparison.source, 'comprobante')
 })
 
 test('FB-2 known RFC, currency or amount mismatch is review_required, never silently corrected', () => {
   const result = api.validateCfdiAgainstRequest(
     {
       ...baseFacts,
-      comprobante: { moneda: 'USD', total: 999.5 },
+      comprobante: { tipoDeComprobante: 'I', moneda: 'USD', total: 999.5 },
       emisor: { rfc: 'CCC010101CCC' },
       receptor: { rfc: 'DDD010101DDD' },
     },
@@ -45,6 +46,43 @@ test('FB-2 known RFC, currency or amount mismatch is review_required, never sile
   assert.ok(result.reviewReasons.includes('total_mismatch'))
 })
 
+test('FB-2 REP/P compares effective payment amount and MonedaP, not Comprobante 0/XXX', () => {
+  const facts = {
+    ...baseFacts,
+    comprobante: { tipoDeComprobante: 'P', moneda: 'XXX', subTotal: 0, total: 0 },
+    pagosTotales: { montoTotalPagos: 62391.01 },
+    pagos: [{ monedaP: 'MXN', tipoCambioP: 1, montoP: 62391.01, doctoRelacionado: [] }],
+  }
+  const context = { ...baseContext, amountRequested: 62391.01 }
+  const result = api.validateCfdiAgainstRequest(facts, context)
+
+  assert.equal(result.status, 'parsed')
+  assert.deepEqual(result.reviewReasons, [])
+  assert.equal(result.comparison.tipoDeComprobante, 'P')
+  assert.equal(result.comparison.currency, 'MXN')
+  assert.equal(result.comparison.total, 62391.01)
+  assert.equal(result.comparison.source, 'pagos_totales')
+  assert.ok(!result.reviewReasons.includes('currency_mismatch'))
+  assert.ok(!result.reviewReasons.includes('total_mismatch'))
+})
+
+test('FB-2 T/N do not compare misleading Comprobante total/currency', () => {
+  for (const tipoDeComprobante of ['T', 'N']) {
+    const result = api.validateCfdiAgainstRequest(
+      {
+        ...baseFacts,
+        comprobante: { tipoDeComprobante, moneda: 'XXX', total: 0 },
+      },
+      baseContext,
+    )
+    assert.equal(result.status, 'review_required')
+    assert.ok(result.reviewReasons.includes('cfdi_tipo_no_comparable'))
+    assert.ok(!result.reviewReasons.includes('currency_mismatch'))
+    assert.ok(!result.reviewReasons.includes('total_mismatch'))
+    assert.equal(result.comparison.comparable, false)
+  }
+})
+
 test('FB-2 missing company/provider RFC is warning-only because DEV catalog is incomplete', () => {
   const result = api.validateCfdiAgainstRequest(baseFacts, { currency: 'MXN', amountRequested: 1000 })
   assert.equal(result.status, 'parsed')
@@ -53,7 +91,7 @@ test('FB-2 missing company/provider RFC is warning-only because DEV catalog is i
   assert.equal(result.reviewReasons.length, 0)
 })
 
-test('FB-2 amount comparison has one-cent tolerance on comprobante.total', () => {
+test('FB-2 amount comparison has one-cent tolerance on comparable amount', () => {
   const inside = api.validateCfdiAgainstRequest(
     { ...baseFacts, comprobante: { ...baseFacts.comprobante, total: 1000.01 } },
     baseContext,
