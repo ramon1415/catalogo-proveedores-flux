@@ -1,6 +1,9 @@
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import Login from './pages/Login'
+import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
+import ProveedoresPage from './features/proveedores/ProveedoresPage'
 
 export default function App() {
   const { session, loading } = useAuth()
@@ -8,20 +11,21 @@ export default function App() {
   if (!session) return <Login />
 
   return (
-    <AppShell kicker="Operación · Solicitudes">
-      <div className="phead">
-        <div>
-          <h1>Solicitudes de pago</h1>
-          <p className="muted">Bandeja de solicitudes del periodo</p>
-        </div>
-      </div>
-      <div className="card wide">
-        <b>F2 · Design system + menú ✓</b>
-        <p className="muted">
-          El shell con nav colapsable (expande en hover), íconos SVG, tema claro/oscuro y contexto de empresa.
-          Las features (tabla, filtros, modal) llegan al migrar cada pantalla en F3+.
-        </p>
-      </div>
-    </AppShell>
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<Navigate to="/proveedores" replace />} />
+        <Route path="proveedores" element={<ProveedoresPage />} />
+        {/* Secciones aún no migradas: puente a la app vanilla. */}
+        <Route path="solicitudes" element={<SectionPending />} />
+        <Route path="layouts" element={<SectionPending />} />
+        <Route path="efectivo" element={<SectionPending />} />
+        <Route path="ingresos" element={<SectionPending />} />
+        <Route path="incidencias" element={<SectionPending />} />
+        <Route path="dashboard" element={<SectionPending />} />
+        <Route path="aprobaciones" element={<SectionPending />} />
+        <Route path="configuracion" element={<SectionPending />} />
+        <Route path="*" element={<Navigate to="/proveedores" replace />} />
+      </Route>
+    </Routes>
   )
 }

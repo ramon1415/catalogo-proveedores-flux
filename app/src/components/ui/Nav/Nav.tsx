@@ -1,36 +1,13 @@
-import type { ReactNode } from 'react'
+import { NavLink } from 'react-router-dom'
 import s from './Nav.module.css'
 import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useCompany } from '../../../lib/company'
-import {
-  IcSolicitudes, IcLayouts, IcEfectivo, IcIngresos, IcIncidencias, IcProveedores,
-  IcDashboard, IcAprobaciones, IcConfig, IcUser, IcLogout,
-} from '../icons'
+import { IcUser, IcLogout } from '../icons'
+import { NAV_SECTIONS } from './navModel'
 
-type Item = { key: string; label: string; icon: ReactNode }
-type Section = { title: string; items: Item[] }
-
-const SECTIONS: Section[] = [
-  { title: 'Operación', items: [
-    { key: 'solicitudes', label: 'Solicitudes de pago', icon: <IcSolicitudes /> },
-    { key: 'layouts', label: 'Layouts de pago', icon: <IcLayouts /> },
-    { key: 'efectivo', label: 'Efectivo', icon: <IcEfectivo /> },
-    { key: 'ingresos', label: 'Ingresos', icon: <IcIngresos /> },
-    { key: 'incidencias', label: 'Incidencias', icon: <IcIncidencias /> },
-    { key: 'proveedores', label: 'Proveedores', icon: <IcProveedores /> },
-  ]},
-  { title: 'General', items: [
-    { key: 'dashboard', label: 'Dashboard', icon: <IcDashboard /> },
-    { key: 'aprobaciones', label: 'Aprobaciones', icon: <IcAprobaciones /> },
-  ]},
-  { title: 'Configuración', items: [
-    { key: 'configuracion', label: 'Configuración', icon: <IcConfig /> },
-  ]},
-]
-
-export function Nav({ active = 'solicitudes', onNavigate }: { active?: string; onNavigate?: (key: string) => void }) {
+export function Nav() {
   const { profile, session, signOut } = useAuth()
   const { companyName } = useCompany()
 
@@ -45,18 +22,18 @@ export function Nav({ active = 'solicitudes', onNavigate }: { active?: string; o
       </div>
 
       <nav className={s.nav}>
-        {SECTIONS.map((sec) => (
+        {NAV_SECTIONS.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => (
-              <button
+              <NavLink
                 key={it.key}
-                className={`${s.item} ${active === it.key ? s.active : ''}`}
-                onClick={() => onNavigate?.(it.key)}
+                to={it.path}
+                className={({ isActive }) => `${s.item} ${isActive ? s.active : ''}`}
               >
                 {it.icon}
                 <span className={s.txt}>{it.label}</span>
-              </button>
+              </NavLink>
             ))}
           </div>
         ))}
