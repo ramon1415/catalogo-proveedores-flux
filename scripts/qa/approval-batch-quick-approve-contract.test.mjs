@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   renderApprovalBatchSubmittedEmail,
+  resolveQuickApprovalRuntimeConfig,
   signQuickApprovalToken,
 } from "../../supabase/functions/approval-batch-submitted-dispatcher/index.ts";
 import { handleRequest } from "../../supabase/functions/approval-batch-quick-approve/index.ts";
@@ -80,6 +81,35 @@ test("feature flag fallback preserves the current single-CTA email", () => {
   assert.match(rendered.html, />Revisar y autorizar corte</);
   assert.doesNotMatch(rendered.html, />Aprobar corte</);
   assert.match(rendered.html, /mismo formato disponible en el botón PDF/);
+});
+
+test("missing Edge flag reads the service-only Vault runtime config and explicit false wins", async () => {
+  let calls = 0;
+  const fetchMock = async (url) => {
+    calls += 1;
+    assert.match(String(url), /\/rpc\/get_approval_batch_quick_approval_runtime_config$/);
+    return Response.json({ enabled: true, secret: SECRET });
+  };
+  const fallback = await resolveQuickApprovalRuntimeConfig(
+    {
+      env: () => undefined,
+      fetch: fetchMock,
+    },
+    "https://ucantptjhwttexzmslvm.supabase.co",
+    "service-role-contract",
+  );
+  assert.deepEqual(fallback, { enabled: true, secret: SECRET });
+  assert.equal(calls, 1);
+
+  const disabled = await resolveQuickApprovalRuntimeConfig(
+    {
+      env: (name) => name === "APPROVAL_BATCH_QUICK_APPROVE_ENABLED" ? "false" : undefined,
+      fetch: async () => { throw new Error("explicit false must not query Vault"); },
+    },
+    "https://ucantptjhwttexzmslvm.supabase.co",
+    "service-role-contract",
+  );
+  assert.deepEqual(disabled, { enabled: false, secret: "" });
 });
 
 test("HMAC token is deterministic for the same event and uses two base64url segments", async () => {
