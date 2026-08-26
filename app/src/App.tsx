@@ -5,6 +5,21 @@ import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
 import ProveedoresPage from './features/proveedores/ProveedoresPage'
 
+const LEGACY_ROUTES = [
+  'solicitudes',
+  'layouts',
+  'comprobantes-batch',
+  'efectivo',
+  'ingresos',
+  'incidencias',
+  'solicitudes-proveedores',
+  'dashboard',
+  'dashboard-anual',
+  'aprobaciones',
+  'cortes-semanales',
+  'configuracion',
+]
+
 export default function App() {
   const { session, loading } = useAuth()
   if (loading) return <div className="center muted">Cargando…</div>
@@ -16,14 +31,7 @@ export default function App() {
         <Route index element={<Navigate to="/proveedores" replace />} />
         <Route path="proveedores" element={<ProveedoresPage />} />
         {/* Secciones aún no migradas: puente a la app vanilla. */}
-        <Route path="solicitudes" element={<SectionPending />} />
-        <Route path="layouts" element={<SectionPending />} />
-        <Route path="efectivo" element={<SectionPending />} />
-        <Route path="ingresos" element={<SectionPending />} />
-        <Route path="incidencias" element={<SectionPending />} />
-        <Route path="dashboard" element={<SectionPending />} />
-        <Route path="aprobaciones" element={<SectionPending />} />
-        <Route path="configuracion" element={<SectionPending />} />
+        {LEGACY_ROUTES.map((path) => <Route key={path} path={path} element={<SectionPending />} />)}
         <Route path="*" element={<Navigate to="/proveedores" replace />} />
       </Route>
     </Routes>
