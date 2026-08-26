@@ -4,12 +4,12 @@ import Login from './pages/Login'
 import SectionPending from './pages/SectionPending'
 import { AppShell } from './components/ui/AppShell'
 import ProveedoresPage from './features/proveedores/ProveedoresPage'
+import EfectivoPage from './features/efectivo/EfectivoPage'
 
 const LEGACY_ROUTES = [
   'solicitudes',
   'layouts',
   'comprobantes-batch',
-  'efectivo',
   'ingresos',
   'incidencias',
   'solicitudes-proveedores',
@@ -30,6 +30,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/proveedores" replace />} />
         <Route path="proveedores" element={<ProveedoresPage />} />
+        <Route path="efectivo" element={<EfectivoPage />} />
         {/* Secciones aún no migradas: puente a la app vanilla. */}
         {LEGACY_ROUTES.map((path) => <Route key={path} path={path} element={<SectionPending />} />)}
         <Route path="*" element={<Navigate to="/proveedores" replace />} />

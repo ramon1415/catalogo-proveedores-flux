@@ -12,6 +12,7 @@
   vertical-align: middle;
 }
 .success { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.accent  { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-text, var(--accent)); border-color: color-mix(in srgb, var(--accent) 44%, transparent); }
 .neutral { background: var(--bg-hover); color: var(--text-3); border-color: var(--border); }
 .info    { background: color-mix(in srgb, #6ea8fe 15%, transparent); color: #9ec3ff; border-color: color-mix(in srgb, #6ea8fe 30%, transparent); }
 .warning { background: color-mix(in srgb, var(--amber, #e0a53a) 16%, transparent); color: var(--amber, #e0a53a); border-color: color-mix(in srgb, var(--amber, #e0a53a) 32%, transparent); }
