@@ -345,23 +345,42 @@ export function renderApprovalBatchSubmittedEmail(
   return { subject, text, html };
 }
 
-async function buildQuickApprovalUrl(event, workerId, runtime, supabaseUrl, serviceRoleKey) {
-  if (optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_ENABLED", "false").toLowerCase() !== "true") {
-    return null;
+export async function resolveQuickApprovalRuntimeConfig(
+  runtime,
+  supabaseUrl,
+  serviceRoleKey,
+) {
+  const envFlag = optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_ENABLED").toLowerCase();
+  let secret = optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_SECRET");
+
+  // An explicit Edge flag always wins. A missing flag falls back to the
+  // service-role-only Vault contract so production can remain fail-closed
+  // without requiring the secret value in source or deployment payloads.
+  if (envFlag && envFlag !== "true") return { enabled: false, secret: "" };
+  if (envFlag === "true" && secret.length >= 32) return { enabled: true, secret };
+
+  const config = await callRpc(
+    runtime.fetch,
+    supabaseUrl,
+    serviceRoleKey,
+    "get_approval_batch_quick_approval_runtime_config",
+    {},
+  );
+  const enabled = envFlag === "true" || (envFlag === "" && config?.enabled === true);
+  if (secret.length < 32) {
+    secret = typeof config?.secret === "string" ? config.secret.trim() : "";
   }
+  return { enabled: enabled && secret.length >= 32, secret };
+}
+
+async function buildQuickApprovalUrl(event, workerId, runtime, supabaseUrl, serviceRoleKey) {
   try {
-    let secret = optionalEnv(runtime, "APPROVAL_BATCH_QUICK_APPROVE_SECRET");
-    if (secret.length < 32) {
-      const config = await callRpc(
-        runtime.fetch,
-        supabaseUrl,
-        serviceRoleKey,
-        "get_approval_batch_quick_approval_runtime_config",
-        {},
-      );
-      secret = typeof config?.secret === "string" ? config.secret.trim() : "";
-    }
-    if (secret.length < 32) return null;
+    const config = await resolveQuickApprovalRuntimeConfig(
+      runtime,
+      supabaseUrl,
+      serviceRoleKey,
+    );
+    if (!config.enabled) return null;
     const material = await callRpc(
       runtime.fetch,
       supabaseUrl,
@@ -373,7 +392,7 @@ async function buildQuickApprovalUrl(event, workerId, runtime, supabaseUrl, serv
         p_ttl_seconds: quickApprovalTtlSeconds(runtime),
       },
     );
-    const token = await signQuickApprovalToken(material, secret);
+    const token = await signQuickApprovalToken(material, config.secret);
     return `${FLUX_URL}/approval_batch_quick_approve.html#token=${token}`;
   } catch {
     return null;
