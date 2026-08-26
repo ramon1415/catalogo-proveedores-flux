@@ -10,7 +10,7 @@ import {
 import type { CashBlockResult } from './api'
 import {
   makeLookups, computeStats, filterFunds, fundStatusBadge, canReview as canReviewRoles,
-  friendlyError, rlsHint,
+  friendlyError, friendlyRpcError, rlsHint,
 } from './logic'
 import type { CashFilters } from './logic'
 import type { CashData, ReviewAction, ProfileLite } from './types'
@@ -88,7 +88,7 @@ export default function EfectivoPage() {
       showToast('Comprobación creada', 'Comprobación creada en borrador.', 'success')
       await reload()
     } catch (error: any) {
-      showToast('No se pudo crear comprobación', friendlyError(error), 'error')
+      showToast('No se pudo crear comprobación', friendlyRpcError(error), 'error')
     }
   }
 
@@ -102,7 +102,7 @@ export default function EfectivoPage() {
       const result = await verifyCashBlock(profileId)
       setBlockResults((prev) => ({ ...prev, [fundId]: result }))
     } catch (error) {
-      showToast('No se pudo verificar', friendlyError(error), 'error')
+      showToast('No se pudo verificar', friendlyRpcError(error), 'error')
       setBlockResults((prev) => {
         const next = { ...prev }
         delete next[fundId]
