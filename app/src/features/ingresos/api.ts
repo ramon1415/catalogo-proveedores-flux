@@ -3,34 +3,55 @@ import type { IngresosData, MemberPayload, PeriodPayload, InvoiceType } from './
 
 const UPLOAD_BUCKET = 'payment-receipts'
 
-// Carga en paralelo idéntica a loadData() del vanilla. Lanza si CUALQUIER
-// consulta falla (el vanilla muestra toast "No se pudo cargar" ante el primer error).
-export async function loadIngresosData(): Promise<IngresosData> {
+// Cada ruta carga únicamente sus fuentes operativas. Así una falla de cuotas no
+// bloquea Incidencias (ni una falla de incidentes bloquea Ingresos).
+export async function loadIngresosData(mode: 'income' | 'incidents'): Promise<IngresosData> {
+  if (mode === 'incidents') {
+    const reqs = await Promise.all([
+      supabase.from('members').select('*').order('full_name', { ascending: true }),
+      supabase.from('incident_charges').select('*').order('incident_date', { ascending: false }),
+      supabase.from('invoices').select('*').eq('invoice_type', 'incident').order('issue_date', { ascending: false }),
+      supabase.from('companies').select('id,name,legal_name,active').order('name', { ascending: true }),
+      supabase.from('cost_centers').select('id,name,code,company_id,active').order('name', { ascending: true }),
+      supabase.from('budget_categories').select('id,code,name,category,budget_type,active').order('code', { ascending: true }),
+    ])
+    const err = reqs.find((r) => r.error)?.error
+    if (err) throw err
+    return {
+      members: reqs[0].data ?? [],
+      periods: [],
+      charges: [],
+      payments: [],
+      incidents: reqs[1].data ?? [],
+      invoices: reqs[2].data ?? [],
+      companies: reqs[3].data ?? [],
+      costCenters: reqs[4].data ?? [],
+      categories: reqs[5].data ?? [],
+    } as IngresosData
+  }
+
   const reqs = await Promise.all([
     supabase.from('members').select('*').order('full_name', { ascending: true }),
     supabase.from('billing_periods').select('*').order('cutoff_date', { ascending: false }),
     supabase.from('maintenance_fee_charges').select('*').order('created_at', { ascending: false }),
     supabase.from('maintenance_fee_payments').select('*').order('created_at', { ascending: false }),
-    supabase.from('incident_charges').select('*').order('incident_date', { ascending: false }),
-    supabase.from('invoices').select('*').order('issue_date', { ascending: false }),
+    supabase.from('invoices').select('*').eq('invoice_type', 'maintenance_fee').order('issue_date', { ascending: false }),
     supabase.from('companies').select('id,name,legal_name,active').order('name', { ascending: true }),
     supabase.from('cost_centers').select('id,name,code,company_id,active').order('name', { ascending: true }),
     supabase.from('budget_categories').select('id,code,name,category,budget_type,active').order('code', { ascending: true }),
   ])
-
   const err = reqs.find((r) => r.error)?.error
   if (err) throw err
-
   return {
     members: reqs[0].data ?? [],
     periods: reqs[1].data ?? [],
     charges: reqs[2].data ?? [],
     payments: reqs[3].data ?? [],
-    incidents: reqs[4].data ?? [],
-    invoices: reqs[5].data ?? [],
-    companies: reqs[6].data ?? [],
-    costCenters: reqs[7].data ?? [],
-    categories: reqs[8].data ?? [],
+    incidents: [],
+    invoices: reqs[4].data ?? [],
+    companies: reqs[5].data ?? [],
+    costCenters: reqs[6].data ?? [],
+    categories: reqs[7].data ?? [],
   } as IngresosData
 }
 

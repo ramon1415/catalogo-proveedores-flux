@@ -199,7 +199,7 @@ export function formatMonth(value: string | null): string {
 
 // ── Detalle de aprobador ──────────────────────────────────────
 export function approverDetailLabel(row: ApproverDetails | null | undefined): string {
-  if (!row?.profile_id) return 'Sin revisor asignado'
+  if (!row?.profile_id) return 'Aprobador no registrado'
   const roles = Array.isArray(row.eligible_roles) && row.eligible_roles.length ? ` · ${row.eligible_roles.join(', ')}` : ''
   const source =
     row.source === 'assigned'

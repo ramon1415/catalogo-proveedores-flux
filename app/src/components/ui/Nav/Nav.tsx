@@ -8,7 +8,10 @@ import { NAV_SECTIONS } from './navModel'
 import { CompanySwitcher } from './CompanySwitcher'
 
 export function Nav() {
-  const { profile, session, signOut } = useAuth()
+  const { profile, session, group, signOut } = useAuth()
+  const sections = NAV_SECTIONS
+    .map((section) => ({ ...section, items: section.items.filter((item) => item.groups.includes(group)) }))
+    .filter((section) => section.items.length > 0)
 
   return (
     <aside className={s.rail}>
@@ -19,7 +22,7 @@ export function Nav() {
       <CompanySwitcher />
 
       <nav className={s.nav}>
-        {NAV_SECTIONS.map((sec) => (
+        {sections.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => (

@@ -1,16 +1,25 @@
 import type { ReactNode } from 'react'
+import { ROLE_GROUPS } from '../../../lib/roles'
+import type { RoleGroup } from '../../../lib/roles'
 import {
-  IcSolicitudes, IcLayouts, IcEfectivo, IcIngresos, IcIncidencias, IcProveedores,
-  IcDashboard, IcAprobaciones, IcConfig,
+  IcSolicitudes, IcLayouts, IcReceiptBatches, IcEfectivo, IcIngresos, IcIncidencias,
+  IcProveedores, IcProviderIntakes, IcDashboard, IcDashboardAnnual, IcAprobaciones,
+  IcApprovalBatches, IcConfig,
 } from '../icons'
+
+const ALL_ACTIVE: RoleGroup[] = [
+  ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION, ROLE_GROUPS.OPERATION,
+]
+const MANAGE: RoleGroup[] = [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION]
+const FINANCE: RoleGroup[] = [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN]
 
 export type NavItem = {
   key: string
   label: string
   path: string
   icon: ReactNode
+  groups: RoleGroup[]
   migrated?: boolean
-  // Página vanilla equivalente (para redirigir mientras la sección no está migrada).
   vanillaHref?: string
 }
 
@@ -20,25 +29,29 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Operación',
     items: [
-      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, migrated: true },
-      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, migrated: true },
-      { key: 'efectivo', label: 'Efectivo', path: '/efectivo', icon: <IcEfectivo />, migrated: true },
-      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, migrated: true },
-      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, migrated: true },
-      { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, migrated: true },
+      { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, migrated: true },
+      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, migrated: true },
+      { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE, vanillaHref: '/comprobantes_batch.html' },
+      { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, migrated: true },
+      { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, migrated: true },
+      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, migrated: true },
+      { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, migrated: true },
+      { key: 'solicitudes-proveedores', label: 'Solicitudes de proveedores', path: '/solicitudes-proveedores', icon: <IcProviderIntakes />, groups: MANAGE, vanillaHref: '/provider_intakes.html' },
     ],
   },
   {
     title: 'General',
     items: [
-      { key: 'dashboard', label: 'Dashboard', path: '/dashboard', icon: <IcDashboard />, migrated: true },
-      { key: 'aprobaciones', label: 'Aprobaciones', path: '/aprobaciones', icon: <IcAprobaciones />, migrated: true },
+      { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, migrated: true },
+      { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, migrated: true },
+      { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, migrated: true },
+      { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE, vanillaHref: '/approval_batches.html' },
     ],
   },
   {
     title: 'Configuración',
     items: [
-      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, migrated: true },
+      { key: 'configuracion', label: 'Configuración', path: '/configuracion', icon: <IcConfig />, groups: MANAGE, migrated: true },
     ],
   },
 ]
