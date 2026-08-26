@@ -41,6 +41,13 @@ pending. The core changes the batch to `approved`; it never calls `close_approva
 The existing status trigger remains the only producer of `approval_batch.approved`, addressed
 to `approval_batches.submitted_by`.
 
+For final batch decisions, `notification-dispatcher` preserves that validated
+`submitted_by` email as the final Resend recipient even while the rest of DEV
+uses `NOTIFICATION_SEND_MODE=test_only`. This applies equally to approvals from
+Flux and Quick Approval; it does not insert, replay, or duplicate notification
+events. Other DEV notification types remain redirected to
+`NOTIFICATION_TEST_EMAIL`.
+
 ## Runtime configuration
 
 - `APPROVAL_BATCH_QUICK_APPROVE_ENABLED=false` (final gate state)
