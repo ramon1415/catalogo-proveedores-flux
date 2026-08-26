@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src https://scsirgbuqjcwoaxfacth.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>Aprobación rápida · Flux</title>
+  <link rel="stylesheet" href="approval_batch_quick_approve.css">
+</head>
+<body>
+  <main class="shell" aria-labelledby="page-title">
+    <section class="card">
+      <header class="brand" aria-label="Flux">FLUX</header>
+      <div class="content">
+        <div id="status-icon" class="status-icon" aria-hidden="true"></div>
+        <p id="eyebrow" class="eyebrow">Aprobación rápida</p>
+        <h1 id="page-title">Validando enlace...</h1>
+        <p id="message" class="message" role="status" aria-live="polite">Espera un momento.</p>
+
+        <dl id="summary" class="summary" hidden>
+          <div><dt>Corte</dt><dd id="batch-label">—</dd></div>
+          <div><dt>Empresa</dt><dd id="company">—</dd></div>
+          <div><dt>Periodo</dt><dd id="period">—</dd></div>
+          <div><dt>Pagos</dt><dd id="item-count">—</dd></div>
+          <div><dt>Total</dt><dd id="totals">—</dd></div>
+        </dl>
+
+        <p id="confirmation" class="confirmation" hidden>¿Confirmas la aprobación completa de este corte?</p>
+        <div class="actions">
+          <button id="approve-button" class="button button-primary" type="button" hidden>
+            Confirmar aprobación
+          </button>
+          <a id="review-link" class="button button-secondary" href="approval_batches.html" hidden>
+            Revisar primero en Flux
+          </a>
+        </div>
+        <p class="privacy">Este enlace sólo permite aprobar todas las partidas pendientes. No permite editar, rechazar ni liberar para pago.</p>
+      </div>
+    </section>
+  </main>
+  <script src="approval_batch_quick_approve.js" defer></script>
+</body>
+</html>
