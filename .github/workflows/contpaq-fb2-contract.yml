@@ -7,7 +7,7 @@ on:
       - "lib/contpaq/**"
       - "upload_helper.js"
       - "contpaq_mapping_candidates.js"
-      - "supabase/migrations/20260826153000_payment_request_cfdi_facts.sql"
+      - "supabase/migrations/20260826160401_payment_request_cfdi_facts.sql"
       - "scripts/qa/contpaq-fb2-*.test.mjs"
       - "scripts/qa/contpaq-fb2-browser-harness.html"
       - "scripts/qa/contpaq-fb3-mapping-candidates.test.mjs"
