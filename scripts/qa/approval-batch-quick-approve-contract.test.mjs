@@ -205,6 +205,7 @@ test("service-role hotfix reads PostgREST JSON claims and keeps public roles den
     "utf8",
   );
   assert.match(sql, /auth\.jwt\(\)\s*->>\s*'role'/i);
+  assert.match(sql, /security invoker/i);
   assert.match(sql, /request\.jwt\.claim\.role/i);
   assert.match(sql, /v_request_role\s*<>\s*'service_role'/i);
   assert.match(sql, /session_user\s*<>\s*'service_role'/i);
