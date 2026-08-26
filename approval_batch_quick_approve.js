@@ -3,6 +3,8 @@
 
   const ENDPOINT = "https://scsirgbuqjcwoaxfacth.supabase.co/functions/v1/approval-batch-quick-approve";
   const DEFAULT_REVIEW_URL = "approval_batches.html";
+  const DEFAULT_REVIEW_LABEL = "Revisar primero en Flux";
+  const DEFAULT_PRIVACY_MESSAGE = "Este enlace sólo permite aprobar todas las partidas pendientes. No permite editar, rechazar ni liberar para pago.";
   let token = null;
   let reviewUrl = DEFAULT_REVIEW_URL;
 
@@ -19,6 +21,7 @@
     confirmation: document.getElementById("confirmation"),
     approve: document.getElementById("approve-button"),
     review: document.getElementById("review-link"),
+    privacy: document.getElementById("privacy-note"),
   };
 
   function formatDate(value) {
@@ -58,6 +61,8 @@
     elements.approve.disabled = false;
     elements.icon.classList.remove("visible");
     elements.icon.textContent = "";
+    elements.review.textContent = DEFAULT_REVIEW_LABEL;
+    elements.privacy.textContent = DEFAULT_PRIVACY_MESSAGE;
 
     if (state === "ready") {
       elements.title.textContent = "Confirmar aprobación";
@@ -79,6 +84,8 @@
       elements.icon.classList.add("visible");
       elements.title.textContent = "Corte aprobado";
       elements.message.textContent = "✓ Corte aprobado correctamente.";
+      elements.review.textContent = "Continuar en Flux";
+      elements.privacy.textContent = "La aprobación quedó registrada. Puedes cerrar esta ventana con seguridad o continuar en Flux.";
       setReview(data.review_url, true);
       return;
     }
@@ -87,6 +94,8 @@
       elements.icon.classList.add("visible");
       elements.title.textContent = "Corte aprobado";
       elements.message.textContent = "✓ Este corte ya fue aprobado.";
+      elements.review.textContent = "Continuar en Flux";
+      elements.privacy.textContent = "La aprobación quedó registrada. Puedes cerrar esta ventana con seguridad o continuar en Flux.";
       setReview(data.review_url, true);
       return;
     }
