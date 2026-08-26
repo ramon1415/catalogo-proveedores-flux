@@ -49,14 +49,47 @@ function validTree(overrides = {}) {
   return { 'cfdi:Comprobante': comprobante }
 }
 
+function paymentTree() {
+  return validTree({
+    '@_TipoDeComprobante': 'P',
+    '@_Moneda': 'XXX',
+    '@_SubTotal': '0',
+    '@_Total': '0',
+    'cfdi:Complemento': {
+      'pago20:Pagos': {
+        '@_Version': '2.0',
+        'pago20:Totales': { '@_MontoTotalPagos': '62391.01' },
+        'pago20:Pago': {
+          '@_FechaPago': '2026-06-27T00:00:00',
+          '@_FormaDePagoP': '03',
+          '@_MonedaP': 'MXN',
+          '@_TipoCambioP': '1',
+          '@_Monto': '62391.01',
+          'pago20:DoctoRelacionado': {
+            '@_IdDocumento': 'DDDD6666-EEEE-7777-FFFF-888899990000',
+            '@_ImpSaldoAnt': '62391.01',
+            '@_ImpPagado': '62391.01',
+            '@_ImpSaldoInsoluto': '0',
+          },
+        },
+      },
+      'tfd:TimbreFiscalDigital': {
+        '@_UUID': '12121212-3434-5656-7878-909090909090',
+      },
+    },
+  })
+}
+
 test('FB-2 parser core has zero imports and no Node/browser/network dependencies', () => {
   assert.doesNotMatch(coreSource, /^\s*import\s/m)
   assert.doesNotMatch(coreSource, /fast-xml-parser|node:|\bfs\b|DOMParser|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
 })
 
-test('FB-2 browser entry imports only the core and explicitly handles DOMParser parsererror', () => {
+test('FB-2 browser entry imports only the core, handles parsererror and rejects DOCTYPE before DOMParser', () => {
   const imports = Array.from(browserSource.matchAll(/^\s*import\s+.*?from\s+['"]([^'"]+)['"]/gm), (m) => m[1])
   assert.deepEqual(imports, ['./cfdiCore.js'])
+  assert.match(browserSource, /<!DOCTYPE/i)
+  assert.match(browserSource, /XML con DOCTYPE rechazado/)
   assert.match(browserSource, /new DOMParser\(\)\.parseFromString/)
   assert.match(browserSource, /querySelector\(['"]parsererror['"]\)/)
   assert.doesNotMatch(browserSource, /fast-xml-parser|node:|\bfs\b|fetch\s*\(|XMLHttpRequest|WebSocket|supabase/i)
@@ -72,6 +105,19 @@ test('FB-2 core parses the certified nested shape used by Flux adapter', () => {
   assert.equal(parsed.uuid, '11111111-2222-3333-4444-555555555555')
   assert.equal(parsed.impuestos.traslados.length, 1)
   assert.equal(parsed.impuestos.traslados[0].importe, 16)
+})
+
+test('FB-2 core exposes Pagos 2.0 effective evidence without changing pagos array contract', () => {
+  const parsed = core.parseCfdiDesdeArbol(paymentTree())
+  assert.equal(parsed.comprobante.tipoDeComprobante, 'P')
+  assert.equal(parsed.comprobante.total, 0)
+  assert.equal(parsed.comprobante.moneda, 'XXX')
+  assert.equal(parsed.pagosTotales.montoTotalPagos, 62391.01)
+  assert.equal(Array.isArray(parsed.pagos), true)
+  assert.equal(parsed.pagos.length, 1)
+  assert.equal(parsed.pagos[0].monedaP, 'MXN')
+  assert.equal(parsed.pagos[0].tipoCambioP, 1)
+  assert.equal(parsed.pagos[0].montoP, 62391.01)
 })
 
 test('FB-2 core rejects non-CFDI and unsupported version with typed errors', () => {
