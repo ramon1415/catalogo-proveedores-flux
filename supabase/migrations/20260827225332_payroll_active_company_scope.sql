@@ -12,9 +12,9 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
-  select auth.role() = 'service_role'
+  select current_user = 'service_role'
     or (
       p_company_id is not null
       and public.current_profile_id() is not null
@@ -88,7 +88,7 @@ create function public.save_payroll_capture_session(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
 declare
   v_existing_company_id uuid;
@@ -148,7 +148,7 @@ create function public.reserve_payroll_capture_file(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, storage, pg_temp
+set search_path = ''
 as $$
 declare
   v_company_id uuid;
@@ -191,7 +191,7 @@ create function public.confirm_payroll_capture_file(p_file_id uuid, p_sha256 tex
 returns jsonb
 language plpgsql
 security definer
-set search_path = public, storage, pg_temp
+set search_path = ''
 as $$
 declare
   v_company_id uuid;
@@ -220,13 +220,13 @@ returns jsonb
 language plpgsql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
 declare
   v_actor uuid := public.current_profile_id();
   v_unscoped jsonb;
 begin
-  if auth.role() = 'service_role' then
+  if current_user = 'service_role' then
     return public.get_payroll_capture_sessions_unscoped_internal(p_session_id);
   end if;
 
@@ -252,7 +252,7 @@ returns boolean
 language plpgsql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
 declare
   v_company_id uuid;
@@ -275,7 +275,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
   select public.payroll_storage_company_access(p_name)
     and public.payroll_capture_storage_insert_allowed_unscoped_internal(p_name);
@@ -286,7 +286,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public, pg_temp
+set search_path = ''
 as $$
   select public.payroll_storage_company_access(p_name)
     and public.payroll_capture_storage_select_allowed_unscoped_internal(p_name);
