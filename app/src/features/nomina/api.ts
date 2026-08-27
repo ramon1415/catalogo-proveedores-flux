@@ -3,7 +3,6 @@ import { BUCKET } from './logic'
 import type {
   ApproverCandidate,
   BankAccount,
-  Company,
   CompanyCostCenter,
   CostCenter,
   CaptureSession,
@@ -15,10 +14,12 @@ import type {
 
 // ── Lecturas de contexto contable / cuentas ────────────────────────────────
 // loadSourceAccounts() del vanilla: company_bank_accounts activas, tipo bank, MXN.
-export async function loadSourceAccounts(): Promise<BankAccount[]> {
+export async function loadSourceAccounts(companyId: string): Promise<BankAccount[]> {
+  if (!companyId) return []
   const { data, error } = await supabase
     .from('company_bank_accounts')
     .select('id,company_id,name,bank_name,currency,account_type,last4,account_number,clabe,active')
+    .eq('company_id', companyId)
     .eq('active', true)
     .eq('account_type', 'bank')
     .eq('currency', 'MXN')
@@ -28,10 +29,15 @@ export async function loadSourceAccounts(): Promise<BankAccount[]> {
 }
 
 // loadAccountingScope() del vanilla: cost_centers activos + mapeos company_cost_centers.
-export async function loadAccountingScope(): Promise<{ costCenters: CostCenter[]; mappings: CompanyCostCenter[] }> {
+export async function loadAccountingScope(companyId: string): Promise<{ costCenters: CostCenter[]; mappings: CompanyCostCenter[] }> {
+  if (!companyId) return { costCenters: [], mappings: [] }
   const [centers, mappings] = await Promise.all([
     supabase.from('cost_centers').select('id,name,code,active').eq('active', true).order('name', { ascending: true }),
-    supabase.from('company_cost_centers').select('company_id,cost_center_id,active').eq('active', true),
+    supabase
+      .from('company_cost_centers')
+      .select('company_id,cost_center_id,active')
+      .eq('company_id', companyId)
+      .eq('active', true),
   ])
   if (centers.error) throw centers.error
   if (mappings.error) throw mappings.error
@@ -39,14 +45,6 @@ export async function loadAccountingScope(): Promise<{ costCenters: CostCenter[]
     costCenters: (centers.data ?? []) as CostCenter[],
     mappings: (mappings.data ?? []) as CompanyCostCenter[],
   }
-}
-
-// Empresas para el selector (el vanilla las tomaba del form de Solicitudes;
-// como página autónoma las leemos de `companies`).
-export async function loadCompanies(): Promise<Company[]> {
-  const { data, error } = await supabase.from('companies').select('id,name').order('name', { ascending: true })
-  if (error) throw error
-  return (data ?? []) as Company[]
 }
 
 // ── RPC 1: get_payroll_capture_sessions(p_session_id) ──────────────────────

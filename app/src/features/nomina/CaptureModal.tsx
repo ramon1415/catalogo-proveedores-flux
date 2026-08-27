@@ -52,15 +52,16 @@ type Props = {
   costCenters: CostCenter[]
   mappings: CompanyCostCenter[]
   isFinance: boolean
+  activeCompanyId: string
   onClose: () => void
   onSaved: () => void
 }
 
-export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, onClose, onSaved }: Props) {
+export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
   const { showToast } = useToast()
 
   // Metadata (equivalente a los campos del form de Solicitudes en modo nómina).
-  const [companyId, setCompanyId] = useState('')
+  const [companyId, setCompanyId] = useState(activeCompanyId)
   const [sourceAccountId, setSourceAccountId] = useState('')
   const [costCenterId, setCostCenterId] = useState('')
   const [subtype, setSubtype] = useState<PayrollSubtype>('ordinaria')
@@ -75,7 +76,6 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionVersion, setSessionVersion] = useState<number | null>(null)
   const [materializedRequestId, setMaterializedRequestId] = useState<string | null>(null)
-  const persistedCompanyId = useRef<string | null>(null)
   const persistedSourceAccountId = useRef<string | null>(null)
 
   // Resumen de submission + aprobadores.
@@ -92,11 +92,18 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
 
   // Hidratar desde una sesión existente (resume) o abrir en limpio.
   useEffect(() => {
-    if (!session) return
+    if (!session) {
+      setCompanyId(activeCompanyId)
+      return
+    }
+    if (session.company_id !== activeCompanyId) {
+      showToast('Captura fuera de alcance', 'La captura no pertenece a la empresa activa.', 'error')
+      onClose()
+      return
+    }
     setSessionId(session.id)
     setSessionVersion(session.version)
     setMaterializedRequestId(session.materialized_payment_request_id || null)
-    persistedCompanyId.current = session.company_id
     persistedSourceAccountId.current = session.company_bank_account_id
     setCompanyId(session.company_id)
     setSourceAccountId(session.company_bank_account_id)
@@ -122,7 +129,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     setFiles(hydrated)
     if (session.materialized_payment_request_id) void loadSubmissionSummary(session.materialized_payment_request_id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session])
+  }, [session, activeCompanyId])
 
   const companyAccounts = useMemo(() => accountsForCompany(accounts, companyId), [accounts, companyId])
   const companyCostCenters = useMemo(
@@ -137,18 +144,6 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const missing = useMemo(() => required.filter((slot) => !files[slot]?.uploaded), [required, files])
 
   // ── Cambios de empresa / cuenta (locks tras subir evidencia) ──────────────
-  function handleCompanyChange(next: string) {
-    const hasPersisted = Object.values(files).some((f) => f?.uploaded)
-    if (sessionId && persistedCompanyId.current && next !== persistedCompanyId.current && hasPersisted) {
-      showToast('Empresa protegida', 'La empresa queda fija después de subir evidencia.', 'warning')
-      return
-    }
-    setCompanyId(next)
-    setSourceAccountId('')
-    setCostCenterId('')
-    clearLocalFileSelections()
-  }
-
   function handleSourceAccountChange(next: string) {
     const encodedUploaded = files.layout_spei?.uploaded || files.layout_toka?.uploaded
     if (sessionId && persistedSourceAccountId.current && encodedUploaded && next !== persistedSourceAccountId.current) {
@@ -285,7 +280,6 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     setSessionId(current.id)
     setSessionVersion(current.version)
     setMaterializedRequestId(current.materialized_payment_request_id || null)
-    persistedCompanyId.current = current.company_id
     persistedSourceAccountId.current = current.company_bank_account_id
     setCompanyId(current.company_id)
     setSourceAccountId(current.company_bank_account_id)
@@ -494,8 +488,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
         <div className={s.grid}>
           <label>
             Empresa *
-            <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} disabled={locked}>
-              <option value="">Seleccionar empresa</option>
+            <select value={companyId} disabled>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name || c.id}
