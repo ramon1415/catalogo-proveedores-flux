@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch, IcPlus } from '../../components/ui/icons'
 import { formatCurrency, compactCurrency, numberValue } from '../../lib/format'
 import {
@@ -382,7 +383,7 @@ export default function LayoutsPage() {
               </tr>
             </thead>
             <tbody>
-              {status === 'loading' && <tr><td colSpan={9} className={s.tableMsg}>Cargando layouts...</td></tr>}
+              {status === 'loading' && <TableSkeletonRows cols={9} />}
               {status === 'error' && <tr><td colSpan={9} className={`${s.tableMsg} ${s.tableErr}`}>{errorMsg || 'No fue posible cargar layouts.'}</td></tr>}
               {status === 'ready' && rows.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>No hay layouts para este filtro.</td></tr>}
               {status === 'ready' && rows.map((l) => {
