@@ -2,7 +2,7 @@ import { lazy } from 'react'
 import type { ComponentType, LazyExoticComponent } from 'react'
 import type { ReactNode } from 'react'
 import {
-  IcSolicitudes, IcLayouts, IcEfectivo, IcIngresos, IcProveedores,
+  IcSolicitudes, IcLayouts, IcEfectivo, IcIngresos, IcIncidencias, IcProveedores,
   IcDashboard, IcAprobaciones, IcConfig,
 } from '../components/ui/icons'
 
@@ -69,8 +69,16 @@ export const MODULE_REGISTRY: ModuleDef[] = [
     component: lazy(() => import('../features/efectivo/EfectivoPage')),
   },
   {
-    key: 'ingresos', label: 'Ingresos', section: 'Operación', path: '/ingresos', extraPaths: ['/incidencias'],
+    key: 'ingresos', label: 'Ingresos', section: 'Operación', path: '/ingresos',
     icon: <IcIngresos />, kind: 'tenant_variant', codeVersion: 1,
+    component: lazy(() => import('../features/ingresos/IngresosPage')),
+  },
+  {
+    // Incidencias: módulo propio, Operadora-only (via company_modules). Reusa
+    // IngresosPage, que se auto-detecta por la ruta /incidencias (isIncidentsPage).
+    // Separado de 'ingresos' para que ingresos pueda variar por empresa (Fersana).
+    key: 'incidencias', label: 'Incidencias', section: 'Operación', path: '/incidencias',
+    icon: <IcIncidencias />, kind: 'shared', codeVersion: 1,
     component: lazy(() => import('../features/ingresos/IngresosPage')),
   },
   {

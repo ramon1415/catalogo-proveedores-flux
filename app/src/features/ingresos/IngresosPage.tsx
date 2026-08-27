@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch } from '../../components/ui/icons'
 import { formatCurrency, compactCurrency, numberValue } from '../../lib/format'
 import { loadIngresosData, generateFees as apiGenerateFees } from './api'
@@ -218,7 +219,7 @@ export default function IngresosPage() {
 
   const loadingRow = (cols: number, msg: string) => <tr><td colSpan={cols} className={s.tableMsg}>{msg}</td></tr>
   function tableBody(cols: number, loadingMsg: string, emptyMsg: string, ready: boolean, count: number, rows: React.ReactNode) {
-    if (status === 'loading') return loadingRow(cols, loadingMsg)
+    if (status === 'loading') { void loadingMsg; return <TableSkeletonRows cols={cols} /> }
     if (status === 'error') return loadingRow(cols, 'No se pudo cargar.')
     if (ready && count === 0) return loadingRow(cols, emptyMsg)
     return rows

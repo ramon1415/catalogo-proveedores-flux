@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { perms } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch, IcPlus } from '../../components/ui/icons'
 import { compactCurrency, formatDate } from '../../lib/format'
 import { numberValue, normalize } from '../../lib/format'
@@ -30,7 +32,8 @@ import s from './Solicitudes.module.css'
 type Fase2Meta = { request_type: string | null; payment_method: string | null }
 
 export default function SolicitudesPage() {
-  const { profile, roles, group } = useAuth()
+  const { profile, roles, group, memberships } = useAuth()
+  const { companyId: activeCompanyId } = useCompany()
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const canApprove = perms.canApprove(group)
@@ -51,7 +54,15 @@ export default function SolicitudesPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('activas')
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
-  const [companyFilter, setCompanyFilter] = useState('todos')
+  // La lista arranca filtrada a la empresa activa (switcher) y se re-sincroniza
+  // al cambiarla. Un usuario de una sola empresa solo ve la suya.
+  const [companyFilter, setCompanyFilter] = useState<string>(activeCompanyId ?? 'todos')
+  useEffect(() => { if (activeCompanyId) setCompanyFilter(activeCompanyId) }, [activeCompanyId])
+  // El selector de empresa solo ofrece las empresas del usuario (memberships).
+  const myCompanies = useMemo(
+    () => companies.filter((c) => memberships.some((m) => m.company_id === c.id)),
+    [companies, memberships],
+  )
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
@@ -240,7 +251,7 @@ export default function SolicitudesPage() {
           </select>
           <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}>
             <option value="todos">Empresa: Todas</option>
-            {companies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
+            {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
           </select>
         </div>
 
@@ -259,7 +270,7 @@ export default function SolicitudesPage() {
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
             </thead>
             <tbody>
-              {status === 'loading' && <tr><td colSpan={6} className={s.tableMsg}>Cargando solicitudes...</td></tr>}
+              {status === 'loading' && <TableSkeletonRows cols={6} />}
               {status === 'ready' && rows.length === 0 && (
                 <tr><td colSpan={6}>
                   <div className={s.emptyState}>

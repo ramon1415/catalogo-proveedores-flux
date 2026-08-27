@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch } from '../../components/ui/icons'
 import { formatCurrency, formatDate, compactCurrency, unique } from '../../lib/format'
 import {
@@ -208,7 +209,7 @@ export default function EfectivoPage() {
               </tr>
             </thead>
             <tbody>
-              {status === 'loading' && <tr><td colSpan={10} className={s.tableMsg}>Cargando fondos...</td></tr>}
+              {status === 'loading' && <TableSkeletonRows cols={10} />}
               {status === 'error' && <tr><td colSpan={10} className={s.tableMsg}>{errorMsg}</td></tr>}
               {status === 'ready' && rows.length === 0 && (
                 <tr><td colSpan={10} className={s.tableMsg}><strong>No hay fondos para este filtro.</strong><br />Ajusta la búsqueda o cambia los filtros.</td></tr>
