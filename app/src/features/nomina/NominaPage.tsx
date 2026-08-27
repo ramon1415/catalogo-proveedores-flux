@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { IcPlus } from '../../components/ui/icons'
 import { captureStateLabel, hasFinanceRole } from './logic'
-import { getCaptureSessions, loadAccountingScope, loadCompanies, loadSourceAccounts } from './api'
+import { getCaptureSessions, loadAccountingScope, loadSourceAccounts } from './api'
 import { CaptureModal } from './CaptureModal'
 import type { BankAccount, Company, CompanyCostCenter, CostCenter, CaptureSession } from './types'
 import s from './Nomina.module.css'
@@ -14,23 +15,34 @@ import s from './Nomina.module.css'
 // confirma, envía a aprobación y exporta.
 export default function NominaPage() {
   const { roles } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
   const isFinance = useMemo(() => hasFinanceRole(roles), [roles])
+  const companies = useMemo<Company[]>(
+    () => (companyId ? [{ id: companyId, name: companyName || 'Empresa activa' }] : []),
+    [companyId, companyName],
+  )
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [sessions, setSessions] = useState<CaptureSession[]>([])
-  const [companies, setCompanies] = useState<Company[]>([])
   const [accounts, setAccounts] = useState<BankAccount[]>([])
   const [costCenters, setCostCenters] = useState<CostCenter[]>([])
   const [mappings, setMappings] = useState<CompanyCostCenter[]>([])
   const [modal, setModal] = useState<{ session: CaptureSession | null } | null>(null)
 
   async function reloadSessions() {
-    setSessions(await getCaptureSessions(null))
+    if (!companyId) return setSessions([])
+    const visible = await getCaptureSessions(null)
+    setSessions(visible.filter((session) => session.company_id === companyId))
   }
 
   useEffect(() => {
-    if (!isFinance) {
+    setModal(null)
+    setSessions([])
+    setAccounts([])
+    setCostCenters([])
+    setMappings([])
+    if (!isFinance || !companyId) {
       setStatus('ready')
       return
     }
@@ -38,11 +50,10 @@ export default function NominaPage() {
     ;(async () => {
       setStatus('loading')
       // Carga tolerante a fallos parciales, igual que el vanilla (Promise.allSettled).
-      const [accountsRes, scopeRes, sessionsRes, companiesRes] = await Promise.allSettled([
-        loadSourceAccounts(),
-        loadAccountingScope(),
+      const [accountsRes, scopeRes, sessionsRes] = await Promise.allSettled([
+        loadSourceAccounts(companyId),
+        loadAccountingScope(companyId),
         getCaptureSessions(null),
-        loadCompanies(),
       ])
       if (cancelled) return
       if (accountsRes.status === 'fulfilled') setAccounts(accountsRes.value)
@@ -50,9 +61,10 @@ export default function NominaPage() {
         setCostCenters(scopeRes.value.costCenters)
         setMappings(scopeRes.value.mappings)
       }
-      if (sessionsRes.status === 'fulfilled') setSessions(sessionsRes.value)
-      if (companiesRes.status === 'fulfilled') setCompanies(companiesRes.value)
-      if ([accountsRes, scopeRes, sessionsRes, companiesRes].some((r) => r.status === 'rejected')) {
+      if (sessionsRes.status === 'fulfilled') {
+        setSessions(sessionsRes.value.filter((session) => session.company_id === companyId))
+      }
+      if ([accountsRes, scopeRes, sessionsRes].some((r) => r.status === 'rejected')) {
         showToast('Nómina parcialmente disponible', 'Algunos datos de contexto no se pudieron cargar.', 'warning')
       }
       setStatus('ready')
@@ -61,7 +73,7 @@ export default function NominaPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFinance])
+  }, [isFinance, companyId])
 
   if (!isFinance) {
     return (
@@ -87,11 +99,11 @@ export default function NominaPage() {
           <span className={s.devPill}>Nómina N3G</span>
           <h1>Capturas de nómina</h1>
           <p className="muted">
-            Paquetes privados de Finanzas y su estado de validación. Flux valida el paquete físico y envía el total de
+            Paquetes privados de {companyName || 'la empresa activa'} y su estado de validación. Flux valida el paquete físico y envía el total de
             Tesorería a aprobación; no calcula sueldos ni ejecuta pagos.
           </p>
         </div>
-        <button className={s.primaryBtn} onClick={() => setModal({ session: null })}>
+        <button className={s.primaryBtn} disabled={!companyId} onClick={() => setModal({ session: null })}>
           <IcPlus size={16} /> Nueva captura
         </button>
       </div>
@@ -101,7 +113,7 @@ export default function NominaPage() {
           <div>
             <span className={s.devPill}>Nómina N3G</span>
             <h2>Capturas de nómina</h2>
-            <p>Paquetes privados de Finanzas y su estado de validación.</p>
+            <p>Paquetes privados de {companyName || 'la empresa activa'} y su estado de validación.</p>
           </div>
           <span className={s.privatePill}>Finance only</span>
         </div>
@@ -134,7 +146,7 @@ export default function NominaPage() {
         </div>
       </section>
 
-      {modal && (
+      {modal && companyId && (
         <CaptureModal
           session={modal.session}
           companies={companies}
@@ -142,6 +154,7 @@ export default function NominaPage() {
           costCenters={costCenters}
           mappings={mappings}
           isFinance={isFinance}
+          activeCompanyId={companyId}
           onClose={() => setModal(null)}
           onSaved={reloadSessions}
         />

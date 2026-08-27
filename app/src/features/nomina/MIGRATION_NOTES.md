@@ -172,17 +172,17 @@ presupuesto + envío a aprobación. Es el equivalente exacto de lo que
 3. **Materialize es Edge Function**, no RPC — incluida por ser parte del rail;
    marcada como tal. Si el entorno no tiene desplegada `payroll-materialize`, el
    flujo se corta en "Validar y materializar" (mismo comportamiento que vanilla).
-4. **`companies`**: lectura nueva para el selector de empresa (en vanilla venía
-   del form de Solicitudes). Si el RLS de `companies` difiere del de Solicitudes,
-   revisar. Riesgo bajo.
+4. **Empresa activa**: el selector ya no consulta `companies`. Toma únicamente
+   la membresía activa del shell React y queda bloqueado a esa empresa. Cuentas,
+   centros y sesiones se reducen al mismo scope.
 5. **Enlace a presupuesto** apunta a la página vanilla `/nomina_presupuesto.html`
    (ruta raíz, fuera de `/app`). Cuando N5A se migre a React, reapuntar.
 6. **No portado (parches runtime del vanilla)**: `budget_live_frontend_guards_base.js`,
    `payroll_company_scope_fix.js`, `payroll_shadow_ux_polish.js`. Son UX/scope
    fixes sobre el DOM inyectado; el comportamiento efectivo del gate (bloqueo +
-   panel) sí se replicó. Verificar en QA que no haya reglas de scope adicionales
-   escondidas en `_base.js` que afecten qué sesiones ve Finanzas (el backend ya
-   filtra por `payroll_has_finance_pii_access` y `expires_at`).
+   panel) sí se replicó. La migración `payroll_active_company_scope` añade la
+   defensa backend que faltaba: membresía activa en listado, creación, reserva,
+   confirmación y acceso a Storage.
 7. **Firma de `reserve_payroll_capture_file`**: params 100% verificados contra
    migración (11 params, orden exacto). El SPEI es el único kind que envía
    metadata de parser; confirmado contra el `case p_kind` de la migración n3f.
