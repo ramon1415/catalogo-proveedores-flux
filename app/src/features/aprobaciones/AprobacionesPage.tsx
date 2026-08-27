@@ -3,6 +3,7 @@ import { useAuth } from '../../lib/auth'
 import { perms } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { Skeleton } from '../../components/ui/Skeleton'
 import { IcSearch } from '../../components/ui/icons'
 import { formatDateTime } from '../../lib/format'
 import { loadApprovalData, decidePaymentRequest } from './api'
@@ -209,7 +210,11 @@ export default function AprobacionesPage() {
         </div>
 
         <div className={`${s.kanban} ${mainTab === 'decide' ? s.viewDecide : s.viewHistory}`}>
-          {status === 'loading' && <div className={s.emptyState}><strong>Cargando aprobaciones...</strong></div>}
+          {status === 'loading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={76} radius={10} />)}
+            </div>
+          )}
           {status === 'error' && (
             <div className={s.emptyState}><strong>No se pudieron cargar aprobaciones.</strong> {errorMsg}</div>
           )}

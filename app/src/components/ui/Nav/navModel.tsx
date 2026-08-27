@@ -39,7 +39,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, moduleKey: 'ingresos', migrated: true },
       { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, moduleKey: 'incidencias', migrated: true },
       { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, moduleKey: 'proveedores', migrated: true },
-      { key: 'solicitudes-proveedores', label: 'Solicitudes de proveedores', path: '/solicitudes-proveedores', icon: <IcProviderIntakes />, groups: MANAGE, vanillaHref: '/provider_intakes.html' },
+      { key: 'solicitudes-proveedores', label: 'Solicitudes de proveedores', path: '/solicitudes-proveedores', icon: <IcProviderIntakes />, groups: MANAGE },
     ],
   },
   {

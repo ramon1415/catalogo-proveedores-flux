@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import {
   fetchDashboardPayload, fetchHistoricalPeriods, fetchHistoricalYear, fetchHistoricalAll, loadHistMapeo,
 } from './api'
@@ -361,7 +362,7 @@ export default function DashboardPage() {
         <table className={s.table}>
           <thead><tr><th>Socio</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th></tr></thead>
           <tbody>
-            {!ds && <tr><td colSpan={5} className={s.tableMsg}>Cargando...</td></tr>}
+            {!ds && <TableSkeletonRows cols={5} rows={4} />}
             {ds && members.length === 0 && <tr><td colSpan={5} className={s.tableMsg}>Sin registros para este periodo.</td></tr>}
             {ds && members.map((r, i) => {
               const b = incomeStatusBadge(r.status)
@@ -587,7 +588,7 @@ export default function DashboardPage() {
                 <table className={s.table} style={{ minWidth: 980 }}>
                   <thead><tr><th>Empresa</th><th>Centro</th><th>Partida</th><th>Codigo</th><th>Presupuesto</th><th>Comprometido</th><th>Ejecutado</th><th>Disponible</th><th>Var. $</th><th>Var. %</th></tr></thead>
                   <tbody>
-                    {!ds && <tr><td colSpan={10} className={s.tableMsg}>Cargando...</td></tr>}
+                    {!ds && <TableSkeletonRows cols={10} rows={4} />}
                     {ds && expenses.length === 0 && <tr><td colSpan={10} className={s.tableMsg}>Sin datos para este filtro.</td></tr>}
                     {ds && expenses.map((r, i) => (
                       <tr key={i}>
@@ -620,7 +621,7 @@ export default function DashboardPage() {
                 <table className={s.table} style={{ minWidth: 900 }}>
                   <thead><tr><th>Empresa</th><th>Centro</th><th>Partida</th><th>Presupuesto YTD</th><th>Comprometido</th><th>Ejecutado</th><th>Disponible</th><th>Var. $</th><th>Var. %</th></tr></thead>
                   <tbody>
-                    {!ds && <tr><td colSpan={9} className={s.tableMsg}>Cargando...</td></tr>}
+                    {!ds && <TableSkeletonRows cols={9} rows={4} />}
                     {ds && ds.ytd.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin datos acumulados.</td></tr>}
                     {ds && ds.ytd.map((r, i) => (
                       <tr key={i}>
@@ -659,7 +660,7 @@ export default function DashboardPage() {
                 <table className={s.table} style={{ minWidth: 900 }}>
                   <thead><tr><th>Socio</th><th>Estirpe</th><th>Periodo</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th><th>Inc.</th><th>Fact.</th></tr></thead>
                   <tbody>
-                    {!ds && <tr><td colSpan={9} className={s.tableMsg}>Cargando...</td></tr>}
+                    {!ds && <TableSkeletonRows cols={9} rows={4} />}
                     {ds && income.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin registros para este filtro.</td></tr>}
                     {ds && income.map((r, i) => {
                       const b = incomeStatusBadge(r.status)
