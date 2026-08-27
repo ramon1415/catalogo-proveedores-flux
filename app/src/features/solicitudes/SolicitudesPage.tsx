@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { perms } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -30,7 +31,8 @@ import s from './Solicitudes.module.css'
 type Fase2Meta = { request_type: string | null; payment_method: string | null }
 
 export default function SolicitudesPage() {
-  const { profile, roles, group } = useAuth()
+  const { profile, roles, group, memberships } = useAuth()
+  const { companyId: activeCompanyId } = useCompany()
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const canApprove = perms.canApprove(group)
@@ -51,7 +53,15 @@ export default function SolicitudesPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('activas')
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
-  const [companyFilter, setCompanyFilter] = useState('todos')
+  // La lista arranca filtrada a la empresa activa (switcher) y se re-sincroniza
+  // al cambiarla. Un usuario de una sola empresa solo ve la suya.
+  const [companyFilter, setCompanyFilter] = useState<string>(activeCompanyId ?? 'todos')
+  useEffect(() => { if (activeCompanyId) setCompanyFilter(activeCompanyId) }, [activeCompanyId])
+  // El selector de empresa solo ofrece las empresas del usuario (memberships).
+  const myCompanies = useMemo(
+    () => companies.filter((c) => memberships.some((m) => m.company_id === c.id)),
+    [companies, memberships],
+  )
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const [requestModalOpen, setRequestModalOpen] = useState(false)
@@ -240,7 +250,7 @@ export default function SolicitudesPage() {
           </select>
           <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}>
             <option value="todos">Empresa: Todas</option>
-            {companies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
+            {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
           </select>
         </div>
 

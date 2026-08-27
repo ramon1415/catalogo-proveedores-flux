@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import s from './AppShell.module.css'
 import { Nav } from './Nav/Nav'
@@ -23,7 +24,11 @@ export function AppShell() {
           <button className={s.iconbtn} title="Tema claro / oscuro" onClick={toggleTheme}><IcTheme /></button>
         </div>
         <div className={s.page}>
-          <Outlet />
+          {/* Suspense aquí (no en App) para que el nav/topbar no parpadeen al
+              cargar el chunk lazy de cada ruta — solo el área de contenido carga. */}
+          <Suspense fallback={<div className="center muted">Cargando…</div>}>
+            <Outlet />
+          </Suspense>
         </div>
       </div>
     </>
