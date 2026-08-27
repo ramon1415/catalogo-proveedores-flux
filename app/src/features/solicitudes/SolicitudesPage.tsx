@@ -5,6 +5,7 @@ import { useCompany } from '../../lib/company'
 import { perms } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch, IcPlus } from '../../components/ui/icons'
 import { compactCurrency, formatDate } from '../../lib/format'
 import { numberValue, normalize } from '../../lib/format'
@@ -269,7 +270,7 @@ export default function SolicitudesPage() {
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
             </thead>
             <tbody>
-              {status === 'loading' && <tr><td colSpan={6} className={s.tableMsg}>Cargando solicitudes...</td></tr>}
+              {status === 'loading' && <TableSkeletonRows cols={6} />}
               {status === 'ready' && rows.length === 0 && (
                 <tr><td colSpan={6}>
                   <div className={s.emptyState}>

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
+import { TableSkeletonRows } from '../../components/ui/Skeleton'
 import { IcSearch, IcPlus } from '../../components/ui/icons'
 import { listProviders, setProviderActive } from './api'
 import { matchesFilters, normalize } from './logic'
@@ -136,9 +137,7 @@ export default function ProveedoresPage() {
               </tr>
             </thead>
             <tbody>
-              {status === 'loading' && (
-                <tr><td colSpan={8} className={s.tableMsg}>Cargando proveedores...</td></tr>
-              )}
+              {status === 'loading' && <TableSkeletonRows cols={8} />}
               {status === 'error' && (
                 <tr><td colSpan={8} className={`${s.tableMsg} ${s.tableErr}`}>No fue posible cargar proveedores.</td></tr>
               )}

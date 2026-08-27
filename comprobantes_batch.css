@@ -48,3 +48,11 @@ button:disabled{cursor:not-allowed;opacity:.5}.receipt-batch-list-item:focus-vis
 .receipt-duplicate-help{margin:14px 0 0;color:var(--text-2);font-size:11px;line-height:1.6}
 @media(max-width:820px){.receipt-batch-flow-overview,.receipt-operation-workflow{grid-template-columns:repeat(2,minmax(0,1fr))}.receipt-candidate{grid-template-columns:76px minmax(0,1fr)}.receipt-candidate-amount{grid-column:1/-1}.receipt-operation-primary-actions button{flex:1 1 220px}}
 @media(max-width:560px){.receipt-batch-flow-overview,.receipt-operation-workflow,.receipt-duplicate-summary{grid-template-columns:1fr}.receipt-operation-footer{padding:12px}.receipt-operation-primary-actions{display:grid;grid-template-columns:1fr}.receipt-operation-primary-actions button{width:100%}.receipt-operation-secondary-body{display:grid;grid-template-columns:1fr}.receipt-operation-secondary-body button{width:100%}.receipt-candidate{grid-template-columns:1fr}.receipt-candidate-amount{grid-column:auto}}
+
+/* Chrome 100% hotfix: let the page own vertical scrolling so batch review is not clipped. */
+@media(min-width:821px){
+  .receipt-batch-page{overflow-x:hidden;overflow-y:auto}
+  .receipt-batch-workspace{flex:0 0 auto;min-height:420px}
+  .receipt-batch-detail{overflow:visible}
+  .receipt-batch-list{max-height:70vh}
+}
