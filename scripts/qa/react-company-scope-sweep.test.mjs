@@ -15,6 +15,8 @@ assert.match(approvals, /allowedCompanyIds\.has\(request\.company_id/)
 const incidents = read('app/src/features/ingresos/IngresosPage.tsx')
 const incidentModal = read('app/src/features/ingresos/IncidentModal.tsx')
 assert.match(incidents, /incident\.company_id === companyId/)
+assert.match(incidents, /setIncidentModalCompanyId\(companyId\)/)
+assert.match(incidents, /onClick=\{openIncidentModal\}/)
 assert.match(incidentModal, /company\.id === activeCompanyId/)
 assert.match(incidentModal, /disabled=\{Boolean\(activeCompanyId\)\}/)
 

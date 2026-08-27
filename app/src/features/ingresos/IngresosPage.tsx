@@ -57,7 +57,7 @@ export default function IngresosPage() {
   const [memberModal, setMemberModal] = useState<MemberModalState>(null)
   const [periodModal, setPeriodModal] = useState(false)
   const [paymentCharge, setPaymentCharge] = useState<MaintenanceFeeCharge | null>(null)
-  const [incidentModal, setIncidentModal] = useState(false)
+  const [incidentModalCompanyId, setIncidentModalCompanyId] = useState<string | null>(null)
   const [invoiceModal, setInvoiceModal] = useState<InvoiceModalState>(null)
   const [invoicePayId, setInvoicePayId] = useState<string | null>(null)
   const [statementMemberId, setStatementMemberId] = useState<string | null>(null)
@@ -69,7 +69,7 @@ export default function IngresosPage() {
   }, [routeTab])
 
   useEffect(() => {
-    setIncidentModal(false)
+    setIncidentModalCompanyId(null)
   }, [companyId])
 
   async function reload() {
@@ -149,6 +149,18 @@ export default function IngresosPage() {
 
   function applyIncidentCard(statusFilter: string) {
     setIncidentFilters((f) => ({ ...f, status: statusFilter }))
+  }
+
+  function openIncidentModal() {
+    if (status !== 'ready' || !data || !lookups) {
+      showToast('Incidencias cargando', 'Espera a que termine la carga antes de crear una incidencia.', 'info')
+      return
+    }
+    if (!companyId || !memberships.some((membership) => membership.company_id === companyId)) {
+      showToast('Empresa no disponible', 'Selecciona una empresa válida antes de crear la incidencia.', 'warning')
+      return
+    }
+    setIncidentModalCompanyId(companyId)
   }
 
   async function onGenerateFees() {
@@ -464,7 +476,7 @@ export default function IngresosPage() {
         <div className={s.tableCard}>
           <div className={s.panelHeader}>
             <div><h2>Incidencias</h2><p>Cargos recuperables a socios o externos.</p></div>
-            <button type="button" className={s.primaryBtn} onClick={() => setIncidentModal(true)}>+ Nueva incidencia</button>
+            <button type="button" className={s.primaryBtn} onClick={openIncidentModal}>+ Nueva incidencia</button>
           </div>
           <div className={s.toolbar}>
             <div className={s.searchBox}>
@@ -599,15 +611,16 @@ export default function IngresosPage() {
           onSaved={async () => { setPaymentCharge(null); await reload() }}
         />
       )}
-      {incidentModal && data && lookups && (
+      {incidentModalCompanyId && data && lookups && (
         <IncidentModal
+          key={incidentModalCompanyId}
           data={data}
           lookups={lookups}
           profileId={profileId}
-          activeCompanyId={companyId}
+          activeCompanyId={incidentModalCompanyId}
           allowedCompanyIds={memberships.map((membership) => membership.company_id)}
-          onClose={() => setIncidentModal(false)}
-          onSaved={async () => { setIncidentModal(false); await reload(); setTab('incidents') }}
+          onClose={() => setIncidentModalCompanyId(null)}
+          onSaved={async () => { setIncidentModalCompanyId(null); await reload(); setTab('incidents') }}
         />
       )}
       {invoiceModal && (
