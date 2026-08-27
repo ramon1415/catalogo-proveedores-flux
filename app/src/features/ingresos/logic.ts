@@ -192,7 +192,13 @@ export function activeCompanies(d: IngresosData): Company[] {
   return d.companies.filter((c) => c.active !== false)
 }
 export function costCentersForCompany(d: IngresosData, companyId: string): CostCenter[] {
-  return d.costCenters.filter((c) => !companyId || c.company_id === companyId)
+  if (!companyId) return []
+  const allowed = new Set(
+    d.companyCostCenters
+      .filter((mapping) => mapping.active !== false && mapping.company_id === companyId)
+      .map((mapping) => mapping.cost_center_id),
+  )
+  return d.costCenters.filter((center) => center.active !== false && allowed.has(center.id))
 }
 
 // ── Etiquetas de filtro rápido ─────────────────────────────────────
