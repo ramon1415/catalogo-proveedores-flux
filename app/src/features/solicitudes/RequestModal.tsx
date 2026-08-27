@@ -15,6 +15,8 @@ import {
   friendlyError, normalizeRpcResult, REQUEST_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS,
 } from './logic'
 import { numberValue } from '../../lib/format'
+import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
@@ -55,10 +57,26 @@ export function RequestModal({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
+  const { memberships } = useAuth()
+  const { companyId: activeCompanyId } = useCompany()
+
+  // El usuario solo puede crear para las empresas donde es miembro. Si tiene una
+  // sola, queda fija; si tiene varias, arranca en la empresa activa del switcher.
+  const myCompanies = useMemo(
+    () => companies.filter((c) => memberships.some((m) => m.company_id === c.id)),
+    [companies, memberships],
+  )
+  const lockedCompany = myCompanies.length === 1
+  const initialCompanyId =
+    activeCompanyId && myCompanies.some((c) => c.id === activeCompanyId)
+      ? activeCompanyId
+      : lockedCompany
+        ? myCompanies[0].id
+        : ''
 
   const [requestType, setRequestType] = useState('provider_payment')
   const [paymentMethod, setPaymentMethod] = useState('transfer')
-  const [companyId, setCompanyId] = useState('')
+  const [companyId, setCompanyId] = useState(initialCompanyId)
   const [costCenterId, setCostCenterId] = useState('')
   const [budgetMonth, setBudgetMonth] = useState(defaultMonth())
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
@@ -492,9 +510,9 @@ export function RequestModal({
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
                   <div className={s.formGrid}>
                     <label>Empresa *
-                      <select className={s.formControl} value={companyId} onChange={(e) => onCompanyChange(e.target.value)} required>
-                        <option value="">Seleccionar empresa</option>
-                        {companies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
+                      <select className={s.formControl} value={companyId} onChange={(e) => onCompanyChange(e.target.value)} required disabled={lockedCompany}>
+                        {!lockedCompany && <option value="">Seleccionar empresa</option>}
+                        {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
                       </select>
                     </label>
                     <label>Centro de costo *
