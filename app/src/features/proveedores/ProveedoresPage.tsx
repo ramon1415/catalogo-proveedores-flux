@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -15,7 +16,8 @@ import s from './Proveedores.module.css'
 type ModalState = { mode: ModalMode; provider: Provider | null } | null
 
 export default function ProveedoresPage() {
-  const { canManageProviders } = useAuth()
+  const { canManageProviders, memberships } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const readonlyMode = params.get('mode') === 'readonly'
@@ -26,7 +28,8 @@ export default function ProveedoresPage() {
   const [filter, setFilter] = useState<StatusFilter>('todos')
   const [modal, setModal] = useState<ModalState>(null)
 
-  const canManage = canManageProviders() && !readonlyMode
+  const hasActiveCompanyScope = Boolean(companyId && memberships.some((membership) => membership.company_id === companyId))
+  const canManage = canManageProviders() && !readonlyMode && hasActiveCompanyScope
 
   async function reload() {
     setStatus('loading')
@@ -42,6 +45,8 @@ export default function ProveedoresPage() {
     reload()
   }, [])
 
+  useEffect(() => setModal(null), [companyId])
+
   // Deep-link: ?provider_id abre el detalle (readonly si mode=readonly).
   useEffect(() => {
     if (status !== 'ready') return
@@ -53,7 +58,7 @@ export default function ProveedoresPage() {
       return
     }
     if (readonlyMode) setModal({ mode: 'readonly', provider: p })
-    else if (canManageProviders()) setModal({ mode: 'edit', provider: p })
+    else if (canManage) setModal({ mode: 'edit', provider: p })
     else setModal({ mode: 'readonly', provider: p })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
@@ -64,7 +69,7 @@ export default function ProveedoresPage() {
   }, [providers, query, filter])
 
   function openEdit(p: Provider) {
-    if (!canManageProviders()) {
+    if (!canManage) {
       showToast('Sin permiso', 'La administración de proveedores corresponde a Finanzas, Dirección o Sysadmin.', 'warning')
       return
     }
@@ -72,7 +77,7 @@ export default function ProveedoresPage() {
   }
 
   async function toggle(p: Provider, activo: boolean) {
-    if (!canManageProviders()) {
+    if (!canManage) {
       showToast('Sin permiso', 'La administración de proveedores corresponde a Finanzas, Dirección o Sysadmin.', 'warning')
       return
     }
@@ -94,10 +99,10 @@ export default function ProveedoresPage() {
       <div className={s.phead}>
         <div>
           <h1>Proveedores</h1>
-          <p className="muted">Administra proveedores, métodos de pago, datos bancarios y estatus operativo.</p>
+          <p className="muted">Catálogo compartido de proveedores. Las acciones se registran desde {companyName || 'una empresa activa'}.</p>
         </div>
         {!readonlyMode && (
-          <button className={s.primaryBtn} onClick={() => setModal({ mode: 'create', provider: null })}>
+          <button className={s.primaryBtn} disabled={!hasActiveCompanyScope} onClick={() => setModal({ mode: 'create', provider: null })}>
             <IcPlus size={16} /> Nuevo proveedor
           </button>
         )}
@@ -186,7 +191,7 @@ export default function ProveedoresPage() {
         <ProviderModal
           mode={modal.mode}
           provider={modal.provider}
-          canManageProviders={canManageProviders()}
+          canManageProviders={canManage}
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null)

@@ -19,9 +19,8 @@ export async function loadLayouts(): Promise<PaymentLayout[]> {
 export async function loadLayoutIssueLines(layoutIds: string[]) {
   return supabase
     .from('payment_layout_lines')
-    .select('id,layout_id,destination_type,destination_value,convenio_number,source_account_number,payment_reference,beneficiary_name,payment_concept,amount,status')
+    .select('id,layout_id,company_id,destination_type,destination_value,convenio_number,source_account_number,payment_reference,beneficiary_name,payment_concept,amount,status')
     .in('layout_id', layoutIds)
-    .neq('status', 'bank_rejected')
 }
 
 export async function loadLayoutCatalogs(): Promise<{ companies: LayoutCompany[]; accounts: CompanyBankAccount[] }> {

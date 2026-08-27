@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -25,7 +26,8 @@ import type {
 import s from './Layouts.module.css'
 
 export default function LayoutsPage() {
-  const { profile } = useAuth()
+  const { profile, memberships } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
   const profileId = (profile?.id as string | undefined) ?? null
 
@@ -34,6 +36,7 @@ export default function LayoutsPage() {
   const [errorMsg, setErrorMsg] = useState('')
   const [issueCounts, setIssueCounts] = useState<Map<string, number>>(new Map())
   const [formatSummaries, setFormatSummaries] = useState<Map<string, FormatSummary>>(new Map())
+  const [layoutCompanies, setLayoutCompanies] = useState<Map<string, Set<string>>>(new Map())
 
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('todos')
@@ -55,6 +58,7 @@ export default function LayoutsPage() {
       // Pendientes PAGOSINT + resúmenes por formato.
       const counts = new Map<string, number>()
       const summaries = new Map<string, FormatSummary>()
+      const companiesByLayout = new Map<string, Set<string>>()
       const ids = data.map((l) => l.id).filter(Boolean)
       if (ids.length) {
         const { data: lines, error } = await loadLayoutIssueLines(ids)
@@ -62,6 +66,9 @@ export default function LayoutsPage() {
           const byLayout = new Map<string, PaymentLayoutLine[]>()
           for (const line of (lines as PaymentLayoutLine[]) || []) {
             const layoutId = line.layout_id as string
+            if (!companiesByLayout.has(layoutId)) companiesByLayout.set(layoutId, new Set())
+            if (line.company_id) companiesByLayout.get(layoutId)!.add(line.company_id)
+            if (line.status === 'bank_rejected') continue
             if (!byLayout.has(layoutId)) byLayout.set(layoutId, [])
             byLayout.get(layoutId)!.push(line)
             if (lineNeedsPagosintReferenceCompletion(line)) counts.set(layoutId, (counts.get(layoutId) || 0) + 1)
@@ -71,6 +78,7 @@ export default function LayoutsPage() {
       }
       setIssueCounts(counts)
       setFormatSummaries(summaries)
+      setLayoutCompanies(companiesByLayout)
       setStatus('ready')
     } catch (error) {
       setErrorMsg(rlsHint('payment_layouts', 'select', error))
@@ -84,14 +92,26 @@ export default function LayoutsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const rows = useMemo(() => filterLayouts(layouts, query, statusFilter), [layouts, query, statusFilter])
+  useEffect(() => {
+    setShowNew(false)
+    setLinesLayoutId(null)
+    setConfirmLayoutId(null)
+    setUploadConfirm(null)
+  }, [companyId])
+
+  const scopedLayouts = useMemo(() => layouts.filter((layout) => {
+    if (!companyId) return false
+    const ids = layoutCompanies.get(layout.id)
+    return ids?.size === 1 && ids.has(companyId)
+  }), [layouts, layoutCompanies, companyId])
+  const rows = useMemo(() => filterLayouts(scopedLayouts, query, statusFilter), [scopedLayouts, query, statusFilter])
 
   const stats = useMemo(() => ({
-    total: layouts.length,
-    draft: layouts.filter((l) => l.status === 'draft').length,
-    generated: layouts.filter((l) => l.status === 'generated').length,
-    amount: layouts.reduce((sum, l) => sum + numberValue(l.total_amount), 0),
-  }), [layouts])
+    total: scopedLayouts.length,
+    draft: scopedLayouts.filter((l) => l.status === 'draft').length,
+    generated: scopedLayouts.filter((l) => l.status === 'generated').length,
+    amount: scopedLayouts.reduce((sum, l) => sum + numberValue(l.total_amount), 0),
+  }), [scopedLayouts])
 
   function ensureProfile(): boolean {
     if (profileId) return true
@@ -104,7 +124,11 @@ export default function LayoutsPage() {
     if (!ensureProfile()) return
     try {
       const cat = await loadLayoutCatalogs()
-      setCatalogs(cat)
+      const allowed = new Set(memberships.map((membership) => membership.company_id))
+      setCatalogs({
+        companies: cat.companies.filter((company) => company.id === companyId && allowed.has(company.id)),
+        accounts: cat.accounts.filter((account) => account.company_id === companyId && allowed.has(account.company_id || '')),
+      })
       setShowNew(true)
     } catch (error) {
       showToast('No se pudieron cargar catalogos', friendlyError(error), 'error')
@@ -128,7 +152,7 @@ export default function LayoutsPage() {
   }
 
   async function openLayoutLines(layoutId: string) {
-    const layout = layouts.find((l) => l.id === layoutId)
+    const layout = scopedLayouts.find((l) => l.id === layoutId)
     if (!layout) return
     setLinesLayoutId(layoutId)
     setLinesLines([])
@@ -154,7 +178,7 @@ export default function LayoutsPage() {
 
   // ── Descargas / validación ─────────────────────────────────────────────
   async function downloadLayoutBbvaFormat(layoutId: string, format: BbvaFormat) {
-    const layout = layouts.find((l) => l.id === layoutId)
+    const layout = scopedLayouts.find((l) => l.id === layoutId)
     if (!layout) return
     if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].includes(format)) {
       showToast('Formato no soportado', 'Solo se pueden descargar PAGOSBBV, PAGOSINT o CIE.', 'warning')
@@ -196,7 +220,7 @@ export default function LayoutsPage() {
   }
 
   async function downloadLayoutCxc(layoutId: string) {
-    const layout = layouts.find((l) => l.id === layoutId)
+    const layout = scopedLayouts.find((l) => l.id === layoutId)
     if (!layout) return
     if (layout.status === 'cancelled') {
       showToast('Layout cancelado', 'No se puede generar archivo CxC BBVA de un layout cancelado.', 'error')
@@ -232,7 +256,7 @@ export default function LayoutsPage() {
   }
 
   async function validateLayoutCxc(layoutId: string) {
-    const layout = layouts.find((l) => l.id === layoutId)
+    const layout = scopedLayouts.find((l) => l.id === layoutId)
     if (!layout) return
     const { data: lines, error } = await fetchLayoutLines(layoutId)
     if (error) { showToast('No se pudo validar', rlsHint('payment_layout_lines', 'select', error), 'error'); return }
@@ -332,15 +356,15 @@ export default function LayoutsPage() {
     return actions
   }
 
-  const linesLayout = linesLayoutId ? layouts.find((l) => l.id === linesLayoutId) ?? null : null
-  const confirmLayout = confirmLayoutId ? layouts.find((l) => l.id === confirmLayoutId) ?? null : null
+  const linesLayout = linesLayoutId ? scopedLayouts.find((l) => l.id === linesLayoutId) ?? null : null
+  const confirmLayout = confirmLayoutId ? scopedLayouts.find((l) => l.id === confirmLayoutId) ?? null : null
 
   return (
     <>
       <div className={s.phead}>
         <div>
           <h1>Layouts de pago</h1>
-          <p className="muted">Genera archivos semanales a partir de solicitudes liberadas para pago.</p>
+          <p className="muted">Genera archivos de {companyName || 'la empresa activa'} a partir de solicitudes liberadas para pago.</p>
         </div>
         <div className={s.headActions}>
           <button className={s.secondaryBtn} onClick={loadLayouts}>Actualizar</button>
@@ -412,6 +436,7 @@ export default function LayoutsPage() {
           companies={catalogs.companies}
           accounts={catalogs.accounts}
           profileId={profileId}
+          activeCompanyId={companyId}
           onClose={() => setShowNew(false)}
           onLayoutsChanged={loadLayouts}
           onOpenLines={(id) => { setShowNew(false); openLayoutLines(id) }}

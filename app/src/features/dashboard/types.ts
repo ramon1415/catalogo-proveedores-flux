@@ -37,6 +37,7 @@ export type Kpis = {
 }
 
 export type BudgetRow = {
+  company_id?: string | null
   company?: string | null
   cost_center?: string | null
   budget_category?: string | null
