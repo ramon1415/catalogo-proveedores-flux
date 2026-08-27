@@ -57,6 +57,13 @@ export const MODULE_REGISTRY: ModuleDef[] = [
     component: lazy(() => import('../features/layouts/LayoutsPage')),
   },
   {
+    // Nómina (captura N2B en React). company_modules la mantiene APAGADA hasta el
+    // QA de Ramón (Edge payroll-materialize desplegada + guards de scope portados).
+    key: 'nomina', label: 'Nómina', section: 'Operación', path: '/nomina',
+    icon: <IcLayouts />, kind: 'shared', codeVersion: 1,
+    component: lazy(() => import('../features/nomina/NominaPage')),
+  },
+  {
     key: 'efectivo', label: 'Efectivo', section: 'Operación', path: '/efectivo',
     icon: <IcEfectivo />, kind: 'shared', codeVersion: 1,
     component: lazy(() => import('../features/efectivo/EfectivoPage')),

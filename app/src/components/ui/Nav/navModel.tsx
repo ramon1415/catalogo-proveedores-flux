@@ -34,6 +34,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, moduleKey: 'solicitudes', migrated: true },
       { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, moduleKey: 'layouts', migrated: true },
+      { key: 'nomina', label: 'Nómina', path: '/nomina', icon: <IcLayouts />, groups: FINANCE, moduleKey: 'nomina', migrated: true },
       { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE },
       { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, moduleKey: 'efectivo', migrated: true },
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, moduleKey: 'ingresos', migrated: true },
