@@ -29,6 +29,7 @@ export function NewLayoutModal({
   companies,
   accounts,
   profileId,
+  activeCompanyId,
   onClose,
   onLayoutsChanged,
   onOpenLines,
@@ -36,6 +37,7 @@ export function NewLayoutModal({
   companies: LayoutCompany[]
   accounts: CompanyBankAccount[]
   profileId: string | null
+  activeCompanyId: string | null
   onClose: () => void
   onLayoutsChanged: () => Promise<void> | void
   onOpenLines: (layoutId: string) => void
@@ -47,7 +49,7 @@ export function NewLayoutModal({
   const [periodStart, setPeriodStart] = useState(initial.start)
   const [periodEnd, setPeriodEnd] = useState(initial.end)
   const [name, setName] = useState('')
-  const [companyId, setCompanyId] = useState('')
+  const [companyId, setCompanyId] = useState(activeCompanyId || '')
   const [bankAccountId, setBankAccountId] = useState('')
 
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -98,6 +100,7 @@ export function NewLayoutModal({
     if (reviewing) return
     const p = params()
     if (!p.p_period_start || !p.p_period_end) return showToast('Fechas requeridas', 'Captura fecha inicio y fecha fin.', 'warning')
+    if (!p.p_company_id) return showToast('Empresa requerida', 'Selecciona una empresa activa antes de revisar solicitudes.', 'warning')
     if (p.p_period_start > p.p_period_end) return showToast('Rango invalido', 'La fecha inicio no puede ser mayor a la fecha fin.', 'warning')
     const key = layoutPreviewParamsKey(p)
     setReviewing(true)
@@ -127,6 +130,7 @@ export function NewLayoutModal({
     e.preventDefault()
     setResult(null)
     if (!profileId) return showToast('Perfil no identificado', 'No se pudo identificar tu perfil de usuario.', 'error')
+    if (!companyId) return showToast('Empresa requerida', 'Selecciona una empresa activa antes de crear el layout.', 'error')
     if (!periodStart || !periodEnd) return showToast('Fechas requeridas', 'Captura fecha inicio y fecha fin.', 'error')
     if (periodStart > periodEnd) return showToast('Rango invalido', 'La fecha inicio no puede ser mayor a la fecha fin.', 'error')
 
@@ -238,8 +242,8 @@ export function NewLayoutModal({
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Opcional" disabled={creating} />
             </label>
             <label>Empresa
-              <select value={companyId} onChange={(e) => onCompanyChange(e.target.value)} disabled={creating}>
-                <option value="">Todas las empresas</option>
+              <select value={companyId} onChange={(e) => onCompanyChange(e.target.value)} disabled={creating || Boolean(activeCompanyId)}>
+                {!activeCompanyId && <option value="">Sin empresa activa</option>}
                 {companyOptions.map((c) => <option key={c.id} value={c.id}>{c.legal_name || c.name || 'Empresa sin nombre'}</option>)}
               </select>
             </label>

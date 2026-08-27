@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -21,10 +22,11 @@ import { SubmitModal } from './SubmitModal'
 import { ReviewModal } from './ReviewModal'
 import s from './Efectivo.module.css'
 
-const EMPTY_FILTERS: CashFilters = { query: '', status: 'todos', method: 'todos', responsibleId: 'todos', companyId: 'todos' }
+const EMPTY_FILTERS: CashFilters = { query: '', status: 'todos', method: 'todos', responsibleId: 'todos', companyId: '' }
 
 export default function EfectivoPage() {
-  const { profile, roles } = useAuth()
+  const { profile, roles, memberships } = useAuth()
+  const { companyId } = useCompany()
   const { showToast } = useToast()
 
   const [data, setData] = useState<CashData | null>(null)
@@ -56,20 +58,32 @@ export default function EfectivoPage() {
     reload()
   }, [])
 
+  useEffect(() => {
+    setFilters((current) => ({ ...current, companyId: companyId || '' }))
+    setDetailFundId(null)
+  }, [companyId])
+
   const lookups = useMemo(
     () => (data ? makeLookups(data, currentProfile) : null),
     [data, currentProfile],
   )
-  const stats = useMemo(() => (data ? computeStats(data) : null), [data])
+  const scopedData = useMemo(() => {
+    if (!data || !companyId) return null
+    const cashFunds = data.cashFunds.filter((fund) => fund.company_id === companyId)
+    const fundIds = new Set(cashFunds.map((fund) => fund.id))
+    return { ...data, cashFunds, reconciliations: data.reconciliations.filter((rec) => fundIds.has(rec.cash_fund_id || '')) }
+  }, [data, companyId])
+  const stats = useMemo(() => (scopedData ? computeStats(scopedData) : null), [scopedData])
 
   const responsibleOptions = useMemo(() => {
-    if (!data || !lookups) return []
-    return unique(data.cashFunds.map((f) => f.responsible_profile_id).filter(Boolean) as string[]).map((id) => ({ id, name: lookups.profileName(id) }))
-  }, [data, lookups])
+    if (!scopedData || !lookups) return []
+    return unique(scopedData.cashFunds.map((f) => f.responsible_profile_id).filter(Boolean) as string[]).map((id) => ({ id, name: lookups.profileName(id) }))
+  }, [scopedData, lookups])
   const companyOptions = useMemo(() => {
-    if (!data || !lookups) return []
-    return unique(data.cashFunds.map((f) => f.company_id).filter(Boolean) as string[]).map((id) => ({ id, name: lookups.companyName(id) }))
-  }, [data, lookups])
+    if (!lookups || !companyId) return []
+    const membership = memberships.find((item) => item.company_id === companyId)
+    return membership ? [{ id: companyId, name: lookups.companyName(companyId) || membership.company_name }] : []
+  }, [memberships, lookups, companyId])
 
   const rows = useMemo(() => {
     if (!data || !lookups) return []
@@ -194,8 +208,8 @@ export default function EfectivoPage() {
             <option value="todos">Responsable: Todos</option>
             {responsibleOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
-          <select value={filters.companyId} onChange={(e) => setFilters((f) => ({ ...f, companyId: e.target.value }))}>
-            <option value="todos">Empresa: Todas</option>
+          <select value={filters.companyId} disabled aria-label="Empresa activa">
+            {!companyId && <option value="">Empresa activa no disponible</option>}
             {companyOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         </div>

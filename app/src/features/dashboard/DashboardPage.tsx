@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -52,6 +53,7 @@ export default function DashboardPage() {
   const { pathname } = useLocation()
   const anualMode = pathname === '/dashboard-anual' || params.get('view') === 'anual'
   const { group } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
   const canView = canViewDashboard(group)
 
@@ -89,6 +91,10 @@ export default function DashboardPage() {
   // Dialogs
   const [showHistory, setShowHistory] = useState(false)
   const [showExport, setShowExport] = useState(false)
+
+  useEffect(() => {
+    setExpCompany(companyName ? normKey(companyName) : '__sin_empresa_activa__')
+  }, [companyId, companyName])
 
   // En modo anual la vista histórica está activa desde el primer paint (equivalente
   // a la clase `anual-boot` del vanilla, que oculta lo operativo sin flash).
@@ -312,20 +318,29 @@ export default function DashboardPage() {
   }
 
   // ── Derivados ────────────────────────────────────────────────────────────────
-  const kpis = useMemo(() => (ds ? computeKpis(ds.kpis, ds.budgetComparison, ds.closureChecklist) : null), [ds])
+  const scopedBudget = useMemo(
+    () => (ds && companyId ? ds.budgetComparison.filter((row) => row.company_id === companyId) : []),
+    [ds, companyId],
+  )
+  const scopedCompanyLabel = scopedBudget[0]?.company || companyName
+  const scopedYtd = useMemo(
+    () => (ds && scopedCompanyLabel ? ds.ytd.filter((row) => normKey(row.company) === normKey(scopedCompanyLabel)) : []),
+    [ds, scopedCompanyLabel],
+  )
+  const kpis = useMemo(() => (ds ? computeKpis(ds.kpis, scopedBudget, ds.closureChecklist) : null), [ds, scopedBudget])
   const closure = useMemo(() => (ds ? computeClosure(ds.kpis, ds.closureChecklist) : null), [ds])
   const members = useMemo(() => (ds ? filterMembers(ds.incomeMembers, memberSearch) : []), [ds, memberSearch])
 
-  const expenseCompanies = useMemo(() => (ds ? uniqueSorted(ds.budgetComparison.map((r) => r.company)) : []), [ds])
-  const expenseCenters = useMemo(() => (ds ? uniqueSorted(ds.budgetComparison.map((r) => r.cost_center)) : []), [ds])
-  const expenseCategories = useMemo(() => (ds ? uniqueSorted(ds.budgetComparison.map((r) => r.budget_category)) : []), [ds])
+  const expenseCompanies = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.company)), [scopedBudget])
+  const expenseCenters = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.cost_center)), [scopedBudget])
+  const expenseCategories = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.budget_category)), [scopedBudget])
   const expenses = useMemo(
-    () => (ds ? filterExpenses(ds.budgetComparison, { search: expSearch, company: expCompany, costCenter: expCenter, category: expCategory }) : []),
-    [ds, expSearch, expCompany, expCenter, expCategory],
+    () => filterExpenses(scopedBudget, { search: expSearch, company: expCompany, costCenter: expCenter, category: expCategory }),
+    [scopedBudget, expSearch, expCompany, expCenter, expCategory],
   )
-  const showBudgetNote = ds ? !hasBudget(ds.budgetComparison) : false
+  const showBudgetNote = ds ? !hasBudget(scopedBudget) : false
 
-  const ytdTotals = useMemo(() => (ds ? computeYtdTotals(ds.ytd) : null), [ds])
+  const ytdTotals = useMemo(() => (ds ? computeYtdTotals(scopedYtd) : null), [ds, scopedYtd])
   const incomeLineages = useMemo(() => (ds ? uniqueSorted(ds.incomeMembers.map((r) => r.lineage)) : []), [ds])
   const income = useMemo(
     () => (ds ? filterIncome(ds.incomeMembers, { search: incSearch, status: incStatus, lineage: incLineage }) : []),
@@ -579,7 +594,7 @@ export default function DashboardPage() {
             <section className={s.tableCard}>
               <div className={s.toolbar} style={{ gridTemplateColumns: 'minmax(200px,1fr) 160px 160px 160px' }}>
                 <input type="search" placeholder="Buscar empresa, centro o partida..." value={expSearch} onChange={(e) => setExpSearch(e.target.value)} />
-                <select value={expCompany} onChange={(e) => setExpCompany(e.target.value)}><option value="todos">Empresa: Todas</option>{expenseCompanies.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
+                <select value={expCompany} disabled aria-label="Empresa activa">{expenseCompanies.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}{expenseCompanies.length === 0 && <option value="__sin_empresa_activa__">Sin datos de empresa</option>}</select>
                 <select value={expCenter} onChange={(e) => setExpCenter(e.target.value)}><option value="todos">Centro: Todos</option>{expenseCenters.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
                 <select value={expCategory} onChange={(e) => setExpCategory(e.target.value)}><option value="todos">Partida: Todas</option>{expenseCategories.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
               </div>
@@ -622,8 +637,8 @@ export default function DashboardPage() {
                   <thead><tr><th>Empresa</th><th>Centro</th><th>Partida</th><th>Presupuesto YTD</th><th>Comprometido</th><th>Ejecutado</th><th>Disponible</th><th>Var. $</th><th>Var. %</th></tr></thead>
                   <tbody>
                     {!ds && <TableSkeletonRows cols={9} rows={4} />}
-                    {ds && ds.ytd.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin datos acumulados.</td></tr>}
-                    {ds && ds.ytd.map((r, i) => (
+                    {ds && scopedYtd.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin datos acumulados para la empresa activa.</td></tr>}
+                    {ds && scopedYtd.map((r, i) => (
                       <tr key={i}>
                         <td>{r.company || 'Sin empresa'}</td>
                         <td>{r.cost_center || 'Sin centro'}</td>

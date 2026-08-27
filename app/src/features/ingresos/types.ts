@@ -80,7 +80,8 @@ export type Invoice = {
 }
 
 export type Company = { id: string; name: string | null; legal_name: string | null; active: boolean | null }
-export type CostCenter = { id: string; name: string | null; code: string | null; company_id: string | null; active: boolean | null }
+export type CostCenter = { id: string; name: string | null; code: string | null; active: boolean | null }
+export type CompanyCostCenter = { company_id: string; cost_center_id: string; active: boolean | null }
 export type BudgetCategory = {
   id: string
   code: string | null
@@ -99,6 +100,7 @@ export type IngresosData = {
   invoices: Invoice[]
   companies: Company[]
   costCenters: CostCenter[]
+  companyCostCenters: CompanyCostCenter[]
   categories: BudgetCategory[]
 }
 

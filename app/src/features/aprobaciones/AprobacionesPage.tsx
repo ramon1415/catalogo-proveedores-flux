@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { perms } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -46,7 +47,8 @@ function BudgetBadge({ request }: { request: PaymentRequest }) {
 }
 
 export default function AprobacionesPage() {
-  const { profile, group } = useAuth()
+  const { profile, group, memberships } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
 
   const [data, setData] = useState<ApprovalData | null>(null)
@@ -75,9 +77,18 @@ export default function AprobacionesPage() {
     reload()
   }, [])
 
-  const requests = data?.requests ?? []
+  const allowedCompanyIds = useMemo(() => new Set(memberships.map((membership) => membership.company_id)), [memberships])
+  const requests = useMemo(
+    () => (data?.requests ?? []).filter((request) => Boolean(companyId) && request.company_id === companyId && allowedCompanyIds.has(request.company_id || '')),
+    [data, companyId, allowedCompanyIds],
+  )
   const providers = data?.providers ?? []
-  const companies = data?.companies ?? []
+  const companies = useMemo(
+    () => (data?.companies ?? []).filter((company) => allowedCompanyIds.has(company.id)),
+    [data, allowedCompanyIds],
+  )
+
+  useEffect(() => setModal(null), [companyId])
 
   const q = normalize(query)
   const rows = useMemo(
@@ -164,7 +175,7 @@ export default function AprobacionesPage() {
       <div className={s.phead}>
         <div>
           <h1>Cola de aprobacion</h1>
-          <p className="muted">Revisa solicitudes pendientes, excepciones y cambios. El historial en la segunda pestaña.</p>
+          <p className="muted">Revisa solicitudes de {companyName || 'la empresa activa'}, excepciones y cambios. El historial en la segunda pestaña.</p>
         </div>
         <button className={s.primaryBtn} onClick={reload}>Actualizar</button>
       </div>

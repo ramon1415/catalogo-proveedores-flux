@@ -12,7 +12,8 @@ export async function loadIngresosData(mode: 'income' | 'incidents'): Promise<In
       supabase.from('incident_charges').select('*').order('incident_date', { ascending: false }),
       supabase.from('invoices').select('*').eq('invoice_type', 'incident').order('issue_date', { ascending: false }),
       supabase.from('companies').select('id,name,legal_name,active').order('name', { ascending: true }),
-      supabase.from('cost_centers').select('id,name,code,company_id,active').order('name', { ascending: true }),
+      supabase.from('cost_centers').select('id,name,code,active').order('name', { ascending: true }),
+      supabase.from('company_cost_centers').select('company_id,cost_center_id,active').eq('active', true),
       supabase.from('budget_categories').select('id,code,name,category,budget_type,active').order('code', { ascending: true }),
     ])
     const err = reqs.find((r) => r.error)?.error
@@ -26,7 +27,8 @@ export async function loadIngresosData(mode: 'income' | 'incidents'): Promise<In
       invoices: reqs[2].data ?? [],
       companies: reqs[3].data ?? [],
       costCenters: reqs[4].data ?? [],
-      categories: reqs[5].data ?? [],
+      companyCostCenters: reqs[5].data ?? [],
+      categories: reqs[6].data ?? [],
     } as IngresosData
   }
 
@@ -37,7 +39,8 @@ export async function loadIngresosData(mode: 'income' | 'incidents'): Promise<In
     supabase.from('maintenance_fee_payments').select('*').order('created_at', { ascending: false }),
     supabase.from('invoices').select('*').eq('invoice_type', 'maintenance_fee').order('issue_date', { ascending: false }),
     supabase.from('companies').select('id,name,legal_name,active').order('name', { ascending: true }),
-    supabase.from('cost_centers').select('id,name,code,company_id,active').order('name', { ascending: true }),
+    supabase.from('cost_centers').select('id,name,code,active').order('name', { ascending: true }),
+    supabase.from('company_cost_centers').select('company_id,cost_center_id,active').eq('active', true),
     supabase.from('budget_categories').select('id,code,name,category,budget_type,active').order('code', { ascending: true }),
   ])
   const err = reqs.find((r) => r.error)?.error
@@ -51,7 +54,8 @@ export async function loadIngresosData(mode: 'income' | 'incidents'): Promise<In
     invoices: reqs[4].data ?? [],
     companies: reqs[5].data ?? [],
     costCenters: reqs[6].data ?? [],
-    categories: reqs[7].data ?? [],
+    companyCostCenters: reqs[7].data ?? [],
+    categories: reqs[8].data ?? [],
   } as IngresosData
 }
 

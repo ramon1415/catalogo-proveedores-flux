@@ -12,12 +12,16 @@ export function IncidentModal({
   data,
   lookups,
   profileId,
+  activeCompanyId,
+  allowedCompanyIds,
   onClose,
   onSaved,
 }: {
   data: IngresosData
   lookups: Lookups
   profileId: string | null
+  activeCompanyId: string | null
+  allowedCompanyIds: string[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -27,7 +31,7 @@ export function IncidentModal({
   const [externalName, setExternalName] = useState('')
   const [externalRfc, setExternalRfc] = useState('')
   const [referredBy, setReferredBy] = useState('')
-  const [companyId, setCompanyId] = useState('')
+  const [companyId, setCompanyId] = useState(activeCompanyId || '')
   const [costCenterId, setCostCenterId] = useState('')
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
   const [amount, setAmount] = useState('')
@@ -37,7 +41,8 @@ export function IncidentModal({
   const [saving, setSaving] = useState(false)
 
   const members = activeMembers(data)
-  const companies = activeCompanies(data)
+  const allowed = new Set(allowedCompanyIds)
+  const companies = activeCompanies(data).filter((company) => company.id === activeCompanyId && allowed.has(company.id))
   const costCenters = costCentersForCompany(data, companyId)
   const isMember = receiverType === 'member'
 
@@ -128,8 +133,8 @@ export function IncidentModal({
             </select>
           </label>
           <label>Empresa
-            <select value={companyId} onChange={(e) => onCompanyChange(e.target.value)}>
-              <option value="">Sin empresa</option>
+            <select value={companyId} onChange={(e) => onCompanyChange(e.target.value)} disabled={Boolean(activeCompanyId)}>
+              {!activeCompanyId && <option value="">Sin empresa activa</option>}
               {companies.map((c) => <option key={c.id} value={c.id}>{lookups.companyName(c.id)}</option>)}
             </select>
           </label>

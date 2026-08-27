@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -32,7 +33,8 @@ type MemberModalState = { member: Member | null } | null
 type InvoiceModalState = { type: InvoiceType; id: string; title: string; subtitle: string; amount: string } | null
 
 export default function IngresosPage() {
-  const { profile } = useAuth()
+  const { profile, memberships } = useAuth()
+  const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
   const location = useLocation()
   const profileId = (profile as { id?: string } | null)?.id ?? null
@@ -55,7 +57,7 @@ export default function IngresosPage() {
   const [memberModal, setMemberModal] = useState<MemberModalState>(null)
   const [periodModal, setPeriodModal] = useState(false)
   const [paymentCharge, setPaymentCharge] = useState<MaintenanceFeeCharge | null>(null)
-  const [incidentModal, setIncidentModal] = useState(false)
+  const [incidentModalCompanyId, setIncidentModalCompanyId] = useState<string | null>(null)
   const [invoiceModal, setInvoiceModal] = useState<InvoiceModalState>(null)
   const [invoicePayId, setInvoicePayId] = useState<string | null>(null)
   const [statementMemberId, setStatementMemberId] = useState<string | null>(null)
@@ -65,6 +67,10 @@ export default function IngresosPage() {
     setTab(routeTab)
     setQuick(null)
   }, [routeTab])
+
+  useEffect(() => {
+    setIncidentModalCompanyId(null)
+  }, [companyId])
 
   async function reload() {
     setStatus('loading')
@@ -94,7 +100,7 @@ export default function IngresosPage() {
   const stats = useMemo(() => (data ? computeStats(data) : null), [data])
   const dashboard = useMemo(() => (data ? computeDashboard(data) : null), [data])
   const incidentStats = useMemo(() => {
-    const rows = data?.incidents ?? []
+    const rows = (data?.incidents ?? []).filter((incident) => Boolean(companyId) && incident.company_id === companyId)
     const pending = rows.filter((i) => ['open', 'invoiced'].includes(i.status || ''))
     return {
       total: rows.length,
@@ -103,7 +109,7 @@ export default function IngresosPage() {
       paid: rows.filter((i) => i.status === 'paid').length,
       pendingAmount: pending.reduce((sum, i) => sum + numberValue(i.amount), 0),
     }
-  }, [data])
+  }, [data, companyId])
 
   const memberRows = useMemo(() => (data ? filterMembers(data, memberFilters, quick) : []), [data, memberFilters, quick])
   const paymentRows = useMemo(
@@ -112,8 +118,11 @@ export default function IngresosPage() {
   )
   const periodCharges = useMemo(() => (data ? chargesForPeriod(data, periodId) : []), [data, periodId])
   const incidentRows = useMemo(
-    () => (data && lookups ? filterIncidents(data, incidentFilters, quick, lookups) : []),
-    [data, lookups, incidentFilters, quick],
+    () => {
+      if (!data || !lookups || !companyId) return []
+      return filterIncidents({ ...data, incidents: data.incidents.filter((incident) => incident.company_id === companyId) }, incidentFilters, quick, lookups)
+    },
+    [data, lookups, incidentFilters, quick, companyId],
   )
   const invoiceRows = useMemo(
     () => (data && lookups ? filterInvoices(data, invoiceFilters, quick, lookups) : []),
@@ -140,6 +149,18 @@ export default function IngresosPage() {
 
   function applyIncidentCard(statusFilter: string) {
     setIncidentFilters((f) => ({ ...f, status: statusFilter }))
+  }
+
+  function openIncidentModal() {
+    if (status !== 'ready' || !data || !lookups) {
+      showToast('Incidencias cargando', 'Espera a que termine la carga antes de crear una incidencia.', 'info')
+      return
+    }
+    if (!companyId || !memberships.some((membership) => membership.company_id === companyId)) {
+      showToast('Empresa no disponible', 'Selecciona una empresa válida antes de crear la incidencia.', 'warning')
+      return
+    }
+    setIncidentModalCompanyId(companyId)
   }
 
   async function onGenerateFees() {
@@ -232,8 +253,8 @@ export default function IngresosPage() {
           <h1>{isIncidentsPage ? 'Incidencias' : 'Ingresos'}</h1>
           <p className="muted">
             {isIncidentsPage
-              ? 'Registra y da seguimiento a cargos recuperables de socios o externos.'
-              : 'Controla socios, periodos de cobro, cuotas, pagos y facturacion.'}
+              ? `Registra y da seguimiento a cargos recuperables de ${companyName || 'la empresa activa'}.`
+              : `Controla el catálogo compartido de socios, periodos, cuotas y pagos desde ${companyName || 'la empresa activa'}.`}
           </p>
         </div>
         <button className={s.secondaryBtn} onClick={reload}>Actualizar</button>
@@ -455,7 +476,7 @@ export default function IngresosPage() {
         <div className={s.tableCard}>
           <div className={s.panelHeader}>
             <div><h2>Incidencias</h2><p>Cargos recuperables a socios o externos.</p></div>
-            <button type="button" className={s.primaryBtn} onClick={() => setIncidentModal(true)}>+ Nueva incidencia</button>
+            <button type="button" className={s.primaryBtn} onClick={openIncidentModal}>+ Nueva incidencia</button>
           </div>
           <div className={s.toolbar}>
             <div className={s.searchBox}>
@@ -590,13 +611,16 @@ export default function IngresosPage() {
           onSaved={async () => { setPaymentCharge(null); await reload() }}
         />
       )}
-      {incidentModal && data && lookups && (
+      {incidentModalCompanyId && data && lookups && (
         <IncidentModal
+          key={incidentModalCompanyId}
           data={data}
           lookups={lookups}
           profileId={profileId}
-          onClose={() => setIncidentModal(false)}
-          onSaved={async () => { setIncidentModal(false); await reload(); setTab('incidents') }}
+          activeCompanyId={incidentModalCompanyId}
+          allowedCompanyIds={memberships.map((membership) => membership.company_id)}
+          onClose={() => setIncidentModalCompanyId(null)}
+          onSaved={async () => { setIncidentModalCompanyId(null); await reload(); setTab('incidents') }}
         />
       )}
       {invoiceModal && (
