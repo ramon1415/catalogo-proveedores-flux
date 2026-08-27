@@ -34,7 +34,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, moduleKey: 'solicitudes', migrated: true },
       { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, moduleKey: 'layouts', migrated: true },
-      { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE, vanillaHref: '/comprobantes_batch.html' },
+      { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE },
       { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, moduleKey: 'efectivo', migrated: true },
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, moduleKey: 'ingresos', migrated: true },
       { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, moduleKey: 'ingresos', migrated: true },
@@ -48,7 +48,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, moduleKey: 'aprobaciones', migrated: true },
-      { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE, vanillaHref: '/approval_batches.html' },
+      { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE },
     ],
   },
   {

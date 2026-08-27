@@ -4,6 +4,7 @@ import { useAuth } from './lib/auth'
 import { useModules } from './lib/moduleAccess'
 import Login from './pages/Login'
 import SectionPending from './pages/SectionPending'
+import LegacyModuleFrame from './pages/LegacyModuleFrame'
 import { AppShell } from './components/ui/AppShell'
 
 export default function App() {
@@ -28,9 +29,9 @@ export default function App() {
           {routes.map(({ path, Comp }) => (
             <Route key={path} path={path.slice(1)} element={<Comp />} />
           ))}
-          <Route path="comprobantes-batch" element={<SectionPending />} />
+          <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/comprobantes_batch.html" title="Comprobantes batch" />} />
           <Route path="solicitudes-proveedores" element={<SectionPending />} />
-          <Route path="cortes-semanales" element={<SectionPending />} />
+          <Route path="cortes-semanales" element={<LegacyModuleFrame src="/approval_batches.html" title="Cortes semanales" />} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>
       </Routes>
