@@ -17,6 +17,8 @@
   --text-1: #15211d; --text-2: #4d5f58; --text-3: #82928a;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* El reset anterior también pisa el margin:auto nativo de <dialog>. */
+dialog:modal { margin: auto; }
 body { background: var(--bg); color: var(--text-1); font-family: var(--font); font-size: 14px; -webkit-font-smoothing: antialiased; }
 .center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .muted { color: var(--text-3); }

@@ -4,7 +4,7 @@ import { ProviderCombo } from './ProviderCombo'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions, createPaymentRequest,
-  updateFase2Metadata, uploadReceipt, linkInvoicePath,
+  updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -17,13 +17,17 @@ import {
 import { numberValue } from '../../lib/format'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
-  ApproverCandidate, ApproverSelection, RequestPayload, Profile,
+  ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
 } from './types'
 import s from './Solicitudes.module.css'
 
 function defaultMonth(): string {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+const INCIDENT_STATUS_LABELS: Record<string, string> = {
+  open: 'Abierta', invoiced: 'Facturada', paid: 'Cobrada', cancelled: 'Cancelada',
 }
 
 export function RequestModal({
@@ -69,6 +73,10 @@ export function RequestModal({
   const [notes, setNotes] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [fileHint, setFileHint] = useState('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
+  const [incidents, setIncidents] = useState<IncidentCharge[]>([])
+  const [membersById, setMembersById] = useState<Map<string, string>>(new Map())
+  const [incidentId, setIncidentId] = useState('')
+  const [incidentLoadState, setIncidentLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   // cash/check delivery
   const [responsibleId, setResponsibleId] = useState(profile?.id ?? '')
   const [dueDate, setDueDate] = useState('')
@@ -97,8 +105,45 @@ export function RequestModal({
     if (dlg && !dlg.open) dlg.showModal()
   }, [])
 
+  useEffect(() => {
+    let active = true
+    loadIncidencias()
+      .then(({ incidents: rows, membersById: members }) => {
+        if (!active) return
+        setIncidents(rows)
+        setMembersById(members)
+        setIncidentLoadState('ready')
+      })
+      .catch(() => {
+        if (!active) return
+        setIncidents([])
+        setIncidentLoadState('error')
+      })
+    return () => { active = false }
+  }, [])
+
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
+  const selectedIncident = incidents.find((incident) => incident.id === incidentId) || null
+
+  function incidentLabel(incident: IncidentCharge): string {
+    const receiver = incident.member_id
+      ? (membersById.get(incident.member_id) || 'Socio')
+      : (incident.external_name || 'Externo')
+    return [
+      incident.incident_date ? new Intl.DateTimeFormat('es-MX').format(new Date(`${incident.incident_date}T12:00:00`)) : 'Sin fecha',
+      receiver,
+      incident.description || 'Sin descripcion',
+      formatCurrencyC(incident.amount, 'MXN'),
+      INCIDENT_STATUS_LABELS[incident.status || ''] || incident.status,
+    ].filter(Boolean).join(' | ')
+  }
+
+  function notesWithIncidentMarker(): string | null {
+    const clean = notes.replace(/\n?\[Visita\/incidencia asociada:[^\]]+\]/g, '').trim()
+    const marker = selectedIncident ? `[Visita/incidencia asociada: ${selectedIncident.id} - ${incidentLabel(selectedIncident)}]` : ''
+    return [clean, marker].filter(Boolean).join('\n') || null
+  }
 
   const availabilityForCategory = (id: string | null) => budgetRows.find((r) => r.budget_category_id === id) || null
   const categoryById = (id: string) => budgetCategories.find((c) => c.id === id) || null
@@ -277,7 +322,7 @@ export function RequestModal({
       currency: cur,
       exchange_rate: cur === 'MXN' ? 1 : numberValue(exchangeRate),
       description: description.trim(),
-      notes: notes.trim() || null,
+      notes: notesWithIncidentMarker(),
       requested_by: profile?.id || null,
       is_extraordinary_adjustment: Boolean(canApprove && isExtraordinary),
       responsible_profile_id: responsibleId || null,
@@ -352,6 +397,7 @@ export function RequestModal({
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
+    setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
     setBudgetRows([]); setCategoryDisabled(true); setCategorySearch('')
@@ -386,14 +432,65 @@ export function RequestModal({
             <div className={s.requestLayout} style={{ padding: '0 2px 2px' }}>
               <div className={s.formSections}>
                 <section className={s.formSection}>
-                  <h3>Datos generales</h3>
+                  <h3>Datos del pago</h3>
                   <div className={s.formGrid}>
+                    <label className={s.fullRow}>Metodo de pago *
+                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
+                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
+                    </label>
                     <label className={s.fullRow}>Tipo de solicitud *
                       <select className={s.formControl} value={requestType} onChange={(e) => setRequestType(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                       <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
                     </label>
+                    <label>Monto solicitado *
+                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+                    </label>
+                    <label>Moneda *
+                      <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
+                        <option value="MXN">MXN</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </label>
+                    <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
+                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+                    </label>
+                    {canApprove && (
+                      <label className={s.checkboxCard}>
+                        <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
+                        Ajuste extraordinario
+                      </label>
+                    )}
+                    <label className={s.fullRow}>Descripcion *
+                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => setDescription(e.target.value)} required />
+                    </label>
+                    <label className={s.fullRow}>Notas
+                      <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
+                    </label>
+                    <label className={s.fullRow}>Factura / comprobante
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                      <span className={s.fileHint}>{fileHint}</span>
+                    </label>
+                  </div>
+                </section>
+
+                <section className={s.formSection}>
+                  <h3>Proveedor / beneficiario</h3>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
+                  <div className={s.formGrid}>
+                    <label className={s.fullRow}>Proveedor *
+                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
+                    </label>
+                  </div>
+                </section>
+
+                <section className={s.formSection}>
+                  <h3>Clasificacion presupuestal</h3>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
+                  <div className={s.formGrid}>
                     <label>Empresa *
                       <select className={s.formControl} value={companyId} onChange={(e) => onCompanyChange(e.target.value)} required>
                         <option value="">Seleccionar empresa</option>
@@ -422,15 +519,33 @@ export function RequestModal({
                     <label>Mes presupuestal *
                       <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
                     </label>
-                    <label className={s.fullRow}>Proveedor *
-                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
-                    </label>
-                    <label className={s.fullRow}>Metodo de pago *
-                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
-                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </div>
+                </section>
+
+                <section className={s.formSection}>
+                  <h3>Contexto operativo</h3>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>Campo opcional para relacionar el pago con una visita o incidencia registrada.</div>
+                  <div className={s.formGrid}>
+                    <label className={s.fullRow}>Visita / Incidencia asociada
+                      <select className={s.formControl} value={incidentId} onChange={(e) => setIncidentId(e.target.value)} disabled={incidentLoadState === 'loading'}>
+                        <option value="">{incidentLoadState === 'loading' ? 'Cargando visitas/incidencias...' : 'Sin visita/incidencia asociada'}</option>
+                        {incidents.map((incident) => <option key={incident.id} value={incident.id}>{incidentLabel(incident)}</option>)}
                       </select>
-                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
                     </label>
+                    <div className={`${s.contextCard} ${incidentLoadState === 'error' ? s.contextError : selectedIncident ? s.contextSuccess : ''} ${s.fullRow}`}>
+                      <strong>{incidentLoadState === 'error'
+                        ? 'No se pudieron cargar visitas/incidencias.'
+                        : selectedIncident
+                          ? 'Visita/incidencia vinculada a esta solicitud.'
+                          : incidents.length === 0 && incidentLoadState === 'ready'
+                            ? 'No hay visitas/incidencias disponibles.'
+                            : 'Asociacion opcional, no requerida para guardar.'}</strong>
+                      <span>{selectedIncident
+                        ? incidentLabel(selectedIncident)
+                        : incidentLoadState === 'error'
+                          ? 'Puedes guardar la solicitud sin asociarla.'
+                          : 'La referencia seleccionada se guardara en las notas de la solicitud.'}</span>
+                    </div>
                   </div>
                 </section>
 
@@ -459,47 +574,8 @@ export function RequestModal({
                 </section>
 
                 <section className={s.formSection}>
-                  <h3>Datos financieros</h3>
-                  <div className={s.formGrid}>
-                    <label>Monto solicitado *
-                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} required />
-                    </label>
-                    <label>Moneda *
-                      <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
-                        <option value="MXN">MXN</option>
-                        <option value="USD">USD</option>
-                      </select>
-                    </label>
-                    <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
-                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
-                    </label>
-                    {canApprove && (
-                      <label className={s.checkboxCard}>
-                        <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
-                        Ajuste extraordinario
-                      </label>
-                    )}
-                  </div>
-                </section>
-
-                <section className={s.formSection}>
-                  <h3>Descripcion</h3>
-                  <div className={s.formGrid}>
-                    <label className={s.fullRow}>Descripcion *
-                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => setDescription(e.target.value)} required />
-                    </label>
-                    <label className={s.fullRow}>Notas
-                      <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
-                    </label>
-                    <label className={s.fullRow}>Factura / comprobante
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
-                      <span className={s.fileHint}>{fileHint}</span>
-                    </label>
-                  </div>
-                </section>
-
-                <section className={s.formSection}>
-                  <h3>Revisión</h3>
+                  <h3>Revisión final</h3>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>Después de completar los datos de la solicitud, selecciona quién realizará la revisión.</div>
                   <div className={s.formGrid}>
                     <label className={s.fullRow}>¿Quién revisará esta solicitud? *
                       <select className={s.formControl} value={approverId} disabled={approverDisabled} onChange={(e) => setApproverId(e.target.value)} required>
