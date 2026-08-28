@@ -12,6 +12,10 @@ import type {
   RoutingMembership,
   RoutingAssignment,
   ApproverCandidate,
+  TenantModule,
+  TenantModuleRelease,
+  TenantModuleConfig,
+  TenantModuleDraft,
   ContpaqCompany,
   BudgetCategory,
   ContpaqAccount,
@@ -180,6 +184,57 @@ export async function addApproverAssignment(
 
 export async function removeApproverAssignment(assignmentId: string): Promise<void> {
   const { error } = await supabase.rpc('remove_approver_assignment', { p_assignment_id: assignmentId })
+  if (error) throw error
+}
+
+// ── Onboarding de tenant (Sistema / SysAdmin) ───────────────────
+// Reutiliza el registro y las RLS de F5.a. No crea empresas, perfiles, roles ni
+// membresias; únicamente siembra/actualiza company_modules para una empresa
+// existente después de la confirmación explícita del sysadmin.
+export async function loadTenantOnboarding(): Promise<{
+  companies: RoutingCompany[]
+  modules: TenantModule[]
+  releases: TenantModuleRelease[]
+  configs: TenantModuleConfig[]
+}> {
+  const [companiesResult, modulesResult, releasesResult, configsResult] = await Promise.all([
+    supabase.from('companies').select('id,name,legal_name,active').eq('active', true).order('name'),
+    supabase.from('modules').select('module_key,name,kind,active').eq('active', true).order('name'),
+    supabase.from('module_releases').select('module_key,version,git_sha,notes').order('module_key').order('version'),
+    supabase
+      .from('company_modules')
+      .select('company_id,module_key,enabled,version,channel,hold,hold_reason')
+      .order('module_key'),
+  ])
+  const failed = [companiesResult, modulesResult, releasesResult, configsResult].find((result) => result.error)
+  if (failed?.error) throw failed.error
+  return {
+    companies: (companiesResult.data || []) as RoutingCompany[],
+    modules: (modulesResult.data || []) as TenantModule[],
+    releases: (releasesResult.data || []) as TenantModuleRelease[],
+    configs: (configsResult.data || []) as TenantModuleConfig[],
+  }
+}
+
+export async function saveTenantModuleConfiguration(
+  companyId: string,
+  drafts: TenantModuleDraft[],
+  profileId: string | null,
+): Promise<void> {
+  if (!companyId || !drafts.length) throw new Error('TENANT_ONBOARDING_CONFIGURATION_EMPTY')
+  const now = new Date().toISOString()
+  const rows = drafts.map((draft) => ({
+    company_id: companyId,
+    module_key: draft.module_key,
+    enabled: draft.enabled,
+    version: draft.version,
+    channel: draft.channel,
+    updated_by: profileId,
+    updated_at: now,
+  }))
+  const { error } = await supabase
+    .from('company_modules')
+    .upsert(rows, { onConflict: 'company_id,module_key' })
   if (error) throw error
 }
 
