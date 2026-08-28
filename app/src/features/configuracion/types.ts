@@ -168,6 +168,38 @@ export type ApproverCandidate = {
 
 export type RoleValue = 'pending' | 'solicitante' | 'finance' | 'director' | 'sysadmin'
 
+// ── Onboarding de tenant (Sistema / SysAdmin) ───────────────────
+export type TenantModule = {
+  module_key: string
+  name: string
+  kind: 'shared' | 'tenant_variant'
+  active: boolean
+}
+
+export type TenantModuleRelease = {
+  module_key: string
+  version: number
+  git_sha: string | null
+  notes: string | null
+}
+
+export type TenantModuleConfig = {
+  company_id: string
+  module_key: string
+  enabled: boolean
+  version: number
+  channel: 'stable' | 'canary'
+  hold: boolean
+  hold_reason: string | null
+}
+
+export type TenantModuleDraft = {
+  module_key: string
+  enabled: boolean
+  version: number
+  channel: 'stable' | 'canary'
+}
+
 // ── Mapeo CONTPAQ ────────────────────────────────────────────────
 export type ContpaqCompany = { id: string; name: string; active?: boolean | null }
 
