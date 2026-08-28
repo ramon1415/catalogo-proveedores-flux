@@ -128,6 +128,20 @@ export async function uploadReservedFile(
 // materializa la solicitud. Idéntico a materializeCapture del vanilla. Flux no
 // ejecuta pagos: sólo valida el paquete y crea la corrida en estado draft.
 export type MaterializeResult = { status: string; payment_request_id?: string }
+export type RevalidateResult = {
+  status: 'validated'
+  capture_session_id: string
+  capture_version: number
+  file_count: number
+  employee_record_count: number
+  channels: string[]
+  employee_net_total_minor: number
+  treasury_total_minor: number
+  provision_base_amount_minor: number
+  finance_review_required: boolean
+  parser_versions: string[]
+  validated_at: string
+}
 
 export async function materializeCapture(sessionId: string, expectedVersion: number): Promise<MaterializeResult> {
   const idempotencyKey = `payroll-n3g:${sessionId}:v${expectedVersion}`
@@ -139,6 +153,15 @@ export async function materializeCapture(sessionId: string, expectedVersion: num
     throw new Error('PAYROLL_MATERIALIZATION_FAILED')
   }
   return data as MaterializeResult
+}
+
+export async function revalidateMaterializedCapture(sessionId: string, expectedVersion: number): Promise<RevalidateResult> {
+  const { data, error } = await supabase.functions.invoke('payroll-materialize', {
+    body: { capture_session_id: sessionId, expected_version: expectedVersion, mode: 'validate_only' },
+  })
+  if (error) throw error
+  if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')
+  return data as RevalidateResult
 }
 
 // ── RPC 5: get_payroll_submission_summary(p_payment_request_id) ────────────

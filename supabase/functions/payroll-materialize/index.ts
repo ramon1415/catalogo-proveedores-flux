@@ -38,14 +38,16 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const JSON_HEADERS = { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" };
+const DEV_PROJECT_REF = "scsirgbuqjcwoaxfacth";
 const PATH_RE = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/;
-type MaterializeInput = { capture_session_id?: string; expected_version?: number; idempotency_key?: string };
+type MaterializeInput = { capture_session_id?: string; expected_version?: number; idempotency_key?: string; mode?: "materialize"|"validate_only" };
 type CaptureFile = { id:string; kind:string; channel:string|null; storage_bucket:string; storage_path:string; mime_type:string; size_bytes:number; sha256:string; capability_code:string; parser_version:string|null; parser_contract:string|null; record_count:number|null; total_amount_minor:number|null; object_size:number|null; object_mime:string|null };
 type Context = { id:string; version:number; reserved_payment_request_id:string; company_id:string; capture_state:string; validation_status:string; expires_at:string; cost_center_id:string|null; expected_channels:string[]; source_accounts:Array<string|null>|null; files:CaptureFile[] };
 type Verified = { meta:any; parsed:any };
 
 function response(status:number,body:Record<string,unknown>):Response { return new Response(JSON.stringify(body),{status,headers:JSON_HEADERS}); }
 function requiredEnv(name:string):string { const value=Deno.env.get(name)?.trim(); if(!value) throw new Error(`missing_required_secret:${name}`); return value.replace(/\/$/,""); }
+function projectRef(base:string):string { try { return new URL(base).hostname.split(".")[0]||""; } catch { return ""; } }
 function bearer(req:Request):string { const value=req.headers.get("authorization")||""; if(!/^Bearer\s+\S+$/i.test(value)) throw new Error("PAYROLL_AUTH_REQUIRED"); return value.replace(/^Bearer\s+/i,""); }
 async function apiJson(url:string,init:RequestInit,code:string):Promise<any>{ const result=await fetch(url,init); if(!result.ok) throw new Error(code); return await result.json(); }
 async function rpc(base:string,key:string,token:string,name:string,body:unknown):Promise<any>{ return await apiJson(`${base}/rest/v1/rpc/${name}`,{method:"POST",headers:{apikey:key,Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify(body)},`PAYROLL_RPC_${name.toUpperCase()}_FAILED`); }
@@ -124,15 +126,19 @@ async function handler(req:Request):Promise<Response>{
   if(req.method!=="POST") return response(405,{error:"METHOD_NOT_ALLOWED"});
   try{
     const base=requiredEnv("SUPABASE_URL"),serviceKey=requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),token=bearer(req); const input=await req.json() as MaterializeInput;
-    if(!input.capture_session_id||!Number.isInteger(input.expected_version)||!input.idempotency_key?.trim()) return response(400,{error:"PAYROLL_MATERIALIZATION_INPUT_INVALID"});
+    const validationOnly=input.mode==="validate_only";
+    if(input.mode&&input.mode!=="materialize"&&!validationOnly) return response(400,{error:"PAYROLL_MATERIALIZATION_INPUT_INVALID"});
+    if(!input.capture_session_id||!Number.isInteger(input.expected_version)||(!validationOnly&&!input.idempotency_key?.trim())) return response(400,{error:"PAYROLL_MATERIALIZATION_INPUT_INVALID"});
+    if(validationOnly&&projectRef(base)!==DEV_PROJECT_REF) throw new Error("PAYROLL_DEV_REVALIDATION_REQUIRED");
     const user=await apiJson(`${base}/auth/v1/user`,{headers:{apikey:serviceKey,Authorization:`Bearer ${token}`}},"PAYROLL_AUTH_REQUIRED");
     await requireFinanceCaptureAccess(base,serviceKey,token,input.capture_session_id);
     const profiles=await apiJson(`${base}/rest/v1/profiles?select=id&auth_user_id=eq.${encodeURIComponent(user.id)}&active=eq.true&limit=1`,{headers:{apikey:serviceKey,Authorization:`Bearer ${serviceKey}`}},"PAYROLL_ACTOR_PROFILE_REQUIRED");
     if(!Array.isArray(profiles)||profiles.length!==1) throw new Error("PAYROLL_ACTOR_PROFILE_REQUIRED");
-    const idempotencyHash=await hashText(input.idempotency_key);
     const context=await rpc(base,serviceKey,serviceKey,"get_payroll_materialization_context_internal",{p_capture_session_id:input.capture_session_id,p_expected_version:input.expected_version}) as Context;
 
-    if(context.capture_state==="materialized"){
+    if(validationOnly&&context.capture_state!=="materialized") throw new Error("PAYROLL_MATERIALIZED_CAPTURE_REQUIRED");
+    if(!validationOnly&&context.capture_state==="materialized"){
+      const idempotencyHash=await hashText(input.idempotency_key!);
       const replay=await rpc(base,serviceKey,serviceKey,"materialize_payroll_capture_internal",{
         p_capture_session_id:context.id,
         p_expected_version:context.version,
@@ -141,8 +147,8 @@ async function handler(req:Request):Promise<Response>{
       });
       return response(200,replay);
     }
-    if(new Date(context.expires_at).getTime()<=Date.now()) throw new Error("PAYROLL_CAPTURE_EXPIRED");
-    if(!context.cost_center_id) throw new Error("PAYROLL_CAPTURE_ACCOUNTING_CONTEXT_REQUIRED");
+    if(!validationOnly&&new Date(context.expires_at).getTime()<=Date.now()) throw new Error("PAYROLL_CAPTURE_EXPIRED");
+    if(!validationOnly&&!context.cost_center_id) throw new Error("PAYROLL_CAPTURE_ACCOUNTING_CONTEXT_REQUIRED");
     if(!context.files.length) throw new Error("PAYROLL_REQUIRED_FILES_MISSING");
 
     const verified=new Map<string,Verified>();
@@ -163,6 +169,23 @@ async function handler(req:Request):Promise<Response>{
     const coverParsed=verified.get("caratula")!.parsed;
     const provisionBaseAmountMinor=Number(coverParsed.provisionBaseAmountMinor);
     if(!Number.isSafeInteger(provisionBaseAmountMinor)||provisionBaseAmountMinor<=0) throw new Error("PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED");
+    if(validationOnly){
+      return response(200,{
+        status:"validated",
+        capture_session_id:context.id,
+        capture_version:context.version,
+        file_count:verified.size,
+        employee_record_count:packageResult.people.length,
+        channels:packageResult.channels.map((channel:any)=>channel.channel),
+        employee_net_total_minor:packageResult.employeeNetTotalMinor,
+        treasury_total_minor:packageResult.treasuryRequestAmountMinor,
+        provision_base_amount_minor:provisionBaseAmountMinor,
+        finance_review_required:Boolean(packageResult.financeReviewRequired),
+        parser_versions:[globalThis.FluxPayrollParser.PARSER_VERSION,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,globalThis.FluxPayrollRealReconcile.CONTRACT_VERSION,globalThis.FluxPayrollProvisionBase.CONTRACT_VERSION],
+        validated_at:new Date().toISOString(),
+      });
+    }
+    const idempotencyHash=await hashText(input.idempotency_key!);
     const coverFileId=verified.get("caratula")!.meta.capture_file_id;
     const lines=packageResult.people.map((p:any)=>({source_capture_file_id:coverFileId,source_sheet:coverParsed.sheetName,source_row_number:p.sourceRow,extraction_version:coverParsed.contractVersion,employee_name:p.employeeName,rfc:p.rfc,curp:p.curp,nss:p.nss,bank_name:p.bankName,bank_account:p.account,clabe:p.clabe,net_amount_minor:p.netAmountMinor,bank_amount_minor:p.bankAmountMinor,spei_amount_minor:p.speiAmountMinor,vouchers_amount_minor:p.vouchersAmountMinor}));
     const channels=packageResult.channels.map((c:any)=>({channel:c.channel,amount_minor:c.amountMinor,benefit_amount_minor:c.benefitAmountMinor??null,fee_amount_minor:c.feeAmountMinor??null,tax_amount_minor:c.taxAmountMinor??null,expected_funding_amount_minor:c.expectedFundingAmountMinor??null,funding_variance_minor:c.fundingVarianceMinor??0}));
