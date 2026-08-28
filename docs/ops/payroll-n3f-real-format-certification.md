@@ -42,6 +42,10 @@ Required headers are located by name on row 5 rather than by hardcoded column le
 - `Neto a pagar`
 - `Neto en efectivo (sin vales)`
 
+`Retroactivo Vales Despensa` is optional because it is present in the Flux Financiera
+cover but absent from Operadora. When present, the parser locates it by header name and
+adds it to `Vales De Despensa`; a missing or blank retroactive value is treated as zero.
+
 NSS is not a cover requirement because the supplied cover does not expose an NSS column. Identity remains valid through RFC/CURP under the existing snapshot model.
 
 Observed aggregate controls:
