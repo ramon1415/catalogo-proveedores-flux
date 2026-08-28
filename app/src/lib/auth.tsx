@@ -87,6 +87,12 @@ async function resolveMemberships(profileId: string, roleForDisplay: string): Pr
     .sort((a, b) => a.company_name.localeCompare(b.company_name))
 }
 
+function sameAuthSession(current: Session | null, next: Session | null): boolean {
+  if (current === next) return true
+  if (!current || !next) return current === next
+  return current.user.id === next.user.id && current.access_token === next.access_token
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -99,11 +105,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Hidrata la sesión existente (compartida con lo vanilla si mismo origen).
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
+      setSession((current) => sameAuthSession(current, data.session) ? current : data.session)
       setSessionReady(true)
     })
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s)
+      setSession((current) => sameAuthSession(current, s) ? current : s)
       setSessionReady(true)
     })
     return () => sub.subscription.unsubscribe()
@@ -152,7 +158,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [session, sessionReady])
+    // Perfil, roles y memberships pertenecen a la identidad. Un refresh del
+    // token no debe volver a loading ni desmontar rutas/iframes ya autenticados.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.id, sessionReady])
 
   async function signInWithGoogle() {
     await supabase.auth.signInWithOAuth({
