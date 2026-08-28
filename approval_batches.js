@@ -1,5 +1,10 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+const ACTIVE_COMPANY_ID = (() => {
+  const queryValue = new URLSearchParams(window.location.search).get("company_id")
+  return queryValue || window.sessionStorage.getItem("flux.company") || null
+})()
+
 const state = {
   profile: null,
   isFinance: false,
@@ -167,7 +172,9 @@ function renderUnauthorized() {
 
 async function loadReferenceData() {
   if (!state.isFinance) return
-  const companies = await supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name")
+  let companiesQuery = supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true)
+  if (ACTIVE_COMPANY_ID) companiesQuery = companiesQuery.eq("id", ACTIVE_COMPANY_ID)
+  const companies = await companiesQuery.order("name")
   if (companies.error) throw companies.error
   state.companies = companies.data || []
   fillCompanyOptions()
@@ -175,7 +182,7 @@ async function loadReferenceData() {
 
 async function loadDirectors() {
   if (!state.isFinance) return
-  const { data, error } = await supabaseClient.rpc("list_company_directors", { p_company_id: null })
+  const { data, error } = await supabaseClient.rpc("list_company_directors", { p_company_id: ACTIVE_COMPANY_ID })
   if (error) return showToast("No se cargaron directores", friendlyError(error), "warning")
   state.directors = asArray(data)
   fillCreateDirectors()
@@ -184,7 +191,7 @@ async function loadDirectors() {
 
 async function loadDirectorCandidates(companyId = null) {
   if (!state.isFinance) return
-  const { data, error } = await supabaseClient.rpc("list_approval_batch_director_candidates", { p_company_id: companyId || null })
+  const { data, error } = await supabaseClient.rpc("list_approval_batch_director_candidates", { p_company_id: companyId || ACTIVE_COMPANY_ID })
   if (error) {
     state.directorCandidates = []
     fillProfileOptions()
@@ -200,7 +207,10 @@ async function loadBatches() {
     const rpc = state.view === "finance" ? "list_finance_approval_batches" : "list_director_approval_batches"
     const { data, error } = await supabaseClient.rpc(rpc, { p_status: null })
     if (error) throw error
-    state.batches = asArray(data)
+    const batches = asArray(data)
+    state.batches = ACTIVE_COMPANY_ID
+      ? batches.filter((batch) => batch.company_id === ACTIVE_COMPANY_ID)
+      : batches
     if (state.view === "director") {
       state.batches.sort((a, b) => Number(b.status === "submitted") - Number(a.status === "submitted") || String(b.created_at || "").localeCompare(String(a.created_at || "")))
     }
@@ -233,7 +243,7 @@ async function refreshAll() {
 async function loadRegularizations() {
   if (!state.isAuthorized || !dom.regularizationList) return
   const { data, error } = await supabaseClient.rpc("list_extraordinary_regularizations", {
-    p_company_id: null,
+    p_company_id: ACTIVE_COMPANY_ID,
   })
   if (error) {
     state.regularizations = []

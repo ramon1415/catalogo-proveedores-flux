@@ -1,5 +1,10 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+const ACTIVE_COMPANY_ID = (() => {
+  const queryValue = new URLSearchParams(window.location.search).get("company_id")
+  return queryValue || window.sessionStorage.getItem("flux.company") || null
+})()
+
 const STATUS = Object.freeze({
   received: { label: "Recibida", event: "Solicitud recibida" },
   in_review: { label: "En revisión", event: "Revisión iniciada" },
@@ -304,7 +309,7 @@ function selectedStatuses() {
 function filterPayload() {
   const filesValue = dom.filesFilter.value
   return {
-    p_company_id: dom.companyFilter.value || null,
+    p_company_id: ACTIVE_COMPANY_ID || dom.companyFilter.value || null,
     p_statuses: selectedStatuses(),
     p_date_from: dom.dateFromFilter.value || null,
     p_date_to: dom.dateToFilter.value || null,
@@ -363,14 +368,18 @@ function setListLoading(loading) {
 }
 
 function updateCompanyOptions(companies) {
-  const selected = dom.companyFilter.value
+  const scopedCompanies = ACTIVE_COMPANY_ID
+    ? companies.filter((company) => company?.id === ACTIVE_COMPANY_ID)
+    : companies
+  const selected = ACTIVE_COMPANY_ID || dom.companyFilter.value
   const fragment = document.createDocumentFragment()
-  fragment.append(optionElement("", "Todas las permitidas"))
-  companies.forEach((company) => {
+  if (!ACTIVE_COMPANY_ID) fragment.append(optionElement("", "Todas las permitidas"))
+  scopedCompanies.forEach((company) => {
     if (company?.id) fragment.append(optionElement(company.id, company.name || "Empresa"))
   })
   dom.companyFilter.replaceChildren(fragment)
-  if (companies.some((company) => company.id === selected)) dom.companyFilter.value = selected
+  if (scopedCompanies.some((company) => company.id === selected)) dom.companyFilter.value = selected
+  dom.companyFilter.disabled = Boolean(ACTIVE_COMPANY_ID)
 }
 
 function renderSummary() {
@@ -2365,7 +2374,10 @@ async function loadLinkManagementContext() {
     return
   }
   state.linkContext = data || {}
-  state.linkCompanies = Array.isArray(data?.companies) ? data.companies : []
+  const companies = Array.isArray(data?.companies) ? data.companies : []
+  state.linkCompanies = ACTIVE_COMPANY_ID
+    ? companies.filter((company) => company.id === ACTIVE_COMPANY_ID)
+    : companies
 }
 
 async function openLinkManagement() {

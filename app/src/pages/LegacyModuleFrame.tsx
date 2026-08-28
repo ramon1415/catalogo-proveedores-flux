@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useCompany } from '../lib/company'
 import s from './LegacyModuleFrame.module.css'
 
 const EMBED_STYLES = `
@@ -19,8 +20,12 @@ interface LegacyModuleFrameProps {
 }
 
 export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps) {
+  const { companyId } = useCompany()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
+  const frameSrc = companyId
+    ? `${src}${src.includes('?') ? '&' : '?'}company_id=${encodeURIComponent(companyId)}`
+    : src
 
   function prepareEmbeddedShell() {
     const doc = frameRef.current?.contentDocument
@@ -40,14 +45,14 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
 
   useEffect(() => {
     setReady(false)
-  }, [src])
+  }, [frameSrc])
 
   return (
     <section className={s.host} aria-label={title}>
       <iframe
         ref={frameRef}
         className={`${s.frame} ${ready ? s.frameReady : ''}`}
-        src={src}
+        src={frameSrc}
         title={title}
         onLoad={prepareEmbeddedShell}
       />
