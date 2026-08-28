@@ -88,6 +88,7 @@ export const MODULE_REGISTRY: ModuleDef[] = [
   },
   {
     key: 'dashboard', label: 'Dashboard', section: 'General', path: '/dashboard',
+    extraPaths: ['/dashboard-anual'],
     icon: <IcDashboard />, kind: 'shared', codeVersion: 1,
     component: lazy(() => import('../features/dashboard/DashboardPage')),
   },
