@@ -38,19 +38,17 @@ function storedZip(entries) {
 }
 function xmlEscape(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function cell(ref, value, type = 'str') { return `<c r="${ref}" t="${type}"><v>${xmlEscape(value)}</v></c>`; }
-function coverFixture({ withVouchers = true } = {}) {
-  const headers = real.REQUIRED_COVER_HEADERS;
+function coverFixture({ withVouchers = true, retroactiveVouchers = '0', headers = real.REQUIRED_COVER_HEADERS } = {}) {
   const headerCells = headers.map((header, index) => cell(String.fromCharCode(65 + index) + '5', header)).join('');
   const voucher = withVouchers ? '50' : '0';
-  const netTwo = withVouchers ? '200' : '150';
+  const netTwo = String(150 + Number(voucher) + Number(retroactiveVouchers));
   const rows = [
-    [6, 'TEST010101AA1', 'TEST010101HDFABC01', 'PERSONA SINTETICA UNO', 'BBVA', SAME_ACCOUNT, '', '0', '100', '100'],
-    [7, 'TEST020202BB2', 'TEST020202MDFABC02', 'PERSONA SINTETICA DOS', 'BANCO EXTERNO', '', SPEI_CLABE, voucher, netTwo, '150'],
-    [8, 'TEST030303CC3', 'TEST030303HDFABC03', 'PERSONA SINTETICA CERO', '', '', '', '0', '0', '0'],
+    [6, { 'RFC': 'TEST010101AA1', 'CURP': 'TEST010101HDFABC01', 'Nombre completo': 'PERSONA SINTETICA UNO', 'Banco': 'BBVA', 'Cuenta banco': SAME_ACCOUNT, 'CLABE': '', 'Vales De Despensa': '0', 'Retroactivo Vales Despensa': '0', 'Neto a pagar': '100', 'Neto en efectivo (sin vales)': '100' }],
+    [7, { 'RFC': 'TEST020202BB2', 'CURP': 'TEST020202MDFABC02', 'Nombre completo': 'PERSONA SINTETICA DOS', 'Banco': 'BANCO EXTERNO', 'Cuenta banco': '', 'CLABE': SPEI_CLABE, 'Vales De Despensa': voucher, 'Retroactivo Vales Despensa': retroactiveVouchers, 'Neto a pagar': netTwo, 'Neto en efectivo (sin vales)': '150' }],
+    [8, { 'RFC': 'TEST030303CC3', 'CURP': 'TEST030303HDFABC03', 'Nombre completo': 'PERSONA SINTETICA CERO', 'Banco': '', 'Cuenta banco': '', 'CLABE': '', 'Vales De Despensa': '0', 'Retroactivo Vales Despensa': '0', 'Neto a pagar': '0', 'Neto en efectivo (sin vales)': '0' }],
   ];
-  const body = rows.map(([row, rfc, curp, name, bank, account, clabe, vales, net, cash]) => {
-    const vals = [rfc, curp, name, bank, account, clabe, vales, net, cash];
-    return `<row r="${row}">${vals.map((value, index) => cell(String.fromCharCode(65 + index) + row, value, index >= 6 ? 'n' : 'str')).join('')}</row>`;
+  const body = rows.map(([row, values]) => {
+    return `<row r="${row}">${headers.map((header, index) => cell(String.fromCharCode(65 + index) + row, values[header], ['Vales De Despensa', 'Retroactivo Vales Despensa', 'Neto a pagar', 'Neto en efectivo (sin vales)'].includes(header) ? 'n' : 'str')).join('')}</row>`;
   }).join('');
   const sheet = `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="5">${headerCells}</row>${body}</sheetData></worksheet>`;
   const workbook = `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="OPERADORA TLACATECPAN" sheetId="1" r:id="rId1"/></sheets></workbook>`;
@@ -97,6 +95,16 @@ test('real cover contract is header-driven, preserves zero-net rows, and does no
   assert.equal(parsed.people[2].netAmountMinor, 0);
   assert.equal(parsed.people[2].nss, '');
   assert.deepEqual(parsed.totals, { netAmountMinor: 30000, cashAmountMinor: 25000, vouchersAmountMinor: 5000 });
+});
+
+test('real cover sums regular and retroactive vouchers by header name regardless of column order', async () => {
+  const headers = [...real.REQUIRED_COVER_HEADERS, ...real.OPTIONAL_COVER_HEADERS].reverse();
+  const parsed = await real.parseCoverXlsx(coverFixture({ headers, retroactiveVouchers: '1400' }));
+  assert.equal(parsed.valid, true);
+  assert.equal(parsed.people[1].coverVouchersAmountMinor, 145000);
+  assert.equal(parsed.people[1].coverCashAmountMinor, 15000);
+  assert.equal(parsed.people[1].netAmountMinor, 160000);
+  assert.deepEqual(parsed.totals, { netAmountMinor: 170000, cashAmountMinor: 25000, vouchersAmountMinor: 145000 });
 });
 
 test('Nomina 108 physical contract is 108 useful ASCII bytes plus CRLF', () => {
