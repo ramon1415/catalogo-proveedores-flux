@@ -56,12 +56,27 @@ export default function SolicitudesPage() {
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
   // La lista arranca filtrada a la empresa activa (switcher) y se re-sincroniza
   // al cambiarla. Un usuario de una sola empresa solo ve la suya.
-  const [companyFilter, setCompanyFilter] = useState<string>(activeCompanyId ?? 'todos')
-  useEffect(() => { if (activeCompanyId) setCompanyFilter(activeCompanyId) }, [activeCompanyId])
+  const [companyFilter, setCompanyFilter] = useState<string>(activeCompanyId ?? '')
+  useEffect(() => { setCompanyFilter(activeCompanyId ?? '') }, [activeCompanyId])
   // El selector de empresa solo ofrece las empresas del usuario (memberships).
   const myCompanies = useMemo(
     () => companies.filter((c) => memberships.some((m) => m.company_id === c.id)),
     [companies, memberships],
+  )
+  const allowedCompanyIds = useMemo(
+    () => new Set(memberships.map((membership) => membership.company_id)),
+    [memberships],
+  )
+  // La empresa activa es el límite de contexto de la SPA. Aunque RLS siga
+  // siendo la autoridad de seguridad, ningún contador, fila o deep-link debe
+  // mezclar otra empresa a la que el mismo usuario también pertenezca.
+  const scopedRequests = useMemo(
+    () => requests.filter(
+      (request) => Boolean(activeCompanyId)
+        && request.company_id === activeCompanyId
+        && allowedCompanyIds.has(request.company_id || ''),
+    ),
+    [requests, activeCompanyId, allowedCompanyIds],
   )
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
@@ -108,12 +123,12 @@ export default function SolicitudesPage() {
     if (status !== 'ready' || deepLinkHandled.current) return
     const requestId = params.get('request_id')
     if (!requestId) { deepLinkHandled.current = true; return }
-    if (requests.some((r) => r.id === requestId)) {
+    if (scopedRequests.some((r) => r.id === requestId)) {
       deepLinkHandled.current = true
       setDetailId(requestId)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, requests])
+  }, [status, scopedRequests])
 
   const lookups = useMemo(() => ({
     company: (id: string | null) => companies.find((c) => c.id === id) || null,
@@ -124,8 +139,8 @@ export default function SolicitudesPage() {
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const active = requests.filter(isActiveRequest)
-    const paid = requests.filter((r) => r.status === 'paid')
+    const active = scopedRequests.filter(isActiveRequest)
+    const paid = scopedRequests.filter((r) => r.status === 'paid')
     return {
       total: active.length,
       aprobables: active.filter((r) => r.budget_decision === 'aprobable').length,
@@ -133,23 +148,23 @@ export default function SolicitudesPage() {
       paid: paid.length,
       amount: active.reduce((sum, r) => sum + numberValue(r.amount_requested), 0),
     }
-  }, [requests])
+  }, [scopedRequests])
 
   // ── Filtered rows ────────────────────────────────────────────────────────
   const rows = useMemo(() => {
     const q = normalize(query)
-    return requests.filter((r) => {
+    return scopedRequests.filter((r) => {
       const haystack = requestSearchHaystack(r, lookups.proveedor(r.proveedor_id), lookups.company(r.company_id), lookups.center(r.cost_center_id), lookups.category(r.budget_category_id))
       return (
         haystack.includes(q) &&
         statusMatches(r, statusFilter) &&
         budgetDecisionMatches(r, decisionFilter) &&
-        (companyFilter === 'todos' || r.company_id === companyFilter)
+        r.company_id === companyFilter
       )
     })
-  }, [requests, lookups, query, statusFilter, decisionFilter, companyFilter])
+  }, [scopedRequests, lookups, query, statusFilter, decisionFilter, companyFilter])
 
-  const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos' || companyFilter !== 'todos'
+  const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos'
 
   const filterParts = useMemo(() => {
     const parts: string[] = []
@@ -157,12 +172,12 @@ export default function SolicitudesPage() {
     if (statusFilter !== 'todos') parts.push(STATUS_FILTER_LABELS[statusFilter] || `Estatus: ${statusFilter}`)
     if (decisionFilter === 'aprobable') parts.push('Aprobables')
     if (decisionFilter === 'excepciones') parts.push('Excepciones presupuestales')
-    if (companyFilter !== 'todos') { const c = lookups.company(companyFilter); parts.push(c ? companyName(c) : 'Empresa filtrada') }
+    if (companyFilter) { const c = lookups.company(companyFilter); parts.push(c ? companyName(c) : 'Empresa activa') }
     return parts
   }, [query, statusFilter, decisionFilter, companyFilter, lookups])
 
   function setFilters(next: { status: StatusFilter; decision: BudgetDecisionFilter }) {
-    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision); setCompanyFilter('todos')
+    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision); setCompanyFilter(activeCompanyId ?? '')
   }
 
   // ── Card active state (mirror renderFilterState) ─────────────────────────
@@ -187,8 +202,8 @@ export default function SolicitudesPage() {
     setDetailKey((k) => k + 1) // fuerza recarga de historial/contexto del detalle
   }
 
-  const detailRequest = detailId ? requests.find((r) => r.id === detailId) || null : null
-  const editRequest = editId ? requests.find((r) => r.id === editId) || null : null
+  const detailRequest = detailId ? scopedRequests.find((r) => r.id === detailId) || null : null
+  const editRequest = editId ? scopedRequests.find((r) => r.id === editId) || null : null
 
   return (
     <>
@@ -249,16 +264,16 @@ export default function SolicitudesPage() {
             <option value="aprobable">Aprobable</option>
             <option value="excepciones">Excepciones</option>
           </select>
-          <select value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}>
-            <option value="todos">Empresa: Todas</option>
-            {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
+          <select value={companyFilter} disabled aria-label="Empresa activa">
+            {!activeCompanyId && <option value="">Empresa activa no disponible</option>}
+            {myCompanies.filter((c) => c.id === activeCompanyId).map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
           </select>
         </div>
 
         {filterParts.length > 0 && (
           <div className={s.filterSummary}>
             <span className={s.filterPill}>Vista filtrada: {filterParts.join(' · ')}</span>
-            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter('todos') }}>Ver todas</button>
+            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter(activeCompanyId ?? '') }}>Ver todas</button>
           </div>
         )}
 
@@ -277,7 +292,7 @@ export default function SolicitudesPage() {
                     <div className={s.esIcon}>{hasActiveFilters ? '🔍' : '📋'}</div>
                     <div className={s.esTitle}>{hasActiveFilters ? 'Sin resultados' : 'Sin solicitudes'}</div>
                     <div className={s.esDesc}>{hasActiveFilters ? 'Ninguna solicitud coincide con los filtros aplicados.' : 'Crea una nueva solicitud de pago para iniciar la bandeja.'}</div>
-                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter('todos') }}>Limpiar filtros</button></div>}
+                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter(activeCompanyId ?? '') }}>Limpiar filtros</button></div>}
                   </div>
                 </td></tr>
               )}
