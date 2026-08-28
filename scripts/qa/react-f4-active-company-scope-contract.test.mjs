@@ -18,5 +18,6 @@ test('solicitudes deriva KPIs, filas y modales desde la empresa activa', () => {
 test('los controles rápidos no pueden volver a Empresa: Todas', () => {
   assert.doesNotMatch(source, /setCompanyFilter\('todos'\)/)
   assert.doesNotMatch(source, /<option value="todos">Empresa: Todas<\/option>/)
-  assert.match(source, /<select value=\{companyFilter\} disabled aria-label="Empresa activa">/)
+  assert.doesNotMatch(source, /aria-label="Empresa activa"/)
+  assert.doesNotMatch(source, /companyFilter/)
 })
