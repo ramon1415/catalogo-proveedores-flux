@@ -11,6 +11,7 @@ import {
 } from '../api'
 import { normalize, formatDate, GROUP_LABELS, GROUP_BADGE, friendlyRoutingError } from '../logic'
 import { AssignRoleModal } from '../AssignRoleModal'
+import { TenantOnboardingWizard } from '../TenantOnboardingWizard'
 import type {
   UserRow,
   RoutingCompany,
@@ -203,6 +204,8 @@ export function SystemTab() {
 
   return (
     <div className={s.panel}>
+      <TenantOnboardingWizard />
+
       {/* Usuarios */}
       <section className={s.tableCard}>
         <div className={s.toolbar}>
