@@ -93,25 +93,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<string[]>([])
   const [group, setGroup] = useState<RoleGroup>(ROLE_GROUPS.PENDING)
   const [memberships, setMemberships] = useState<Membership[]>([])
+  const [sessionReady, setSessionReady] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     // Hidrata la sesión existente (compartida con lo vanilla si mismo origen).
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
-      setLoading(false)
+      setSessionReady(true)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s))
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s)
+      setSessionReady(true)
+    })
     return () => sub.subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
+    if (!sessionReady) return
     let cancelled = false
+    setLoading(true)
     if (!session) {
       setProfile(null)
       setRoles([])
       setGroup(ROLE_GROUPS.PENDING)
       setMemberships([])
+      setLoading(false)
       return
     }
     ;(async () => {
@@ -122,12 +129,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles([])
         setGroup(ROLE_GROUPS.PENDING)
         setMemberships([])
+        setLoading(false)
         return
       }
       if (prof.active === false) {
         setRoles([])
         setGroup(ROLE_GROUPS.INACTIVE)
         setMemberships([])
+        setLoading(false)
         return
       }
       const r = await resolveRoles(prof.id)
@@ -138,11 +147,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const mem = await resolveMemberships(prof.id, r[0] ?? groupFromRoles(r))
       if (cancelled) return
       setMemberships(mem)
+      setLoading(false)
     })()
     return () => {
       cancelled = true
     }
-  }, [session])
+  }, [session, sessionReady])
 
   async function signInWithGoogle() {
     await supabase.auth.signInWithOAuth({
