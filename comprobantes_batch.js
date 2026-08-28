@@ -1,6 +1,11 @@
 ;(function paymentBatchUi() {
   "use strict"
 
+  const ACTIVE_COMPANY_ID = (() => {
+    const queryValue = new URLSearchParams(window.location.search).get("company_id")
+    return queryValue || window.sessionStorage.getItem("flux.company") || null
+  })()
+
   const RPC = Object.freeze({
     context: "get_payment_batch_context",
     createBatch: "create_payment_ingestion_batch",
@@ -65,7 +70,8 @@
       if (error) throw error
       state.context = object(data)
       if (state.context.allowed === false || state.context.can_access === false) return renderBlocked("Acceso restringido", state.context.block_reason || "No tienes capacidad asignada para consultar conciliaciones.")
-      populateCompanies(array(state.context.companies))
+      const companies = array(state.context.companies)
+      populateCompanies(ACTIVE_COMPANY_ID ? companies.filter((company) => company.id === ACTIVE_COMPANY_ID) : companies)
       dom.accessState.hidden = true
       dom.batchWorkspace.hidden = false
       syncCapabilities()
@@ -172,7 +178,7 @@
   async function loadBatches(announce = false) {
     setBusy(true)
     try {
-      const { data, error } = await client.rpc(RPC.listBatches, { p_company_id: null, p_status: null, p_limit: 50 })
+      const { data, error } = await client.rpc(RPC.listBatches, { p_company_id: ACTIVE_COMPANY_ID, p_status: null, p_limit: 50 })
       if (error) throw error
       state.batches = array(data?.items || data)
       renderSummary()
@@ -522,7 +528,7 @@
     if (!context.batchId) return
     try {
       const [batchesResult, detailResult] = await Promise.all([
-        client.rpc(RPC.listBatches, { p_company_id: null, p_status: null, p_limit: 50 }),
+        client.rpc(RPC.listBatches, { p_company_id: ACTIVE_COMPANY_ID, p_status: null, p_limit: 50 }),
         client.rpc(RPC.batchDetail, { p_batch_id: context.batchId }),
       ])
       if (!operationContextIsCurrent(context)) return
