@@ -54,15 +54,6 @@ export default function SolicitudesPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('activas')
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
-  // La lista arranca filtrada a la empresa activa (switcher) y se re-sincroniza
-  // al cambiarla. Un usuario de una sola empresa solo ve la suya.
-  const [companyFilter, setCompanyFilter] = useState<string>(activeCompanyId ?? '')
-  useEffect(() => { setCompanyFilter(activeCompanyId ?? '') }, [activeCompanyId])
-  // El selector de empresa solo ofrece las empresas del usuario (memberships).
-  const myCompanies = useMemo(
-    () => companies.filter((c) => memberships.some((m) => m.company_id === c.id)),
-    [companies, memberships],
-  )
   const allowedCompanyIds = useMemo(
     () => new Set(memberships.map((membership) => membership.company_id)),
     [memberships],
@@ -158,11 +149,10 @@ export default function SolicitudesPage() {
       return (
         haystack.includes(q) &&
         statusMatches(r, statusFilter) &&
-        budgetDecisionMatches(r, decisionFilter) &&
-        r.company_id === companyFilter
+        budgetDecisionMatches(r, decisionFilter)
       )
     })
-  }, [scopedRequests, lookups, query, statusFilter, decisionFilter, companyFilter])
+  }, [scopedRequests, lookups, query, statusFilter, decisionFilter])
 
   const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos'
 
@@ -172,12 +162,12 @@ export default function SolicitudesPage() {
     if (statusFilter !== 'todos') parts.push(STATUS_FILTER_LABELS[statusFilter] || `Estatus: ${statusFilter}`)
     if (decisionFilter === 'aprobable') parts.push('Aprobables')
     if (decisionFilter === 'excepciones') parts.push('Excepciones presupuestales')
-    if (companyFilter) { const c = lookups.company(companyFilter); parts.push(c ? companyName(c) : 'Empresa activa') }
+    if (activeCompanyId) { const c = lookups.company(activeCompanyId); parts.push(c ? companyName(c) : 'Empresa activa') }
     return parts
-  }, [query, statusFilter, decisionFilter, companyFilter, lookups])
+  }, [query, statusFilter, decisionFilter, activeCompanyId, lookups])
 
   function setFilters(next: { status: StatusFilter; decision: BudgetDecisionFilter }) {
-    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision); setCompanyFilter(activeCompanyId ?? '')
+    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision)
   }
 
   // ── Card active state (mirror renderFilterState) ─────────────────────────
@@ -264,16 +254,12 @@ export default function SolicitudesPage() {
             <option value="aprobable">Aprobable</option>
             <option value="excepciones">Excepciones</option>
           </select>
-          <select value={companyFilter} disabled aria-label="Empresa activa">
-            {!activeCompanyId && <option value="">Empresa activa no disponible</option>}
-            {myCompanies.filter((c) => c.id === activeCompanyId).map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
-          </select>
         </div>
 
         {filterParts.length > 0 && (
           <div className={s.filterSummary}>
             <span className={s.filterPill}>Vista filtrada: {filterParts.join(' · ')}</span>
-            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter(activeCompanyId ?? '') }}>Ver todas</button>
+            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Ver todas</button>
           </div>
         )}
 
@@ -292,7 +278,7 @@ export default function SolicitudesPage() {
                     <div className={s.esIcon}>{hasActiveFilters ? '🔍' : '📋'}</div>
                     <div className={s.esTitle}>{hasActiveFilters ? 'Sin resultados' : 'Sin solicitudes'}</div>
                     <div className={s.esDesc}>{hasActiveFilters ? 'Ninguna solicitud coincide con los filtros aplicados.' : 'Crea una nueva solicitud de pago para iniciar la bandeja.'}</div>
-                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos'); setCompanyFilter(activeCompanyId ?? '') }}>Limpiar filtros</button></div>}
+                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Limpiar filtros</button></div>}
                   </div>
                 </td></tr>
               )}
