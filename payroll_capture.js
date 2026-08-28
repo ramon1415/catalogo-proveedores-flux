@@ -20,6 +20,7 @@
     initialized: false,
     saving: false,
     materializing: false,
+    revalidating: false,
     submitting: false,
     sessionId: null,
     sessionVersion: null,
@@ -251,6 +252,14 @@
     materialize.textContent = 'Validar paquete y materializar';
     dom.submit.insertAdjacentElement('afterend', materialize);
     dom.materialize = materialize;
+    const revalidate = document.createElement('button');
+    revalidate.id = 'payrollRevalidateBtn';
+    revalidate.className = 'secondary-btn hidden';
+    revalidate.type = 'button';
+    revalidate.disabled = true;
+    revalidate.textContent = 'Revalidar paquete en servidor';
+    materialize.insertAdjacentElement('afterend', revalidate);
+    dom.revalidate = revalidate;
     dom.ackVariance = document.getElementById('payrollAcknowledgeVarianceBtn');
     dom.submitApproval = document.getElementById('payrollSubmitApprovalBtn');
   }
@@ -298,6 +307,7 @@
     });
     document.querySelectorAll('[data-payroll-file-input]').forEach(function (input) { bindFile(input.id, input.dataset.payrollFileInput); });
     dom.materialize.addEventListener('click', materializeCapture);
+    dom.revalidate.addEventListener('click', revalidateMaterializedCapture);
     dom.ackVariance.addEventListener('click', acknowledgeVariance);
     dom.submitApproval.addEventListener('click', submitForApproval);
     dom.boardList.addEventListener('click', function (event) {
@@ -418,6 +428,7 @@
     if(!dom.section) return;
     const payroll=state.active;
     dom.section.classList.toggle('hidden',!payroll); dom.materialize.classList.toggle('hidden',!payroll);
+    dom.revalidate.classList.toggle('hidden',!payroll||!isDevSupabaseProject()||!state.materializedRequestId);
     dom.requestForm.querySelector('.request-layout')?.classList.toggle('payroll-mode',payroll);
     dom.requestForm.querySelector('.summary-panel')?.classList.toggle('hidden',payroll);
     const fieldIds=['costCenterId','budgetCategorySearch','budgetCategoryId','budgetMonth','providerSearch','proveedorId','paymentMethod','requestFile','approverId','amountRequested','currency','exchangeRate','isExtraordinaryAdjustment'];
@@ -501,6 +512,8 @@
     const spei=state.files.layout_spei;dom.speiCount.textContent=spei?.recordCount?String(spei.recordCount):spei?.uploaded?'Servidor validará':'Pendiente';
     dom.issues.innerHTML=missing.length?missing.map(function(slot){return '<span class="payroll-issue-chip">MISSING_USER_FILE · '+escapeHtml(slotLabel(slot))+'</span>';}).join(''):'<span class="payroll-issue-chip">Paquete completo para verificación</span>';
     dom.materialize.disabled=!state.active||materialized||!state.sessionId||missing.length>0||state.materializing;
+    dom.revalidate.classList.toggle('hidden',!state.active||!materialized||!isDevSupabaseProject());
+    dom.revalidate.disabled=!state.active||!materialized||!state.sessionId||state.revalidating;
     dom.submit.disabled=materialized||state.saving;
     syncConditionalInputs();
   }
@@ -539,6 +552,19 @@
       notify('Nómina validada','El servidor verificó el paquete y materializó la solicitud.','success');
     }catch(error){notify('Validación no completada',friendlyError(error),'error');}
     finally{state.materializing=false;dom.materialize.textContent='Validar paquete y materializar';renderCapture();}
+  }
+
+  async function revalidateMaterializedCapture() {
+    if(state.revalidating||!state.sessionId||!state.sessionVersion||!state.materializedRequestId||!isDevSupabaseProject())return;
+    const client=getClient();if(!client)return;
+    state.revalidating=true;dom.revalidate.disabled=true;dom.revalidate.textContent='Revalidando paquete…';
+    try{
+      const result=await client.functions.invoke('payroll-materialize',{body:{capture_session_id:state.sessionId,expected_version:state.sessionVersion,mode:'validate_only'}});
+      if(result.error)throw result.error;
+      if(!result.data||result.data.status!=='validated')throw new Error('PAYROLL_DEV_REVALIDATION_FAILED');
+      notify('Paquete revalidado sin cambios',String(result.data.file_count)+' archivos · '+String(result.data.employee_record_count)+' registros · '+String((result.data.channels||[]).length)+' canales. No se modificó la corrida.','success');
+    }catch(error){notify('No se pudo revalidar',friendlyError(error),'error');}
+    finally{state.revalidating=false;dom.revalidate.textContent='Revalidar paquete en servidor';renderCapture();}
   }
 
   async function loadSubmissionSummary() {
@@ -590,6 +616,7 @@
   function slotLabel(value){return({caratula:'Carátula',layout_mismo_banco:'BBVA Nómina 108',layout_spei:'SPEI',layout_toka:'TOKA fondeo',cfdi_vales:'TOKA CFDI'})[value]||value||'Captura';}
   function channelLabel(value){return({banco:'BBVA mismo banco',spei:'SPEI',vales:'TOKA / vales'})[value]||value;}
   function formatMoney(value){const n=Number(value);if(!Number.isFinite(n))return'—';return new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN'}).format(n);}
+  function isDevSupabaseProject(){try{return new URL(window.FLUX_ENV_CONFIG?.supabaseUrl||'').hostname.split('.')[0]==='scsirgbuqjcwoaxfacth';}catch(_){return false;}}
   function notify(title,message,variant){if(typeof showToast==='function')return showToast(title,message,variant);if(window.Components?.toast)return window.Components.toast(title,message,variant);}
 
   function friendlyError(error){const message=String(error?.message||error||'Error inesperado.');const map={payroll_capture_finance_required:'La captura de nómina es exclusiva de Finanzas.',payroll_capture_metadata_invalid:'La metadata de la corrida no es válida.',payroll_capture_source_account_invalid:'La cuenta origen no pertenece a la empresa o está inactiva.',payroll_capture_cost_center_invalid:'El centro de costo no está habilitado para la empresa.',payroll_capture_version_conflict:'La captura cambió. Recarga antes de continuar.',payroll_capture_session_expired:'La sesión de captura expiró.',payroll_capture_materialized_locked:'La corrida ya fue materializada y sus datos de captura están congelados.',payroll_capture_spei_validation_required:'El TXT SPEI no pasó el diagnóstico certificado.',payroll_capture_toka_funding_validation_required:'El TXT de fondeo TOKA no es válido para esta captura.',PAYROLL_TOKA_FUNDING_VARIANCE_REVIEW_REQUIRED:'Finanzas debe reconocer la diferencia de fondeo TOKA antes de enviar.',PAYROLL_SERVER_PACKAGE_VALIDATION_FAILED:'Los archivos no conciliaron entre sí en la verificación del servidor.',PAYROLL_SOURCE_ACCOUNT_MISMATCH:'La cuenta origen codificada en los layouts no coincide con la cuenta seleccionada.',PAYROLL_REQUIRED_FILES_MISSING:'Faltan archivos obligatorios del paquete.',PAYROLL_COVER_SHEET_SERVER_PARSE_FAILED:'La carátula no coincide con el contrato físico certificado.',PAYROLL_SAME_BANK_SERVER_PARSE_FAILED:'El archivo BBVA mismo banco no coincide con Nómina 108.',PAYROLL_TOKA_CFDI_SERVER_PARSE_FAILED:'El CFDI TOKA no coincide con el contrato certificado.',PAYROLL_TOKA_FUNDING_SERVER_PARSE_FAILED:'El TXT de fondeo TOKA no coincide con el contrato certificado.'};const key=Object.keys(map).find(function(k){return message.includes(k);});return key?map[key]:message;}

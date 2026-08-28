@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
+import { isDevSupabaseProject } from '../../lib/supabase'
 import {
   FILE_CARDS,
   accountLabel,
@@ -26,6 +27,7 @@ import {
   getSubmissionSummary,
   listApproverOptions,
   materializeCapture,
+  revalidateMaterializedCapture,
   saveCaptureSession,
   submitForApproval,
   uploadReservedFile,
@@ -86,6 +88,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
 
   const [saving, setSaving] = useState(false)
   const [materializing, setMaterializing] = useState(false)
+  const [revalidating, setRevalidating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   const locked = materializedRequestId !== null
@@ -331,6 +334,23 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     }
   }
 
+  async function revalidate() {
+    if (revalidating || !locked || !sessionId || sessionVersion === null || !isFinance || !isDevSupabaseProject) return
+    setRevalidating(true)
+    try {
+      const result = await revalidateMaterializedCapture(sessionId, sessionVersion)
+      showToast(
+        'Paquete revalidado sin cambios',
+        `${result.file_count} archivos · ${result.employee_record_count} registros · ${result.channels.length} canales. No se modificó la corrida.`,
+        'success',
+      )
+    } catch (error) {
+      showToast('No se pudo revalidar', friendlyError(error), 'error')
+    } finally {
+      setRevalidating(false)
+    }
+  }
+
   // ── Resumen de submission + aprobadores ──────────────────────────────────
   async function loadSubmissionSummary(requestId: string) {
     try {
@@ -457,6 +477,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       <button type="button" className={s.secondaryBtn} onClick={onClose}>
         Cerrar
       </button>
+      {locked && isFinance && isDevSupabaseProject && (
+        <button type="button" className={s.secondaryBtn} onClick={revalidate} disabled={revalidating}>
+          {revalidating ? 'Revalidando paquete…' : 'Revalidar paquete en servidor'}
+        </button>
+      )}
       <button type="button" className={s.secondaryBtn} onClick={save} disabled={locked || saving}>
         {saving ? 'Guardando…' : 'Guardar captura'}
       </button>

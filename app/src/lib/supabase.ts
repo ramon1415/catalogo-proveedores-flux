@@ -23,3 +23,11 @@ if (!url || !anon) {
 // supabase-js persiste en localStorage bajo `sb-<project-ref>-auth-token`, así que la
 // SPA lee la sesión existente sin re-login. (Este es el GATE de F1.)
 export const supabase = createClient(url, anon)
+
+export const isDevSupabaseProject = (() => {
+  try {
+    return new URL(url).hostname.split('.')[0] === 'scsirgbuqjcwoaxfacth'
+  } catch {
+    return false
+  }
+})()
