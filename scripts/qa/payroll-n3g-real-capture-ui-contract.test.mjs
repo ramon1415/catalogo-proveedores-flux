@@ -39,7 +39,14 @@ test('only SPEI browser diagnostics become staging parser metadata; other real f
 test('materialization is invoked through the JWT-protected Edge with a stable version-bound idempotency key', () => {
   assert.match(capture,/client\.functions\.invoke\('payroll-materialize'/);
   assert.match(capture,/idempotencyKey='payroll-n3g:'\+state\.sessionId\+':v'\+expectedVersion/);
-  assert.match(edge,/const idempotencyHash=await hashText\(input\.idempotency_key\)/);
+  assert.match(edge,/const validationOnly=input\.mode==="validate_only"/);
+  assert.match(edge,/\(!validationOnly&&!input\.idempotency_key\?\.trim\(\)\)/);
+  assert.equal(
+    edge.match(/const idempotencyHash=await hashText\(input\.idempotency_key!\)/g)?.length,
+    2,
+    'materialize and replay must hash the stable key; validate_only must not require one',
+  );
+  assert.match(edge,/if\(validationOnly\)\{[\s\S]*?return response\(200,[\s\S]*?\);\s*\}\s*const idempotencyHash=await hashText\(input\.idempotency_key!\)/);
   assert.match(edge,/context\.capture_state==="materialized"/);
   assert.match(edge,/p_idempotency_key_hash:idempotencyHash/);
   assert.match(migration,/p_expected_version not in \(v_session\.version,v_session\.version-1\)/);
