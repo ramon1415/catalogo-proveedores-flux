@@ -74,6 +74,34 @@
 .fieldHint { padding: 0 16px 10px; color: var(--text-3); font-size: 11px; }
 .fieldHint.err { color: var(--ruby, #e05a6a); }
 
+/* Tenant onboarding wizard */
+.wizardSteps { display: flex; align-items: center; gap: 6px; }
+.wizardSteps span { width: 25px; height: 25px; border-radius: 999px; border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-3); background: var(--bg-input); font-size: 11px; font-weight: 800; }
+.wizardSteps .currentStep { color: var(--accent-contrast); background: var(--accent); border-color: transparent; }
+.wizardState { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--text-3); font-size: 12.5px; }
+.wizardBody { padding: 4px 16px 16px; }
+.wizardField { display: flex; flex-direction: column; gap: 6px; max-width: 520px; padding: 10px 0 16px; color: var(--text-3); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.wizardField select, .moduleControls select { min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-1); background: var(--bg-input); font: inherit; font-size: 12.5px; }
+.wizardActions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 14px; }
+.moduleGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.moduleCard { padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-surface); }
+.moduleToggle { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.moduleToggle input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); }
+.moduleToggle > span:nth-child(2) { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.moduleToggle strong { color: var(--text-1); font-size: 12.5px; }
+.moduleToggle small { color: var(--text-3); font-size: 10.5px; }
+.moduleControls { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 11px; }
+.moduleControls label { display: flex; flex-direction: column; gap: 4px; color: var(--text-3); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .35px; }
+.moduleControls select:disabled, .moduleToggle input:disabled { opacity: .55; cursor: not-allowed; }
+.holdNote { margin-top: 9px; padding: 7px 8px; border-radius: 7px; color: var(--amber, #e0a53a); background: color-mix(in srgb, var(--amber, #e0a53a) 10%, transparent); font-size: 10.5px; }
+.reviewList { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.reviewRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.reviewRow:last-child { border-bottom: 0; }
+.reviewRow strong { color: var(--text-1); }
+.reviewRow span { color: var(--text-3); text-align: right; }
+.confirmRow { display: flex; align-items: flex-start; gap: 9px; margin-top: 13px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-2); font-size: 12px; }
+.confirmRow input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--accent); }
+
 /* Modal */
 .dialog { border: 0; padding: 0; background: transparent; max-width: min(560px, 94vw); width: 100%; color: var(--text-1); }
 .dialog.narrow { max-width: min(440px, 94vw); }
@@ -140,4 +168,7 @@
 @media (max-width: 640px) {
   .formGrid { grid-template-columns: 1fr; }
   .refGrid { grid-template-columns: 1fr; }
+  .moduleGrid { grid-template-columns: 1fr; }
+  .reviewRow { align-items: flex-start; flex-direction: column; }
+  .reviewRow span { text-align: left; }
 }
