@@ -91,6 +91,7 @@ export type BudgetAvailabilityRow = {
   company_id?: string | null
   cost_center_id?: string | null
   budget_month?: string | null
+  responsible_email?: string | null
   [key: string]: unknown
 }
 

@@ -58,7 +58,7 @@ export function RequestModal({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
-  const { memberships } = useAuth()
+  const { memberships, group } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
   // "Visita/incidencia asociada" es concepto de socios (Operadora). Solo se muestra
   // para empresas con el módulo incidencias habilitado.
@@ -173,14 +173,22 @@ export function RequestModal({
   const categoryById = (id: string) => budgetCategories.find((c) => c.id === id) || null
 
   const filteredCategoryRows = useMemo(() => {
+    // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
+    // responsable), cada quien ve SOLO sus partidas. Sysadmin ve todas. Empresas
+    // sin responsables (p.ej. Operadora) no se filtran.
+    const myEmail = (profile?.email || '').trim().toLowerCase()
+    const usesResponsible = budgetRows.some((r) => r.responsible_email)
+    const scoped = usesResponsible && group !== 'sysadmin'
+      ? budgetRows.filter((r) => String(r.responsible_email || '').trim().toLowerCase() === myEmail)
+      : budgetRows
     const q = categorySearch.trim().toLowerCase()
-    if (!q) return budgetRows
-    return budgetRows.filter((r) => {
+    if (!q) return scoped
+    return scoped.filter((r) => {
       const cat = categoryById(r.budget_category_id!)
       return budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetRows, categorySearch])
+  }, [budgetRows, categorySearch, profile, group])
 
   // ── Carga de partidas al cambiar empresa / CC / mes ──────────────────────
   async function reloadBudgetCategories(nextCompany: string, nextCC: string, nextMonth: string) {
