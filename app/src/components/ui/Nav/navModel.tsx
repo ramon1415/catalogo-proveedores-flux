@@ -28,28 +28,36 @@ export type NavItem = {
 
 export type NavSection = { title: string; items: NavItem[] }
 
+// IA por responsabilidad/rol (los grupos ≈ clusters de permiso):
+// Operación = captura del día a día · Administración = procesamiento y control ·
+// Balances = reportería read-only · Configuración = sysadmin.
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Operación',
     items: [
       { key: 'solicitudes', label: 'Solicitudes de pago', path: '/solicitudes', icon: <IcSolicitudes />, groups: ALL_ACTIVE, moduleKey: 'solicitudes', migrated: true },
-      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, moduleKey: 'layouts', migrated: true },
+      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, moduleKey: 'incidencias', migrated: true },
       { key: 'nomina', label: 'Nómina', path: '/nomina', icon: <IcLayouts />, groups: FINANCE, moduleKey: 'nomina', migrated: true },
+      { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, moduleKey: 'proveedores', migrated: true },
+    ],
+  },
+  {
+    title: 'Administración',
+    items: [
+      { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, moduleKey: 'aprobaciones', migrated: true },
+      { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE },
+      { key: 'layouts', label: 'Layouts de pago', path: '/layouts', icon: <IcLayouts />, groups: MANAGE, moduleKey: 'layouts', migrated: true },
       { key: 'comprobantes-batch', label: 'Comprobantes batch', path: '/comprobantes-batch', icon: <IcReceiptBatches />, groups: FINANCE },
       { key: 'efectivo', label: 'Efectivo y comprobaciones', path: '/efectivo', icon: <IcEfectivo />, groups: MANAGE, moduleKey: 'efectivo', migrated: true },
       { key: 'ingresos', label: 'Ingresos', path: '/ingresos', icon: <IcIngresos />, groups: MANAGE, moduleKey: 'ingresos', migrated: true },
-      { key: 'incidencias', label: 'Incidencias', path: '/incidencias', icon: <IcIncidencias />, groups: MANAGE, moduleKey: 'incidencias', migrated: true },
-      { key: 'proveedores', label: 'Proveedores', path: '/proveedores', icon: <IcProveedores />, groups: MANAGE, moduleKey: 'proveedores', migrated: true },
       { key: 'solicitudes-proveedores', label: 'Solicitudes de proveedores', path: '/solicitudes-proveedores', icon: <IcProviderIntakes />, groups: MANAGE },
     ],
   },
   {
-    title: 'General',
+    title: 'Balances',
     items: [
       { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
-      { key: 'aprobaciones', label: 'Cola de aprobación', path: '/aprobaciones', icon: <IcAprobaciones />, groups: MANAGE, moduleKey: 'aprobaciones', migrated: true },
-      { key: 'cortes-semanales', label: 'Cortes semanales', path: '/cortes-semanales', icon: <IcApprovalBatches />, groups: MANAGE },
     ],
   },
   {
