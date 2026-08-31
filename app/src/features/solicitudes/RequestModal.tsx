@@ -17,6 +17,7 @@ import {
 import { numberValue } from '../../lib/format'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
@@ -59,6 +60,10 @@ export function RequestModal({
   const { showToast } = useToast()
   const { memberships } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
+  // "Visita/incidencia asociada" es concepto de socios (Operadora). Solo se muestra
+  // para empresas con el módulo incidencias habilitado.
+  const { isEnabled } = useModules()
+  const showIncidencias = isEnabled('incidencias')
 
   // El usuario solo puede crear para las empresas donde es miembro. Si tiene una
   // sola, queda fija; si tiene varias, arranca en la empresa activa del switcher.
@@ -124,6 +129,7 @@ export function RequestModal({
   }, [])
 
   useEffect(() => {
+    if (!showIncidencias) { setIncidentLoadState('ready'); return }
     let active = true
     loadIncidencias()
       .then(({ incidents: rows, membersById: members }) => {
@@ -138,7 +144,7 @@ export function RequestModal({
         setIncidentLoadState('error')
       })
     return () => { active = false }
-  }, [])
+  }, [showIncidencias])
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -540,6 +546,7 @@ export function RequestModal({
                   </div>
                 </section>
 
+                {showIncidencias && (
                 <section className={s.formSection}>
                   <h3>Contexto operativo</h3>
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Campo opcional para relacionar el pago con una visita o incidencia registrada.</div>
@@ -566,6 +573,7 @@ export function RequestModal({
                     </div>
                   </div>
                 </section>
+                )}
 
                 <section className={`${s.formSection} ${isCashOrCheck ? '' : s.hidden}`}>
                   <h3>Datos de entrega</h3>
