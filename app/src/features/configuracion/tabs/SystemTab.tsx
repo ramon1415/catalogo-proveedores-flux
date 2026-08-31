@@ -3,6 +3,9 @@ import { useToast } from '../../../components/ui/Toast'
 import { Badge } from '../../../components/ui/Badge'
 import {
   loadUsers,
+  listCompanyAccessRequests,
+  approveCompanyAccessRequest,
+  rejectCompanyAccessRequest,
   loadApproverRouting,
   setProfileCompanyMembership,
   listApproverCandidates,
@@ -18,6 +21,7 @@ import type {
   RoutingMembership,
   RoutingAssignment,
   ApproverCandidate,
+  CompanyAccessRequest,
 } from '../types'
 import s from '../Configuracion.module.css'
 
@@ -31,6 +35,10 @@ export function SystemTab() {
   const [usersStatus, setUsersStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [usersError, setUsersError] = useState('')
   const [routingError, setRoutingError] = useState('')
+  const [accessRequests, setAccessRequests] = useState<CompanyAccessRequest[]>([])
+  const [accessRequestsStatus, setAccessRequestsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [accessRequestsError, setAccessRequestsError] = useState('')
+  const [reviewingRequest, setReviewingRequest] = useState('')
 
   // Filtros de usuarios
   const [usersSearch, setUsersSearch] = useState('')
@@ -53,8 +61,19 @@ export function SystemTab() {
   const [savingAssignment, setSavingAssignment] = useState(false)
 
   async function reloadAll() {
-    await loadUsersData()
-    await loadRouting()
+    await Promise.all([loadUsersData(), loadRouting(), loadAccessRequests()])
+  }
+
+  async function loadAccessRequests() {
+    setAccessRequestsStatus('loading')
+    try {
+      setAccessRequests(await listCompanyAccessRequests())
+      setAccessRequestsError('')
+      setAccessRequestsStatus('ready')
+    } catch (error: any) {
+      setAccessRequestsError(friendlyRoutingError(error))
+      setAccessRequestsStatus('error')
+    }
   }
 
   async function loadUsersData() {
@@ -199,12 +218,92 @@ export function SystemTab() {
     }
   }
 
+  async function approveAccess(row: CompanyAccessRequest, role: 'solicitante' | 'finance' | 'director') {
+    setReviewingRequest(row.id)
+    try {
+      await approveCompanyAccessRequest(row.id, role)
+      showToast(
+        'Acceso aprobado',
+        `${row.profile_name || row.profile_email || 'El usuario'} ya pertenece a ${row.company_name || 'la empresa'}.`,
+        'success',
+      )
+      await reloadAll()
+    } catch (error: any) {
+      showToast('No se pudo aprobar', friendlyRoutingError(error), 'error')
+    } finally {
+      setReviewingRequest('')
+    }
+  }
+
+  async function rejectAccess(row: CompanyAccessRequest) {
+    setReviewingRequest(row.id)
+    try {
+      await rejectCompanyAccessRequest(row.id)
+      showToast('Solicitud rechazada', 'No se concedió ningún rol ni membresía.', 'success')
+      await loadAccessRequests()
+    } catch (error: any) {
+      showToast('No se pudo rechazar', friendlyRoutingError(error), 'error')
+    } finally {
+      setReviewingRequest('')
+    }
+  }
+
   const companyOptionLabel = (c: RoutingCompany) => c.legal_name || c.name || 'Sin empresa'
   const userOptionLabel = (u: UserRow) => u.full_name || u.email || 'Sin nombre'
 
   return (
     <div className={s.panel}>
       <TenantOnboardingWizard />
+
+      {/* Solicitudes de acceso por liga de empresa */}
+      <section className={s.tableCard}>
+        <div className={s.panelToolbar}>
+          <div>
+            <h2>Solicitudes de acceso por empresa</h2>
+            <p>La liga identifica la empresa; SysAdmin confirma únicamente el rol permitido.</p>
+          </div>
+          <button type="button" className={s.secondaryBtn} onClick={loadAccessRequests}>Actualizar</button>
+        </div>
+        <div className={s.tableWrap}>
+          <table className={s.table}>
+            <thead><tr><th>Usuario</th><th>Empresa solicitada</th><th>Fecha</th><th>Estatus</th><th>Acción</th></tr></thead>
+            <tbody>
+              {accessRequestsStatus === 'loading' && <tr><td colSpan={5} className={s.tableMsg}>Cargando solicitudes…</td></tr>}
+              {accessRequestsStatus === 'error' && <tr><td colSpan={5} className={`${s.tableMsg} ${s.tableErr}`}>{accessRequestsError}</td></tr>}
+              {accessRequestsStatus === 'ready' && accessRequests.length === 0 && (
+                <tr><td colSpan={5} className={s.tableMsg}>No hay solicitudes de acceso.</td></tr>
+              )}
+              {accessRequestsStatus === 'ready' && accessRequests.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <span className={s.cellMain}>{row.profile_name || 'Sin nombre'}</span>
+                    <span className={s.cellSub}>{row.profile_email || ''}</span>
+                    {row.current_roles?.length ? <span className={s.cellSub}>Rol actual: {row.current_roles.join(', ')}</span> : null}
+                  </td>
+                  <td>{row.company_name || 'Sin empresa'}</td>
+                  <td><span className={s.cellSub}>{formatDate(row.requested_at)}</span></td>
+                  <td>
+                    <Badge variant={row.status === 'pending' ? 'warning' : row.status === 'approved' ? 'success' : 'neutral'}>
+                      {row.status === 'pending' ? 'Pendiente' : row.status === 'approved' ? 'Aprobada' : 'Rechazada'}
+                    </Badge>
+                    {row.approved_role && <span className={s.cellSub}>{row.approved_role}</span>}
+                  </td>
+                  <td>
+                    {row.status === 'pending' ? (
+                      <div className={s.rowActions}>
+                        <button type="button" className={s.smallBtn} disabled={reviewingRequest === row.id} onClick={() => approveAccess(row, 'solicitante')}>Solicitante</button>
+                        <button type="button" className={`${s.smallBtn} ${s.info}`} disabled={reviewingRequest === row.id} onClick={() => approveAccess(row, 'finance')}>Finanzas</button>
+                        <button type="button" className={s.smallBtn} disabled={reviewingRequest === row.id} onClick={() => approveAccess(row, 'director')}>Director</button>
+                        <button type="button" className={`${s.smallBtn} ${s.danger}`} disabled={reviewingRequest === row.id} onClick={() => rejectAccess(row)}>Rechazar</button>
+                      </div>
+                    ) : <span className={s.cellSub}>Revisada</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Usuarios */}
       <section className={s.tableCard}>

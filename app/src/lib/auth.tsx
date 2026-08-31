@@ -26,7 +26,7 @@ type AuthState = {
   canManageProviders: () => boolean
   canCreateProviders: () => boolean
   isPending: () => boolean
-  signInWithGoogle: () => Promise<void>
+  signInWithGoogle: (redirectTo?: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -38,9 +38,18 @@ export function useAuth(): AuthState {
   return v
 }
 
-// Resuelve el perfil por auth_user_id y luego por email (espejo de resolveProfile
-// en config.js). NO auto-crea perfil: eso queda del lado del onboarding vanilla.
+// Resuelve o crea el perfil autenticado mediante una función server-side. La
+// función valida auth.uid() contra auth.users y puede enlazar de forma segura un
+// perfil previamente sembrado por email. El fallback conserva compatibilidad
+// mientras la migración se publica en un Preview.
 async function resolveProfile(session: Session): Promise<Profile | null> {
+  const ensured = await supabase.rpc('ensure_current_profile')
+  const ensuredRow = Array.isArray(ensured.data) ? ensured.data[0] : ensured.data
+  if (ensuredRow?.id) return ensuredRow as Profile
+
+  const missingRpc = ensured.error && ['42883', 'PGRST202'].includes(ensured.error.code || '')
+  if (ensured.error && !missingRpc) throw ensured.error
+
   const lookups: Array<[string, string | undefined]> = [
     ['auth_user_id', session.user.id],
     ['email', session.user.email ?? undefined],
@@ -154,7 +163,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       setMemberships(mem)
       setLoading(false)
-    })()
+    })().catch(() => {
+      if (cancelled) return
+      setProfile(null)
+      setRoles([])
+      setGroup(ROLE_GROUPS.PENDING)
+      setMemberships([])
+      setLoading(false)
+    })
     return () => {
       cancelled = true
     }
@@ -163,10 +179,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id, sessionReady])
 
-  async function signInWithGoogle() {
+  async function signInWithGoogle(redirectTo?: string) {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: new URL('/app/', window.location.origin).toString() },
+      options: { redirectTo: new URL(redirectTo || '/app/', window.location.origin).toString() },
     })
   }
 

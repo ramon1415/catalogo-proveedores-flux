@@ -12,6 +12,7 @@ import type {
   RoutingMembership,
   RoutingAssignment,
   ApproverCandidate,
+  CompanyAccessRequest,
   TenantModule,
   TenantModuleRelease,
   TenantModuleConfig,
@@ -122,6 +123,29 @@ export async function assignRole(profileId: string, selected: string, aliases: s
     const { error: ie } = await supabase.from('user_roles').insert({ profile_id: profileId, role_id: roleRow.id })
     if (ie) throw ie
   }
+}
+
+// ── Solicitudes de acceso por empresa ───────────────────────────
+export async function listCompanyAccessRequests(): Promise<CompanyAccessRequest[]> {
+  const { data, error } = await supabase.rpc('list_company_access_requests')
+  if (error) throw error
+  return (data || []) as CompanyAccessRequest[]
+}
+
+export async function approveCompanyAccessRequest(
+  requestId: string,
+  role: 'solicitante' | 'finance' | 'director',
+): Promise<void> {
+  const { error } = await supabase.rpc('approve_company_access_request', {
+    p_request_id: requestId,
+    p_role: role,
+  })
+  if (error) throw error
+}
+
+export async function rejectCompanyAccessRequest(requestId: string): Promise<void> {
+  const { error } = await supabase.rpc('reject_company_access_request', { p_request_id: requestId })
+  if (error) throw error
 }
 
 // ── Enrutamiento de aprobadores ──────────────────────────────────

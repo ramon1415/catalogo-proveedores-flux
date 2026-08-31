@@ -1,16 +1,24 @@
 import { Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { useModules } from './lib/moduleAccess'
 import Login from './pages/Login'
 import LegacyModuleFrame from './pages/LegacyModuleFrame'
 import { AppShell } from './components/ui/AppShell'
+import AccessRequestPage from './features/access/AccessRequestPage'
+import PendingAccessPage from './features/access/PendingAccessPage'
 
 export default function App() {
-  const { session, loading } = useAuth()
+  const { session, profile, group, memberships, loading } = useAuth()
   const { enabled } = useModules()
+  const { pathname } = useLocation()
+  const accessMatch = pathname.match(/^\/acceso\/([a-z0-9_-]+)$/i)
   if (loading) return <div className="center muted">Cargando…</div>
   if (!session) return <Login />
+  if (accessMatch) return <AccessRequestPage code={accessMatch[1].toLowerCase()} />
+  if (!profile || group === 'pending' || group === 'inactive' || memberships.length === 0) {
+    return <PendingAccessPage />
+  }
 
   // Rutas construidas desde los módulos habilitados de la empresa activa
   // (registro ∩ company_modules). Cada módulo aporta su ruta + rutas extra.
