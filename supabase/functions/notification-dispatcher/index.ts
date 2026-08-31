@@ -129,17 +129,31 @@ const approvalBatchDecisionEventTypes = new Set([
   "approval_batch.partially_approved",
 ]);
 
+const paymentOutcomeEventTypes = new Set([
+  "payment_request.approved",
+  "payment_receipt.linked",
+]);
+
 export function resolveFinalRecipient(
   eventType: string,
   intendedRecipient: string,
   sendMode: string,
   testEmail: string,
+  preserveAuthorizedIntendedRecipient = false,
 ): string {
   // The decision claim and document RPCs validate this address against the
   // batch's active submitted_by profile before Resend is called. Preserve that
   // business recipient while keeping every other DEV event isolated.
-  if (approvalBatchDecisionEventTypes.has(eventType)) return intendedRecipient;
+  if (
+    approvalBatchDecisionEventTypes.has(eventType) ||
+    preserveAuthorizedIntendedRecipient
+  ) return intendedRecipient;
   return sendMode === "test_only" ? testEmail : intendedRecipient;
+}
+
+function requestsAuthorizedIntendedRecipientRetry(event: NotificationEvent): boolean {
+  return paymentOutcomeEventTypes.has(event.event_type) &&
+    event.payload?.dev_intended_recipient_retry === true;
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
@@ -1065,7 +1079,7 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
 
     for (const event of events) {
       const intendedRecipient = event.recipient_email;
-      const finalRecipient = resolveFinalRecipient(
+      let finalRecipient = resolveFinalRecipient(
         event.event_type,
         intendedRecipient,
         sendMode,
@@ -1076,6 +1090,29 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
       let attachment: PreparedAttachment | undefined;
 
       try {
+        if (sendMode === "test_only" && requestsAuthorizedIntendedRecipientRetry(event)) {
+          const authorized = await callRpc<boolean>(
+            runtime.fetch,
+            supabaseUrl,
+            serviceRoleKey,
+            "notification_dev_intended_recipient_retry_authorized",
+            {
+              p_event_id: event.id,
+              p_recipient_email: intendedRecipient,
+            },
+          );
+          if (authorized !== true) {
+            throw new Error("dev_intended_recipient_retry_not_authorized");
+          }
+          finalRecipient = resolveFinalRecipient(
+            event.event_type,
+            intendedRecipient,
+            sendMode,
+            testEmail,
+            true,
+          );
+        }
+
         if (event.event_type === "payment_receipt.linked") {
           attachment = await prepareReceiptAttachment(
             runtime.fetch,
