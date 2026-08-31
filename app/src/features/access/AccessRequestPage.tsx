@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import logoFull from '../../assets/logo-flux-verde.webp'
+import { useCompany } from '../../lib/company'
 import { requestCompanyAccess } from './api'
 import type { CompanyAccessResult } from './api'
 import s from './AccessRequestPage.module.css'
@@ -24,26 +24,35 @@ function friendlyError(error: any): string {
 }
 
 export default function AccessRequestPage({ code }: { code: string }) {
-  const navigate = useNavigate()
+  const { setCompany } = useCompany()
   const [state, setState] = useState<State>({ kind: 'loading' })
 
   useEffect(() => {
     let cancelled = false
     requestCompanyAccess(code)
-      .then((result) => { if (!cancelled) setState({ kind: 'ready', result }) })
+      .then((result) => {
+        if (cancelled) return
+        if (result.status === 'already_member' || result.status === 'approved') {
+          // La liga también fija el tenant correcto. La recarga vuelve a hidratar
+          // membresías cuando el administrador acaba de aprobar al usuario.
+          setCompany(result.company_id)
+          window.location.replace('/app/solicitudes')
+          return
+        }
+        setState({ kind: 'ready', result })
+      })
       .catch((error) => { if (!cancelled) setState({ kind: 'error', message: friendlyError(error) }) })
     return () => { cancelled = true }
   }, [code])
 
   const ready = state.kind === 'ready' ? state.result : null
-  const alreadyGranted = ready?.status === 'already_member' || ready?.status === 'approved'
 
   return (
     <main className={s.screen}>
       <section className={s.card} aria-live="polite">
         <img className={s.logo} src={logoFull} alt="Flux" />
         <div className={`${s.icon} ${state.kind === 'error' ? s.danger : ready ? s.success : ''}`}>
-          {state.kind === 'loading' ? '…' : state.kind === 'error' ? '!' : alreadyGranted ? '✓' : '✓'}
+          {state.kind === 'loading' ? '…' : state.kind === 'error' ? '!' : '✓'}
         </div>
 
         {state.kind === 'loading' && (
@@ -63,24 +72,13 @@ export default function AccessRequestPage({ code }: { code: string }) {
           </>
         )}
 
-        {ready && !alreadyGranted && (
+        {ready && (
           <>
             <h1>Solicitud enviada</h1>
             <p>Tu cuenta quedó registrada. Un administrador debe asignarte un rol antes de que puedas entrar.</p>
             <div className={s.company}>{ready.company_name}</div>
             <div className={s.actions}>
               <button className={s.button} type="button" onClick={() => window.location.reload()}>Actualizar acceso</button>
-            </div>
-          </>
-        )}
-
-        {ready && alreadyGranted && (
-          <>
-            <h1>Acceso disponible</h1>
-            <p>Tu cuenta ya pertenece a esta empresa.</p>
-            <div className={s.company}>{ready.company_name}</div>
-            <div className={s.actions}>
-              <button className={s.button} type="button" onClick={() => navigate('/solicitudes', { replace: true })}>Entrar a Flux</button>
             </div>
           </>
         )}
