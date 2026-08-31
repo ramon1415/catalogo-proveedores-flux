@@ -10,6 +10,19 @@ const migration = readFileSync(
   "utf8",
 );
 
+const retryMigration = readFileSync(
+  new URL(
+    "../../supabase/migrations/20260831201500_notification_payment_outcome_authorized_retry_dev.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+const dispatcher = readFileSync(
+  new URL("../../supabase/functions/notification-dispatcher/index.ts", import.meta.url),
+  "utf8",
+);
+
 function extractFunction(name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = migration.match(
@@ -64,4 +77,41 @@ test("trigger and recovery functions are not callable by API roles", () => {
   );
   assert.match(migration, /claim_notification_events_for_dispatcher_v2/);
   assert.match(migration, /notification_payment_outcome_acl_invalid/);
+});
+
+test("authorized DEV retries are exact clones and service-only", () => {
+  assert.match(retryMigration, /source_folio = 'SOL-2026-0118'/);
+  assert.match(retryMigration, /recipient_email\)\) = 'ramon@quantta\.mx'/);
+  assert.match(retryMigration, /payment_request\.approved/);
+  assert.match(retryMigration, /payment_receipt\.linked/);
+  assert.match(retryMigration, /original\.status = 'sent'/);
+  assert.match(retryMigration, /retry\.source_id is not distinct from original\.source_id/);
+  assert.match(retryMigration, /retry\.recipient_email = original\.recipient_email/);
+  assert.match(retryMigration, /dev-intended-recipient-retry:v1:/);
+  assert.match(retryMigration, /dev_retry_original_event_id/);
+  assert.match(retryMigration, /dev_intended_recipient_retry/);
+  assert.match(
+    retryMigration,
+    /revoke all on function public\.notification_dev_intended_recipient_retry_authorized\(uuid, text\)[\s\S]*from public, anon, authenticated/i,
+  );
+  assert.match(
+    retryMigration,
+    /grant execute on function public\.notification_dev_intended_recipient_retry_authorized\(uuid, text\)[\s\S]*to service_role/i,
+  );
+  assert.doesNotMatch(retryMigration, /RESEND_API_KEY|NOTIFICATION_DISPATCHER_SECRET|sb_secret_|eyJ[A-Za-z0-9_-]{20,}/);
+});
+
+test("dispatcher preserves a retry recipient only after the database authorization", () => {
+  assert.match(dispatcher, /event\.payload\?\.dev_intended_recipient_retry === true/);
+  assert.match(dispatcher, /notification_dev_intended_recipient_retry_authorized/);
+  assert.match(dispatcher, /authorized !== true/);
+  assert.match(dispatcher, /dev_intended_recipient_retry_not_authorized/);
+  assert.match(
+    dispatcher,
+    /preserveAuthorizedIntendedRecipient = false/,
+  );
+  assert.match(
+    dispatcher,
+    /return sendMode === "test_only" \? testEmail : intendedRecipient/,
+  );
 });
