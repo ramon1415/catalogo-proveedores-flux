@@ -73,6 +73,14 @@ test('pending React sessions receive an explicit gate instead of a fail-open mod
   assert.match(accessPage, /Actualizar acceso/)
 })
 
+test('existing members skip the landing and enter the linked company directly', () => {
+  assert.match(accessPage, /result\.status === 'already_member'/)
+  assert.match(accessPage, /result\.status === 'approved'/)
+  assert.match(accessPage, /setCompany\(result\.company_id\)/)
+  assert.match(accessPage, /window\.location\.replace\('\/app\/solicitudes'\)/)
+  assert.doesNotMatch(accessPage, /Acceso disponible/)
+})
+
 test('company access request foreign keys have covering indexes', () => {
   assert.match(hardening, /company_access_requests_company_id_idx/)
   assert.match(hardening, /company_access_requests \(company_id\)/)
