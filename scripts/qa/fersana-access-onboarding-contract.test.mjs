@@ -6,6 +6,10 @@ const migration = fs.readFileSync(
   'supabase/migrations/20260831003419_fersana_company_access_onboarding.sql',
   'utf8',
 )
+const hardening = fs.readFileSync(
+  'supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql',
+  'utf8',
+)
 const auth = fs.readFileSync('app/src/lib/auth.tsx', 'utf8')
 const app = fs.readFileSync('app/src/App.tsx', 'utf8')
 const accessPage = fs.readFileSync('app/src/features/access/AccessRequestPage.tsx', 'utf8')
@@ -17,6 +21,8 @@ test('Fersana access link never exposes a public company directory', () => {
   assert.match(migration, /revoke all on table public\.company_access_links from public, anon, authenticated/)
   assert.doesNotMatch(accessPage, /from\(['"]companies['"]\)/)
   assert.match(app, /pathname\.match\(\/\^\\\/acceso\\\//)
+  assert.match(hardening, /company_access_links_no_direct_access/)
+  assert.match(hardening, /as restrictive[\s\S]*using \(false\)[\s\S]*with check \(false\)/)
 })
 
 test('authenticated profile bootstrap is server validated and least privilege', () => {
@@ -65,4 +71,11 @@ test('pending React sessions receive an explicit gate instead of a fail-open mod
   assert.match(app, /<PendingAccessPage \/>/)
   assert.match(accessPage, /Solicitud enviada/)
   assert.match(accessPage, /Actualizar acceso/)
+})
+
+test('company access request foreign keys have covering indexes', () => {
+  assert.match(hardening, /company_access_requests_company_id_idx/)
+  assert.match(hardening, /company_access_requests \(company_id\)/)
+  assert.match(hardening, /company_access_requests_reviewed_by_idx/)
+  assert.match(hardening, /company_access_requests \(reviewed_by\)/)
 })
