@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
-import { perms } from '../../lib/roles'
+import { perms, ROLE_GROUPS } from '../../lib/roles'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows } from '../../components/ui/Skeleton'
@@ -37,6 +37,7 @@ export default function SolicitudesPage() {
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const canApprove = perms.canApprove(group)
+  const isOperation = group === ROLE_GROUPS.OPERATION
   const currentProfileId = profile?.id ?? null
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -65,9 +66,10 @@ export default function SolicitudesPage() {
     () => requests.filter(
       (request) => Boolean(activeCompanyId)
         && request.company_id === activeCompanyId
-        && allowedCompanyIds.has(request.company_id || ''),
+        && allowedCompanyIds.has(request.company_id || '')
+        && (!isOperation || (Boolean(currentProfileId) && request.requested_by === currentProfileId)),
     ),
-    [requests, activeCompanyId, allowedCompanyIds],
+    [requests, activeCompanyId, allowedCompanyIds, isOperation, currentProfileId],
   )
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
