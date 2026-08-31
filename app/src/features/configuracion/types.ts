@@ -168,6 +168,20 @@ export type ApproverCandidate = {
 
 export type RoleValue = 'pending' | 'solicitante' | 'finance' | 'director' | 'sysadmin'
 
+export type CompanyAccessRequest = {
+  id: string
+  profile_id: string
+  profile_name: string | null
+  profile_email: string | null
+  company_id: string
+  company_name: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  requested_at: string
+  reviewed_at: string | null
+  approved_role: 'solicitante' | 'finance' | 'director' | null
+  current_roles: string[] | null
+}
+
 // ── Onboarding de tenant (Sistema / SysAdmin) ───────────────────
 export type TenantModule = {
   module_key: string

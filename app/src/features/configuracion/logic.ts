@@ -269,6 +269,11 @@ export function friendlyRoutingError(error: any): string {
     profile_not_found_or_inactive: 'Solo los perfiles activos pueden recibir una membresía.',
     requester_cannot_be_own_pool_approver: 'El solicitante no puede agregarse como su propio aprobador.',
     approver_already_configured: 'Este aprobador ya está configurado para el solicitante y la empresa.',
+    company_access_request_not_found: 'La solicitud de acceso ya no existe.',
+    company_access_request_rejected: 'La solicitud fue rechazada y debe enviarse nuevamente.',
+    company_access_request_already_approved: 'La solicitud ya fue aprobada.',
+    company_access_profile_already_has_different_role: 'El perfil ya tiene un rol global diferente. Revisa el usuario antes de aprobar.',
+    company_access_role_not_allowed: 'El rol solicitado no está permitido para altas por empresa.',
   }
   const key = Object.keys(known).find((item) => message.includes(item))
   return key ? known[key] : friendlyError(error)

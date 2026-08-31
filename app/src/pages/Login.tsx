@@ -9,7 +9,7 @@ export default function Login() {
       <main className={s.card}>
         <img className={s.logo} src={logoFull} alt="Flux Operadora" />
         <p className={s.sub}>Plataforma de gestión</p>
-        <button className={s.button} onClick={signInWithGoogle}>Continuar con Google</button>
+        <button className={s.button} onClick={() => signInWithGoogle(window.location.href)}>Continuar con Google</button>
         <p className={s.powered}>Powered by <span>Quantta</span></p>
       </main>
     </div>
