@@ -134,6 +134,12 @@ const paymentOutcomeEventTypes = new Set([
   "payment_receipt.linked",
 ]);
 
+const devBusinessRecipientEventTypes = new Set([
+  "payment_request.created",
+  "payment_request.approved",
+  "payment_receipt.linked",
+]);
+
 export function resolveFinalRecipient(
   eventType: string,
   intendedRecipient: string,
@@ -1090,7 +1096,34 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
       let attachment: PreparedAttachment | undefined;
 
       try {
-        if (sendMode === "test_only" && requestsAuthorizedIntendedRecipientRetry(event)) {
+        if (
+          sendMode === "test_only" &&
+          devBusinessRecipientEventTypes.has(event.event_type)
+        ) {
+          const authorized = await callRpc<boolean>(
+            runtime.fetch,
+            supabaseUrl,
+            serviceRoleKey,
+            "notification_dev_business_recipient_authorized",
+            {
+              p_event_id: event.id,
+              p_recipient_email: intendedRecipient,
+            },
+          );
+          if (authorized !== true) {
+            throw new Error("dev_business_recipient_not_authorized");
+          }
+          finalRecipient = resolveFinalRecipient(
+            event.event_type,
+            intendedRecipient,
+            sendMode,
+            testEmail,
+            true,
+          );
+        } else if (
+          sendMode === "test_only" &&
+          requestsAuthorizedIntendedRecipientRetry(event)
+        ) {
           const authorized = await callRpc<boolean>(
             runtime.fetch,
             supabaseUrl,
