@@ -377,6 +377,12 @@ export function RequestModal({
     const validation = validateRequestPayload(payload, availabilityForCategory, candidates)
     if (validation) { showToast('Revisa la solicitud', validation, 'warning'); return }
 
+    // Documento obligatorio en toda solicitud (política global).
+    if (!file) {
+      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
+      return
+    }
+
     setSubmitting(true)
     try {
       const data = await createPaymentRequest(payload)
@@ -502,8 +508,8 @@ export function RequestModal({
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                     </label>
-                    <label className={s.fullRow}>Factura / comprobante
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                    <label className={s.fullRow}>Factura / comprobante *
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
                   </div>
@@ -514,7 +520,7 @@ export function RequestModal({
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
                   <div className={s.formGrid}>
                     <label className={s.fullRow}>Proveedor *
-                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
+                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
                     </label>
                   </div>
                 </section>
