@@ -141,6 +141,9 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
     p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
     p_approver_id: payload.approver_id,
     p_approver_assignment_id: payload.approver_assignment_id,
+    p_subtotal_amount: payload.subtotal_amount,
+    p_tax_amount: payload.tax_amount,
+    p_withholding_amount: payload.withholding_amount,
   })
   if (error) throw error
   return data

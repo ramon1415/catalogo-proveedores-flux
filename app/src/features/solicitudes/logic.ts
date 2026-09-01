@@ -491,6 +491,10 @@ export function currentLinkedIncidentId(notes: string | null): string | null {
 
 // ── Mapas de errores (idénticos al vanilla) ────────────────────────────────
 const ROUTING_ERRORS: Record<string, string> = {
+  fiscal_subtotal_invalid: 'El subtotal del desglose fiscal debe ser mayor a 0.',
+  fiscal_breakdown_invalid: 'IVA y retenciones no pueden ser negativos.',
+  fiscal_breakdown_mismatch: 'El desglose fiscal no cuadra con el total (subtotal + IVA − retenciones).',
+  fiscal_subtotal_required: 'Captura el subtotal para registrar IVA o retenciones.',
   company_scope_required: 'Tu perfil no tiene membresía activa en la empresa seleccionada.',
   approver_id_required: 'Selecciona quién revisará esta solicitud.',
   approver_assignment_id_required: 'Selecciona uno de los aprobadores configurados para ti.',

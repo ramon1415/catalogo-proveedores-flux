@@ -257,6 +257,11 @@ export type RequestPayload = {
   responsible_profile_id: string | null
   due_date: string | null
   delivery_method: string
+  // Desglose fiscal (opcional). Si hay subtotal, el budget lo descuenta a él;
+  // sin desglose se sigue descontando el total (transición conservadora).
+  subtotal_amount: number | null
+  tax_amount: number | null
+  withholding_amount: number | null
 }
 
 export type EditPayload = {
