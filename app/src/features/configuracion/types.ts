@@ -142,6 +142,7 @@ export type RoutingMembership = {
   profile_email: string | null
   company_id: string
   company_name: string | null
+  role_key: 'operator' | 'finance' | 'director' | 'sysadmin' | null
   active: boolean
 }
 
@@ -166,7 +167,7 @@ export type ApproverCandidate = {
   eligible_roles: string[] | null
 }
 
-export type RoleValue = 'pending' | 'solicitante' | 'finance' | 'director' | 'sysadmin'
+export type RoleValue = 'pending' | 'operator' | 'finance' | 'director' | 'sysadmin'
 
 export type CompanyAccessRequest = {
   id: string
@@ -178,7 +179,7 @@ export type CompanyAccessRequest = {
   status: 'pending' | 'approved' | 'rejected'
   requested_at: string
   reviewed_at: string | null
-  approved_role: 'solicitante' | 'finance' | 'director' | null
+  approved_role: 'solicitante' | 'operator' | 'finance' | 'director' | null
   current_roles: string[] | null
 }
 

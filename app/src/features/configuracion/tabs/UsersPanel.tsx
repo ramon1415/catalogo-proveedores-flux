@@ -4,10 +4,9 @@ import { Badge } from '../../../components/ui/Badge'
 import {
   loadUsers, loadApproverRouting, listCompanyAccessRequests,
   approveCompanyAccessRequest, rejectCompanyAccessRequest,
-  setProfileCompanyMembership, listApproverCandidates, addApproverAssignment, removeApproverAssignment,
+  setProfileCompanyRole, listApproverCandidates, addApproverAssignment, removeApproverAssignment,
 } from '../api'
-import { normalize, GROUP_LABELS, GROUP_BADGE, friendlyRoutingError } from '../logic'
-import { AssignRoleModal } from '../AssignRoleModal'
+import { normalize, GROUP_LABELS, GROUP_BADGE, friendlyRoutingError, groupFromRoleNames } from '../logic'
 import type {
   UserRow, RoutingCompany, RoutingMembership, RoutingAssignment, ApproverCandidate, CompanyAccessRequest,
 } from '../types'
@@ -33,7 +32,6 @@ export function UsersPanel() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('todos')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [assignTarget, setAssignTarget] = useState<UserRow | null>(null)
   const [busy, setBusy] = useState(false)
   const [reviewing, setReviewing] = useState('')
   const [approverAdd, setApproverAdd] = useState<ApproverAdd>(null)
@@ -55,13 +53,21 @@ export function UsersPanel() {
   }
   useEffect(() => { reload() /* eslint-disable-next-line */ }, [])
 
+  const companyRolesFor = (profileId: string) => memberships
+    .filter((membership) => membership.profile_id === profileId && membership.active && membership.role_key)
+    .map((membership) => membership.role_key as string)
+  const displayGroup = (user: UserRow) =>
+    user.group === 'sysadmin' ? 'sysadmin' : groupFromRoleNames(companyRolesFor(user.id))
+
   const filtered = useMemo(() => {
     const q = normalize(search)
     return users.filter((u) => {
       const text = normalize(`${u.full_name || ''} ${u.email || ''}`)
-      return (!q || text.includes(q)) && (roleFilter === 'todos' || u.group === roleFilter)
+      const group = displayGroup(u)
+      return (!q || text.includes(q)) && (roleFilter === 'todos' || group === roleFilter)
     })
-  }, [users, search, roleFilter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users, memberships, search, roleFilter])
 
   const selected = useMemo(() => users.find((u) => u.id === selectedId) ?? null, [users, selectedId])
   const membershipFor = (companyId: string) =>
@@ -82,7 +88,20 @@ export function UsersPanel() {
     const row = membershipFor(companyId)
     setBusy(true)
     try {
-      await setProfileCompanyMembership(selected.id, companyId, !(row?.active))
+      const role = row?.role_key === 'finance' || row?.role_key === 'director' ? row.role_key : 'operator'
+      await setProfileCompanyRole(selected.id, companyId, role, !(row?.active))
+      await reloadRouting()
+    } catch (error) {
+      showToast('No se pudo actualizar', friendlyRoutingError(error), 'error')
+    } finally { setBusy(false) }
+  }
+
+  async function changeCompanyRole(companyId: string, role: 'operator' | 'finance' | 'director') {
+    if (!selected) return
+    setBusy(true)
+    try {
+      await setProfileCompanyRole(selected.id, companyId, role, true)
+      showToast('Rol actualizado', 'El cambio aplica únicamente a esta empresa.', 'success')
       await reloadRouting()
     } catch (error) {
       showToast('No se pudo actualizar', friendlyRoutingError(error), 'error')
@@ -129,7 +148,7 @@ export function UsersPanel() {
     } finally { setBusy(false) }
   }
 
-  async function approveAccess(row: CompanyAccessRequest, role: 'solicitante' | 'finance' | 'director') {
+  async function approveAccess(row: CompanyAccessRequest, role: 'operator' | 'finance' | 'director') {
     setReviewing(row.id)
     try {
       await approveCompanyAccessRequest(row.id, role)
@@ -187,6 +206,7 @@ export function UsersPanel() {
                 {status === 'ready' && filtered.length === 0 && <tr><td colSpan={2} className={s.tableMsg}>Sin resultados.</td></tr>}
                 {filtered.map((u) => {
                   const nPending = pendingRequestsFor(u.id).length
+                  const group = displayGroup(u)
                   return (
                     <tr key={u.id} onClick={() => { setSelectedId(u.id); setApproverAdd(null) }}
                       style={{ cursor: 'pointer', background: u.id === selectedId ? 'var(--bg-hover, rgba(120,120,120,.12))' : undefined }}>
@@ -194,7 +214,7 @@ export function UsersPanel() {
                         <span className={s.cellMain}>{u.full_name || 'Sin nombre'}{nPending ? ' 🔔' : ''}</span>
                         <span className={s.cellSub}>{u.email || ''}</span>
                       </td>
-                      <td><Badge variant={GROUP_BADGE[u.group] || 'neutral'}>{GROUP_LABELS[u.group] || u.group}</Badge></td>
+                      <td><Badge variant={GROUP_BADGE[group] || 'neutral'}>{GROUP_LABELS[group] || group}</Badge></td>
                     </tr>
                   )
                 })}
@@ -209,7 +229,7 @@ export function UsersPanel() {
             <div className={s.sectionNote}><p>Selecciona una persona de la lista para ver y editar sus permisos.</p></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Encabezado + rol */}
+              {/* Encabezado + alcance */}
               <div className={s.sectionNote}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
@@ -217,11 +237,10 @@ export function UsersPanel() {
                     <p>{selected.email || ''}</p>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
                       <Badge variant={selected.active === true ? 'success' : 'neutral'}>{selected.active === true ? 'Perfil activo' : 'Perfil inactivo'}</Badge>
-                      <Badge variant={GROUP_BADGE[selected.group] || 'neutral'}>{GROUP_LABELS[selected.group] || selected.group}</Badge>
-                      <span className={s.cellSub}>{selected.roleNames.length ? selected.roleNames.join(', ') : 'sin rol'}</span>
+                      <Badge variant={GROUP_BADGE[displayGroup(selected)] || 'neutral'}>{GROUP_LABELS[displayGroup(selected)] || displayGroup(selected)}</Badge>
+                      <span className={s.cellSub}>{selected.group === 'sysadmin' ? 'Poder total global' : 'Roles definidos por empresa'}</span>
                     </div>
                   </div>
-                  <button type="button" className={s.secondaryBtn} onClick={() => setAssignTarget(selected)}>Cambiar rol</button>
                 </div>
                 {selected.active !== true && <p style={{ color: 'var(--ruby)' }}>Perfil inactivo: conserva historial pero no puede recibir membresías ni ser aprobador.</p>}
               </div>
@@ -231,7 +250,7 @@ export function UsersPanel() {
                 <div key={row.id} className={s.sectionNote} style={{ borderLeft: '3px solid var(--amber, #f8ae00)' }}>
                   <strong>Solicitud de acceso pendiente → {row.company_name || 'empresa'}</strong>
                   <div className={s.rowActions} style={{ marginTop: 8 }}>
-                    <button className={s.smallBtn} disabled={reviewing === row.id} onClick={() => approveAccess(row, 'solicitante')}>Aprobar: Solicitante</button>
+                    <button className={s.smallBtn} disabled={reviewing === row.id} onClick={() => approveAccess(row, 'operator')}>Aprobar: Operador</button>
                     <button className={`${s.smallBtn} ${s.info}`} disabled={reviewing === row.id} onClick={() => approveAccess(row, 'finance')}>Finanzas</button>
                     <button className={s.smallBtn} disabled={reviewing === row.id} onClick={() => approveAccess(row, 'director')}>Director</button>
                     <button className={`${s.smallBtn} ${s.danger}`} disabled={reviewing === row.id} onClick={() => rejectAccess(row)}>Rechazar</button>
@@ -242,14 +261,25 @@ export function UsersPanel() {
               {/* Empresas (membresías) */}
               <div className={s.tableWrap}>
                 <table className={s.table}>
-                  <thead><tr><th>Empresa</th><th>Membresía</th><th></th></tr></thead>
+                  <thead><tr><th>Empresa</th><th>Rol en esta empresa</th><th>Membresía</th><th></th></tr></thead>
                   <tbody>
-                    <tr><td colSpan={3} className={s.cellSub} style={{ fontWeight: 600 }}>Empresas — en cuáles puede operar</td></tr>
+                    <tr><td colSpan={4} className={s.cellSub} style={{ fontWeight: 600 }}>Cada empresa conserva su propio rol.</td></tr>
                     {companies.map((c) => {
                       const m = membershipFor(c.id)
                       return (
                         <tr key={c.id}>
                           <td>{companyLabel(c)}</td>
+                          <td>
+                            <select
+                              value={m?.role_key || 'operator'}
+                              disabled={busy || selected.active !== true || selected.group === 'sysadmin'}
+                              onChange={(event) => changeCompanyRole(c.id, event.target.value as 'operator' | 'finance' | 'director')}
+                            >
+                              <option value="operator">Operador</option>
+                              <option value="finance">Finanzas</option>
+                              <option value="director">Director</option>
+                            </select>
+                          </td>
                           <td>{m ? <Badge variant={m.active ? 'success' : 'neutral'}>{m.active ? 'Activa' : 'Inactiva'}</Badge> : <span className={s.cellSub}>Sin membresía</span>}</td>
                           <td>
                             <button className={s.smallBtn} disabled={busy || selected.active !== true} onClick={() => toggleMembership(c.id)}>
@@ -314,9 +344,6 @@ export function UsersPanel() {
         </div>
       </div>
 
-      {assignTarget && (
-        <AssignRoleModal user={assignTarget} onClose={() => setAssignTarget(null)} onSaved={() => { setAssignTarget(null); reload() }} />
-      )}
     </section>
   )
 }

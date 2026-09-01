@@ -134,7 +134,7 @@ export async function listCompanyAccessRequests(): Promise<CompanyAccessRequest[
 
 export async function approveCompanyAccessRequest(
   requestId: string,
-  role: 'solicitante' | 'finance' | 'director',
+  role: 'operator' | 'finance' | 'director',
 ): Promise<void> {
   const { error } = await supabase.rpc('approve_company_access_request', {
     p_request_id: requestId,
@@ -176,6 +176,21 @@ export async function setProfileCompanyMembership(
   const { error } = await supabase.rpc('set_profile_company_membership', {
     p_profile_id: profileId,
     p_company_id: companyId,
+    p_active: active,
+  })
+  if (error) throw error
+}
+
+export async function setProfileCompanyRole(
+  profileId: string,
+  companyId: string,
+  role: 'operator' | 'finance' | 'director',
+  active = true,
+): Promise<void> {
+  const { error } = await supabase.rpc('set_profile_company_role', {
+    p_profile_id: profileId,
+    p_company_id: companyId,
+    p_role: role,
     p_active: active,
   })
   if (error) throw error
