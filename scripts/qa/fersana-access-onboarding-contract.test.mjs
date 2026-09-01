@@ -10,6 +10,11 @@ const hardening = fs.readFileSync(
   'supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql',
   'utf8',
 )
+const scopedRoles = fs.readFileSync(
+  'supabase/migrations/20260901055111_company_scoped_roles_foundation.sql',
+  'utf8',
+)
+const productionSeed = fs.readFileSync('prod-readiness/paso5-fersana-seed.sql', 'utf8')
 const auth = fs.readFileSync('app/src/lib/auth.tsx', 'utf8')
 const app = fs.readFileSync('app/src/App.tsx', 'utf8')
 const accessPage = fs.readFileSync('app/src/features/access/AccessRequestPage.tsx', 'utf8')
@@ -17,7 +22,7 @@ const usersPanel = fs.readFileSync('app/src/features/configuracion/tabs/UsersPan
 
 test('Fersana access link never exposes a public company directory', () => {
   assert.match(migration, /company_access_links/)
-  assert.match(migration, /values \('fersana', v_company_id, true, now\(\)\)/)
+  assert.match(productionSeed, /select 'fersana', c\.id, true, now\(\)[\s\S]*where c\.rfc = 'SFE100825TM9'/)
   assert.match(migration, /revoke all on table public\.company_access_links from public, anon, authenticated/)
   assert.doesNotMatch(accessPage, /from\(['"]companies['"]\)/)
   assert.match(app, /pathname\.match\(\/\^\\\/acceso\\\//)
@@ -43,26 +48,23 @@ test('access requests are own-row readable and admin-reviewed through guarded RP
   assert.match(migration, /alter table public\.company_access_requests enable row level security/)
   assert.match(migration, /profile_id = public\.current_profile_id\(\)/)
   assert.match(migration, /current_user_has_role\(public\.flux_sysadmin_roles\(\)\)/)
-  assert.match(migration, /company_access_role_not_allowed/)
-  assert.match(migration, /v_role_name not in \('solicitante', 'finance', 'director'\)/)
-  assert.doesNotMatch(migration, /v_role_name not in \([^)]*admin/)
+  assert.match(scopedRoles, /company_access_role_not_allowed/)
+  assert.match(scopedRoles, /v_role not in \('operator', 'finance', 'director'\)/)
+  assert.doesNotMatch(scopedRoles, /v_role not in \([^)]*admin/)
   assert.match(usersPanel, /r\.profile_id === profileId && r\.status === 'pending'/)
-  assert.match(usersPanel, /approveAccess\(row, 'solicitante'\)/)
+  assert.match(usersPanel, /approveAccess\(row, 'operator'\)/)
   assert.match(usersPanel, /approveAccess\(row, 'finance'\)/)
   assert.match(usersPanel, /approveAccess\(row, 'director'\)/)
   assert.match(usersPanel, /rejectAccess\(row\)/)
 })
 
 test('approval creates company scope and director pool membership only when requested', () => {
-  const approveBlock = migration.slice(
-    migration.indexOf('create or replace function public.approve_company_access_request'),
-    migration.indexOf('create or replace function public.reject_company_access_request'),
+  const approveBlock = scopedRoles.slice(
+    scopedRoles.indexOf('create or replace function public.approve_company_access_request'),
+    scopedRoles.indexOf('comment on function private.profile_has_company_role'),
   )
-  assert.match(approveBlock, /insert into public\.profile_company_memberships/)
-  assert.match(approveBlock, /on conflict \(profile_id, company_id\)[\s\S]*do update set active = true/)
-  assert.match(approveBlock, /if v_role_name = 'director' then/)
-  assert.match(approveBlock, /insert into public\.company_directors/)
-  assert.match(approveBlock, /company_access_profile_already_has_different_role/)
+  assert.match(approveBlock, /perform public\.set_profile_company_role/)
+  assert.doesNotMatch(approveBlock, /company_access_profile_already_has_different_role/)
   assert.doesNotMatch(approveBlock, /delete from public\.user_roles/)
 })
 
