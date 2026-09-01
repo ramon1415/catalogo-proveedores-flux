@@ -199,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signInWithGoogle(redirectTo?: string) {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: new URL(redirectTo || '/app/', window.location.origin).toString() },
+      options: { redirectTo: new URL(redirectTo || '/', window.location.origin).toString() },
     })
   }
 
