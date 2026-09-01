@@ -1,0 +1,29 @@
+.screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top left, rgba(207, 225, 203, .14), transparent 38%), var(--bg-app);
+}
+
+.card {
+  width: min(460px, 100%);
+  padding: 38px 34px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg-card);
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.logo { width: 190px; max-width: 70%; margin: 0 auto 25px; }
+.icon { width: 52px; height: 52px; display: grid; place-items: center; margin: 0 auto 18px; border-radius: 14px; background: rgba(245, 158, 11, .13); border: 1px solid rgba(245, 158, 11, .28); font-size: 22px; }
+.success { background: rgba(16, 185, 129, .13); border-color: rgba(16, 185, 129, .3); }
+.danger { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .3); }
+.card h1 { margin: 0 0 9px; color: var(--text-1); font-size: 19px; }
+.card p { margin: 0 0 20px; color: var(--text-3); font-size: 13px; line-height: 1.65; }
+.company { display: inline-block; margin-bottom: 22px; padding: 7px 13px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-1); background: var(--bg-elevated); font-size: 13px; font-weight: 700; }
+.actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.button { min-height: 39px; padding: 0 17px; border: 1px solid var(--border); border-radius: 9px; background: var(--accent); color: var(--bg-app); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.secondary { background: transparent; color: var(--text-2); }
+.powered { margin-top: 25px !important; font-size: 11px !important; opacity: .7; }
