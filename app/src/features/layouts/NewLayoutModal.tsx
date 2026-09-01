@@ -188,7 +188,7 @@ export function NewLayoutModal({
         navigate(`/solicitudes?request_id=${encodeURIComponent(action.requestId)}`)
         break
       case 'open-batch':
-        window.location.assign(`/approval_batches.html?batch_id=${encodeURIComponent(action.batchId)}`)
+        window.location.assign(`/cortes-semanales?batch_id=${encodeURIComponent(action.batchId)}`)
         break
       case 'open-provider':
         navigate(`/proveedores?provider_id=${encodeURIComponent(action.providerId)}&return_to=layouts`)
