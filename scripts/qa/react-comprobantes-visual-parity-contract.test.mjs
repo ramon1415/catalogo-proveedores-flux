@@ -51,3 +51,12 @@ test('Operation review keeps a usable hierarchy and persistent next action', () 
   assert.match(css, /\.operationBody \{[^}]*overflow-y: auto/)
   assert.match(css, /\.operationActions \{[^}]*position: sticky/)
 })
+
+test('Blocked extraction exposes an honest next step instead of a dead end', () => {
+  assert.match(operationModal, /NON_CORRECTABLE_ISSUES/)
+  assert.match(operationModal, /Subir comprobante BBVA original/)
+  assert.match(operationModal, /Corregir datos para continuar/)
+  assert.match(operationModal, /!receiptReviewed/)
+  assert.match(page, /onStartNewBatch=\{\(\) => \{/)
+  assert.match(page, /setUploadOpen\(true\)/)
+})
