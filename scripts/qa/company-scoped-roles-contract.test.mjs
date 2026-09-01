@@ -49,6 +49,8 @@ test('authorized people matrix is frozen without guessing unresolved emails', ()
   assert.match(matrix, /Denise \| Pendiente de correo exacto/)
   assert.match(matrix, /Gerardo \| Pendiente de correo exacto/)
   assert.match(matrix, /Ara \| Pendiente de correo exacto/)
+  assert.match(matrix, /Yanin \| `ynavarrete@soportef\.com` \| Finanzas \| Finanzas/)
+  assert.match(matrix, /Alfredo \| `afajardo@soportef\.com` \| Finanzas \| Finanzas/)
 })
 
 test('cutover remains fail-closed until global business-role dependencies are gone', () => {

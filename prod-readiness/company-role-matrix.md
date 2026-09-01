@@ -6,8 +6,8 @@ antes del corte; nunca se adivinan cuentas por nombre.
 
 | Persona | Cuenta confirmada | Operadora | Soporte Fersana |
 |---|---|---|---|
-| Yanin | `ynavarrete@soportef.com` | Finanzas | Operador |
-| Alfredo | `afajardo@soportef.com` | Finanzas | Operador |
+| Yanin | `ynavarrete@soportef.com` | Finanzas | Finanzas |
+| Alfredo | `afajardo@soportef.com` | Finanzas | Finanzas |
 | Denise | Pendiente de correo exacto | Finanzas | Finanzas |
 | Gerardo | Pendiente de correo exacto | — | Finanzas |
 | Cesar | `cesar@quantta.mx` | Director | Director |
