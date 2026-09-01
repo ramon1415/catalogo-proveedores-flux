@@ -30,7 +30,7 @@ export type NavSection = { title: string; items: NavItem[] }
 
 // IA por responsabilidad/rol (los grupos ≈ clusters de permiso):
 // Operación = captura del día a día · Administración = procesamiento y control ·
-// Balances = reportería read-only · Configuración = sysadmin.
+// Reportes = reportería read-only · Configuración = sysadmin.
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Operación',
@@ -54,10 +54,11 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Balances',
+    title: 'Reportes',
     items: [
       { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
+      { key: 'presupuesto-anual', label: 'Presupuesto anual', path: '/presupuesto-anual', icon: <IcDashboardAnnual />, groups: MANAGE },
     ],
   },
   {
