@@ -15,6 +15,7 @@ import {
   friendlyError, normalizeRpcResult, REQUEST_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS,
 } from './logic'
 import { numberValue } from '../../lib/format'
+import { parseCfdiFile } from './cfdi'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { useModules } from '../../lib/moduleAccess'
@@ -89,6 +90,11 @@ export function RequestModal({
   const [proveedorId, setProveedorId] = useState('')
   const [providerSearch, setProviderSearch] = useState('')
   const [amount, setAmount] = useState('')
+  // Desglose fiscal (opcional): el budget descuenta el subtotal cuando existe.
+  const [subtotal, setSubtotal] = useState('')
+  const [taxAmount, setTaxAmount] = useState('')
+  const [withholding, setWithholding] = useState('')
+  const [cfdiHint, setCfdiHint] = useState('')
   const [currency, setCurrency] = useState('MXN')
   const [exchangeRate, setExchangeRate] = useState('1')
   const [isExtraordinary, setIsExtraordinary] = useState(false)
@@ -308,9 +314,39 @@ export function RequestModal({
 
   function onFile(f: File | null) {
     setFile(f)
+    setCfdiHint('')
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
-    if (!res.ok) { setFile(null); setFileHint(res.message) } else setFileHint(res.message)
+    if (!res.ok) { setFile(null); setFileHint(res.message); return }
+    setFileHint(res.message)
+    // Autollenado del desglose desde el CFDI (XML). Solo rellena vacíos;
+    // nunca pisa lo que el usuario ya capturó.
+    if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
+      parseCfdiFile(f).then((cfdi) => {
+        if (!cfdi) return
+        if (cfdi.subtotal != null) setSubtotal((prev) => prev || String(cfdi.subtotal))
+        if (cfdi.traslados != null) setTaxAmount((prev) => prev || String(cfdi.traslados))
+        if (cfdi.retenciones != null) setWithholding((prev) => prev || String(cfdi.retenciones))
+        if (cfdi.total != null) setAmount((prev) => prev || String(cfdi.total))
+        setCfdiHint('Desglose leído del CFDI. Verifica los importes antes de enviar.')
+      })
+    }
+  }
+
+  // Validación local del desglose (espejo de las reglas del RPC).
+  function validateFiscalBreakdown(): string {
+    const hasAny = subtotal !== '' || taxAmount !== '' || withholding !== ''
+    if (!hasAny) return ''
+    const sub = numberValue(subtotal)
+    if (!(sub > 0)) return 'Captura el subtotal (gasto sin impuestos) del desglose fiscal.'
+    const iva = taxAmount === '' ? 0 : numberValue(taxAmount)
+    const ret = withholding === '' ? 0 : numberValue(withholding)
+    if (iva < 0 || ret < 0) return 'IVA y retenciones no pueden ser negativos.'
+    const total = numberValue(amount)
+    if (Math.abs(sub + iva - ret - total) > 0.01) {
+      return `El desglose no cuadra: ${formatCurrencyC(sub + iva - ret, currency)} (subtotal + IVA − retenciones) vs total ${formatCurrencyC(total, currency)}.`
+    }
+    return ''
   }
 
   function onProviderSelect(id: string, label: string) {
@@ -360,6 +396,9 @@ export function RequestModal({
       responsible_profile_id: responsibleId || null,
       due_date: dueDate || null,
       delivery_method: deliveryMethod || normalizePaymentMethod(paymentMethod),
+      subtotal_amount: subtotal === '' ? null : numberValue(subtotal),
+      tax_amount: subtotal === '' ? null : (taxAmount === '' ? 0 : numberValue(taxAmount)),
+      withholding_amount: subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding)),
     }
   }
 
@@ -376,6 +415,9 @@ export function RequestModal({
     const payload = collectPayload()
     const validation = validateRequestPayload(payload, availabilityForCategory, candidates)
     if (validation) { showToast('Revisa la solicitud', validation, 'warning'); return }
+
+    const fiscalValidation = validateFiscalBreakdown()
+    if (fiscalValidation) { showToast('Desglose fiscal', fiscalValidation, 'warning'); return }
 
     // Documento obligatorio en toda solicitud (política global).
     if (!file) {
@@ -435,6 +477,7 @@ export function RequestModal({
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
+    setSubtotal(''); setTaxAmount(''); setWithholding(''); setCfdiHint('')
     setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
@@ -496,6 +539,23 @@ export function RequestModal({
                     <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
                       <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
                     </label>
+                    <div className={s.fullRow}>
+                      <div className={s.fieldHint} style={{ marginBottom: 4 }}>
+                        Desglose fiscal (opcional) — si lo capturas, el presupuesto descuenta el subtotal (gasto sin IVA).
+                        {cfdiHint && <strong> {cfdiHint}</strong>}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                        <label>Subtotal
+                          <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} />
+                        </label>
+                        <label>IVA
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
+                        </label>
+                        <label>Retenciones
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={withholding} onChange={(e) => setWithholding(e.target.value)} />
+                        </label>
+                      </div>
+                    </div>
                     {canApprove && (
                       <label className={s.checkboxCard}>
                         <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
