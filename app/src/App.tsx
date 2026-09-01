@@ -7,6 +7,7 @@ import LegacyModuleFrame from './pages/LegacyModuleFrame'
 import { AppShell } from './components/ui/AppShell'
 import AccessRequestPage from './features/access/AccessRequestPage'
 import PendingAccessPage from './features/access/PendingAccessPage'
+import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
 
 export default function App() {
   const { session, profile, group, memberships, loading } = useAuth()
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/comprobantes_batch.html" title="Comprobantes batch" />} />
           <Route path="solicitudes-proveedores" element={<LegacyModuleFrame src="/provider_intakes.html" title="Solicitudes de proveedores" />} />
           <Route path="cortes-semanales" element={<LegacyModuleFrame src="/approval_batches.html" title="Cortes semanales" />} />
+          <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>
       </Routes>
