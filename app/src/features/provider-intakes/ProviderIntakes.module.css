@@ -1,5 +1,6 @@
 .phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
 .phead h1 { margin: 0 0 2px; }
+.eyebrow { display: block; margin-bottom: 7px; color: var(--accent-text); font-size: 10.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .kpi { background: var(--bg-card, rgba(120,120,120,.06)); border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; text-align: left; }
@@ -9,8 +10,9 @@
 
 .card { background: var(--bg-card, rgba(120,120,120,.04)); border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 12px; overflow: hidden; }
 .toolbar { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; align-items: end; padding: 14px 16px; border-bottom: 1px solid var(--border, rgba(120,120,120,.12)); }
-.toolbar label { min-width: 0; display: grid !important; align-items: stretch !important; gap: 5px !important; font-size: 11px; font-weight: 600; }
+.filterField { min-width: 0; display: grid; align-items: stretch; gap: 6px; color: var(--text-3); font-size: 10.5px; font-weight: 700; }
 .toolbar input, .toolbar select { min-width: 0; width: 100%; }
+.toolbarActions { min-height: 38px; display: flex; align-items: center; }
 .wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border, rgba(120,120,120,.1)); white-space: nowrap; }

@@ -51,6 +51,7 @@ export default function ProviderIntakesPage() {
   useEffect(() => { load() }, [load])
 
   function patch(p: Partial<IntakeFilters>) { setFilters((f) => ({ ...f, ...p, page: 1 })) }
+  function clearFilters() { setFilters(initialFilters(companyId)) }
 
   const kpiTotal = INTAKE_STATUS_ORDER.reduce((a, k) => a + Number(summary[k] || 0), 0)
   const first = total ? (filters.page - 1) * filters.pageSize + 1 : 0
@@ -62,11 +63,12 @@ export default function ProviderIntakesPage() {
     <>
       <div className={s.phead}>
         <div>
+          <span className={s.eyebrow}>Portal de proveedores · Fase 2B</span>
           <h1>Solicitudes de proveedores</h1>
-          <p className="muted">Bandeja de altas de proveedores (intake).</p>
+          <p className="muted">Prepara, convierte y audita solicitudes desacopladas sin salir del flujo normal de Flux.</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="primary-btn" onClick={() => setLinksOpen(true)}>Administrar ligas</button>
+          <button className="primary-btn" onClick={() => setLinksOpen(true)}>+ Generar liga de proveedor</button>
           <button className="secondary-btn" onClick={load}>Actualizar</button>
         </div>
       </div>
@@ -84,23 +86,40 @@ export default function ProviderIntakesPage() {
 
       <div className={s.card}>
         <div className={s.toolbar}>
-          <input placeholder="Folio…" value={filters.folio} onChange={(e) => patch({ folio: e.target.value })} />
-          <input placeholder="Proveedor…" value={filters.provider} onChange={(e) => patch({ provider: e.target.value })} />
-          <select value={filters.status} onChange={(e) => patch({ status: e.target.value as IntakeStatus | '' })}>
-            <option value="">Todos los estados</option>
-            {INTAKE_STATUS_ORDER.map((k) => <option key={k} value={k}>{INTAKE_STATUS[k].label}</option>)}
-          </select>
-          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Desde<input type="date" value={filters.dateFrom} onChange={(e) => patch({ dateFrom: e.target.value })} /></label>
-          <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Hasta<input type="date" value={filters.dateTo} onChange={(e) => patch({ dateTo: e.target.value })} /></label>
-          <select value={filters.hasFiles} onChange={(e) => patch({ hasFiles: e.target.value as '' | 'true' | 'false' })}>
-            <option value="">Con y sin archivos</option>
-            <option value="true">Con archivos</option>
-            <option value="false">Sin archivos</option>
-          </select>
-          <select value={filters.sort} onChange={(e) => patch({ sort: e.target.value })}>
-            <option value="desc">Más recientes</option>
-            <option value="asc">Más antiguas</option>
-          </select>
+          <label className={s.filterField}>Folio
+            <input placeholder="INT-2026-000001" value={filters.folio} onChange={(e) => patch({ folio: e.target.value })} />
+          </label>
+          <label className={s.filterField}>Proveedor
+            <input placeholder="Nombre declarado" value={filters.provider} onChange={(e) => patch({ provider: e.target.value })} />
+          </label>
+          <label className={s.filterField}>Estado
+            <select value={filters.status} onChange={(e) => patch({ status: e.target.value as IntakeStatus | '' })}>
+              <option value="">Todos</option>
+              {INTAKE_STATUS_ORDER.map((k) => <option key={k} value={k}>{INTAKE_STATUS[k].label}</option>)}
+            </select>
+          </label>
+          <label className={s.filterField}>Desde
+            <input type="date" value={filters.dateFrom} onChange={(e) => patch({ dateFrom: e.target.value })} />
+          </label>
+          <label className={s.filterField}>Hasta
+            <input type="date" value={filters.dateTo} onChange={(e) => patch({ dateTo: e.target.value })} />
+          </label>
+          <label className={s.filterField}>Documentos
+            <select value={filters.hasFiles} onChange={(e) => patch({ hasFiles: e.target.value as '' | 'true' | 'false' })}>
+              <option value="">Con y sin archivos</option>
+              <option value="true">Con archivos</option>
+              <option value="false">Sin archivos</option>
+            </select>
+          </label>
+          <label className={s.filterField}>Recepción
+            <select value={filters.sort} onChange={(e) => patch({ sort: e.target.value })}>
+              <option value="desc">Más recientes primero</option>
+              <option value="asc">Más antiguas primero</option>
+            </select>
+          </label>
+          <div className={s.toolbarActions}>
+            <button className="secondary-btn" type="button" onClick={clearFilters}>Limpiar</button>
+          </div>
         </div>
 
         <div className={s.wrap}>
