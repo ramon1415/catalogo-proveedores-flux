@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { useModules } from './lib/moduleAccess'
@@ -8,6 +8,10 @@ import { AppShell } from './components/ui/AppShell'
 import AccessRequestPage from './features/access/AccessRequestPage'
 import PendingAccessPage from './features/access/PendingAccessPage'
 import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
+
+// Intake ya completó su QA funcional. Comprobantes y Cortes conservan sus
+// respaldos vanilla hasta que terminen sus validaciones independientes.
+const ProviderIntakesPage = lazy(() => import('./features/provider-intakes/ProviderIntakesPage'))
 
 export default function App() {
   const { session, profile, group, memberships, loading } = useAuth()
@@ -38,7 +42,7 @@ export default function App() {
             <Route key={path} path={path.slice(1)} element={<Comp />} />
           ))}
           <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/legacy/comprobantes_batch.html" title="Comprobantes batch" />} />
-          <Route path="solicitudes-proveedores" element={<LegacyModuleFrame src="/legacy/provider_intakes.html" title="Solicitudes de proveedores" />} />
+          <Route path="solicitudes-proveedores" element={<ProviderIntakesPage />} />
           <Route path="cortes-semanales" element={<LegacyModuleFrame src="/legacy/approval_batches.html" title="Cortes semanales" />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />
