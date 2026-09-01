@@ -1,5 +1,8 @@
 import { supabase } from '../../lib/supabase'
-import type { IntakeFilters, IntakeListResult, IntakeDetailResult, IntakeAction } from './types'
+import type {
+  IntakeFilters, IntakeListResult, IntakeDetailResult, IntakeAction,
+  MatchData, LinkTarget, MatchComparison,
+} from './types'
 
 // Espejo de list_provider_intakes() del vanilla (provider_intakes.js).
 export async function listProviderIntakes(f: IntakeFilters): Promise<IntakeListResult> {
@@ -69,6 +72,71 @@ export async function submitIntakeAction(params: {
     p_to_status: action.toStatus,
     p_notes: trimmed || null,
     p_action_id: actionId,
+  })
+  if (error) throw error
+}
+
+// ── Matching de proveedor maestro (rebanada 5) ─────────────────────────────
+export async function findProviderIntakeCandidates(intakeId: string, search: string): Promise<MatchData> {
+  const { data, error } = await supabase.rpc('find_provider_intake_candidates', {
+    p_payment_intake_id: intakeId,
+    p_search: search.trim() || null,
+    p_limit: 12,
+  })
+  if (error) throw error
+  const r = (data && typeof data === 'object' ? data : {}) as Partial<MatchData>
+  return {
+    eligible: Boolean(r.eligible),
+    current_match: r.current_match ?? null,
+    candidates: Array.isArray(r.candidates) ? r.candidates : [],
+    duplicate_rfc_count: Number(r.duplicate_rfc_count ?? 0),
+    history: Array.isArray(r.history) ? r.history : [],
+  }
+}
+
+export async function getProviderIntakeLinkTarget(intakeId: string): Promise<LinkTarget | null> {
+  const { data, error } = await supabase.rpc('get_provider_intake_link_target', {
+    p_payment_intake_id: intakeId,
+  })
+  if (error) throw error
+  const r = data as LinkTarget | null
+  return r?.targeted ? r : null
+}
+
+export async function getProviderIntakeMatchComparison(intakeId: string, providerId: string): Promise<MatchComparison> {
+  const { data, error } = await supabase.rpc('get_provider_intake_match_comparison', {
+    p_payment_intake_id: intakeId,
+    p_proveedor_id: providerId,
+  })
+  if (error) throw error
+  const r = (data && typeof data === 'object' ? data : {}) as Partial<MatchComparison>
+  return {
+    provider_alias: r.provider_alias ?? null,
+    provider_active: Boolean(r.provider_active),
+    rows: Array.isArray(r.rows) ? r.rows : [],
+  }
+}
+
+// set / replace / clear — la misma RPC; clear = p_proveedor_id null.
+export async function setProviderIntakeMatch(params: {
+  intakeId: string
+  expectedStatus: string
+  expectedUpdatedAt: string | null
+  expectedCurrentMatch: string | null
+  providerId: string | null
+  reason: string
+  reasonCode: string
+  actionId: string
+}): Promise<void> {
+  const { error } = await supabase.rpc('set_provider_intake_match', {
+    p_payment_intake_id: params.intakeId,
+    p_expected_status: params.expectedStatus,
+    p_expected_updated_at: params.expectedUpdatedAt,
+    p_expected_current_match: params.expectedCurrentMatch,
+    p_proveedor_id: params.providerId,
+    p_reason: params.reason.trim() || null,
+    p_reason_code: params.reasonCode,
+    p_action_id: params.actionId,
   })
   if (error) throw error
 }

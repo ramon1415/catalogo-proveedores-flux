@@ -7,6 +7,7 @@ import {
   INTAKE_STATUS, FILE_KIND_LABELS, quarantineLabel, actorLabel, formatBytes, friendlyIntakeError,
   availableIntakeActions, validateIntakeAction, TRANSITION_COPY, createUuid,
 } from './logic'
+import { IntakeMatchSection } from './IntakeMatchSection'
 import type { IntakeAction, IntakeDetailResult } from './types'
 import s from './ProviderIntakes.module.css'
 
@@ -207,6 +208,11 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
                   </dl>
                 </section>
               </div>
+
+              <IntakeMatchSection
+                intake={intake}
+                onChanged={async () => { await reload(); onChanged?.() }}
+              />
 
               <section className={s.detailSection}>
                 <h3>Documentos privados</h3>

@@ -87,6 +87,64 @@ export type IntakeDetailResult = {
   events: IntakeEvent[]
 }
 
+// ── Matching de proveedor maestro (rebanada 5) ────────────────────────────
+export type MatchConfidence = 'high' | 'medium' | 'low' | 'none'
+
+export type CurrentMatch = {
+  proveedor_id: string
+  alias: string | null
+  legal_name: string | null
+  active: boolean
+  bank: string | null
+  clabe_masked: string | null
+  account_masked: string | null
+}
+
+export type MatchCandidate = CurrentMatch & {
+  selectable: boolean
+  confidence: MatchConfidence | null
+  score: number | null
+  reasons: string[] | null
+  differences: string[] | null
+}
+
+export type MatchHistoryRow = {
+  action_kind: string | null
+  previous_provider: string | null
+  new_provider: string | null
+  actor_type: string | null
+  created_at: string | null
+  reason: string | null
+}
+
+export type MatchData = {
+  eligible: boolean
+  current_match: CurrentMatch | null
+  candidates: MatchCandidate[]
+  duplicate_rfc_count: number
+  history: MatchHistoryRow[]
+  error?: string
+}
+
+export type LinkTarget = {
+  targeted: boolean
+  proveedor_id: string
+  alias: string | null
+  legal_name: string | null
+  rfc_masked: string | null
+  active: boolean
+  bank_review: string | null
+  identity_differences: { field: string; declared: string | null; master: string | null }[] | null
+}
+
+export type MatchComparison = {
+  provider_alias: string | null
+  provider_active: boolean
+  rows: { field: string; declared: string | null; master: string | null; result: string | null }[]
+}
+
+export type MatchKind = 'set' | 'replace' | 'clear'
+
 // ── Acciones de flujo (rebanada 3): transiciones de estado + nota interna ──
 export type IntakeAction =
   | { kind: 'transition'; toStatus: Exclude<IntakeStatus, 'received' | 'converted' | 'cancelled'>; label: string; danger?: boolean }
