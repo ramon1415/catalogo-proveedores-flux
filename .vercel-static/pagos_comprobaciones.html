@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pagos y comprobaciones | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-modal-fix">
+  <link rel="stylesheet" href="./pagos_comprobaciones_receipt_fix.css?v=20260701-sysadmin-receipt">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Pagos y comprobaciones</div></div>
+        </div>
+              <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+        <div class="nav-section">
+          <div class="nav-section-title">OPERACION</div>
+          <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link"><span>S</span> Solicitudes de pago</a>
+          <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link"><span>L</span> Layouts de pago</a>
+          <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link"><span>E</span> Efectivo y comprobaciones</a>
+          <a href="./ingresos.html" data-flux-nav-key="income" class="nav-link"><span>I</span> Ingresos</a>
+          <a href="./ingresos.html" data-flux-nav-key="incidents" class="nav-link"><span>V</span> Incidencias</a>
+          <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link"><span>P</span> Proveedores</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">GENERAL</div>
+          <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link"><span>D</span> Dashboard operativo</a>
+          <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link"><span>A</span> Cola de aprobacion</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">CONFIGURACION</div>
+          <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link"><span>C</span> Configuracion</a>
+        </div>
+      </nav>
+      <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Operacion de pagos</div>
+        <div class="topbar-user"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button><div class="avatar">FL</div></div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Pagos y comprobaciones</h1>
+            <p>Vista general de transferencias, efectivo, cheques y comprobantes usando solo informacion existente del sistema.</p>
+          </div>
+          <button class="primary-btn" id="refreshBtn" type="button">Actualizar</button>
+        </div>
+
+        <div class="notice">
+          Esta pantalla separa transferencias, entregas de efectivo/cheque y comprobaciones. Una solicitud de efectivo aprobada sin fondo aparece como pendiente por entregar, no como transferencia.
+        </div>
+
+        <section class="stats-grid">
+          <button class="stat-card success" type="button" data-filter="confirmed"><p>Pagos confirmados</p><strong id="confirmedCount">0</strong></button>
+          <button class="stat-card warning" type="button" data-filter="pending_confirmation"><p>Pendientes por confirmar</p><strong id="pendingConfirmationCount">0</strong></button>
+          <button class="stat-card info" type="button" data-filter="pending_delivery"><p>Pendientes por entregar</p><strong id="pendingDeliveryCount">0</strong></button>
+          <button class="stat-card" type="button" data-filter="pending_receipt"><p>Pendientes de comprobacion</p><strong id="pendingReceiptCount">0</strong></button>
+          <button class="stat-card danger" type="button" data-filter="review"><p>En revision</p><strong id="reviewCount">0</strong></button>
+        </section>
+
+        <section class="table-card">
+          <div class="table-toolbar">
+            <input id="searchInput" type="search" placeholder="Buscar proveedor, responsable, empresa o solicitud">
+            <select id="typeFilter">
+              <option value="all">Tipo: Todos</option>
+              <option value="transfer">Transferencia</option>
+              <option value="cash">Efectivo</option>
+              <option value="check">Cheque</option>
+            </select>
+            <select id="statusFilter">
+              <option value="all">Estatus: Todos</option>
+              <option value="confirmed">Confirmado</option>
+              <option value="pending_confirmation">Pendiente por confirmar</option>
+              <option value="pending_delivery">Pendiente por entregar</option>
+              <option value="pending_reconciliation">Pendiente de comprobacion</option>
+              <option value="review">En revision</option>
+              <option value="closed">Cerrado</option>
+            </select>
+            <button class="secondary-btn" id="clearFilterBtn" type="button">Ver todos</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Solicitud / Folio</th>
+                  <th>Proveedor</th>
+                  <th>Responsable gasto</th>
+                  <th>Empresa</th>
+                  <th>Monto</th>
+                  <th>Fecha</th>
+                  <th>Etapa</th>
+                  <th>Comprobante</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="paymentsTableBody">
+                <tr><td colspan="10" class="empty-state"><strong>Cargando pagos...</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="detailDialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div><h2 id="detailTitle">Pago</h2><p id="detailSubtitle">Detalle operativo.</p></div>
+        <button type="button" class="icon-btn" id="closeDetailBtn">x</button>
+      </div>
+      <div class="modal-scroll" id="detailContent"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeDetailFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260624-static-nav"></script>
+  <script src="./pagos_comprobaciones.js?v=20260603-cash-payments-ux"></script>
+  <script src="./pagos_comprobaciones_cash_ux.js?v=20260630-transfer-receipts-status"></script>
+  <script src="./pagos_comprobaciones_receipt_fix.js?v=20260701-sysadmin-receipt"></script>
+</body>
+</html>

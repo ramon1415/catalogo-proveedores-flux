@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; img-src 'self' data:; connect-src https://ucantptjhwttexzmslvm.functions.supabase.co https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests">
+  <title>Portal de proveedores | Flux Operadora</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="./solicitar.css?v=20260818-provider-portal-prod">
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido principal</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <img class="flux-logo" src="./assets/logo-flux-verde.webp" alt="Flux Operadora" width="230" height="58">
+      <div class="header-context">
+        <span>Portal de proveedores</span>
+</div>
+    </div>
+  </header>
+<main id="contenido" tabindex="-1">
+    <section id="boot-view" class="status-shell" aria-labelledby="boot-title">
+      <div class="status-card">
+        <div class="loader" aria-hidden="true"></div>
+        <p class="eyebrow">Conexión segura</p>
+        <h1 id="boot-title" tabindex="-1">Validando tu enlace</h1>
+        <p>Estamos preparando el portal y sus límites de envío.</p>
+        <p class="sr-only" role="status" aria-live="polite">Validando el enlace del portal.</p>
+      </div>
+    </section>
+
+    <section id="unavailable-view" class="status-shell" hidden aria-labelledby="unavailable-title">
+      <div class="status-card status-card--compact">
+        <div class="status-icon status-icon--neutral" aria-hidden="true">i</div>
+        <p class="eyebrow">Portal de proveedores</p>
+        <h1 id="unavailable-title" tabindex="-1">Este enlace no está disponible.</h1>
+        <p id="unavailable-message">Solicita un enlace vigente a tu contacto de Finanzas.</p>
+      </div>
+    </section>
+
+    <section id="temporary-error-view" class="status-shell" hidden aria-labelledby="temporary-error-title">
+      <div class="status-card status-card--compact">
+        <div class="status-icon status-icon--warning" aria-hidden="true">!</div>
+        <p class="eyebrow">Interrupción temporal</p>
+        <h1 id="temporary-error-title" tabindex="-1">No pudimos validar el enlace</h1>
+        <p id="temporary-error-message">Revisa tu conexión y vuelve a intentarlo.</p>
+        <button id="retry-link-button" class="button button--primary" type="button">Volver a intentar</button>
+      </div>
+    </section>
+
+    <section id="portal-view" class="portal-shell" hidden aria-labelledby="portal-title">
+      <div class="portal-heading">
+        <div>
+          <p class="eyebrow">Solicitud segura</p>
+          <h1 id="portal-title" tabindex="-1">Información para <span id="company-name">la empresa receptora</span></h1>
+          <p>Completa los cuatro pasos. Podrás revisar todo antes de enviar.</p>
+        </div>
+        <div class="security-note" role="note">
+          <span class="security-note__icon" aria-hidden="true"><svg class="flux-ico" viewBox="0 0 1920 1920" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M1827.701 303.065 698.835 1431.801 92.299 825.266 0 917.564 698.835 1616.4 1919.869 395.234z"/></svg></span>
+          <span>Conexión directa con Finanzas<br><small>Sin cuenta ni acceso al sistema interno</small></span>
+        </div>
+      </div>
+
+      <nav class="stepper" aria-label="Progreso de la solicitud">
+        <ol>
+          <li class="stepper__item is-current" data-step-indicator="1" aria-current="step"><span>1</span><b>Proveedor</b></li>
+          <li class="stepper__item" data-step-indicator="2"><span>2</span><b>Pago</b></li>
+          <li class="stepper__item" data-step-indicator="3"><span>3</span><b>Documentos</b></li>
+          <li class="stepper__item" data-step-indicator="4"><span>4</span><b>Revisión</b></li>
+        </ol>
+      </nav>
+
+      <div id="form-status" class="form-status" role="status" aria-live="polite" aria-atomic="true"></div>
+
+      <div class="portal-grid">
+        <form id="intake-form" novalidate>
+          <div class="form-card">
+            <section class="form-step" data-step="1" aria-labelledby="step-1-title">
+              <div class="section-heading">
+                <span class="section-number" aria-hidden="true">01</span>
+                <div><p class="eyebrow">Paso 1 de 4</p><h2 id="step-1-title" tabindex="-1">Datos del proveedor</h2><p>Identifica a la persona o empresa que solicita el pago.</p></div>
+              </div>
+              <aside class="registered-data-card" id="registered-provider-data" aria-labelledby="registered-provider-title" hidden>
+                <p class="eyebrow">Datos registrados</p>
+                <h3 id="registered-provider-title">Información precargada para este enlace</h3>
+                <p>Verifica que esta información siga vigente. Si algo cambió, actualízalo antes de enviar.</p>
+                <p class="registered-data-note">Tus cambios se guardarán únicamente como datos declarados para esta solicitud; no modificarán automáticamente al proveedor maestro.</p>
+              </aside>
+              <fieldset>
+                <legend>Identificación y contacto</legend>
+                <div class="field-grid">
+                  <div class="field field--wide"><label for="provider-name">Nombre o razón social <span aria-hidden="true">*</span></label><input id="provider-name" name="provider_name" type="text" maxlength="200" autocomplete="organization" required aria-describedby="provider-name-help provider-name-error"><small id="provider-name-help">Escribe el nombre fiscal o comercial completo.</small><p class="field-error" id="provider-name-error"></p></div>
+                  <div class="field"><label for="provider-rfc">RFC</label><input id="provider-rfc" name="provider_rfc" type="text" maxlength="20" autocomplete="off" autocapitalize="characters" aria-describedby="provider-rfc-help provider-rfc-error"><small id="provider-rfc-help">12 o 13 caracteres, sin importar espacios o guiones.</small><p class="field-error" id="provider-rfc-error"></p></div>
+                  <div class="field"><label for="provider-email">Correo electrónico <span aria-hidden="true">*</span></label><input id="provider-email" name="provider_email" type="email" maxlength="254" inputmode="email" autocomplete="email" required aria-describedby="provider-email-help provider-email-error"><small id="provider-email-help">Usaremos este dato únicamente para identificar la solicitud.</small><p class="field-error" id="provider-email-error"></p></div>
+                  <div class="field"><label for="provider-phone">Teléfono</label><input id="provider-phone" name="provider_phone" type="tel" maxlength="50" inputmode="tel" autocomplete="tel" aria-describedby="provider-phone-error"><p class="field-error" id="provider-phone-error"></p></div>
+                </div>
+              </fieldset>
+            </section>
+
+            <section class="form-step" data-step="2" aria-labelledby="step-2-title" hidden>
+              <div class="section-heading"><span class="section-number" aria-hidden="true">02</span><div><p class="eyebrow">Paso 2 de 4</p><h2 id="step-2-title" tabindex="-1">Pago y factura</h2><p>Captura el monto, el motivo y, cuando aplique, los datos bancarios.</p></div></div>
+              <fieldset>
+                <legend>Información del pago</legend>
+                <div class="field-grid">
+                  <div class="field field--wide"><label for="concept">Concepto del pago <span aria-hidden="true">*</span></label><input id="concept" name="concept" type="text" maxlength="300" required aria-describedby="concept-error"><p class="field-error" id="concept-error"></p></div>
+                  <div class="field field--wide"><label for="description">Descripción o comentarios</label><textarea id="description" name="description" maxlength="4000" rows="4" aria-describedby="description-help description-error"></textarea><small id="description-help"><span id="description-count">0</span> de 4,000 caracteres.</small><p class="field-error" id="description-error"></p></div>
+                  <div class="field"><label for="amount-requested">Monto solicitado <span aria-hidden="true">*</span></label><div class="input-prefix"><span aria-hidden="true">$</span><input id="amount-requested" name="amount_requested" type="text" inputmode="decimal" maxlength="20" required aria-describedby="amount-requested-help amount-requested-error"></div><small id="amount-requested-help">Usa máximo dos decimales.</small><p class="field-error" id="amount-requested-error"></p></div>
+                  <div class="field"><label for="currency">Moneda <span aria-hidden="true">*</span></label><select id="currency" name="currency" aria-describedby="currency-error"><option value="MXN">MXN — Peso mexicano</option></select><p class="field-error" id="currency-error"></p></div>
+                  <div class="field"><label for="requested-payment-date">Fecha solicitada de pago</label><input id="requested-payment-date" name="requested_payment_date" type="date" aria-describedby="requested-payment-date-error"><p class="field-error" id="requested-payment-date-error"></p></div>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Datos de factura</legend>
+                <div class="field-grid">
+                  <div class="field"><label for="invoice-folio">Folio de factura</label><input id="invoice-folio" name="invoice_folio" type="text" maxlength="120" aria-describedby="invoice-folio-error"><p class="field-error" id="invoice-folio-error"></p></div>
+                  <div class="field"><label for="invoice-date">Fecha de factura</label><input id="invoice-date" name="invoice_date" type="date" aria-describedby="invoice-date-error"><p class="field-error" id="invoice-date-error"></p></div>
+                  <div class="field field--wide"><label for="invoice-uuid">UUID fiscal</label><input id="invoice-uuid" name="invoice_uuid" type="text" maxlength="36" autocomplete="off" autocapitalize="characters" aria-describedby="invoice-uuid-help invoice-uuid-error"><small id="invoice-uuid-help">Formato del folio fiscal: 8-4-4-4-12 caracteres.</small><p class="field-error" id="invoice-uuid-error"></p></div>
+                </div>
+              </fieldset>
+              <fieldset id="bank-information-fieldset">
+                <legend>Información bancaria</legend>
+                <p class="fieldset-help" id="bank-generic-help">Completa esta sección solo cuando corresponda al pago.</p>
+                <section class="registered-bank-card" id="registered-bank-data" aria-labelledby="registered-bank-title" hidden>
+                  <p class="eyebrow">Datos bancarios registrados</p>
+                  <h3 id="registered-bank-title">Confirma la vigencia de tus datos</h3>
+                  <dl>
+                    <div><dt>Banco</dt><dd id="registered-bank-name">No informado</dd></div>
+                    <div><dt>Cuenta</dt><dd id="registered-bank-account">No informada</dd></div>
+                    <div><dt>CLABE</dt><dd id="registered-bank-clabe">No informada</dd></div>
+                  </dl>
+                  <div class="bank-confirmation-options" role="group" aria-labelledby="bank-confirmation-question">
+                    <p id="bank-confirmation-question"><strong>¿Tus datos bancarios registrados siguen vigentes? <span aria-hidden="true">*</span></strong></p>
+                    <label><input type="radio" name="bank_data_confirmation" value="MASTER_CONFIRMED" aria-describedby="bank-data-confirmation-error"> Sí, siguen vigentes</label>
+                    <label><input type="radio" name="bank_data_confirmation" value="CHANGE_DECLARED" aria-describedby="bank-data-confirmation-error"> Necesito reportar un cambio</label>
+                    <p class="field-error" id="bank-data-confirmation-error"></p>
+                  </div>
+                </section>
+                <div class="field-grid" id="declared-bank-fields">
+                  <div class="field"><label for="bank-name">Banco</label><input id="bank-name" name="bank_name" type="text" maxlength="160" autocomplete="off" aria-describedby="bank-name-error"><p class="field-error" id="bank-name-error"></p></div>
+                  <div class="field"><label for="beneficiary-name">Beneficiario</label><input id="beneficiary-name" name="beneficiary_name" type="text" maxlength="200" autocomplete="off" aria-describedby="beneficiary-name-error"><p class="field-error" id="beneficiary-name-error"></p></div>
+                  <div class="field"><label for="bank-account">Número de cuenta</label><input id="bank-account" name="bank_account" type="text" maxlength="34" inputmode="text" autocomplete="off" aria-describedby="bank-account-help bank-account-error"><small id="bank-account-help">De 4 a 34 letras o números.</small><p class="field-error" id="bank-account-error"></p></div>
+                  <div class="field"><label for="bank-clabe">CLABE</label><input id="bank-clabe" name="bank_clabe" type="text" maxlength="23" inputmode="numeric" autocomplete="off" aria-describedby="bank-clabe-help bank-clabe-error"><small id="bank-clabe-help">Exactamente 18 dígitos.</small><p class="field-error" id="bank-clabe-error"></p></div>
+                </div>
+              </fieldset>
+            </section>
+
+            <section class="form-step" data-step="3" aria-labelledby="step-3-title" hidden>
+              <div class="section-heading"><span class="section-number" aria-hidden="true">03</span><div><p class="eyebrow">Paso 3 de 4</p><h2 id="step-3-title" tabindex="-1">Documentos</h2><p>Adjunta únicamente los archivos necesarios para respaldar la solicitud.</p></div></div>
+              <div class="limit-card" role="note">
+                <strong id="file-limit-title">Límites del enlace</strong>
+                <p id="file-limit-copy">Consultando cantidad, tamaño y formatos permitidos.</p>
+                <button id="limits-help-button" class="text-button" type="button" aria-expanded="false" aria-controls="limits-help">¿Qué incluye el límite total?</button>
+                <p id="limits-help" hidden>El cálculo incluye archivos, datos del formulario, CAPTCHA y metadatos técnicos del envío.</p>
+              </div>
+              <section class="document-kind-guide" aria-labelledby="document-kind-guide-title">
+                <div>
+                  <p class="eyebrow">Antes de seleccionar</p>
+                  <h3 id="document-kind-guide-title">Tipos de documento aceptados</h3>
+                  <p>Clasifica cada archivo después de adjuntarlo. La clasificación no cambia las validaciones del enlace.</p>
+                </div>
+                <ul>
+                  <li><strong>Factura PDF</strong><span id="kind-format-invoice-pdf">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Factura XML</strong><span id="kind-format-invoice-xml">Formato disponible al validar el enlace.</span></li>
+                  <li><strong>Documento bancario</strong><span id="kind-format-bank-document">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Soporte</strong><span id="kind-format-support">Formatos disponibles al validar el enlace.</span></li>
+                  <li><strong>Otro</strong><span id="kind-format-other">Formatos disponibles al validar el enlace.</span></li>
+                </ul>
+                <p class="document-kind-runtime" id="document-kind-runtime">Los límites vigentes aparecerán aquí antes de seleccionar archivos.</p>
+              </section>
+              <div id="dropzone" class="dropzone" role="group" aria-labelledby="dropzone-title" aria-describedby="dropzone-help file-global-error">
+                <div class="dropzone__icon" aria-hidden="true">↑</div>
+                <strong id="dropzone-title">Arrastra tus documentos aquí</strong>
+                <span>o selecciónalos desde tu dispositivo</span>
+                <button id="choose-files-button" class="button button--secondary" type="button" aria-controls="file-input">Seleccionar archivos</button>
+                <label class="sr-only" for="file-input">Seleccionar documentos para adjuntar</label>
+                <input id="file-input" class="sr-only" type="file" multiple accept=".pdf,.xml,.jpg,.jpeg,.png,.webp,application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp" tabindex="-1">
+              </div>
+              <p id="dropzone-help" class="help-copy">No se generan vistas previas ni enlaces temporales.</p>
+              <p id="file-global-error" class="field-error" role="alert"></p>
+              <div id="file-list" class="file-list" aria-live="polite"></div>
+              <div class="usage-meter">
+                <div><span>Presupuesto estimado utilizado</span><strong id="usage-copy">0 MB</strong></div>
+                <div class="usage-track" role="progressbar" aria-label="Presupuesto total utilizado" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="usage-bar"></span></div>
+                <small id="total-budget-copy">Límite total pendiente de validación.</small>
+              </div>
+            </section>
+
+            <section class="form-step" data-step="4" aria-labelledby="step-4-title" hidden>
+              <div class="section-heading"><span class="section-number" aria-hidden="true">04</span><div><p class="eyebrow">Paso 4 de 4</p><h2 id="step-4-title" tabindex="-1">Revisión y envío</h2><p>Verifica cuidadosamente la información antes de enviarla.</p></div></div>
+              <div id="review-content" class="review-sections"></div>
+              <fieldset class="consent-fieldset">
+                <legend>Confirmaciones requeridas</legend>
+                <label class="check-row"><input id="privacy-accepted" type="checkbox" required><span>Declaro que he leído el <a id="privacy-link" href="#" target="_blank" rel="noopener noreferrer">Aviso de Privacidad para Proveedores</a> y otorgo mi consentimiento expreso para el tratamiento de los datos financieros y patrimoniales que proporcione, exclusivamente para las finalidades descritas en dicho Aviso.</span></label>
+</fieldset>
+              <div class="honeypot" aria-hidden="true"><label for="website-confirmation">Deja este campo vacío</label><input id="website-confirmation" name="website_confirmation" type="text" tabindex="-1" autocomplete="off"></div>
+              <section class="captcha-card" aria-labelledby="captcha-title"><div><h3 id="captcha-title">Control de seguridad</h3><p>Completa la verificación para habilitar el envío.</p></div><div id="turnstile-widget"></div><p id="captcha-error" class="field-error" role="alert"></p></section>
+              <div id="submit-error" class="submit-error" role="alert" hidden><strong>No pudimos completar el envío</strong><p id="submit-error-message"></p><p id="request-reference" class="technical-reference" hidden></p></div>
+              <div id="upload-progress" class="upload-progress" hidden><div><span>Enviando de forma segura…</span><strong id="upload-progress-label">Preparando</strong></div><progress id="upload-progress-bar" max="100"></progress></div>
+            </section>
+
+            <div class="form-actions">
+              <button id="back-button" class="button button--secondary" type="button" hidden>Anterior</button>
+              <button id="next-button" class="button button--primary" type="button">Continuar</button>
+              <button id="submit-button" class="button button--primary" type="submit" disabled hidden>Enviar solicitud</button>
+            </div>
+          </div>
+        </form>
+
+        <section class="summary-aside" aria-labelledby="summary-title">
+          <details id="mobile-summary" class="mobile-summary"><summary>Ver resumen de la solicitud</summary><div id="mobile-summary-content"></div></details>
+          <div class="summary-card desktop-summary">
+            <p class="eyebrow">Tu solicitud</p>
+            <h2 id="summary-title">Resumen</h2>
+            <dl id="summary-list"><div><dt>Empresa receptora</dt><dd id="summary-company">—</dd></div><div><dt>Proveedor</dt><dd id="summary-provider">Sin capturar</dd></div><div><dt>Monto</dt><dd id="summary-amount">Sin capturar</dd></div><div><dt>Documentos</dt><dd id="summary-files">0 archivos</dd></div></dl>
+            <div class="summary-privacy"><span aria-hidden="true">🔒</span><p>Tu enlace y la información capturada no se guardan en este dispositivo.</p></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="success-view" class="success-shell" hidden aria-labelledby="success-title">
+      <div class="success-card">
+        <div class="success-mark" aria-hidden="true"><svg class="flux-ico" viewBox="0 0 1920 1920" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M1827.701 303.065 698.835 1431.801 92.299 825.266 0 917.564 698.835 1616.4 1919.869 395.234z"/></svg></div>
+        <p class="eyebrow">Envío confirmado</p>
+        <h1 id="success-title" tabindex="-1">Solicitud recibida</h1>
+        <p>Tu información fue recibida correctamente por <strong id="success-company"></strong>.</p>
+        <div class="folio-card"><span>Folio público</span><strong id="public-folio"></strong></div>
+        <p id="success-message">Conserva este folio para cualquier aclaración.</p>
+        <p id="success-date" class="success-date"></p>
+        <div class="success-actions"><button id="copy-folio-button" class="button button--primary" type="button">Copiar folio</button><button id="print-button" class="button button--secondary" type="button">Imprimir confirmación</button><button id="finish-button" class="button button--quiet" type="button">Finalizar</button></div>
+        <p id="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><p>Flux Operadora · Tecnología Quantta</p><p>Portal exclusivo para recepción de solicitudes de proveedores.</p></footer>
+
+  <script type="module" src="./solicitar.js?v=20260818-provider-portal-prod"></script>
+</body>
+</html>

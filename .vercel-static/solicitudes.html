@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solicitudes de pago | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-modal-fix">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./payment_batch_final_reconciliation.css?v=20260723-v1">
+  <style>
+    /* Solicitudes-specific — layout del formulario y panel de decision */
+    .search-field { position:relative }
+    .search-field::before {
+      content:''; position:absolute; left:12px; top:50%; width:13px; height:13px;
+      transform:translateY(-50%);
+      background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%2370708a' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") center/contain no-repeat;
+    }
+    .search-field input { padding-left:34px }
+
+    .provider-combo { display:flex; gap:6px; align-items:flex-start }
+    .provider-combo-input { position:relative; flex:1; min-width:0 }
+    .provider-plus-btn { height:36px; width:36px; border-radius:7px; border:1px solid var(--border-strong); background:var(--bg-input); color:var(--text-2); font-size:16px; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; font-family:inherit; padding:0 }
+    .provider-plus-btn:hover { background:var(--bg-hover); color:var(--text-1) }
+    .combo-list { position:absolute; top:calc(100% + 3px); left:0; right:0; z-index:300; background:var(--bg-card); border:1px solid var(--border-strong); border-radius:9px; box-shadow:var(--shadow); max-height:220px; overflow-y:auto; padding:4px 0; list-style:none; margin:0 }
+    .combo-list li { padding:8px 12px; cursor:pointer; }
+    .combo-list li:hover, .combo-list li.combo-active { background:var(--bg-hover) }
+    .combo-list li .combo-main { display:block; font-size:12.5px; font-weight:600; color:var(--text-1) }
+    .combo-list li .combo-sub  { display:block; font-size:10.5px; color:var(--text-3); margin-top:1px }
+    .combo-list li.combo-empty { color:var(--text-3); cursor:default; font-size:12px; font-style:italic }
+
+    .request-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; align-items:start }
+    .form-sections { display:flex; flex-direction:column; gap:14px; min-width:0 }
+    .form-section { border:1px solid var(--border); border-radius:13px; padding:15px; background:rgba(255,255,255,.015) }
+    .form-section h3 { font-size:12px; font-weight:700; color:var(--text-1); margin-bottom:12px }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px }
+    .form-grid label { display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3); letter-spacing:.35px; text-transform:uppercase }
+    .form-grid > label { min-width:0 }
+    .form-grid label.full-row { grid-column:1/-1 }
+    .form-grid .form-control { width:100%; min-width:0; max-width:100%; box-sizing:border-box }
+    .form-grid select.form-control { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    .form-control { height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none; font-family:inherit }
+    .form-control:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim) }
+    .form-control.textarea { height:auto; min-height:74px; padding:10px 11px; resize:vertical; line-height:1.45 }
+    .field-hint { color:var(--text-3); font-size:11px; font-weight:500; line-height:1.4; margin-top:1px; text-transform:none; letter-spacing:0 }
+    .field-hint.success { color:var(--accent-text) }
+    .field-hint.warning { color:var(--amber) }
+    .field-hint.error { color:var(--ruby) }
+    .checkbox-card { display:flex!important; align-items:center; flex-direction:row!important; gap:9px!important; min-height:36px; padding:0 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-2)!important; text-transform:none!important; letter-spacing:0!important; font-size:12.5px!important; font-weight:600!important; cursor:pointer }
+    .checkbox-card input { width:15px; height:15px; accent-color:var(--accent); flex-shrink:0 }
+
+    .summary-panel { position:sticky; top:0; border:1px solid var(--border); border-radius:15px; padding:16px; background:linear-gradient(180deg,rgba(15,118,110,.12),rgba(255,255,255,.015)); box-shadow:var(--shadow) }
+    .summary-panel { min-width:0; overflow:hidden }
+    .summary-panel h3 { font-size:13px; color:var(--text-1); margin-bottom:4px }
+    .summary-panel > p { color:var(--text-3); font-size:12px; margin-bottom:14px }
+    .sol-summary-list { display:flex; flex-direction:column; gap:10px }
+    .sol-summary-list label { display:flex; flex-direction:column; gap:5px; font-size:10.5px; font-weight:700; color:var(--text-3); letter-spacing:.35px; text-transform:uppercase }
+    .summary-value { min-height:20px; color:var(--text-1); font-size:12.5px; font-weight:600; text-transform:none; letter-spacing:0; overflow-wrap:anywhere }
+    .summary-note { margin-top:14px; padding:12px; border-radius:12px; background:var(--accent-dim); border:1px solid rgba(15,118,110,.22); color:var(--accent-text); font-size:12px; line-height:1.45 }
+
+    .filter-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--bg-hover); color:var(--text-2); font-size:12px }
+    .filter-pill { display:inline-flex; align-items:center; gap:7px; padding:5px 9px; border-radius:999px; background:var(--accent-dim); color:var(--accent-text); border:1px solid rgba(15,118,110,.22); font-weight:700 }
+
+    tbody tr.highlight-row { background:var(--bg-hover) }
+    tbody tr.highlight-row td:first-child { box-shadow:inset 3px 0 0 var(--accent) }
+
+    .decision-card { margin-top:12px; border:1px solid var(--border); border-radius:15px; padding:16px; background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,.01)) }
+    .decision-card h3 { font-size:13px; color:var(--text-1); margin-bottom:3px; letter-spacing:-.1px }
+    .decision-card > p { color:var(--text-3); font-size:12px; margin-bottom:12px }
+    .decision-note { border-radius:12px; padding:11px 12px; margin-bottom:12px; font-size:12px; font-weight:700; line-height:1.45; border:1px solid var(--border) }
+    .decision-note.success { background:var(--emerald-dim); border-color:rgba(18,183,106,.24); color:var(--emerald) }
+    .decision-note.warning { background:var(--amber-dim); border-color:rgba(245,158,11,.25); color:var(--amber) }
+    .decision-note.neutral { background:var(--accent-dim); border-color:rgba(15,118,110,.22); color:var(--accent-text) }
+    .decision-card textarea { width:100%; min-height:78px; padding:10px 11px; background:var(--bg-input); border:1px solid var(--border); border-radius:9px; color:var(--text-1); font-size:12.5px; resize:vertical; outline:none; font-family:inherit }
+    .decision-card textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-dim) }
+    .decision-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px }
+    .decision-btn { min-height:34px; padding:7px 12px; border-radius:8px; border:1px solid var(--border-strong); background:transparent; color:var(--text-2); font-size:12px; font-weight:700; cursor:pointer; font-family:inherit }
+    .decision-btn:hover { background:var(--bg-hover); color:var(--text-1) }
+    .decision-btn.approve { background:var(--emerald-dim); color:var(--emerald); border-color:rgba(18,183,106,.24) }
+    .decision-btn.reject  { background:var(--ruby-dim);   color:var(--ruby);   border-color:rgba(224,62,82,.26) }
+    .decision-btn.change  { background:var(--amber-dim);  color:var(--amber);  border-color:rgba(245,158,11,.24) }
+    .decision-btn.adjust  { background:var(--violet-dim); color:var(--violet); border-color:rgba(168,85,247,.24) }
+    .decision-btn:disabled { opacity:.55; cursor:not-allowed }
+    .decision-error { min-height:18px; margin-top:8px; color:var(--ruby); font-size:12px; font-weight:700 }
+
+    .approval-history { margin-top:12px; border-top:1px solid var(--border); padding-top:12px }
+    .approval-history h4 { font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.55px; margin-bottom:8px }
+    .history-list { display:flex; flex-direction:column; gap:7px }
+    .history-item { border:1px solid var(--border); border-radius:11px; padding:9px 10px; background:rgba(255,255,255,.015); color:var(--text-2); font-size:12px }
+    .history-item strong { display:block; color:var(--text-1); margin-bottom:2px }
+    .history-item span { display:block; color:var(--text-3); font-size:10.5px; margin-top:3px }
+
+    .budget-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:4px }
+    pre { max-height:220px; overflow:auto; padding:12px; border-radius:10px; background:var(--bg-input); border:1px solid var(--border); color:var(--text-2); font-size:11px; line-height:1.45; white-space:pre-wrap }
+    details { color:var(--text-2) }
+    details summary { cursor:pointer; color:var(--accent-text); font-weight:700; margin-bottom:8px }
+
+    #requestDialog { max-width:1060px }
+    #detailDialog  { max-width:860px }
+    .batch-execution-panel { margin:12px 0; padding:12px 14px; border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:7px; background:var(--bg-surface); color:var(--text-2); font-size:12px }
+    .batch-execution-panel.extraordinary { border-left-color:#d97706; background:color-mix(in srgb,#d97706 7%,var(--bg-surface)) }
+    .batch-execution-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap }
+    .batch-execution-head strong { color:var(--text-1); display:block; margin-bottom:3px }
+    .batch-execution-meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:7px; color:var(--text-3); font-size:10.5px }
+    .batch-execution-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:10px }
+    .batch-history-timeline { display:grid; gap:0; margin-top:10px; padding-top:2px }
+    .batch-history-step { display:grid; grid-template-columns:14px minmax(0,1fr); gap:8px; position:relative; padding-bottom:10px }
+    .batch-history-step:not(:last-child)::before { content:""; position:absolute; left:5px; top:12px; bottom:0; width:1px; background:var(--border) }
+    .batch-history-dot { width:11px; height:11px; margin-top:2px; border-radius:50%; background:var(--text-3); border:2px solid var(--bg-surface); box-shadow:0 0 0 1px var(--border); z-index:1 }
+    .batch-history-dot.approved { background:#15803d }
+    .batch-history-dot.rejected { background:#dc2626 }
+    .batch-history-dot.pending { background:#d97706 }
+    .batch-history-step div { display:grid; gap:2px; min-width:0 }
+    .batch-history-step strong { color:var(--text-1); font-size:11px }
+    .batch-history-step span,.batch-history-step small { color:var(--text-3); font-size:10.5px; line-height:1.4 }
+
+
+    .extraordinary-warning { padding:10px; border-left:3px solid #d97706; background:var(--amber-dim); color:var(--text-2); font-size:12px; line-height:1.5 }
+    .extraordinary-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px }
+    .extraordinary-summary div { min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:7px; background:var(--bg-surface) }
+    .extraordinary-summary span { display:block; color:var(--text-3); font-size:9.5px; font-weight:700; text-transform:uppercase }
+    .extraordinary-summary strong { display:block; margin-top:3px; color:var(--text-1); font-size:11.5px; overflow-wrap:anywhere }
+    .extraordinary-evidence-status { padding:10px 12px; border:1px solid var(--border); border-radius:7px; background:var(--bg-surface); color:var(--text-2); font-size:11.5px; line-height:1.5 }
+    .extraordinary-evidence-status.warning { border-color:rgba(217,119,6,.38); background:var(--amber-dim) }
+    .extraordinary-evidence-status.danger { border-color:rgba(220,38,38,.35); background:color-mix(in srgb,#dc2626 8%,var(--bg-surface)); color:var(--text-1) }
+    .extraordinary-file-help { color:var(--text-3); font-size:10.5px; line-height:1.45 }
+    .extraordinary-row-badge { margin-left:6px }
+    .extraordinary-intent-card { grid-column:1/-1; align-items:flex-start!important; padding:11px!important; min-height:auto }
+    .extraordinary-intent-copy { display:grid; gap:3px }
+    .extraordinary-intent-copy strong { color:var(--text-1); font-size:12px }
+    .extraordinary-intent-copy small { color:var(--text-3); font-weight:500; line-height:1.45 }
+    .extraordinary-intent-card.is-disabled { opacity:.72; cursor:not-allowed }
+    .extraordinary-intent-card.is-disabled input { cursor:not-allowed }
+    .extraordinary-intent-card.is-enabled { border-color:rgba(217,119,6,.36); background:var(--amber-dim) }
+    .approver-final-section { border-color:rgba(94,234,212,.22); background:linear-gradient(180deg,rgba(15,118,110,.08),rgba(255,255,255,.015)) }
+    .approver-final-section > .field-hint { display:block; margin:-4px 0 12px }
+
+    @media (max-width:1100px) { .request-layout { grid-template-columns:1fr } .summary-panel { position:static } }
+    @media (max-width:760px)  { .form-grid { grid-template-columns:1fr } .budget-strip { grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div>
+          <div>
+            <div class="brand-title">Flux Operadora</div>
+            <div class="brand-subtitle">Solicitudes de pago</div>
+          </div>
+        </div>
+              <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+        <div class="nav-section">
+          <div class="nav-section-title">OPERACION</div>
+          <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link active"><span>S</span> Solicitudes de pago</a>
+          <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link"><span>L</span> Layouts de pago</a>
+          <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link"><span>E</span> Efectivo y comprobaciones</a>
+          <a href="./ingresos.html" data-flux-nav-key="income" class="nav-link"><span>I</span> Ingresos</a>
+          <a href="./ingresos.html" data-flux-nav-key="incidents" class="nav-link"><span>V</span> Incidencias</a>
+          <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link"><span>P</span> Proveedores</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">GENERAL</div>
+          <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link"><span>D</span> Dashboard operativo</a>
+          <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link"><span>A</span> Cola de aprobacion</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">CONFIGURACION</div>
+          <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link"><span>C</span> Configuracion</a>
+        </div>
+      </nav>
+      <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button id="logoutBtn" class="secondary-btn" style="width:100%" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Validacion automatica contra presupuesto</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+          <div class="avatar">FL</div>
+        </div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Solicitudes de pago</h1>
+            <p>Crea solicitudes y deja que el sistema valide automaticamente la disponibilidad presupuestal.</p>
+          </div>
+          <button id="newRequestBtn" class="primary-btn" type="button">+ Nueva solicitud</button>
+        </div>
+
+        <div class="stats-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+          <div id="totalCard"      class="kpi info clickable"    role="button" tabindex="0"><span class="kpi-label">Solicitudes activas</span><span class="kpi-value" id="totalRequests">0</span></div>
+          <div id="approvableCard" class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Aprobables</span><span class="kpi-value" id="approvableRequests">0</span></div>
+          <div id="exceptionsCard" class="kpi warning clickable" role="button" tabindex="0"><span class="kpi-label">Excepciones presupuestales</span><span class="kpi-value" id="blockedRequests">0</span></div>
+          <div id="paidCard"       class="kpi success clickable" role="button" tabindex="0"><span class="kpi-label">Pagadas</span><span class="kpi-value" id="paidRequests">0</span></div>
+          <div class="kpi muted"><span class="kpi-label">Monto solicitado</span><span class="kpi-value" id="requestedAmount">$0</span></div>
+        </div>
+
+        <section class="table-card">
+          <div class="table-toolbar" style="grid-template-columns:minmax(240px,1fr) 150px 190px minmax(180px,260px)">
+            <div class="search-field">
+              <input id="searchInput" type="search" placeholder="Buscar por folio, proveedor o descripcion...">
+            </div>
+            <select id="statusFilter">
+              <option value="todos">Estatus: Todos</option>
+              <option value="activas" selected>Activas</option>
+              <option value="submitted">Enviada</option>
+              <option value="approved">Aprobada</option>
+              <option value="changes_requested">Con correccion</option>
+              <option value="finance_validation">En revision</option>
+              <option value="scheduled">Programada</option>
+              <option value="paid">Pagada</option>
+              <option value="rejected">Rechazada</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+            <select id="budgetDecisionFilter">
+              <option value="todos">Presupuesto: Todos</option>
+              <option value="aprobable">Aprobable</option>
+              <option value="excepciones">Excepciones</option>
+            </select>
+            <select id="companyFilter">
+              <option value="todos">Empresa: Todas</option>
+            </select>
+          </div>
+
+          <div id="filterSummary" class="filter-summary hidden">
+            <span id="filterSummaryText" class="filter-pill">Vista filtrada</span>
+            <button id="clearFiltersBtn" type="button" class="small-btn">Ver todas</button>
+          </div>
+
+          <div id="messageBox" class="hidden" style="padding:16px 18px;font-size:13px;color:var(--text-3)">Cargando solicitudes...</div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Folio</th>
+                  <th>Proveedor</th>
+                  <th>Partida</th>
+                  <th>Monto</th>
+                  <th>Estatus</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="requestsTableBody">
+                <tr><td colspan="6" style="padding:44px;text-align:center;color:var(--text-3)">Cargando solicitudes...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <!-- Dialog: nueva solicitud -->
+  <dialog id="requestDialog">
+    <form id="requestForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Nueva solicitud de pago</h2>
+          <p>Completa los datos operativos y financieros para validar presupuesto al guardar.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" id="closeRequestModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+        </div>
+      </div>
+
+      <div class="modal-scroll" style="padding:0">
+        <div class="request-layout" style="padding:0 2px 2px">
+          <div class="form-sections">
+            <section class="form-section">
+              <h3>Datos generales</h3>
+              <div class="form-grid">
+                <label>Empresa *
+                  <select id="companyId" class="form-control" required></select>
+                </label>
+                <label>Centro de costo *
+                  <select id="costCenterId" class="form-control" required></select>
+                </label>
+                <label class="full-row">Partida presupuestal *
+                  <input id="budgetCategorySearch" type="text" class="form-control" placeholder="Filtrar partida por nombre…" autocomplete="off" style="width:100%;margin-bottom:6px" disabled>
+                  <select id="budgetCategoryId" class="form-control" required></select>
+                  <div id="budgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
+                </label>
+                <label>Mes presupuestal *
+                  <input id="budgetMonth" class="form-control" type="month" required>
+                </label>
+                <label class="full-row">Proveedor *
+                  <div class="provider-combo" id="providerCombo">
+                    <div class="provider-combo-input">
+                      <input id="providerSearch" type="text" class="form-control" placeholder="Escribe para buscar entre todos los proveedores (alias, razón social, RFC)…" autocomplete="off" aria-autocomplete="list" aria-controls="providerDropdown" style="width:100%">
+                      <ul id="providerDropdown" class="combo-list hidden" role="listbox"></ul>
+                    </div>
+                    <button id="newProviderFromRequestBtn" type="button" class="provider-plus-btn" title="Crear proveedor sin salir de la solicitud" aria-label="Crear proveedor sin salir de la solicitud">+</button>
+                    <input type="hidden" id="proveedorId">
+                  </div>
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h3>Datos financieros</h3>
+              <div class="form-grid">
+                <label>Monto solicitado *
+                  <input id="amountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+                </label>
+                <label>Moneda *
+                  <select id="currency" class="form-control" required>
+                    <option value="MXN">MXN</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </label>
+                <label id="exchangeRateRow" class="hidden">Tipo de cambio *
+                  <input id="exchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1">
+                </label>
+                <label class="checkbox-card">
+                  <input id="isExtraordinaryAdjustment" type="checkbox">
+                  Ajuste extraordinario presupuestal
+                </label>
+                <label id="extraordinaryIntentSection" class="checkbox-card extraordinary-intent-card hidden">
+                  <input id="requiresExtraordinaryTreatment" type="checkbox">
+                  <span class="extraordinary-intent-copy">
+                    <strong>Requiere tratamiento extraordinario</strong>
+                    <small id="extraordinaryIntentHelp">Selecciona una empresa autorizada para habilitar esta opción.</small>
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <h3>Descripcion</h3>
+              <div class="form-grid">
+                <label class="full-row">Descripcion *
+                  <textarea id="description" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
+                </label>
+                <label class="full-row">Notas
+                  <textarea id="notes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
+                </label>
+                <label class="full-row">Factura / comprobante
+                  <input type="file" id="requestFile" class="form-file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml">
+                  <span class="file-hint">JPG, PNG, WEBP, PDF o XML · máx. 10 MB</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="form-section approver-final-section">
+              <h3>Revisión final</h3>
+              <span class="field-hint">Después de completar los datos de la solicitud, selecciona quién realizará la revisión.</span>
+              <div class="form-grid">
+                <label class="full-row">¿Quién revisará esta solicitud? *
+                  <select id="approverId" class="form-control" required disabled>
+                    <option value="">Completa empresa, centro de costo y monto</option>
+                  </select>
+                  <input id="approverAssignmentId" type="hidden" value="">
+                  <span id="approverHelp" class="field-hint">Selecciona empresa, centro de costo y monto para cargar aprobadores disponibles.</span>
+                </label>
+              </div>
+            </section>
+          </div>
+
+          <aside class="summary-panel">
+            <h3>Resumen</h3>
+            <p>Vista previa de la solicitud antes de validar.</p>
+            <div class="sol-summary-list">
+              <label>Empresa <span id="summaryCompany" class="summary-value">Sin seleccionar</span></label>
+              <label>Aprobador seleccionado <span id="summaryApprover" class="summary-value">Sin seleccionar</span></label>
+              <label>Centro de costo <span id="summaryCostCenter" class="summary-value">Sin seleccionar</span></label>
+              <label>Partida <span id="summaryCategory" class="summary-value">Sin seleccionar</span></label>
+              <label>Proveedor <span id="summaryProvider" class="summary-value">Sin seleccionar</span></label>
+              <label>Mes <span id="summaryMonth" class="summary-value">Sin seleccionar</span></label>
+              <label>Monto <span id="summaryAmount" class="summary-value">$0.00 MXN</span></label>
+            </div>
+            <div class="summary-note">
+              Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelRequestBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitRequestBtn" class="primary-btn">Crear solicitud</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <dialog id="extraordinaryDialog" class="narrow">
+    <form id="extraordinaryForm" class="modal-content">
+      <div class="modal-header"><div><h2 style="color:var(--text-1)">Completar autorización externa</h2><p id="extraordinarySubtitle">La marca de creación fue sólo una intención; todavía no existe bypass.</p></div><button type="button" id="closeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <div class="full-row extraordinary-warning">La solicitud permanecerá fuera del layout hasta completar todos los datos, conservar presupuesto no bloqueado y activar la autorización en el servidor. La evidencia es opcional y siempre privada.</div>
+          <div id="extraordinarySummary" class="extraordinary-summary full-row" aria-label="Resumen de la autorización extraordinaria"></div>
+          <label class="full-row">Persona que autorizó externamente *<select id="extraordinaryDirector" class="form-control" required><option value="">Selecciona...</option></select></label>
+          <label>Fecha y hora de autorización *<input id="extraordinaryAuthorizedAt" class="form-control" type="datetime-local" required></label>
+          <label>Medio de autorización *<select id="extraordinaryAuthorizationMedium" class="form-control" required><option value="">Selecciona...</option><option value="whatsapp">WhatsApp</option><option value="email">Correo</option><option value="phone">Llamada</option><option value="in_person">Presencial</option><option value="signed_document">Documento firmado</option><option value="other">Otro</option></select></label>
+          <label class="full-row">Referencia completa *<input id="extraordinaryAuthorizationReference" class="form-control" minlength="8" maxlength="500" required placeholder="Folio, mensaje, asunto, ubicación o referencia verificable"></label>
+          <label class="full-row">Categoría *<select id="extraordinaryCategory" class="form-control" required><option value="">Selecciona...</option><option value="operational_emergency">Emergencia operativa / fuga</option><option value="urgent_reimbursement">Reembolso urgente</option><option value="urgent_termination">Desvinculación o finiquito urgente</option><option value="critical_service">Servicio crítico</option><option value="other">Otro</option></select></label>
+          <label class="full-row">Motivo de urgencia *<textarea id="extraordinaryReason" class="form-control textarea" minlength="20" maxlength="1500" required></textarea></label>
+          <label class="full-row">Evidencia privada (opcional)<input id="extraordinaryEvidenceFile" class="form-control" type="file" accept="application/pdf,image/jpeg,image/png,image/webp"><span class="extraordinary-file-help">PDF, JPG, PNG o WEBP; máximo 5 MB. Si adjuntas un archivo, Flux calcula SHA-256 y valida sus metadatos.</span></label>
+          <label id="extraordinaryEvidenceAttestationRow" class="checkbox-card full-row hidden"><input id="extraordinaryEvidenceAttestation" type="checkbox"> Confirmo que la evidencia corresponde exactamente a esta solicitud, importe, moneda y persona autorizadora.</label>
+          <label class="checkbox-card full-row"><input id="extraordinaryDirectorAbsent" type="checkbox" required> Confirmo la ausencia del Director para el flujo ordinario.</label>
+          <label class="checkbox-card full-row"><input id="extraordinaryConfirm" type="checkbox" required> Confirmo que el pago no puede esperar la aprobación ordinaria del Director.</label>
+          <div id="extraordinaryEvidenceStatus" class="extraordinary-evidence-status full-row hidden" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" id="cancelExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitExtraordinaryBtn" class="primary-btn">Activar tratamiento extraordinario</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="revokeExtraordinaryDialog" class="narrow">
+    <form id="revokeExtraordinaryForm" class="modal-content">
+      <div class="modal-header"><div><h2 style="color:var(--text-1)">Cancelar o revocar tratamiento extraordinario</h2><p>Antes de activarse puede regresar al flujo ordinario. Después de activarse sólo puede revocarse si aún no fue consumido.</p></div><button type="button" id="closeRevokeExtraordinaryBtn" class="icon-btn" aria-label="Cerrar">x</button></div>
+      <div class="modal-scroll"><div class="form-grid"><label class="full-row">Motivo *<textarea id="revokeExtraordinaryReason" class="form-control textarea" minlength="10" maxlength="1000" required></textarea></label></div></div>
+      <div class="modal-actions"><button type="button" id="cancelRevokeExtraordinaryBtn" class="secondary-btn">Cancelar</button><button type="submit" id="submitRevokeExtraordinaryBtn" class="primary-btn">Confirmar</button></div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: detalle de solicitud -->
+  <dialog id="detailDialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="detailTitle" style="color:var(--text-1)">Detalle de solicitud</h2>
+          <p id="detailSubtitle">Validacion presupuestal automatica</p>
+        </div>
+        <button type="button" id="closeDetailModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-scroll" id="detailContent"></div>
+      <div class="modal-actions">
+        <button type="button" id="editRequestBtn" class="secondary-btn" style="margin-right:auto;display:none">Editar solicitud</button>
+        <button type="button" id="closeDetailFooterBtn" class="secondary-btn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Dialog: editar solicitud -->
+  <dialog id="editDialog">
+    <form id="editForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Editar solicitud</h2>
+          <p id="editSubtitle">Modifica los datos de la solicitud.</p>
+        </div>
+        <button type="button" id="closeEditModalBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-scroll" style="padding:0">
+        <div style="padding:0 2px 2px">
+          <section class="form-section">
+            <h3>Datos generales</h3>
+            <div class="form-grid">
+              <label>Empresa *
+                <select id="editCompanyId" class="form-control" required></select>
+              </label>
+              <label>Centro de costo *
+                <select id="editCostCenterId" class="form-control" required></select>
+              </label>
+              <label class="full-row">Partida presupuestal *
+                <input id="editBudgetCategorySearch" type="text" class="form-control" placeholder="Filtrar partida por nombre…" autocomplete="off" style="width:100%;margin-bottom:6px" disabled>
+                <select id="editBudgetCategoryId" class="form-control" required></select>
+                <div id="editBudgetCategoryHelp" class="field-hint">Selecciona empresa, centro de costo y mes para cargar partidas disponibles.</div>
+              </label>
+              <label>Mes presupuestal *
+                <input id="editBudgetMonth" class="form-control" type="month" required>
+              </label>
+              <label class="full-row">Proveedor *
+                <div class="provider-combo" id="editProviderCombo">
+                  <div class="provider-combo-input">
+                    <input id="editProviderSearch" type="text" class="form-control" placeholder="Escribe para buscar entre todos los proveedores (alias, razón social, RFC)…" autocomplete="off" style="width:100%">
+                    <ul id="editProviderDropdown" class="combo-list hidden" role="listbox"></ul>
+                  </div>
+                  <input type="hidden" id="editProveedorId">
+                </div>
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Datos financieros</h3>
+            <div class="form-grid">
+              <label>Monto solicitado *
+                <input id="editAmountRequested" class="form-control" type="number" min="0.01" step="0.01" placeholder="0.00" required>
+              </label>
+              <label>Moneda *
+                <select id="editCurrency" class="form-control" required>
+                  <option value="MXN">MXN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </label>
+              <label id="editExchangeRateRow" class="hidden">Tipo de cambio *
+                <input id="editExchangeRate" class="form-control" type="number" min="0.0001" step="0.0001" value="1">
+              </label>
+              <label class="checkbox-card">
+                <input id="editIsExtraordinaryAdjustment" type="checkbox">
+                Ajuste extraordinario
+              </label>
+            </div>
+          </section>
+
+          <section class="form-section" style="margin-top:12px">
+            <h3>Descripcion</h3>
+            <div class="form-grid">
+              <label class="full-row">Descripcion *
+                <textarea id="editDescription" class="form-control textarea" rows="3" placeholder="Concepto de la solicitud..." required></textarea>
+              </label>
+              <label class="full-row">Notas
+                <textarea id="editNotes" class="form-control textarea" rows="2" placeholder="Notas internas opcionales..."></textarea>
+              </label>
+              <label class="full-row">Factura / comprobante
+                <input type="file" id="editRequestFile" class="form-file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml">
+                <span class="file-hint">JPG, PNG, WEBP, PDF o XML · máx. 10 MB</span>
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancelEditBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" id="submitEditBtn" class="primary-btn">Guardar cambios</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260818-provider-portal-reconciled"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./upload_helper.js"></script>
+  <script src="./solicitudes.js?v=20260818-default-active"></script>
+  <script src="./pdf-lib-1.17.1.min.js?v=20260723-vendored-root"></script>
+  <script src="./payment_batch_single_page_pdf.js?v=20260723-one-to-one"></script>
+  <script src="./payment_request_reconciliation_evidence.js?v=20260723-one-to-one"></script>
+  <script src="./solicitudes_batch_execution.js?v=20260805-extraordinary-governed"></script>
+  <script src="./cash_flow_extension.js?v=20260714-readiness-028d"></script>
+  <script src="./fase2_request_payment_method_extension.js?v=20260821-detalle-fix"></script>
+  <script src="./fase2_request_success_patch.js?v=20260709-multi-approver-pool"></script>
+  <script src="./budget_live_frontend_guards.js?v=20260817-self-commit"></script>
+</body>
+</html>
