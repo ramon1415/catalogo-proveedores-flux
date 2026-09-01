@@ -2,6 +2,8 @@
 -- Tenant-scoped por company_id. Aislado del subsistema de ingresos de Operadora
 -- (income_payments/billing_periods), que es single-tenant y específico de socios/eventos.
 
+begin;
+
 create table if not exists public.recurring_income_templates (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id) on delete cascade,
@@ -18,11 +20,13 @@ create table if not exists public.recurring_income_templates (
 );
 create index if not exists recurring_income_templates_company_idx
   on public.recurring_income_templates(company_id);
+create unique index if not exists recurring_income_templates_company_id_id_uidx
+  on public.recurring_income_templates(company_id, id);
 
 create table if not exists public.tenant_income_entries (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references public.companies(id) on delete cascade,
-  template_id uuid references public.recurring_income_templates(id) on delete set null,
+  template_id uuid,
   period text,  -- 'YYYY-MM' para recurrentes; null para ingresos sueltos
   payer_name text not null,
   concept text not null,
@@ -36,6 +40,15 @@ create table if not exists public.tenant_income_entries (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.tenant_income_entries
+  drop constraint if exists tenant_income_entries_template_id_fkey;
+alter table public.tenant_income_entries
+  drop constraint if exists tenant_income_entries_company_template_fk;
+alter table public.tenant_income_entries
+  add constraint tenant_income_entries_company_template_fk
+  foreign key (company_id, template_id)
+  references public.recurring_income_templates(company_id, id)
+  on delete set null (template_id);
 create index if not exists tenant_income_entries_company_period_idx
   on public.tenant_income_entries(company_id, period);
 -- evita doble generación del mismo template en el mismo periodo (los sueltos, template null, no aplican)
@@ -43,9 +56,13 @@ create unique index if not exists tenant_income_entries_recurring_unique
   on public.tenant_income_entries(template_id, period)
   where template_id is not null and period is not null;
 
+drop trigger if exists recurring_income_templates_set_updated_at
+  on public.recurring_income_templates;
 create trigger recurring_income_templates_set_updated_at
   before update on public.recurring_income_templates
   for each row execute function public.set_updated_at();
+drop trigger if exists tenant_income_entries_set_updated_at
+  on public.tenant_income_entries;
 create trigger tenant_income_entries_set_updated_at
   before update on public.tenant_income_entries
   for each row execute function public.set_updated_at();
@@ -54,11 +71,24 @@ create trigger tenant_income_entries_set_updated_at
 alter table public.recurring_income_templates enable row level security;
 alter table public.tenant_income_entries enable row level security;
 
+revoke all privileges on table
+  public.recurring_income_templates,
+  public.tenant_income_entries
+from public, anon, authenticated, service_role;
+grant select, insert, update, delete on table
+  public.recurring_income_templates,
+  public.tenant_income_entries
+to authenticated, service_role;
+
+drop policy if exists recurring_income_templates_rw
+  on public.recurring_income_templates;
 create policy recurring_income_templates_rw on public.recurring_income_templates
   for all to authenticated
   using (public.has_active_company_membership(public.current_profile_id(), company_id))
   with check (public.has_active_company_membership(public.current_profile_id(), company_id));
 
+drop policy if exists tenant_income_entries_rw
+  on public.tenant_income_entries;
 create policy tenant_income_entries_rw on public.tenant_income_entries
   for all to authenticated
   using (public.has_active_company_membership(public.current_profile_id(), company_id))
@@ -69,11 +99,12 @@ create or replace function public.generate_recurring_income(p_company_id uuid, p
 returns integer
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
 declare v_count integer := 0;
 begin
-  if not public.has_active_company_membership(public.current_profile_id(), p_company_id) then
+  if auth.uid() is null
+     or not public.has_active_company_membership(public.current_profile_id(), p_company_id) then
     raise exception 'not_authorized' using errcode = '42501';
   end if;
   if p_period !~ '^\d{4}-\d{2}$' then
@@ -94,3 +125,5 @@ begin
 end $$;
 revoke all on function public.generate_recurring_income(uuid, text) from public, anon;
 grant execute on function public.generate_recurring_income(uuid, text) to authenticated, service_role;
+
+commit;

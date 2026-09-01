@@ -4,6 +4,8 @@
 -- profile as pending and lets a Flux sysadmin approve the exact tenant + role.
 -- No public company directory is exposed.
 
+begin;
+
 create table if not exists public.company_access_links (
   code text primary key,
   company_id uuid not null references public.companies(id),
@@ -142,6 +144,10 @@ declare
   v_company_name text;
   v_request public.company_access_requests%rowtype;
 begin
+  if auth.uid() is null then
+    raise exception 'authentication_required';
+  end if;
+
   v_profile_id := public.current_profile_id();
   if v_profile_id is null then
     raise exception 'profile_required';
@@ -234,7 +240,8 @@ security definer
 set search_path = public, pg_temp
 as $function$
 begin
-  if not public.current_user_has_role(public.flux_sysadmin_roles()) then
+  if auth.uid() is null
+     or not public.current_user_has_role(public.flux_sysadmin_roles()) then
     raise exception 'routing_admin_required';
   end if;
 
@@ -280,7 +287,8 @@ declare
   v_existing_roles text[];
 begin
   v_actor := public.current_profile_id();
-  if v_actor is null
+  if auth.uid() is null
+     or v_actor is null
      or not public.current_user_has_role(public.flux_sysadmin_roles()) then
     raise exception 'routing_admin_required';
   end if;
@@ -385,7 +393,8 @@ declare
   v_request public.company_access_requests%rowtype;
 begin
   v_actor := public.current_profile_id();
-  if v_actor is null
+  if auth.uid() is null
+     or v_actor is null
      or not public.current_user_has_role(public.flux_sysadmin_roles()) then
     raise exception 'routing_admin_required';
   end if;
@@ -428,27 +437,8 @@ grant execute on function public.list_company_access_requests() to authenticated
 grant execute on function public.approve_company_access_request(uuid, text) to authenticated;
 grant execute on function public.reject_company_access_request(uuid) to authenticated;
 
-do $block$
-declare
-  v_company_id uuid;
-  v_count integer;
-begin
-  select min(c.id::text)::uuid, count(*)
-    into v_company_id, v_count
-  from public.companies c
-  where lower(btrim(c.name)) = 'soporte fersana'
-     or lower(btrim(coalesce(c.legal_name, ''))) = 'soporte fersana';
+-- El link se crea en paso5-fersana-seed.sql, después de que exista la empresa.
+-- Mantener el DDL independiente de datos elimina la dependencia circular entre
+-- el paso 1 (migraciones) y el paso 4 (seed).
 
-  if v_count <> 1 then
-    raise exception 'fersana_company_resolution_expected_one_found_%', v_count;
-  end if;
-
-  insert into public.company_access_links(code, company_id, active, updated_at)
-  values ('fersana', v_company_id, true, now())
-  on conflict (code)
-  do update set
-    company_id = excluded.company_id,
-    active = true,
-    updated_at = now();
-end;
-$block$;
+commit;

@@ -4,6 +4,8 @@
 -- Yanin=ynavarrete@soportef.com, Alfredo=afajardo@soportef.com y
 -- Contabilidad=contabilidad2@soportef.com. Confirmar la lista en el gate GO/NO-GO.
 
+begin;
+
 update public.company_cost_center_budget_categories rel
 set responsible_email = d.email
 from (values
@@ -95,3 +97,5 @@ begin
   end if;
 end;
 $$;
+
+commit;
