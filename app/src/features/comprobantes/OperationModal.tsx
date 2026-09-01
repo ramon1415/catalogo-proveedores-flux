@@ -257,22 +257,32 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
 
   return (
     <div className={s.overlay} onClick={() => !busy && onClose()}>
-      <div className={s.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
-        <div className={s.modalHead}>
+      <div
+        className={`${s.modal} ${s.operationModal}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="operation-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={`${s.modalHead} ${s.operationHeader}`}>
           <div>
-            <h2 style={{ fontSize: '1.1rem' }}>Comprobante · página {operation.source_page || operation.page_number || '—'}</h2>
-            <p className="muted">{operation.bank_unique_folio || operation.bank_reference || 'Sin referencia bancaria'}</p>
+            <span className={s.modalEyebrow}>Conciliación bancaria</span>
+            <h2 id="operation-modal-title">Comprobante · página {operation.source_page || operation.page_number || '—'}</h2>
+            <p className="muted">Referencia: {operation.bank_unique_folio || operation.bank_reference || 'sin referencia bancaria'}</p>
           </div>
-          <button className="small-btn" disabled={busy} onClick={onClose}>Cerrar</button>
+          <button className={s.closeButton} aria-label="Cerrar revisión" title="Cerrar" disabled={busy} onClick={onClose}>×</button>
         </div>
 
-        <div className={s.modalBody}>
+        <div className={`${s.modalBody} ${s.operationBody}`}>
           {/* Stepper */}
           <ol className={s.steps}>
             {steps.map((st, i) => (
               <li key={st.label} className={`${s.step} ${st.state ? s[st.state] : ''}`}>
-                <strong>{i + 1}. {st.label}</strong>
-                <span className="muted" style={{ fontSize: '.75rem' }}>{st.hint}</span>
+                <span className={s.operationStepNumber}>{st.state === 'done' ? '✓' : i + 1}</span>
+                <span className={s.operationStepCopy}>
+                  <strong>{st.label}</strong>
+                  <small>{st.hint}</small>
+                </span>
               </li>
             ))}
           </ol>
@@ -282,13 +292,20 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
             El importe y la moneda se leen del PDF y nunca se capturan durante la vinculación.
           </p>
 
+          <div className={s.sectionHeading}>
+            <span>Datos leídos del PDF</span>
+            <small>Compara estos datos con el comprobante individual</small>
+          </div>
+
           {/* Datos extraídos */}
           <dl className={s.factGrid}>
             <div><dt>Fecha</dt><dd>{operation.application_date || operation.operation_date || 'Sin fecha'}</dd></div>
+            <div><dt>Importe del comprobante</dt><dd>{formatMinor(operation.amount_minor, operation.currency || 'MXN')}</dd></div>
+            <div><dt>Moneda</dt><dd>{operation.currency || 'MXN'}</dd></div>
             <div><dt>Beneficiario</dt><dd>{operation.beneficiary_name || 'Por identificar'}</dd></div>
-            <div><dt>Concepto</dt><dd>{operation.payment_reason || operation.concept || 'Sin concepto'}</dd></div>
-            <div><dt>Importe</dt><dd>{formatMinor(operation.amount_minor, operation.currency || 'MXN')}</dd></div>
+            <div><dt>Referencia</dt><dd>{operation.bank_unique_folio || operation.bank_reference || 'Sin referencia'}</dd></div>
             <div><dt>Extracción</dt><dd><Badge variant={extractionStatus === 'accepted' ? 'success' : extractionStatus === 'rejected' ? 'danger' : 'warning'}>{statusLabel(extractionStatus)}</Badge></dd></div>
+            <div className={s.factWide}><dt>Concepto</dt><dd>{operation.payment_reason || operation.concept || 'Sin concepto'}</dd></div>
           </dl>
 
           {/* Aviso de extracción */}
@@ -326,9 +343,14 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
 
           {/* Acciones primarias */}
           {!linked && (
-            <div className={s.formBtns} style={{ justifyContent: 'flex-start', flexWrap: 'wrap' }}>
+            <div className={s.operationActions}>
+              <div className={s.nextAction}>
+                <span>Siguiente paso</span>
+                <strong>{nextActionReason()}</strong>
+              </div>
+              <div className={s.operationActionButtons}>
               <button
-                className="secondary-btn"
+                className={shareable ? 'secondary-btn' : 'primary-btn'}
                 disabled={(!sourceDoc && !evidence?.id) || busy}
                 title={evidence?.id ? 'Abrir el comprobante privado de una sola página' : sourceDoc ? `Crear y abrir únicamente la página ${pageNumber}` : 'No existe una página privada disponible.'}
                 onClick={openReceipt}
@@ -354,10 +376,9 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
                   Vincular comprobante y marcar solicitud como pagada
                 </button>
               )}
+              </div>
             </div>
           )}
-
-          <p className="muted" style={{ margin: 0, fontSize: '.85rem' }}>{nextActionReason()}</p>
 
           {/* Candidatos */}
           {!linked && (
@@ -418,8 +439,8 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
 
           {/* Corrección / rechazo */}
           {showCorrection && (
-            <details>
-              <summary className="muted" style={{ cursor: 'pointer', fontSize: '.85rem' }}>Corregir datos extraídos o cerrar la revisión</summary>
+            <details className={s.correctionDisclosure}>
+              <summary>¿Los datos leídos son incorrectos?</summary>
               <div style={{ marginTop: 8 }}>
                 <button
                   className="secondary-btn"

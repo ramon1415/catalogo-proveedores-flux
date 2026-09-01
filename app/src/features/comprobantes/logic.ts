@@ -73,20 +73,26 @@ export const operationStatus = (op: BatchOperation) =>
 export const batchStatus = (b: { batch_status?: string | null; status?: string | null }) =>
   b.batch_status || b.status || 'awaiting_upload'
 
-// Fusión operations × extractions por extraction_id, precedencia operación.
+// La RPC devuelve `operations[].extraction_id`, pero `extractions[].id`.
+// Normalizamos ambas formas antes de fusionar para no renderizar cada página dos veces.
 export function batchOperations(detail: BatchDetail | null): BatchOperation[] {
   if (!detail) return []
   const operations = detail.operations || detail.bank_operations || []
   const extractions = detail.extractions || []
-  const byId = new Map(extractions.map((e) => [e.extraction_id, e]))
+  const extractionKey = (item: BatchOperation) => item.extraction_id || item.id || null
+  const byId = new Map(extractions.flatMap((e) => {
+    const key = extractionKey(e)
+    return key ? [[key, e] as const] : []
+  }))
   const merged = operations.map((op) => {
     const ex = op.extraction_id ? byId.get(op.extraction_id) : undefined
     return { ...(ex || {}), ...op }
   })
   // Extracciones sin operación asociada también se listan.
-  const seen = new Set(merged.map((m) => m.extraction_id))
+  const seen = new Set(merged.map(extractionKey).filter(Boolean))
   for (const ex of extractions) {
-    if (!seen.has(ex.extraction_id)) merged.push(ex)
+    const key = extractionKey(ex)
+    if (!key || !seen.has(key)) merged.push(ex)
   }
   return merged
 }

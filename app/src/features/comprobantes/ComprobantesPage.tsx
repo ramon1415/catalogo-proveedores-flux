@@ -16,12 +16,19 @@ import s from './Comprobantes.module.css'
 
 // Migración a React de comprobantes_batch.html: bandeja de batches BBVA +
 // flujo de vinculación 1:1 comprobante ↔ solicitud aprobada.
-const SUMMARY_FILTERS: { key: string; label: string; statuses: string[] }[] = [
-  { key: '', label: 'Total', statuses: [] },
-  { key: 'processing', label: 'Procesando', statuses: ['awaiting_upload', 'extracting'] },
-  { key: 'review_required', label: 'Por revisar', statuses: ['review_required'] },
-  { key: 'ready', label: 'Listos', statuses: ['ready'] },
-  { key: 'failed', label: 'Con incidencia', statuses: ['failed', 'cancelled'] },
+const SUMMARY_FILTERS: { key: string; label: string; subtitle: string; tone: string; statuses: string[] }[] = [
+  { key: '', label: 'Total', subtitle: 'Batches visibles', tone: 'total', statuses: [] },
+  { key: 'processing', label: 'Procesando', subtitle: 'Ingesta o extracción', tone: 'processing', statuses: ['awaiting_upload', 'extracting'] },
+  { key: 'review_required', label: 'Por revisar', subtitle: 'Extracciones', tone: 'review', statuses: ['review_required'] },
+  { key: 'ready', label: 'Listos', subtitle: 'Revisión terminada', tone: 'ready', statuses: ['ready'] },
+  { key: 'failed', label: 'Con incidencia', subtitle: 'Requieren atención', tone: 'failed', statuses: ['failed', 'cancelled'] },
+]
+
+const FLOW_STEPS = [
+  ['1', 'Revisar comprobante', 'Abre una sola página'],
+  ['2', 'Buscar solicitud aprobada', 'Consulta sin modificar datos'],
+  ['3', 'Confirmar coincidencia', 'Importe y moneda exactos'],
+  ['4', 'Comprobante vinculado', 'Solicitud marcada como pagada'],
 ]
 
 export default function ComprobantesPage() {
@@ -151,33 +158,55 @@ export default function ComprobantesPage() {
     <>
       <div className={s.phead}>
         <div>
-          <h1>Comprobantes</h1>
-          <p className="muted">Vinculación 1:1 protegida — cada comprobante se vincula con una sola solicitud aprobada.</p>
+          <span className={s.eyebrow}>Comprobantes bancarios · BBVA PDF V1</span>
+          <h1>Comprobantes batch</h1>
+          <p className="muted">Sube un lote, revisa cada operación y vincúlala con la solicitud aprobada correspondiente.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className={s.headActions}>
+          <button className="secondary-btn" onClick={refreshAll}>Actualizar</button>
           {capabilities.can_ingest === true && (
             <button className="primary-btn" onClick={() => setUploadOpen(true)}>Nuevo batch</button>
           )}
-          <button className="secondary-btn" onClick={refreshAll}>Actualizar</button>
         </div>
+      </div>
+
+      <div className={s.safetyBanner}>
+        <strong>! &nbsp;Vinculación 1:1 protegida</strong>
+        <span>Cada comprobante se vincula con una sola solicitud aprobada. El importe y la moneda se leen del PDF y nunca se capturan durante la vinculación.</span>
+      </div>
+
+      <ol className={s.flowSteps} aria-label="Flujo de vinculación de comprobantes">
+        {FLOW_STEPS.map(([number, title, copy]) => (
+          <li key={number}>
+            <span className={s.stepNumber}>{number}</span>
+            <span><strong>{title}</strong><small>{copy}</small></span>
+          </li>
+        ))}
+      </ol>
+
+      <div className={s.helpNote}>
+        <strong>¿Ya aparece un lote?</strong>
+        <span>Fue cargado anteriormente. Para iniciar otro usa <b>Nuevo batch</b>. Si subes exactamente el mismo PDF, Flux abrirá el lote original para evitar duplicados.</span>
       </div>
 
       <div className={s.kpis}>
         {SUMMARY_FILTERS.map((f) => (
           <button
             key={f.key}
-            className={`${s.kpi} ${summaryFilter === f.key ? s.active : ''}`}
+            className={`${s.kpi} ${s[f.tone]} ${summaryFilter === f.key ? s.active : ''}`}
             aria-pressed={summaryFilter === f.key}
             onClick={() => setSummaryFilter(summaryFilter === f.key && f.key !== '' ? '' : f.key)}
           >
-            <strong>{counts[f.key] ?? 0}</strong><span>{f.label}</span>
+            <span>{f.label}</span>
+            <strong>{counts[f.key] ?? 0}</strong>
+            <small>{f.subtitle}</small>
           </button>
         ))}
       </div>
 
       <div className={s.split}>
         {/* Lista */}
-        <div className={s.card}>
+        <div className={s.listPane}>
           <div className={s.toolbar}>
             <input placeholder="Buscar batch…" value={search} onChange={(e) => setSearch(e.target.value)} />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -205,8 +234,14 @@ export default function ComprobantesPage() {
         </div>
 
         {/* Detalle */}
-        <div className={s.card}>
-          {!detail && <p className={s.msg}>Selecciona un batch para revisar sus operaciones.</p>}
+        <div className={s.detailPane}>
+          {!detail && (
+            <div className={s.emptyState}>
+              <span className={s.emptyIcon}>B</span>
+              <strong>Selecciona un batch</strong>
+              <p>Aquí verás sus documentos, operaciones,<br />conciliación e historial.</p>
+            </div>
+          )}
           {detail && (
             <div className={s.detailBody}>
               <div className={s.metricRow}>
