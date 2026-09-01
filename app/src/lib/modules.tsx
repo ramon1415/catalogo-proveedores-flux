@@ -71,7 +71,8 @@ export const MODULE_REGISTRY: ModuleDef[] = [
   {
     key: 'ingresos', label: 'Ingresos', section: 'Operación', path: '/ingresos',
     icon: <IcIngresos />, kind: 'tenant_variant', codeVersion: 1,
-    component: lazy(() => import('../features/ingresos/IngresosPage')),
+    // Ruteador por empresa: Operadora → IngresosPage (cuotas legacy); otras → panel tenant.
+    component: lazy(() => import('../features/ingresos/IngresosRoute')),
   },
   {
     // Incidencias: módulo propio, Operadora-only (via company_modules). Reusa
