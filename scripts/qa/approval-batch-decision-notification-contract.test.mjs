@@ -3,9 +3,9 @@ import fs from "node:fs";
 import { resolveFinalRecipient } from "../../supabase/functions/notification-dispatcher/index.ts";
 
 const migrationPath =
-  "supabase/migrations/20260825025522_approval_batch_decision_submitter_email_pdf.sql";
+  "supabase/migrations/20260825031856_approval_batch_decision_submitter_email_pdf.sql";
 const wakeupMigrationPath =
-  "supabase/migrations/20260825032139_approval_batch_decision_wakeup_dev.sql";
+  "supabase/migrations/20260825032422_approval_batch_decision_wakeup_dev.sql";
 const dispatcherPath = process.env.DISPATCHER_PATH ||
   "supabase/functions/notification-dispatcher/index.ts";
 const migration = fs.readFileSync(migrationPath, "utf8");

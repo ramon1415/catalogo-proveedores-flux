@@ -3,13 +3,13 @@
 -- DRAFT para revisión de Ramón. Generado desde dev (31-ago-2026).
 --
 -- PRERREQUISITOS (o falla / queda incompleto):
---   1) Paso 2 aplicado en prod (platform_module_registry crea modules/company_modules).
+--   1) Paso 1 aplicado en prod (platform_module_registry crea modules/company_modules).
 --   2) Prod tiene una budget_versions ACTIVA del año 2026.
 --   3) Confirmar unique constraints: companies(rfc), cost_centers(code),
 --      budget_categories(code), company_modules(company_id,module_key).
 --      (Los guards usan NOT EXISTS / ON CONFLICT; ajustar si difieren.)
 --
--- Ejecutar en una transacción. Idempotente salvo budget_lines (ver nota al final).
+-- Ejecutar en una transacción. Rerun-safe y fail-closed.
 -- ============================================================================
 begin;
 
@@ -33,8 +33,8 @@ where comp.rfc = 'SFE100825TM9'
     where c.rfc = 'SFE100825TM9' and b.account_number = '0191134094'
   );
 
--- 4) Módulos habilitados (requiere paso 2) ------------------------------------
--- Refleja el estado decidido en dev: incidencias OFF; el resto ON.
+-- 4) Módulos habilitados (requiere paso 1) ------------------------------------
+-- Refleja DEV: incidencias, ingresos y nómina OFF; operación financiera ON.
 insert into company_modules (company_id, module_key, enabled, version, channel)
 select comp.id, d.module_key, d.enabled, d.version, d.channel
 from (values
@@ -43,18 +43,19 @@ from (values
   ('dashboard', true, 1, 'stable'),
   ('efectivo', true, 1, 'stable'),
   ('incidencias', false, 1, 'stable'),
-  ('ingresos', true, 1, 'stable'),
+  ('ingresos', false, 1, 'stable'),
   ('layouts', true, 1, 'stable'),
-  ('nomina', true, 1, 'stable'),
+  ('nomina', false, 1, 'stable'),
   ('proveedores', true, 1, 'stable'),
   ('solicitudes', true, 1, 'stable')
 ) d(module_key, enabled, version, channel)
 join companies comp on comp.rfc = 'SFE100825TM9'
 on conflict (company_id, module_key) do update set enabled = excluded.enabled;
 
--- 5) Presupuesto 2026 · categorías (56, SF-2026-*) ---------------------------
+-- 5) Catálogo Fersana · 60 partidas (56 con presupuesto distinto de cero) ----
 insert into budget_categories (code, name, category, active) values
   ('SF-2026-001', 'Renta', 'Soporte Fersana · Operativo', true),
+  ('SF-2026-002', 'Mantenimiento Inmueble', 'Soporte Fersana · Operativo', true),
   ('SF-2026-003', 'Reparacion y Mantto Bluepath', 'Soporte Fersana · Operativo', true),
   ('SF-2026-004', 'Luz', 'Soporte Fersana · Operativo', true),
   ('SF-2026-005', 'Dispensador de Agua', 'Soporte Fersana · Operativo', true),
@@ -66,6 +67,7 @@ insert into budget_categories (code, name, category, active) values
   ('SF-2026-011', 'Comisiones Efectivale', 'Soporte Fersana · Operativo', true),
   ('SF-2026-012', 'Servicio de Escolta', 'Soporte Fersana · Operativo', true),
   ('SF-2026-013', 'Google y MS Office', 'Soporte Fersana · Operativo', true),
+  ('SF-2026-014', 'Activos Fijos Menores Bluepath', 'Soporte Fersana · Operativo', true),
   ('SF-2026-015', 'Bolsas de empleo (OCC, Computrabajo)', 'Soporte Fersana · Operativo', true),
   ('SF-2026-016', 'LinkedIn', 'Soporte Fersana · Operativo', true),
   ('SF-2026-017', 'Evaluatest', 'Soporte Fersana · Operativo', true),
@@ -74,6 +76,7 @@ insert into budget_categories (code, name, category, active) values
   ('SF-2026-020', 'Capacitación interna', 'Soporte Fersana · Operativo', true),
   ('SF-2026-021', 'Curso brigadistas', 'Soporte Fersana · Operativo', true),
   ('SF-2026-022', 'Cursos primeros auxilios', 'Soporte Fersana · Operativo', true),
+  ('SF-2026-023', 'Capacitación técnica', 'Soporte Fersana · Operativo', true),
   ('SF-2026-024', 'Membresía B-Salud', 'Soporte Fersana · Operativo', true),
   ('SF-2026-025', 'Talleres bienestar', 'Soporte Fersana · Operativo', true),
   ('SF-2026-026', 'Actividades de voluntariado', 'Soporte Fersana · Operativo', true),
@@ -98,6 +101,7 @@ insert into budget_categories (code, name, category, active) values
   ('SF-2026-045', 'Comisiones Bancarias', 'Soporte Fersana · Operativo', true),
   ('SF-2026-046', 'Depreciaciones', 'Soporte Fersana · Operativo', true),
   ('SF-2026-047', 'Renta Servidor y Mtto.', 'Soporte Fersana · Operativo', true),
+  ('SF-2026-048', 'Actualización y Mtto. Contpaq', 'Soporte Fersana · Operativo', true),
   ('SF-2026-049', 'Partidas no Deducibles', 'Soporte Fersana · Operativo', true),
   ('SF-2026-050', 'Servicios notariales y auditoría', 'Soporte Fersana · Operativo', true),
   ('SF-2026-051', 'Iguala Blanco Carrillo', 'Soporte Fersana · Operativo', true),
@@ -111,6 +115,17 @@ insert into budget_categories (code, name, category, active) values
   ('SF-2026-059', 'Consultoria Medicion de Impacto', 'Soporte Fersana · Estratégico', true),
   ('SF-2026-060', 'Gastos Automatización', 'Soporte Fersana · Estratégico', true)
 on conflict (code) do nothing;
+
+insert into company_cost_center_budget_categories (
+  company_id, cost_center_id, budget_category_id, active
+)
+select comp.id, cc.id, bc.id, true
+from companies comp
+join cost_centers cc on cc.code = 'SF'
+join budget_categories bc on bc.code between 'SF-2026-001' and 'SF-2026-060'
+where comp.rfc = 'SFE100825TM9'
+on conflict (company_id, cost_center_id, budget_category_id)
+do update set active = excluded.active;
 
 -- 6) Presupuesto 2026 · 322 líneas -------------------------------------------
 -- Keyed por código + versión activa 2026 + cost center SF (portable a prod).
@@ -443,7 +458,37 @@ from (values
 join budget_categories bc on bc.code = d.code
 join cost_centers cc on cc.code = 'SF'
 join companies comp on comp.rfc = 'SFE100825TM9'
-cross join (select id from budget_versions where active and year = 2026 limit 1) v;
+cross join (select id from budget_versions where active and year = 2026 limit 1) v
+where not exists (
+  select 1
+  from budget_lines existing
+  where existing.budget_version_id = v.id
+    and existing.company_id = comp.id
+    and existing.cost_center_id = cc.id
+    and existing.budget_category_id = bc.id
+    and existing.budget_month = d.m::date
+);
+
+-- Fail closed: un reintento no duplica y cualquier drift aborta toda la transacción.
+do $$
+declare
+  v_count bigint;
+  v_total numeric;
+begin
+  select count(*), coalesce(sum(bl.amount), 0)
+    into v_count, v_total
+  from budget_lines bl
+  join companies c on c.id = bl.company_id
+  join budget_versions bv on bv.id = bl.budget_version_id
+  where c.rfc = 'SFE100825TM9'
+    and bv.active
+    and bv.year = 2026;
+
+  if v_count <> 322 or v_total <> 6289204.00 then
+    raise exception 'fersana_budget_postcheck_failed: count=%, total=%', v_count, v_total;
+  end if;
+end;
+$$;
 
 commit;
 
@@ -458,13 +503,11 @@ commit;
 --
 -- MEMBERSHIPS / ROLES / APROBADORES: NO se seedean aquí — los profiles se crean en
 -- el primer login OAuth. Post-seed en prod:
---   - Cesar, Yanin, Alfredo, Yulma (ychavez@soportef.com), Ara (recursoshumanos@soportef.com)
+--   - La lista final de usuarios/correos se confirma en el gate GO/NO-GO.
 --     entran por la LIGA de acceso de Fersana (code 'fersana').
 --   - SysAdmin (Carlos) confirma rol + membresía por usuario.
 --   - Cesar = Director/Aprobador (approver_assignments) — necesita rol de aprobador ANTES.
 --
--- NOTA idempotencia: los budget_lines NO tienen guard de conflicto. Re-ejecutar
--- duplicaría. Si hay que re-correr, primero:
---   delete from budget_lines bl using companies c
---   where bl.company_id=c.id and c.rfc='SFE100825TM9';
+-- IDEMPOTENCIA: las líneas usan NOT EXISTS sobre versión/empresa/centro/partida/mes.
+-- No borrar datos para reintentar. El postcheck anterior aborta si detecta drift.
 -- ============================================================================
