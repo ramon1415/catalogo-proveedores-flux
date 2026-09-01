@@ -12,6 +12,7 @@ import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
 // Migración completa del intake (7 rebanadas); el vanilla queda como
 // respaldo directo en /provider_intakes.html mientras se valida paridad.
 const ProviderIntakesPage = lazy(() => import('./features/provider-intakes/ProviderIntakesPage'))
+const ComprobantesPage = lazy(() => import('./features/comprobantes/ComprobantesPage'))
 
 export default function App() {
   const { session, profile, group, memberships, loading } = useAuth()
@@ -41,7 +42,7 @@ export default function App() {
           {routes.map(({ path, Comp }) => (
             <Route key={path} path={path.slice(1)} element={<Comp />} />
           ))}
-          <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/comprobantes_batch.html" title="Comprobantes batch" />} />
+          <Route path="comprobantes-batch" element={<ComprobantesPage />} />
           <Route path="solicitudes-proveedores" element={<ProviderIntakesPage />} />
           <Route path="cortes-semanales" element={<LegacyModuleFrame src="/approval_batches.html" title="Cortes semanales" />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
