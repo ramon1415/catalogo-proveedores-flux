@@ -145,6 +145,42 @@ export type MatchComparison = {
 
 export type MatchKind = 'set' | 'replace' | 'clear'
 
+// ── Gestión de ligas públicas (rebanada 7) ────────────────────────────────
+export type LinkCompany = { id: string; name: string | null; active_provider_count: number | null }
+
+export type LinkDefaults = {
+  duration_hours?: number
+  max_files?: number
+  max_file_mb?: number
+  max_total_mb?: number
+  max_submissions_per_day?: number
+  allowed_file_types?: string[]
+}
+
+export type LinkManagementContext = {
+  companies: LinkCompany[]
+  defaults: LinkDefaults
+}
+
+export type LinkProviderResult = {
+  proveedor_id: string
+  alias: string | null
+  legal_name: string | null
+  rfc_masked: string | null
+  bank: string | null
+  account_masked: string | null
+  clabe_masked: string | null
+}
+
+export type ActiveLink = {
+  id: string
+  status: string | null
+  label: string | null
+  token_prefix: string | null
+  expires_at: string | null
+  current_intakes: number | null
+}
+
 // ── Draft de pago + conversión (rebanada 6) ───────────────────────────────
 export type PaymentDraftDerivedState =
   | 'NOT_STARTED' | 'DRAFT_INCOMPLETE' | 'READY_PENDING_PROVIDER' | 'BLOCKED_BANK_REVIEW'

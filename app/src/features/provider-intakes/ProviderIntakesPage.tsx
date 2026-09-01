@@ -6,6 +6,7 @@ import { formatCurrency, formatDateTime } from '../../lib/format'
 import { listProviderIntakes } from './api'
 import { INTAKE_STATUS, INTAKE_STATUS_ORDER, friendlyIntakeError } from './logic'
 import { IntakeDetailModal } from './IntakeDetailModal'
+import { IntakeLinkManager } from './IntakeLinkManager'
 import type { IntakeFilters, IntakeItem, IntakeSummary, IntakeStatus } from './types'
 import s from './ProviderIntakes.module.css'
 
@@ -22,6 +23,7 @@ export default function ProviderIntakesPage() {
   useToast()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [linksOpen, setLinksOpen] = useState(false)
   const [filters, setFilters] = useState<IntakeFilters>(() => initialFilters(companyId))
   const [items, setItems] = useState<IntakeItem[]>([])
   const [summary, setSummary] = useState<IntakeSummary>({})
@@ -63,7 +65,10 @@ export default function ProviderIntakesPage() {
           <h1>Solicitudes de proveedores</h1>
           <p className="muted">Bandeja de altas de proveedores (intake).</p>
         </div>
-        <button className="secondary-btn" onClick={load}>Actualizar</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="secondary-btn" onClick={() => setLinksOpen(true)}>Administrar ligas</button>
+          <button className="secondary-btn" onClick={load}>Actualizar</button>
+        </div>
       </div>
 
       <div className={s.kpis}>
@@ -130,6 +135,7 @@ export default function ProviderIntakesPage() {
       </div>
 
       {selectedId && <IntakeDetailModal intakeId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} />}
+      {linksOpen && <IntakeLinkManager onClose={() => setLinksOpen(false)} />}
     </>
   )
 }

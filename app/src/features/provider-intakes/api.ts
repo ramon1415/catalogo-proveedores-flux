@@ -3,6 +3,7 @@ import type {
   IntakeFilters, IntakeListResult, IntakeDetailResult, IntakeAction,
   MatchData, LinkTarget, MatchComparison,
   PaymentDraftContext, PaymentDraftForm, ApproverOption,
+  LinkManagementContext, LinkProviderResult, ActiveLink,
 } from './types'
 
 // Espejo de list_provider_intakes() del vanilla (provider_intakes.js).
@@ -225,6 +226,72 @@ export async function listApproverOptions(companyId: string, costCenterId: strin
   })
   if (error) throw error
   return Array.isArray(data) ? data as ApproverOption[] : []
+}
+
+// ── Gestión de ligas públicas (rebanada 7) ─────────────────────────────────
+export async function getLinkManagementContext(): Promise<LinkManagementContext> {
+  const { data, error } = await supabase.rpc('get_provider_intake_link_management_context')
+  if (error) throw error
+  const r = (data && typeof data === 'object' ? data : {}) as Partial<LinkManagementContext>
+  return { companies: Array.isArray(r.companies) ? r.companies : [], defaults: r.defaults ?? {} }
+}
+
+export async function findLinkProviders(companyId: string, search: string): Promise<LinkProviderResult[]> {
+  const { data, error } = await supabase.rpc('find_provider_intake_link_providers', {
+    p_company_id: companyId,
+    p_search: search,
+    p_limit: 12,
+  })
+  if (error) throw error
+  return Array.isArray(data) ? data as LinkProviderResult[] : []
+}
+
+export async function getLinkScope(companyId: string, proveedorId: string | null): Promise<ActiveLink | null> {
+  const { data, error } = await supabase.rpc('get_provider_intake_link_scope', {
+    p_company_id: companyId,
+    p_proveedor_id: proveedorId,
+  })
+  if (error) throw error
+  return (data as { active_link?: ActiveLink | null })?.active_link ?? null
+}
+
+// El raw_token solo se ve aquí (o al regenerar); nunca se almacena completo.
+export async function createIntakeLink(params: {
+  companyId: string
+  proveedorId: string | null
+  label: string
+  durationHours: number
+  maxSubmissionsPerDay: number
+  maxFileMb: number
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_provider_intake_link_v2', {
+    p_company_id: params.companyId,
+    p_proveedor_id: params.proveedorId,
+    p_label: params.label.trim() || null,
+    p_duration_hours: params.durationHours,
+    p_max_submissions_per_day: params.maxSubmissionsPerDay,
+    p_max_file_mb: params.maxFileMb,
+  })
+  if (error) throw error
+  return String((data as { raw_token?: string })?.raw_token || '')
+}
+
+export async function revokeIntakeLink(linkId: string): Promise<void> {
+  const { error } = await supabase.rpc('revoke_provider_intake_link', {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+  })
+  if (error) throw error
+}
+
+export async function regenerateIntakeLink(linkId: string, durationHours: number): Promise<string> {
+  const { data, error } = await supabase.rpc('regenerate_provider_intake_link_v2', {
+    p_intake_link_id: linkId,
+    p_confirmed: true,
+    p_duration_hours: durationHours,
+  })
+  if (error) throw error
+  return String((data as { raw_token?: string })?.raw_token || '')
 }
 
 // Espejo de openTemporaryFile() — enlace firmado de corta duración (rebanada 4).
