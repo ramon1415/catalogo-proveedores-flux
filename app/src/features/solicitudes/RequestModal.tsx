@@ -17,6 +17,7 @@ import {
 import { numberValue } from '../../lib/format'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
@@ -57,8 +58,12 @@ export function RequestModal({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
-  const { memberships } = useAuth()
+  const { memberships, group } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
+  // "Visita/incidencia asociada" es concepto de socios (Operadora). Solo se muestra
+  // para empresas con el módulo incidencias habilitado.
+  const { isEnabled } = useModules()
+  const showIncidencias = isEnabled('incidencias')
 
   // El usuario solo puede crear para las empresas donde es miembro. Si tiene una
   // sola, queda fija; si tiene varias, arranca en la empresa activa del switcher.
@@ -124,6 +129,7 @@ export function RequestModal({
   }, [])
 
   useEffect(() => {
+    if (!showIncidencias) { setIncidentLoadState('ready'); return }
     let active = true
     loadIncidencias()
       .then(({ incidents: rows, membersById: members }) => {
@@ -138,7 +144,7 @@ export function RequestModal({
         setIncidentLoadState('error')
       })
     return () => { active = false }
-  }, [])
+  }, [showIncidencias])
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -167,14 +173,22 @@ export function RequestModal({
   const categoryById = (id: string) => budgetCategories.find((c) => c.id === id) || null
 
   const filteredCategoryRows = useMemo(() => {
+    // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
+    // responsable), cada quien ve SOLO sus partidas. Sysadmin ve todas. Empresas
+    // sin responsables (p.ej. Operadora) no se filtran.
+    const myEmail = (profile?.email || '').trim().toLowerCase()
+    const usesResponsible = budgetRows.some((r) => r.responsible_email)
+    const scoped = usesResponsible && group !== 'sysadmin'
+      ? budgetRows.filter((r) => String(r.responsible_email || '').trim().toLowerCase() === myEmail)
+      : budgetRows
     const q = categorySearch.trim().toLowerCase()
-    if (!q) return budgetRows
-    return budgetRows.filter((r) => {
+    if (!q) return scoped
+    return scoped.filter((r) => {
       const cat = categoryById(r.budget_category_id!)
       return budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetRows, categorySearch])
+  }, [budgetRows, categorySearch, profile, group])
 
   // ── Carga de partidas al cambiar empresa / CC / mes ──────────────────────
   async function reloadBudgetCategories(nextCompany: string, nextCC: string, nextMonth: string) {
@@ -363,6 +377,12 @@ export function RequestModal({
     const validation = validateRequestPayload(payload, availabilityForCategory, candidates)
     if (validation) { showToast('Revisa la solicitud', validation, 'warning'); return }
 
+    // Documento obligatorio en toda solicitud (política global).
+    if (!file) {
+      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
+      return
+    }
+
     setSubmitting(true)
     try {
       const data = await createPaymentRequest(payload)
@@ -488,8 +508,8 @@ export function RequestModal({
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                     </label>
-                    <label className={s.fullRow}>Factura / comprobante
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                    <label className={s.fullRow}>Factura / comprobante *
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
                   </div>
@@ -500,7 +520,7 @@ export function RequestModal({
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
                   <div className={s.formGrid}>
                     <label className={s.fullRow}>Proveedor *
-                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
+                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
                     </label>
                   </div>
                 </section>
@@ -540,6 +560,7 @@ export function RequestModal({
                   </div>
                 </section>
 
+                {showIncidencias && (
                 <section className={s.formSection}>
                   <h3>Contexto operativo</h3>
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Campo opcional para relacionar el pago con una visita o incidencia registrada.</div>
@@ -566,6 +587,7 @@ export function RequestModal({
                     </div>
                   </div>
                 </section>
+                )}
 
                 <section className={`${s.formSection} ${isCashOrCheck ? '' : s.hidden}`}>
                   <h3>Datos de entrega</h3>

@@ -1,0 +1,14 @@
+.phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.phead h1 { margin: 0 0 2px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat { background: var(--bg-card, rgba(120,120,120,.06)); border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.stat strong { font-size: 1.15rem; }
+
+.card { background: var(--bg-card, rgba(120,120,120,.04)); border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 12px; overflow: hidden; }
+.wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border, rgba(120,120,120,.12)); white-space: nowrap; }
+.table th:not(:first-child), .table td:not(:first-child) { text-align: right; }
+.msg { text-align: center; color: var(--muted, #888); padding: 20px; }
+.totalRow td { border-top: 2px solid var(--border, rgba(120,120,120,.3)); border-bottom: none; }

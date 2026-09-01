@@ -76,14 +76,29 @@ export async function loadBudgetAvailability(
   costCenterId: string,
   budgetMonth: string,
 ): Promise<BudgetAvailabilityRow[]> {
-  const { data, error } = await supabase
-    .from('budget_availability')
-    .select('*')
-    .eq('company_id', companyId)
-    .eq('cost_center_id', costCenterId)
-    .eq('budget_month', budgetMonth)
-  if (error) throw error
-  return (data ?? []) as BudgetAvailabilityRow[]
+  const [availRes, relRes] = await Promise.all([
+    supabase
+      .from('budget_availability')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('cost_center_id', costCenterId)
+      .eq('budget_month', budgetMonth),
+    // Responsable por partida (scoping "solo el responsable ve su partida").
+    supabase
+      .from('company_cost_center_budget_categories')
+      .select('budget_category_id, responsible_email')
+      .eq('company_id', companyId)
+      .eq('cost_center_id', costCenterId),
+  ])
+  if (availRes.error) throw availRes.error
+  if (relRes.error) throw relRes.error
+  const respByCat = new Map(
+    (relRes.data ?? []).map((r: { budget_category_id: string; responsible_email: string | null }) => [r.budget_category_id, r.responsible_email]),
+  )
+  return (availRes.data ?? []).map((r) => ({
+    ...(r as BudgetAvailabilityRow),
+    responsible_email: respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? null,
+  }))
 }
 
 // ── Aprobadores ────────────────────────────────────────────────────────────
