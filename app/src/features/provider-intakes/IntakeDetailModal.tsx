@@ -217,6 +217,7 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
 
               <IntakePaymentDraftSection
                 intakeId={intake.id}
+                intakeUpdatedAt={intake.updated_at}
                 onChanged={async () => { await reload(); onChanged?.() }}
               />
 
