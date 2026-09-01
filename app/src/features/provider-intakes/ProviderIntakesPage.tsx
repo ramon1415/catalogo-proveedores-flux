@@ -66,7 +66,7 @@ export default function ProviderIntakesPage() {
           <p className="muted">Bandeja de altas de proveedores (intake).</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="secondary-btn" onClick={() => setLinksOpen(true)}>Administrar ligas</button>
+          <button className="primary-btn" onClick={() => setLinksOpen(true)}>Administrar ligas</button>
           <button className="secondary-btn" onClick={load}>Actualizar</button>
         </div>
       </div>
