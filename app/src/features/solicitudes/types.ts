@@ -262,6 +262,7 @@ export type RequestPayload = {
   subtotal_amount: number | null
   tax_amount: number | null
   withholding_amount: number | null
+  invoice_uuid: string | null // folio fiscal del CFDI — candado anti doble pago
 }
 
 export type EditPayload = {
