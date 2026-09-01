@@ -37,3 +37,51 @@ export type IntakeFilters = {
   page: number
   pageSize: number
 }
+
+// ── Detalle (rebanada 2) ──────────────────────────────────────────────────
+export type IntakeDetailData = {
+  id: string
+  public_folio: string | null
+  company_name: string | null
+  created_at: string | null
+  status: IntakeStatus
+  provider_name: string | null
+  provider_rfc: string | null
+  provider_email: string | null
+  provider_phone: string | null
+  concept: string | null
+  description: string | null
+  amount_requested: number | null
+  currency: string | null
+  requested_payment_date: string | null
+  invoice_folio: string | null
+  invoice_uuid: string | null
+  invoice_date: string | null
+  bank_name: string | null
+  beneficiary_name: string | null
+  bank_account_masked: string | null
+  bank_clabe_masked: string | null
+}
+
+export type IntakeFile = {
+  id: string
+  original_filename: string | null
+  file_kind: string | null
+  mime_type: string | null
+  size_bytes: number | null
+  quarantine_status: string | null
+}
+
+export type IntakeEvent = {
+  event_type: string | null
+  created_at: string | null
+  actor_name: string | null
+  actor_type: string | null
+  notes: string | null
+}
+
+export type IntakeDetailResult = {
+  intake: IntakeDetailData | null
+  files: IntakeFile[]
+  events: IntakeEvent[]
+}

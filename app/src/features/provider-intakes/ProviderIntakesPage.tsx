@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge'
 import { formatCurrency, formatDateTime } from '../../lib/format'
 import { listProviderIntakes } from './api'
 import { INTAKE_STATUS, INTAKE_STATUS_ORDER, friendlyIntakeError } from './logic'
+import { IntakeDetailModal } from './IntakeDetailModal'
 import type { IntakeFilters, IntakeItem, IntakeSummary, IntakeStatus } from './types'
 import s from './ProviderIntakes.module.css'
 
@@ -18,8 +19,9 @@ function initialFilters(companyId: string | null): IntakeFilters {
 
 export default function ProviderIntakesPage() {
   const { companyId } = useCompany()
-  const { showToast } = useToast()
+  useToast()
 
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filters, setFilters] = useState<IntakeFilters>(() => initialFilters(companyId))
   const [items, setItems] = useState<IntakeItem[]>([])
   const [summary, setSummary] = useState<IntakeSummary>({})
@@ -111,7 +113,7 @@ export default function ProviderIntakesPage() {
                   <td className={s.numeric}>{it.amount_requested != null ? formatCurrency(it.amount_requested) : '—'}</td>
                   <td><Badge variant={INTAKE_STATUS[it.status]?.variant ?? 'neutral'}>{INTAKE_STATUS[it.status]?.label ?? it.status}</Badge></td>
                   <td>{formatDateTime(it.created_at)}</td>
-                  <td><button className="small-btn" onClick={() => showToast('En migración', 'El detalle de la solicitud llega en la siguiente rebanada.', 'info')}>Ver detalle</button></td>
+                  <td><button className="small-btn" onClick={() => setSelectedId(it.id)}>Ver detalle</button></td>
                 </tr>
               ))}
             </tbody>
@@ -126,6 +128,8 @@ export default function ProviderIntakesPage() {
           </div>
         )}
       </div>
+
+      {selectedId && <IntakeDetailModal intakeId={selectedId} onClose={() => setSelectedId(null)} />}
     </>
   )
 }

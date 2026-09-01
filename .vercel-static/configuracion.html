@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuracion | Flux</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/favicon-512.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./ux2_shared.css?v=20260818-modal-fix">
+  <link rel="stylesheet" href="./ux2_nav_skeleton.css?v=20260805-brand-verde">
+  <link rel="stylesheet" href="./socios_history_patch.css?v=20260602-ux2">
+  <style>
+    .config-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .config-tab { min-height:34px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card); color:var(--text-3); padding:6px 13px; font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:7px; }
+    .config-tab:hover { color:var(--text-2); background:var(--bg-hover); }
+    .config-tab.active { color:var(--accent-text); border-color:rgba(94,234,212,.28); background:var(--accent-dim); }
+    .config-tab[disabled] { opacity:.38; cursor:not-allowed; }
+    .tab-badge { font-size:9.5px; line-height:1; padding:3px 6px; border-radius:999px; border:1px solid var(--border-strong); color:var(--text-3); background:var(--bg-hover); }
+    .config-panel { display:none; flex-direction:column; gap:14px; }
+    .config-panel.active { display:flex; }
+    .panel-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; border-bottom:1px solid var(--border); }
+    .panel-toolbar h2 { font-size:14px; color:var(--text-1); margin:0 0 2px; }
+    .panel-toolbar p { color:var(--text-3); font-size:12px; margin:0; }
+    .form-grid input, .form-grid select, .form-grid textarea { min-height:34px; padding:0 10px; background:var(--bg-input); border:1px solid var(--border); border-radius:7px; color:var(--text-1); font-size:12.5px; outline:none; }
+    .form-grid textarea { min-height:72px; padding:8px 10px; resize:vertical; }
+    .form-grid input[type=checkbox] { min-height:unset; width:14px; height:14px; padding:0; accent-color:var(--accent); cursor:pointer; }
+    .check-label { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-2); cursor:pointer; }
+    .pending-card { background:var(--bg-card); border:1px solid var(--border); border-radius:13px; padding:24px; display:flex; flex-direction:column; gap:10px; }
+    .pending-card h2 { font-size:15px; color:var(--text-1); }
+    .pending-card p { font-size:12.5px; color:var(--text-3); }
+    .role-option { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:11px; cursor:pointer; background:var(--bg-card); transition:border-color 120ms }
+    .role-option:hover { border-color:var(--border-strong) }
+    .role-option input[type=radio] { margin-top:2px; accent-color:var(--accent); flex-shrink:0; width:15px; height:15px }
+    .role-option-body { display:flex; flex-direction:column; gap:3px }
+    .role-option-title { font-size:13px; font-weight:700; color:var(--text-1) }
+    .role-option-desc { font-size:11.5px; color:var(--text-3); line-height:1.4 }
+    .role-option:has(input:checked) { border-color:var(--accent); background:var(--accent-dim) }
+    .role-option:has(input:checked) .role-option-title { color:var(--accent-text) }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-logo"><img src="./assets/favicon-512.png" alt="Flux"></div>
+          <div><div class="brand-title">Flux Operadora</div><div class="brand-subtitle">Configuracion</div></div>
+        </div>
+              <nav class="nav" aria-label="Menu principal" data-flux-nav-mode="static">
+        <div class="nav-section">
+          <div class="nav-section-title">OPERACION</div>
+          <a href="./solicitudes.html" data-flux-nav-key="requests" class="nav-link"><span>S</span> Solicitudes de pago</a>
+          <a href="./layouts.html" data-flux-nav-key="layouts" class="nav-link"><span>L</span> Layouts de pago</a>
+          <a href="./efectivo.html" data-flux-nav-key="cash" class="nav-link"><span>E</span> Efectivo y comprobaciones</a>
+          <a href="./ingresos.html" data-flux-nav-key="income" class="nav-link"><span>I</span> Ingresos</a>
+          <a href="./ingresos.html" data-flux-nav-key="incidents" class="nav-link"><span>V</span> Incidencias</a>
+          <a href="./proveedores.html" data-flux-nav-key="providers" class="nav-link"><span>P</span> Proveedores</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">GENERAL</div>
+          <a href="./dashboard.html" data-flux-nav-key="dashboard" class="nav-link"><span>D</span> Dashboard operativo</a>
+          <a href="./aprobaciones.html" data-flux-nav-key="approvals" class="nav-link"><span>A</span> Cola de aprobacion</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">CONFIGURACION</div>
+          <a href="./configuracion.html" data-flux-nav-key="config" class="nav-link active"><span>C</span> Configuracion</a>
+        </div>
+      </nav>
+      <script src="./nav_first_paint_bootstrap.js?v=20260624-static-nav"></script>
+      </div>
+      <div class="user-card">
+        <p id="userName">Usuario</p>
+        <span id="userEmail">Sesion activa</span>
+        <button class="secondary-btn" id="logoutBtn" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-kicker">Administracion del sistema</div>
+        <div class="topbar-user">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Cambiar tema"></button>
+          <div class="avatar">FL</div>
+        </div>
+      </header>
+
+      <section class="page">
+        <div class="page-header">
+          <div>
+            <h1>Configuracion</h1>
+            <p>Administra catalogos y parametros operativos.</p>
+          </div>
+        </div>
+
+        <div id="permissionMessage" class="notice-v2 warning hidden">
+          <span class="notice-icon">⚠</span>
+          <span class="notice-text" id="permissionMessageText"></span>
+        </div>
+
+        <div class="config-tabs" role="tablist">
+          <button type="button" class="config-tab" data-config-tab="members">Socios <span class="tab-badge">Dir</span></button>
+          <button type="button" class="config-tab" data-config-tab="originAccounts">Cuentas origen <span class="tab-badge">Adm/Dir</span></button>
+          <button type="button" class="config-tab" data-config-tab="budgets">Presupuestos <span class="tab-badge">Trim.</span></button>
+          <button type="button" class="config-tab" data-config-tab="system">Sistema <span class="tab-badge">SysAdmin</span></button>
+        </div>
+
+        <!-- Socios -->
+        <div id="membersPanel" class="config-panel">
+          <section class="table-card">
+            <div class="panel-toolbar">
+              <div>
+                <h2>Socios</h2>
+                <p>Administra titulares y consulta su historial de cuotas, pagos e incidencias.</p>
+              </div>
+              <button class="primary-btn" id="newMemberBtn" type="button">+ Nuevo socio</button>
+            </div>
+            <div class="table-toolbar" style="grid-template-columns:minmax(200px,1fr) 160px 160px auto">
+              <input id="memberSearch" type="search" placeholder="Buscar socio, RFC o correo">
+              <select id="memberStatusFilter">
+                <option value="all">Estatus: Todos</option>
+                <option value="active">Activos</option>
+                <option value="inactive">Inactivos</option>
+              </select>
+              <select id="memberLineageFilter">
+                <option value="all">Estirpe: Todas</option>
+                <option value="SNR">SNR</option>
+                <option value="SNM">SNM</option>
+                <option value="PSN">PSN</option>
+                <option value="CSN">CSN</option>
+                <option value="FSN">FSN</option>
+              </select>
+              <button class="secondary-btn" id="clearMemberFilterBtn" type="button">Ver todos</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Socio</th>
+                    <th>RFC</th>
+                    <th>Estirpe</th>
+                    <th>Factor</th>
+                    <th>Saldo pendiente</th>
+                    <th>Incidencias</th>
+                    <th>Facturas</th>
+                    <th>Estatus</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="membersTableBody">
+                  <tr><td colspan="9" style="padding:44px;text-align:center;color:var(--text-3)">Selecciona la pestaña Socios para cargar.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Cuentas origen -->
+        <div id="originAccountsPanel" class="config-panel">
+          <div class="notice-v2 info">
+            <span class="notice-icon">·</span>
+            <span class="notice-text">
+              <span class="notice-title">Cuentas origen</span>
+              <span class="notice-sep">—</span>
+              <span class="notice-desc">Son las cuentas bancarias de la empresa desde las que se realizan pagos. No son cuentas del proveedor.</span>
+            </span>
+          </div>
+          <section class="table-card">
+            <div class="panel-toolbar">
+              <div>
+                <h2>Cuentas origen</h2>
+                <p>Estas cuentas alimentan solicitudes y layouts de pago.</p>
+              </div>
+              <button class="primary-btn" id="newOriginAccountBtn" type="button">+ Nueva cuenta origen</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Empresa</th>
+                    <th>Nombre de cuenta</th>
+                    <th>Banco</th>
+                    <th>Numero de cuenta</th>
+                    <th>CLABE</th>
+                    <th>Moneda</th>
+                    <th>Estatus</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="originAccountsTableBody">
+                  <tr><td colspan="8" style="padding:44px;text-align:center;color:var(--text-3)">Selecciona la pestaña Cuentas origen para cargar.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Presupuestos -->
+        <div id="budgetsPanel" class="config-panel">
+          <div class="pending-card">
+            <h2>Presupuestos</h2>
+            <p>Carga trimestral de presupuestos por empresa, centro de costo, partida y periodo. Pendiente de conexion con modelo presupuestal final.</p>
+            <div class="notice-v2 warning">
+              <span class="notice-icon">·</span>
+              <span class="notice-text">
+                <span class="notice-title">Pendiente</span>
+                <span class="notice-sep">—</span>
+                <span class="notice-desc">Permitira cargar presupuesto base trimestral para alimentar Dashboard, comparativos y cierre mensual.</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sistema -->
+        <div id="systemPanel" class="config-panel">
+          <section class="table-card">
+            <div class="table-toolbar" style="grid-template-columns:minmax(200px,1fr) 160px auto">
+              <input type="search" id="usersSearch" placeholder="Buscar por nombre o email…">
+              <select id="usersRoleFilter">
+                <option value="todos">Todos los roles</option>
+                <option value="pending">Pendiente</option>
+                <option value="operation">Operativo</option>
+                <option value="admin_finance">Financiero</option>
+                <option value="direction">Director</option>
+                <option value="sysadmin">SysAdmin</option>
+              </select>
+              <button type="button" id="refreshUsersBtn" class="secondary-btn">Actualizar</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Rol actual</th>
+                    <th>Nivel de acceso</th>
+                    <th>Registrado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                  <tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-3)">Cargando usuarios…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-card">
+            <div class="table-toolbar" style="grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto">
+              <select id="routingMembershipProfile" aria-label="Usuario para membresía"></select>
+              <select id="routingMembershipCompany" aria-label="Empresa para membresía"></select>
+              <button type="button" id="saveRoutingMembershipBtn" class="primary-btn">Agregar membresía</button>
+            </div>
+            <div style="padding:0 16px 10px">
+              <strong style="font-size:12px;color:var(--text-1)">Alcance usuario–empresa</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">Define en qué empresas puede operar cada perfil.</p>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Usuario</th><th>Empresa</th><th>Estatus</th><th>Acción</th></tr></thead>
+                <tbody id="routingMembershipsTableBody">
+                  <tr><td colspan="4" style="padding:28px;text-align:center;color:var(--text-3)">Carga la pestaña Sistema para consultar membresías.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-card">
+            <div style="padding:14px 16px 8px">
+              <strong style="font-size:12px;color:var(--text-1)">Aprobadores disponibles por solicitante</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">Define las personas que un solicitante puede elegir para revisar sus solicitudes en cada empresa.</p>
+            </div>
+            <form id="routingAssignmentForm" class="table-toolbar" style="grid-template-columns:minmax(170px,1fr) minmax(170px,1fr) minmax(170px,1fr) auto">
+              <select id="routingRequester" aria-label="Solicitante" required></select>
+              <select id="routingAssignmentCompany" aria-label="Empresa" required disabled></select>
+              <select id="routingApprover" aria-label="Aprobador disponible" required disabled></select>
+              <button type="submit" id="saveRoutingAssignmentBtn" class="primary-btn">Agregar aprobador</button>
+            </form>
+            <div id="routingAssignmentHelp" class="field-hint" style="padding:0 16px 10px">Selecciona un solicitante con membresía activa.</div>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Solicitante</th><th>Empresa</th><th>Aprobador disponible</th><th>Rol</th><th>Estatus</th><th>Acción</th></tr></thead>
+                <tbody id="routingAssignmentsTableBody">
+                  <tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Sin aprobadores configurados.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="table-card" id="extraordinaryFacultySection">
+            <div style="padding:14px 16px 8px">
+              <strong style="font-size:12px;color:var(--text-1)">Facultad de solicitud extraordinaria</strong>
+              <p style="font-size:11px;color:var(--text-3);margin-top:3px">La facultad es explícita por perfil y empresa. El rol Finanzas o SysAdmin por sí solo no habilita la operación.</p>
+            </div>
+            <form id="extraordinaryFacultyForm" class="table-toolbar" style="grid-template-columns:minmax(170px,1fr) minmax(170px,1fr) minmax(220px,1.4fr) auto">
+              <select id="extraordinaryFacultyProfile" aria-label="Perfil" required></select>
+              <select id="extraordinaryFacultyCompany" aria-label="Empresa" required></select>
+              <input id="extraordinaryFacultyReason" type="text" minlength="10" maxlength="500" required placeholder="Motivo de la concesión o revocación">
+              <button type="submit" id="saveExtraordinaryFacultyBtn" class="primary-btn">Conceder facultad</button>
+            </form>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>Perfil</th><th>Empresa</th><th>Estatus</th><th>Motivo</th><th>Acción</th></tr></thead>
+                <tbody id="extraordinaryFacultiesTableBody">
+                  <tr><td colspan="5" style="padding:28px;text-align:center;color:var(--text-3)">Sin facultades extraordinarias configuradas.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Dialog: cuentas origen -->
+  <dialog id="originAccountDialog" class="narrow">
+    <form id="originAccountForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="originAccountModalTitle" style="color:var(--text-1)">Nueva cuenta origen</h2>
+          <p>Cuenta de la empresa desde la que se realizaran pagos.</p>
+        </div>
+        <button type="button" id="closeOriginAccountModalBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-scroll">
+        <input type="hidden" id="originAccountId">
+        <div class="form-grid">
+          <label class="full-row">Empresa *<select id="originCompanyId" required></select></label>
+          <label>Nombre de cuenta *<input id="originAccountName" required placeholder="Ej. BBVA Operadora"></label>
+          <label>Banco *<input id="originBankName" required placeholder="BBVA, Santander, Banorte..."></label>
+          <label>Numero de cuenta *<input id="originAccountNumber" required placeholder="Cuenta cargo"></label>
+          <label>CLABE<input id="originClabe" maxlength="18" placeholder="18 digitos"></label>
+          <label>Moneda *<select id="originCurrency" required><option value="MXN">MXN</option><option value="USD">USD</option></select></label>
+          <label>Tipo de cuenta
+            <select id="originAccountType">
+              <option value="">Sin clasificar</option>
+              <option value="bank">Cuenta bancaria</option>
+              <option value="cash">Caja / efectivo</option>
+              <option value="card_processor">Procesador de tarjeta</option>
+              <option value="other">Otra</option>
+            </select>
+          </label>
+          <label class="check-label"><input id="originAccountActive" type="checkbox" checked> Cuenta activa</label>
+          <label class="full-row">Notas<textarea id="originNotes" rows="3" placeholder="Uso operativo, propiedad, restricciones..."></textarea></label>
+        </div>
+        <div id="originAccountFormMessage" class="notice-v2 danger hidden" style="margin-top:10px">
+          <span class="notice-icon">✕</span>
+          <span class="notice-text" id="originAccountFormMessageText"></span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelOriginAccountBtn" class="secondary-btn">Cancelar</button>
+        <button type="submit" class="primary-btn">Guardar cuenta origen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: socio -->
+  <dialog id="memberDialog" class="narrow">
+    <form id="memberForm" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="memberDialogTitle" style="color:var(--text-1)">Nuevo socio</h2>
+          <p>El factor define la proporcion con la que participa en cuotas de mantenimiento.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeMemberBtn">✕</button>
+      </div>
+      <div class="modal-scroll">
+        <div class="form-grid">
+          <label class="full-row">Nombre completo *<input id="memberFullName" required></label>
+          <label>RFC<input id="memberRfc"></label>
+          <label>Estirpe
+            <select id="memberLineage">
+              <option value="">Sin estirpe</option>
+              <option value="SNR">SNR</option>
+              <option value="SNM">SNM</option>
+              <option value="PSN">PSN</option>
+              <option value="CSN">CSN</option>
+              <option value="FSN">FSN</option>
+            </select>
+          </label>
+          <label>Factor de participacion *<input id="memberFeeFactor" type="number" min="0.0001" step="any" value="1" required></label>
+          <label>Correo<input id="memberEmail" type="email"></label>
+          <label>Telefono<input id="memberPhone"></label>
+          <label class="full-row">Notas<textarea id="memberNotes" rows="3"></textarea></label>
+          <label class="check-label"><input id="memberActive" type="checkbox" checked> Activo</label>
+        </div>
+        <div id="memberError" class="notice-v2 danger hidden" style="margin-top:10px">
+          <span class="notice-icon">✕</span>
+          <span class="notice-text" id="memberErrorText"></span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="cancelMemberBtn">Cancelar</button>
+        <button type="submit" class="primary-btn" id="saveMemberBtn">Guardar socio</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: historial socio -->
+  <dialog id="historyDialog" class="history-dialog">
+    <div class="modal-content history-modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="historyTitle" style="color:var(--text-1)">Historial del socio</h2>
+          <p>Cuotas, pagos, incidencias y facturas vinculadas al socio.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeHistoryBtn">✕</button>
+      </div>
+      <div class="modal-scroll" id="historyContent"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-btn" id="closeHistoryFooterBtn">Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Dialog: asignar rol -->
+  <dialog id="assignRoleDialog" class="narrow">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 style="color:var(--text-1)">Asignar rol</h2>
+          <p id="assignRoleSubtitle">Selecciona el nivel de acceso para este usuario.</p>
+        </div>
+        <button type="button" id="closeAssignRoleBtn" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-scroll" style="gap:10px">
+        <div style="display:flex;flex-direction:column;gap:8px" id="roleOptions">
+          <label class="role-option" data-group="pending">
+            <input type="radio" name="assignRole" value="pending">
+            <div class="role-option-body">
+              <span class="role-option-title">Pendiente</span>
+              <span class="role-option-desc">Sin acceso al sistema. Puede iniciar sesión pero no ver nada.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="operation">
+            <input type="radio" name="assignRole" value="solicitante">
+            <div class="role-option-body">
+              <span class="role-option-title">Operativo</span>
+              <span class="role-option-desc">Solo puede crear y ver sus propias solicitudes de pago.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="admin_finance">
+            <input type="radio" name="assignRole" value="finance">
+            <div class="role-option-body">
+              <span class="role-option-title">Financiero</span>
+              <span class="role-option-desc">Acceso completo a solicitudes, layouts, efectivo, ingresos, proveedores y dashboard.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="direction">
+            <input type="radio" name="assignRole" value="director">
+            <div class="role-option-body">
+              <span class="role-option-title">Director</span>
+              <span class="role-option-desc">Mismo acceso que financiero más aprobaciones y cola de decisión.</span>
+            </div>
+          </label>
+          <label class="role-option" data-group="sysadmin">
+            <input type="radio" name="assignRole" value="sysadmin">
+            <div class="role-option-body">
+              <span class="role-option-title">SysAdmin</span>
+              <span class="role-option-desc">Acceso total incluyendo gestión de usuarios, roles y configuración del sistema.</span>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cancelAssignRoleBtn" class="secondary-btn">Cancelar</button>
+        <button type="button" id="saveAssignRoleBtn" class="primary-btn">Guardar rol</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toastStack" class="toast-stack-v2" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js?v=20260624-static-nav"></script>
+  <script src="./components.js?v=20260610-toast-indialog"></script>
+  <script src="./configuracion.js?v=20260805-extraordinary-faculty"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase'
-import type { IntakeFilters, IntakeListResult } from './types'
+import type { IntakeFilters, IntakeListResult, IntakeDetailResult } from './types'
 
 // Espejo de list_provider_intakes() del vanilla (provider_intakes.js).
 export async function listProviderIntakes(f: IntakeFilters): Promise<IntakeListResult> {
@@ -24,5 +24,17 @@ export async function listProviderIntakes(f: IntakeFilters): Promise<IntakeListR
     page: Number(r.page ?? f.page),
     page_size: Number(r.page_size ?? f.pageSize),
     companies: Array.isArray(r.companies) ? r.companies : [],
+  }
+}
+
+// Espejo de get_provider_intake_detail() — detalle read-only (rebanada 2).
+export async function getProviderIntakeDetail(intakeId: string): Promise<IntakeDetailResult> {
+  const { data, error } = await supabase.rpc('get_provider_intake_detail', { p_payment_intake_id: intakeId })
+  if (error) throw error
+  const r = (data && typeof data === 'object' ? data : {}) as Partial<IntakeDetailResult>
+  return {
+    intake: r.intake ?? null,
+    files: Array.isArray(r.files) ? r.files : [],
+    events: Array.isArray(r.events) ? r.events : [],
   }
 }
