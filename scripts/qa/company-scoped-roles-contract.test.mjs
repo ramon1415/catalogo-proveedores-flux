@@ -40,6 +40,8 @@ test('authorized people matrix is frozen without guessing unresolved emails', ()
   for (const email of [
     'ynavarrete@soportef.com',
     'afajardo@soportef.com',
+    'denise@quantta.mx',
+    'agalvan@fluxfinanciera.com',
     'cesar@quantta.mx',
     'lisette@dezdez.earth',
     'ychavez@fluxfinanciera.com',

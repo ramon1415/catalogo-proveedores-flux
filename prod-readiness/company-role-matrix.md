@@ -8,14 +8,22 @@ antes del corte; nunca se adivinan cuentas por nombre.
 |---|---|---|---|
 | Yanin | `ynavarrete@soportef.com` | Finanzas | Finanzas |
 | Alfredo | `afajardo@soportef.com` | Finanzas | Finanzas |
-| Denise | Pendiente de correo exacto | Finanzas | Finanzas |
+| Denise | `denise@quantta.mx` | Finanzas | Finanzas |
 | Gerardo | Pendiente de correo exacto | — | Finanzas |
 | Cesar | `cesar@quantta.mx` | Director | Director |
 | Lis | `lisette@dezdez.earth` | Director | Director |
-| Ara | Pendiente de correo exacto | — | Operador |
+| Ara (Araceli Galván) | `agalvan@fluxfinanciera.com` | — | Operador |
 | Yulma | `ychavez@fluxfinanciera.com` | — | Operador |
 | Carlos | `carlos@quantta.mx` | Poder total | Poder total |
 | Ramón | `ramon@quantta.mx` | Poder total | Poder total |
+
+Identidad pendiente:
+
+- Sólo falta confirmar el correo exacto de Gerardo.
+- El perfil `contraloria@soportef.com` aparece en la evidencia, pero no se
+  asigna a Gerardo ni recibe un rol sin confirmación expresa.
+- Las capturas también muestran perfiles Gmail de Carlos y Ramón. No sustituyen
+  las cuentas de poder total previamente autorizadas en esta matriz.
 
 Reglas:
 
