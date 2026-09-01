@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { useModules } from './lib/moduleAccess'
 import Login from './pages/Login'
-import LegacyModuleFrame from './pages/LegacyModuleFrame'
 import { AppShell } from './components/ui/AppShell'
 import AccessRequestPage from './features/access/AccessRequestPage'
 import PendingAccessPage from './features/access/PendingAccessPage'
@@ -13,6 +12,7 @@ import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
 // respaldo directo en /provider_intakes.html mientras se valida paridad.
 const ProviderIntakesPage = lazy(() => import('./features/provider-intakes/ProviderIntakesPage'))
 const ComprobantesPage = lazy(() => import('./features/comprobantes/ComprobantesPage'))
+const CortesPage = lazy(() => import('./features/cortes/CortesPage'))
 
 export default function App() {
   const { session, profile, group, memberships, loading } = useAuth()
@@ -44,7 +44,7 @@ export default function App() {
           ))}
           <Route path="comprobantes-batch" element={<ComprobantesPage />} />
           <Route path="solicitudes-proveedores" element={<ProviderIntakesPage />} />
-          <Route path="cortes-semanales" element={<LegacyModuleFrame src="/approval_batches.html" title="Cortes semanales" />} />
+          <Route path="cortes-semanales" element={<CortesPage />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>
