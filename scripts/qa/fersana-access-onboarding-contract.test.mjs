@@ -13,7 +13,7 @@ const hardening = fs.readFileSync(
 const auth = fs.readFileSync('app/src/lib/auth.tsx', 'utf8')
 const app = fs.readFileSync('app/src/App.tsx', 'utf8')
 const accessPage = fs.readFileSync('app/src/features/access/AccessRequestPage.tsx', 'utf8')
-const system = fs.readFileSync('app/src/features/configuracion/tabs/SystemTab.tsx', 'utf8')
+const usersPanel = fs.readFileSync('app/src/features/configuracion/tabs/UsersPanel.tsx', 'utf8')
 
 test('Fersana access link never exposes a public company directory', () => {
   assert.match(migration, /company_access_links/)
@@ -46,10 +46,11 @@ test('access requests are own-row readable and admin-reviewed through guarded RP
   assert.match(migration, /company_access_role_not_allowed/)
   assert.match(migration, /v_role_name not in \('solicitante', 'finance', 'director'\)/)
   assert.doesNotMatch(migration, /v_role_name not in \([^)]*admin/)
-  assert.match(system, /Solicitudes de acceso por empresa/)
-  assert.match(system, /approveAccess\(row, 'solicitante'\)/)
-  assert.match(system, /approveAccess\(row, 'finance'\)/)
-  assert.match(system, /approveAccess\(row, 'director'\)/)
+  assert.match(usersPanel, /r\.profile_id === profileId && r\.status === 'pending'/)
+  assert.match(usersPanel, /approveAccess\(row, 'solicitante'\)/)
+  assert.match(usersPanel, /approveAccess\(row, 'finance'\)/)
+  assert.match(usersPanel, /approveAccess\(row, 'director'\)/)
+  assert.match(usersPanel, /rejectAccess\(row\)/)
 })
 
 test('approval creates company scope and director pool membership only when requested', () => {

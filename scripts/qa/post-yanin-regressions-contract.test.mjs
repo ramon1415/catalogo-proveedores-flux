@@ -6,7 +6,7 @@ const layouts = readFileSync(new URL("../../layouts.js", import.meta.url), "utf8
 const layoutsHtml = readFileSync(new URL("../../layouts.html", import.meta.url), "utf8")
 const batches = readFileSync(new URL("../../approval_batches.js", import.meta.url), "utf8")
 const migration = readFileSync(
-  new URL("../../supabase/migrations/037_secure_extraordinary_external_authorization.sql", import.meta.url),
+  new URL("../../supabase/migrations/20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql", import.meta.url),
   "utf8",
 )
 

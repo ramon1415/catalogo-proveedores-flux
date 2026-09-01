@@ -22,7 +22,14 @@ on conflict (company_id, module_key) do nothing;
 
 -- un ingreso recurrente y una entrada (WS7) SOLO de la empresa de prueba
 insert into recurring_income_templates (company_id, payer_name, concept, amount)
-select id, 'ZZ Pagador', 'ZZ Renta test', 111.11 from companies where rfc='ZZA010101ZZ0';
+select c.id, 'ZZ Pagador', 'ZZ Renta test', 111.11
+from companies c
+where c.rfc='ZZA010101ZZ0'
+  and not exists (
+    select 1
+    from recurring_income_templates t
+    where t.company_id=c.id and t.payer_name='ZZ Pagador' and t.concept='ZZ Renta test'
+  );
 commit;
 
 -- ── B) Verificación de aislamiento ──────────────────────────────────────────
@@ -55,8 +62,15 @@ group by c.name;
 begin;
 delete from tenant_income_entries e using companies c where e.company_id=c.id and c.rfc='ZZA010101ZZ0';
 delete from recurring_income_templates t using companies c where t.company_id=c.id and c.rfc='ZZA010101ZZ0';
+delete from company_access_requests r using companies c where r.company_id=c.id and c.rfc='ZZA010101ZZ0';
+delete from company_access_links l using companies c where l.company_id=c.id and c.rfc='ZZA010101ZZ0';
+delete from approver_assignments a using companies c where a.company_id=c.id and c.rfc='ZZA010101ZZ0';
+delete from company_directors d using companies c where d.company_id=c.id and c.rfc='ZZA010101ZZ0';
+delete from profile_company_memberships m using companies c where m.company_id=c.id and c.rfc='ZZA010101ZZ0';
 delete from company_modules cm using companies c where cm.company_id=c.id and c.rfc='ZZA010101ZZ0';
--- si se creó profile/membership de prueba, borrarlos aquí también (por su id).
+-- No borrar automáticamente el profile: puede conservar historia o membresías de otras empresas.
+-- Si el usuario fue creado exclusivamente para el ensayo, eliminarlo manualmente tras verificar
+-- que no tenga membresías, solicitudes ni eventos fuera de ZZ Aislamiento.
 delete from companies where rfc='ZZA010101ZZ0';
 commit;
 
