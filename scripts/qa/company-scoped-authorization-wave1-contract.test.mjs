@@ -145,11 +145,20 @@ test('legacy RPC predicates are drift-checked before company-scope rewrite', () 
     'payment_receipt_evidence_storage_path_allowed',
     'get_payment_request_approver_details',
     'list_payment_ingestion_batches',
+    'get_payment_batch_context',
   ]) assert.match(rpcMigration, new RegExp(signature))
 
   assert.match(rpcMigration, /expected_count/)
   assert.match(rpcMigration, /company_role_rpc_.*_drift/)
   assert.match(rpcMigration, /company_role_rpc_postcheck_failed/)
+  assert.match(
+    rpcMigration,
+    /function public\.get_payment_batch_context\(\)[\s\S]*?set search_path = ''/i,
+  )
+  assert.match(
+    rpcMigration,
+    /get_payment_batch_context\(\)[\s\S]*?private\.current_profile_has_company_role[\s\S]*?array\['finance'\]/i,
+  )
   assert.match(rpcMigration, /^begin;/m)
   assert.match(rpcMigration, /^commit;/m)
 })

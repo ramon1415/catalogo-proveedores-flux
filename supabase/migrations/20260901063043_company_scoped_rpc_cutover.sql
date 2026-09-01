@@ -134,6 +134,74 @@ begin
 end
 $cutover$;
 
+-- Batch context is a cross-company directory. Access is true only when the
+-- caller has Finance in at least one active company, and the returned list is
+-- filtered through that same exact-company predicate.
+create or replace function public.get_payment_batch_context()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor uuid := public.current_profile_id();
+  v_can_access boolean;
+begin
+  if v_actor is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  select exists (
+    select 1
+    from public.companies company
+    where coalesce(company.active, true)
+      and private.current_profile_has_company_role(
+        company.id,
+        array['finance']::text[]
+      )
+  ) into v_can_access;
+
+  return jsonb_build_object(
+    'actor_profile_id', v_actor,
+    'can_access', v_can_access,
+    'capabilities', jsonb_build_object(
+      'can_ingest', v_can_access,
+      'can_review', v_can_access,
+      'can_match', v_can_access,
+      'can_link', v_can_access,
+      'can_propose', false,
+      'can_reserve', false,
+      'can_confirm', false,
+      'can_reverse', false
+    ),
+    'companies', coalesce((
+      select jsonb_agg(
+        jsonb_build_object('id', company.id, 'name', company.name)
+        order by company.name
+      )
+      from public.companies company
+      where coalesce(company.active, true)
+        and private.current_profile_has_company_role(
+          company.id,
+          array['finance']::text[]
+        )
+    ), '[]'::jsonb),
+    'upload_policy', jsonb_build_object(
+      'allowed_mime_types', jsonb_build_array('application/pdf'),
+      'max_file_bytes', 26214400,
+      'max_pages', 500
+    ),
+    'matching_model', 'one_receipt_to_one_approved_request',
+    'amount_source', 'accepted_bank_extraction'
+  );
+end
+$function$;
+
+revoke all on function public.get_payment_batch_context() from public, anon;
+grant execute on function public.get_payment_batch_context()
+  to authenticated, service_role;
+
 -- Final function gate: sysadmin-only checks are intentional global platform
 -- controls. Business-role checks must all use the company helper.
 do $postcheck$
