@@ -10,6 +10,7 @@ import {
 } from './logic'
 import { UploadBatchModal } from './UploadBatchModal'
 import { OperationModal } from './OperationModal'
+import { BulkLinkModal } from './BulkLinkModal'
 import type { BatchContext, BatchListItem, BatchDetail, BatchOperation, CreateBatchResult } from './types'
 import s from './Comprobantes.module.css'
 
@@ -41,6 +42,7 @@ export default function ComprobantesPage() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [operation, setOperation] = useState<BatchOperation | null>(null)
   const [duplicate, setDuplicate] = useState<{ id: string; folio: string; status: string } | null>(null)
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const capabilities = useMemo(() => {
     const caps = context?.capabilities && Object.keys(context.capabilities).length ? context.capabilities : context
@@ -214,6 +216,12 @@ export default function ComprobantesPage() {
                 <div className={s.metric}><strong>{acceptedCount}</strong><span>Aceptadas</span></div>
               </div>
 
+              {capabilities.can_link === true && operations.some((op) => op.bank_operation_id && linkStatuses[op.bank_operation_id!] !== 'linked') && (
+                <div>
+                  <button className="secondary-btn" onClick={() => setBulkOpen(true)}>Vincular coincidencias exactas</button>
+                </div>
+              )}
+
               <div className={s.wrap}>
                 <table className={s.table}>
                   <thead>
@@ -306,6 +314,17 @@ export default function ComprobantesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {bulkOpen && (
+        <BulkLinkModal
+          operations={operations}
+          onClose={() => setBulkOpen(false)}
+          onLinked={async () => {
+            await loadBatchesList()
+            if (selectedId) await loadDetail(selectedId)
+          }}
+        />
       )}
 
       {operation && detail && (

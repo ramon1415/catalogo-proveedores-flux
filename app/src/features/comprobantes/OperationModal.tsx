@@ -70,6 +70,18 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
   }, [])
 
   useEffect(() => { refreshPreview(operationId) }, [operationId, refreshPreview])
+
+  // Menos clicks: si el comprobante ya es shareable al abrir, la búsqueda de
+  // candidatos arranca sola (es de solo lectura, no modifica estados).
+  const autoSearched = useRef(false)
+  useEffect(() => {
+    if (autoSearched.current || !operationId || !preview) return
+    if (preview.evidence?.status === 'shareable' && !preview.link?.id && can('can_match')) {
+      autoSearched.current = true
+      searchCandidates()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, operationId])
   useEffect(() => () => {
     epoch.current += 1
     if (receiptRef.current) URL.revokeObjectURL(receiptRef.current.blobUrl)
