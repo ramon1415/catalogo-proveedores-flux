@@ -22,7 +22,14 @@ test('migrated React button classes have complete shared styling', () => {
 })
 
 test('provider intake restores the primary links action and responsive filter grid', () => {
-  assert.match(intakePage, /className="primary-btn"[\s\S]{0,120}>Administrar ligas<\/button>/)
+  assert.match(intakePage, /Portal de proveedores · Fase 2B/)
+  assert.match(intakePage, /Prepara, convierte y audita solicitudes desacopladas/)
+  assert.match(intakePage, /className="primary-btn"[\s\S]{0,120}>\+ Generar liga de proveedor<\/button>/)
+  for (const label of ['Folio', 'Proveedor', 'Estado', 'Desde', 'Hasta', 'Documentos', 'Recepción']) {
+    assert.match(intakePage, new RegExp(`className=\\{s\\.filterField\\}>${label}`))
+  }
+  assert.match(intakePage, /onClick=\{clearFilters\}>Limpiar<\/button>/)
+  assert.match(intakePage, /function clearFilters\(\) \{ setFilters\(initialFilters\(companyId\)\) \}/)
   assert.match(intakeCss, /grid-template-columns: repeat\(4, minmax\(150px, 1fr\)\)/)
   assert.match(intakeCss, /@media \(max-width: 1100px\)/)
   assert.match(intakeCss, /@media \(max-width: 680px\)/)
