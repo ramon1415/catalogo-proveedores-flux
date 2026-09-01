@@ -57,8 +57,12 @@ begin
   join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
     and pg_get_functiondef(p.oid) ilike '%company_id%'
-    and pg_get_functiondef(p.oid) ilike '%current_user_has_role%'
-    and pg_get_functiondef(p.oid) ~* 'flux_(finance|approver|member)_roles|finance|finanzas|director|approver_2|solicitante|operator'
+    and (
+      pg_get_functiondef(p.oid) ~*
+        'current_user_has_role\s*\(\s*(public\.)?(flux_(finance|approver|member)_roles|approval_batch_direction_roles)\s*\('
+      or pg_get_functiondef(p.oid) ~*
+        'current_user_has_role\s*\(\s*array\s*\[[^]]*''(finance|finanzas|treasury|tesoreria|administracion|director|direccion|approver_2|aprobador_2|solicitante|operator)'''
+    )
     and p.proname not in (
       'current_user_has_role',
       'notification_current_user_has_role'

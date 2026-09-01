@@ -20,16 +20,22 @@ mantiene apilado sobre la rama del PR #475 hasta que la fundación sea aprobada.
 - CONTPAQ y las tablas privadas de Nómina exigen Finanzas en la empresa exacta.
 - SysAdmin conserva el override global definido por la fundación.
 
+## Ola RPC preparada
+
+- Los RPC heredados de conciliación, ejecución, detalle de cortes, CONTPAQ y
+  almacenamiento reemplazan sus checks globales por el rol de la empresa.
+- Cada reemplazo valida firma y cantidad exacta de predicados; cualquier drift
+  aborta la migración antes de aplicar un cambio parcial.
+- El preflight distingue un check global SysAdmin intencional de un check
+  global de negocio (Finanzas, Director u Operador).
+
 ## Pendiente antes del GO
 
-1. Convertir RPC heredados que aún contienen comprobaciones globales de
-   Finanzas/Dirección, empezando por conciliación, ejecución de solicitudes y
-   los dos RPC de escritura/revisión CONTPAQ.
-2. Ejecutar pruebas SQL con dos empresas y cuatro perfiles: Operador, Finanzas,
+1. Ejecutar pruebas SQL con dos empresas y cuatro perfiles: Operador, Finanzas,
    Director y SysAdmin; cada caso debe incluir allow y deny cruzado.
-3. Ejecutar advisors de seguridad/performance en DEV después de aplicar las
+2. Ejecutar advisors de seguridad/performance en DEV después de aplicar las
    migraciones, con autorización separada.
-4. Ejecutar `paso1c-company-role-cutover-preflight.sql`; sólo un PASS permite
+3. Ejecutar `paso1c-company-role-cutover-preflight.sql`; sólo un PASS permite
    preparar la matriz real de usuarios.
 
-Estado actual: `NO-GO / WAVE1_PREPARED / PROD_NOT_TOUCHED`.
+Estado actual: `NO-GO / CUTOVER_CODE_PREPARED / DEV_EXECUTION_PENDING / PROD_NOT_TOUCHED`.

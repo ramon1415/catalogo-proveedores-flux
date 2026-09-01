@@ -6,6 +6,14 @@ const migration = readFileSync(
   'supabase/migrations/20260901062149_company_scoped_rls_rpc_cutover.sql',
   'utf8',
 )
+const rpcMigration = readFileSync(
+  'supabase/migrations/20260901063043_company_scoped_rpc_cutover.sql',
+  'utf8',
+)
+const preflight = readFileSync(
+  'prod-readiness/paso1c-company-role-cutover-preflight.sql',
+  'utf8',
+)
 
 function policy(name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -102,4 +110,35 @@ test('the migration is transactional and fails closed on policy regression', () 
   assert.match(migration, /^begin;/m)
   assert.match(migration, /company_role_wave1_policy_postcheck_failed/)
   assert.match(migration, /^commit;/m)
+})
+
+test('legacy RPC predicates are drift-checked before company-scope rewrite', () => {
+  for (const signature of [
+    'contpaq_mapper_save_mapping',
+    'contpaq_mapper_set_review',
+    'get_approval_batch_detail',
+    'get_payment_request_execution_readiness',
+    'payment_reconciliation_require_finance',
+    'payment_reconciliation_storage_path_allowed',
+    'payment_receipt_evidence_storage_path_allowed',
+    'get_payment_request_approver_details',
+    'list_payment_ingestion_batches',
+  ]) assert.match(rpcMigration, new RegExp(signature))
+
+  assert.match(rpcMigration, /expected_count/)
+  assert.match(rpcMigration, /company_role_rpc_.*_drift/)
+  assert.match(rpcMigration, /company_role_rpc_postcheck_failed/)
+  assert.match(rpcMigration, /^begin;/m)
+  assert.match(rpcMigration, /^commit;/m)
+})
+
+test('preflight detects only actual global business-role calls', () => {
+  assert.match(preflight, /flux_\(finance\|approver\|member\)_roles/)
+  assert.match(preflight, /approval_batch_direction_roles/)
+  assert.match(preflight, /current_user_has_role\\s\*\\\(/)
+  assert.match(preflight, /company_role_preflight_legacy_function_blockers/)
+  assert.doesNotMatch(
+    preflight,
+    /pg_get_functiondef\(p\.oid\) ~\* 'flux_\(finance\|approver\|member\)_roles\|finance'/,
+  )
 })
