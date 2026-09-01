@@ -9,8 +9,8 @@ Estado verificado de prod (31-ago-2026): `main` NO tiene `app/` ni `vercel.json`
 | Paso | Qué | Depende de |
 |---|---|---|
 | **1** | Migraciones aditivas (abajo) | Preflight de esquema PROD |
-| **2** | Edge functions necesarias, con versión/hash fijados | 1 |
-| **3** | Auth prod + variables Vercel (redirect, Site URL y `VITE_*`) | — |
+| **2** | Edge functions + recuperación de notificaciones, con versión/hash fijados | 1 |
+| **3** | Auth prod + variables runtime Vercel (redirect, Site URL y `FLUX_*`) | — |
 | **4** | Seed Fersana + responsables (`paso5*.sql`) | 1 |
 | **5** | Frontend `/app` a `main` (PR #467, aditivo) | 1, 2, 3, 4 |
 | **6** | Ensayo de aislamiento + smoke Fersana/Operadora | 5 |
@@ -41,9 +41,26 @@ Después: `get_advisors(security)` en prod. Verificar RLS de las tablas nuevas.
 
 No desplegar "la última" versión a ciegas. Preparar una matriz DEV→PROD con versión, SHA-256, `verify_jwt`, secretos requeridos y razón del cambio. Para este release sólo se despliegan funciones indispensables para Fersana; Nómina permanece fuera de alcance y deshabilitada. **WS7 no usa edge function** (es RPC).
 
+La matriz viva está congelada en [`paso2-edge-functions-matrix.md`](./paso2-edge-functions-matrix.md). Resultado del preflight del 1-sep-2026: las cuatro funciones comunes de PROD ya contienen los contratos necesarios y conservan variantes correctas para `https://flux.quantta.mx`; **no copiar las versiones DEV a PROD**. En particular, las versiones DEV contienen orígenes y controles `test_only` que no deben promoverse.
+
+Antes del corte se debe aplicar y activar, con cutoff nuevo, [`paso2b-notification-recovery-prod.sql`](./paso2b-notification-recovery-prod.sql). El script agrega el wake-up faltante de `payment_request.approved` y un recovery de cinco minutos para las cuatro rutas de correo. Es fail-closed: sin secretos/flags explícitos no reclama eventos. Nunca reutilizar un cutoff histórico, porque PROD conserva eventos `pending` anteriores al corte.
+
 ## Paso 3 · Auth prod
 
-Supabase prod → Authentication → URL Configuration: agregar **Redirect URL** del `/app` de prod y confirmar **Site URL**. Vercel prod: verificar `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` contra el proyecto PROD. No exponer `service_role` ni secretos en variables `VITE_*`.
+Supabase prod → Authentication → URL Configuration:
+
+- **Site URL:** `https://flux.quantta.mx`.
+- Redirect vanilla: `https://flux.quantta.mx/solicitudes.html?post_login=1`.
+- Redirect React: `https://flux.quantta.mx/app/**`. El glob queda limitado a `/app/` porque el login React conserva la ruta actual, incluida la liga de acceso por empresa.
+- Google OAuth callback del proyecto PROD: `https://ucantptjhwttexzmslvm.supabase.co/auth/v1/callback`.
+
+Vercel no inyecta `VITE_*` en este despliegue. `/api/runtime-config` lee únicamente:
+
+- `FLUX_SUPABASE_URL` → proyecto PROD `ucantptjhwttexzmslvm` en scope **Production**.
+- `FLUX_SUPABASE_ANON_KEY` → clave pública del mismo proyecto en scope **Production**.
+- `FLUX_ENV=prod` en scope **Production**.
+
+`FLUX_SUPABASE_SERVICE_ROLE_KEY` puede existir para endpoints server-side, pero nunca se devuelve en `/api/runtime-config`, nunca se declara como `VITE_*` y nunca se expone al navegador.
 
 ## Paso 4 · Seed Fersana
 
