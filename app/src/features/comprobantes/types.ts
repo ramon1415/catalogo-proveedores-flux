@@ -27,6 +27,7 @@ export type BatchListItem = {
 }
 
 export type BatchOperation = {
+  id?: string | null
   extraction_id?: string | null
   extraction_status?: string | null
   extraction_updated_at?: string | null
