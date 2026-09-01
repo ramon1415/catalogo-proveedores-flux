@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../../components/ui/Toast'
 import { Badge } from '../../../components/ui/Badge'
+import { hasPlatformPowerEmail } from '../../../lib/platformPower'
 import {
   loadUsers, loadApproverRouting, listCompanyAccessRequests,
   approveCompanyAccessRequest, rejectCompanyAccessRequest,
@@ -13,6 +14,11 @@ import type {
 import s from '../Configuracion.module.css'
 
 type ApproverAdd = { companyId: string; candidates: ApproverCandidate[]; selected: string } | null
+type EditableCompanyRole = 'operator' | 'finance' | 'director'
+
+function editableCompanyRole(role: RoutingMembership['role_key']): EditableCompanyRole | '' {
+  return role === 'operator' || role === 'finance' || role === 'director' ? role : ''
+}
 
 // Vista centrada en el usuario: una sola lista de personas; al seleccionar una,
 // se gestionan TODAS sus cosas (rol, membresías por empresa, aprobadores y
@@ -54,10 +60,13 @@ export function UsersPanel() {
   useEffect(() => { reload() /* eslint-disable-next-line */ }, [])
 
   const companyRolesFor = (profileId: string) => memberships
-    .filter((membership) => membership.profile_id === profileId && membership.active && membership.role_key)
-    .map((membership) => membership.role_key as string)
+    .filter((membership) => membership.profile_id === profileId && membership.active)
+    .map((membership) => editableCompanyRole(membership.role_key))
+    .filter(Boolean) as EditableCompanyRole[]
   const displayGroup = (user: UserRow) =>
-    user.group === 'sysadmin' ? 'sysadmin' : groupFromRoleNames(companyRolesFor(user.id))
+    user.group === 'sysadmin' && hasPlatformPowerEmail(user.email)
+      ? 'sysadmin'
+      : groupFromRoleNames(companyRolesFor(user.id))
 
   const filtered = useMemo(() => {
     const q = normalize(search)
@@ -86,9 +95,13 @@ export function UsersPanel() {
   async function toggleMembership(companyId: string) {
     if (!selected) return
     const row = membershipFor(companyId)
+    const role = editableCompanyRole(row?.role_key ?? null)
+    if (!role) {
+      showToast('Define primero el rol', 'Selecciona Operador, Finanzas o Director para esta empresa.', 'warning')
+      return
+    }
     setBusy(true)
     try {
-      const role = row?.role_key === 'finance' || row?.role_key === 'director' ? row.role_key : 'operator'
       await setProfileCompanyRole(selected.id, companyId, role, !(row?.active))
       await reloadRouting()
     } catch (error) {
@@ -170,6 +183,9 @@ export function UsersPanel() {
   }
 
   const companyLabel = (c: RoutingCompany) => c.legal_name || c.name || 'Sin empresa'
+  const selectedHasPlatformPower = Boolean(
+    selected && selected.group === 'sysadmin' && hasPlatformPowerEmail(selected.email),
+  )
 
   return (
     <section className={s.tableCard}>
@@ -238,7 +254,7 @@ export function UsersPanel() {
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
                       <Badge variant={selected.active === true ? 'success' : 'neutral'}>{selected.active === true ? 'Perfil activo' : 'Perfil inactivo'}</Badge>
                       <Badge variant={GROUP_BADGE[displayGroup(selected)] || 'neutral'}>{GROUP_LABELS[displayGroup(selected)] || displayGroup(selected)}</Badge>
-                      <span className={s.cellSub}>{selected.group === 'sysadmin' ? 'Poder total global' : 'Roles definidos por empresa'}</span>
+                      <span className={s.cellSub}>{selectedHasPlatformPower ? 'Poder total global' : 'Roles definidos por empresa'}</span>
                     </div>
                   </div>
                 </div>
@@ -266,15 +282,20 @@ export function UsersPanel() {
                     <tr><td colSpan={4} className={s.cellSub} style={{ fontWeight: 600 }}>Cada empresa conserva su propio rol.</td></tr>
                     {companies.map((c) => {
                       const m = membershipFor(c.id)
+                      const role = editableCompanyRole(m?.role_key ?? null)
                       return (
                         <tr key={c.id}>
                           <td>{companyLabel(c)}</td>
                           <td>
                             <select
-                              value={m?.role_key || 'operator'}
-                              disabled={busy || selected.active !== true || selected.group === 'sysadmin'}
-                              onChange={(event) => changeCompanyRole(c.id, event.target.value as 'operator' | 'finance' | 'director')}
+                              value={role}
+                              disabled={busy || selected.active !== true}
+                              onChange={(event) => {
+                                const nextRole = event.target.value as EditableCompanyRole
+                                if (nextRole) changeCompanyRole(c.id, nextRole)
+                              }}
                             >
+                              <option value="" disabled>{m ? 'Definir rol' : 'Sin rol'}</option>
                               <option value="operator">Operador</option>
                               <option value="finance">Finanzas</option>
                               <option value="director">Director</option>
@@ -282,8 +303,8 @@ export function UsersPanel() {
                           </td>
                           <td>{m ? <Badge variant={m.active ? 'success' : 'neutral'}>{m.active ? 'Activa' : 'Inactiva'}</Badge> : <span className={s.cellSub}>Sin membresía</span>}</td>
                           <td>
-                            <button className={s.smallBtn} disabled={busy || selected.active !== true} onClick={() => toggleMembership(c.id)}>
-                              {m?.active ? 'Desactivar' : m ? 'Activar' : 'Agregar'}
+                            <button className={s.smallBtn} disabled={busy || selected.active !== true || !role} onClick={() => toggleMembership(c.id)}>
+                              {!role ? 'Define rol' : m?.active ? 'Desactivar' : 'Activar'}
                             </button>
                           </td>
                         </tr>
