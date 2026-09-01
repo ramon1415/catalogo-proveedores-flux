@@ -37,9 +37,9 @@ export default function App() {
           {routes.map(({ path, Comp }) => (
             <Route key={path} path={path.slice(1)} element={<Comp />} />
           ))}
-          <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/comprobantes_batch.html" title="Comprobantes batch" />} />
-          <Route path="solicitudes-proveedores" element={<LegacyModuleFrame src="/provider_intakes.html" title="Solicitudes de proveedores" />} />
-          <Route path="cortes-semanales" element={<LegacyModuleFrame src="/approval_batches.html" title="Cortes semanales" />} />
+          <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/legacy/comprobantes_batch.html" title="Comprobantes batch" />} />
+          <Route path="solicitudes-proveedores" element={<LegacyModuleFrame src="/legacy/provider_intakes.html" title="Solicitudes de proveedores" />} />
+          <Route path="cortes-semanales" element={<LegacyModuleFrame src="/legacy/approval_batches.html" title="Cortes semanales" />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>

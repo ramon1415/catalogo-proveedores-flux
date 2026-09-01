@@ -36,7 +36,7 @@ export default function AccessRequestPage({ code }: { code: string }) {
           // La liga también fija el tenant correcto. La recarga vuelve a hidratar
           // membresías cuando el administrador acaba de aprobar al usuario.
           setCompany(result.company_id)
-          window.location.replace('/app/solicitudes')
+          window.location.replace('/solicitudes')
           return
         }
         setState({ kind: 'ready', result })
