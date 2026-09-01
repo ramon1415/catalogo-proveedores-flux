@@ -41,7 +41,36 @@
 .modalBody { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
 
 .field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted, #888); }
-.field input, .field select, .field textarea { font: inherit; color: var(--text, inherit); }
+.field input, .field select, .field textarea { font: inherit; color: var(--text-1); }
+.toolbar input,
+.modal input:not([type='radio']):not([type='checkbox']):not([type='file']),
+.modal select,
+.modal textarea {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.modal textarea { min-height: 76px; resize: vertical; }
+.toolbar input:focus,
+.toolbar select:focus,
+.modal input:focus,
+.modal select:focus,
+.modal textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.modal input:disabled, .modal select:disabled, .modal textarea:disabled,
+.modal input:not([type='radio']):not([type='checkbox']):not([type='file']):read-only,
+.modal textarea:read-only {
+  opacity: .72;
+  cursor: not-allowed;
+}
 .formBtns { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .err { margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(229,72,77,.08); color: var(--danger, #e5484d); font-size: .85rem; }
 .warnNote { margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(245,166,35,.1); color: var(--warning, #d99a1f); font-size: .85rem; }
