@@ -44,6 +44,7 @@ export type IntakeDetailData = {
   public_folio: string | null
   company_name: string | null
   created_at: string | null
+  updated_at: string | null
   status: IntakeStatus
   provider_name: string | null
   provider_rfc: string | null
@@ -85,3 +86,8 @@ export type IntakeDetailResult = {
   files: IntakeFile[]
   events: IntakeEvent[]
 }
+
+// ── Acciones de flujo (rebanada 3): transiciones de estado + nota interna ──
+export type IntakeAction =
+  | { kind: 'transition'; toStatus: Exclude<IntakeStatus, 'received' | 'converted' | 'cancelled'>; label: string; danger?: boolean }
+  | { kind: 'note'; toStatus: null; label: string; danger?: boolean }

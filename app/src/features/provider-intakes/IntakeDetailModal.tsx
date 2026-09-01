@@ -1,41 +1,97 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { formatCurrency, formatDateTime } from '../../lib/format'
-import { getProviderIntakeDetail } from './api'
-import { INTAKE_STATUS, FILE_KIND_LABELS, quarantineLabel, actorLabel, formatBytes, friendlyIntakeError } from './logic'
-import type { IntakeDetailResult } from './types'
+import { getProviderIntakeDetail, submitIntakeAction } from './api'
+import {
+  INTAKE_STATUS, FILE_KIND_LABELS, quarantineLabel, actorLabel, formatBytes, friendlyIntakeError,
+  availableIntakeActions, validateIntakeAction, TRANSITION_COPY, createUuid,
+} from './logic'
+import type { IntakeAction, IntakeDetailResult } from './types'
 import s from './ProviderIntakes.module.css'
 
-// Rebanada 2: detalle read-only (proveedor, solicitud, factura, banca, documentos, historial).
-// Las acciones (transiciones, matching, conversión, draft de pago, links) son rebanadas 3-N.
+// Rebanada 2-3: detalle read-only + acciones de flujo (transiciones + nota interna).
+// Matching, draft de pago y links son rebanadas 4-N.
 function Field({ k, v }: { k: string; v: React.ReactNode }) {
   return <div className={s.field}><dt>{k}</dt><dd>{v || '—'}</dd></div>
 }
 
-export function IntakeDetailModal({ intakeId, onClose }: { intakeId: string; onClose: () => void }) {
+type PendingAction = { action: IntakeAction; actionId: string }
+
+export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: string; onClose: () => void; onChanged?: () => void }) {
   const { showToast } = useToast()
   const [data, setData] = useState<IntakeDetailResult | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [err, setErr] = useState('')
+
+  const [pending, setPending] = useState<PendingAction | null>(null)
+  const [notes, setNotes] = useState('')
+  const [actionErr, setActionErr] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const reload = useCallback(async () => {
+    const d = await getProviderIntakeDetail(intakeId)
+    setData(d)
+    return d
+  }, [intakeId])
 
   useEffect(() => {
     let active = true
     ;(async () => {
       setStatus('loading')
       try {
-        const d = await getProviderIntakeDetail(intakeId)
-        if (!active) return
-        setData(d); setStatus('ready')
+        await reload()
+        if (active) setStatus('ready')
       } catch (e) {
-        if (!active) return
-        setErr(friendlyIntakeError(e)); setStatus('error')
+        if (active) { setErr(friendlyIntakeError(e)); setStatus('error') }
       }
     })()
     return () => { active = false }
-  }, [intakeId])
+  }, [reload])
 
   const intake = data?.intake ?? null
+  const actions = useMemo(() => (intake ? availableIntakeActions(intake.status) : []), [intake])
+
+  function startAction(action: IntakeAction) {
+    setPending({ action, actionId: createUuid() })
+    setNotes('')
+    setActionErr('')
+  }
+
+  async function confirmAction() {
+    if (!pending || !intake) return
+    const validation = validateIntakeAction(pending.action, notes.trim())
+    if (validation) { setActionErr(validation); return }
+    setActionErr('')
+    setSaving(true)
+    try {
+      await submitIntakeAction({
+        intakeId: intake.id,
+        action: pending.action,
+        notes,
+        expectedStatus: intake.status,
+        expectedUpdatedAt: intake.updated_at,
+        actionId: pending.actionId,
+      })
+      setPending(null)
+      setNotes('')
+      showToast(
+        pending.action.kind === 'note' ? 'Nota agregada' : 'Estado actualizado',
+        pending.action.kind === 'note' ? 'El historial conserva la nueva nota interna.' : 'Se registró un único evento de auditoría.',
+        'success',
+      )
+      await reload()
+      onChanged?.()
+    } catch (e) {
+      setActionErr(friendlyIntakeError(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const actionCopy = pending?.action.kind === 'transition'
+    ? TRANSITION_COPY[pending.action.toStatus]
+    : { title: 'Agregar nota interna', hint: 'Queda registrada en el historial (mínimo 3 caracteres).', confirm: 'Guardar nota' }
 
   return (
     <div className={s.overlay} onClick={onClose}>
@@ -57,6 +113,48 @@ export function IntakeDetailModal({ intakeId, onClose }: { intakeId: string; onC
           {status === 'ready' && !intake && <p className={s.msg}>La solicitud ya no está disponible.</p>}
           {status === 'ready' && intake && (
             <>
+              {/* Barra de acciones de flujo */}
+              <div className={s.actionBar}>
+                {actions.map((a) => (
+                  <button
+                    key={a.label}
+                    className={a.danger ? 'danger-btn' : 'secondary-btn'}
+                    disabled={saving}
+                    onClick={() => startAction(a)}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+
+              {pending && (
+                <div className={s.actionForm}>
+                  <div>
+                    <strong>{actionCopy.title}</strong>
+                    <p className="muted" style={{ margin: '2px 0 0', fontSize: '.85rem' }}>{actionCopy.hint}</p>
+                  </div>
+                  <textarea
+                    rows={3}
+                    maxLength={2000}
+                    placeholder={pending.action.kind === 'note' ? 'Nota interna…' : 'Comentario (opcional salvo corrección/rechazo)…'}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    autoFocus
+                  />
+                  {actionErr && <p className={s.actionErr}>{actionErr}</p>}
+                  <div className={s.actionFormBtns}>
+                    <button className="secondary-btn" disabled={saving} onClick={() => { setPending(null); setActionErr('') }}>Cancelar</button>
+                    <button
+                      className={pending.action.danger ? 'danger-btn' : 'primary-btn'}
+                      disabled={saving}
+                      onClick={confirmAction}
+                    >
+                      {saving ? 'Guardando…' : actionCopy.confirm}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className={s.detailGrid}>
                 <section className={s.detailSection}>
                   <h3>Proveedor declarado</h3>

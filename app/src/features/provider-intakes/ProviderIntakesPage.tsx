@@ -129,7 +129,7 @@ export default function ProviderIntakesPage() {
         )}
       </div>
 
-      {selectedId && <IntakeDetailModal intakeId={selectedId} onClose={() => setSelectedId(null)} />}
+      {selectedId && <IntakeDetailModal intakeId={selectedId} onClose={() => setSelectedId(null)} onChanged={load} />}
     </>
   )
 }

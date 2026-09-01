@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase'
-import type { IntakeFilters, IntakeListResult, IntakeDetailResult } from './types'
+import type { IntakeFilters, IntakeListResult, IntakeDetailResult, IntakeAction } from './types'
 
 // Espejo de list_provider_intakes() del vanilla (provider_intakes.js).
 export async function listProviderIntakes(f: IntakeFilters): Promise<IntakeListResult> {
@@ -37,4 +37,38 @@ export async function getProviderIntakeDetail(intakeId: string): Promise<IntakeD
     files: Array.isArray(r.files) ? r.files : [],
     events: Array.isArray(r.events) ? r.events : [],
   }
+}
+
+// Espejo de submitAction() — transición de estado o nota interna (rebanada 3).
+// Concurrencia optimista: enviamos el estado/updated_at esperados + un action_id
+// idempotente, igual que el vanilla, para que un doble click no duplique eventos.
+export async function submitIntakeAction(params: {
+  intakeId: string
+  action: IntakeAction
+  notes: string
+  expectedStatus: string
+  expectedUpdatedAt: string | null
+  actionId: string
+}): Promise<void> {
+  const { intakeId, action, notes, expectedStatus, expectedUpdatedAt, actionId } = params
+  const trimmed = notes.trim()
+  if (action.kind === 'note') {
+    const { error } = await supabase.rpc('add_provider_intake_note', {
+      p_payment_intake_id: intakeId,
+      p_expected_updated_at: expectedUpdatedAt,
+      p_notes: trimmed,
+      p_action_id: actionId,
+    })
+    if (error) throw error
+    return
+  }
+  const { error } = await supabase.rpc('transition_provider_intake', {
+    p_payment_intake_id: intakeId,
+    p_expected_status: expectedStatus,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_to_status: action.toStatus,
+    p_notes: trimmed || null,
+    p_action_id: actionId,
+  })
+  if (error) throw error
 }
