@@ -443,7 +443,7 @@ from (values
 join budget_categories bc on bc.code = d.code
 join cost_centers cc on cc.code = 'SF'
 join companies comp on comp.rfc = 'SFE100825TM9'
-cross join (select id from budget_versions where is_active and year = 2026 limit 1) v;
+cross join (select id from budget_versions where active and year = 2026 limit 1) v;
 
 commit;
 
