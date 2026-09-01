@@ -25,3 +25,5 @@ Reglas:
 - Cambiar de empresa debe recalcular el rol efectivo inmediatamente.
 - No aplicar la matriz mientras `paso1c-company-role-cutover-preflight.sql`
   reporte policies o funciones heredadas con roles de negocio globales.
+- El avance y los bloqueadores del corte se documentan en
+  `company-role-cutover-waves.md`; preparar una ola no autoriza ejecutarla.
