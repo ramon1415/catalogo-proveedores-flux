@@ -34,6 +34,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   function setCompany(id: string) {
     setCompanyId(id)
     sessionStorage.setItem(KEY, id)
+    window.dispatchEvent(new CustomEvent('flux:company-change', { detail: { companyId: id } }))
   }
 
   const companyName = memberships.find((m) => m.company_id === companyId)?.company_name ?? null
