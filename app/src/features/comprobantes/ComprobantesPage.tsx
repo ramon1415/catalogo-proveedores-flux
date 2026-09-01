@@ -368,6 +368,10 @@ export default function ComprobantesPage() {
           detail={detail}
           capabilities={capabilities}
           onClose={() => setOperation(null)}
+          onStartNewBatch={() => {
+            setOperation(null)
+            setUploadOpen(true)
+          }}
           onChanged={async () => {
             await loadBatchesList()
             if (selectedId) await loadDetail(selectedId)

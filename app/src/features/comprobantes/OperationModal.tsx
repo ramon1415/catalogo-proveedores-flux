@@ -23,10 +23,17 @@ type Props = {
   detail: BatchDetail
   capabilities: BatchCapabilities
   onClose: () => void
+  onStartNewBatch: () => void
   onChanged: () => Promise<void> | void
 }
 
-export function OperationModal({ operation: initialOperation, detail, capabilities, onClose, onChanged }: Props) {
+const NON_CORRECTABLE_ISSUES = new Set([
+  'bank_not_identified',
+  'bank_status_not_operated',
+  'strong_bank_identity_missing',
+])
+
+export function OperationModal({ operation: initialOperation, detail, capabilities, onClose, onStartNewBatch, onChanged }: Props) {
   const { showToast } = useToast()
   const [operation, setOperation] = useState(initialOperation)
   const [preview, setPreview] = useState<LinkPreview | null>(null)
@@ -57,6 +64,9 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
   const pageNumber = Math.max(1, Number(operation.page_number || operation.source_page) || 1)
   const rejected = extractionStatus === 'rejected'
   const receiptReviewed = Boolean(receipt && receipt.extractionId === extractionId && receipt.pageCount === 1)
+  const issues = operation.review_issues || []
+  const nonCorrectableIssues = issues.filter((issue) => NON_CORRECTABLE_ISSUES.has(issue))
+  const requiresOriginalBbvaPdf = extractionStatus === 'blocked' && nonCorrectableIssues.length > 0
 
   const refreshPreview = useCallback(async (opId: string | null) => {
     if (!opId) { setPreview(null); return }
@@ -229,6 +239,14 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
     if (!contractReady) return 'El contrato 1:1 todavía no está instalado en este ambiente. La interfaz permanece en modo seguro.'
     if (linked) return 'Paso 4 de 4: el comprobante está vinculado y la solicitud quedó pagada.'
     if (rejected) return 'Este registro no puede utilizarse como comprobante individual.'
+    if (requiresOriginalBbvaPdf) {
+      return 'No puede avanzar: este archivo no acredita una operación BBVA completada con una cuenta origen empresarial identificable. Sube el comprobante BBVA original.'
+    }
+    if (extractionStatus === 'blocked') {
+      return receiptReviewed
+        ? 'Corrige los datos señalados para habilitar la revisión y después buscar la solicitud.'
+        : 'Paso 1 de 4: abre el comprobante individual; después corrige los datos señalados.'
+    }
     if (!shareable) return 'Paso 1 de 4: abre el comprobante individual, revisa los datos y confírmalos.'
     if (!searchCompleted) return 'Paso 2 de 4: busca solicitudes aprobadas compatibles. La búsqueda no modifica datos.'
     if (!selectedRequestId) {
@@ -251,9 +269,8 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
   const acceptEnabled = can('can_review') && contractReady && Boolean(operation.extraction_updated_at) && receiptReviewed && !busy
   const showSearch = Boolean(operationId) && shareable && !linked
   const showConfirm = !linked && Boolean(candidate)
-  const showCorrection = !linked && ['review_required', 'blocked'].includes(extractionStatus)
-
-  const issues = operation.review_issues || []
+  const showCorrection = !linked && !requiresOriginalBbvaPdf && ['review_required', 'blocked'].includes(extractionStatus)
+  const showBlockedCorrection = showCorrection && extractionStatus === 'blocked'
 
   return (
     <div className={s.overlay} onClick={() => !busy && onClose()}>
@@ -362,6 +379,21 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
                   {operationId ? 'Comprobante revisado, continuar' : 'Datos correctos, continuar'}
                 </button>
               )}
+              {showBlockedCorrection && (
+                <button
+                  className="primary-btn"
+                  disabled={!can('can_review') || !contractReady || !receiptReviewed || busy}
+                  title={receiptReviewed ? 'Completar y auditar los datos que el PDF no permitió leer.' : 'Primero abre y revisa el comprobante individual.'}
+                  onClick={() => setCorrectionOpen(true)}
+                >
+                  Corregir datos para continuar
+                </button>
+              )}
+              {requiresOriginalBbvaPdf && (
+                <button className="primary-btn" disabled={busy} onClick={onStartNewBatch}>
+                  Subir comprobante BBVA original
+                </button>
+              )}
               {showSearch && (
                 <button className="primary-btn" disabled={!can('can_match') || busy} onClick={searchCandidates}>
                   Buscar solicitud aprobada
@@ -438,7 +470,7 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
           )}
 
           {/* Corrección / rechazo */}
-          {showCorrection && (
+          {showCorrection && extractionStatus !== 'blocked' && (
             <details className={s.correctionDisclosure}>
               <summary>¿Los datos leídos son incorrectos?</summary>
               <div style={{ marginTop: 8 }}>
