@@ -149,6 +149,22 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
   return data
 }
 
+// FB-2: persiste el CFDI parseado (salida del parser certificado del módulo
+// CONTPAQ) para que el feeder contable arme los registros fiscales V/I/AM.
+// No-fatal: la solicitud ya existe; si falla solo se avisa.
+export async function saveCfdiData(requestId: string, cfdi: unknown): Promise<string> {
+  try {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({ cfdi_data: cfdi, updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (!error) return ''
+    return 'La solicitud se creó, pero el CFDI parseado no pudo guardarse para contabilidad.'
+  } catch {
+    return 'La solicitud se creó, pero el CFDI parseado no pudo guardarse para contabilidad.'
+  }
+}
+
 // Guarda metadata Fase 2 (request_type/payment_method). Devuelve un warning si
 // falta la columna en el ambiente (migración 004c), sin lanzar.
 export async function updateFase2Metadata(
