@@ -71,6 +71,10 @@ test('approval, banking, cash incidents, and extraordinary rows are company scop
     'approval_batches_read_authorized',
     'cba_select',
     'cba_write',
+    'cash_funds_select_company',
+    'cash_funds_insert_company',
+    'cash_funds_update_company',
+    'cash_funds_delete_company',
     'company_directors_read_authorized',
     'extraordinary_payment_policies_read',
     'incident_charges_authorized_select',
@@ -95,8 +99,10 @@ test('CONTPAQ and payroll require Finance in the selected company', () => {
     /payroll_active_company_access[\s\S]*?auth\.jwt\(\) ->> 'role'[\s\S]*?service_role/,
   )
 
+  assert.doesNotMatch(migration, /create policy budget_categories_write/i)
+  assert.match(migration, /budget_categories is a shared global catalogue/i)
+
   for (const name of [
-    'budget_categories_write',
     'payroll_provision_settings_finance_read',
     'payroll_provision_entries_finance_read',
     'payroll_contpaq_role_mappings_finance_read',
@@ -104,6 +110,22 @@ test('CONTPAQ and payroll require Finance in the selected company', () => {
   ]) {
     assert.match(policy(name), /array\['finance'\]/)
   }
+})
+
+test('cash funds preserve responsible read and scope management by company', () => {
+  const select = policy('cash_funds_select_company')
+  const insert = policy('cash_funds_insert_company')
+  const update = policy('cash_funds_update_company')
+  const remove = policy('cash_funds_delete_company')
+
+  assert.match(select, /responsible_profile_id = \(select public\.current_profile_id\(\)\)/)
+  assert.match(select, /array\['operator','finance','director'\]/)
+  for (const write of [insert, update, remove]) {
+    assert.match(write, /array\['finance','director'\]/)
+  }
+  assert.match(insert, /with check/i)
+  assert.match(update, /with check/i)
+  assert.doesNotMatch(`${select}\n${insert}\n${update}\n${remove}`, /current_user_has_role/i)
 })
 
 test('the migration is transactional and fails closed on policy regression', () => {

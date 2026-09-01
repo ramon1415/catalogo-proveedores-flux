@@ -100,8 +100,13 @@ as $function$
       select 1
       from public.user_roles ur
       join public.roles r on r.id = ur.role_id
+      join public.profiles p on p.id = ur.profile_id
       where ur.profile_id = p_profile_id
         and private.canonical_company_role(r.name) = 'sysadmin'
+        and lower(btrim(coalesce(p.email, ''))) in (
+          'carlos@quantta.mx',
+          'ramon@quantta.mx'
+        )
     )
     or exists (
       select 1
@@ -324,6 +329,6 @@ end;
 $function$;
 
 comment on function private.profile_has_company_role(uuid, uuid, text[]) is
-  'Authorization primitive for company-aware policies/RPCs. Global override is limited to canonical sysadmin roles.';
+  'Authorization primitive for company-aware policies/RPCs. Global override requires both a canonical sysadmin role and an approved platform-power email.';
 
 commit;
