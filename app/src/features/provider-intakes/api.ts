@@ -72,3 +72,27 @@ export async function submitIntakeAction(params: {
   })
   if (error) throw error
 }
+
+// Espejo de openTemporaryFile() — enlace firmado de corta duración (rebanada 4).
+// La ruta del API vive en la raíz del sitio (Vercel), no bajo /app/: absoluta.
+export async function getIntakeFileSignedUrl(intakeId: string, fileId: string): Promise<{ url: string; expiresIn: number }> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('auth_required')
+
+  const response = await fetch('/api/provider-intake-file-url', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ payment_intake_id: intakeId, file_id: fileId }),
+    cache: 'no-store',
+    credentials: 'same-origin',
+  })
+  const result = await response.json().catch(() => ({})) as { url?: string; error?: string; expires_in?: number }
+  if (!response.ok || !result.url) throw new Error(result.error || 'signed_url_unavailable')
+
+  const url = new URL(result.url)
+  if (url.protocol !== 'https:') throw new Error('signed_url_unavailable')
+  return { url: url.toString(), expiresIn: Number(result.expires_in || 120) }
+}

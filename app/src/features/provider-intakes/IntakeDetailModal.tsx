@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { formatCurrency, formatDateTime } from '../../lib/format'
-import { getProviderIntakeDetail, submitIntakeAction } from './api'
+import { getProviderIntakeDetail, submitIntakeAction, getIntakeFileSignedUrl } from './api'
 import {
   INTAKE_STATUS, FILE_KIND_LABELS, quarantineLabel, actorLabel, formatBytes, friendlyIntakeError,
   availableIntakeActions, validateIntakeAction, TRANSITION_COPY, createUuid,
@@ -28,6 +28,7 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
   const [notes, setNotes] = useState('')
   const [actionErr, setActionErr] = useState('')
   const [saving, setSaving] = useState(false)
+  const [openingFileId, setOpeningFileId] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     const d = await getProviderIntakeDetail(intakeId)
@@ -86,6 +87,20 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
       setActionErr(friendlyIntakeError(e))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function openFile(fileId: string) {
+    if (!intake || openingFileId) return
+    setOpeningFileId(fileId)
+    try {
+      const { url, expiresIn } = await getIntakeFileSignedUrl(intake.id, fileId)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      showToast('Enlace temporal generado', `El acceso expira en ${expiresIn} segundos.`, 'info')
+    } catch (e) {
+      showToast('Documento no disponible', friendlyIntakeError(e), 'error')
+    } finally {
+      setOpeningFileId(null)
     }
   }
 
@@ -203,7 +218,9 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
                           <div>{f.original_filename || 'Documento'}</div>
                           <div className="muted" style={{ fontSize: '.8rem' }}>{FILE_KIND_LABELS[f.file_kind || ''] || 'Documento'} · {f.mime_type || 'Tipo n/d'} · {formatBytes(f.size_bytes)} · {quarantineLabel(f.quarantine_status)}</div>
                         </div>
-                        <button className="small-btn" onClick={() => showToast('En migración', 'La apertura temporal de documentos llega en la siguiente rebanada.', 'info')}>Abrir temporalmente</button>
+                        <button className="small-btn" disabled={openingFileId != null} onClick={() => openFile(f.id)}>
+                          {openingFileId === f.id ? 'Generando enlace…' : 'Abrir temporalmente'}
+                        </button>
                       </li>
                     ))}
                   </ul>
