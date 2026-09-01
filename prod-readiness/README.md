@@ -1,39 +1,72 @@
-# Prod-readiness Fersana — runbook (DRAFT)
+# Prod-readiness Fersana — candidato PROD congelado
 
-Paquete de apoyo para llevar **Soporte Fersana** a producción. **Nada aquí se ha aplicado a prod.** Es material de revisión para Ramón (dueño del pipeline de prod).
+Paquete de apoyo para llevar **Soporte Fersana** a producción. **Nada aquí se
+ha aplicado a prod.** El candidato queda congelado por SHA-256 en
+[`MANIFEST.sha256`](./MANIFEST.sha256) y requiere una autorización de ejecución
+separada de Ramón.
 
-Estado verificado de prod (31-ago-2026): `main` NO tiene `app/` ni `vercel.json`; prod DB no tiene `company_modules` ni `platform_module_registry`; 1 empresa (Operadora), 0 Fersana; última migración `20260827205542`. `main` y `dev` están **divergidos** (dev +1040 / main +164).
+Estado verificado de prod (1-sep-2026): `main` NO tiene `app/` ni
+`vercel.json`; prod DB no tiene las tablas nuevas de este paquete; 1 empresa,
+0 Fersana; última migración `20260827205542`. El PR #467 sigue abierto.
 
 ## Orden de ejecución
 
 | Paso | Qué | Depende de |
 |---|---|---|
-| **1** | Migraciones aditivas (abajo) | Preflight de esquema PROD |
+| **0** | `paso1-preflight-prod.sql` (solo lectura) | — |
+| **1** | Migraciones aditivas corregidas (abajo) | 0 = PASS |
 | **2** | Edge functions + recuperación de notificaciones, con versión/hash fijados | 1 |
 | **3** | Auth prod + variables runtime Vercel (redirect, Site URL y `FLUX_*`) | — |
-| **4** | Seed Fersana + responsables (`paso5*.sql`) | 1 |
-| **5** | Frontend `/app` a `main` (PR #467, aditivo) | 1, 2, 3, 4 |
+| **4** | Seed Fersana + responsables + postcheck | 1 |
+| **5** | Frontend `/app` a `main` (PR #467, aditivo) | 1, 2, 3, 4 = PASS |
 | **6** | Ensayo de aislamiento + smoke Fersana/Operadora | 5 |
 
-`main` no se mergea (= deploy) hasta que backend, Auth, variables y seed estén verificados. El vanilla permanece como fallback durante todo el corte.
+`main` no se mergea (= deploy) hasta que backend, Auth, variables, seed y
+postcheck estén verificados. El vanilla permanece como fallback durante todo el
+corte. Ante cualquier falla seguir [`ROLLBACK.md`](./ROLLBACK.md); no improvisar
+`DROP`, limpieza ni reintentos.
 
 ---
 
+## Paso 0 · Preflight de solo lectura
+
+Ejecutar [`paso1-preflight-prod.sql`](./paso1-preflight-prod.sql) en el proyecto
+`ucantptjhwttexzmslvm`. Debe emitir `FERSANA_PREFLIGHT_PASS`. Comprueba:
+
+- exactamente una empresa incumbente y ausencia de Fersana;
+- exactamente una versión presupuestal 2026 activa;
+- tablas, funciones y roles requeridos;
+- ausencia de colisiones `SF` / `SF-2026-*`;
+- ausencia de los siete objetos nuevos.
+
+La transacción es `READ ONLY` y termina en `ROLLBACK`.
+
 ## Paso 1 · Migraciones a prod
 
-Las migraciones de dev son **aditivas** (crean objetos que no existen en prod) → aplicar en este orden. Antes de ejecutar, comparar cada una contra el esquema vivo de PROD y congelar su SHA-256.
+Aplicar únicamente los archivos exactos incluidos en
+[`MANIFEST.sha256`](./MANIFEST.sha256), en este orden. No copiar SQL desde el
+chat ni editarlo en Supabase Studio.
 
-1. `20260826223239_platform_module_registry.sql` — crea `modules` / `company_modules` / `platform_module_registry` y **siembra a Operadora** (la identifica por `incident_charges`, no por id).
+1. `20260826223239_platform_module_registry.sql` — crea `modules`,
+   `module_releases` y `company_modules`.
 2. `20260826223357_platform_module_registry_advisor_hardening.sql`
-3. `20260827090000_platform_module_incidencias.sql`
+3. `20260827090000_platform_module_incidencias.sql` — fija Incidencias en ON
+   para el único `company_id` incumbente validado por el preflight; no usa
+   nombre ni UUID hardcodeado.
 4. `20260827100000_platform_module_nomina.sql`
-5. `20260831003419_fersana_company_access_onboarding.sql` + `20260831005200_fersana_company_access_advisor_hardening.sql`
-6. `20260831120000_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS + `generate_recurring_income`).
+5. `20260831003419_fersana_company_access_onboarding.sql` +
+   `20260831005200_fersana_company_access_advisor_hardening.sql` — DDL y RPC
+   atómicos; la liga `fersana` se crea después, dentro del seed.
+6. `20260831120000_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
+   `generate_recurring_income`), con FK compuesta que impide ligar un template
+   de otra empresa.
 7. `20260831130000_budget_category_responsible.sql` — agrega `responsible_email` e índice para scoping de partidas.
 
-Después: `get_advisors(security)` en prod. Verificar RLS de las tablas nuevas.
+Cada archivo debe cerrar con `COMMIT`. Después: `get_advisors(security)` en
+prod y verificación de RLS.
 
-**Caveat:** la del registry siembra Operadora — verificar que en prod queda con sus módulos correctos (no romper su nav vanilla; la app vanilla no usa company_modules, así que no la afecta, pero el /app sí lo leerá).
+**Nómina:** sólo se registra el módulo y permanece OFF para todas las empresas.
+No aplicar ninguna migración operativa N0–N5 ni desplegar funciones de Nómina.
 
 ---
 
@@ -64,10 +97,18 @@ Vercel no inyecta `VITE_*` en este despliegue. `/api/runtime-config` lee únicam
 
 ## Paso 4 · Seed Fersana
 
-1. `paso5-fersana-seed.sql` — empresa + cost center SF + cuenta origen BBVA + módulos + **budget 2026 completo** (60 partidas; 56 con monto / 322 líneas = $6,289,204). El insert de líneas es rerun-safe y el postcheck aborta la transacción si no coincide el conteo o total esperado.
-2. `paso5b-fersana-responsables.sql` — asigna las 60 partidas a sus cinco responsables y valida 60/60.
+1. `paso5-fersana-seed.sql` — empresa + liga de acceso + cost center SF +
+   cuenta origen BBVA + módulos + **budget 2026 completo** (60 partidas; 56 con
+   monto / 322 líneas = $6,289,204). Es transaccional y fail-closed.
+2. `paso5b-fersana-responsables.sql` — asigna las 60 partidas a sus cinco
+   responsables, valida 60/60 y ahora también es transaccional.
+3. `paso1-postcheck-prod.sql` — sólo lectura; debe emitir
+   `FERSANA_POSTCHECK_PASS`.
 
-Prerrequisitos: paso 1 aplicado + una `budget_versions` activa 2026 en prod. Memberships/roles/aprobadores **no** se seedean (los profiles se crean en el primer login OAuth). Antes del corte se debe confirmar la lista final de correos; el catálogo preparado usa `ychavez@fluxfinanciera.com` para Yulma y `contabilidad2@soportef.com` para las cinco partidas contables.
+Memberships/roles/aprobadores **no** se seedean (los profiles se crean en el
+primer login OAuth). Antes de autorizar la ejecución se debe confirmar la lista
+final de correos; el catálogo preparado usa `ychavez@fluxfinanciera.com` para
+Yulma y `contabilidad2@soportef.com` para las cinco partidas contables.
 
 ## Paso 5 · Frontend `/app`
 
@@ -79,4 +120,4 @@ Fusionar PR #467 sólo cuando los pasos 1–4 estén completos. El alcance debe 
 
 ---
 
-_Generado por Claude Code el 31-ago-2026 desde el estado de dev._
+_Candidato corregido y congelado el 1-sep-2026. PROD no tocado._

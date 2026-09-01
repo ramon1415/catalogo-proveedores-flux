@@ -18,6 +18,31 @@ insert into companies (name, legal_name, rfc, active)
 select 'Soporte Fersana', 'Soporte Fersana, SA de CV', 'SFE100825TM9', true
 where not exists (select 1 from companies where rfc = 'SFE100825TM9');
 
+do $$
+declare
+  v_count integer;
+begin
+  select count(*) into v_count
+  from companies
+  where rfc = 'SFE100825TM9';
+
+  if v_count <> 1 then
+    raise exception 'fersana_company_expected_one_found_%', v_count;
+  end if;
+end;
+$$;
+
+-- Liga opaca de onboarding. Se crea aquí (no en la migración de DDL) porque la
+-- empresa apenas existe a partir de este seed.
+insert into public.company_access_links(code, company_id, active, updated_at)
+select 'fersana', c.id, true, now()
+from public.companies c
+where c.rfc = 'SFE100825TM9'
+on conflict (code) do update
+set company_id = excluded.company_id,
+    active = true,
+    updated_at = now();
+
 -- 2) Centro de costo ----------------------------------------------------------
 insert into cost_centers (name, code, active)
 select 'Soporte Fersana', 'SF', true
