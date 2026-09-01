@@ -29,7 +29,11 @@ function monthValue(v: string | null | undefined): string {
   return v ? v.slice(0, 7) : ''
 }
 
-export function IntakePaymentDraftSection({ intakeId, onChanged }: { intakeId: string; onChanged: () => Promise<void> | void }) {
+export function IntakePaymentDraftSection({ intakeId, intakeUpdatedAt, onChanged }: {
+  intakeId: string
+  intakeUpdatedAt: string | null
+  onChanged: () => Promise<void> | void
+}) {
   const [context, setContext] = useState<PaymentDraftContext | null>(null)
   const [ctxErr, setCtxErr] = useState('')
   const [open, setOpen] = useState(false)
@@ -41,7 +45,9 @@ export function IntakePaymentDraftSection({ intakeId, onChanged }: { intakeId: s
     } catch (e) {
       setCtxErr(friendlyIntakeError(e))
     }
-  }, [intakeId])
+  // Matching y transiciones cambian updated_at sin cerrar el detalle. Volver a
+  // leer el contexto evita guardar o convertir contra una versión anterior.
+  }, [intakeId, intakeUpdatedAt])
 
   useEffect(() => { load() }, [load])
 

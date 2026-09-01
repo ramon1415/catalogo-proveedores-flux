@@ -57,7 +57,9 @@ export function IntakeMatchSection({ intake, onChanged }: { intake: IntakeDetail
     } finally {
       setLoading(false)
     }
-  }, [intake.id])
+  // El mismo detalle permanece montado después de una transición. El estado y
+  // updated_at forman parte de la versión optimista y deben refrescar matching.
+  }, [intake.id, intake.status, intake.updated_at])
 
   useEffect(() => { load('') }, [load])
 
