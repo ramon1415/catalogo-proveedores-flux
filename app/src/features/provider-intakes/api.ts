@@ -2,6 +2,7 @@ import { supabase } from '../../lib/supabase'
 import type {
   IntakeFilters, IntakeListResult, IntakeDetailResult, IntakeAction,
   MatchData, LinkTarget, MatchComparison,
+  PaymentDraftContext, PaymentDraftForm, ApproverOption,
 } from './types'
 
 // Espejo de list_provider_intakes() del vanilla (provider_intakes.js).
@@ -139,6 +140,91 @@ export async function setProviderIntakeMatch(params: {
     p_action_id: params.actionId,
   })
   if (error) throw error
+}
+
+// ── Draft de pago + conversión (rebanada 6) ────────────────────────────────
+export async function getPaymentDraftContext(intakeId: string): Promise<PaymentDraftContext> {
+  const { data, error } = await supabase.rpc('get_provider_intake_payment_draft_context', {
+    p_payment_intake_id: intakeId,
+  })
+  if (error) throw error
+  return data as PaymentDraftContext
+}
+
+// Guardado parcial permitido; el servidor decide missing_fields/derived_state.
+export async function savePaymentDraft(params: {
+  intakeId: string
+  expectedIntakeStatus: string
+  expectedIntakeUpdatedAt: string | null
+  expectedDraftVersion: number | null
+  form: PaymentDraftForm
+  actionId: string
+}): Promise<void> {
+  const { form } = params
+  const { error } = await supabase.rpc('save_provider_intake_payment_draft', {
+    p_payment_intake_id: params.intakeId,
+    p_expected_intake_status: params.expectedIntakeStatus,
+    p_expected_intake_updated_at: params.expectedIntakeUpdatedAt,
+    p_expected_draft_version: params.expectedDraftVersion,
+    p_cost_center_id: form.cost_center_id,
+    p_budget_category_id: form.budget_category_id,
+    p_budget_month: form.budget_month,
+    p_company_bank_account_id: form.company_bank_account_id,
+    p_payment_method: form.payment_method,
+    p_requested_by_profile_id: form.requested_by_profile_id,
+    p_approver_profile_id: form.approver_profile_id,
+    p_approver_assignment_id: form.approver_assignment_id,
+    p_final_amount: form.final_amount,
+    p_currency: form.currency,
+    p_scheduled_payment_date: form.scheduled_payment_date,
+    p_internal_concept: form.internal_concept,
+    p_internal_notes: form.internal_notes,
+    p_amount_change_reason: form.amount_change_reason,
+    p_action_id: params.actionId,
+  })
+  if (error) throw error
+}
+
+// La conversión NO reenvía el formulario: el servidor lee el draft persistido.
+export async function convertIntakeToPaymentRequest(params: {
+  intakeId: string
+  expectedIntakeUpdatedAt: string | null
+  expectedDraftVersion: number | null
+  actionId: string
+}): Promise<{ request_number?: string; request_status?: string; budget_decision?: string }> {
+  const { data, error } = await supabase.rpc('convert_provider_intake_to_payment_request', {
+    p_payment_intake_id: params.intakeId,
+    p_expected_intake_updated_at: params.expectedIntakeUpdatedAt,
+    p_expected_draft_version: params.expectedDraftVersion,
+    p_action_id: params.actionId,
+  })
+  if (error) throw error
+  return (data && typeof data === 'object' ? data : {}) as { request_number?: string; request_status?: string; budget_decision?: string }
+}
+
+export async function confirmMasterBanking(params: {
+  intakeId: string
+  expectedIntakeUpdatedAt: string | null
+  expectedProviderUpdatedAt: string | null
+  actionId: string
+}): Promise<void> {
+  const { error } = await supabase.rpc('confirm_provider_intake_master_banking', {
+    p_payment_intake_id: params.intakeId,
+    p_expected_intake_updated_at: params.expectedIntakeUpdatedAt,
+    p_expected_provider_updated_at: params.expectedProviderUpdatedAt,
+    p_action_id: params.actionId,
+  })
+  if (error) throw error
+}
+
+export async function listApproverOptions(companyId: string, costCenterId: string, amount: number): Promise<ApproverOption[]> {
+  const { data, error } = await supabase.rpc('list_payment_request_approver_options', {
+    p_company_id: companyId,
+    p_cost_center_id: costCenterId,
+    p_amount: amount,
+  })
+  if (error) throw error
+  return Array.isArray(data) ? data as ApproverOption[] : []
 }
 
 // Espejo de openTemporaryFile() — enlace firmado de corta duración (rebanada 4).

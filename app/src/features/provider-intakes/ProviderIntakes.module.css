@@ -47,3 +47,7 @@
 .matchCard { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 10px; background: var(--bg-card, rgba(120,120,120,.04)); margin-bottom: 8px; }
 .matchCardHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .matchWarning { margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(229,72,77,.08); color: var(--danger, #e5484d); font-size: .85rem; }
+
+/* Draft de pago (rebanada 6) */
+.draftField { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted, #888); }
+.draftField input, .draftField select, .draftField textarea { font: inherit; color: var(--text, inherit); }

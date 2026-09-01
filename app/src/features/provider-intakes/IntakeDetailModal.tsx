@@ -8,6 +8,7 @@ import {
   availableIntakeActions, validateIntakeAction, TRANSITION_COPY, createUuid,
 } from './logic'
 import { IntakeMatchSection } from './IntakeMatchSection'
+import { IntakePaymentDraftSection } from './IntakePaymentDraft'
 import type { IntakeAction, IntakeDetailResult } from './types'
 import s from './ProviderIntakes.module.css'
 
@@ -211,6 +212,11 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
 
               <IntakeMatchSection
                 intake={intake}
+                onChanged={async () => { await reload(); onChanged?.() }}
+              />
+
+              <IntakePaymentDraftSection
+                intakeId={intake.id}
                 onChanged={async () => { await reload(); onChanged?.() }}
               />
 

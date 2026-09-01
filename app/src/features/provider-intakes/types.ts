@@ -145,6 +145,74 @@ export type MatchComparison = {
 
 export type MatchKind = 'set' | 'replace' | 'clear'
 
+// ── Draft de pago + conversión (rebanada 6) ───────────────────────────────
+export type PaymentDraftDerivedState =
+  | 'NOT_STARTED' | 'DRAFT_INCOMPLETE' | 'READY_PENDING_PROVIDER' | 'BLOCKED_BANK_REVIEW'
+  | 'READY_FOR_CONVERSION' | 'ALREADY_CONVERTED' | 'BLOCKED_INTAKE_STATUS'
+
+export type PaymentDraftForm = {
+  cost_center_id: string | null
+  budget_category_id: string | null
+  budget_month: string | null // YYYY-MM-01
+  company_bank_account_id: string | null
+  payment_method: string | null
+  requested_by_profile_id: string | null
+  approver_profile_id: string | null
+  approver_assignment_id: string | null
+  final_amount: string | null
+  currency: string | null
+  scheduled_payment_date: string | null
+  internal_concept: string | null
+  internal_notes: string | null
+  amount_change_reason: string | null
+}
+
+export type PaymentDraftContext = {
+  can_prepare: boolean
+  can_save: boolean
+  intake: {
+    id: string; company_id: string; company_name: string | null; public_folio: string | null
+    status: string; updated_at: string | null
+    provider_name: string | null; concept: string | null; description: string | null
+    amount_requested: number | null; currency: string | null; requested_payment_date: string | null
+    invoice: { folio: string | null; date: string | null } | null
+    created_payment_request_id: string | null
+  }
+  draft: (PaymentDraftForm & { version: number | null }) | null
+  defaults: Partial<PaymentDraftForm> & { requested_by_profile_id?: string | null }
+  catalogs: {
+    cost_centers: { id: string; code: string | null; name: string | null }[]
+    budget_categories: { id: string; cost_center_id: string | null; name: string | null; code?: string | null }[]
+    origin_accounts: { id: string; name: string | null; bank_name: string | null; last4: string | null }[]
+    currencies: string[]
+  }
+  requester_options: { profile_id: string; display_name: string | null }[]
+  approver_options: ApproverOption[]
+  provider: { proveedor_id: string; display_name: string | null; active: boolean } | null
+  state: {
+    derived_state: PaymentDraftDerivedState
+    missing_fields: string[]
+    blockers: string[]
+    banking: {
+      material_mismatch: boolean
+      difference_fields: string[]
+      comparison: { field: string; declared: string | null; master: string | null; different: boolean }[]
+      resolution_valid: boolean
+      resolution: { created_at: string | null } | null
+      provider_updated_at: string | null
+    } | null
+  }
+  error?: string
+}
+
+export type ApproverOption = {
+  profile_id: string
+  display_name: string | null
+  option_label: string | null
+  assignment_id: string | null
+  source: string | null
+}
+
 // ── Acciones de flujo (rebanada 3): transiciones de estado + nota interna ──
 export type IntakeAction =
   | { kind: 'transition'; toStatus: Exclude<IntakeStatus, 'received' | 'converted' | 'cancelled'>; label: string; danger?: boolean }

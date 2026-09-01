@@ -168,6 +168,59 @@ export function maskedText(v: string | null | undefined): string {
   return v.slice(0, 2) + '•'.repeat(Math.min(v.length - 4, 10)) + v.slice(-2)
 }
 
+// ── Draft de pago (rebanada 6) ──────────────────────────────────────────────
+export const PAYMENT_DRAFT_STATE: Record<string, { label: string; variant: 'info' | 'warning' | 'danger' | 'success' | 'neutral' }> = {
+  NOT_STARTED: { label: 'Sin iniciar', variant: 'neutral' },
+  DRAFT_INCOMPLETE: { label: 'Borrador incompleto', variant: 'warning' },
+  READY_PENDING_PROVIDER: { label: 'Preparada · pendiente de proveedor', variant: 'warning' },
+  BLOCKED_BANK_REVIEW: { label: 'Bloqueada · revisar datos bancarios', variant: 'danger' },
+  READY_FOR_CONVERSION: { label: 'Lista para conversión', variant: 'success' },
+  ALREADY_CONVERTED: { label: 'Solicitud de pago creada', variant: 'success' },
+  BLOCKED_INTAKE_STATUS: { label: 'Preparación no disponible', variant: 'neutral' },
+}
+
+export const PAYMENT_DRAFT_FIELD_LABELS: Record<string, string> = {
+  cost_center_id: 'Centro de costo', budget_category_id: 'Categoría presupuestal', budget_month: 'Mes presupuestal',
+  company_bank_account_id: 'Cuenta origen', payment_method: 'Método de pago', requested_by_profile_id: 'Solicitante',
+  approver_profile_id: 'Aprobador', final_amount: 'Monto final', currency: 'Moneda',
+  scheduled_payment_date: 'Fecha programada', internal_concept: 'Concepto interno', amount_change_reason: 'Razón del cambio de monto',
+}
+
+export const PAYMENT_DRAFT_BLOCKER_LABELS: Record<string, string> = {
+  PAYMENT_REQUEST_ALREADY_CREATED: 'Ya existe una solicitud de pago creada.',
+  INTAKE_STATUS_NOT_IN_REVIEW: 'La solicitud no está en revisión.',
+  PROVIDER_REQUIRED_FOR_CONVERSION: 'Confirma el proveedor maestro antes de convertir.',
+  PROVIDER_INACTIVE: 'El proveedor maestro está inactivo.',
+  BANKING_DATA_REVIEW_REQUIRED: 'Resuelve la revisión de datos bancarios.',
+  APPROVER_RULE_PENDING_CONVERSION: 'La regla de aprobación está pendiente.',
+}
+
+export const BANKING_FIELD_LABELS: Record<string, string> = {
+  bank: 'Banco', account: 'Cuenta', clabe: 'CLABE', beneficiary: 'Beneficiario', reported_change: 'Cambio reportado',
+}
+
+// Validación cliente antes de guardar (espejo de validatePaymentDraftForm).
+export function validatePaymentDraft(form: { final_amount: string | null; amount_change_reason: string | null; internal_concept: string | null; internal_notes: string | null }, amountRequested: number | null): string {
+  const { final_amount, amount_change_reason, internal_concept, internal_notes } = form
+  if (final_amount != null && final_amount !== '') {
+    if (!/^\d+(?:\.\d{1,2})?$/.test(final_amount) || Number(final_amount) <= 0) {
+      return 'Captura un monto positivo con máximo dos decimales.'
+    }
+    if (amountRequested != null && Number(final_amount) !== amountRequested && (amount_change_reason || '').trim().length < 10) {
+      return 'Explica el cambio de monto en al menos 10 caracteres.'
+    }
+  }
+  // eslint-disable-next-line no-control-regex
+  const dirty = (v: string | null, max: number) => v != null && (v.length > max || /[\u0000-\u001F\u007F]/.test(v) || /<[^>]*>/.test(v))
+  if (dirty(internal_concept, 500) || dirty(internal_notes, 2000) || dirty(amount_change_reason, 1000)) {
+    return 'Retira etiquetas, caracteres de control o texto que exceda el límite.'
+  }
+  if (internal_concept && internal_concept.trim().length > 0 && internal_concept.trim().length < 3) {
+    return 'El concepto interno requiere al menos 3 caracteres.'
+  }
+  return ''
+}
+
 export function createUuid(): string {
   const c = (globalThis as { crypto?: Crypto }).crypto
   if (c?.randomUUID) return c.randomUUID()
