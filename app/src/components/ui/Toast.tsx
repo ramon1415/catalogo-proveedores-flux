@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import s from './Toast.module.css'
 
 export type ToastVariant = 'success' | 'error' | 'warning' | 'info'
@@ -17,7 +18,29 @@ export function useToast(): ToastApi {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [activeDialog, setActiveDialog] = useState<HTMLDialogElement | null>(null)
   const seq = useRef(0)
+
+  // Native modal dialogs live in the browser's top layer. A fixed toast mounted
+  // under <body> can never paint above that layer, regardless of z-index. Keep
+  // the viewport inside the topmost open dialog and move it back automatically
+  // when the dialog closes.
+  useEffect(() => {
+    const syncActiveDialog = () => {
+      const openDialogs = document.querySelectorAll<HTMLDialogElement>('dialog[open]')
+      setActiveDialog(openDialogs.item(openDialogs.length - 1))
+    }
+
+    syncActiveDialog()
+    const observer = new MutationObserver(syncActiveDialog)
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['open'],
+    })
+    return () => observer.disconnect()
+  }, [])
 
   const showToast = useCallback((title: string, desc?: string, variant: ToastVariant = 'success') => {
     const id = ++seq.current
@@ -25,10 +48,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000)
   }, [])
 
-  return (
-    <Ctx.Provider value={{ showToast }}>
-      {children}
-      <div className={s.stack}>
+  const viewport = (
+    <div className={s.stack} data-toast-viewport>
         {toasts.map((t) => {
           const assertive = t.variant === 'error' || t.variant === 'warning'
           return (
@@ -53,6 +74,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           )
         })}
       </div>
+  )
+
+  return (
+    <Ctx.Provider value={{ showToast }}>
+      {children}
+      {activeDialog ? createPortal(viewport, activeDialog) : viewport}
     </Ctx.Provider>
   )
 }
