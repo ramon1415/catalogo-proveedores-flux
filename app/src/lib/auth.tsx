@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { groupFromRoles, perms, ROLE_GROUPS } from './roles'
+import { hasPlatformPowerEmail } from './platformPower'
 import type { RoleGroup } from './roles'
 
 export type Profile = {
@@ -31,11 +32,6 @@ type AuthState = {
 }
 
 const Ctx = createContext<AuthState | undefined>(undefined)
-
-const PLATFORM_POWER_EMAILS = new Set([
-  'carlos@quantta.mx',
-  'ramon@quantta.mx',
-])
 
 export function useAuth(): AuthState {
   const v = useContext(Ctx)
@@ -213,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const globalGroup = useMemo(() => groupFromRoles(globalRoles), [globalRoles])
   const hasPlatformPower = globalGroup === ROLE_GROUPS.SYSADMIN
-    && PLATFORM_POWER_EMAILS.has(String(profile?.email ?? '').trim().toLowerCase())
+    && hasPlatformPowerEmail(profile?.email)
   const effectiveMembership = useMemo(
     () => memberships.find((membership) => membership.company_id === selectedCompanyId) ?? memberships[0] ?? null,
     [memberships, selectedCompanyId],
