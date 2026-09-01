@@ -250,6 +250,60 @@ with check ((select private.current_profile_has_company_role(
   array['finance']::text[]
 )));
 
+-- Efectivo: the responsible profile may read its own fund only while it has an
+-- active role in that company. Finance and Director manage the exact company.
+drop policy if exists "cash funds manageable by finance roles"
+  on public.cash_funds;
+drop policy if exists "cash funds readable by owner or finance roles"
+  on public.cash_funds;
+drop policy if exists cash_funds_select_company
+  on public.cash_funds;
+drop policy if exists cash_funds_manage_company
+  on public.cash_funds;
+drop policy if exists cash_funds_insert_company
+  on public.cash_funds;
+drop policy if exists cash_funds_update_company
+  on public.cash_funds;
+drop policy if exists cash_funds_delete_company
+  on public.cash_funds;
+create policy cash_funds_select_company
+on public.cash_funds for select to authenticated
+using (
+  (
+    responsible_profile_id = (select public.current_profile_id())
+    and (select private.current_profile_has_company_role(
+      company_id,
+      array['operator','finance','director']::text[]
+    ))
+  )
+  or (select private.current_profile_has_company_role(
+    company_id,
+    array['finance','director']::text[]
+  ))
+);
+create policy cash_funds_insert_company
+on public.cash_funds for insert to authenticated
+with check ((select private.current_profile_has_company_role(
+  company_id,
+  array['finance','director']::text[]
+)));
+create policy cash_funds_update_company
+on public.cash_funds for update to authenticated
+using ((select private.current_profile_has_company_role(
+  company_id,
+  array['finance','director']::text[]
+)))
+with check ((select private.current_profile_has_company_role(
+  company_id,
+  array['finance','director']::text[]
+)));
+create policy cash_funds_delete_company
+on public.cash_funds for delete to authenticated
+using ((select private.current_profile_has_company_role(
+  company_id,
+  array['finance','director']::text[]
+)));
+
 drop policy if exists company_directors_read_authorized
   on public.company_directors;
 create policy company_directors_read_authorized
@@ -344,16 +398,9 @@ grant execute on function public.contpaq_mapper_company_access(uuid)
   to authenticated, service_role;
 
 drop policy if exists budget_categories_write on public.budget_categories;
-create policy budget_categories_write
-on public.budget_categories for update to authenticated
-using ((select private.current_profile_has_company_role(
-  company_id,
-  array['finance']::text[]
-)))
-with check ((select private.current_profile_has_company_role(
-  company_id,
-  array['finance']::text[]
-)));
+-- budget_categories is a shared global catalogue and intentionally has no
+-- company_id. Authenticated writes stay fail-closed; company-specific budget
+-- configuration belongs to the mapping tables that carry company_id.
 
 -- Payroll is high-PII: only Finance in the exact company, while service_role
 -- remains available for the server-side materialization path.
@@ -430,6 +477,7 @@ begin
       'approval_batch_company_settings',
       'approval_batches',
       'budget_categories',
+      'cash_funds',
       'company_bank_accounts',
       'company_directors',
       'extraordinary_payment_policies',

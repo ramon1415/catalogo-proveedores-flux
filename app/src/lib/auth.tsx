@@ -32,6 +32,11 @@ type AuthState = {
 
 const Ctx = createContext<AuthState | undefined>(undefined)
 
+const PLATFORM_POWER_EMAILS = new Set([
+  'carlos@quantta.mx',
+  'ramon@quantta.mx',
+])
+
 export function useAuth(): AuthState {
   const v = useContext(Ctx)
   if (!v) throw new Error('useAuth debe usarse dentro de <AuthProvider>')
@@ -207,17 +212,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const globalGroup = useMemo(() => groupFromRoles(globalRoles), [globalRoles])
+  const hasPlatformPower = globalGroup === ROLE_GROUPS.SYSADMIN
+    && PLATFORM_POWER_EMAILS.has(String(profile?.email ?? '').trim().toLowerCase())
   const effectiveMembership = useMemo(
     () => memberships.find((membership) => membership.company_id === selectedCompanyId) ?? memberships[0] ?? null,
     [memberships, selectedCompanyId],
   )
   const roles = useMemo(
-    () => globalGroup === ROLE_GROUPS.SYSADMIN
+    () => hasPlatformPower
       ? globalRoles
       : effectiveMembership?.role
         ? [effectiveMembership.role]
         : [],
-    [effectiveMembership, globalGroup, globalRoles],
+    [effectiveMembership, globalRoles, hasPlatformPower],
   )
   const group = profile?.active === false ? ROLE_GROUPS.INACTIVE : groupFromRoles(roles)
 

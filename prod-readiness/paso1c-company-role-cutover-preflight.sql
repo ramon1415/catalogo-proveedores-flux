@@ -35,7 +35,17 @@ begin
   join public.user_roles ur on ur.profile_id = p.id
   join public.roles r on r.id = ur.role_id
   where lower(btrim(r.name)) in ('sysadmin', 'system_admin', 'admin', 'superadmin')
-    and lower(btrim(coalesce(p.email, ''))) not in ('carlos@quantta.mx', 'ramon@quantta.mx');
+    and lower(btrim(coalesce(p.email, ''))) not in ('carlos@quantta.mx', 'ramon@quantta.mx')
+    and exists (
+      select 1
+      from public.companies c
+      where coalesce(c.active, true)
+        and private.profile_has_company_role(
+          p.id,
+          c.id,
+          array['operator']::text[]
+        )
+    );
 
   select string_agg(format('%I.%I:%I', schemaname, tablename, policyname), ', ' order by tablename, policyname)
     into v_policy_blockers

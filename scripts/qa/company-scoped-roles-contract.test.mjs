@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const migration = readFileSync('supabase/migrations/20260901055111_company_scoped_roles_foundation.sql', 'utf8')
+const hardening = readFileSync('supabase/migrations/20260901070846_company_scoped_power_override_hardening.sql', 'utf8')
 const auth = readFileSync('app/src/lib/auth.tsx', 'utf8')
 const company = readFileSync('app/src/lib/company.tsx', 'utf8')
 const api = readFileSync('app/src/features/configuracion/api.ts', 'utf8')
@@ -10,13 +11,27 @@ const users = readFileSync('app/src/features/configuracion/tabs/UsersPanel.tsx',
 const matrix = readFileSync('prod-readiness/company-role-matrix.md', 'utf8')
 const cutover = readFileSync('prod-readiness/paso1c-company-role-cutover-preflight.sql', 'utf8')
 
-test('membership owns the canonical company role and global roles are not mutated', () => {
+test('membership owns the canonical company role and platform power is allowlisted', () => {
   assert.match(migration, /add column if not exists role_key text/)
   assert.match(migration, /role_key in \('operator', 'finance', 'director', 'sysadmin'\)/)
   assert.match(migration, /private\.profile_has_company_role/)
-  assert.match(migration, /Global override is limited to canonical sysadmin roles/)
+  assert.match(migration, /carlos@quantta\.mx/)
+  assert.match(migration, /ramon@quantta\.mx/)
+  assert.match(migration, /approved platform-power email/)
   assert.doesNotMatch(migration, /delete\s+from\s+public\.user_roles/i)
   assert.doesNotMatch(migration, /insert\s+into\s+public\.user_roles/i)
+})
+
+test('database and SPA reserve platform power for Carlos and Ramon', () => {
+  for (const email of ['carlos@quantta.mx', 'ramon@quantta.mx']) {
+    const escaped = email.replace('.', '\\.')
+    assert.match(migration, new RegExp(escaped))
+    assert.match(hardening, new RegExp(escaped))
+    assert.match(auth, new RegExp(escaped))
+  }
+  assert.match(hardening, /security definer\s+set search_path = ''/i)
+  assert.match(hardening, /company_role_power_override_hardening_failed/)
+  assert.match(auth, /PLATFORM_POWER_EMAILS\.has/)
 })
 
 test('access approval and admin edits write the exact company membership role', () => {
@@ -48,9 +63,9 @@ test('authorized people matrix is frozen without guessing unresolved emails', ()
     'carlos@quantta.mx',
     'ramon@quantta.mx',
   ]) assert.match(matrix, new RegExp(email.replace('.', '\\.')))
-  assert.match(matrix, /Denise \| Pendiente de correo exacto/)
   assert.match(matrix, /Gerardo \| Pendiente de correo exacto/)
-  assert.match(matrix, /Ara \| Pendiente de correo exacto/)
+  assert.doesNotMatch(matrix, /Denise \| Pendiente de correo exacto/)
+  assert.doesNotMatch(matrix, /Ara \| Pendiente de correo exacto/)
   assert.match(matrix, /Yanin \| `ynavarrete@soportef\.com` \| Finanzas \| Finanzas/)
   assert.match(matrix, /Alfredo \| `afajardo@soportef\.com` \| Finanzas \| Finanzas/)
 })
