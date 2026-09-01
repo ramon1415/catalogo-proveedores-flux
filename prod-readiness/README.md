@@ -80,6 +80,9 @@ Para PROD se generan variantes reproducibles mediante
 2. `generated/company_scoped_rpc_cutover_prod.sql` — corta todos los RPC
    productivos, omite únicamente las dos firmas CONTPAQ ausentes y reescribe
    con conteo exacto dos RPC de compatibilidad que DEV ya no conserva.
+3. `generated/company_scoped_historical_actuals_prod.sql` — reemplaza las dos
+   policies globales heredadas de históricos por lectura de miembros y escritura
+   de Finanzas en la empresa exacta; aborta si existe una fila sin `company_id`.
 
 Ambas variantes deben pasar juntas en una transacción de ensayo terminada en
 `ROLLBACK` antes de aplicarse. Nómina y CFDI/CONTPAQ no se habilitan ni se crean

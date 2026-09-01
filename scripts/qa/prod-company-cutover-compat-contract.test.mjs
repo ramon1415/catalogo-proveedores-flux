@@ -9,6 +9,7 @@ execFileSync(process.execPath, [resolve(root, 'scripts/qa/build-prod-company-cut
 
 const wave1 = readFileSync(resolve(root, 'prod-readiness/generated/company_scoped_rls_rpc_cutover_prod.sql'), 'utf8')
 const rpc = readFileSync(resolve(root, 'prod-readiness/generated/company_scoped_rpc_cutover_prod.sql'), 'utf8')
+const historical = readFileSync(resolve(root, 'prod-readiness/generated/company_scoped_historical_actuals_prod.sql'), 'utf8')
 
 test('PROD wave cuts released tables and guards absent optional modules', () => {
   assert.match(wave1, /create policy payment_requests_select/)
@@ -32,4 +33,11 @@ test('PROD RPC wave cuts the two retained compatibility functions', () => {
   assert.match(rpc, /provider_intake_internal_access_allowed/)
   assert.match(rpc, /prod_execution_context_finance_drift/)
   assert.match(rpc, /prod_provider_intake_company_predicate_drift/)
+})
+
+test('historical actuals are read by company members and written by company Finance', () => {
+  assert.match(historical, /historical_actuals_null_company_rows/)
+  assert.match(historical, /array\['operator','finance','director'\]/)
+  assert.match(historical, /array\['finance'\]/)
+  assert.match(historical, /historical_actuals_company_scope_failed/)
 })
