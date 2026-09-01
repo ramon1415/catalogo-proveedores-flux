@@ -8,8 +8,9 @@
 .kpi span { font-size: .8rem; color: var(--muted, #888); }
 
 .card { background: var(--bg-card, rgba(120,120,120,.04)); border: 1px solid var(--border, rgba(120,120,120,.2)); border-radius: 12px; overflow: hidden; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px; border-bottom: 1px solid var(--border, rgba(120,120,120,.12)); }
-.toolbar input, .toolbar select { min-width: 0; }
+.toolbar { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; align-items: end; padding: 14px 16px; border-bottom: 1px solid var(--border, rgba(120,120,120,.12)); }
+.toolbar label { min-width: 0; display: grid !important; align-items: stretch !important; gap: 5px !important; font-size: 11px; font-weight: 600; }
+.toolbar input, .toolbar select { min-width: 0; width: 100%; }
 .wrap { overflow-x: auto; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border, rgba(120,120,120,.1)); white-space: nowrap; }
@@ -50,4 +51,44 @@
 
 /* Draft de pago (rebanada 6) */
 .draftField { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted, #888); }
-.draftField input, .draftField select, .draftField textarea { font: inherit; color: var(--text, inherit); }
+.draftField input, .draftField select, .draftField textarea { font: inherit; color: var(--text-1); }
+
+.toolbar input,
+.modal input:not([type='radio']):not([type='checkbox']):not([type='file']),
+.modal select,
+.modal textarea {
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.modal textarea { min-height: 76px; resize: vertical; }
+.toolbar input:focus,
+.toolbar select:focus,
+.modal input:focus,
+.modal select:focus,
+.modal textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+.modal input:disabled, .modal select:disabled, .modal textarea:disabled,
+.modal input:not([type='radio']):not([type='checkbox']):not([type='file']):read-only,
+.modal textarea:read-only {
+  opacity: .72;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 680px) {
+  .phead { flex-direction: column; }
+  .phead > div:last-child { width: 100%; flex-wrap: wrap; }
+  .phead > div:last-child button { flex: 1; }
+  .toolbar { grid-template-columns: 1fr; }
+}
