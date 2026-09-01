@@ -38,6 +38,14 @@ await cp(appDist, output, { recursive: true })
 // de URL. Los HTML internos antiguos se resuelven mediante redirects a React.
 const publicRootEntries = [
   'assets',
+  // Runtime PDF vendored que el módulo React de comprobantes (y la precarga
+  // CSF) cargan desde la raíz — sin estos, la ingesta/derivación se rompe
+  // con pdf_runtime_unavailable.
+  'pdfjs-3.11.174.min.js',
+  'pdfjs-worker-3.11.174.min.js',
+  'pdf-lib-1.17.1.min.js',
+  'payment_batch_parser.js',
+  'payment_batch_single_page_pdf.js',
   'solicitar.html',
   'solicitar.css',
   'solicitar.js',

@@ -67,7 +67,7 @@ export function IntakePaymentDraftSection({ intakeId, intakeUpdatedAt, onChanged
         <Badge variant={stateInfo.variant}>{stateInfo.label}</Badge>
         {missing.length > 0 && <span className="muted" style={{ fontSize: '.85rem' }}>{missing.length} campos pendientes</span>}
         {context.intake?.created_payment_request_id && (
-          <a className="small-btn" href={`/app/solicitudes?request_id=${context.intake.created_payment_request_id}`}>Abrir solicitud de pago</a>
+          <a className="small-btn" href={`/solicitudes?request_id=${context.intake.created_payment_request_id}`}>Abrir solicitud de pago</a>
         )}
       </div>
       {(context.state?.blockers || []).length > 0 && (
