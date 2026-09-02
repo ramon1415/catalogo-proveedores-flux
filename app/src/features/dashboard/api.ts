@@ -36,22 +36,26 @@ async function fetchAllRows<T>(
   return rows
 }
 
-// Años disponibles en historical_actuals (solo period_month).
-export async function fetchHistoricalPeriods(): Promise<{ period_month: string | null }[]> {
+// Años disponibles en historical_actuals de la empresa activa. El filtro por
+// company_id es obligatorio: sin él, al cargar el histórico de otra empresa
+// las series se mezclarían (RLS acota por membresía, no por empresa activa).
+export async function fetchHistoricalPeriods(companyId: string): Promise<{ period_month: string | null }[]> {
   return fetchAllRows<{ period_month: string | null }>(() =>
     supabase
       .from('historical_actuals')
       .select('period_month')
+      .eq('company_id', companyId)
       .order('period_month', { ascending: false }),
   )
 }
 
 // Filas de un año concreto.
-export async function fetchHistoricalYear(year: number): Promise<HistoricalActual[]> {
+export async function fetchHistoricalYear(companyId: string, year: number): Promise<HistoricalActual[]> {
   return fetchAllRows<HistoricalActual>(() =>
     supabase
       .from('historical_actuals')
       .select('account_code,account_name,period_month,amount')
+      .eq('company_id', companyId)
       .gte('period_month', `${year}-01-01`)
       .lt('period_month', `${year + 1}-01-01`)
       .order('period_month'),
@@ -59,11 +63,12 @@ export async function fetchHistoricalYear(year: number): Promise<HistoricalActua
 }
 
 // Todas las filas (vista "Todos los años").
-export async function fetchHistoricalAll(): Promise<HistoricalActual[]> {
+export async function fetchHistoricalAll(companyId: string): Promise<HistoricalActual[]> {
   return fetchAllRows<HistoricalActual>(() =>
     supabase
       .from('historical_actuals')
       .select('account_code,account_name,period_month,amount')
+      .eq('company_id', companyId)
       .order('period_month'),
   )
 }
