@@ -38,6 +38,9 @@ export type PaymentRequest = {
   // sin la migración 004c; se lee de forma perezosa en detalle/tabla.
   request_type?: string | null
   payment_method?: string | null
+  // Reembolsos: empleado que cobra. En el resto de tipos va null y el
+  // destinatario del dinero sigue siendo el proveedor.
+  beneficiary_profile_id?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -135,6 +138,71 @@ export type PaymentReceiptRow = {
 }
 
 export type Profile = { id: string; full_name: string | null; email: string | null }
+
+// ── Reembolsos ─────────────────────────────────────────────────────────────
+// Datos bancarios del empleado. Viven en su propia tabla (no en profiles, que
+// es legible por cualquier autenticado): cada quien ve/edita los suyos y
+// Finanzas los lee para dispersar.
+export type EmployeeBankAccount = {
+  profile_id: string
+  company_id: string
+  banco: string | null
+  clabe: string | null
+  cuenta: string | null
+  beneficiary_name: string | null
+  updated_at?: string | null
+}
+
+// Renglón persistido del desglose (reimbursement_items).
+export type ReimbursementItem = {
+  id: string
+  payment_request_id: string
+  company_id: string
+  budget_category_id: string | null
+  descripcion: string
+  amount: number | null
+  subtotal_amount: number | null
+  tax_amount: number | null
+  deducible: boolean
+  invoice_uuid: string | null
+  cfdi_data?: unknown
+  storage_path: string | null
+  created_at?: string | null
+}
+
+// Renglón en captura (cliente). El adjunto todavía no está en Storage, así que
+// se guarda el File y se sube después de crear la solicitud.
+export type ReimbursementDraftItem = {
+  key: string
+  descripcion: string
+  amount: string
+  budgetCategoryId: string
+  deducible: boolean
+  file: File | null
+  fileHint: string
+  // Autollenado del CFDI del renglón (parseCfdiFile + parser certificado).
+  subtotalAmount: number | null
+  taxAmount: number | null
+  invoiceUuid: string | null
+  cfdiData: unknown | null
+}
+
+// Payload de insert de un renglón (sin id/created_at, que pone la BD).
+export type ReimbursementItemInsert = {
+  payment_request_id: string
+  company_id: string
+  // NOT NULL en la BD: la partida atribuye el gasto a su área también cuando
+  // el renglón no es deducible.
+  budget_category_id: string
+  descripcion: string
+  amount: number
+  subtotal_amount: number | null
+  tax_amount: number | null
+  deducible: boolean
+  invoice_uuid: string | null
+  cfdi_data: unknown | null
+  storage_path: string | null
+}
 
 export type IncidentCharge = {
   id: string
@@ -263,6 +331,10 @@ export type RequestPayload = {
   tax_amount: number | null
   withholding_amount: number | null
   invoice_uuid: string | null
+  // Reembolsos: el RPC ya los conoce, así que el beneficiario se persiste en
+  // la MISMA transacción que la solicitud (antes iba en un UPDATE posterior,
+  // que podía dejar la solicitud sin destinatario si fallaba).
+  beneficiary_profile_id: string | null
 }
 
 export type EditPayload = {
@@ -285,3 +357,10 @@ export type DecisionAction =
   | 'approved' | 'rejected' | 'changes_requested'
   | 'exception_approved' | 'exception_rejected'
   | 'amount_change_requested' | 'category_change_requested' | 'budget_adjustment_requested'
+
+// Proyecto (catálogo opcional que administra Finanzas en Configuración). En la
+// solicitud solo se necesita lo mínimo para pintar el selector.
+export type ProjectOption = {
+  id: string
+  name: string
+}
