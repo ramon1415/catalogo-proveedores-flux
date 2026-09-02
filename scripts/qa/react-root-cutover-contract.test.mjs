@@ -41,11 +41,23 @@ test('public token and quick-approval URLs remain canonical', () => {
   assert.ok(!vercel.redirects.some((item) => item.source === '/approval_batch_quick_approve.html'))
 })
 
+test('React comprobantes keeps its vendored PDF runtime at the canonical root', () => {
+  for (const asset of [
+    'pdfjs-3.11.174.min.js',
+    'pdfjs-worker-3.11.174.min.js',
+    'pdf-lib-1.17.1.min.js',
+    'payment_batch_parser.js',
+    'payment_batch_single_page_pdf.js',
+  ]) {
+    assert.ok(build.includes(`'${asset}'`), `${asset} must remain at the canonical root`)
+  }
+})
+
 test('vanilla rollback and legacy API bridge are explicit', () => {
   assert.match(build, /legacyOutput/)
   assert.ok(vercel.rewrites.some((item) => item.source === '/legacy/api/:path*' && item.destination === '/api/:path*'))
   assert.match(app, /src="\/legacy\/comprobantes_batch\.html"/)
-  assert.match(app, /src="\/legacy\/provider_intakes\.html"/)
+  assert.match(app, /path="solicitudes-proveedores" element={<ProviderIntakesPage \/>}/)
   assert.match(app, /src="\/legacy\/approval_batches\.html"/)
 })
 
@@ -53,7 +65,13 @@ test('built artifact separates React, public links and vanilla rollback', { skip
   const rootIndex = read('.vercel-static/index.html')
   assert.match(rootIndex, /<div id="root"><\/div>/)
   assert.ok(existsSync(new URL('../../.vercel-static/legacy/solicitudes.html', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/legacy/provider_intakes.html', import.meta.url)))
   assert.ok(existsSync(new URL('../../.vercel-static/solicitar.html', import.meta.url)))
   assert.ok(existsSync(new URL('../../.vercel-static/approval_batch_quick_approve.html', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/pdfjs-3.11.174.min.js', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/pdfjs-worker-3.11.174.min.js', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/pdf-lib-1.17.1.min.js', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/payment_batch_parser.js', import.meta.url)))
+  assert.ok(existsSync(new URL('../../.vercel-static/payment_batch_single_page_pdf.js', import.meta.url)))
   assert.ok(!existsSync(new URL('../../.vercel-static/solicitudes.html', import.meta.url)))
 })
