@@ -239,3 +239,60 @@ export type ContpaqMappingRow = {
 }
 
 export type ContpaqFilter = 'todas' | 'revisar' | 'sinmapear'
+
+// Sub-secciones del tab Mapeo CONTPAQ.
+export type ContpaqSubTab = 'partidas' | 'impuestos' | 'proveedores' | 'bancos'
+
+// Llaves fiscales fijas que consume el módulo contable (mapeoEmpresa.impuestos).
+export type TaxKey =
+  | 'ivaAcreditablePagado'
+  | 'ivaRetenidoAcreditable'
+  | 'retIvaPasivo'
+  | 'retIsrPasivo'
+  | 'ivaPendiente'
+  | 'ajusteRedondeo'
+  | 'noDeducibles'
+
+export type TaxMappingRow = {
+  tax_key: TaxKey
+  contpaq_account_code: string
+  needs_review: boolean
+}
+
+export type ProviderMappingRow = {
+  proveedor_id: string
+  contpaq_account_code: string | null
+  contpaq_provider_id: string | null
+}
+
+export type BankMappingRow = {
+  company_bank_account_id: string
+  contpaq_account_code: string
+}
+
+// Referencia de solo-lectura importada de CONTPAQ para el picker de terceros.
+export type ContpaqTercero = {
+  id_contpaq: string
+  nombre: string
+  rfc: string | null
+  tipo_tercero: 'proveedor' | 'cliente'
+}
+
+// Proveedor Flux (columnas reales de la tabla proveedores).
+export type ProveedorRow = {
+  id: string
+  alias: string | null
+  nombre_completo: string | null
+  rfc: string | null
+  activo: boolean | null
+}
+
+// Cuenta bancaria de la empresa (subset para el mapeo de bancos).
+export type BankAccountRow = {
+  id: string
+  company_id: string | null
+  name: string | null
+  bank_name: string | null
+  last4: string | null
+  active: boolean | null
+}
