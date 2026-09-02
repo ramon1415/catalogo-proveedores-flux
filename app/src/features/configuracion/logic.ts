@@ -49,9 +49,12 @@ const TAB_ACCESS: Record<ConfigTab, RoleGroup[]> = {
   contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   system: [ROLE_GROUPS.SYSADMIN],
   empresas: [ROLE_GROUPS.SYSADMIN],
+  // El catálogo lo da de alta Finanzas (ADMIN = grupo finanzas/tesorería);
+  // Dirección lo consulta porque es quien lee el reporte de costo por proyecto.
+  proyectos: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
 }
 
-export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system', 'empresas']
+export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system', 'empresas', 'proyectos']
 
 export const TAB_LABELS: Record<ConfigTab, string> = {
   members: 'Socios',
@@ -60,6 +63,7 @@ export const TAB_LABELS: Record<ConfigTab, string> = {
   contpaq: 'Mapeo CONTPAQ',
   system: 'Usuarios',
   empresas: 'Empresas',
+  proyectos: 'Proyectos',
 }
 
 export const TAB_BADGES: Record<ConfigTab, string> = {
@@ -69,6 +73,7 @@ export const TAB_BADGES: Record<ConfigTab, string> = {
   contpaq: 'Adm/Dir',
   system: 'SysAdmin',
   empresas: 'SysAdmin',
+  proyectos: 'Adm/Dir',
 }
 
 export function canAccessConfigTab(tab: string, group: RoleGroup): boolean {
@@ -91,6 +96,8 @@ const TAB_QUERY_MAP: Record<string, ConfigTab> = {
   sistema: 'system',
   usuarios: 'system',
   empresas: 'empresas',
+  proyectos: 'proyectos',
+  projects: 'proyectos',
 }
 
 export function resolveRequestedTab(raw: string): string {
@@ -287,4 +294,24 @@ export function friendlyRoutingError(error: any): string {
 // ── Mapeo CONTPAQ ────────────────────────────────────────────────
 export function errorMessage(err: any): string {
   return err?.message || String(err)
+}
+
+// ── Proyectos ────────────────────────────────────────────────────
+// El índice único es por (company_id, lower(trim(name))): el duplicado es el
+// error esperable al capturar, así que se nombra en vez de mostrar el 23505.
+export function projectErrorMessage(err: any): string {
+  const code = String(err?.code || '')
+  const msg = String(err?.message || err || '')
+  if (code === '23505' || msg.includes('projects_company_name')) {
+    return 'Ya existe un proyecto con ese nombre en esta empresa.'
+  }
+  if (code === '42501' || msg.toLowerCase().includes('row-level security')) {
+    return 'No tienes permiso para administrar proyectos de esta empresa.'
+  }
+  return msg || 'Error desconocido'
+}
+
+export function validateProject(name: string): string {
+  if (!name.trim()) return 'Captura el nombre del proyecto.'
+  return ''
 }

@@ -6,7 +6,7 @@ import {
   loadBudgetAvailability, listApproverOptions, createPaymentRequest,
   updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
-  insertReimbursementItems,
+  insertReimbursementItems, loadActiveProjects, setRequestProject,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -29,7 +29,7 @@ import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
-  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert,
+  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert, ProjectOption,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -131,6 +131,12 @@ export function RequestModal({
   const [bankAccount, setBankAccount] = useState<EmployeeBankAccount | null>(null)
   const [bankLoading, setBankLoading] = useState(false)
   const [items, setItems] = useState<ReimbursementDraftItem[]>([emptyReimbursementItem()])
+
+  // ── Proyecto (opcional) ──────────────────────────────────────────────────
+  // Etiqueta para poder sumar el costo de un esfuerzo que cruza varias
+  // facturas. Se usa poco: si la empresa no tiene catálogo, el campo no existe.
+  const [projects, setProjects] = useState<ProjectOption[]>([])
+  const [projectId, setProjectId] = useState('')
 
   const [budgetRows, setBudgetRows] = useState<BudgetAvailabilityRow[]>([])
   const [categoryHelp, setCategoryHelp] = useState({ text: 'Selecciona empresa, centro de costo y mes para cargar partidas disponibles.', state: '' })
@@ -347,6 +353,19 @@ export function RequestModal({
     setApproverHelp({ text, color })
   }
 
+  // El catálogo es por empresa: al cambiarla se recarga y se limpia la
+  // selección previa, que ya no pertenece al nuevo catálogo.
+  useEffect(() => {
+    if (!companyId) { setProjects([]); setProjectId(''); return }
+    let active = true
+    loadActiveProjects(companyId).then((rows) => {
+      if (!active) return
+      setProjects(rows)
+      setProjectId((prev) => (rows.some((p) => p.id === prev) ? prev : ''))
+    })
+    return () => { active = false }
+  }, [companyId])
+
   // Recarga aprobadores cuando cambian empresa/CC (inmediato) o monto (debounce).
   useEffect(() => {
     loadApprovers()
@@ -531,6 +550,13 @@ export function RequestModal({
       if (cfdiFull.current) {
         const cfdiWarning = await saveCfdiData(requestId, cfdiFull.current)
         if (cfdiWarning) showToast('CFDI no persistido', cfdiWarning, 'warning')
+      }
+
+      // Proyecto: el RPC no conoce project_id, así que se etiqueta después.
+      // Aplica a cualquier tipo de solicitud y nunca bloquea la creación.
+      if (projectId) {
+        const projectWarning = await setRequestProject(requestId, projectId)
+        if (projectWarning) showToast('Proyecto no etiquetado', projectWarning, 'warning')
       }
 
       // Metadata local de efectivo/cheque (persistCashMetadataIfNeeded).
@@ -789,6 +815,17 @@ export function RequestModal({
                     <label>Mes presupuestal *
                       <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
                     </label>
+                    {/* Opcional y discreto: solo aparece si Finanzas dio de alta
+                        proyectos para esta empresa. Sin catálogo no estorba. */}
+                    {projects.length > 0 && (
+                      <label>Proyecto
+                        <select className={s.formControl} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                          <option value="">Sin proyecto</option>
+                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <div className={s.fieldHint}>Solo si este gasto forma parte de un proyecto con costo a medir.</div>
+                      </label>
+                    )}
                   </div>
                 </section>
 

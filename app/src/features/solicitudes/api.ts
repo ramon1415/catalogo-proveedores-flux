@@ -5,7 +5,7 @@ import type {
   BudgetAvailabilityRow, ApproverCandidate, ApprovalHistoryRow, PaymentReceiptRow,
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
   EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
-  ReimbursementItemInsert,
+  ReimbursementItemInsert, ProjectOption,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
@@ -554,4 +554,35 @@ export async function getReceiptUrl(storagePath: string): Promise<string | null>
 export async function linkInvoicePath(requestId: string, storagePath: string): Promise<void> {
   const { error } = await supabase.from('payment_requests').update({ invoice_storage_path: storagePath }).eq('id', requestId)
   if (error) throw error
+}
+
+// ── Proyectos ──────────────────────────────────────────────────────────────
+// Catálogo opcional por empresa. Si la empresa no tiene proyectos activos, el
+// campo ni siquiera se muestra, así que un fallo se trata como "sin catálogo"
+// en lugar de romper el formulario.
+export async function loadActiveProjects(companyId: string): Promise<ProjectOption[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id,name')
+    .eq('company_id', companyId)
+    .eq('active', true)
+    .order('name', { ascending: true })
+  if (error) return []
+  return (data ?? []) as ProjectOption[]
+}
+
+// Mismo patrón que setBeneficiaryProfile: create_payment_request no conoce
+// project_id, y la solicitud no debe perderse si este update falla. El proyecto
+// es una etiqueta opcional, así que solo se avisa.
+export async function setRequestProject(requestId: string, projectId: string): Promise<string> {
+  try {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({ project_id: projectId, updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (!error) return ''
+    return 'La solicitud se creó, pero no se pudo etiquetar con el proyecto seleccionado.'
+  } catch {
+    return 'La solicitud se creó, pero no se pudo etiquetar con el proyecto seleccionado.'
+  }
 }

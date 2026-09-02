@@ -353,3 +353,10 @@ export type DecisionAction =
   | 'approved' | 'rejected' | 'changes_requested'
   | 'exception_approved' | 'exception_rejected'
   | 'amount_change_requested' | 'category_change_requested' | 'budget_adjustment_requested'
+
+// Proyecto (catálogo opcional que administra Finanzas en Configuración). En la
+// solicitud solo se necesita lo mínimo para pintar el selector.
+export type ProjectOption = {
+  id: string
+  name: string
+}
