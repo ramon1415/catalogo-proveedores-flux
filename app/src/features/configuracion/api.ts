@@ -31,6 +31,8 @@ import type {
   PaidRequestRow,
   AccountingExportRow,
   AccountingExportInsert,
+  Project,
+  ProjectPayload,
 } from './types'
 import { groupFromRoleNames } from './logic'
 
@@ -588,5 +590,46 @@ export async function deleteBankMapping(companyId: string, bankAccountId: string
     .delete()
     .eq('company_id', companyId)
     .eq('company_bank_account_id', bankAccountId)
+  if (error) throw error
+}
+
+// ── Proyectos ────────────────────────────────────────────────────
+// El catálogo se administra por empresa. Se traen activos e inactivos: el tab
+// necesita ver los desactivados para poder reactivarlos.
+export async function loadProjects(companyId: string): Promise<Project[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id,company_id,name,description,active,created_at,updated_at')
+    .eq('company_id', companyId)
+    .order('name', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Project[]
+}
+
+export async function createProject(companyId: string, payload: ProjectPayload): Promise<Project> {
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({ company_id: companyId, name: payload.name, description: payload.description })
+    .select('id,company_id,name,description,active,created_at,updated_at')
+    .single()
+  if (error) throw error
+  return data as Project
+}
+
+export async function updateProject(id: string, payload: ProjectPayload): Promise<void> {
+  const { error } = await supabase
+    .from('projects')
+    .update({ name: payload.name, description: payload.description, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw error
+}
+
+// Nunca se borra: un proyecto con gastos históricos debe conservarse para que
+// el reporte de costo siga cuadrando. Desactivar solo lo saca del selector.
+export async function setProjectActive(id: string, active: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('projects')
+    .update({ active, updated_at: new Date().toISOString() })
+    .eq('id', id)
   if (error) throw error
 }

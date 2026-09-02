@@ -1,6 +1,25 @@
 // Tipos de la sección Configuración (portados 1:1 de configuracion.js vanilla).
 
-export type ConfigTab = 'members' | 'originAccounts' | 'budgets' | 'contpaq' | 'system' | 'empresas'
+export type ConfigTab = 'members' | 'originAccounts' | 'budgets' | 'contpaq' | 'system' | 'empresas' | 'proyectos'
+
+// ── Proyectos ────────────────────────────────────────────────────
+// Catálogo por empresa que Finanzas da de alta; las solicitudes lo referencian
+// de forma opcional para poder sumar el costo de un esfuerzo que cruza varias
+// facturas/proveedores.
+export type Project = {
+  id: string
+  company_id: string
+  name: string
+  description: string | null
+  active: boolean
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type ProjectPayload = {
+  name: string
+  description: string | null
+}
 
 // ── Cuentas origen ───────────────────────────────────────────────
 export type Company = {

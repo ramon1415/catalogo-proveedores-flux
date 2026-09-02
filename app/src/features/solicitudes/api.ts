@@ -4,7 +4,8 @@ import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
   BudgetAvailabilityRow, ApproverCandidate, ApprovalHistoryRow, PaymentReceiptRow,
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
-  EditPayload, DecisionAction, CashFund,
+  EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
+  ReimbursementItemInsert, ProjectOption,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
@@ -44,6 +45,16 @@ export async function loadProveedores(): Promise<Proveedor[]> {
 
 export async function loadProfiles(): Promise<Profile[]> {
   const { data, error } = await supabase.from('profiles').select('id,full_name,email')
+  if (error) return []
+  return (data ?? []) as Profile[]
+}
+
+// Perfiles activos, para elegir beneficiario de un reembolso. `active` puede
+// venir null en perfiles viejos: solo se descartan los explícitamente inactivos.
+export async function loadActiveProfiles(companyId: string): Promise<Profile[]> {
+  const { data, error } = await supabase.rpc('list_reimbursement_beneficiaries', {
+    p_company_id: companyId,
+  })
   if (error) return []
   return (data ?? []) as Profile[]
 }
@@ -145,6 +156,8 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
     p_tax_amount: payload.tax_amount,
     p_withholding_amount: payload.withholding_amount,
     p_invoice_uuid: payload.invoice_uuid,
+    p_beneficiary_profile_id: payload.beneficiary_profile_id,
+    p_request_type: payload.request_type,
   })
   if (error) throw error
   return data
@@ -191,6 +204,82 @@ function isMissingFase2ColumnError(error: any): boolean {
   const message = String(error?.message || error || '').toLowerCase()
   const code = String(error?.code || '').toUpperCase()
   return code === 'PGRST204' || message.includes('schema cache') || message.includes('payment_method') || message.includes('request_type')
+}
+
+// ── Reembolsos ─────────────────────────────────────────────────────────────
+// Datos bancarios del empleado que cobra. RLS: cada quien ve los suyos y
+// Finanzas los ve todos; si el usuario no puede leerlos, se devuelve null y la
+// UI pide capturarlos (nunca revienta el formulario).
+export async function loadEmployeeBankAccount(profileId: string, companyId: string): Promise<EmployeeBankAccount | null> {
+  const { data, error } = await supabase
+    .from('employee_bank_accounts')
+    .select('profile_id,company_id,banco,clabe,cuenta,beneficiary_name,updated_at')
+    .eq('profile_id', profileId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (error) return null
+  return (data as EmployeeBankAccount) || null
+}
+
+export async function upsertEmployeeBankAccount(account: EmployeeBankAccount): Promise<void> {
+  const { error } = await supabase
+    .from('employee_bank_accounts')
+    .upsert({ ...account, updated_at: new Date().toISOString() }, { onConflict: 'profile_id,company_id' })
+  if (error) throw error
+}
+
+// Se guarda DESPUÉS de create_payment_request: el RPC no conoce la columna, y
+// la solicitud no debe perderse si este update falla. Devuelve warning, no lanza.
+export async function setBeneficiaryProfile(requestId: string, profileId: string): Promise<string> {
+  try {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({ beneficiary_profile_id: profileId, updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (!error) return ''
+    return 'La solicitud se creó, pero no se pudo registrar al beneficiario del reembolso.'
+  } catch {
+    return 'La solicitud se creó, pero no se pudo registrar al beneficiario del reembolso.'
+  }
+}
+
+// Insert del desglose. No bloqueante por la misma razón: la solicitud ya existe.
+export async function insertReimbursementItems(items: ReimbursementItemInsert[]): Promise<string> {
+  if (!items.length) return ''
+  try {
+    const { error } = await supabase.from('reimbursement_items').insert(items)
+    if (!error) return ''
+    // El índice único por folio fiscal es la defensa contra reembolsar dos
+    // veces el mismo CFDI; conviene decirlo con nombre propio.
+    if (String(error.code || '') === '23505') {
+      return 'La solicitud se creó, pero uno de los comprobantes ya fue reembolsado antes (folio fiscal duplicado). Revisa el desglose.'
+    }
+    return 'La solicitud se creó, pero el desglose de gastos no pudo guardarse.'
+  } catch {
+    return 'La solicitud se creó, pero el desglose de gastos no pudo guardarse.'
+  }
+}
+
+export async function loadReimbursementItems(requestId: string): Promise<ReimbursementItem[]> {
+  const { data, error } = await supabase
+    .from('reimbursement_items')
+    .select('id,payment_request_id,company_id,budget_category_id,descripcion,amount,subtotal_amount,tax_amount,deducible,invoice_uuid,storage_path,created_at')
+    .eq('payment_request_id', requestId)
+    .order('created_at', { ascending: true })
+  if (error) return []
+  return (data ?? []) as ReimbursementItem[]
+}
+
+// Beneficiario de la solicitud. Consulta aparte de PAYMENT_REQUEST_COLUMNS para
+// no romper la lista en ambientes sin la migración de reembolsos.
+export async function loadBeneficiaryProfileId(requestId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select('beneficiary_profile_id')
+    .eq('id', requestId)
+    .maybeSingle()
+  if (error || !data) return null
+  return (data as { beneficiary_profile_id: string | null }).beneficiary_profile_id ?? null
 }
 
 // ── Alta rápida de proveedor (fase2 quick provider) ───────────────────────
@@ -464,4 +553,35 @@ export async function getReceiptUrl(storagePath: string): Promise<string | null>
 export async function linkInvoicePath(requestId: string, storagePath: string): Promise<void> {
   const { error } = await supabase.from('payment_requests').update({ invoice_storage_path: storagePath }).eq('id', requestId)
   if (error) throw error
+}
+
+// ── Proyectos ──────────────────────────────────────────────────────────────
+// Catálogo opcional por empresa. Si la empresa no tiene proyectos activos, el
+// campo ni siquiera se muestra, así que un fallo se trata como "sin catálogo"
+// en lugar de romper el formulario.
+export async function loadActiveProjects(companyId: string): Promise<ProjectOption[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id,name')
+    .eq('company_id', companyId)
+    .eq('active', true)
+    .order('name', { ascending: true })
+  if (error) return []
+  return (data ?? []) as ProjectOption[]
+}
+
+// Mismo patrón que setBeneficiaryProfile: create_payment_request no conoce
+// project_id, y la solicitud no debe perderse si este update falla. El proyecto
+// es una etiqueta opcional, así que solo se avisa.
+export async function setRequestProject(requestId: string, projectId: string): Promise<string> {
+  try {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update({ project_id: projectId, updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (!error) return ''
+    return 'La solicitud se creó, pero no se pudo etiquetar con el proyecto seleccionado.'
+  } catch {
+    return 'La solicitud se creó, pero no se pudo etiquetar con el proyecto seleccionado.'
+  }
 }
