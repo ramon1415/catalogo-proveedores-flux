@@ -7,6 +7,8 @@ export type CfdiBreakdown = {
   total: number | null
   traslados: number | null
   retenciones: number | null
+  uuid: string | null
+  rfcEmisor: string | null
 }
 
 export async function parseCfdiFile(file: File): Promise<CfdiBreakdown | null> {
@@ -37,8 +39,13 @@ export async function parseCfdiFile(file: File): Promise<CfdiBreakdown | null> {
       break
     }
 
+    const timbre = comprobante.getElementsByTagNameNS('*', 'TimbreFiscalDigital')[0] ?? null
+    const uuid = timbre?.getAttribute('UUID')?.trim().toUpperCase() || null
+    const emisor = comprobante.getElementsByTagNameNS('*', 'Emisor')[0] ?? null
+    const rfcEmisor = emisor?.getAttribute('Rfc')?.trim().toUpperCase() || null
+
     if (subtotal == null && total == null) return null
-    return { subtotal, total, traslados, retenciones }
+    return { subtotal, total, traslados, retenciones, uuid, rfcEmisor }
   } catch {
     return null
   }

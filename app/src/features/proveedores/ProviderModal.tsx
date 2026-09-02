@@ -7,6 +7,7 @@ import {
   messageForSaveError,
 } from './logic'
 import { saveProvider, uploadProviderCsf, getCsfSignedUrl } from './api'
+import { parseCsfFile } from '../../lib/csf'
 import { useToast } from '../../components/ui/Toast'
 import s from './Proveedores.module.css'
 
@@ -83,9 +84,11 @@ export function ProviderModal({
   onSaved: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const csfParseVersion = useRef(0)
   const { showToast } = useToast()
   const [f, setF] = useState<FormState>(EMPTY)
   const [csfFile, setCsfFile] = useState<File | null>(null)
+  const [csfParseHint, setCsfParseHint] = useState('')
   const [saving, setSaving] = useState(false)
 
   const readonly = mode === 'readonly'
@@ -146,6 +149,37 @@ export function ProviderModal({
       if (value === 'convenio') next.tipo_cuenta = ''
       return next
     })
+  }
+
+  async function onCsfFile(file: File | null) {
+    const parseVersion = ++csfParseVersion.current
+    setCsfFile(file)
+    setCsfParseHint('')
+    if (!file || (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name))) return
+
+    const csf = await parseCsfFile(file)
+    if (parseVersion !== csfParseVersion.current) return
+    if (!csf) {
+      setCsfParseHint('No se pudo leer la CSF (¿es un escaneo?). Captura los datos manualmente.')
+      return
+    }
+
+    setF((prev) => ({
+      ...prev,
+      rfc: prev.rfc || (csf.rfc ?? ''),
+      nombre_completo: prev.nombre_completo || (csf.nombre ?? ''),
+      persona_tipo: prev.persona_tipo || (csf.personaTipo ?? ''),
+      notas:
+        prev.notas ||
+        [
+          csf.regimen && `Régimen: ${csf.regimen}`,
+          csf.codigoPostal && `CP: ${csf.codigoPostal}`,
+          csf.idCif && `idCIF: ${csf.idCif}`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+    }))
+    setCsfParseHint('Datos precargados desde la CSF. Verifícalos antes de guardar.')
   }
 
   async function onViewCsf() {
@@ -336,8 +370,8 @@ export function ProviderModal({
 
             <label className={s.fullRow}>Constancia de Situación Fiscal (CSF)
               <input type="file" accept="application/pdf,image/*" disabled={dis || !canUploadCsf}
-                onChange={(e) => setCsfFile(e.target.files?.[0] ?? null)} />
-              <span className={s.hint}>{csfHint}</span>
+                onChange={(e) => void onCsfFile(e.target.files?.[0] ?? null)} />
+              <span className={s.hint}>{csfParseHint || csfHint}</span>
               {isEdit && currentCsfPath && !readonly && (
                 <button type="button" className={s.smallBtn} onClick={onViewCsf}>Ver CSF</button>
               )}
