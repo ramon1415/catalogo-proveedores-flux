@@ -76,7 +76,7 @@ export async function loadBudgetAvailability(
   costCenterId: string,
   budgetMonth: string,
 ): Promise<BudgetAvailabilityRow[]> {
-  const [availRes, relRes] = await Promise.all([
+  const [availRes, relRes, sharedRes] = await Promise.all([
     supabase
       .from('budget_availability')
       .select('*')
@@ -89,15 +89,35 @@ export async function loadBudgetAvailability(
       .select('budget_category_id, responsible_email')
       .eq('company_id', companyId)
       .eq('cost_center_id', costCenterId),
+    // Responsables compartidos: permite que una partida conserve a su titular
+    // y sea visible para más integrantes sin sobrescribir la asignación previa.
+    supabase
+      .from('company_cost_center_budget_category_responsibles')
+      .select('budget_category_id, responsible_email')
+      .eq('company_id', companyId)
+      .eq('cost_center_id', costCenterId),
   ])
   if (availRes.error) throw availRes.error
   if (relRes.error) throw relRes.error
-  const respByCat = new Map(
-    (relRes.data ?? []).map((r: { budget_category_id: string; responsible_email: string | null }) => [r.budget_category_id, r.responsible_email]),
-  )
+  if (sharedRes.error) throw sharedRes.error
+  const respByCat = new Map<string, Set<string>>()
+  function addResponsible(budgetCategoryId: string, email: string | null) {
+    const normalized = String(email || '').trim().toLowerCase()
+    if (!normalized) return
+    const emails = respByCat.get(budgetCategoryId) ?? new Set<string>()
+    emails.add(normalized)
+    respByCat.set(budgetCategoryId, emails)
+  }
+  for (const row of relRes.data ?? []) {
+    addResponsible(row.budget_category_id, row.responsible_email)
+  }
+  for (const row of sharedRes.data ?? []) {
+    addResponsible(row.budget_category_id, row.responsible_email)
+  }
   return (availRes.data ?? []).map((r) => ({
     ...(r as BudgetAvailabilityRow),
-    responsible_email: respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? null,
+    responsible_email: [...(respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? [])][0] ?? null,
+    responsible_emails: [...(respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? [])],
   }))
 }
 
