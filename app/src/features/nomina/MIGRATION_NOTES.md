@@ -1,6 +1,28 @@
 # Migración: Nómina — rail de captura N2B/N3G (vanilla → React)
 
-Portado 1:1 desde el **rail de captura**, no desde las 5 "páginas". El core vive
+## WS4 · Captura en una pantalla (septiembre 2026)
+
+La captura nueva colapsa la metadata, selección de canales y slots tipados en
+un dropzone múltiple, un resumen agregado y el CTA **Registrar y enviar a
+aprobación**. No modifica RPCs, migraciones ni Edge Functions.
+
+- La empresa permanece fijada por `useCompany`; no se agrega un selector de
+  alcance alterno.
+- `payroll_subtype` usa `ordinaria` como default contractual.
+- Los parsers certificados de `payroll_real_formats.js` y `speiParser.ts`
+  clasifican por contenido. La UI descarta PII y conserva sólo conteos/totales.
+- Los canales se derivan de los archivos presentes; ya no hay checkboxes.
+- Cuenta y centro de costo se precargan si sólo existe una opción o desde el
+  último valor local recordado para la empresa.
+- Como el parser canónico de carátula aún no expone fechas, el periodo se
+  infiere de nombres físicos no ambiguos (`fwdnom16_2026`, `Qna 16_2026`) y se
+  abre el detalle para captura manual cuando esa señal no existe.
+- La acción conserva el orden N3G: guardar sesión → reservar/subir/confirmar
+  cada archivo → `payroll-materialize` → resumen/gates → aprobación.
+- La varianza TOKA, presupuesto no listo o múltiples aprobadores detienen el
+  avance en la misma pantalla; ningún gate se omite.
+
+El contrato se conserva 1:1 desde el **rail de captura**, no desde las 5 "páginas". El core vive
 en `payroll_capture.js` (600 líneas) + el gate de presupuesto de
 `budget_live_frontend_guards.js`. En el vanilla la captura se **inyecta dentro
 del diálogo "Nueva solicitud" de `solicitudes.html`** cuando `requestType =
@@ -27,9 +49,8 @@ nomina` y el usuario es Finanzas. En React se reconstruye como página autónoma
 - `company_bank_accounts` — cuenta origen de Tesorería (`active=true`,
   `account_type='bank'`, `currency='MXN'`). Se enmascara siempre (últimos 4).
 - `cost_centers` (activos) + `company_cost_centers` (mapeo empresa↔CC activo).
-- `companies` — selector de empresa. **Nuevo respecto al vanilla**: en vanilla el
-  `companyId` venía del `<select id="companyId">` del form de Solicitudes; como
-  página autónoma se lee `companies` directo. Es la única lectura añadida.
+- La empresa no se consulta por separado: `companyId` proviene exclusivamente
+  de `useCompany` y se muestra bloqueado a la empresa activa.
 
 ## Los 8 RPCs del contrato (nombre + params, tal cual)
 Verificados contra `supabase/migrations/*payroll*`:
@@ -153,11 +174,13 @@ presupuesto + envío a aprobación. Es el equivalente exacto de lo que
   de rol, bucket.
 - `speiParser.ts` — parser SPEI certificado portado 1:1 de `payroll_parser.js`
   (`parsePayrollSpeiTxt`, `summarizePayrollSpeiForCapture` + helpers puros).
+- `physicalParsers.ts` — adaptador de clasificación que empaqueta y reutiliza
+  `payroll_real_formats.js`; descarta PII y expone sólo diagnósticos agregados.
 - `api.ts` — los 8 RPCs + subida 2 fases + Edge `payroll-materialize` + lecturas.
 - `NominaPage.tsx` — default export: gate de rol + tablero de capturas + botón
   "Nueva captura".
-- `CaptureModal.tsx` — el rail completo (form, canales, cards de archivo,
-  validación, resumen, varianza, gate presupuesto, submit).
+- `CaptureModal.tsx` — dropzone único, resumen, detalles colapsados y una acción
+  orquestadora; conserva varianza, gate de presupuesto y envío a aprobación.
 - `Nomina.module.css` — estilos portados de `payrollN3gStyles` + `payroll-n5b`.
 
 ## Discrepancias con el brief (contrato manda) y riesgos/gaps de paridad
@@ -171,7 +194,8 @@ presupuesto + envío a aprobación. Es el equivalente exacto de lo que
    confirmarlo en el código y no cambiarlo).
 3. **Materialize es Edge Function**, no RPC — incluida por ser parte del rail;
    marcada como tal. Si el entorno no tiene desplegada `payroll-materialize`, el
-   flujo se corta en "Validar y materializar" (mismo comportamiento que vanilla).
+   la acción única se detiene durante la validación del servidor (mismo gate que
+   el vanilla; no se materializa ni se envía a aprobación).
 4. **Empresa activa**: el selector ya no consulta `companies`. Toma únicamente
    la membresía activa del shell React y queda bloqueado a esa empresa. Cuentas,
    centros y sesiones se reducen al mismo scope.

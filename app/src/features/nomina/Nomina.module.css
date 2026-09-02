@@ -180,6 +180,245 @@
   font-size: 12px;
   line-height: 1.5;
 }
+.introRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.dropzone {
+  position: relative;
+  min-height: 150px;
+  padding: 24px;
+  border: 2px dashed var(--border);
+  border-radius: 15px;
+  background: var(--bg-input);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+.dropzone:hover,
+.dropzoneActive {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.dropzoneActive {
+  transform: scale(1.005);
+}
+.dropzone strong {
+  color: var(--text-1);
+  font-size: 15px;
+}
+.dropzone span {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.dropzone .dropzoneAction {
+  margin-top: 7px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 750;
+}
+.dropzone input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.inlineNotice {
+  padding: 9px 11px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 9px;
+  background: var(--amber-dim);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.detectedPanel,
+.onePageSummary {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+.panelHeading,
+.summaryTop {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.panelHeading strong,
+.summaryTop strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 13px;
+  margin-top: 3px;
+}
+.channelChips {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.channelChips span {
+  padding: 4px 8px;
+  border: 1px solid rgba(18, 183, 106, 0.28);
+  border-radius: 999px;
+  background: var(--emerald-dim);
+  color: var(--emerald);
+  font-size: 9.5px;
+  font-weight: 750;
+}
+.fileRows {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+}
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, auto) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+.fileRowDanger {
+  border-color: rgba(224, 62, 82, 0.32);
+  background: var(--ruby-dim);
+}
+.fileRow > div:first-child {
+  min-width: 0;
+}
+.fileRow > div:first-child strong,
+.fileRow > div:first-child span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileRow > div:first-child strong {
+  color: var(--text-1);
+  font-size: 12px;
+}
+.fileRow > div:first-child span {
+  color: var(--text-3);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.fileRow select {
+  height: 34px;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-1);
+  padding: 0 8px;
+}
+.fileAggregate {
+  text-align: right;
+}
+.fileAggregate span,
+.fileAggregate strong {
+  display: block;
+  font-size: 10px;
+}
+.fileAggregate span {
+  color: var(--text-3);
+}
+.fileAggregate strong {
+  color: var(--text-1);
+  margin-top: 2px;
+}
+.iconBtn {
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.iconBtn:hover {
+  color: var(--ruby);
+}
+.summaryMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  padding: 12px 14px 0;
+}
+.onePageSummary .channelList,
+.onePageSummary .issues,
+.onePageSummary .localChecks {
+  margin: 11px 14px 0;
+}
+.localChecks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.checkPass,
+.checkWarning {
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+}
+.checkPass {
+  color: var(--emerald);
+  background: var(--emerald-dim);
+  border-color: rgba(18, 183, 106, 0.28);
+}
+.checkWarning {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.details {
+  margin: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.details summary {
+  padding: 11px 12px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  background: var(--bg-input);
+}
+.details .grid {
+  padding: 12px;
+}
+.primaryAction {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 7px;
+}
+.primaryAction small {
+  color: var(--text-3);
+  font-size: 9.5px;
+  text-align: center;
+}
+.primaryWide {
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -493,7 +732,8 @@
 @media (max-width: 720px) {
   .grid,
   .fileGrid,
-  .metrics {
+  .metrics,
+  .summaryMetrics {
     grid-template-columns: 1fr;
   }
   .approval {
@@ -501,5 +741,17 @@
   }
   .boardItem {
     grid-template-columns: 1fr;
+  }
+  .introRow,
+  .panelHeading,
+  .summaryTop {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .fileRow {
+    grid-template-columns: 1fr;
+  }
+  .fileAggregate {
+    text-align: left;
   }
 }

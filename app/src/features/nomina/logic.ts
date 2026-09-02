@@ -7,6 +7,7 @@ import type {
   BankAccount,
   CompanyCostCenter,
   CostCenter,
+  FileMap,
   FileSlotState,
   PayrollChannel,
   PayrollSlot,
@@ -71,6 +72,107 @@ export function slotsForChannel(channel: PayrollChannel): PayrollSlot[] {
   if (channel === 'vales') return ['layout_toka', 'cfdi_vales']
   if (channel === 'banco') return ['layout_mismo_banco']
   return ['layout_spei']
+}
+
+export function channelsFromFiles(files: FileMap): PayrollChannel[] {
+  const channels: PayrollChannel[] = []
+  if (files.layout_mismo_banco) channels.push('banco')
+  if (files.layout_spei) channels.push('spei')
+  if (files.layout_toka || files.cfdi_vales) channels.push('vales')
+  return channels
+}
+
+export type InferredPayrollPeriod = {
+  periodNumber: number
+  year: number
+  periodStart: string
+  periodEnd: string
+  source: 'date_range' | 'period_number'
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match = value.match(/^(20\d{2})-(\d{2})-(\d{2})$/)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+// Los parsers físicos certificados todavía no exponen el periodo. El paquete
+// real sí lo codifica en nombres como fwdnom16_2026 o Qna 16_2026. Esta
+// inferencia exige una sola coincidencia y nunca reemplaza al servidor.
+export function inferPayrollPeriodFromFileNames(fileNames: string[]): InferredPayrollPeriod | null {
+  const names = (fileNames || []).map((name) => String(name || ''))
+  const explicitRanges = new Map<string, { start: string; end: string }>()
+  const periods = new Set<number>()
+  const years = new Set<number>()
+
+  for (const name of names) {
+    const range = name.match(/(20\d{2})[-_.](\d{2})[-_.](\d{2})\D+(20\d{2})[-_.](\d{2})[-_.](\d{2})/)
+    if (range) {
+      const start = `${range[1]}-${range[2]}-${range[3]}`
+      const end = `${range[4]}-${range[5]}-${range[6]}`
+      explicitRanges.set(`${start}/${end}`, { start, end })
+    }
+
+    const patterns = [
+      /fwdnom\s*0?(\d{1,2})[_-](20\d{2})/i,
+      /(?:qna|quincena|periodo|n[oó]mina)\s*[-_ ]*0?(\d{1,2})(?:\s*(?:de|\/|_|-)\s*(20\d{2}))?/i,
+    ]
+    for (const pattern of patterns) {
+      const match = name.match(pattern)
+      if (!match) continue
+      const period = Number(match[1])
+      if (period >= 1 && period <= 24) periods.add(period)
+      if (match[2]) years.add(Number(match[2]))
+      break
+    }
+    for (const match of name.matchAll(/(?:^|\D)(20\d{2})(?=\D|$)/g)) years.add(Number(match[1]))
+  }
+
+  if (explicitRanges.size === 1) {
+    const [{ start, end }] = Array.from(explicitRanges.values())
+    const startDate = new Date(`${start}T00:00:00Z`)
+    const endDate = new Date(`${end}T00:00:00Z`)
+    if (isValidIsoDate(start) && isValidIsoDate(end) && start <= end) {
+      const month = startDate.getUTCMonth() + 1
+      const half = startDate.getUTCDate() <= 15 ? 1 : 2
+      return {
+        periodNumber: (month - 1) * 2 + half,
+        year: startDate.getUTCFullYear(),
+        periodStart: start,
+        periodEnd: end,
+        source: 'date_range',
+      }
+    }
+  }
+
+  if (periods.size !== 1 || years.size !== 1) return null
+  const periodNumber = Array.from(periods)[0]
+  const year = Array.from(years)[0]
+  const month = Math.ceil(periodNumber / 2)
+  const secondHalf = periodNumber % 2 === 0
+  const startDay = secondHalf ? 16 : 1
+  const endDay = secondHalf ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 15
+  return {
+    periodNumber,
+    year,
+    periodStart: isoDate(year, month, startDay),
+    periodEnd: isoDate(year, month, endDay),
+    source: 'period_number',
+  }
+}
+
+export function defaultPayrollConcept(subtype: PayrollSubtype, periodStart: string, periodEnd: string): string {
+  if (!periodStart || !periodEnd) return ''
+  const label = subtype === 'extraordinaria' ? 'extraordinaria' : 'ordinaria'
+  return `Nómina ${label} ${periodStart} al ${periodEnd}`
 }
 
 // ── Cuentas origen / centros de costo ──────────────────────────────────────
@@ -174,6 +276,7 @@ export async function inspectFile(
     uploaded: false,
     status: 'server_verification_pending',
     file,
+    fileName: file.name,
     extension,
     mimeType,
     sizeBytes: file.size,
@@ -182,7 +285,21 @@ export async function inspectFile(
   }
 
   if (slot === 'layout_spei') {
-    const summary = summarizePayrollSpeiForCapture(buffer, sourceCandidates)
+    const parsedWithoutAccount = parsePayrollSpeiTxt(buffer)
+    const summary = sourceCandidates.length
+      ? summarizePayrollSpeiForCapture(buffer, sourceCandidates)
+      : {
+          parserVersion: parsedWithoutAccount.parserVersion,
+          contractVersion: parsedWithoutAccount.contractVersion,
+          valid: parsedWithoutAccount.issues.length === 0 && parsedWithoutAccount.records.length > 0,
+          recordCount: parsedWithoutAccount.issues.length === 0 ? parsedWithoutAccount.records.length : 0,
+          totalAmountMinor:
+            parsedWithoutAccount.issues.length === 0
+              ? parsedWithoutAccount.records.reduce((sum, record) => sum + record.amountMinor, 0)
+              : null,
+          currency: 'MXN',
+          issues: parsedWithoutAccount.issues,
+        }
     if (!summary.valid) {
       return { ...base, status: 'parser_error', uploadable: false, parserSummary: summary, issueCodes: ['PARSER_ERROR'] }
     }
@@ -200,8 +317,7 @@ export async function inspectFile(
     if (
       parsed.issues.length ||
       parsed.records.length !== 1 ||
-      !allowed.size ||
-      parsed.records.some((record) => !allowed.has(record.sourceAccount))
+      (allowed.size > 0 && parsed.records.some((record) => !allowed.has(record.sourceAccount)))
     ) {
       return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
     }

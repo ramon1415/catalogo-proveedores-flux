@@ -112,6 +112,21 @@ export type SpeiIssue = {
   field?: string
 }
 
+// Resumen local estrictamente agregado. Los parsers pueden leer PII para
+// validar los archivos en el navegador, pero la UI sólo conserva estos
+// conteos/totales y el servidor vuelve a interpretar los bytes como autoridad.
+export type LocalFileDiagnostic = {
+  contractVersion: string
+  recordCount: number | null
+  totalAmountMinor: number | null
+  cashAmountMinor?: number | null
+  vouchersAmountMinor?: number | null
+  benefitAmountMinor?: number | null
+  feeAmountMinor?: number | null
+  taxAmountMinor?: number | null
+  expectedFundingAmountMinor?: number | null
+}
+
 // Estado local de un slot en la UI antes/después de subir (equivalente a
 // state.files[slot] del vanilla).
 export type FileSlotState = {
@@ -120,11 +135,13 @@ export type FileSlotState = {
   uploaded: boolean
   status: string
   file?: File
+  fileName?: string
   extension?: string
   mimeType?: string
   sizeBytes?: number
   sha256?: string
   parserSummary?: SpeiParserSummary
+  localDiagnostic?: LocalFileDiagnostic
   recordCount?: number | null
   totalAmountMinor?: number | null
   issueCodes: string[]
