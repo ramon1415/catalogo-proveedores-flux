@@ -183,9 +183,14 @@ export function RequestModal({
     // responsable), cada quien ve SOLO sus partidas. Sysadmin ve todas. Empresas
     // sin responsables (p.ej. Operadora) no se filtran.
     const myEmail = (profile?.email || '').trim().toLowerCase()
-    const usesResponsible = budgetRows.some((r) => r.responsible_email)
+    const usesResponsible = budgetRows.some((r) => (r.responsible_emails?.length ?? 0) > 0 || r.responsible_email)
     const scoped = usesResponsible && group !== 'sysadmin'
-      ? budgetRows.filter((r) => String(r.responsible_email || '').trim().toLowerCase() === myEmail)
+      ? budgetRows.filter((r) => {
+          const emails = r.responsible_emails?.length
+            ? r.responsible_emails
+            : [String(r.responsible_email || '').trim().toLowerCase()]
+          return emails.includes(myEmail)
+        })
       : budgetRows
     const q = categorySearch.trim().toLowerCase()
     if (!q) return scoped
