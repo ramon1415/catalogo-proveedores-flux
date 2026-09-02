@@ -38,6 +38,13 @@ await cp(appDist, output, { recursive: true })
 // de URL. Los HTML internos antiguos se resuelven mediante redirects a React.
 const publicRootEntries = [
   'assets',
+  // El módulo React de Comprobantes carga estos runtimes vendored desde la
+  // raíz. Deben sobrevivir al cutover que conserva el vanilla bajo /legacy.
+  'pdfjs-3.11.174.min.js',
+  'pdfjs-worker-3.11.174.min.js',
+  'pdf-lib-1.17.1.min.js',
+  'payment_batch_parser.js',
+  'payment_batch_single_page_pdf.js',
   'solicitar.html',
   'solicitar.css',
   'solicitar.js',
