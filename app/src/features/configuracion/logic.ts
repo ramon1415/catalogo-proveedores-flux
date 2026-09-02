@@ -48,16 +48,18 @@ const TAB_ACCESS: Record<ConfigTab, RoleGroup[]> = {
   budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   system: [ROLE_GROUPS.SYSADMIN],
+  empresas: [ROLE_GROUPS.SYSADMIN],
 }
 
-export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system']
+export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system', 'empresas']
 
 export const TAB_LABELS: Record<ConfigTab, string> = {
   members: 'Socios',
   originAccounts: 'Cuentas origen',
   budgets: 'Presupuestos',
   contpaq: 'Mapeo CONTPAQ',
-  system: 'Sistema',
+  system: 'Usuarios',
+  empresas: 'Empresas',
 }
 
 export const TAB_BADGES: Record<ConfigTab, string> = {
@@ -66,6 +68,7 @@ export const TAB_BADGES: Record<ConfigTab, string> = {
   budgets: 'Trim.',
   contpaq: 'Adm/Dir',
   system: 'SysAdmin',
+  empresas: 'SysAdmin',
 }
 
 export function canAccessConfigTab(tab: string, group: RoleGroup): boolean {
@@ -86,6 +89,8 @@ const TAB_QUERY_MAP: Record<string, ConfigTab> = {
   contpaq: 'contpaq',
   system: 'system',
   sistema: 'system',
+  usuarios: 'system',
+  empresas: 'empresas',
 }
 
 export function resolveRequestedTab(raw: string): string {

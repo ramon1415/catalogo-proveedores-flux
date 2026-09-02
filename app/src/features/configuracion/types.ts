@@ -1,6 +1,6 @@
 // Tipos de la sección Configuración (portados 1:1 de configuracion.js vanilla).
 
-export type ConfigTab = 'members' | 'originAccounts' | 'budgets' | 'contpaq' | 'system'
+export type ConfigTab = 'members' | 'originAccounts' | 'budgets' | 'contpaq' | 'system' | 'empresas'
 
 // ── Cuentas origen ───────────────────────────────────────────────
 export type Company = {

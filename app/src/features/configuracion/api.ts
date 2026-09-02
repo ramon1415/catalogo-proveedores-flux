@@ -135,6 +135,12 @@ export async function assignRole(profileId: string, selected: string, aliases: s
   }
 }
 
+// Activa/desactiva el perfil global; no toca roles ni membresías (histórico intacto).
+export async function setProfileActive(profileId: string, active: boolean): Promise<void> {
+  const { error } = await supabase.from('profiles').update({ active }).eq('id', profileId)
+  if (error) throw error
+}
+
 // ── Solicitudes de acceso por empresa ───────────────────────────
 export async function listCompanyAccessRequests(): Promise<CompanyAccessRequest[]> {
   const { data, error } = await supabase.rpc('list_company_access_requests')
