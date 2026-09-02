@@ -241,7 +241,7 @@ export type ContpaqMappingRow = {
 export type ContpaqFilter = 'todas' | 'revisar' | 'sinmapear'
 
 // Sub-secciones del tab Mapeo CONTPAQ.
-export type ContpaqSubTab = 'partidas' | 'impuestos' | 'proveedores' | 'bancos'
+export type ContpaqSubTab = 'partidas' | 'impuestos' | 'proveedores' | 'bancos' | 'exportar'
 
 // Llaves fiscales fijas que consume el módulo contable (mapeoEmpresa.impuestos).
 export type TaxKey =
@@ -295,4 +295,50 @@ export type BankAccountRow = {
   bank_name: string | null
   last4: string | null
   active: boolean | null
+}
+
+// ── Export contable (FB-7) ───────────────────────────────────────
+// Fila de payment_requests pagada, con lo que consume el adapter del motor.
+export type PaidRequestRow = {
+  id: string
+  company_id: string | null
+  provider_id: string | null
+  proveedor_id: string | null
+  budget_category_id: string | null
+  cost_center_id: string | null
+  company_bank_account_id: string | null
+  amount_requested: number | string | null
+  currency: string | null
+  exchange_rate: number | string | null
+  concept: string | null
+  description: string | null
+  request_number: string | null
+  paid_at: string | null
+  payment_method: string | null
+  cfdi_data: Record<string, unknown> | null
+  proveedores: { rfc: string | null; nombre_completo: string | null; persona_tipo: string | null } | null
+}
+
+// Fila del ledger accounting_exports (subset que consume el export).
+export type AccountingExportRow = {
+  source_feeder: string
+  source_id: string
+  source_kind: string | null
+  status: string
+  tipo_pol: number
+  folio: number
+}
+
+// Fila a insertar en accounting_exports (salida de planRegistro del motor).
+export type AccountingExportInsert = {
+  source_feeder: string
+  source_id: string
+  source_kind: string
+  company_id: string | null
+  tipo_pol: number
+  folio: number
+  periodo: string
+  uuid_cfdi: string | null
+  status: string
+  content_hash: string
 }

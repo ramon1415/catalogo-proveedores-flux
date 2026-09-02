@@ -30,6 +30,8 @@ import type {
   ProveedorRow,
   BankAccountRow,
 } from '../types'
+import type { MapeoEmpresa } from '../../../lib/contpaq/export'
+import { ExportarSection } from '../ExportarSection'
 import s from '../Configuracion.module.css'
 
 // Lista FIJA de llaves fiscales que consume el módulo contable — el orden es el de captura.
@@ -354,7 +356,45 @@ export function ContpaqTab() {
     { key: 'impuestos', label: 'Impuestos', pending: pendientes.impuestos },
     { key: 'proveedores', label: 'Proveedores', pending: pendientes.proveedores },
     { key: 'bancos', label: 'Bancos', pending: pendientes.bancos },
+    { key: 'exportar', label: 'Exportar', pending: 0 },
   ]
+
+  // mapeoEmpresa con la forma que consume el motor de export (FB-7): las
+  // mismas capas que capturan las otras secciones, indexadas por id de negocio.
+  const mapeoEmpresa = useMemo<MapeoEmpresa>(() => {
+    const partida: Record<string, string> = {}
+    mappings.forEach((code, id) => { partida[id] = code })
+    const banco: Record<string, string> = {}
+    bankMap.forEach((code, id) => { banco[id] = code })
+    const proveedor: Record<string, { cuenta: string; idProveedor: number | string }> = {}
+    provMap.forEach((st, id) => {
+      // Solo cuenta como mapeado si tiene tercero CONTPAQ (idProveedor es lo
+      // que consumen los registros fiscales I/V).
+      if (st.terceroId) proveedor[id] = { cuenta: st.code ?? '', idProveedor: st.terceroId }
+    })
+    const impuesto: MapeoEmpresa['impuesto'] = {
+      ivaAcreditablePagado: taxMap.get('ivaAcreditablePagado')?.code,
+      ivaRetenidoAcreditable: taxMap.get('ivaRetenidoAcreditable')?.code,
+      retIvaPasivo: taxMap.get('retIvaPasivo')?.code,
+      retIsrPasivo: taxMap.get('retIsrPasivo')?.code,
+    }
+    const cuentasEspeciales = {
+      ajusteRedondeo: taxMap.get('ajusteRedondeo')?.code,
+      noDeducibles: taxMap.get('noDeducibles')?.code,
+    }
+    return { partida, banco, proveedor, impuesto, cuentasEspeciales }
+  }, [mappings, bankMap, provMap, taxMap])
+
+  // Etiquetas para que los faltantes del export se lean con nombre, no uuid.
+  const nombrePartida = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories])
+  const nombreBanco = useMemo(
+    () => new Map(bankAccounts.map((b) => [b.id, [b.name, b.bank_name].filter(Boolean).join(' · ') || b.id])),
+    [bankAccounts],
+  )
+  const nombreProveedor = useMemo(
+    () => new Map(proveedores.map((p) => [p.id, p.alias || p.nombre_completo || p.id])),
+    [proveedores],
+  )
 
   // Contadores "X de Y" por sección.
   const taxCounter = `${TAX_KEYS.filter((t) => taxMap.get(t.key)?.code).length} de ${TAX_KEYS.length} impuestos mapeados`
@@ -736,6 +776,17 @@ export function ContpaqTab() {
             </table>
           </div>
         </section>
+      )}
+
+      {subTab === 'exportar' && (
+        <ExportarSection
+          companyId={companyId}
+          companyName={companies.find((c) => c.id === companyId)?.name ?? 'empresa'}
+          mapeo={mapeoEmpresa}
+          nombrePartida={nombrePartida}
+          nombreBanco={nombreBanco}
+          nombreProveedor={nombreProveedor}
+        />
       )}
 
       {/* Datalists compartidos por todas las secciones */}

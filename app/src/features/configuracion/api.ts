@@ -28,6 +28,9 @@ import type {
   ContpaqTercero,
   ProveedorRow,
   BankAccountRow,
+  PaidRequestRow,
+  AccountingExportRow,
+  AccountingExportInsert,
 } from './types'
 import { groupFromRoleNames } from './logic'
 
@@ -496,6 +499,80 @@ export async function upsertBankMapping(companyId: string, bankAccountId: string
     },
     { onConflict: 'company_id,company_bank_account_id' },
   )
+  if (error) throw error
+}
+
+// ── Export contable (FB-7) ──────────────────────────────────────
+// Pagos PAGADOS de la empresa dentro del mes elegido (filtro por paid_at —
+// la columna existe en payment_requests), con el proveedor anidado que
+// consume paymentRequestAContrato. Orden por paid_at: el folio consecutivo
+// se asigna en orden de pago.
+export async function loadPaidRequestsForExport(
+  companyId: string,
+  mesInicio: string, // 'YYYY-MM-01' (inclusive)
+  mesFin: string, // primer día del mes siguiente (exclusivo)
+): Promise<PaidRequestRow[]> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select(
+      'id,company_id,provider_id,proveedor_id,budget_category_id,cost_center_id,company_bank_account_id,' +
+        'amount_requested,currency,exchange_rate,concept,description,request_number,paid_at,payment_method,' +
+        'cfdi_data,proveedores(rfc,nombre_completo,persona_tipo)',
+    )
+    .eq('company_id', companyId)
+    .eq('status', 'paid')
+    .gte('paid_at', mesInicio)
+    .lt('paid_at', mesFin)
+    .order('paid_at', { ascending: true })
+  if (error) throw error
+  return (data || []) as unknown as PaidRequestRow[]
+}
+
+// Ledger vigente de esos pagos (idempotencia por source+kind) + folios ya
+// usados en el periodo (semilla del folio provider: max(folio) por tipo_pol,
+// contando también cancelados para nunca re-usar un folio emitido).
+export async function loadExportLedger(
+  companyId: string,
+  periodo: string, // 'YYYY-MM-01'
+  sourceIds: string[],
+): Promise<{ exportadosIds: Set<string>; foliosPorTipo: Record<string, number> }> {
+  const [porSourceR, porPeriodoR] = await Promise.all([
+    sourceIds.length
+      ? supabase
+          .from('accounting_exports')
+          .select('source_feeder,source_id,source_kind,status,tipo_pol,folio')
+          .eq('source_feeder', 'flux')
+          .in('source_id', sourceIds)
+      : Promise.resolve({ data: [] as AccountingExportRow[], error: null }),
+    supabase
+      .from('accounting_exports')
+      .select('tipo_pol,folio,status')
+      .eq('company_id', companyId)
+      .eq('periodo', periodo),
+  ])
+  if (porSourceR.error) throw porSourceR.error
+  if (porPeriodoR.error) throw porPeriodoR.error
+
+  const exportadosIds = new Set<string>()
+  for (const r of (porSourceR.data || []) as AccountingExportRow[]) {
+    // Vigente = status 'exported' de la etapa 'directo' (filas pre-F3 sin
+    // source_kind cuentan como 'directo' — misma regla que el motor).
+    if (r.status === 'exported' && (r.source_kind ?? 'directo') === 'directo') {
+      exportadosIds.add(String(r.source_id))
+    }
+  }
+  const foliosPorTipo: Record<string, number> = {}
+  for (const r of (porPeriodoR.data || []) as { tipo_pol: number; folio: number }[]) {
+    const clave = String(r.tipo_pol)
+    if ((foliosPorTipo[clave] ?? 0) < r.folio) foliosPorTipo[clave] = r.folio
+  }
+  return { exportadosIds, foliosPorTipo }
+}
+
+// Registro en el ledger de las pólizas ya descargadas. Se llama DESPUÉS de
+// generar el archivo: si truena, el archivo ya existe y la UI lo dice.
+export async function insertAccountingExports(rows: AccountingExportInsert[]): Promise<void> {
+  const { error } = await supabase.from('accounting_exports').insert(rows)
   if (error) throw error
 }
 
