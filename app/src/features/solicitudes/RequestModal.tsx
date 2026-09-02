@@ -16,6 +16,8 @@ import {
 } from './logic'
 import { numberValue } from '../../lib/format'
 import { parseCfdiFile } from './cfdi'
+import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
+import { saveCfdiData } from './api'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { useModules } from '../../lib/moduleAccess'
@@ -97,6 +99,9 @@ export function RequestModal({
   const [withholding, setWithholding] = useState('')
   const [invoiceUuid, setInvoiceUuid] = useState('')
   const [cfdiHint, setCfdiHint] = useState('')
+  // FB-2: el CFDI completo parseado con el parser certificado del módulo
+  // CONTPAQ; se persiste tras crear la solicitud para el feeder contable.
+  const cfdiFull = useRef<CfdiParsed | null>(null)
   const [currency, setCurrency] = useState('MXN')
   const [exchangeRate, setExchangeRate] = useState('1')
   const [isExtraordinary, setIsExtraordinary] = useState(false)
@@ -319,6 +324,7 @@ export function RequestModal({
     setFile(f)
     setCfdiHint('')
     setInvoiceUuid('')
+    cfdiFull.current = null // el snapshot pertenece al adjunto vigente
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
@@ -338,6 +344,10 @@ export function RequestModal({
           `Desglose leído del CFDI${cfdi.uuid ? ` (folio fiscal …${cfdi.uuid.slice(-12)})` : ''}. Verifica los importes antes de enviar.`,
         )
       })
+      // FB-2: parse completo con el parser certificado, para contabilidad.
+      // Independiente del prefill: si el XML no cumple el contrato fiscal
+      // (CfdiParseError) simplemente no se persiste snapshot.
+      f.text().then((xml) => { cfdiFull.current = parseCfdiXml(xml) }).catch(() => { cfdiFull.current = null })
     }
   }
 
@@ -442,6 +452,12 @@ export function RequestModal({
       if (!requestId) throw new Error('No se obtuvo el id de la solicitud creada.')
 
       const warning = await updateFase2Metadata(requestId, payload.request_type, payload.payment_method)
+
+      // FB-2: snapshot del CFDI para el feeder contable (no bloqueante).
+      if (cfdiFull.current) {
+        const cfdiWarning = await saveCfdiData(requestId, cfdiFull.current)
+        if (cfdiWarning) showToast('CFDI no persistido', cfdiWarning, 'warning')
+      }
 
       // Metadata local de efectivo/cheque (persistCashMetadataIfNeeded).
       if (['cash', 'check'].includes(payload.payment_method)) {

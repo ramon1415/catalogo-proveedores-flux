@@ -21,6 +21,16 @@ import type {
   BudgetCategory,
   ContpaqAccount,
   ContpaqMappingRow,
+  TaxKey,
+  TaxMappingRow,
+  ProviderMappingRow,
+  BankMappingRow,
+  ContpaqTercero,
+  ProveedorRow,
+  BankAccountRow,
+  PaidRequestRow,
+  AccountingExportRow,
+  AccountingExportInsert,
 } from './types'
 import { groupFromRoleNames } from './logic'
 
@@ -363,5 +373,214 @@ export async function upsertContpaqMapping(
 
 export async function updateBudgetCategoryGroup(categoryId: string, category: string): Promise<void> {
   const { error } = await supabase.from('budget_categories').update({ category }).eq('id', categoryId)
+  if (error) throw error
+}
+
+// ── Mapeo CONTPAQ: impuestos / proveedores / bancos ─────────────
+// Catálogo de proveedores Flux activos (compartido entre empresas del grupo).
+export async function loadContpaqProveedores(): Promise<ProveedorRow[]> {
+  const { data, error } = await supabase
+    .from('proveedores')
+    .select('id,alias,nombre_completo,rfc,activo')
+    .eq('activo', true)
+    .order('alias', { ascending: true })
+  if (error) throw error
+  return (data || []) as ProveedorRow[]
+}
+
+// Capas extra del mapeoEmpresa por empresa: impuestos, proveedores, bancos y
+// la referencia de terceros CONTPAQ para el picker.
+export async function loadContpaqCompanyExtras(companyId: string): Promise<{
+  taxMappings: TaxMappingRow[]
+  providerMappings: ProviderMappingRow[]
+  bankMappings: BankMappingRow[]
+  terceros: ContpaqTercero[]
+  bankAccounts: BankAccountRow[]
+}> {
+  const [taxR, provR, bankR, tercR, cuentasR] = await Promise.all([
+    supabase
+      .from('tax_account_mappings')
+      .select('tax_key,contpaq_account_code,needs_review')
+      .eq('company_id', companyId),
+    supabase
+      .from('provider_account_mappings')
+      .select('proveedor_id,contpaq_account_code,contpaq_provider_id')
+      .eq('company_id', companyId),
+    supabase
+      .from('bank_account_mappings')
+      .select('company_bank_account_id,contpaq_account_code')
+      .eq('company_id', companyId),
+    fetchAllRows<ContpaqTercero>(() =>
+      supabase
+        .from('contpaq_terceros')
+        .select('id_contpaq,nombre,rfc,tipo_tercero')
+        .eq('company_id', companyId)
+        .order('id_contpaq'),
+    ),
+    supabase
+      .from('company_bank_accounts')
+      .select('id,company_id,name,bank_name,last4,active')
+      .eq('company_id', companyId)
+      .eq('active', true)
+      .order('name'),
+  ])
+  if (taxR.error) throw taxR.error
+  if (provR.error) throw provR.error
+  if (bankR.error) throw bankR.error
+  if (cuentasR.error) throw cuentasR.error
+  return {
+    taxMappings: (taxR.data || []) as TaxMappingRow[],
+    providerMappings: (provR.data || []) as ProviderMappingRow[],
+    bankMappings: (bankR.data || []) as BankMappingRow[],
+    terceros: tercR,
+    bankAccounts: (cuentasR.data || []) as BankAccountRow[],
+  }
+}
+
+// Al guardar manualmente una cuenta la discrepancia queda resuelta: needs_review → false.
+export async function upsertTaxMapping(companyId: string, taxKey: TaxKey, code: string): Promise<void> {
+  const { error } = await supabase.from('tax_account_mappings').upsert(
+    {
+      company_id: companyId,
+      tax_key: taxKey,
+      contpaq_account_code: code,
+      needs_review: false,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,tax_key' },
+  )
+  if (error) throw error
+}
+
+export async function deleteTaxMapping(companyId: string, taxKey: TaxKey): Promise<void> {
+  const { error } = await supabase
+    .from('tax_account_mappings')
+    .delete()
+    .eq('company_id', companyId)
+    .eq('tax_key', taxKey)
+  if (error) throw error
+}
+
+export async function upsertProviderMapping(
+  companyId: string,
+  proveedorId: string,
+  code: string | null,
+  terceroId: string | null,
+): Promise<void> {
+  const { error } = await supabase.from('provider_account_mappings').upsert(
+    {
+      company_id: companyId,
+      proveedor_id: proveedorId,
+      contpaq_account_code: code,
+      contpaq_provider_id: terceroId,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,proveedor_id' },
+  )
+  if (error) throw error
+}
+
+export async function deleteProviderMapping(companyId: string, proveedorId: string): Promise<void> {
+  const { error } = await supabase
+    .from('provider_account_mappings')
+    .delete()
+    .eq('company_id', companyId)
+    .eq('proveedor_id', proveedorId)
+  if (error) throw error
+}
+
+export async function upsertBankMapping(companyId: string, bankAccountId: string, code: string): Promise<void> {
+  const { error } = await supabase.from('bank_account_mappings').upsert(
+    {
+      company_id: companyId,
+      company_bank_account_id: bankAccountId,
+      contpaq_account_code: code,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'company_id,company_bank_account_id' },
+  )
+  if (error) throw error
+}
+
+// ── Export contable (FB-7) ──────────────────────────────────────
+// Pagos PAGADOS de la empresa dentro del mes elegido (filtro por paid_at —
+// la columna existe en payment_requests), con el proveedor anidado que
+// consume paymentRequestAContrato. Orden por paid_at: el folio consecutivo
+// se asigna en orden de pago.
+export async function loadPaidRequestsForExport(
+  companyId: string,
+  mesInicio: string, // 'YYYY-MM-01' (inclusive)
+  mesFin: string, // primer día del mes siguiente (exclusivo)
+): Promise<PaidRequestRow[]> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select(
+      'id,company_id,provider_id,proveedor_id,budget_category_id,cost_center_id,company_bank_account_id,' +
+        'amount_requested,currency,exchange_rate,concept,description,request_number,paid_at,payment_method,' +
+        'cfdi_data,proveedores(rfc,nombre_completo,persona_tipo)',
+    )
+    .eq('company_id', companyId)
+    .eq('status', 'paid')
+    .gte('paid_at', mesInicio)
+    .lt('paid_at', mesFin)
+    .order('paid_at', { ascending: true })
+  if (error) throw error
+  return (data || []) as unknown as PaidRequestRow[]
+}
+
+// Ledger vigente de esos pagos (idempotencia por source+kind) + folios ya
+// usados en el periodo (semilla del folio provider: max(folio) por tipo_pol,
+// contando también cancelados para nunca re-usar un folio emitido).
+export async function loadExportLedger(
+  companyId: string,
+  periodo: string, // 'YYYY-MM-01'
+  sourceIds: string[],
+): Promise<{ exportadosIds: Set<string>; foliosPorTipo: Record<string, number> }> {
+  const [porSourceR, porPeriodoR] = await Promise.all([
+    sourceIds.length
+      ? supabase
+          .from('accounting_exports')
+          .select('source_feeder,source_id,source_kind,status,tipo_pol,folio')
+          .eq('source_feeder', 'flux')
+          .in('source_id', sourceIds)
+      : Promise.resolve({ data: [] as AccountingExportRow[], error: null }),
+    supabase
+      .from('accounting_exports')
+      .select('tipo_pol,folio,status')
+      .eq('company_id', companyId)
+      .eq('periodo', periodo),
+  ])
+  if (porSourceR.error) throw porSourceR.error
+  if (porPeriodoR.error) throw porPeriodoR.error
+
+  const exportadosIds = new Set<string>()
+  for (const r of (porSourceR.data || []) as AccountingExportRow[]) {
+    // Vigente = status 'exported' de la etapa 'directo' (filas pre-F3 sin
+    // source_kind cuentan como 'directo' — misma regla que el motor).
+    if (r.status === 'exported' && (r.source_kind ?? 'directo') === 'directo') {
+      exportadosIds.add(String(r.source_id))
+    }
+  }
+  const foliosPorTipo: Record<string, number> = {}
+  for (const r of (porPeriodoR.data || []) as { tipo_pol: number; folio: number }[]) {
+    const clave = String(r.tipo_pol)
+    if ((foliosPorTipo[clave] ?? 0) < r.folio) foliosPorTipo[clave] = r.folio
+  }
+  return { exportadosIds, foliosPorTipo }
+}
+
+// Registro en el ledger de las pólizas ya descargadas. Se llama DESPUÉS de
+// generar el archivo: si truena, el archivo ya existe y la UI lo dice.
+export async function insertAccountingExports(rows: AccountingExportInsert[]): Promise<void> {
+  const { error } = await supabase.from('accounting_exports').insert(rows)
+  if (error) throw error
+}
+
+export async function deleteBankMapping(companyId: string, bankAccountId: string): Promise<void> {
+  const { error } = await supabase
+    .from('bank_account_mappings')
+    .delete()
+    .eq('company_id', companyId)
+    .eq('company_bank_account_id', bankAccountId)
   if (error) throw error
 }
