@@ -58,6 +58,7 @@ export function RequestModal({
   onCreated: (requestId: string | null) => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const cfdiParseVersion = useRef(0)
   const { showToast } = useToast()
   const { memberships, group } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
@@ -94,6 +95,7 @@ export function RequestModal({
   const [subtotal, setSubtotal] = useState('')
   const [taxAmount, setTaxAmount] = useState('')
   const [withholding, setWithholding] = useState('')
+  const [invoiceUuid, setInvoiceUuid] = useState('')
   const [cfdiHint, setCfdiHint] = useState('')
   const [currency, setCurrency] = useState('MXN')
   const [exchangeRate, setExchangeRate] = useState('1')
@@ -313,8 +315,10 @@ export function RequestModal({
   }
 
   function onFile(f: File | null) {
+    const parseVersion = ++cfdiParseVersion.current
     setFile(f)
     setCfdiHint('')
+    setInvoiceUuid('')
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
@@ -323,12 +327,16 @@ export function RequestModal({
     // nunca pisa lo que el usuario ya capturó.
     if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
       parseCfdiFile(f).then((cfdi) => {
+        if (parseVersion !== cfdiParseVersion.current) return
         if (!cfdi) return
         if (cfdi.subtotal != null) setSubtotal((prev) => prev || String(cfdi.subtotal))
         if (cfdi.traslados != null) setTaxAmount((prev) => prev || String(cfdi.traslados))
         if (cfdi.retenciones != null) setWithholding((prev) => prev || String(cfdi.retenciones))
         if (cfdi.total != null) setAmount((prev) => prev || String(cfdi.total))
-        setCfdiHint('Desglose leído del CFDI. Verifica los importes antes de enviar.')
+        if (cfdi.uuid) setInvoiceUuid(cfdi.uuid)
+        setCfdiHint(
+          `Desglose leído del CFDI${cfdi.uuid ? ` (folio fiscal …${cfdi.uuid.slice(-12)})` : ''}. Verifica los importes antes de enviar.`,
+        )
       })
     }
   }
@@ -399,6 +407,7 @@ export function RequestModal({
       subtotal_amount: subtotal === '' ? null : numberValue(subtotal),
       tax_amount: subtotal === '' ? null : (taxAmount === '' ? 0 : numberValue(taxAmount)),
       withholding_amount: subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding)),
+      invoice_uuid: invoiceUuid || null,
     }
   }
 
@@ -477,7 +486,7 @@ export function RequestModal({
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
-    setSubtotal(''); setTaxAmount(''); setWithholding(''); setCfdiHint('')
+    setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
     setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
