@@ -22,19 +22,20 @@ test('company role editor never presents a missing or legacy role as operator', 
 })
 
 test('legacy global admin state does not lock company role editing', () => {
-  assert.match(panel, /disabled=\{busy \|\| selected\.active !== true\}/)
-  assert.doesNotMatch(panel, /disabled=\{[^}]*selected\.group === 'sysadmin'/)
+  assert.match(panel, /disabled=\{busy \|\| user\.active !== true\}/)
+  assert.doesNotMatch(panel, /disabled=\{[^}]*user\.group === 'sysadmin'/)
 })
 
 test('membership activation requires an explicit editable company role', () => {
   assert.match(panel, /if \(!role\) \{[\s\S]*Define primero el rol/)
-  assert.match(panel, /disabled=\{busy \|\| selected\.active !== true \|\| !role\}/)
+  assert.match(panel, /disabled=\{busy \|\| user\.active !== true\}/)
   assert.doesNotMatch(panel, /row\?\.role_key[^\n]*: 'operator'/)
 })
 
 test('global power label is restricted to the two approved platform accounts', () => {
   assert.match(platformPower, /'carlos@quantta\.mx'/)
   assert.match(platformPower, /'ramon@quantta\.mx'/)
-  assert.match(panel, /selectedHasPlatformPower \? 'Poder total global' : 'Roles definidos por empresa'/)
-  assert.doesNotMatch(panel, /selected\.group === 'sysadmin' \? 'Poder total global'/)
+  assert.match(panel, /const hasPlatformPower = user\.group === 'sysadmin' && hasPlatformPowerEmail\(user\.email\)/)
+  assert.match(panel, /\{hasPlatformPower && <span[^>]*>Poder total global/)
+  assert.doesNotMatch(panel, /user\.group === 'sysadmin' \? 'Poder total global'/)
 })

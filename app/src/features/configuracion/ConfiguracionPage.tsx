@@ -7,6 +7,7 @@ import { OriginAccountsTab } from './tabs/OriginAccountsTab'
 import { BudgetsTab } from './tabs/BudgetsTab'
 import { ContpaqTab } from './tabs/ContpaqTab'
 import { SystemTab } from './tabs/SystemTab'
+import { EmpresasTab } from './tabs/EmpresasTab'
 import type { ConfigTab } from './types'
 import s from './Configuracion.module.css'
 
@@ -95,6 +96,7 @@ export default function ConfiguracionPage() {
       {active === 'budgets' && <BudgetsTab />}
       {active === 'contpaq' && <ContpaqTab />}
       {active === 'system' && <SystemTab />}
+      {active === 'empresas' && <EmpresasTab />}
     </>
   )
 }
