@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const expectedBlob = "a45a3c099cf267575b587a195e1747ce12492323";
+// Recertificado el 2-sep-2026. El pin anterior (a45a3c099cf2…) era del 7-ago
+// (commit 60fabb0) y quedó atrás tras siete cambios del dispatcher entre el
+// 24 y el 31 de ago: PDF de sistema, aislamiento de eventos por cutoff y
+// ruteo del correo de DEV al Director seleccionado. Verificado contra el
+// artefacto realmente desplegado en DEV (versión 50, 31-ago 15:13): su
+// index.ts hashea 414b318f05d8…, idéntico a este repo. Sin deriva.
+const expectedBlob = "414b318f05d88f4ee4fbab5daf7ce141010ef774";
 const sourcePath = new URL(
   "../../supabase/functions/notification-dispatcher/index.ts",
   import.meta.url,

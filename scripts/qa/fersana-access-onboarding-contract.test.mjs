@@ -80,7 +80,9 @@ test('existing members skip the landing and enter the linked company directly', 
   assert.match(accessPage, /result\.status === 'already_member'/)
   assert.match(accessPage, /result\.status === 'approved'/)
   assert.match(accessPage, /setCompany\(result\.company_id\)/)
-  assert.match(accessPage, /window\.location\.replace\('\/app\/solicitudes'\)/)
+  // React se movió a la raíz (#492/#493): el destino perdió el prefijo /app,
+  // que hoy solo sobrevive como redirect de compatibilidad en vercel.json.
+  assert.match(accessPage, /window\.location\.replace\('\/solicitudes'\)/)
   assert.doesNotMatch(accessPage, /Acceso disponible/)
 })
 

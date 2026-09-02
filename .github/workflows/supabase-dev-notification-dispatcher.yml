@@ -34,7 +34,7 @@ jobs:
 
     env:
       SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
-      EXPECTED_FUNCTION_BLOB: a45a3c099cf267575b587a195e1747ce12492323
+      EXPECTED_FUNCTION_BLOB: 414b318f05d88f4ee4fbab5daf7ce141010ef774
       CONFIRM_DEV: ${{ inputs.confirm_dev }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
       CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
