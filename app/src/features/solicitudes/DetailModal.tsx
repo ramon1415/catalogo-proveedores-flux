@@ -7,6 +7,7 @@ import {
   getApproverDetails, loadApprovalHistory, loadPaymentReceipts, getReceiptUrl,
   decidePaymentRequest, getExecutionContext, loadRequestSummary, loadCashFund,
   loadIncidencias, updateRequestNotes, getReceiptSummary, getEvidenceAccess, createSignedUrl,
+  loadReimbursementItems, loadBeneficiaryProfileId, loadEmployeeBankAccount,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorAlias, formatCurrencyC,
@@ -16,14 +17,14 @@ import {
   extraordinaryStatusLabel, extraordinaryCategoryLabel, batchStatusLabel, reviewLabel,
   authorizationBlockReasonLabel, cashFundAvailabilityMessage, executionAuthorizationSourceLabel,
   effectivePaymentType, currentLinkedIncidentId, INCIDENT_STATUS_MAP, normalizeRpcResult,
-  rlsHint,
+  rlsHint, isReimbursement,
 } from './logic'
 import { ExtraordinaryModal, RevokeExtraordinaryModal } from './ExtraordinaryModal'
 import { CashFundModal } from './CashFundModal'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   ApprovalHistoryRow, PaymentReceiptRow, ExecutionContext, RequestSummary,
-  CashFund, IncidentCharge, DecisionAction,
+  CashFund, IncidentCharge, DecisionAction, ReimbursementItem, EmployeeBankAccount,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -84,6 +85,11 @@ export function DetailModal({
   const [extraOpen, setExtraOpen] = useState(false)
   const [revokeOpen, setRevokeOpen] = useState(false)
   const [cashFundOpen, setCashFundOpen] = useState(false)
+
+  // Reembolso (solo lectura): beneficiario, sus datos bancarios y el desglose.
+  const [reimbursementItems, setReimbursementItems] = useState<ReimbursementItem[] | null>(null)
+  const [beneficiaryId, setBeneficiaryId] = useState<string | null>(null)
+  const [beneficiaryBank, setBeneficiaryBank] = useState<EmployeeBankAccount | null>(null)
 
   // Incidencias
   const [incidents, setIncidents] = useState<IncidentCharge[] | null>(null)
@@ -180,6 +186,31 @@ export function DetailModal({
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.id])
+
+  const isReembolso = isReimbursement(fase2?.request_type ?? request.request_type)
+
+  // Desglose y beneficiario del reembolso. Efecto aparte del principal porque
+  // depende de la metadata Fase 2, que puede llegar después del primer render.
+  useEffect(() => {
+    if (!isReembolso) { setReimbursementItems(null); setBeneficiaryId(null); setBeneficiaryBank(null); return }
+    let cancelled = false
+    ;(async () => {
+      const [rows, profileId] = await Promise.all([
+        loadReimbursementItems(request.id),
+        loadBeneficiaryProfileId(request.id),
+      ])
+      if (cancelled) return
+      setReimbursementItems(rows)
+      setBeneficiaryId(profileId)
+      // Los datos bancarios solo se leen si el usuario tiene permiso (RLS);
+      // si no, la tarjeta simplemente no los muestra.
+      if (profileId) {
+        const bank = await loadEmployeeBankAccount(profileId)
+        if (!cancelled) setBeneficiaryBank(bank)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isReembolso, request.id])
 
   const detailNotice = isPaid
     ? { title: 'Pagada', desc: 'Esta solicitud ya fue pagada.', variant: 'success' as const }
@@ -294,7 +325,7 @@ export function DetailModal({
         <div className={s.modalHead}>
           <div>
             <h2>{request.request_number || 'Detalle de solicitud'}</h2>
-            <p>{`${proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`}</p>
+            <p>{`${isReembolso ? 'Reembolso' : proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`}</p>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -316,7 +347,14 @@ export function DetailModal({
           <div className={s.amountBig}>{formatCurrencyC(request.amount_requested, currency)}</div>
 
           <div className={s.refGrid}>
-            <RefCell label="Proveedor" value={proveedorAlias(proveedor)} />
+            {/* En reembolso no hay proveedor: el destinatario es el empleado. */}
+            {isReembolso
+              ? <RefCell label="Beneficiario" value={
+                  profiles.find((p) => p.id === beneficiaryId)?.full_name
+                  || beneficiaryBank?.beneficiary_name
+                  || 'Sin beneficiario registrado'
+                } />
+              : <RefCell label="Proveedor" value={proveedorAlias(proveedor)} />}
             <RefCell label="Empresa" value={companyName(company)} />
             <div className={`${s.refCell} ${s.full}`}>
               <span className={s.refLabel}>Aprobador seleccionado</span>
@@ -346,6 +384,22 @@ export function DetailModal({
             <DataRow label="Disponible después" value={formatCurrencyC(request.budget_available_after, currency)} muted />
             <DataRow label="Faltante" value={formatCurrencyC(request.budget_shortfall, currency)} muted />
           </div>
+
+          {/* Reembolso: a quién se le paga y qué se le reembolsa (solo lectura) */}
+          {isReembolso && (
+            <ReimbursementDetailSection
+              items={reimbursementItems}
+              beneficiaryName={
+                profiles.find((p) => p.id === beneficiaryId)?.full_name
+                || profiles.find((p) => p.id === beneficiaryId)?.email
+                || beneficiaryBank?.beneficiary_name
+                || (beneficiaryId ? 'Perfil no disponible' : 'Sin beneficiario registrado')
+              }
+              bank={beneficiaryBank}
+              categories={budgetCategories}
+              currency={currency}
+            />
+          )}
 
           {/* Panel de ruta de autorización / extraordinarios */}
           {context && summary && <BatchExecutionPanel context={context} onAuthorize={() => setExtraOpen(true)} onRevoke={() => setRevokeOpen(true)} />}
@@ -467,6 +521,60 @@ export function DetailModal({
         />
       )}
     </dialog>
+  )
+}
+
+// Desglose del reembolso, solo lectura. El detalle económico real vive aquí:
+// el monto de la solicitud es la suma y su partida es solo la del renglón mayor.
+function ReimbursementDetailSection({
+  items,
+  beneficiaryName,
+  bank,
+  categories,
+  currency,
+}: {
+  items: ReimbursementItem[] | null
+  beneficiaryName: string
+  bank: EmployeeBankAccount | null
+  categories: BudgetCategory[]
+  currency: string
+}) {
+  const total = (items ?? []).reduce((sum, item) => sum + numberValue(item.amount), 0)
+  return (
+    <section className={s.decisionCard}>
+      <h3>Reembolso a empleado</h3>
+      <p>El pago se dispersa a la persona que cubrió el gasto, no a los comercios emisores.</p>
+      <div className={s.detailGrid}>
+        <DetailCard label="Beneficiario" value={beneficiaryName} />
+        <DetailCard
+          label="Cuenta destino"
+          value={bank
+            ? `${bank.banco || 'Sin banco'} · ${bank.clabe ? `CLABE ${bank.clabe}` : bank.cuenta ? `Cuenta ${bank.cuenta}` : 'Sin cuenta'}`
+            : 'Sin datos bancarios visibles'}
+        />
+      </div>
+      <div className={s.historyList}>
+        {items === null && <div className={s.historyItem}>Cargando desglose…</div>}
+        {items?.length === 0 && <div className={s.historyItem}>Esta solicitud no tiene desglose registrado.</div>}
+        {items?.map((item) => {
+          const category = categories.find((c) => c.id === item.budget_category_id) || null
+          return (
+            <div key={item.id} className={s.historyItem}>
+              <strong>{formatCurrencyC(item.amount, currency)} · {item.descripcion}</strong>
+              {budgetCategoryLabel(category)}
+              <span>
+                {item.deducible ? 'Deducible' : 'No deducible'}
+                {' · '}
+                {item.invoice_uuid ? `Folio fiscal ${item.invoice_uuid}` : 'Sin folio fiscal'}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+      {items?.length ? (
+        <div className={s.summaryNote}>Suma del desglose: {formatCurrencyC(total, currency)}</div>
+      ) : null}
+    </section>
   )
 }
 

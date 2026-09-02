@@ -5,6 +5,8 @@ import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions, createPaymentRequest,
   updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
+  loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
+  insertReimbursementItems,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -13,7 +15,10 @@ import {
   candidateMatchesSelection, validateRequestPayload, normalizeRequestType,
   normalizePaymentMethod, requestTypeLabel, paymentMethodLabel, isApproverStaleError,
   friendlyError, normalizeRpcResult, REQUEST_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS,
+  isReimbursement, reimbursementTotals, validateReimbursementItems,
+  employeeBankAccountIssues,
 } from './logic'
+import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
 import { parseCfdiFile } from './cfdi'
 import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
@@ -24,6 +29,7 @@ import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
+  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -116,6 +122,16 @@ export function RequestModal({
   const [dueDate, setDueDate] = useState('')
   const [deliveryMethod, setDeliveryMethod] = useState('cash')
 
+  // ── Reembolso ────────────────────────────────────────────────────────────
+  // El beneficiario arranca en el usuario actual; Finanzas/sysadmin puede
+  // capturar el reembolso a nombre de otra persona.
+  const canChooseBeneficiary = group === 'sysadmin' || group === 'admin_finance'
+  const [beneficiaryId, setBeneficiaryId] = useState(profile?.id ?? '')
+  const [beneficiaryProfiles, setBeneficiaryProfiles] = useState<Profile[]>([])
+  const [bankAccount, setBankAccount] = useState<EmployeeBankAccount | null>(null)
+  const [bankLoading, setBankLoading] = useState(false)
+  const [items, setItems] = useState<ReimbursementDraftItem[]>([emptyReimbursementItem()])
+
   const [budgetRows, setBudgetRows] = useState<BudgetAvailabilityRow[]>([])
   const [categoryHelp, setCategoryHelp] = useState({ text: 'Selecciona empresa, centro de costo y mes para cargar partidas disponibles.', state: '' })
   const [categoryDisabled, setCategoryDisabled] = useState(true)
@@ -156,6 +172,42 @@ export function RequestModal({
       })
     return () => { active = false }
   }, [showIncidencias])
+
+  const isReembolso = isReimbursement(requestType)
+
+  // Catálogo de beneficiarios. Solo se carga en modo reembolso y solo si el
+  // usuario puede elegir a alguien más; en el caso normal basta su propio perfil.
+  useEffect(() => {
+    if (!isReembolso) return
+    if (!canChooseBeneficiary) {
+      setBeneficiaryProfiles(profile ? [profile] : [])
+      return
+    }
+    let active = true
+    loadActiveProfiles().then((rows) => {
+      if (!active) return
+      // Se asegura que el propio perfil esté en la lista aunque el select falle.
+      const withSelf = profile && !rows.some((r) => r.id === profile.id) ? [profile, ...rows] : rows
+      setBeneficiaryProfiles(withSelf)
+    })
+    return () => { active = false }
+  }, [isReembolso, canChooseBeneficiary, profile])
+
+  // Datos bancarios del beneficiario vigente.
+  useEffect(() => {
+    if (!isReembolso || !beneficiaryId) { setBankAccount(null); return }
+    let active = true
+    setBankLoading(true)
+    loadEmployeeBankAccount(beneficiaryId)
+      .then((account) => { if (active) setBankAccount(account) })
+      .finally(() => { if (active) setBankLoading(false) })
+    return () => { active = false }
+  }, [isReembolso, beneficiaryId])
+
+  // Totales derivados del desglose: en reembolso mandan sobre monto/partida.
+  const reembolsoTotals = useMemo(() => reimbursementTotals(items), [items])
+  const effectiveAmount = isReembolso ? String(reembolsoTotals.total || '') : amount
+  const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : budgetCategoryId
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -249,7 +301,8 @@ export function RequestModal({
   }
 
   async function loadApprovers() {
-    const amt = numberValue(amount)
+    // En reembolso el monto lo manda el desglose, no el input.
+    const amt = numberValue(effectiveAmount)
     const version = ++approverVersion.current
     if (!companyId || !costCenterId || amt <= 0) {
       resetApprovers('Completa empresa, centro de costo y monto', true)
@@ -305,7 +358,7 @@ export function RequestModal({
     amountTimer.current = window.setTimeout(() => loadApprovers(), 300)
     return () => window.clearTimeout(amountTimer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount])
+  }, [effectiveAmount])
 
   function onCompanyChange(v: string) { setCompanyId(v); reloadBudgetCategories(v, costCenterId, budgetMonth) }
   function onCostCenterChange(v: string) { setCostCenterId(v); reloadBudgetCategories(companyId, v, budgetMonth) }
@@ -378,8 +431,8 @@ export function RequestModal({
   // ── Summary panel derived ────────────────────────────────────────────────
   const company = companies.find((c) => c.id === companyId) || null
   const center = costCenters.find((c) => c.id === costCenterId) || null
-  const category = categoryById(budgetCategoryId)
-  const availability = availabilityForCategory(budgetCategoryId)
+  const category = categoryById(effectiveCategoryId)
+  const availability = availabilityForCategory(effectiveCategoryId)
   const proveedor = proveedores.find((p) => p.id === proveedorId) || null
   const approver = candidates.find((c) => c.profile_id === approverId) || null
 
@@ -389,14 +442,16 @@ export function RequestModal({
     return {
       request_type: normalizeRequestType(requestType || 'provider_payment'),
       payment_method: normalizePaymentMethod(paymentMethod || 'transfer'),
-      proveedor_id: proveedorId || null,
+      // En reembolso no hay proveedor: el destinatario es el empleado y se
+      // registra aparte, en beneficiary_profile_id.
+      proveedor_id: isReembolso ? null : (proveedorId || null),
       company_id: companyId || null,
       approver_id: approverId || null,
       approver_assignment_id: selected?.assignment_id || null,
       cost_center_id: costCenterId || null,
-      budget_category_id: budgetCategoryId || null,
+      budget_category_id: effectiveCategoryId || null,
       budget_month: monthInputToDate(budgetMonth),
-      amount_requested: numberValue(amount),
+      amount_requested: numberValue(effectiveAmount),
       currency: cur,
       exchange_rate: cur === 'MXN' ? 1 : numberValue(exchangeRate),
       description: description.trim(),
@@ -406,9 +461,20 @@ export function RequestModal({
       responsible_profile_id: responsibleId || null,
       due_date: dueDate || null,
       delivery_method: deliveryMethod || normalizePaymentMethod(paymentMethod),
-      subtotal_amount: subtotal === '' ? null : numberValue(subtotal),
-      tax_amount: subtotal === '' ? null : (taxAmount === '' ? 0 : numberValue(taxAmount)),
-      withholding_amount: subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding)),
+      // Reembolso: quien cobra es el empleado; el RPC lo persiste en la
+      // misma transacción que la solicitud.
+      beneficiary_profile_id: isReembolso ? (beneficiaryId || null) : null,
+      // Reembolso: el desglose fiscal global es la suma de los renglones
+      // deducibles (los no deducibles no llevan IVA acreditable).
+      subtotal_amount: isReembolso
+        ? reembolsoTotals.subtotal
+        : (subtotal === '' ? null : numberValue(subtotal)),
+      tax_amount: isReembolso
+        ? (reembolsoTotals.subtotal == null ? null : reembolsoTotals.tax ?? 0)
+        : (subtotal === '' ? null : (taxAmount === '' ? 0 : numberValue(taxAmount))),
+      withholding_amount: isReembolso
+        ? (reembolsoTotals.subtotal == null ? null : 0)
+        : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
     }
   }
 
@@ -422,15 +488,32 @@ export function RequestModal({
       return
     }
 
+    // Reembolso: se valida el desglose y al beneficiario antes de armar el payload.
+    if (isReembolso) {
+      if (!beneficiaryId) {
+        showToast('Beneficiario requerido', 'Selecciona a quién se le reembolsa.', 'warning')
+        return
+      }
+      const bankIssues = employeeBankAccountIssues(bankAccount)
+      if (bankIssues.length) {
+        showToast('Datos bancarios incompletos', `Falta ${bankIssues.join(', ')} del beneficiario. Captúralos para poder dispersar.`, 'warning')
+        return
+      }
+      const itemsValidation = validateReimbursementItems(items)
+      if (itemsValidation) { showToast('Revisa el desglose', itemsValidation, 'warning'); return }
+    }
+
     const payload = collectPayload()
     const validation = validateRequestPayload(payload, availabilityForCategory, candidates)
     if (validation) { showToast('Revisa la solicitud', validation, 'warning'); return }
 
-    const fiscalValidation = validateFiscalBreakdown()
+    // El desglose fiscal manual no aplica en reembolso: ahí sale de los renglones.
+    const fiscalValidation = isReembolso ? '' : validateFiscalBreakdown()
     if (fiscalValidation) { showToast('Desglose fiscal', fiscalValidation, 'warning'); return }
 
-    // Documento obligatorio en toda solicitud (política global).
-    if (!file) {
+    // Documento obligatorio en toda solicitud (política global). En reembolso
+    // los comprobantes van por renglón, ya validados arriba.
+    if (!isReembolso && !file) {
       showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
       return
     }
@@ -459,6 +542,47 @@ export function RequestModal({
             delivery_method: payload.payment_method,
           }))
         } catch { /* ignore */ }
+      }
+
+      // Reembolso: beneficiario + desglose. Todo posterior a la creación y no
+      // bloqueante — la solicitud ya existe, así que los fallos solo se avisan.
+      if (isReembolso) {
+        // El beneficiario ya viajó en el RPC (transaccional). Este respaldo solo
+        // cubre un ambiente sin el parámetro nuevo; si ya quedó grabado, no corre.
+        if (!result.beneficiary_profile_id) {
+          const beneficiaryWarning = await setBeneficiaryProfile(requestId, beneficiaryId)
+          if (beneficiaryWarning) showToast('Beneficiario no registrado', beneficiaryWarning, 'warning')
+        }
+
+        const inserts: ReimbursementItemInsert[] = []
+        let uploadFailures = 0
+        for (const item of items) {
+          let storagePath: string | null = null
+          if (item.file) {
+            try {
+              storagePath = await uploadReceipt(item.file, `solicitudes/${requestId}/reembolso`)
+            } catch {
+              uploadFailures += 1
+            }
+          }
+          inserts.push({
+            payment_request_id: requestId,
+            budget_category_id: item.budgetCategoryId,
+            descripcion: item.descripcion.trim(),
+            amount: numberValue(item.amount),
+            subtotal_amount: item.subtotalAmount,
+            tax_amount: item.taxAmount,
+            deducible: item.deducible,
+            invoice_uuid: item.invoiceUuid,
+            cfdi_data: item.cfdiData,
+            storage_path: storagePath,
+          })
+        }
+        if (uploadFailures) {
+          showToast('Comprobantes no subidos', `${uploadFailures} comprobante(s) del desglose no pudieron subirse. El renglón queda registrado sin archivo.`, 'warning')
+        }
+        const itemsWarning = await insertReimbursementItems(inserts)
+        if (itemsWarning) showToast('Desglose no guardado', itemsWarning, 'warning')
       }
 
       // Adjunto de comprobante.
@@ -497,6 +621,7 @@ export function RequestModal({
     setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
+    setBeneficiaryId(profile?.id ?? ''); setBankAccount(null); setItems([emptyReimbursementItem()])
     setBudgetRows([]); setCategoryDisabled(true); setCategorySearch('')
     setCategoryHelp({ text: 'Selecciona empresa, centro de costo y mes para cargar partidas disponibles.', state: '' })
     resetApprovers('Completa empresa, centro de costo y monto', false)
@@ -544,7 +669,13 @@ export function RequestModal({
                       <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
                     </label>
                     <label>Monto solicitado *
-                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+                      {/* En reembolso el monto es la suma del desglose: se muestra
+                          calculado para que nadie lo edite por separado. */}
+                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
+                        value={isReembolso ? (reembolsoTotals.total || '') : amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        readOnly={isReembolso} required />
+                      {isReembolso && <span className={s.fieldHint}>Suma de los renglones del desglose de gastos.</span>}
                     </label>
                     <label>Moneda *
                       <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
@@ -555,7 +686,7 @@ export function RequestModal({
                     <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
                       <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
                     </label>
-                    <div className={s.fullRow}>
+                    <div className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>
                       <div className={s.fieldHint} style={{ marginBottom: 4 }}>
                         Desglose fiscal (opcional) — si lo capturas, el presupuesto descuenta el subtotal (gasto sin IVA).
                         {cfdiHint && <strong> {cfdiHint}</strong>}
@@ -584,22 +715,45 @@ export function RequestModal({
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                     </label>
-                    <label className={s.fullRow}>Factura / comprobante *
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required />
+                    {/* En reembolso los comprobantes van por renglón: cada uno es
+                        de un comercio distinto, no hay una factura única. */}
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante *
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
                   </div>
                 </section>
 
-                <section className={s.formSection}>
-                  <h3>Proveedor / beneficiario</h3>
-                  <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
-                  <div className={s.formGrid}>
-                    <label className={s.fullRow}>Proveedor *
-                      <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
-                    </label>
-                  </div>
-                </section>
+                {isReembolso ? (
+                  <ReimbursementSection
+                    profiles={beneficiaryProfiles}
+                    canChooseBeneficiary={canChooseBeneficiary}
+                    beneficiaryId={beneficiaryId}
+                    onBeneficiaryChange={setBeneficiaryId}
+                    bankAccount={bankAccount}
+                    bankLoading={bankLoading}
+                    onBankLoaded={setBankAccount}
+                    items={items}
+                    onItemsChange={setItems}
+                    categoryRows={filteredCategoryRows}
+                    categoryLabel={(id) => {
+                      const row = availabilityForCategory(id)
+                      return row ? budgetCategoryAvailabilityLabel(categoryById(id), row) : budgetCategoryLabel(categoryById(id))
+                    }}
+                    categoryDisabled={categoryDisabled}
+                    currency={currency}
+                  />
+                ) : (
+                  <section className={s.formSection}>
+                    <h3>Proveedor / beneficiario</h3>
+                    <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
+                    <div className={s.formGrid}>
+                      <label className={s.fullRow}>Proveedor *
+                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
+                      </label>
+                    </div>
+                  </section>
+                )}
 
                 <section className={s.formSection}>
                   <h3>Clasificacion presupuestal</h3>
@@ -617,10 +771,12 @@ export function RequestModal({
                         {costCenters.map((c) => <option key={c.id} value={c.id}>{costCenterName(c)}</option>)}
                       </select>
                     </label>
-                    <label className={s.fullRow}>Partida presupuestal *
+                    {/* En reembolso la partida se elige por renglón; la de la
+                        solicitud sale del renglón de mayor monto. */}
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Partida presupuestal *
                       <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
                         value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
-                      <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required>
+                      <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required={!isReembolso}>
                         <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
                         {filteredCategoryRows.map((r) => (
                           <option key={r.budget_category_id} value={r.budget_category_id!}>
@@ -718,9 +874,18 @@ export function RequestModal({
                     : 'Pendiente de seleccionar'}</span></label>
                   <label>Centro de costo <span className={s.summaryValue}>{center ? costCenterName(center) : 'Sin seleccionar'}</span></label>
                   <label>Partida <span className={s.summaryValue}>{category ? `${budgetCategoryLabel(category)} | Disp. ${formatCurrencyC(getAvailableAmount(availability), 'MXN')}` : 'Sin seleccionar'}</span></label>
-                  <label>Proveedor <span className={s.summaryValue}>{proveedor ? proveedorLabel(proveedor) : 'Sin seleccionar'}</span></label>
+                  {isReembolso ? (
+                    <label>Beneficiario <span className={s.summaryValue}>
+                      {beneficiaryProfiles.find((p) => p.id === beneficiaryId)?.full_name
+                        || beneficiaryProfiles.find((p) => p.id === beneficiaryId)?.email
+                        || 'Sin seleccionar'}
+                    </span></label>
+                  ) : (
+                    <label>Proveedor <span className={s.summaryValue}>{proveedor ? proveedorLabel(proveedor) : 'Sin seleccionar'}</span></label>
+                  )}
                   <label>Mes <span className={s.summaryValue}>{budgetMonth ? formatMonth(`${budgetMonth}-01`) : 'Sin seleccionar'}</span></label>
-                  <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(amount), currency)}</span></label>
+                  <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
+                  {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
                 <div className={s.summaryNote}>Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.</div>
               </aside>

@@ -6,7 +6,7 @@ import { normalize, numberValue } from '../../lib/format'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
   BudgetAvailabilityRow, ApproverCandidate, ApproverSelection,
-  DecisionAction, RequestPayload,
+  DecisionAction, RequestPayload, EmployeeBankAccount, ReimbursementDraftItem,
 } from './types'
 
 export const ACTIVE_REQUEST_STATUSES = [
@@ -243,7 +243,10 @@ export function validateRequestPayload(
   if (!availabilityForCategory(payload.budget_category_id))
     return 'La partida seleccionada no esta disponible para la empresa, centro de costo y mes.'
   if (!payload.budget_month) return 'Selecciona el mes presupuestal.'
-  if (!payload.proveedor_id) return 'Selecciona un proveedor.'
+  // En un reembolso el destinatario es un empleado (beneficiary_profile_id),
+  // no un proveedor del catálogo: el combo ni siquiera se muestra.
+  if (!payload.proveedor_id && payload.request_type !== 'reimbursement')
+    return 'Selecciona un proveedor.'
   if (!payload.amount_requested || payload.amount_requested <= 0) return 'El monto solicitado debe ser mayor a 0.'
   if (!payload.currency) return 'Selecciona la moneda.'
   if (!payload.exchange_rate || payload.exchange_rate <= 0) return 'El tipo de cambio debe ser mayor a 0.'
@@ -253,6 +256,118 @@ export function validateRequestPayload(
   if (['cash', 'check'].includes(payload.payment_method) && !payload.due_date)
     return 'Captura la fecha limite de comprobacion.'
   return validateApproverSelection(payload.approver_id || '', payload.approver_assignment_id, candidates)
+}
+
+// ── Reembolsos ─────────────────────────────────────────────────────────────
+export function isReimbursement(raw: unknown): boolean {
+  return normalizeRequestType(raw) === 'reimbursement'
+}
+
+// La CLABE se guarda como texto (conserva ceros iniciales); aquí solo se
+// normalizan separadores para validar los 18 dígitos.
+export function normalizeClabe(value: string): string {
+  return String(value || '').replace(/[\s-]/g, '')
+}
+
+export function isValidClabe(value: string): boolean {
+  return /^[0-9]{18}$/.test(normalizeClabe(value))
+}
+
+// Qué le falta a la cuenta del empleado para poder dispersarle. Sin banco,
+// beneficiario y CLABE (o cuenta) el layout no puede armar la línea.
+export function employeeBankAccountIssues(account: EmployeeBankAccount | null): string[] {
+  if (!account) return ['Sin datos bancarios registrados']
+  const issues: string[] = []
+  if (!String(account.beneficiary_name || '').trim()) issues.push('nombre del beneficiario')
+  if (!String(account.banco || '').trim()) issues.push('banco')
+  const clabe = String(account.clabe || '').trim()
+  const cuenta = String(account.cuenta || '').trim()
+  if (!clabe && !cuenta) issues.push('CLABE o cuenta')
+  else if (clabe && !isValidClabe(clabe)) issues.push('CLABE de 18 dígitos')
+  return issues
+}
+
+export type ReimbursementTotals = {
+  total: number
+  subtotal: number | null
+  tax: number | null
+  dominantCategoryId: string
+}
+
+// Totales de la solicitud a partir del desglose:
+//  · total    = suma de TODOS los renglones (incluye no deducibles, p.ej. propinas)
+//  · IVA      = el de los renglones DEDUCIBLES únicamente (una propina no
+//    acredita IVA), y
+//  · subtotal = base de TODOS los renglones: base del CFDI en los deducibles y
+//    el monto completo en los no deducibles (una nota es 100% base, sin IVA).
+//    Equivale a total − IVA, y es lo que exige create_payment_request, que
+//    valida subtotal + IVA − retenciones == amount_requested (±0.01);
+//    mandar solo la base de los deducibles truena con fiscal_breakdown_mismatch.
+//    `deducible` no cambia ni el budget ni la identidad: marca el tratamiento
+//    contable (cuenta destino, IVA acreditable / DIOT).
+//    Si un renglón deducible no cuadra contra su propio CFDI (importes editados
+//    a mano, retenciones) se devuelve null y el presupuesto descuenta el total,
+//    como en el resto de tipos.
+//  · partida  = la del renglón de mayor monto, para que el gate presupuestal
+//    siga teniendo una sola partida contra la cual validar.
+export function reimbursementTotals(items: ReimbursementDraftItem[]): ReimbursementTotals {
+  let total = 0
+  let deducibleTotal = 0
+  let deducibleSubtotal = 0
+  let tax = 0
+  let hasFiscal = false
+  let dominantCategoryId = ''
+  let dominantAmount = -1
+  for (const item of items) {
+    const amount = numberValue(item.amount)
+    if (!(amount > 0)) continue
+    total += amount
+    if (item.deducible && item.subtotalAmount != null) {
+      hasFiscal = true
+      deducibleTotal += amount
+      deducibleSubtotal += item.subtotalAmount
+      tax += item.taxAmount ?? 0
+    }
+    if (item.budgetCategoryId && amount > dominantAmount) {
+      dominantAmount = amount
+      dominantCategoryId = item.budgetCategoryId
+    }
+  }
+  // Los renglones deducibles deben cuadrar contra su propio CFDI; si no, no se
+  // manda desglose fiscal global.
+  const fiscalOk = hasFiscal && Math.abs(deducibleSubtotal + tax - deducibleTotal) <= 0.01
+  return {
+    total: round2(total),
+    subtotal: fiscalOk ? round2(total - tax) : null,
+    tax: fiscalOk ? round2(tax) : null,
+    dominantCategoryId,
+  }
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+// Validación del desglose. La partida es obligatoria en TODOS los renglones,
+// deducibles o no: es la que atribuye el gasto a su área (un gasto de RH sin
+// factura sigue siendo de RH), y la columna es NOT NULL en la BD. Lo único que
+// cambia al marcar "sin comprobante fiscal" es que no se exige el adjunto.
+export function validateReimbursementItems(items: ReimbursementDraftItem[]): string {
+  if (!items.length) return 'Agrega al menos un gasto al desglose del reembolso.'
+  for (const [index, item] of items.entries()) {
+    const position = `Gasto ${index + 1}`
+    if (!item.descripcion.trim()) return `${position}: captura la descripción del gasto.`
+    if (!(numberValue(item.amount) > 0)) return `${position}: el monto debe ser mayor a 0.`
+    if (!item.budgetCategoryId) {
+      return `${position}: selecciona la partida presupuestal (obligatoria también en gastos sin comprobante).`
+    }
+    if (item.deducible && !item.file) {
+      return `${position}: adjunta el comprobante o márcalo como "sin comprobante fiscal".`
+    }
+  }
+  const total = items.reduce((sum, item) => sum + numberValue(item.amount), 0)
+  if (!(total > 0)) return 'La suma del desglose debe ser mayor a 0.'
+  return ''
 }
 
 // ── Decisiones del aprobador ───────────────────────────────────────────────
@@ -512,6 +627,13 @@ const ROUTING_ERRORS: Record<string, string> = {
 
 export function friendlyError(error: any, operation = ''): string {
   const message = error?.message || String(error || 'Error desconocido')
+  // create_payment_request todavía exige proveedor. En un reembolso el
+  // destinatario es un empleado y mandar un proveedor "de relleno" contaminaría
+  // el catálogo, así que se falla con un mensaje que nombra el bloqueo.
+  if (message.includes('proveedor_id es obligatorio')) {
+    return 'El servidor todavía exige un proveedor al crear la solicitud, y un reembolso se paga a un empleado. '
+      + 'Falta liberar el ajuste de create_payment_request para reembolsos; avisa a sistemas antes de reintentar.'
+  }
   const routingKey = Object.keys(ROUTING_ERRORS).find((key) => message.includes(key))
   if (routingKey) return ROUTING_ERRORS[routingKey]
   if (message.toLowerCase().includes('row-level security') || error?.code === '42501') {
