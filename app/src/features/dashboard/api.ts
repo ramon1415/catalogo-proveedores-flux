@@ -54,7 +54,7 @@ export async function fetchHistoricalYear(companyId: string, year: number): Prom
   return fetchAllRows<HistoricalActual>(() =>
     supabase
       .from('historical_actuals')
-      .select('account_code,account_name,period_month,amount')
+      .select('account_code,account_name,period_month,amount,flujo')
       .eq('company_id', companyId)
       .gte('period_month', `${year}-01-01`)
       .lt('period_month', `${year + 1}-01-01`)
@@ -67,7 +67,7 @@ export async function fetchHistoricalAll(companyId: string): Promise<HistoricalA
   return fetchAllRows<HistoricalActual>(() =>
     supabase
       .from('historical_actuals')
-      .select('account_code,account_name,period_month,amount')
+      .select('account_code,account_name,period_month,amount,flujo')
       .eq('company_id', companyId)
       .order('period_month'),
   )

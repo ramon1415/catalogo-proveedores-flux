@@ -115,6 +115,9 @@ export type HistoricalActual = {
   account_name: string | null
   period_month: string | null
   amount: number | null
+  // Clasificado al CARGAR con el catálogo de la empresa. El prefijo de cuenta
+  // no es portable (OPT: 6xx egresos; SF: 6xx ingresos financieros, 5xx gastos).
+  flujo?: 'ingreso' | 'egreso' | null
 }
 
 // Mapeo cuenta CONTPAQ → partida/grupo del presupuesto.
