@@ -3,24 +3,25 @@ import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
 import { isDevSupabaseProject } from '../../lib/supabase'
 import {
-  FILE_CARDS,
+  ALL_SLOTS,
+  SLOT_CONFIG,
   accountLabel,
   accountsForCompany,
-  captureStateLabel,
   channelLabel,
+  channelsFromFiles,
   costCenterLabel,
   costCentersForCompany,
-  enabledSlots,
+  defaultPayrollConcept,
   formatMoney,
   friendlyError,
+  inferPayrollPeriodFromFileNames,
   inspectFile,
-  parserErrorSlot,
   requiredSlots,
   slotLabel,
-  slotsForChannel,
   sourceAccountCandidates,
   validateMetadata,
 } from './logic'
+import { classifyPayrollFile } from './physicalParsers'
 import {
   acknowledgeTokaVariance,
   getCaptureSessions,
@@ -40,6 +41,7 @@ import type {
   CostCenter,
   CaptureSession,
   FileMap,
+  FileSlotState,
   PayrollChannel,
   PayrollSlot,
   PayrollSubtype,
@@ -59,10 +61,43 @@ type Props = {
   onSaved: () => void
 }
 
+type UnrecognizedFile = {
+  id: string
+  file: File
+  message: string
+}
+
+function storageKey(kind: 'account' | 'cost-center', companyId: string): string {
+  return `flux:payroll:${kind}:${companyId}`
+}
+
+function readRemembered(kind: 'account' | 'cost-center', companyId: string): string {
+  try {
+    return window.localStorage.getItem(storageKey(kind, companyId)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function remember(kind: 'account' | 'cost-center', companyId: string, value: string): void {
+  try {
+    if (value) window.localStorage.setItem(storageKey(kind, companyId), value)
+  } catch {
+    // El almacenamiento local es sólo una comodidad; nunca bloquea la captura.
+  }
+}
+
+function fileId(file: File, index: number): string {
+  return `${file.name}:${file.size}:${file.lastModified}:${index}`
+}
+
+function moneyFromMinor(value: number | null | undefined): string {
+  return Number.isSafeInteger(value) ? formatMoney(Number(value) / 100) : '—'
+}
+
 export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
   const { showToast } = useToast()
 
-  // Metadata (equivalente a los campos del form de Solicitudes en modo nómina).
   const [companyId, setCompanyId] = useState(activeCompanyId)
   const [sourceAccountId, setSourceAccountId] = useState('')
   const [costCenterId, setCostCenterId] = useState('')
@@ -73,27 +108,48 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const [notes, setNotes] = useState('')
   const [channels, setChannels] = useState<PayrollChannel[]>([])
   const [files, setFiles] = useState<FileMap>({})
+  const [unrecognized, setUnrecognized] = useState<UnrecognizedFile[]>([])
 
-  // Estado de sesión / materialización.
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionVersion, setSessionVersion] = useState<number | null>(null)
   const [materializedRequestId, setMaterializedRequestId] = useState<string | null>(null)
   const persistedSourceAccountId = useRef<string | null>(null)
 
-  // Resumen de submission + aprobadores.
   const [summary, setSummary] = useState<SubmissionSummary | null>(null)
   const [approvers, setApprovers] = useState<ApproverCandidate[]>([])
   const [approverValue, setApproverValue] = useState('')
   const [varianceNote, setVarianceNote] = useState('')
 
-  const [saving, setSaving] = useState(false)
-  const [materializing, setMaterializing] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [dropActive, setDropActive] = useState(false)
+  const [classifying, setClassifying] = useState(false)
+  const [workflowBusy, setWorkflowBusy] = useState(false)
   const [revalidating, setRevalidating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [progressText, setProgressText] = useState('')
+  const [replacementNotice, setReplacementNotice] = useState('')
+  const classificationEpoch = useRef(0)
+  const conceptIsAutomatic = useRef(true)
 
   const locked = materializedRequestId !== null
 
-  // Hidratar desde una sesión existente (resume) o abrir en limpio.
+  const companyAccounts = useMemo(() => accountsForCompany(accounts, companyId), [accounts, companyId])
+  const companyCostCenters = useMemo(
+    () => costCentersForCompany(costCenters, mappings, companyId),
+    [costCenters, mappings, companyId],
+  )
+  const selectedAccount = useMemo(() => accounts.find((account) => account.id === sourceAccountId), [accounts, sourceAccountId])
+  const sourceCandidates = useMemo(() => sourceAccountCandidates(selectedAccount), [selectedAccount])
+  const required = useMemo(() => requiredSlots(channels), [channels])
+  const missing = useMemo(
+    () => required.filter((slot) => !files[slot]?.uploaded && !files[slot]?.uploadable),
+    [required, files],
+  )
+  const hasParserErrors = useMemo(
+    () => Object.values(files).some((file) => file?.status === 'parser_error' || file?.status === 'failed'),
+    [files],
+  )
+
   useEffect(() => {
     if (!session) {
       setCompanyId(activeCompanyId)
@@ -104,49 +160,63 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       onClose()
       return
     }
-    setSessionId(session.id)
-    setSessionVersion(session.version)
-    setMaterializedRequestId(session.materialized_payment_request_id || null)
-    persistedSourceAccountId.current = session.company_bank_account_id
-    setCompanyId(session.company_id)
-    setSourceAccountId(session.company_bank_account_id)
-    setCostCenterId(session.cost_center_id || '')
-    setSubtype(session.payroll_subtype)
-    setPeriodStart(session.period_start)
-    setPeriodEnd(session.period_end)
-    setConcept(session.concept)
-    setNotes(session.notes || '')
-    setChannels(session.expected_channels || [])
-    const hydrated: FileMap = {}
-    ;(session.files || []).forEach((f) => {
-      hydrated[f.kind] = {
-        present: true,
-        uploaded: true,
-        uploadable: false,
-        status: f.parsing_status || 'server_verification_pending',
-        recordCount: f.record_count,
-        totalAmountMinor: f.total_amount_minor,
-        issueCodes: f.issue_codes || [],
-      }
-    })
-    setFiles(hydrated)
-    if (session.materialized_payment_request_id) void loadSubmissionSummary(session.materialized_payment_request_id)
+    hydrate(session)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, activeCompanyId])
 
-  const companyAccounts = useMemo(() => accountsForCompany(accounts, companyId), [accounts, companyId])
-  const companyCostCenters = useMemo(
-    () => costCentersForCompany(costCenters, mappings, companyId),
-    [costCenters, mappings, companyId],
-  )
-  const selectedAccount = useMemo(() => accounts.find((a) => a.id === sourceAccountId), [accounts, sourceAccountId])
-  const candidates = useMemo(() => sourceAccountCandidates(selectedAccount), [selectedAccount])
+  useEffect(() => {
+    if (session || !companyId || sourceAccountId || !companyAccounts.length) return
+    const remembered = readRemembered('account', companyId)
+    const preferred = companyAccounts.find((account) => account.id === remembered) || (companyAccounts.length === 1 ? companyAccounts[0] : null)
+    if (preferred) setSourceAccountId(preferred.id)
+  }, [session, companyId, companyAccounts, sourceAccountId])
 
-  const required = useMemo(() => requiredSlots(channels), [channels])
-  const enabled = useMemo(() => enabledSlots(channels), [channels])
-  const missing = useMemo(() => required.filter((slot) => !files[slot]?.uploaded), [required, files])
+  useEffect(() => {
+    if (session || !companyId || costCenterId || !companyCostCenters.length) return
+    const remembered = readRemembered('cost-center', companyId)
+    const preferred =
+      companyCostCenters.find((center) => center.id === remembered) || (companyCostCenters.length === 1 ? companyCostCenters[0] : null)
+    if (preferred) setCostCenterId(preferred.id)
+  }, [session, companyId, companyCostCenters, costCenterId])
 
-  // ── Cambios de empresa / cuenta (locks tras subir evidencia) ──────────────
+  useEffect(() => {
+    if (!conceptIsAutomatic.current || locked) return
+    setConcept(defaultPayrollConcept(subtype, periodStart, periodEnd))
+  }, [subtype, periodStart, periodEnd, locked])
+
+  function hydrate(current: CaptureSession, loadSummary = true) {
+    setSessionId(current.id)
+    setSessionVersion(current.version)
+    setMaterializedRequestId(current.materialized_payment_request_id || null)
+    persistedSourceAccountId.current = current.company_bank_account_id
+    setCompanyId(current.company_id)
+    setSourceAccountId(current.company_bank_account_id)
+    setCostCenterId(current.cost_center_id || '')
+    setSubtype(current.payroll_subtype)
+    setPeriodStart(current.period_start)
+    setPeriodEnd(current.period_end)
+    setConcept(current.concept)
+    conceptIsAutomatic.current = false
+    setNotes(current.notes || '')
+    setChannels(current.expected_channels || [])
+    setUnrecognized([])
+    const hydrated: FileMap = {}
+    ;(current.files || []).forEach((file) => {
+      hydrated[file.kind] = {
+        present: true,
+        uploaded: true,
+        uploadable: false,
+        status: file.parsing_status || 'server_verification_pending',
+        fileName: slotLabel(file.kind),
+        recordCount: file.record_count,
+        totalAmountMinor: file.total_amount_minor,
+        issueCodes: file.issue_codes || [],
+      }
+    })
+    setFiles(hydrated)
+    if (loadSummary && current.materialized_payment_request_id) void loadSubmissionSummary(current.materialized_payment_request_id)
+  }
+
   function handleSourceAccountChange(next: string) {
     const encodedUploaded = files.layout_spei?.uploaded || files.layout_toka?.uploaded
     if (sessionId && persistedSourceAccountId.current && encodedUploaded && next !== persistedSourceAccountId.current) {
@@ -154,67 +224,168 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       return
     }
     setSourceAccountId(next)
-    // Descartar selecciones locales de layouts que codifican la cuenta.
-    setFiles((prev) => {
-      const copy = { ...prev }
-      ;(['layout_spei', 'layout_toka'] as PayrollSlot[]).forEach((slot) => {
-        if (copy[slot]?.file) delete copy[slot]
-      })
-      return copy
-    })
+    remember('account', companyId, next)
   }
 
-  function clearLocalFileSelections() {
-    setFiles((prev) => {
-      const copy = { ...prev }
-      Object.keys(copy).forEach((k) => {
-        if (copy[k as PayrollSlot]?.file) delete copy[k as PayrollSlot]
-      })
-      return copy
-    })
+  function handleCostCenterChange(next: string) {
+    setCostCenterId(next)
+    remember('cost-center', companyId, next)
   }
 
-  // ── Canales ───────────────────────────────────────────────────────────────
-  function toggleChannel(channel: PayrollChannel) {
-    const isOn = channels.includes(channel)
-    if (isOn) {
-      const slots = slotsForChannel(channel)
-      if (slots.some((slot) => files[slot]?.uploaded)) {
-        showToast('Canal protegido', 'No puedes retirar un canal después de subir su evidencia. Crea una captura nueva.', 'warning')
-        return
+  function selectedFileNames(nextFiles: FileMap, nextUnrecognized: UnrecognizedFile[]): string[] {
+    return [
+      ...Object.values(nextFiles).map((state) => state?.fileName || '').filter(Boolean),
+      ...nextUnrecognized.map((entry) => entry.file.name),
+    ]
+  }
+
+  function applyPeriodInference(nextFiles: FileMap, nextUnrecognized: UnrecognizedFile[]): boolean {
+    if (periodStart && periodEnd) return true
+    const inferred = inferPayrollPeriodFromFileNames(selectedFileNames(nextFiles, nextUnrecognized))
+    if (!inferred) return false
+    setPeriodStart(inferred.periodStart)
+    setPeriodEnd(inferred.periodEnd)
+    return true
+  }
+
+  async function addFiles(incoming: File[]) {
+    if (locked || !incoming.length || classifying) return
+    const epoch = ++classificationEpoch.current
+    setClassifying(true)
+    setProgressText(`Identificando ${incoming.length} archivo${incoming.length === 1 ? '' : 's'}…`)
+    try {
+      const results = await Promise.all(
+        incoming.map(async (file, index) => {
+          try {
+            const classified = await classifyPayrollFile(file)
+            if (!classified) return { kind: 'unknown' as const, entry: { id: fileId(file, index), file, message: 'No reconocido' } }
+            const inspected = await inspectFile(classified.slot, file, sourceCandidates)
+            return {
+              kind: 'known' as const,
+              slot: classified.slot,
+              state: {
+                ...inspected,
+                fileName: file.name,
+                recordCount: classified.diagnostic.recordCount,
+                totalAmountMinor: classified.diagnostic.totalAmountMinor,
+                localDiagnostic: classified.diagnostic,
+              } satisfies FileSlotState,
+            }
+          } catch {
+            return { kind: 'unknown' as const, entry: { id: fileId(file, index), file, message: 'No reconocido' } }
+          }
+        }),
+      )
+      if (classificationEpoch.current !== epoch) return
+
+      const nextFiles: FileMap = { ...files }
+      const nextUnknown = [...unrecognized]
+      const replaced: string[] = []
+      for (const result of results) {
+        if (result.kind === 'unknown') {
+          nextUnknown.push(result.entry)
+          continue
+        }
+        if (nextFiles[result.slot]?.uploaded) {
+          nextUnknown.push({
+            id: fileId(result.state.file as File, nextUnknown.length),
+            file: result.state.file as File,
+            message: `${slotLabel(result.slot)} ya está guardado; crea una captura nueva para reemplazarlo`,
+          })
+          continue
+        }
+        if (nextFiles[result.slot]) replaced.push(slotLabel(result.slot))
+        nextFiles[result.slot] = result.state
       }
-      setChannels((prev) => prev.filter((c) => c !== channel))
-      setFiles((prev) => {
-        const copy = { ...prev }
-        slots.forEach((slot) => delete copy[slot])
-        return copy
-      })
-    } else {
-      setChannels((prev) => [...prev, channel])
+      const totalFiles = Object.keys(nextFiles).length + nextUnknown.length
+      if (totalFiles > 5) {
+        nextUnknown.splice(Math.max(0, nextUnknown.length - (totalFiles - 5)), totalFiles - 5)
+        showToast('Máximo cinco archivos', 'La captura admite hasta cinco archivos; los adicionales no se agregaron.', 'warning')
+      }
+      setFiles(nextFiles)
+      setUnrecognized(nextUnknown)
+      setChannels(channelsFromFiles(nextFiles))
+      const hasPeriod = applyPeriodInference(nextFiles, nextUnknown)
+      if (replaced.length) setReplacementNotice(`Se reemplazó el archivo anterior de ${Array.from(new Set(replaced)).join(', ')}.`)
+
+      const inferredChannels = channelsFromFiles(nextFiles)
+      const inferredRequired = requiredSlots(inferredChannels)
+      const inferredMissing = inferredRequired.filter((slot) => !nextFiles[slot]?.uploadable && !nextFiles[slot]?.uploaded)
+      if (!sourceAccountId || !costCenterId || !hasPeriod || inferredMissing.length) setDetailsOpen(true)
+    } finally {
+      if (classificationEpoch.current === epoch) {
+        setClassifying(false)
+        setProgressText('')
+      }
     }
   }
 
-  // ── Archivos ────────────────────────────────────────────────────────────────
-  async function handleFile(slot: PayrollSlot, file: File | null) {
-    if (!file) {
-      setFiles((prev) => {
-        const copy = { ...prev }
-        delete copy[slot]
-        return copy
-      })
+  async function assignManualSlot(entry: UnrecognizedFile, slot: PayrollSlot) {
+    if (files[slot]?.uploaded) {
+      showToast('Archivo protegido', `${slotLabel(slot)} ya está guardado en esta captura.`, 'warning')
       return
     }
     try {
-      const fs = await inspectFile(slot, file, candidates)
-      setFiles((prev) => ({ ...prev, [slot]: fs }))
-    } catch {
-      setFiles((prev) => ({ ...prev, [slot]: parserErrorSlot() }))
+      const inspected = await inspectFile(slot, entry.file, sourceCandidates)
+      const nextFiles = { ...files, [slot]: { ...inspected, fileName: entry.file.name } }
+      const nextUnknown = unrecognized.filter((item) => item.id !== entry.id)
+      setFiles(nextFiles)
+      setUnrecognized(nextUnknown)
+      setChannels(channelsFromFiles(nextFiles))
+      applyPeriodInference(nextFiles, nextUnknown)
+    } catch (error) {
+      showToast('Archivo no compatible', friendlyError(error), 'warning')
     }
   }
 
-  // ── Guardar captura + subir archivos reservados ──────────────────────────
-  async function save() {
-    if (saving || locked) return
+  function removeFile(slot: PayrollSlot) {
+    const current = files[slot]
+    if (!current || current.uploaded || locked) return
+    const next = { ...files }
+    delete next[slot]
+    setFiles(next)
+    setChannels(channelsFromFiles(next))
+  }
+
+  async function validatePendingFiles(): Promise<FileMap> {
+    const checked: FileMap = { ...files }
+    for (const [slot, state] of Object.entries(files) as Array<[PayrollSlot, FileSlotState | undefined]>) {
+      if (!state?.file || state.uploaded) continue
+      const inspected = await inspectFile(slot, state.file, sourceCandidates)
+      checked[slot] = {
+        ...inspected,
+        fileName: state.fileName,
+        localDiagnostic: state.localDiagnostic,
+        recordCount: state.localDiagnostic?.recordCount ?? inspected.recordCount,
+        totalAmountMinor: state.localDiagnostic?.totalAmountMinor ?? inspected.totalAmountMinor,
+      }
+      if (!inspected.uploadable || inspected.status === 'parser_error') throw new Error('PAYROLL_SOURCE_ACCOUNT_MISMATCH')
+    }
+    setFiles(checked)
+    return checked
+  }
+
+  async function loadSubmissionSummary(requestId: string): Promise<{ data: SubmissionSummary; options: ApproverCandidate[] }> {
+    const data = await getSubmissionSummary(requestId)
+    setSummary(data)
+    let options: ApproverCandidate[] = []
+    if (data.status === 'draft') {
+      try {
+        options = await listApproverOptions(data.company_id, data.cost_center_id, Number(data.amount_requested))
+      } catch (error) {
+        showToast('Aprobadores no disponibles', friendlyError(error), 'warning')
+      }
+    }
+    setApprovers(options)
+    setApproverValue((current) => {
+      if (options.some((option) => option.profile_id === current)) return current
+      return options.length === 1 ? options[0].profile_id : ''
+    })
+    return { data, options }
+  }
+
+  async function registerAndAdvance() {
+    if (workflowBusy || locked) return
     const validation = validateMetadata({
       isFinance,
       companyId,
@@ -227,11 +398,20 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       channels,
     })
     if (validation) {
+      setDetailsOpen(true)
       showToast('Revisa la captura', validation, 'warning')
       return
     }
-    setSaving(true)
+    if (missing.length || hasParserErrors) {
+      showToast('Paquete incompleto', 'Falta un archivo requerido o alguno no pasó la validación local.', 'warning')
+      return
+    }
+
+    setWorkflowBusy(true)
     try {
+      setProgressText('Revisando archivos…')
+      const checkedFiles = await validatePendingFiles()
+      setProgressText('Registrando corrida…')
       const saved = await saveCaptureSession({
         sessionId,
         expectedVersion: sessionVersion,
@@ -249,88 +429,68 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       const currentId = saved.id
       setSessionId(currentId)
       setSessionVersion(version)
-      // Subir en dos fases cada archivo pendiente (reserve → storage → confirm).
-      // Se marca cada slot como subido y se avanza la versión conforme progresa,
-      // para que un reintento tras fallo parcial use la versión correcta (fidelidad
-      // con la mutación por-archivo de uploadReservedFile del vanilla).
-      const uploads = (Object.entries(files) as Array<[PayrollSlot, FileMap[PayrollSlot]]>).filter(
-        ([, fs]) => fs?.uploadable && !fs?.uploaded,
+      remember('account', companyId, sourceAccountId)
+      remember('cost-center', companyId, costCenterId)
+
+      const uploads = (Object.entries(checkedFiles) as Array<[PayrollSlot, FileSlotState | undefined]>).filter(
+        ([, state]) => state?.uploadable && !state.uploaded,
       )
-      for (const [slot, fs] of uploads) {
-        version = await uploadReservedFile(currentId, version, slot, fs!)
+      for (let index = 0; index < uploads.length; index += 1) {
+        const [slot, state] = uploads[index]
+        setProgressText(`Subiendo ${index + 1} de ${uploads.length}…`)
+        version = await uploadReservedFile(currentId, version, slot, state as FileSlotState)
         setSessionVersion(version)
-        setFiles((prev) => {
-          const existing = prev[slot]
-          if (!existing) return prev
-          return { ...prev, [slot]: { ...existing, uploaded: true, uploadable: false, file: undefined } }
+        setFiles((current) => {
+          const existing = current[slot]
+          if (!existing) return current
+          return { ...current, [slot]: { ...existing, uploaded: true, uploadable: false, file: undefined } }
         })
       }
-      // Rehidratar desde el servidor.
+
+      setProgressText('Validando paquete en servidor…')
+      const result = await materializeCapture(currentId, version)
       const list = await getCaptureSessions(currentId)
-      const current = list.find((x) => x.id === currentId)
-      if (current) hydrate(current)
-      onSaved()
-      showToast('Captura guardada', 'El paquete privado quedó guardado. Cuando estén todos los archivos podrás validar y materializar.', 'success')
-    } catch (error) {
-      showToast('No se pudo guardar', friendlyError(error), 'error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Rehidrata el estado local a partir de una sesión del servidor (sin reabrir efecto).
-  function hydrate(current: CaptureSession) {
-    setSessionId(current.id)
-    setSessionVersion(current.version)
-    setMaterializedRequestId(current.materialized_payment_request_id || null)
-    persistedSourceAccountId.current = current.company_bank_account_id
-    setCompanyId(current.company_id)
-    setSourceAccountId(current.company_bank_account_id)
-    setCostCenterId(current.cost_center_id || '')
-    setSubtype(current.payroll_subtype)
-    setPeriodStart(current.period_start)
-    setPeriodEnd(current.period_end)
-    setConcept(current.concept)
-    setNotes(current.notes || '')
-    setChannels(current.expected_channels || [])
-    const hydrated: FileMap = {}
-    ;(current.files || []).forEach((f) => {
-      hydrated[f.kind] = {
-        present: true,
-        uploaded: true,
-        uploadable: false,
-        status: f.parsing_status || 'server_verification_pending',
-        recordCount: f.record_count,
-        totalAmountMinor: f.total_amount_minor,
-        issueCodes: f.issue_codes || [],
-      }
-    })
-    setFiles(hydrated)
-    if (current.materialized_payment_request_id) void loadSubmissionSummary(current.materialized_payment_request_id)
-  }
-
-  // ── Materializar (Edge Function) ─────────────────────────────────────────
-  async function materialize() {
-    if (materializing || !sessionId || sessionVersion === null) return
-    if (missing.length) {
-      showToast('Paquete incompleto', 'Faltan archivos requeridos.', 'warning')
-      return
-    }
-    setMaterializing(true)
-    try {
-      const result = await materializeCapture(sessionId, sessionVersion)
-      const requestId = result.payment_request_id || materializedRequestId
+      const current = list.find((item) => item.id === currentId)
+      const requestId = result.payment_request_id || current?.materialized_payment_request_id || materializedRequestId
+      if (!requestId) throw new Error('PAYROLL_MATERIALIZATION_FAILED')
       setMaterializedRequestId(requestId)
-      const list = await getCaptureSessions(sessionId)
-      const current = list.find((x) => x.id === sessionId)
-      if (current) hydrate(current)
-      else if (requestId) await loadSubmissionSummary(requestId)
+      if (current) hydrate(current, false)
+
+      setProgressText('Preparando aprobación…')
+      const loaded = await loadSubmissionSummary(requestId)
+      const vales = loaded.data.channels?.find((channel) => channel.channel === 'vales')
+      const variance = Number(vales?.funding_variance || 0)
+      if (variance !== 0 && !vales?.funding_variance_acknowledged) {
+        showToast('Corrida registrada', 'Revisa y reconoce la diferencia TOKA para continuar a aprobación.', 'warning')
+        onSaved()
+        return
+      }
+      if (loaded.data.budget_ready !== true) {
+        showToast('Corrida registrada', 'El paquete quedó validado; falta completar el gate presupuestal.', 'warning')
+        onSaved()
+        return
+      }
+      if (loaded.options.length !== 1) {
+        showToast(
+          'Corrida registrada',
+          loaded.options.length > 1 ? 'Selecciona el aprobador para completar el envío.' : 'No hay un aprobador elegible para este contexto.',
+          'warning',
+        )
+        onSaved()
+        return
+      }
+
+      setProgressText('Enviando a aprobación…')
+      const option = loaded.options[0]
+      await submitForApproval(requestId, option.profile_id, option.assignment_id || null)
+      await loadSubmissionSummary(requestId)
       onSaved()
-      showToast('Nómina validada', 'El servidor verificó el paquete y materializó la solicitud.', 'success')
+      showToast('Nómina enviada', 'La corrida quedó registrada y enviada a aprobación.', 'success')
     } catch (error) {
-      showToast('Validación no completada', friendlyError(error), 'error')
+      showToast('No se pudo completar la corrida', friendlyError(error), 'error')
     } finally {
-      setMaterializing(false)
+      setWorkflowBusy(false)
+      setProgressText('')
     }
   }
 
@@ -341,34 +501,13 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       const result = await revalidateMaterializedCapture(sessionId, sessionVersion)
       showToast(
         'Paquete revalidado sin cambios',
-        `${result.file_count} archivos · ${result.employee_record_count} registros · ${result.channels.length} canales. No se modificó la corrida.`,
+        `${result.file_count} archivos · ${result.employee_record_count} registros · ${result.channels.length} canales.`,
         'success',
       )
     } catch (error) {
       showToast('No se pudo revalidar', friendlyError(error), 'error')
     } finally {
       setRevalidating(false)
-    }
-  }
-
-  // ── Resumen de submission + aprobadores ──────────────────────────────────
-  async function loadSubmissionSummary(requestId: string) {
-    try {
-      const data = await getSubmissionSummary(requestId)
-      setSummary(data)
-      if (data.status === 'draft') {
-        try {
-          const opts = await listApproverOptions(data.company_id, data.cost_center_id, Number(data.amount_requested))
-          setApprovers(opts)
-        } catch (error) {
-          setApprovers([])
-          showToast('Aprobadores no disponibles', friendlyError(error), 'warning')
-        }
-      } else {
-        setApprovers([])
-      }
-    } catch (error) {
-      showToast('No se pudo leer el resumen', friendlyError(error), 'error')
     }
   }
 
@@ -391,12 +530,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
 
   async function submit() {
     if (submitting || !summary || !materializedRequestId) return
-    const option = approvers.find((a) => a.profile_id === approverValue)
+    const option = approvers.find((candidate) => candidate.profile_id === approverValue)
     if (!option) {
       showToast('Aprobador requerido', 'Selecciona un aprobador elegible.', 'warning')
       return
     }
-    // Gate de presupuesto (budget_live_frontend_guards): bloquear si draft y no listo.
     if (summary.status === 'draft' && summary.budget_ready === false) {
       showToast('Presupuesto requerido', 'Configura y valida el presupuesto antes de enviar la Nómina a aprobación.', 'warning')
       return
@@ -414,14 +552,24 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     }
   }
 
-  // ── Derivados de render ────────────────────────────────────────────────────
-  const captureState = locked ? 'Materializada' : missing.length ? 'Archivos pendientes' : 'Lista para validación server-side'
-  const totalText = summary ? formatMoney(summary.amount_requested) : 'Se calcula en servidor'
-  const spei = files.layout_spei
-  const speiText = spei?.recordCount ? String(spei.recordCount) : spei?.uploaded ? 'Servidor validará' : 'Pendiente'
+  const coverDiagnostic = files.caratula?.localDiagnostic
+  const bankDiagnostic = files.layout_mismo_banco?.localDiagnostic
+  const speiDiagnostic = files.layout_spei?.localDiagnostic
+  const tokaDiagnostic = files.layout_toka?.localDiagnostic
+  const cfdiDiagnostic = files.cfdi_vales?.localDiagnostic
+  const cashLayoutsMinor = (bankDiagnostic?.totalAmountMinor ?? 0) + (speiDiagnostic?.totalAmountMinor ?? 0)
+  const cashDifference = coverDiagnostic?.cashAmountMinor == null ? null : cashLayoutsMinor - coverDiagnostic.cashAmountMinor
+  const vouchersDifference =
+    coverDiagnostic?.vouchersAmountMinor == null || cfdiDiagnostic?.benefitAmountMinor == null
+      ? null
+      : cfdiDiagnostic.benefitAmountMinor - coverDiagnostic.vouchersAmountMinor
+  const localVariance =
+    tokaDiagnostic?.totalAmountMinor == null || cfdiDiagnostic?.expectedFundingAmountMinor == null
+      ? null
+      : tokaDiagnostic.totalAmountMinor - cfdiDiagnostic.expectedFundingAmountMinor
 
   const channelSummary = summary && Array.isArray(summary.channels) ? summary.channels : []
-  const valesChannel = channelSummary.find((c) => c.channel === 'vales')
+  const valesChannel = channelSummary.find((channel) => channel.channel === 'vales')
   const variance = Number(valesChannel?.funding_variance || 0)
   const needsReview = variance !== 0 && !valesChannel?.funding_variance_acknowledged
   const isDraft = summary?.status === 'draft'
@@ -429,48 +577,9 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const approvalReady = isDraft && !needsReview && budgetReady
   const budgetBlocked = summary?.budget_decision === 'bloqueado'
 
-  function renderFileStatus(slot: PayrollSlot, isRequired: boolean) {
-    const f = files[slot]
-    if (!isRequired) return <span className={`${s.state} ${s.stateNeutral}`}>No requerido</span>
-    if (!f) {
-      return (
-        <>
-          <span className={`${s.state} ${s.stateWarning}`}>Pendiente de archivo</span>
-          <small>MISSING_USER_FILE</small>
-        </>
-      )
-    }
-    if (f.status === 'parser_error' || f.status === 'failed') {
-      return (
-        <>
-          <span className={`${s.state} ${s.stateDanger}`}>Error de formato</span>
-          <small>No se subirá</small>
-        </>
-      )
-    }
-    if (locked) {
-      return (
-        <>
-          <span className={`${s.state} ${s.stateSuccess}`}>Verificado en servidor</span>
-          <small>Evidencia vinculada a la corrida materializada</small>
-        </>
-      )
-    }
-    if (f.uploaded) {
-      return (
-        <>
-          <span className={`${s.state} ${s.stateSuccess}`}>Archivo privado recibido</span>
-          <small>{slot === 'layout_spei' ? 'Diagnóstico local PASS · servidor revalidará' : 'Verificación server-side pendiente'}</small>
-        </>
-      )
-    }
-    return (
-      <>
-        <span className={`${s.state} ${s.stateWarning}`}>Listo para subir</span>
-        <small>Se verificará en servidor</small>
-      </>
-    )
-  }
+  const metadataMissing = !sourceAccountId || !costCenterId || !periodStart || !periodEnd || concept.trim().length < 3
+  const packageReady =
+    channels.length > 0 && missing.length === 0 && !hasParserErrors && unrecognized.length === 0 && Boolean(files.caratula)
 
   const actions = (
     <>
@@ -482,241 +591,260 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
           {revalidating ? 'Revalidando paquete…' : 'Revalidar paquete en servidor'}
         </button>
       )}
-      <button type="button" className={s.secondaryBtn} onClick={save} disabled={locked || saving}>
-        {saving ? 'Guardando…' : 'Guardar captura'}
-      </button>
-      <button
-        type="button"
-        className={s.primaryBtn}
-        onClick={materialize}
-        disabled={locked || !sessionId || missing.length > 0 || materializing}
-      >
-        {materializing ? 'Validando en servidor…' : 'Validar paquete y materializar'}
-      </button>
     </>
   )
 
   return (
     <Modal
       title="Captura de nómina"
-      subtitle="Carga el paquete físico, valida en servidor y envía el total de Tesorería a aprobación."
+      subtitle="Arrastra el paquete, revisa el resumen y envíalo con una sola acción."
       size="lg"
       onClose={onClose}
       actions={actions}
     >
       <div className={s.section}>
-        <span className={s.devPill}>DEV · N3G</span>
-        <p className={s.sectionCopy}>
-          Flux no calcula nómina. Valida el paquete físico, materializa la corrida y la envía a aprobación individual.
-        </p>
-
-        <div className={s.grid}>
-          <label>
-            Empresa *
-            <select value={companyId} disabled>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name || c.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Tipo de corrida *
-            <select value={subtype} onChange={(e) => setSubtype(e.target.value as PayrollSubtype)} disabled={locked}>
-              <option value="ordinaria">Ordinaria</option>
-              <option value="extraordinaria">Extraordinaria</option>
-            </select>
-          </label>
-          <label>
-            Cuenta origen *
-            <select value={sourceAccountId} onChange={(e) => handleSourceAccountChange(e.target.value)} disabled={locked || !companyId}>
-              <option value="">{companyId ? 'Seleccionar cuenta origen' : 'Selecciona empresa primero'}</option>
-              {companyAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {accountLabel(a)}
-                </option>
-              ))}
-            </select>
-            <span className={s.hint}>Cuenta de Tesorería; siempre se muestra enmascarada.</span>
-          </label>
-          <label>
-            Centro de costo *
-            <select value={costCenterId} onChange={(e) => setCostCenterId(e.target.value)} disabled={locked || !companyId}>
-              <option value="">{companyId ? 'Seleccionar centro de costo' : 'Selecciona empresa primero'}</option>
-              {companyCostCenters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {costCenterLabel(c)}
-                </option>
-              ))}
-            </select>
-            <span className={s.hint}>Define el contexto contable y las reglas de aprobación.</span>
-          </label>
-          <label>
-            Periodo inicio *
-            <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} disabled={locked} />
-          </label>
-          <label>
-            Periodo fin *
-            <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} disabled={locked} />
-          </label>
-          <label className={s.fullRow}>
-            Concepto *
-            <input value={concept} onChange={(e) => setConcept(e.target.value)} disabled={locked} placeholder="Concepto o descripción de la corrida" />
-          </label>
-          <label className={s.fullRow}>
-            Notas
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} disabled={locked} />
-          </label>
-        </div>
-
-        <fieldset className={s.channelPicker}>
-          <legend>Canales de la corrida *</legend>
-          {[
-            { value: 'banco' as PayrollChannel, label: 'BBVA mismo banco' },
-            { value: 'spei' as PayrollChannel, label: 'SPEI' },
-            { value: 'vales' as PayrollChannel, label: 'Vales / TOKA' },
-          ].map((ch) => (
-            <label key={ch.value}>
-              <input type="checkbox" checked={channels.includes(ch.value)} onChange={() => toggleChannel(ch.value)} disabled={locked} />
-              {ch.label}
-            </label>
-          ))}
-        </fieldset>
-
-        <div>
+        <div className={s.introRow}>
+          <div>
+            <span className={s.devPill}>DEV · Captura simplificada</span>
+            <p className={s.sectionCopy}>
+              Flux valida archivos y registra la corrida; no calcula sueldos, no genera layouts y no ejecuta pagos.
+            </p>
+          </div>
           <span className={s.privatePill}>Privado · Finanzas</span>
         </div>
 
-        <div className={s.fileGrid}>
-          {FILE_CARDS.map((card) => {
-            const isRequired = required.includes(card.slot)
-            const slotEnabled = enabled[card.slot]
-            return (
-              <article key={card.slot} className={`${s.fileCard} ${slotEnabled ? '' : s.fileCardDisabled}`}>
-                <div className={s.fileCardHead}>
-                  <strong>{card.title}</strong>
-                  <span>{card.badge}</span>
-                </div>
-                <p>{card.copy}</p>
-                <input
-                  type="file"
-                  accept={card.accept}
-                  aria-label={card.title}
-                  disabled={locked || !slotEnabled}
-                  onChange={(e) => handleFile(card.slot, e.target.files?.[0] || null)}
-                />
-                <div className={s.fileStatus}>{renderFileStatus(card.slot, isRequired)}</div>
-              </article>
-            )
-          })}
-        </div>
+        {!locked && (
+          <label
+            className={`${s.dropzone} ${dropActive ? s.dropzoneActive : ''}`}
+            onDragEnter={(event) => {
+              event.preventDefault()
+              setDropActive(true)
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={(event) => {
+              event.preventDefault()
+              if (event.currentTarget === event.target) setDropActive(false)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              setDropActive(false)
+              void addFiles(Array.from(event.dataTransfer.files))
+            }}
+          >
+            <strong>{classifying ? 'Identificando archivos…' : 'Arrastra aquí los archivos de la corrida'}</strong>
+            <span>Carátula XLSX y layouts TXT/XML, en cualquier orden · máximo 5 archivos</span>
+            <span className={s.dropzoneAction}>Seleccionar archivos</span>
+            <input
+              type="file"
+              multiple
+              accept=".xlsx,.txt,.xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,application/xml,text/xml"
+              disabled={classifying}
+              onChange={(event) => {
+                void addFiles(Array.from(event.target.files || []))
+                event.currentTarget.value = ''
+              }}
+            />
+          </label>
+        )}
 
-        <section className={s.validationPanel} aria-live="polite">
-          <div className={s.validationRow}>
-            <span className={s.summaryLabel}>Estado</span>
-            <strong>{captureState}</strong>
-          </div>
-          <div className={s.validationRow}>
-            <span className={s.summaryLabel}>Monto</span>
-            <strong>{totalText}</strong>
-          </div>
-          <div className={s.validationRow}>
-            <span className={s.summaryLabel}>SPEI</span>
-            <strong>{speiText}</strong>
-          </div>
-          <div className={s.issues}>
-            {missing.length ? (
-              missing.map((slot) => (
-                <span key={slot} className={s.issueChip}>
-                  MISSING_USER_FILE · {slotLabel(slot)}
-                </span>
-              ))
-            ) : (
-              <span className={s.issueChip}>Paquete completo para verificación</span>
+        {replacementNotice && <div className={s.inlineNotice}>{replacementNotice}</div>}
+
+        <section className={s.detectedPanel} aria-live="polite">
+          <div className={s.panelHeading}>
+            <div>
+              <span className={s.summaryLabel}>Archivos detectados</span>
+              <strong>{Object.keys(files).length} de hasta 5</strong>
+            </div>
+            {channels.length > 0 && (
+              <div className={s.channelChips}>
+                {channels.map((channel) => <span key={channel}>{channelLabel(channel)}</span>)}
+              </div>
             )}
           </div>
-          <p className={s.piiNote}>
-            Esta vista no muestra nombres, RFC, CURP, NSS, cuentas, CLABE ni referencias de empleados.
-          </p>
+
+          <div className={s.fileRows}>
+            {(Object.entries(files) as Array<[PayrollSlot, FileSlotState]>).map(([slot, state]) => (
+              <article key={slot} className={s.fileRow}>
+                <div>
+                  <strong>{state.fileName || slotLabel(slot)}</strong>
+                  <span>{slotLabel(slot)} · detectado por contenido</span>
+                </div>
+                <div className={s.fileAggregate}>
+                  {state.recordCount != null && <span>{state.recordCount} registros</span>}
+                  {state.totalAmountMinor != null && <strong>{moneyFromMinor(state.totalAmountMinor)}</strong>}
+                </div>
+                <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
+                  {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
+                </span>
+                {!state.uploaded && !locked && (
+                  <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
+                    Quitar
+                  </button>
+                )}
+              </article>
+            ))}
+
+            {unrecognized.map((entry) => (
+              <article key={entry.id} className={`${s.fileRow} ${s.fileRowDanger}`}>
+                <div>
+                  <strong>{entry.file.name}</strong>
+                  <span>{entry.message} — elige el tipo manualmente</span>
+                </div>
+                <select defaultValue="" onChange={(event) => event.target.value && void assignManualSlot(entry, event.target.value as PayrollSlot)}>
+                  <option value="">Elegir tipo…</option>
+                  {ALL_SLOTS.map((slot) => <option key={slot} value={slot}>{slotLabel(slot)} ({SLOT_CONFIG[slot].extension.toUpperCase()})</option>)}
+                </select>
+                <span className={`${s.state} ${s.stateDanger}`}>No reconocido</span>
+                <button type="button" className={s.iconBtn} onClick={() => setUnrecognized((items) => items.filter((item) => item.id !== entry.id))}>
+                  Quitar
+                </button>
+              </article>
+            ))}
+
+            {!Object.keys(files).length && !unrecognized.length && <div className={s.boardEmpty}>Aún no has agregado archivos.</div>}
+          </div>
+        </section>
+
+        <section className={s.onePageSummary}>
+          <div className={s.summaryTop}>
+            <div>
+              <span className={s.summaryLabel}>Resumen de la corrida</span>
+              <strong>{periodStart && periodEnd ? `${periodStart} → ${periodEnd}` : 'Periodo pendiente de inferir'}</strong>
+            </div>
+            <span className={`${s.state} ${packageReady && !metadataMissing ? s.stateSuccess : s.stateWarning}`}>
+              {locked ? 'Validada por servidor' : packageReady && !metadataMissing ? 'Lista para registrar' : 'Requiere revisión'}
+            </span>
+          </div>
+
+          <div className={s.summaryMetrics}>
+            <div className={s.metric}>
+              <span>Total neto</span>
+              <strong>{summary ? formatMoney(summary.employee_net) : moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
+            </div>
+            <div className={s.metric}>
+              <span>Empleados</span>
+              <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
+            </div>
+            <div className={s.metric}>
+              <span>Canales</span>
+              <strong>{channels.length || '—'}</strong>
+            </div>
+          </div>
+
+          {channels.length > 0 && (
+            <div className={s.channelList}>
+              {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
+              {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
+              {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
+            </div>
+          )}
+
+          {(cashDifference !== null || vouchersDifference !== null || localVariance !== null) && (
+            <div className={s.localChecks}>
+              {cashDifference !== null && <span className={cashDifference === 0 ? s.checkPass : s.checkWarning}>Efectivo vs layouts: {cashDifference === 0 ? 'coincide' : `diferencia ${moneyFromMinor(cashDifference)}`}</span>}
+              {vouchersDifference !== null && <span className={vouchersDifference === 0 ? s.checkPass : s.checkWarning}>Vales vs CFDI: {vouchersDifference === 0 ? 'coincide' : `diferencia ${moneyFromMinor(vouchersDifference)}`}</span>}
+              {localVariance !== null && localVariance !== 0 && <span className={s.checkWarning}>Fondeo TOKA: diferencia preliminar {moneyFromMinor(localVariance)}</span>}
+            </div>
+          )}
+
+          {missing.length > 0 && <div className={s.issues}>{missing.map((slot) => <span key={slot} className={s.issueChip}>Falta {slotLabel(slot)}</span>)}</div>}
+          {unrecognized.length > 0 && (
+            <div className={s.issues}>
+              <span className={s.issueChip}>Clasifica o quita los archivos no reconocidos</span>
+            </div>
+          )}
+
+          <details className={s.details} open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+            <summary>Ver/editar detalles {metadataMissing ? '· faltan datos' : '· completos'}</summary>
+            <div className={s.grid}>
+              <label>
+                Empresa
+                <select value={companyId} disabled>
+                  {companies.map((company) => <option key={company.id} value={company.id}>{company.name || company.id}</option>)}
+                </select>
+              </label>
+              <label>
+                Tipo de corrida
+                <select value={subtype} onChange={(event) => setSubtype(event.target.value as PayrollSubtype)} disabled={locked}>
+                  <option value="ordinaria">Ordinaria</option>
+                  <option value="extraordinaria">Extraordinaria</option>
+                </select>
+              </label>
+              <label>
+                Cuenta origen *
+                <select value={sourceAccountId} onChange={(event) => handleSourceAccountChange(event.target.value)} disabled={locked}>
+                  <option value="">Seleccionar cuenta origen</option>
+                  {companyAccounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
+                </select>
+              </label>
+              <label>
+                Centro de costo *
+                <select value={costCenterId} onChange={(event) => handleCostCenterChange(event.target.value)} disabled={locked}>
+                  <option value="">Seleccionar centro de costo</option>
+                  {companyCostCenters.map((center) => <option key={center.id} value={center.id}>{costCenterLabel(center)}</option>)}
+                </select>
+              </label>
+              <label>
+                Periodo inicio *
+                <input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} disabled={locked} />
+              </label>
+              <label>
+                Periodo fin *
+                <input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} disabled={locked} />
+              </label>
+              <label className={s.fullRow}>
+                Concepto *
+                <input value={concept} onChange={(event) => { conceptIsAutomatic.current = false; setConcept(event.target.value) }} disabled={locked} />
+              </label>
+              <label className={s.fullRow}>
+                Notas
+                <textarea value={notes} onChange={(event) => setNotes(event.target.value)} disabled={locked} />
+              </label>
+            </div>
+          </details>
+
+          {!locked && (
+            <div className={s.primaryAction}>
+              <button
+                type="button"
+                className={`${s.primaryBtn} ${s.primaryWide}`}
+                onClick={registerAndAdvance}
+                disabled={workflowBusy || classifying || !packageReady || metadataMissing}
+              >
+                {workflowBusy ? progressText || 'Procesando…' : 'Registrar y enviar a aprobación'}
+              </button>
+              <small>Se conservan las mismas RPC, carga privada, SHA-256, validación del servidor y auditoría.</small>
+            </div>
+          )}
         </section>
 
         {summary && (
           <section className={s.summary}>
             <div className={s.metrics}>
-              <div className={s.metric}>
-                <span>Neto empleados</span>
-                <strong>{formatMoney(summary.employee_net)}</strong>
-              </div>
-              <div className={s.metric}>
-                <span>Salida Tesorería</span>
-                <strong>{formatMoney(summary.amount_requested)}</strong>
-              </div>
+              <div className={s.metric}><span>Neto empleados</span><strong>{formatMoney(summary.employee_net)}</strong></div>
+              <div className={s.metric}><span>Salida Tesorería</span><strong>{formatMoney(summary.amount_requested)}</strong></div>
             </div>
 
             <div className={s.channelList}>
-              {channelSummary.map((c) => {
-                let detail = formatMoney(c.amount)
-                if (c.channel === 'vales') {
-                  detail += ` · beneficio ${formatMoney(c.benefit_amount)} · comisión ${formatMoney(c.fee_amount)} · IVA ${formatMoney(c.tax_amount)}`
-                }
-                return (
-                  <div key={c.channel} className={s.channelRow}>
-                    <span>{channelLabel(c.channel)}</span>
-                    <strong>{detail}</strong>
-                  </div>
-                )
-              })}
+              {channelSummary.map((channel) => <div key={channel.channel} className={s.channelRow}><span>{channelLabel(channel.channel)}</span><strong>{formatMoney(channel.amount)}</strong></div>)}
             </div>
 
             {needsReview && valesChannel && (
               <div className={s.review}>
                 <strong>Revisión de fondeo TOKA requerida</strong>
-                <p>
-                  Fondeo real {formatMoney(valesChannel.amount)} vs esperado {formatMoney(valesChannel.expected_funding_amount)} · diferencia{' '}
-                  {formatMoney(variance)}.
-                </p>
-                <textarea
-                  maxLength={500}
-                  value={varianceNote}
-                  onChange={(e) => setVarianceNote(e.target.value)}
-                  placeholder="Documenta por qué Finanzas acepta la diferencia antes de enviar a aprobación."
-                />
-                <div className={s.actionsRow}>
-                  <button type="button" className={s.secondaryBtn} onClick={acknowledgeVariance}>
-                    Reconocer diferencia
-                  </button>
-                </div>
+                <p>Fondeo real {formatMoney(valesChannel.amount)} vs esperado {formatMoney(valesChannel.expected_funding_amount)} · diferencia {formatMoney(variance)}.</p>
+                <textarea maxLength={500} value={varianceNote} onChange={(event) => setVarianceNote(event.target.value)} placeholder="Documenta por qué Finanzas acepta la diferencia." />
+                <button type="button" className={s.secondaryBtn} onClick={acknowledgeVariance}>Reconocer diferencia</button>
               </div>
             )}
 
-            {/* Gate de presupuesto (budget_live_frontend_guards, plegado). */}
             {isDraft && !budgetReady && (
               <div className={`${s.budgetGate} ${budgetBlocked ? s.budgetBlocked : s.budgetPending}`}>
                 <div>
                   <strong>{budgetBlocked ? 'Presupuesto bloqueado' : 'Presupuesto pendiente'}</strong>
-                  <p>
-                    {budgetBlocked
-                      ? summary.budget_block_reason || 'La disponibilidad vigente no permite enviar esta Nómina a aprobación.'
-                      : 'Configura mes y partida presupuestal antes de seleccionar aprobador.'}
-                  </p>
+                  <p>{summary.budget_block_reason || 'Configura mes y partida presupuestal antes de enviar.'}</p>
                 </div>
-                {materializedRequestId && (
-                  <a className={s.secondaryBtn} href={`/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>
-                    Configurar presupuesto
-                  </a>
-                )}
-              </div>
-            )}
-
-            {isDraft && budgetReady && (
-              <div className={`${s.budgetGate} ${s.budgetReady}`}>
-                <div>
-                  <strong>Presupuesto listo</strong>
-                  <p>
-                    Disponible después: {formatMoney(summary.budget_available_after)} · {String(summary.budget_month || '').slice(0, 7)}
-                  </p>
-                </div>
+                {materializedRequestId && <a className={s.secondaryBtn} href={`/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>Configurar presupuesto</a>}
               </div>
             )}
 
@@ -724,38 +852,32 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               <div className={s.approval}>
                 <label>
                   Aprobador *
-                  <select value={approverValue} onChange={(e) => setApproverValue(e.target.value)}>
+                  <select value={approverValue} onChange={(event) => setApproverValue(event.target.value)}>
                     <option value="">Selecciona aprobador</option>
-                    {approvers.map((a) => (
-                      <option key={a.profile_id} value={a.profile_id}>
-                        {a.option_label || a.display_name || a.email || a.profile_id}
-                      </option>
-                    ))}
+                    {approvers.map((approver) => <option key={approver.profile_id} value={approver.profile_id}>{approver.option_label || approver.display_name || approver.email || approver.profile_id}</option>)}
                   </select>
                 </label>
-                <button type="button" className={s.primaryBtn} onClick={submit} disabled={!approvers.length || submitting}>
-                  Enviar a aprobación
-                </button>
+                <button type="button" className={s.primaryBtn} onClick={submit} disabled={!approverValue || submitting}>{submitting ? 'Enviando…' : 'Continuar y enviar a aprobación'}</button>
               </div>
             )}
 
             <p className={s.submissionState}>
               {isDraft
                 ? needsReview
-                  ? 'Reconoce la diferencia TOKA antes de enviar.'
+                  ? 'Reconoce la diferencia TOKA antes de continuar.'
                   : !budgetReady
-                    ? 'Configura y valida el presupuesto antes de seleccionar aprobador.'
+                    ? 'Completa el gate presupuestal antes de continuar.'
                     : approvers.length
-                      ? 'Lista para seleccionar aprobador.'
+                      ? 'Lista para enviar.'
                       : 'No hay aprobadores elegibles para este contexto.'
                 : `Estado de solicitud: ${summary.status}`}
             </p>
           </section>
         )}
 
-        {session && (
-          <p className={s.hint}>Sesión: {captureStateLabel(session.capture_state)}</p>
-        )}
+        <p className={s.piiNote}>
+          Esta vista no muestra nombres, RFC, CURP, NSS, cuentas, CLABE ni referencias de empleados. La validación final siempre ocurre en el servidor.
+        </p>
       </div>
     </Modal>
   )
