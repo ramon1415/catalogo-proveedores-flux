@@ -46,6 +46,11 @@ const publicRootEntries = [
   'approval_batch_quick_approve.html',
   'approval_batch_quick_approve.css',
   'approval_batch_quick_approve.js',
+  'pdfjs-3.11.174.min.js',
+  'pdfjs-worker-3.11.174.min.js',
+  'pdf-lib-1.17.1.min.js',
+  'payment_batch_parser.js',
+  'payment_batch_single_page_pdf.js',
 ]
 
 for (const entry of publicRootEntries) {
