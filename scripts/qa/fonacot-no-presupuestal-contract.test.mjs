@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const migration = fs.readFileSync(
-  'supabase/migrations/20260903034215_fonacot_no_presupuestal.sql',
+  'supabase/migrations/20260903041213_fonacot_no_presupuestal.sql',
   'utf8',
 )
 const api = fs.readFileSync('app/src/features/solicitudes/api.ts', 'utf8')

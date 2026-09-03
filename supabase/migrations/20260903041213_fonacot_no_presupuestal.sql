@@ -1,4 +1,4 @@
--- Pagos de terceros retenidos (FONACOT): la empresa dispersa dinero que ya
+-- FONACOT no presupuestal: la empresa dispersa dinero que ya
 -- retuvo al trabajador, por lo que la solicitud sigue el flujo normal de
 -- autorización/pago pero no consume una línea de presupuesto.
 
