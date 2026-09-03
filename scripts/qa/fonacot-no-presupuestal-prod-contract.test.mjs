@@ -61,6 +61,18 @@ test('React exposes mapped no-budget categories without a budget line', () => {
   assert.match(requestModal, /Esta partida no consume presupuesto y seguirá el flujo normal de autorización\./)
 })
 
+test('FONACOT remains visible in Fersana even when other categories are scoped by responsible', () => {
+  assert.match(
+    requestModal,
+    /if \(r\.no_presupuestal\) return true[\s\S]*return emails\.includes\(myEmail\)/,
+  )
+  assert.ok(
+    requestModal.indexOf('if (r.no_presupuestal) return true')
+      < requestModal.indexOf('return emails.includes(myEmail)'),
+    'the no-budget bypass must run before responsible-email filtering',
+  )
+})
+
 test('rollback disables FONACOT exposure without deleting request history', () => {
   assert.match(rollback, /update public\.company_cost_center_budget_categories/)
   assert.match(rollback, /update public\.budget_categories[\s\S]*set active = false/)
