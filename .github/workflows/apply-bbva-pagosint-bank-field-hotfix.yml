@@ -24,6 +24,28 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
+      - name: Normalize optional legacy filter in patch script
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/ops/apply_bbva_pagosint_bank_field_hotfix.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''legacy = replace_many(
+              legacy,
+              '.filter((item) => item.status !== "bank_rejected")',
+              '.filter((item) => item.status === "included")',
+              "legacy item filters",
+          )'''
+          new = '''legacy = legacy.replace(
+              '.filter((item) => item.status !== "bank_rejected")',
+              '.filter((item) => item.status === "included")',
+          )'''
+          if text.count(old) != 1:
+              raise SystemExit(f'optional legacy filter patch expected once, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply focused patch
         run: python scripts/ops/apply_bbva_pagosint_bank_field_hotfix.py
 
