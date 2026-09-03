@@ -24,20 +24,39 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
-      - name: Apply focused company-scope fix
+      - name: Repair and validate patch preparer
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+
           path = Path('.github/scripts/apply_cortes_company_scope.py')
           text = path.read_text(encoding='utf-8')
-          old = 'state.companies = scopeCompanyRows(companies.data)'
-          new = 'state.companies = asArray(companies.data)'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one company assignment, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replacements = {
+              'state.companies = scopeCompanyRows(companies.data)': 'state.companies = asArray(companies.data)',
+              'return !state.companyScopeId || row?.company_id === state.companyScopeId': 'return !state.companyScopeId || row?.company_id === state.companyScopeId || row?.id === state.companyScopeId',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one preparer match, found {text.count(old)}: {old}')
+              text = text.replace(old, new, 1)
+
+          lines = text.splitlines()
+          repaired = 0
+          for index, line in enumerate(lines):
+              if 'dom.pageContext.textContent = state.view === "finance"' in line:
+                  lines[index] = "    '''  dom.pageContext.textContent = state.view === \"finance\" ? \"Preparacion por Finanzas\" : \"Decision de Direccion\"''',"
+                  repaired += 1
+          if repaired != 1:
+              raise SystemExit(f'expected one page-context source line, found {repaired}')
+
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
-          python .github/scripts/apply_cortes_company_scope.py
+          python -m py_compile .github/scripts/apply_cortes_company_scope.py
+
+      - name: Apply focused company-scope fix
+        run: python .github/scripts/apply_cortes_company_scope.py
 
       - name: Validate legacy syntax
         run: node --check approval_batches.js
