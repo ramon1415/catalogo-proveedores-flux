@@ -219,8 +219,8 @@ export function validateBbvaInterbankContent(content: string): LayoutValidation 
 )
 logic = replace_once(
     logic,
-    '  const prefix = format === BBVA_FORMAT_INTERBANK ? \"PAGOSINT\" : format === BBVA_FORMAT_CIE ? \"PAGOSCIE\" : \"PAGOSBBV\"',
-    '  const prefix = format === BBVA_FORMAT_MIXED ? \"PAGOSMIX\" : format === BBVA_FORMAT_INTERBANK ? \"PAGOSINT\" : format === BBVA_FORMAT_CIE ? \"PAGOSCIE\" : \"PAGOSBBV\"',
+    "  const prefix = format === BBVA_FORMAT_INTERBANK ? 'PAGOSINT' : format === BBVA_FORMAT_CIE ? 'PAGOSCIE' : 'PAGOSBBV'",
+    "  const prefix = format === BBVA_FORMAT_MIXED ? 'PAGOSMIX' : format === BBVA_FORMAT_INTERBANK ? 'PAGOSINT' : format === BBVA_FORMAT_CIE ? 'PAGOSCIE' : 'PAGOSBBV'",
     "mixed filename prefix",
 )
 logic = replace_once(
