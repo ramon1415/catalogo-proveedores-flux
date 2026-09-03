@@ -28,6 +28,23 @@ jobs:
       - name: Apply recovered VBA mixed-format contract
         run: python scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
 
+      - name: Normalize generated PTC test expectation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/qa/bbva-mixed-clabe-macro-contract.test.mjs')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          matches = 0
+          for index, line in enumerate(lines):
+              if line.startswith('const expected = "PTC012914000000000007'):
+                  lines[index] = 'const expected = "PTC012914000000000007000000000191134094MXP0000000003527.90" + "PRUEBA CLABE BBVA".padEnd(30, " ")'
+                  matches += 1
+          if matches != 1:
+              raise SystemExit(f'expected one PTC test constant, found {matches}')
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
       - name: Install React dependencies
         run: npm --prefix app ci
 
@@ -55,7 +72,8 @@ jobs:
           git config user.email "ramon@quantta.mx"
           git rm \
             .github/workflows/apply-bbva-clabe-012-mixed-hotfix.yml \
-            scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+            scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py \
+            scripts/ops/run_bbva_clabe_012_mixed_hotfix.txt
           git add \
             layouts.js \
             layouts.html \
