@@ -1,0 +1,284 @@
+name: Apply BBVA CLABE 012 routing hotfix v2
+
+on:
+  push:
+    branches:
+      - hotfix/bbva-clabe-012-routing-prod
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[bbva-clabe-routing-fixed]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Apply focused routing fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_block(path: Path, start_marker: str, end_marker: str, new_block: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f'{path}: start marker not found: {start_marker}')
+              end_start = text.find(end_marker, start)
+              if end_start < 0:
+                  raise SystemExit(f'{path}: end marker not found: {end_marker}')
+              path.write_text(text[:start] + new_block + text[end_start:], encoding='utf-8')
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          ts = Path('app/src/features/layouts/logic.ts')
+          replace_block(
+              ts,
+              "export function detectBbvaLayoutFormat(",
+              "export function bbvaFormatLabel",
+              """export const BBVA_CLABE_BANK_CODE = '012'
+
+          export function isBbvaDestinationClabe(value: unknown): boolean {
+            const digits = cxcDigits(value)
+            return digits.length === CXC_ACCOUNT_LENGTH && digits.startsWith(BBVA_CLABE_BANK_CODE)
+          }
+
+          export function detectBbvaLayoutFormat(line: Pick<PaymentLayoutLine, 'destination_type' | 'destination_value'>): BbvaFormat {
+            const type = normalizeDestinationType(line.destination_type)
+            if (['cuenta', 'cuenta_bancaria', 'cuenta_bbva', 'mismo_banco', 'bbva'].includes(type)) return BBVA_FORMAT_SAME_BANK
+            // Una CLABE 012 pertenece a BBVA. Enviarla en PAGOSINT provoca que
+            // Net Cash la busque como banco interbancario para un registro de misma institución.
+            if (type === 'clabe' && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_SAME_BANK
+            if (['clabe', 'interbancario', 'transferencia_interbancaria', 'tarjeta', 'tdc'].includes(type)) return BBVA_FORMAT_INTERBANK
+            if (type === 'convenio') return BBVA_FORMAT_CIE
+            throw new Error('Tipo de destino no soportado para layout BBVA; define cuenta, CLABE o convenio.')
+          }
+
+          """,
+          )
+
+          legacy = Path('layouts.js')
+          replace_block(
+              legacy,
+              "function detectBbvaLayoutFormat(line) {",
+              "function normalizeDestinationType",
+              """const BBVA_CLABE_BANK_CODE = \"012\"
+
+          function isBbvaDestinationClabe(value) {
+            const digits = cxcDigits(value)
+            return digits.length === CXC_ACCOUNT_LENGTH && digits.startsWith(BBVA_CLABE_BANK_CODE)
+          }
+
+          function detectBbvaLayoutFormat(line) {
+            const type = normalizeDestinationType(line.destination_type)
+            if ([\"cuenta\", \"cuenta_bancaria\", \"cuenta_bbva\", \"mismo_banco\", \"bbva\"].includes(type)) return BBVA_FORMAT_SAME_BANK
+            // Una CLABE 012 pertenece a BBVA y debe ir por Pagos BBVA, no Pagos Inter.
+            if (type === \"clabe\" && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_SAME_BANK
+            if ([\"clabe\", \"interbancario\", \"transferencia_interbancaria\", \"tarjeta\", \"tdc\"].includes(type)) return BBVA_FORMAT_INTERBANK
+            if (type === \"convenio\") return BBVA_FORMAT_CIE
+            throw new Error(\"Tipo de destino no soportado para layout BBVA; define cuenta, CLABE o convenio.\")
+          }
+
+          """,
+          )
+
+          docs = Path('docs/ops/layout-cxc-download-format.md')
+          replace_once(
+              docs,
+              """- `destination_type = cuenta` -> `PAGOSBBV`.
+          - `destination_type = clabe` -> `PAGOSINT`.
+          - `destination_type = convenio` -> bloqueado para estos formatos; requiere CIE.""",
+              """- `destination_type = cuenta` -> `PAGOSBBV`.
+          - `destination_type = clabe` con código bancario `012` -> `PAGOSBBV` (misma institución BBVA).
+          - `destination_type = clabe` con cualquier otro código bancario -> `PAGOSINT`.
+          - `destination_type = convenio` -> bloqueado para estos formatos; requiere CIE.""",
+          )
+
+          cie_test = Path('scripts/qa/bbva-cie-layout-contract.test.mjs')
+          replace_once(
+              cie_test,
+              'destination_value: "012345678901234567",',
+              'destination_value: "002345678901234567",',
+          )
+
+          test = Path('scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs')
+          test.write_text(r'''import assert from "node:assert/strict"
+          import { readFileSync } from "node:fs"
+          import test from "node:test"
+          import vm from "node:vm"
+
+          const root = new URL("../../", import.meta.url)
+          const source = readFileSync(new URL("layouts.js", root), "utf8")
+          const reactSource = readFileSync(new URL("app/src/features/layouts/logic.ts", root), "utf8")
+          const docs = readFileSync(new URL("docs/ops/layout-cxc-download-format.md", root), "utf8")
+
+          const document = {
+            documentElement: { dataset: {} },
+            addEventListener() {},
+            getElementById() { return null },
+            body: { appendChild() {} },
+          }
+          const window = {
+            supabase: { createClient() { return {} } },
+            setTimeout,
+            clearTimeout,
+          }
+          window.window = window
+
+          const context = vm.createContext({
+            window,
+            document,
+            SUPABASE_URL: "https://example.supabase.co",
+            SUPABASE_ANON_KEY: "synthetic",
+            TextEncoder,
+            Blob,
+            URL,
+            console: { info() {}, warn() {}, error() {} },
+            setTimeout,
+            clearTimeout,
+          })
+
+          vm.runInContext(`${source}
+          globalThis.__bbvaRouting = {
+            BBVA_FORMAT_SAME_BANK,
+            BBVA_FORMAT_INTERBANK,
+            detectBbvaLayoutFormat,
+            buildBbvaLayoutFiles,
+          }
+          `, context)
+
+          const bbva = context.__bbvaRouting
+          const base = {
+            id: "line",
+            payment_request_id: "request",
+            request_number: "SOL-QA",
+            status: "included",
+            source_account_number: "0191134094",
+            amount: "100.00",
+            beneficiary_name: "BENEFICIARIO PRUEBA",
+            payment_reference: "123",
+            payment_concept: "PAGO PRUEBA",
+          }
+
+          const bbvaClabe = {
+            ...base,
+            id: "bbva-clabe",
+            destination_type: "clabe",
+            destination_value: "012914000000000007",
+            beneficiary_name: "DESTINO BBVA",
+          }
+          const bbvaAccount = {
+            ...base,
+            id: "bbva-account",
+            destination_type: "cuenta",
+            destination_value: "0108301492",
+            beneficiary_name: "CUENTA BBVA",
+          }
+          const banamexReimbursement = {
+            ...base,
+            id: "banamex-1",
+            destination_type: "clabe",
+            destination_value: "002180000000000001",
+            beneficiary_name: "REEMBOLSO UNO",
+            payment_reference: "3082",
+            payment_concept: "REEMBOLSO PRUEBA UNO",
+          }
+          const anotherInterbank = {
+            ...base,
+            id: "interbank-2",
+            destination_type: "clabe",
+            destination_value: "646180000000000002",
+            beneficiary_name: "REEMBOLSO DOS",
+            payment_reference: "3082",
+            payment_concept: "REEMBOLSO PRUEBA DOS",
+          }
+
+          test("CLABE 012 is routed to PAGOSBBV while external CLABEs remain PAGOSINT", () => {
+            assert.equal(bbva.detectBbvaLayoutFormat(bbvaClabe), bbva.BBVA_FORMAT_SAME_BANK)
+            assert.equal(bbva.detectBbvaLayoutFormat(bbvaAccount), bbva.BBVA_FORMAT_SAME_BANK)
+            assert.equal(bbva.detectBbvaLayoutFormat(banamexReimbursement), bbva.BBVA_FORMAT_INTERBANK)
+            assert.equal(bbva.detectBbvaLayoutFormat(anotherInterbank), bbva.BBVA_FORMAT_INTERBANK)
+          })
+
+          test("mixed Soporte-style layout downloads two valid records per rail", () => {
+            const files = bbva.buildBbvaLayoutFiles(
+              [bbvaClabe, banamexReimbursement, bbvaAccount, anotherInterbank],
+              { layout_number: "LAY-2026-QA" },
+            )
+            assert.deepEqual(Array.from(files, (file) => file.format), [
+              bbva.BBVA_FORMAT_SAME_BANK,
+              bbva.BBVA_FORMAT_INTERBANK,
+            ])
+            const sameBank = files.find((file) => file.format === bbva.BBVA_FORMAT_SAME_BANK)
+            const interbank = files.find((file) => file.format === bbva.BBVA_FORMAT_INTERBANK)
+            assert.equal(sameBank.validation.ok, true, sameBank.validation.errors.join("\n"))
+            assert.equal(interbank.validation.ok, true, interbank.validation.errors.join("\n"))
+            assert.equal(sameBank.validation.lineCount, 2)
+            assert.equal(interbank.validation.lineCount, 2)
+            assert.deepEqual(Array.from(sameBank.validation.lineLengths), [85, 85])
+            assert.deepEqual(Array.from(interbank.validation.lineLengths), [128, 128])
+            assert.equal(interbank.validation.lines[0].slice(0, 3), "002")
+            assert.equal(interbank.content.includes("012914000000000007"), false)
+            assert.equal(sameBank.content.includes("012914000000000007"), true)
+          })
+
+          test("React and legacy generators preserve the same routing rule", () => {
+            assert.match(reactSource, /BBVA_CLABE_BANK_CODE = '012'/)
+            assert.match(reactSource, /type === 'clabe' && isBbvaDestinationClabe\(line\.destination_value\)/)
+            assert.match(source, /BBVA_CLABE_BANK_CODE = "012"/)
+            assert.match(source, /type === "clabe" && isBbvaDestinationClabe\(line\.destination_value\)/)
+            assert.match(docs, /clabe` con código bancario `012` -> `PAGOSBBV`/)
+          })
+          '''.replace('          ', ''), encoding='utf-8')
+          PY
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused and regression contracts
+        run: |
+          node --check layouts.js
+          node --test \
+            scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs \
+            scripts/qa/bbva-cie-layout-contract.test.mjs \
+            scripts/qa/layout-budget-exception-reference-contract.test.mjs \
+            scripts/qa/prod-reimbursement-permissions.test.mjs \
+            scripts/qa/approval-batches-company-scope-contract.test.mjs \
+            scripts/qa/layout-scheduled-date-window-guard.test.mjs
+
+      - name: Build production artifact
+        run: npm --prefix app run build
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm \
+            .github/workflows/apply-bbva-clabe-012-routing-hotfix.yml \
+            .github/workflows/apply-bbva-clabe-012-routing-hotfix-v2.yml
+          git add \
+            layouts.js \
+            app/src/features/layouts/logic.ts \
+            docs/ops/layout-cxc-download-format.md \
+            scripts/qa/bbva-cie-layout-contract.test.mjs \
+            scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs
+          git commit -m "fix(layouts): separar CLABE BBVA 012 de Pagos Inter [bbva-clabe-routing-fixed]"
+          git push origin HEAD:hotfix/bbva-clabe-012-routing-prod
