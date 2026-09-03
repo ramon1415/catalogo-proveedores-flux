@@ -1,0 +1,279 @@
+name: Apply reimbursement documents atomic hotfix v3
+
+on:
+  push:
+    branches:
+      - hotfix/reimbursement-documents-atomic-prod
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[reimbursement-docs-atomic]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Apply robust frontend and contract changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          def sub_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return updated
+
+          request_path = Path('app/src/features/solicitudes/RequestModal.tsx')
+          request = request_path.read_text(encoding='utf-8')
+          request = sub_once(request, r"  loadBudgetAvailability, listApproverOptions, createPaymentRequest,\n", "  loadBudgetAvailability, listApproverOptions,\n", 'request import createPaymentRequest')
+          request = sub_once(
+              request,
+              r"  createPaymentRequestWithDocument, updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,\n",
+              "  createPaymentRequestWithDocument, createReimbursementRequestWithDocuments,\n  updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,\n",
+              'request atomic api import',
+          )
+          request = sub_once(
+              request,
+              r"  loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,\n  insertReimbursementItems,\n",
+              "  loadActiveProfiles, loadEmployeeBankAccount,\n",
+              'request old reimbursement api imports',
+          )
+          request = sub_once(
+              request,
+              r"  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert,\n",
+              "  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementUpdateItem,\n",
+              'request reimbursement type import',
+          )
+          request = sub_once(
+              request,
+              r"    let stagedDocumentPath: string \| null = null\n",
+              "    const stagedDocumentPaths: string[] = []\n",
+              'request staged path state',
+          )
+
+          create_block = textwrap.dedent('''
+                let data: any
+                if (isReembolso) {
+                  if (!profile?.id) throw new Error('requester_profile_required')
+                  const stagedItems: ReimbursementUpdateItem[] = []
+                  for (const item of items) {
+                    let storagePath: string | null = null
+                    if (item.file) {
+                      storagePath = await uploadReceipt(item.file, `solicitudes/drafts/${profile.id}`)
+                      stagedDocumentPaths.push(storagePath)
+                    }
+                    stagedItems.push({
+                      budget_category_id: item.budgetCategoryId,
+                      descripcion: item.descripcion.trim(),
+                      amount: numberValue(item.amount),
+                      subtotal_amount: item.subtotalAmount,
+                      tax_amount: item.taxAmount,
+                      deducible: item.deducible,
+                      invoice_uuid: item.invoiceUuid,
+                      cfdi_data: item.cfdiData,
+                      storage_path: storagePath,
+                    })
+                  }
+                  data = await createReimbursementRequestWithDocuments(payload, stagedItems)
+                  // El RPC ya enlazó todos los paths en la misma transacción que la
+                  // solicitud y sus renglones; desde aquí dejan de ser temporales.
+                  stagedDocumentPaths.length = 0
+                } else {
+                  if (!file || !profile?.id) throw new Error('request_document_required')
+                  const stagedDocumentPath = await uploadReceipt(file, `solicitudes/drafts/${profile.id}`)
+                  stagedDocumentPaths.push(stagedDocumentPath)
+                  data = await createPaymentRequestWithDocument(payload, stagedDocumentPath)
+                  // Desde aquí el archivo ya quedó enlazado dentro de la misma transacción
+                  // que creó la solicitud; no debe eliminarse aunque falle un paso posterior.
+                  stagedDocumentPaths.length = 0
+                }
+                const result = normalizeRpcResult<any>(data)
+          ''').rstrip() + '\n'
+          create_block = textwrap.indent(create_block, '      ')
+          request = sub_once(
+              request,
+              r"      let data: any\n      if \(isReembolso\) \{\n        data = await createPaymentRequest\(payload\)\n      \} else \{.*?      \}\n      const result = normalizeRpcResult<any>\(data\)\n",
+              create_block,
+              'request create block',
+              re.S,
+          )
+
+          request = sub_once(
+              request,
+              r"      // Reembolso: beneficiario \+ desglose\. Todo posterior a la creación y no\n      // bloqueante — la solicitud ya existe, así que los fallos solo se avisan\.\n      if \(isReembolso\) \{.*?\n      \}\n\n      const folio = result\.request_number \|\| result\.payment_request_number \|\| 'Solicitud'",
+              "      // En reembolso, beneficiario, renglones y comprobantes ya quedaron\n      // persistidos atómicamente por create_reimbursement_request_with_documents.\n\n      const folio = result.request_number || result.payment_request_number || 'Solicitud'",
+              'request legacy reimbursement persistence block',
+              re.S,
+          )
+          request = sub_once(
+              request,
+              r"      if \(stagedDocumentPath\) \{\n        try \{ await removeReceipt\(stagedDocumentPath\) \} catch \{ /\* limpieza best-effort \*/ \}\n      \}",
+              "      for (const path of stagedDocumentPaths) {\n        try { await removeReceipt(path) } catch { /* limpieza best-effort */ }\n      }",
+              'request staged cleanup',
+          )
+          request_path.write_text(request, encoding='utf-8')
+
+          api_path = Path('app/src/features/solicitudes/api.ts')
+          api = api_path.read_text(encoding='utf-8')
+          api = sub_once(
+              api,
+              r"  ReimbursementItemInsert, ReimbursementUpdatePayload,\n",
+              "  ReimbursementItemInsert, ReimbursementUpdateItem, ReimbursementUpdatePayload,\n",
+              'api reimbursement type import',
+          )
+          api_function = textwrap.dedent('''
+          export async function createReimbursementRequestWithDocuments(
+            payload: RequestPayload,
+            items: ReimbursementUpdateItem[],
+          ): Promise<any> {
+            const { data, error } = await supabase.rpc('create_reimbursement_request_with_documents', {
+              p_company_id: payload.company_id,
+              p_cost_center_id: payload.cost_center_id,
+              p_budget_month: payload.budget_month,
+              p_currency: payload.currency,
+              p_exchange_rate: payload.exchange_rate,
+              p_description: payload.description,
+              p_notes: payload.notes,
+              p_requested_by: payload.requested_by,
+              p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+              p_approver_id: payload.approver_id,
+              p_approver_assignment_id: payload.approver_assignment_id,
+              p_beneficiary_profile_id: payload.beneficiary_profile_id,
+              p_payment_method: payload.payment_method,
+              p_items: items,
+            })
+            if (error) throw error
+            return data
+          }
+
+          ''')
+          api = sub_once(
+              api,
+              r"// Guarda metadata Fase 2 \(request_type/payment_method\)\. Devuelve un warning si\n",
+              api_function + "// Guarda metadata Fase 2 (request_type/payment_method). Devuelve un warning si\n",
+              'api atomic function insertion',
+          )
+          api_path.write_text(api, encoding='utf-8')
+
+          types_path = Path('app/src/features/solicitudes/types.ts')
+          types = types_path.read_text(encoding='utf-8')
+          types = sub_once(
+              types,
+              r"// Renglón en captura \(cliente\)\. El adjunto todavía no está en Storage, así que\n// se guarda el File y se sube después de crear la solicitud\.",
+              "// Renglón en captura (cliente). El File se conserva localmente hasta que todos\n// los comprobantes se suben a staging antes de crear el reembolso.",
+              'types lifecycle comment',
+          )
+          types_path.write_text(types, encoding='utf-8')
+
+          logic_path = Path('app/src/features/solicitudes/logic.ts')
+          logic = logic_path.read_text(encoding='utf-8')
+          logic = sub_once(
+              logic,
+              re.escape("  reimbursement_item_receipt_required: 'Cada gasto deducible debe conservar o adjuntar su comprobante.',\n  reimbursement_item_invoice_uuid_duplicate: 'El desglose contiene un folio fiscal repetido.',"),
+              "  reimbursement_item_receipt_required: 'Cada gasto deducible debe conservar o adjuntar su comprobante.',\n  reimbursement_document_path_invalid: 'La ruta temporal del comprobante de reembolso no es válida.',\n  reimbursement_document_path_duplicate: 'El mismo comprobante no puede usarse en dos renglones.',\n  reimbursement_document_not_found_or_not_owned: 'El comprobante no llegó a Storage o no pertenece a tu sesión. Vuelve a seleccionarlo.',\n  reimbursement_document_already_linked: 'El comprobante ya está vinculado a otra solicitud.',\n  reimbursement_item_payload_invalid: 'Uno de los gastos contiene datos inválidos.',\n  requester_profile_must_match_current_profile: 'La sesión no coincide con el solicitante del reembolso.',\n  reimbursement_item_invoice_uuid_duplicate: 'El desglose contiene un folio fiscal repetido.',",
+              'logic friendly errors',
+          )
+          logic_path.write_text(logic, encoding='utf-8')
+
+          test = Path('scripts/qa/reimbursement-supporting-documents-atomic.test.mjs')
+          test.write_text(textwrap.dedent(r'''
+          import test from 'node:test'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+
+          const requestModal = readFileSync('app/src/features/solicitudes/RequestModal.tsx', 'utf8')
+          const api = readFileSync('app/src/features/solicitudes/api.ts', 'utf8')
+          const types = readFileSync('app/src/features/solicitudes/types.ts', 'utf8')
+          const migration = readFileSync('supabase/migrations/20260903203000_reimbursement_supporting_documents_atomic.sql', 'utf8')
+
+          test('reimbursement uploads every selected receipt before creating the request', () => {
+            assert.match(requestModal, /createReimbursementRequestWithDocuments/)
+            assert.match(requestModal, /uploadReceipt\(item\.file, `solicitudes\/drafts\/\$\{profile\.id\}`\)/)
+            assert.match(requestModal, /stagedDocumentPaths\.push\(storagePath\)/)
+            assert.match(requestModal, /data = await createReimbursementRequestWithDocuments\(payload, stagedItems\)/)
+            assert.doesNotMatch(requestModal, /data = await createPaymentRequest\(payload\)/)
+            assert.doesNotMatch(requestModal, /insertReimbursementItems\(inserts\)/)
+            assert.doesNotMatch(requestModal, /Comprobantes no subidos/)
+          })
+
+          test('failed staging or RPC removes every unlinked temporary object', () => {
+            assert.match(requestModal, /const stagedDocumentPaths: string\[\] = \[\]/)
+            assert.match(requestModal, /for \(const path of stagedDocumentPaths\)/)
+            assert.match(requestModal, /await removeReceipt\(path\)/)
+            assert.match(requestModal, /stagedDocumentPaths\.length = 0/)
+          })
+
+          test('api calls the dedicated atomic reimbursement RPC', () => {
+            assert.match(api, /export async function createReimbursementRequestWithDocuments/)
+            assert.match(api, /supabase\.rpc\('create_reimbursement_request_with_documents'/)
+            assert.match(api, /p_items: items/)
+            assert.match(types, /se suben a staging antes de crear el reembolso/)
+          })
+
+          test('database wrapper validates ownership and inserts request plus items in one transaction', () => {
+            for (const expected of [
+              'security definer',
+              'reimbursement_document_not_found_or_not_owned',
+              'object.owner = v_auth_user_id',
+              'public.create_payment_request(',
+              'insert into public.reimbursement_items',
+              "p_request_type => 'reimbursement'",
+              'grant execute on function public.create_reimbursement_request_with_documents',
+              'to authenticated, service_role',
+            ]) assert.ok(migration.toLowerCase().includes(expected.toLowerCase()), `missing ${expected}`)
+            assert.match(migration, /revoke all on function[\s\S]*from public, anon/i)
+          })
+          ''').lstrip(), encoding='utf-8')
+          PY
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused and regression contracts
+        run: |
+          node --test \
+            scripts/qa/reimbursement-supporting-documents-atomic.test.mjs \
+            scripts/qa/fersana-request-document-hotfix.test.mjs \
+            scripts/qa/prod-reimbursement-permissions.test.mjs \
+            scripts/qa/reimbursement-inline-classification-ux.test.mjs \
+            scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs \
+            scripts/qa/approval-batches-company-scope-contract.test.mjs \
+            scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs
+
+      - name: Build production artifact
+        run: npm --prefix app run build
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm \
+            .github/workflows/apply-reimbursement-documents-atomic-hotfix.yml \
+            .github/workflows/apply-reimbursement-documents-atomic-hotfix-v2.yml \
+            .github/workflows/apply-reimbursement-documents-atomic-hotfix-v3.yml
+          git add \
+            app/src/features/solicitudes/RequestModal.tsx \
+            app/src/features/solicitudes/api.ts \
+            app/src/features/solicitudes/logic.ts \
+            app/src/features/solicitudes/types.ts \
+            scripts/qa/reimbursement-supporting-documents-atomic.test.mjs \
+            supabase/migrations/20260903203000_reimbursement_supporting_documents_atomic.sql
+          git commit -m "fix(reembolsos): crear solicitud y comprobantes atómicamente [reimbursement-docs-atomic]"
+          git push origin HEAD:hotfix/reimbursement-documents-atomic-prod
