@@ -115,6 +115,10 @@ export function EditModal({
     if (saving) return
     if (!proveedorId) { showToast('Revisa la solicitud', 'Selecciona un proveedor.', 'warning'); return }
     if (!budgetCategoryId) { showToast('Revisa la solicitud', 'Selecciona una partida presupuestal.', 'warning'); return }
+    if (!request.invoice_storage_path && !file) {
+      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de guardar.', 'warning')
+      return
+    }
 
     setSaving(true)
     const payload: EditPayload = {
@@ -218,7 +222,7 @@ export function EditModal({
                 <label className={s.fullRow}>Notas
                   <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                 </label>
-                <label className={s.fullRow}>Factura / comprobante
+                <label className={s.fullRow}>Factura / comprobante {request.invoice_storage_path ? '(reemplazo opcional)' : '*'}
                   <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                   <span className={s.fileHint}>{fileHint}</span>
                 </label>

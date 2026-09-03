@@ -4,7 +4,7 @@ import { ProviderCombo } from './ProviderCombo'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions, createPaymentRequest,
-  updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
+  createPaymentRequestWithDocument, updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems,
 } from './api'
@@ -521,8 +521,19 @@ export function RequestModal({
     }
 
     setSubmitting(true)
+    let stagedDocumentPath: string | null = null
     try {
-      const data = await createPaymentRequest(payload)
+      let data: any
+      if (isReembolso) {
+        data = await createPaymentRequest(payload)
+      } else {
+        if (!file || !profile?.id) throw new Error('request_document_required')
+        stagedDocumentPath = await uploadReceipt(file, `solicitudes/drafts/${profile.id}`)
+        data = await createPaymentRequestWithDocument(payload, stagedDocumentPath)
+        // Desde aquí el archivo ya quedó enlazado dentro de la misma transacción
+        // que creó la solicitud; no debe eliminarse aunque falle un paso posterior.
+        stagedDocumentPath = null
+      }
       const result = normalizeRpcResult<any>(data)
       const requestId = result.payment_request_id || result.id || null
       if (!requestId) throw new Error('No se obtuvo el id de la solicitud creada.')
@@ -582,22 +593,15 @@ export function RequestModal({
         if (itemsWarning) showToast('Desglose no guardado', itemsWarning, 'warning')
       }
 
-      // Adjunto de comprobante.
-      if (file) {
-        try {
-          const path = await uploadReceipt(file, `solicitudes/${requestId}`)
-          await linkInvoicePath(requestId, path)
-        } catch {
-          showToast('Comprobante no vinculado', 'La solicitud se creo, pero el comprobante no pudo subirse o vincularse.', 'warning')
-        }
-      }
-
       const folio = result.request_number || result.payment_request_number || 'Solicitud'
       showToast('Solicitud creada', `${folio} creada correctamente.`, 'success')
       if (warning) showToast('Metodo de pago pendiente', warning, 'warning')
       setSuccess({ folio, requestType: payload.request_type, paymentMethod: payload.payment_method, warning })
       onCreated(requestId)
     } catch (error) {
+      if (stagedDocumentPath) {
+        try { await removeReceipt(stagedDocumentPath) } catch { /* limpieza best-effort */ }
+      }
       if (isApproverStaleError(error)) {
         await loadApprovers()
         setApproverHelp((h) => ({ text: `La lista de aprobadores cambió. Revisa y selecciona nuevamente. ${h.text}`.trim(), color: 'var(--amber)' }))

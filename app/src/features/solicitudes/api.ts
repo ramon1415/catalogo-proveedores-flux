@@ -217,6 +217,37 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
   return data
 }
 
+export async function createPaymentRequestWithDocument(
+  payload: RequestPayload,
+  invoiceStoragePath: string,
+): Promise<any> {
+  const { data, error } = await supabase.rpc('create_payment_request_with_document', {
+    p_proveedor_id: payload.proveedor_id,
+    p_company_id: payload.company_id,
+    p_cost_center_id: payload.cost_center_id,
+    p_budget_category_id: payload.budget_category_id,
+    p_budget_month: payload.budget_month,
+    p_amount_requested: payload.amount_requested,
+    p_currency: payload.currency,
+    p_exchange_rate: payload.exchange_rate,
+    p_description: payload.description,
+    p_notes: payload.notes,
+    p_requested_by: payload.requested_by,
+    p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+    p_approver_id: payload.approver_id,
+    p_approver_assignment_id: payload.approver_assignment_id,
+    p_subtotal_amount: payload.subtotal_amount,
+    p_tax_amount: payload.tax_amount,
+    p_withholding_amount: payload.withholding_amount,
+    p_invoice_uuid: payload.invoice_uuid,
+    p_beneficiary_profile_id: payload.beneficiary_profile_id,
+    p_request_type: payload.request_type,
+    p_invoice_storage_path: invoiceStoragePath,
+  })
+  if (error) throw error
+  return data
+}
+
 // Guarda metadata Fase 2 (request_type/payment_method). Devuelve un warning si
 // falta la columna en el ambiente (migración 004c), sin lanzar.
 export async function updateFase2Metadata(
@@ -600,6 +631,11 @@ export async function uploadReceipt(file: File, folder: string): Promise<string>
   })
   if (error) throw new Error(`Error al subir archivo: ${error.message}`)
   return path
+}
+
+export async function removeReceipt(storagePath: string): Promise<void> {
+  const { error } = await supabase.storage.from(UPLOAD_BUCKET).remove([storagePath])
+  if (error) throw new Error(`Error al limpiar archivo temporal: ${error.message}`)
 }
 
 export async function getReceiptUrl(storagePath: string): Promise<string | null> {
