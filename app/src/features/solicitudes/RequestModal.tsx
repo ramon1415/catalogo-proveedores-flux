@@ -10,7 +10,7 @@ import {
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
-  budgetCategoryAvailabilityLabel, getAvailableAmount, sortAvailabilityRows,
+  budgetCategoryAvailabilityLabel, sortAvailabilityRows,
   monthInputToDate, formatCurrencyC, formatMonth, validateReceiptFile,
   candidateMatchesSelection, validateRequestPayload, normalizeRequestType,
   normalizePaymentMethod, requestTypeLabel, paymentMethodLabel, isApproverStaleError,
@@ -428,6 +428,7 @@ export function RequestModal({
   const center = costCenters.find((c) => c.id === costCenterId) || null
   const category = categoryById(effectiveCategoryId)
   const availability = availabilityForCategory(effectiveCategoryId)
+  const isNoBudgetCategory = category?.no_presupuestal === true || availability?.no_presupuestal === true
   const proveedor = proveedores.find((p) => p.id === proveedorId) || null
   const approver = candidates.find((c) => c.profile_id === approverId) || null
 
@@ -865,7 +866,9 @@ export function RequestModal({
                     ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
                     : 'Pendiente de seleccionar'}</span></label>
                   <label>Centro de costo <span className={s.summaryValue}>{center ? costCenterName(center) : 'Sin seleccionar'}</span></label>
-                  <label>Partida <span className={s.summaryValue}>{category ? `${budgetCategoryLabel(category)} | Disp. ${formatCurrencyC(getAvailableAmount(availability), 'MXN')}` : 'Sin seleccionar'}</span></label>
+                  <label>Partida <span className={s.summaryValue}>{category
+                    ? (availability ? budgetCategoryAvailabilityLabel(category, availability) : budgetCategoryLabel(category))
+                    : 'Sin seleccionar'}</span></label>
                   {isReembolso ? (
                     <label>Beneficiario <span className={s.summaryValue}>
                       {beneficiaryProfiles.find((p) => p.id === beneficiaryId)?.full_name
@@ -879,7 +882,9 @@ export function RequestModal({
                   <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
-                <div className={s.summaryNote}>Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.</div>
+                <div className={s.summaryNote}>{isNoBudgetCategory
+                  ? 'Esta partida no consume presupuesto y seguirá el flujo normal de autorización.'
+                  : 'Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.'}</div>
               </aside>
             </div>
           </div>
