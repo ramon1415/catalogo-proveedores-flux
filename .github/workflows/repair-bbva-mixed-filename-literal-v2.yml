@@ -1,0 +1,51 @@
+name: Repair BBVA mixed filename matcher v2
+
+on:
+  push:
+    branches:
+      - hotfix/bbva-clabe-012-mixed-prod
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[mixed-ts-literal-repaired-v2]') && !contains(github.event.head_commit.message, '[bbva-clabe-mixed-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Repair match lines
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          old_count = 0
+          new_count = 0
+          for index, line in enumerate(lines):
+              if 'const prefix = format === BBVA_FORMAT_INTERBANK' in line and 'PAGOSINT' in line and line.lstrip().startswith("'"):
+                  lines[index] = '    "  const prefix = format === BBVA_FORMAT_INTERBANK ? \'PAGOSINT\' : format === BBVA_FORMAT_CIE ? \'PAGOSCIE\' : \'PAGOSBBV\'",'
+                  old_count += 1
+              if 'const prefix = format === BBVA_FORMAT_MIXED' in line and 'PAGOSMIX' in line and line.lstrip().startswith("'"):
+                  lines[index] = '    "  const prefix = format === BBVA_FORMAT_MIXED ? \'PAGOSMIX\' : format === BBVA_FORMAT_INTERBANK ? \'PAGOSINT\' : format === BBVA_FORMAT_CIE ? \'PAGOSCIE\' : \'PAGOSBBV\'",'
+                  new_count += 1
+          if old_count != 1 or new_count != 1:
+              raise SystemExit(f'prefix matcher counts old={old_count} new={new_count}')
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          python -m py_compile scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+
+      - name: Commit repaired script
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm .github/workflows/repair-bbva-mixed-filename-literal.yml
+          git rm .github/workflows/repair-bbva-mixed-filename-literal-v2.yml
+          git add scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+          git commit -m "ci: reparar matcher mixto [mixed-ts-literal-repaired-v2]"
+          git push origin HEAD:hotfix/bbva-clabe-012-mixed-prod
