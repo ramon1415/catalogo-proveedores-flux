@@ -6,6 +6,13 @@ const migration = fs.readFileSync(
   'supabase/migrations/20260903041213_fonacot_no_presupuestal.sql',
   'utf8',
 )
+const fersanaMappingFile = fs.readdirSync('supabase/migrations')
+  .find((file) => file.endsWith('_fonacot_fersana_mapping.sql'))
+assert.ok(fersanaMappingFile, 'missing FONACOT mapping migration for Fersana')
+const fersanaMapping = fs.readFileSync(
+  `supabase/migrations/${fersanaMappingFile}`,
+  'utf8',
+)
 const api = fs.readFileSync('app/src/features/solicitudes/api.ts', 'utf8')
 const logic = fs.readFileSync('app/src/features/solicitudes/logic.ts', 'utf8')
 const types = fs.readFileSync('app/src/features/solicitudes/types.ts', 'utf8')
@@ -36,6 +43,15 @@ test('seed is natural-keyed and only marks FONACOT as pass-through', () => {
   assert.match(migration, /lower\(btrim\(company\.name\)\) = 'operadora tlacatecpan'/)
   assert.match(migration, /lower\(btrim\(cost_center\.name\)\) = 'rancho san juan tlacatecpan'/)
   assert.doesNotMatch(migration, /update public\.budget_categories[\s\S]*(?:carga social|\bisn\b)/i)
+})
+
+test('FONACOT is mapped to Soporte Fersana with natural keys', () => {
+  assert.match(fersanaMapping, /lower\(btrim\(company\.name\)\) = 'soporte fersana'/)
+  assert.match(fersanaMapping, /lower\(btrim\(cost_center\.name\)\) = 'soporte fersana'/)
+  assert.match(fersanaMapping, /category\.code = 'FONACOT'/)
+  assert.match(fersanaMapping, /category\.no_presupuestal/)
+  assert.match(fersanaMapping, /on conflict \(company_id, cost_center_id, budget_category_id\)[\s\S]*do update set active = true/)
+  assert.doesNotMatch(fersanaMapping, /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)
 })
 
 test('React exposes mapped no-budget categories without a budget line', () => {
