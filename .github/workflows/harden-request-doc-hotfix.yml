@@ -34,7 +34,7 @@ jobs:
               text = path.read_text(encoding='utf-8')
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'{path}: expected one match, found {count}')
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:100]!r}')
               path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           migration = Path('supabase/migrations/20260903192500_request_supporting_documents_hotfix.sql')
@@ -65,14 +65,8 @@ jobs:
           detail = Path('app/src/features/solicitudes/DetailModal.tsx')
           replace_once(
               detail,
-              """                value={request.invoice_storage_path
-                          ? <button type=\"button\" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
-                          : <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>}""",
-              """                value={request.invoice_storage_path
-                          ? <button type=\"button\" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
-                          : canEdit
-                            ? <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>
-                            : <span>Documento no disponible</span>}""",
+              ": <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>}",
+              ": canEdit\n                  ? <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>\n                  : <span>Documento no disponible</span>}",
           )
           PY
 
