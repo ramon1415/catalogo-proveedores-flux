@@ -1,0 +1,288 @@
+name: Apply reimbursement inline classification
+
+on:
+  push:
+    branches:
+      - codex/reimbursement-inline-classification-prod
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[inline-scope-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/reimbursement-inline-classification-prod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Apply focused UX fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          modal_path = Path('app/src/features/solicitudes/RequestModal.tsx')
+          modal = modal_path.read_text()
+
+          modal = replace_once(
+              modal,
+              """                    profiles={beneficiaryProfiles}
+                    companyId={companyId}
+                    canChooseBeneficiary={canChooseBeneficiary}""",
+              """                    profiles={beneficiaryProfiles}
+                    companies={myCompanies}
+                    costCenters={costCenters}
+                    companyId={companyId}
+                    costCenterId={costCenterId}
+                    budgetMonth={budgetMonth}
+                    companyLocked={lockedCompany}
+                    onCompanyChange={onCompanyChange}
+                    onCostCenterChange={onCostCenterChange}
+                    onBudgetMonthChange={onMonthChange}
+                    categoryHelp={categoryHelp}
+                    canChooseBeneficiary={canChooseBeneficiary}""",
+              'RequestModal reimbursement props',
+          )
+
+          classification_start = """                <section className={s.formSection}>
+                  <h3>Clasificacion presupuestal</h3>"""
+          classification_end = "\n\n                {showIncidencias && ("
+          if modal.count(classification_start) != 1:
+              raise SystemExit('RequestModal classification section marker not unique')
+          start = modal.index(classification_start)
+          end = modal.index(classification_end, start)
+          block = modal[start:end]
+          indented_block = '\n'.join(('  ' + line) if line else line for line in block.splitlines())
+          wrapped = "                {!isReembolso && (\n" + indented_block + "\n                )}"
+          modal = modal[:start] + wrapped + modal[end:]
+          modal_path.write_text(modal)
+
+          section_path = Path('app/src/features/solicitudes/ReimbursementSection.tsx')
+          section = section_path.read_text()
+
+          section = replace_once(
+              section,
+              """import {
+  employeeBankAccountIssues, formatCurrencyC, isValidClabe, normalizeClabe,
+  reimbursementTotals, validateReceiptFile,
+} from './logic'""",
+              """import {
+  companyName, costCenterName, employeeBankAccountIssues, formatCurrencyC,
+  isValidClabe, normalizeClabe, reimbursementTotals, validateReceiptFile,
+} from './logic'""",
+              'ReimbursementSection logic imports',
+          )
+          section = replace_once(
+              section,
+              """import type {
+  BudgetAvailabilityRow, EmployeeBankAccount, Profile, ReimbursementDraftItem,
+} from './types'""",
+              """import type {
+  BudgetAvailabilityRow, Company, CostCenter, EmployeeBankAccount, Profile,
+  ReimbursementDraftItem,
+} from './types'""",
+              'ReimbursementSection type imports',
+          )
+          section = replace_once(
+              section,
+              """  profiles,
+  companyId,
+  canChooseBeneficiary,""",
+              """  profiles,
+  companies,
+  costCenters,
+  companyId,
+  costCenterId,
+  budgetMonth,
+  companyLocked,
+  onCompanyChange,
+  onCostCenterChange,
+  onBudgetMonthChange,
+  categoryHelp,
+  canChooseBeneficiary,""",
+              'ReimbursementSection destructured props',
+          )
+          section = replace_once(
+              section,
+              """  profiles: Profile[]
+  companyId: string
+  canChooseBeneficiary: boolean""",
+              """  profiles: Profile[]
+  companies: Company[]
+  costCenters: CostCenter[]
+  companyId: string
+  costCenterId: string
+  budgetMonth: string
+  companyLocked: boolean
+  onCompanyChange: (id: string) => void
+  onCostCenterChange: (id: string) => void
+  onBudgetMonthChange: (month: string) => void
+  categoryHelp: { text: string; state: string }
+  canChooseBeneficiary: boolean""",
+              'ReimbursementSection prop types',
+          )
+
+          scope_marker = """      <section className={s.formSection}>
+        <h3>Desglose de gastos</h3>
+        <div className={`${s.fieldHint} ${s.fullRow}`}>"""
+          scope_replacement = """      <section className={s.formSection}>
+        <h3>Desglose de gastos</h3>
+
+        <div className={s.reimbursementScope}>
+          <div className={s.reimbursementScopeIntro}>
+            <strong>Empresa y periodo del reembolso</strong>
+            <span>Selecciona estos datos una sola vez. Después asigna la partida correspondiente en cada gasto.</span>
+          </div>
+          <div className={`${s.formGrid} ${s.reimbursementScopeGrid}`}>
+            <label>Empresa *
+              <select
+                className={s.formControl}
+                value={companyId}
+                onChange={(e) => onCompanyChange(e.target.value)}
+                required
+                disabled={companyLocked}
+              >
+                {!companyLocked && <option value="">Seleccionar empresa</option>}
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>{companyName(company)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Centro de costo *
+              <select
+                className={s.formControl}
+                value={costCenterId}
+                onChange={(e) => onCostCenterChange(e.target.value)}
+                required
+              >
+                <option value="">Seleccionar centro de costo</option>
+                {costCenters.map((center) => (
+                  <option key={center.id} value={center.id}>{costCenterName(center)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Mes presupuestal *
+              <input
+                className={s.formControl}
+                type="month"
+                value={budgetMonth}
+                onChange={(e) => onBudgetMonthChange(e.target.value)}
+                required
+              />
+            </label>
+            <div className={`${s.fieldHint} ${s.reimbursementScopeHelp} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>
+              {categoryHelp.text}
+            </div>
+          </div>
+        </div>
+
+        <div className={`${s.fieldHint} ${s.fullRow}`}>"""
+          section = replace_once(section, scope_marker, scope_replacement, 'inline reimbursement scope')
+          section_path.write_text(section)
+
+          styles_path = Path('app/src/features/solicitudes/Solicitudes.module.css')
+          styles = styles_path.read_text()
+          styles_marker = """/* ── Reembolsos: desglose por renglón + datos bancarios del empleado ─────── */
+.itemsTable { display: grid; gap: 8px; margin-top: 4px; }"""
+          styles_replacement = """/* ── Reembolsos: desglose por renglón + datos bancarios del empleado ─────── */
+.reimbursementScope { margin: 0 0 14px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-surface); }
+.reimbursementScopeIntro { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.reimbursementScopeIntro strong { color: var(--text-1); font-size: 12px; }
+.reimbursementScopeIntro span { color: var(--text-3); font-size: 11px; line-height: 1.4; }
+.reimbursementScopeGrid { grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) minmax(150px, .8fr); gap: 10px; }
+.reimbursementScopeHelp { grid-column: 1 / -1; margin-top: -2px; }
+.itemsTable { display: grid; gap: 8px; margin-top: 4px; }"""
+          styles = replace_once(styles, styles_marker, styles_replacement, 'reimbursement scope styles')
+          media_marker = """@media (max-width: 760px) {
+  .formGrid { grid-template-columns: 1fr; }"""
+          media_replacement = """@media (max-width: 760px) {
+  .formGrid { grid-template-columns: 1fr; }
+  .reimbursementScopeGrid { grid-template-columns: 1fr; }"""
+          styles = replace_once(styles, media_marker, media_replacement, 'reimbursement responsive scope')
+          styles_path.write_text(styles)
+
+          test_path = Path('scripts/qa/reimbursement-inline-classification-ux.test.mjs')
+          test_path.write_text("""import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+
+const modal = fs.readFileSync('app/src/features/solicitudes/RequestModal.tsx', 'utf8')
+const reimbursement = fs.readFileSync('app/src/features/solicitudes/ReimbursementSection.tsx', 'utf8')
+const styles = fs.readFileSync('app/src/features/solicitudes/Solicitudes.module.css', 'utf8')
+
+test('reimbursement selects company, center and month next to its expense rows', () => {
+  assert.match(reimbursement, /Empresa y periodo del reembolso/)
+  assert.match(reimbursement, /Selecciona estos datos una sola vez/)
+  assert.match(reimbursement, /<label>Empresa \*/)
+  assert.match(reimbursement, /<label>Centro de costo \*/)
+  assert.match(reimbursement, /<label>Mes presupuestal \*/)
+  assert.ok(
+    reimbursement.indexOf('Empresa y periodo del reembolso') < reimbursement.indexOf('Partida presupuestal *'),
+    'the shared scope must appear before the per-expense category selector',
+  )
+})
+
+test('the separate classification card is not rendered for reimbursements', () => {
+  assert.match(
+    modal,
+    /\{!isReembolso && \(\s*<section className=\{s\.formSection\}>\s*<h3>Clasificacion presupuestal<\/h3>/,
+  )
+  assert.match(modal, /companies=\{myCompanies\}/)
+  assert.match(modal, /costCenters=\{costCenters\}/)
+  assert.match(modal, /onBudgetMonthChange=\{onMonthChange\}/)
+})
+
+test('category permissions and responsive behavior remain in the reimbursement flow', () => {
+  assert.match(modal, /categoryRows=\{filteredCategoryRows\}/)
+  assert.match(reimbursement, /categoryRows\.map/)
+  assert.match(styles, /\.reimbursementScopeGrid \{ grid-template-columns:/)
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*\.reimbursementScopeGrid \{ grid-template-columns: 1fr; \}/)
+})
+""")
+          PY
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused and regression contracts
+        run: >-
+          node --test
+          scripts/qa/reimbursement-inline-classification-ux.test.mjs
+          scripts/qa/prod-reimbursement-ux-hotfix.test.mjs
+          scripts/qa/prod-reimbursement-permissions.test.mjs
+          scripts/qa/solicitudes-scroll-contract.test.mjs
+          scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs
+
+      - name: Build production React artifact
+        run: npm --prefix app run build
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm .github/workflows/apply-reimbursement-inline-classification.yml
+          git add \
+            app/src/features/solicitudes/RequestModal.tsx \
+            app/src/features/solicitudes/ReimbursementSection.tsx \
+            app/src/features/solicitudes/Solicitudes.module.css \
+            scripts/qa/reimbursement-inline-classification-ux.test.mjs
+          git commit -m "fix(solicitudes): integrar clasificación en desglose de reembolsos [inline-scope-applied]"
+          git push origin HEAD:codex/reimbursement-inline-classification-prod
