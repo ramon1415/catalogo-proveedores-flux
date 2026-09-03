@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
 import {
-  cleanText, friendlyRpcError, formatMissingFields, formatPreviewMoney, layoutAccountLabel,
-  providerExecutionLayoutFields,
+  cleanText, friendlyRpcError, formatDate, formatMissingFields, formatPreviewMoney,
+  layoutAccountLabel, providerExecutionLayoutFields,
 } from './logic'
 import {
   completeProviderPaymentExecutionData, completePaymentRequestLayoutData,
@@ -15,11 +15,15 @@ import s from './Layouts.module.css'
 export function LayoutCompletionModal({
   request,
   accounts,
+  periodStart,
+  periodEnd,
   onClose,
   onSaved,
 }: {
   request: PreviewRow
   accounts: CompanyBankAccount[]
+  periodStart: string
+  periodEnd: string
   onClose: () => void
   onSaved: () => void | Promise<void>
 }) {
@@ -115,6 +119,12 @@ export function LayoutCompletionModal({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    if (date && (date < periodStart || date > periodEnd)) {
+      return fieldError(
+        refs.date,
+        `La fecha programada debe quedar dentro del periodo del layout: ${formatDate(periodStart)} a ${formatDate(periodEnd)}.`,
+      )
+    }
     const referenceValue = cleanText(reference)
     if (referenceValue && !/^\d{1,5}$/.test(referenceValue)) {
       return fieldError(refs.reference, 'La referencia debe contener de 1 a 5 dígitos.')
@@ -218,7 +228,17 @@ export function LayoutCompletionModal({
           </label>
 
           <label>Fecha programada
-            <input ref={refs.date} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input
+              ref={refs.date}
+              type="date"
+              min={periodStart}
+              max={periodEnd}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+            <span className={s.fieldHint}>
+              Debe quedar dentro del periodo del layout: {formatDate(periodStart)} a {formatDate(periodEnd)}.
+            </span>
           </label>
 
           <label className={s.fullRow}>Concepto de pago

@@ -291,6 +291,8 @@ export function NewLayoutModal({
         <LayoutCompletionModal
           request={completionRequest}
           accounts={accounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
           onClose={() => setCompletionRequest(null)}
           onSaved={async () => { setCompletionRequest(null); await runReview() }}
         />
