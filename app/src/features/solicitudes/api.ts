@@ -5,7 +5,7 @@ import type {
   BudgetAvailabilityRow, ApproverCandidate, ApprovalHistoryRow, PaymentReceiptRow,
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
   EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
-  ReimbursementItemInsert, ReimbursementUpdatePayload,
+  ReimbursementItemInsert, ReimbursementUpdateItem, ReimbursementUpdatePayload,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
@@ -243,6 +243,31 @@ export async function createPaymentRequestWithDocument(
     p_beneficiary_profile_id: payload.beneficiary_profile_id,
     p_request_type: payload.request_type,
     p_invoice_storage_path: invoiceStoragePath,
+  })
+  if (error) throw error
+  return data
+}
+
+
+export async function createReimbursementRequestWithDocuments(
+  payload: RequestPayload,
+  items: ReimbursementUpdateItem[],
+): Promise<any> {
+  const { data, error } = await supabase.rpc('create_reimbursement_request_with_documents', {
+    p_company_id: payload.company_id,
+    p_cost_center_id: payload.cost_center_id,
+    p_budget_month: payload.budget_month,
+    p_currency: payload.currency,
+    p_exchange_rate: payload.exchange_rate,
+    p_description: payload.description,
+    p_notes: payload.notes,
+    p_requested_by: payload.requested_by,
+    p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+    p_approver_id: payload.approver_id,
+    p_approver_assignment_id: payload.approver_assignment_id,
+    p_beneficiary_profile_id: payload.beneficiary_profile_id,
+    p_payment_method: payload.payment_method,
+    p_items: items,
   })
   if (error) throw error
   return data

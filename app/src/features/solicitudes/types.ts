@@ -174,8 +174,8 @@ export type ReimbursementItem = {
   created_at?: string | null
 }
 
-// Renglón en captura (cliente). El adjunto todavía no está en Storage, así que
-// se guarda el File y se sube después de crear la solicitud.
+// Renglón en captura (cliente). El File se conserva localmente hasta que todos
+// los comprobantes se suben a staging antes de crear el reembolso.
 export type ReimbursementDraftItem = {
   key: string
   descripcion: string

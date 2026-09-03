@@ -3,10 +3,10 @@ import { useToast } from '../../components/ui/Toast'
 import { ProviderCombo } from './ProviderCombo'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
-  loadBudgetAvailability, listApproverOptions, createPaymentRequest,
-  createPaymentRequestWithDocument, updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
-  loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
-  insertReimbursementItems,
+  loadBudgetAvailability, listApproverOptions,
+  createPaymentRequestWithDocument, createReimbursementRequestWithDocuments,
+  updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
+  loadActiveProfiles, loadEmployeeBankAccount,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -27,7 +27,7 @@ import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
-  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert,
+  EmployeeBankAccount, ReimbursementDraftItem, ReimbursementUpdateItem,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -521,18 +521,43 @@ export function RequestModal({
     }
 
     setSubmitting(true)
-    let stagedDocumentPath: string | null = null
+    const stagedDocumentPaths: string[] = []
     try {
+
       let data: any
       if (isReembolso) {
-        data = await createPaymentRequest(payload)
+        if (!profile?.id) throw new Error('requester_profile_required')
+        const stagedItems: ReimbursementUpdateItem[] = []
+        for (const item of items) {
+          let storagePath: string | null = null
+          if (item.file) {
+            storagePath = await uploadReceipt(item.file, `solicitudes/drafts/${profile.id}`)
+            stagedDocumentPaths.push(storagePath)
+          }
+          stagedItems.push({
+            budget_category_id: item.budgetCategoryId,
+            descripcion: item.descripcion.trim(),
+            amount: numberValue(item.amount),
+            subtotal_amount: item.subtotalAmount,
+            tax_amount: item.taxAmount,
+            deducible: item.deducible,
+            invoice_uuid: item.invoiceUuid,
+            cfdi_data: item.cfdiData,
+            storage_path: storagePath,
+          })
+        }
+        data = await createReimbursementRequestWithDocuments(payload, stagedItems)
+        // El RPC ya enlazó todos los paths en la misma transacción que la
+        // solicitud y sus renglones; desde aquí dejan de ser temporales.
+        stagedDocumentPaths.length = 0
       } else {
         if (!file || !profile?.id) throw new Error('request_document_required')
-        stagedDocumentPath = await uploadReceipt(file, `solicitudes/drafts/${profile.id}`)
+        const stagedDocumentPath = await uploadReceipt(file, `solicitudes/drafts/${profile.id}`)
+        stagedDocumentPaths.push(stagedDocumentPath)
         data = await createPaymentRequestWithDocument(payload, stagedDocumentPath)
         // Desde aquí el archivo ya quedó enlazado dentro de la misma transacción
         // que creó la solicitud; no debe eliminarse aunque falle un paso posterior.
-        stagedDocumentPath = null
+        stagedDocumentPaths.length = 0
       }
       const result = normalizeRpcResult<any>(data)
       const requestId = result.payment_request_id || result.id || null
@@ -551,47 +576,8 @@ export function RequestModal({
         } catch { /* ignore */ }
       }
 
-      // Reembolso: beneficiario + desglose. Todo posterior a la creación y no
-      // bloqueante — la solicitud ya existe, así que los fallos solo se avisan.
-      if (isReembolso) {
-        // El beneficiario ya viajó en el RPC (transaccional). Este respaldo solo
-        // cubre un ambiente sin el parámetro nuevo; si ya quedó grabado, no corre.
-        if (!result.beneficiary_profile_id) {
-          const beneficiaryWarning = await setBeneficiaryProfile(requestId, beneficiaryId)
-          if (beneficiaryWarning) showToast('Beneficiario no registrado', beneficiaryWarning, 'warning')
-        }
-
-        const inserts: ReimbursementItemInsert[] = []
-        let uploadFailures = 0
-        for (const item of items) {
-          let storagePath: string | null = null
-          if (item.file) {
-            try {
-              storagePath = await uploadReceipt(item.file, `solicitudes/${requestId}/reembolso`)
-            } catch {
-              uploadFailures += 1
-            }
-          }
-          inserts.push({
-            payment_request_id: requestId,
-            company_id: payload.company_id!,
-            budget_category_id: item.budgetCategoryId,
-            descripcion: item.descripcion.trim(),
-            amount: numberValue(item.amount),
-            subtotal_amount: item.subtotalAmount,
-            tax_amount: item.taxAmount,
-            deducible: item.deducible,
-            invoice_uuid: item.invoiceUuid,
-            cfdi_data: item.cfdiData,
-            storage_path: storagePath,
-          })
-        }
-        if (uploadFailures) {
-          showToast('Comprobantes no subidos', `${uploadFailures} comprobante(s) del desglose no pudieron subirse. El renglón queda registrado sin archivo.`, 'warning')
-        }
-        const itemsWarning = await insertReimbursementItems(inserts)
-        if (itemsWarning) showToast('Desglose no guardado', itemsWarning, 'warning')
-      }
+      // En reembolso, beneficiario, renglones y comprobantes ya quedaron
+      // persistidos atómicamente por create_reimbursement_request_with_documents.
 
       const folio = result.request_number || result.payment_request_number || 'Solicitud'
       showToast('Solicitud creada', `${folio} creada correctamente.`, 'success')
@@ -599,8 +585,8 @@ export function RequestModal({
       setSuccess({ folio, requestType: payload.request_type, paymentMethod: payload.payment_method, warning })
       onCreated(requestId)
     } catch (error) {
-      if (stagedDocumentPath) {
-        try { await removeReceipt(stagedDocumentPath) } catch { /* limpieza best-effort */ }
+      for (const path of stagedDocumentPaths) {
+        try { await removeReceipt(path) } catch { /* limpieza best-effort */ }
       }
       if (isApproverStaleError(error)) {
         await loadApprovers()
