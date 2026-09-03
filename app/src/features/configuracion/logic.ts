@@ -46,7 +46,11 @@ const TAB_ACCESS: Record<ConfigTab, RoleGroup[]> = {
   members: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.DIRECTION],
   originAccounts: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
-  contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+  // DARK LAUNCH: el módulo CONTPAQ (mapeos + export + revisión de cuentas) se
+  // despliega a prod pero visible solo para SysAdmin, para poder correr el UAT
+  // contra datos reales sin exponerlo a Finanzas. Para encenderlo a Finanzas,
+  // regresar a [SYSADMIN, ADMIN, DIRECTION] y el badge a 'Adm/Dir'.
+  contpaq: [ROLE_GROUPS.SYSADMIN],
   system: [ROLE_GROUPS.SYSADMIN],
   empresas: [ROLE_GROUPS.SYSADMIN],
   // El catálogo lo da de alta Finanzas (ADMIN = grupo finanzas/tesorería);
@@ -70,7 +74,7 @@ export const TAB_BADGES: Record<ConfigTab, string> = {
   members: 'Dir',
   originAccounts: 'Adm/Dir',
   budgets: 'Trim.',
-  contpaq: 'Adm/Dir',
+  contpaq: 'SysAdmin',
   system: 'SysAdmin',
   empresas: 'SysAdmin',
   proyectos: 'Adm/Dir',
