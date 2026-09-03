@@ -23,7 +23,7 @@ test('flujo is explicit and never inferred from company-specific account prefixe
 })
 
 test('historical reads use company membership roles and remain fail-closed', () => {
-  const sql = read('20260902223804_historical_actuals_company_roles.sql')
+  const sql = read('20260902230410_historical_actuals_company_roles.sql')
   assert.match(sql, /for select\s+to authenticated/i)
   assert.match(sql, /private\.current_profile_has_company_role\(\s*company_id,\s*array\['finance','director'\]/i)
   assert.match(sql, /current_user_has_role\([\s\S]*'sysadmin'/i)

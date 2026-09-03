@@ -55,6 +55,7 @@
     { "source": "/dashboard/:path*", "destination": "/index.html" },
     { "source": "/dashboard-anual", "destination": "/index.html" },
     { "source": "/presupuesto-anual", "destination": "/index.html" },
+    { "source": "/costo-por-proyecto", "destination": "/index.html" },
     { "source": "/configuracion", "destination": "/index.html" },
     { "source": "/configuracion/:path*", "destination": "/index.html" }
   ]
