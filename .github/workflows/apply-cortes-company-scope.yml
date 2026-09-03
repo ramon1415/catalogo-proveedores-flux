@@ -64,6 +64,9 @@ jobs:
       - name: Install React dependencies
         run: npm --prefix app ci
 
+      - name: Install dispatcher contract dependencies
+        run: npm install --no-save --package-lock=false jspdf@2.5.2 jspdf-autotable@3.8.4
+
       - name: Run focused and regression contracts
         run: >-
           node --test
