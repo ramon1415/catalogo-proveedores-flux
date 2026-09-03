@@ -1,0 +1,64 @@
+from pathlib import Path
+
+
+modal_path = Path("app/src/features/solicitudes/RequestModal.tsx")
+modal = modal_path.read_text(encoding="utf-8")
+
+old_comment = """    // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
+    // responsable), cada quien ve SOLO sus partidas. Sysadmin ve todas. Empresas
+    // sin responsables (p.ej. Operadora) no se filtran."""
+new_comment = """    // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
+    // responsable), cada quien ve SOLO sus partidas. Las partidas no presupuestales
+    // mapeadas a la empresa son compartidas; sysadmin ve todas. Empresas sin
+    // responsables (p.ej. Operadora) no se filtran."""
+if modal.count(old_comment) != 1:
+    raise SystemExit(
+        f"expected one responsibility comment, found {modal.count(old_comment)}"
+    )
+modal = modal.replace(old_comment, new_comment, 1)
+
+old_filter = """      ? budgetRows.filter((r) => {
+          const emails = r.responsible_emails?.length
+            ? r.responsible_emails
+            : [String(r.responsible_email || '').trim().toLowerCase()]
+          return emails.includes(myEmail)
+        })"""
+new_filter = """      ? budgetRows.filter((r) => {
+          // FONACOT y cualquier partida no presupuestal activa/mapeada no consumen
+          // el presupuesto de un responsable, por lo que deben estar disponibles
+          // para cualquier integrante con acceso a esta empresa.
+          if (r.no_presupuestal) return true
+          const emails = r.responsible_emails?.length
+            ? r.responsible_emails
+            : [String(r.responsible_email || '').trim().toLowerCase()]
+          return emails.includes(myEmail)
+        })"""
+if modal.count(old_filter) != 1:
+    raise SystemExit(f"expected one responsible filter, found {modal.count(old_filter)}")
+modal = modal.replace(old_filter, new_filter, 1)
+modal_path.write_text(modal, encoding="utf-8")
+
+test_path = Path("scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs")
+test_source = test_path.read_text(encoding="utf-8")
+marker = """test('rollback disables FONACOT exposure without deleting request history', () => {"""
+addition = """test('FONACOT remains visible in Fersana even when other categories are scoped by responsible', () => {
+  assert.match(
+    requestModal,
+    /if \(r\.no_presupuestal\) return true[\s\S]*return emails\.includes\(myEmail\)/,
+  )
+  assert.ok(
+    requestModal.indexOf('if (r.no_presupuestal) return true')
+      < requestModal.indexOf('return emails.includes(myEmail)'),
+    'the no-budget bypass must run before responsible-email filtering',
+  )
+})
+
+"""
+if test_source.count(marker) != 1:
+    raise SystemExit(
+        f"expected one rollback test marker, found {test_source.count(marker)}"
+    )
+if "FONACOT remains visible in Fersana" in test_source:
+    raise SystemExit("visibility contract already present")
+test_source = test_source.replace(marker, addition + marker, 1)
+test_path.write_text(test_source, encoding="utf-8")
