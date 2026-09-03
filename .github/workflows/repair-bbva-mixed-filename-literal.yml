@@ -1,0 +1,45 @@
+name: Repair BBVA mixed TypeScript filename literal
+
+on:
+  push:
+    branches:
+      - hotfix/bbva-clabe-012-mixed-prod
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[mixed-ts-literal-repaired]') && !contains(github.event.head_commit.message, '[bbva-clabe-mixed-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Repair TypeScript filename matcher
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py')
+          text = path.read_text(encoding='utf-8')
+          old = "    '  const prefix = format === BBVA_FORMAT_INTERBANK ? \\\"PAGOSINT\\\" : format === BBVA_FORMAT_CIE ? \\\"PAGOSCIE\\\" : \\\"PAGOSBBV\\\"',\n    '  const prefix = format === BBVA_FORMAT_MIXED ? \\\"PAGOSMIX\\\" : format === BBVA_FORMAT_INTERBANK ? \\\"PAGOSINT\\\" : format === BBVA_FORMAT_CIE ? \\\"PAGOSCIE\\\" : \\\"PAGOSBBV\\\"',"
+          new = '''    "  const prefix = format === BBVA_FORMAT_INTERBANK ? 'PAGOSINT' : format === BBVA_FORMAT_CIE ? 'PAGOSCIE' : 'PAGOSBBV'",
+    "  const prefix = format === BBVA_FORMAT_MIXED ? 'PAGOSMIX' : format === BBVA_FORMAT_INTERBANK ? 'PAGOSINT' : format === BBVA_FORMAT_CIE ? 'PAGOSCIE' : 'PAGOSBBV'",'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected one TypeScript filename matcher, found {count}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python -m py_compile scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+
+      - name: Commit repaired script
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm .github/workflows/repair-bbva-mixed-filename-literal.yml
+          git add scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+          git commit -m "ci: reparar literal TypeScript mixto [mixed-ts-literal-repaired]"
+          git push origin HEAD:hotfix/bbva-clabe-012-mixed-prod
