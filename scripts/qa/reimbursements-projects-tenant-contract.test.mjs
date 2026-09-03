@@ -58,3 +58,11 @@ test('the SPA always scopes employee bank data and reimbursement items to the ac
   assert.match(modal, /company_id: payload\.company_id!/)
   assert.match(layouts, /\.eq\('profile_id', row\.beneficiary_profile_id\)[\s\S]*\.eq\('company_id', row\.company_id\)/)
 })
+
+test('the project cost report supports direct navigation and browser refreshes', () => {
+  const vercel = readFileSync('vercel.json', 'utf8')
+  assert.match(
+    vercel,
+    /"source":\s*"\/costo-por-proyecto"[\s\S]*"destination":\s*"\/index\.html"/,
+  )
+})
