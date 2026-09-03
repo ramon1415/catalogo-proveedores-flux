@@ -65,7 +65,7 @@ export type CompanyBankAccount = {
 }
 
 // Formatos BBVA soportados.
-export type BbvaFormat = 'same_bank' | 'interbank' | 'cie'
+export type BbvaFormat = 'same_bank' | 'mixed' | 'interbank' | 'cie'
 
 // Fila de la vista previa de elegibilidad (RPC preview_payment_layout_eligibility).
 export type PreviewRow = {

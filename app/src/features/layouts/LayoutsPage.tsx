@@ -14,7 +14,7 @@ import {
   filterLayouts, formatDate, layoutStatusBadge, summarizeLayoutFormats, lineNeedsPagosintReferenceCompletion, detectBbvaLayoutFormat,
   validateLayoutLines, buildBbvaLayoutFiles, formatInvalidLayoutLineMessage, invalidLineNeedsPagosintReference,
   mergeLayoutFileName, bbvaFormatLabel, maskBbvaLine, rlsHint, friendlyError, friendlyRpcError,
-  CXC_MIME_TYPE, BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE,
+  CXC_MIME_TYPE, BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE,
 } from './logic'
 import { NewLayoutModal } from './NewLayoutModal'
 import { LinesModal } from './LinesModal'
@@ -180,8 +180,8 @@ export default function LayoutsPage() {
   async function downloadLayoutBbvaFormat(layoutId: string, format: BbvaFormat) {
     const layout = scopedLayouts.find((l) => l.id === layoutId)
     if (!layout) return
-    if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].includes(format)) {
-      showToast('Formato no soportado', 'Solo se pueden descargar PAGOSBBV, PAGOSINT o CIE.', 'warning')
+    if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].includes(format)) {
+      showToast('Formato no soportado', 'Solo se pueden descargar PAGOSBBV, PAGOSMIX, PAGOSINT o CIE.', 'warning')
       return
     }
     if (layout.status === 'cancelled') {
@@ -315,10 +315,15 @@ export default function LayoutsPage() {
     }
     const actions: React.ReactNode[] = []
     const sameBank = summary[BBVA_FORMAT_SAME_BANK]
+    const mixed = summary[BBVA_FORMAT_MIXED]
     const interbank = summary[BBVA_FORMAT_INTERBANK]
     const cie = summary[BBVA_FORMAT_CIE]
     if (sameBank.count > 0) {
       actions.push(<button key="bbv" className={s.smallBtn} type="button" onClick={() => downloadLayoutBbvaFormat(layout.id, BBVA_FORMAT_SAME_BANK)}>▾ Pagos BBVA</button>)
+    }
+    if (mixed.count > 0) {
+      if (mixed.validationIssues > 0) actions.push(<button key="mix-w" className={`${s.smallBtn} ${s.warning}`} type="button" onClick={() => openLayoutLines(layout.id)}>Revisar Mixtos ({mixed.validationIssues})</button>)
+      else actions.push(<button key="mix" className={s.smallBtn} type="button" onClick={() => downloadLayoutBbvaFormat(layout.id, BBVA_FORMAT_MIXED)}>▾ Pagos Mixtos</button>)
     }
     if (interbank.count > 0) {
       if (interbank.referenceIssues > 0) actions.push(<button key="int-w" className={`${s.smallBtn} ${s.warning}`} type="button" onClick={() => openLayoutLines(layout.id)}>Completar PAGOSINT</button>)

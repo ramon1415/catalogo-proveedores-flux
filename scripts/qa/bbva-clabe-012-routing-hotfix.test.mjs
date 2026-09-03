@@ -37,6 +37,7 @@ const context = vm.createContext({
 vm.runInContext(`${source}
 globalThis.__bbvaRouting = {
   BBVA_FORMAT_SAME_BANK,
+  BBVA_FORMAT_MIXED,
   BBVA_FORMAT_INTERBANK,
   detectBbvaLayoutFormat,
   buildBbvaLayoutFiles,
@@ -89,8 +90,8 @@ const anotherInterbank = {
   payment_concept: "REEMBOLSO PRUEBA DOS",
 }
 
-test("CLABE 012 is routed to PAGOSBBV while external CLABEs remain PAGOSINT", () => {
-  assert.equal(bbva.detectBbvaLayoutFormat(bbvaClabe), bbva.BBVA_FORMAT_SAME_BANK)
+test("CLABE 012 is routed to PAGOSMIX while account stays PAGOSBBV and external CLABEs stay PAGOSINT", () => {
+  assert.equal(bbva.detectBbvaLayoutFormat(bbvaClabe), bbva.BBVA_FORMAT_MIXED)
   assert.equal(bbva.detectBbvaLayoutFormat(bbvaAccount), bbva.BBVA_FORMAT_SAME_BANK)
   assert.equal(bbva.detectBbvaLayoutFormat(banamexReimbursement), bbva.BBVA_FORMAT_INTERBANK)
   assert.equal(bbva.detectBbvaLayoutFormat(anotherInterbank), bbva.BBVA_FORMAT_INTERBANK)
@@ -103,22 +104,29 @@ test("mixed Soporte-style layout downloads two valid records per rail", () => {
   )
   assert.deepEqual(Array.from(files, (file) => file.format), [
     bbva.BBVA_FORMAT_SAME_BANK,
+    bbva.BBVA_FORMAT_MIXED,
     bbva.BBVA_FORMAT_INTERBANK,
   ])
   const sameBank = files.find((file) => file.format === bbva.BBVA_FORMAT_SAME_BANK)
+  const mixed = files.find((file) => file.format === bbva.BBVA_FORMAT_MIXED)
   const interbank = files.find((file) => file.format === bbva.BBVA_FORMAT_INTERBANK)
   assert.equal(sameBank.validation.ok, true, sameBank.validation.errors.join("\n"))
+  assert.equal(mixed.validation.ok, true, mixed.validation.errors.join("\n"))
   assert.equal(interbank.validation.ok, true, interbank.validation.errors.join("\n"))
-  assert.equal(sameBank.validation.lineCount, 2)
+  assert.equal(sameBank.validation.lineCount, 1)
+  assert.equal(mixed.validation.lineCount, 1)
   assert.equal(interbank.validation.lineCount, 2)
-  assert.deepEqual(Array.from(sameBank.validation.lineLengths), [85, 85])
+  assert.deepEqual(Array.from(sameBank.validation.lineLengths), [85])
+  assert.deepEqual(Array.from(mixed.validation.lineLengths), [88])
   assert.deepEqual(Array.from(interbank.validation.lineLengths), [128, 128])
   assert.equal(interbank.validation.lines[0].slice(0, 3), "002")
   assert.equal(interbank.validation.lines[0].slice(85, 90), "40002")
   assert.equal(interbank.validation.lines[1].slice(85, 90), "40646")
   assert.equal(interbank.content.includes("03082"), false)
   assert.equal(interbank.content.includes("012914000000000007"), false)
-  assert.equal(sameBank.content.includes("012914000000000007"), true)
+  assert.equal(sameBank.content.includes("012914000000000007"), false)
+  assert.equal(mixed.content.startsWith("PTC012914000000000007"), true)
+  assert.equal(mixed.fileName.startsWith("PAGOSMIX_FLUX_"), true)
 })
 
 test("React and legacy generators preserve the same routing rule", () => {
@@ -126,5 +134,5 @@ test("React and legacy generators preserve the same routing rule", () => {
   assert.match(reactSource, /type === 'clabe' && isBbvaDestinationClabe\(line\.destination_value\)/)
   assert.match(source, /BBVA_CLABE_BANK_CODE = "012"/)
   assert.match(source, /type === "clabe" && isBbvaDestinationClabe\(line\.destination_value\)/)
-  assert.match(docs, /clabe` con código bancario `012` -> `PAGOSBBV`/)
+  assert.match(docs, /clabe` con código bancario `012` -> `PAGOSMIX`/)
 })
