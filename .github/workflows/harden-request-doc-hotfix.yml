@@ -1,0 +1,103 @@
+name: Harden request document hotfix
+
+on:
+  push:
+    branches:
+      - hotfix/fersana-detail-request-documents-prod
+
+permissions:
+  contents: write
+
+jobs:
+  harden-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[request-doc-hardened]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Harden linked-document integrity and read-only UX
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          migration = Path('supabase/migrations/20260903192500_request_supporting_documents_hotfix.sql')
+          replace_once(
+              migration,
+              """using (
+            bucket_id = 'payment-receipts'
+            and name ~* '^solicitudes/drafts/[0-9a-f-]{36}/'
+            and split_part(name, '/', 3) = public.current_profile_id()::text
+          );""",
+              """using (
+            bucket_id = 'payment-receipts'
+            and name ~* '^solicitudes/drafts/[0-9a-f-]{36}/'
+            and split_part(name, '/', 3) = public.current_profile_id()::text
+            and not exists (
+              select 1
+              from public.payment_requests request
+              where request.invoice_storage_path = storage.objects.name
+            )
+            and not exists (
+              select 1
+              from public.reimbursement_items item
+              where item.storage_path = storage.objects.name
+            )
+          );""",
+          )
+
+          detail = Path('app/src/features/solicitudes/DetailModal.tsx')
+          replace_once(
+              detail,
+              """                value={request.invoice_storage_path
+                          ? <button type=\"button\" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
+                          : <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>}""",
+              """                value={request.invoice_storage_path
+                          ? <button type=\"button\" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
+                          : canEdit
+                            ? <button type=\"button\" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>
+                            : <span>Documento no disponible</span>}""",
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused contracts
+        run: >-
+          node --test
+          scripts/qa/fersana-request-document-hotfix.test.mjs
+          scripts/qa/prod-reimbursement-permissions.test.mjs
+          scripts/qa/reimbursement-inline-classification-ux.test.mjs
+          scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs
+
+      - name: Build production artifact
+        run: npm --prefix app run build
+
+      - name: Commit hardened hotfix
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm .github/workflows/harden-request-doc-hotfix.yml
+          git add \
+            app/src/features/solicitudes/DetailModal.tsx \
+            supabase/migrations/20260903192500_request_supporting_documents_hotfix.sql
+          git commit -m "fix(solicitudes): proteger documentos enlazados [request-doc-hardened]"
+          git push origin HEAD:hotfix/fersana-detail-request-documents-prod
