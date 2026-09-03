@@ -1495,3 +1495,1433 @@ revoke all on function public.approval_batch_payment_layout_candidates(
 grant execute on function public.approval_batch_payment_layout_candidates(
   date, date, uuid, uuid
 ) to service_role;
+
+-- -------------------------------------------------------------------------
+-- Integración con Comprobantes batch.
+--
+-- El reconciliador histórico compara cada operación bancaria contra un
+-- proveedor. Para reembolsos conservamos el contrato completo de monto,
+-- moneda, evidencia, snapshot, layout e idempotencia, pero la identidad y la
+-- cuenta destino se resuelven desde el empleado beneficiario y su empresa.
+
+do $receipt_baseline$
+begin
+  if md5(pg_get_functiondef(to_regprocedure(
+       'public.payment_reconciliation_snapshot_is_receipt_matchable(uuid)'
+     ))) is distinct from '2c5d098fc47adcf050e68ea413cd3cf8' then
+    raise exception 'reimbursement_receipt_baseline_changed:snapshot';
+  end if;
+  if md5(pg_get_functiondef(to_regprocedure(
+       'public.find_payment_receipt_candidates(uuid,integer)'
+     ))) is distinct from '243e559ca1eeb73ebea0ebf651aae4cc' then
+    raise exception 'reimbursement_receipt_baseline_changed:candidates';
+  end if;
+  if md5(pg_get_functiondef(to_regprocedure(
+       'public.link_payment_receipt_to_request(uuid,uuid,text)'
+     ))) is distinct from '7891d585da7a316652e53be2c3ca8265' then
+    raise exception 'reimbursement_receipt_baseline_changed:link';
+  end if;
+  if md5(pg_get_functiondef(to_regprocedure(
+       'public.enqueue_payment_receipt_linked_notifications_internal(uuid)'
+     ))) is distinct from '76f07f15899612d19170a68fff1605ca' then
+    raise exception 'reimbursement_receipt_baseline_changed:notification';
+  end if;
+  if md5(pg_get_functiondef(to_regprocedure(
+       'public.get_payment_receipt_notification_attachment(uuid)'
+     ))) is distinct from 'bc3f61e08c8087588b4f3acccb2f0341' then
+    raise exception 'reimbursement_receipt_baseline_changed:attachment';
+  end if;
+  if not exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.notification_events'::regclass
+      and constraint_row.conname = 'notification_events_recipient_type_check'
+      and position(
+        'usuario_beneficiario'
+        in pg_get_constraintdef(constraint_row.oid, true)
+      ) = 0
+  ) then
+    raise exception 'reimbursement_receipt_baseline_changed:recipient_type';
+  end if;
+end
+$receipt_baseline$;
+
+-- El outbox histórico sólo distinguía solicitante, administrador y proveedor.
+-- Un reembolso puede avisar a un empleado beneficiario distinto del solicitante;
+-- el rol detallado sigue quedando en recipient_role y en el payload.
+alter table public.notification_events
+  drop constraint notification_events_recipient_type_check;
+alter table public.notification_events
+  add constraint notification_events_recipient_type_check check (
+    recipient_type in (
+      'usuario_solicitante',
+      'usuario_beneficiario',
+      'administrador_sistema',
+      'proveedor'
+    )
+  );
+
+alter function public.payment_reconciliation_snapshot_is_receipt_matchable(uuid)
+  rename to payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb;
+revoke all on function public.payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb(uuid)
+  from public, anon, authenticated;
+grant execute on function public.payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb(uuid)
+  to service_role;
+
+create or replace function public.payment_reconciliation_snapshot_is_receipt_matchable(
+  p_snapshot_id uuid
+)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_snapshot public.payable_snapshots%rowtype;
+  v_request public.payment_requests%rowtype;
+  v_currency text;
+  v_amount_minor bigint;
+  v_matching_layout_lines integer := 0;
+  v_total_layout_lines integer := 0;
+  v_matching_legacy_receipts integer := 0;
+  v_total_legacy_receipts integer := 0;
+  v_paid_layout_id uuid;
+  v_source_current boolean := false;
+  v_is_reimbursement boolean := false;
+begin
+  select * into v_snapshot
+  from public.payable_snapshots snapshot
+  where snapshot.id = p_snapshot_id;
+  if not found then return false; end if;
+
+  select * into v_request
+  from public.payment_requests request
+  where request.id = v_snapshot.payment_request_id;
+  if not found then return false; end if;
+
+  v_is_reimbursement :=
+    coalesce(v_request.request_type::text = 'reimbursement', false)
+    or v_request.beneficiary_profile_id is not null;
+  if not v_is_reimbursement then
+    return public.payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb(
+      p_snapshot_id
+    );
+  end if;
+
+  if v_request.beneficiary_profile_id is null
+     or not public.has_active_company_membership(
+       v_request.beneficiary_profile_id,
+       v_request.company_id
+     )
+     or not exists (
+       select 1
+       from public.employee_bank_accounts account
+       where account.profile_id = v_request.beneficiary_profile_id
+         and account.company_id = v_request.company_id
+     ) then
+    return false;
+  end if;
+
+  if v_request.status::text = 'approved' then
+    return public.payment_reconciliation_snapshot_is_payable(v_snapshot.id);
+  end if;
+
+  if v_request.status::text not in ('finance_validation', 'paid') then
+    return false;
+  end if;
+
+  if v_snapshot.company_id <> v_request.company_id
+     or v_snapshot.source_approval_material_updated_at is distinct from
+       v_request.approval_material_updated_at
+     or v_snapshot.authorized_at < v_request.approval_material_updated_at then
+    return false;
+  end if;
+
+  v_currency := public.payment_reconciliation_normalize_currency(
+    v_request.currency
+  );
+  v_amount_minor := public.payment_amount_to_minor(
+    v_request.amount_requested,
+    v_currency
+  );
+  if v_snapshot.currency is distinct from v_currency
+     or v_snapshot.amount_minor is distinct from v_amount_minor then
+    return false;
+  end if;
+
+  if v_request.status::text = 'finance_validation' then
+    select count(*) into v_matching_layout_lines
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'included'
+      and layout.status in ('generated', 'uploaded')
+      and public.payment_amount_to_minor(line.amount, v_currency) =
+        v_snapshot.amount_minor;
+
+    if v_matching_layout_lines <> 1 then
+      return false;
+    end if;
+  else
+    if v_request.paid_by is null or v_request.paid_at is null then
+      return false;
+    end if;
+
+    select count(*) into v_total_layout_lines
+    from public.payment_layout_lines line
+    where line.payment_request_id = v_request.id;
+
+    select count(*) into v_matching_layout_lines
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'paid'
+      and layout.status = 'confirmed'
+      and public.payment_amount_to_minor(line.amount, v_currency) =
+        v_snapshot.amount_minor;
+
+    if v_total_layout_lines <> 1 or v_matching_layout_lines <> 1 then
+      return false;
+    end if;
+
+    select line.layout_id into v_paid_layout_id
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'paid'
+      and layout.status = 'confirmed'
+      and public.payment_amount_to_minor(line.amount, v_currency) =
+        v_snapshot.amount_minor;
+
+    select count(*) into v_total_legacy_receipts
+    from public.payment_receipts legacy
+    where legacy.payment_request_id = v_request.id;
+
+    select count(*) into v_matching_legacy_receipts
+    from public.payment_receipts legacy
+    where legacy.payment_request_id = v_request.id
+      and legacy.layout_id = v_paid_layout_id
+      and public.payment_amount_to_minor(legacy.amount, v_currency) =
+        v_snapshot.amount_minor
+      and legacy.registered_by is not distinct from v_request.paid_by
+      and legacy.created_at is not distinct from v_request.paid_at;
+
+    if v_total_legacy_receipts <> 1
+       or v_matching_legacy_receipts <> 1 then
+      return false;
+    end if;
+
+    if exists (
+      select 1
+      from public.payment_request_receipt_links link
+      where link.payment_request_id = v_request.id
+    ) then
+      return false;
+    end if;
+  end if;
+
+  if v_snapshot.source_type = 'approval_batch_item' then
+    select exists (
+      select 1
+      from public.approval_batch_items item
+      join public.approval_batches batch on batch.id = item.batch_id
+      where item.id = v_snapshot.source_id
+        and item.payment_request_id = v_request.id
+        and item.removed_at is null
+        and item.director_status = 'approved'
+        and item.finance_release_status = 'released'
+        and item.decided_by = v_snapshot.authorized_by
+        and item.decided_at is not distinct from v_snapshot.authorized_at
+        and batch.status = 'closed'
+        and batch.closed_at is not null
+        and v_snapshot.source_status = 'closed'
+        and public.approval_batch_request_has_current_direction_approval(
+          v_request.id
+        )
+    ) into v_source_current;
+  elsif v_snapshot.source_type = 'extraordinary_authorization' then
+    select exists (
+      select 1
+      from public.payment_request_extraordinary_authorizations extra_auth
+      where extra_auth.id = v_snapshot.source_id
+        and extra_auth.payment_request_id = v_request.id
+        and extra_auth.status = 'active'
+        and extra_auth.authorized_by = v_snapshot.authorized_by
+        and extra_auth.authorized_at is not distinct from v_snapshot.authorized_at
+        and v_snapshot.source_status = 'active'
+    ) into v_source_current;
+  else
+    v_source_current := false;
+  end if;
+
+  return coalesce(v_source_current, false);
+end;
+$function$;
+
+revoke all on function public.payment_reconciliation_snapshot_is_receipt_matchable(uuid)
+  from public, anon, authenticated;
+grant execute on function public.payment_reconciliation_snapshot_is_receipt_matchable(uuid)
+  to service_role;
+
+alter function public.find_payment_receipt_candidates(uuid, integer)
+  rename to find_payment_receipt_candidates_pre_reimb;
+revoke all on function public.find_payment_receipt_candidates_pre_reimb(uuid, integer)
+  from public, anon, authenticated;
+grant execute on function public.find_payment_receipt_candidates_pre_reimb(uuid, integer)
+  to service_role;
+
+create or replace function public.find_payment_receipt_candidates(
+  p_operation_id uuid,
+  p_limit integer default 20
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_operation public.bank_payment_operations%rowtype;
+  v_provider_result jsonb;
+  v_reimbursement_items jsonb := '[]'::jsonb;
+  v_items jsonb := '[]'::jsonb;
+begin
+  if p_limit is null or p_limit not between 1 and 100 then
+    raise exception 'invalid_limit';
+  end if;
+
+  -- La implementación certificada conserva autorización, evidencia y todos
+  -- los candidatos de proveedor. Pedimos el máximo y aplicamos el límite una
+  -- sola vez después de combinar ambos tipos de beneficiario.
+  v_provider_result := public.find_payment_receipt_candidates_pre_reimb(
+    p_operation_id,
+    100
+  );
+
+  select * into v_operation
+  from public.bank_payment_operations operation
+  where operation.id = p_operation_id;
+
+  with latest_snapshots as (
+    select distinct on (snapshot.payment_request_id) snapshot.*
+    from public.payable_snapshots snapshot
+    where snapshot.company_id = v_operation.company_id
+    order by snapshot.payment_request_id, snapshot.version desc
+  ), reimbursement_candidates as (
+    select
+      snapshot.id as snapshot_id,
+      request.id as payment_request_id,
+      request.request_number,
+      request.concept,
+      request.status::text as request_status,
+      coalesce(
+        nullif(btrim(account.beneficiary_name), ''),
+        nullif(btrim(profile.full_name), ''),
+        'Beneficiario'
+      ) as proveedor_name,
+      snapshot.amount_minor,
+      snapshot.currency,
+      v_operation.beneficiary_name as receipt_beneficiary,
+      v_operation.payment_reason as receipt_reference,
+      (
+        v_operation.destination_account_hash is not null
+        and (
+          v_operation.destination_account_hash =
+            public.payment_reconciliation_account_hash(account.clabe)
+          or v_operation.destination_account_hash =
+            public.payment_reconciliation_account_hash(account.cuenta)
+        )
+      ) as account_match,
+      (
+        nullif(public.payment_receipt_normalize_match_text(
+          v_operation.beneficiary_name
+        ), '') is not null
+        and (
+          (
+            nullif(public.payment_receipt_normalize_match_text(
+              account.beneficiary_name
+            ), '') is not null
+            and public.payment_receipt_normalize_match_text(
+              v_operation.beneficiary_name
+            ) like '%' || public.payment_receipt_normalize_match_text(
+              account.beneficiary_name
+            ) || '%'
+          )
+          or (
+            nullif(public.payment_receipt_normalize_match_text(
+              profile.full_name
+            ), '') is not null
+            and public.payment_receipt_normalize_match_text(
+              v_operation.beneficiary_name
+            ) like '%' || public.payment_receipt_normalize_match_text(
+              profile.full_name
+            ) || '%'
+          )
+        )
+      ) as name_match
+    from latest_snapshots snapshot
+    join public.payment_requests request
+      on request.id = snapshot.payment_request_id
+    join public.employee_bank_accounts account
+      on account.profile_id = request.beneficiary_profile_id
+     and account.company_id = request.company_id
+    join public.profiles profile
+      on profile.id = request.beneficiary_profile_id
+     and coalesce(profile.active, true)
+    where request.company_id = v_operation.company_id
+      and (
+        request.request_type::text = 'reimbursement'
+        or request.beneficiary_profile_id is not null
+      )
+      and public.has_active_company_membership(
+        request.beneficiary_profile_id,
+        request.company_id
+      )
+      and request.status::text in ('approved', 'finance_validation', 'paid')
+      and snapshot.amount_minor = v_operation.amount_minor
+      and snapshot.currency = v_operation.currency
+      and public.payment_reconciliation_snapshot_is_receipt_matchable(
+        snapshot.id
+      )
+      and not exists (
+        select 1
+        from public.payment_request_receipt_links link
+        where link.payment_request_id = request.id
+      )
+      and (
+        request.status::text = 'paid'
+        or not exists (
+          select 1
+          from public.payment_receipts legacy
+          where legacy.payment_request_id = request.id
+        )
+      )
+  )
+  select coalesce(jsonb_agg(
+    to_jsonb(candidate)
+      || jsonb_build_object(
+        'request_type', 'reimbursement',
+        'payee_kind', 'employee_beneficiary'
+      )
+    order by candidate.account_match desc,
+      candidate.name_match desc,
+      candidate.request_number,
+      candidate.payment_request_id
+  ), '[]'::jsonb)
+    into v_reimbursement_items
+  from reimbursement_candidates candidate
+  where candidate.account_match or candidate.name_match;
+
+  with combined as (
+    select document
+    from jsonb_array_elements(
+      coalesce(v_provider_result -> 'items', '[]'::jsonb)
+    ) provider(document)
+    where not exists (
+      select 1
+      from public.payment_requests request
+      where request.id = nullif(document ->> 'payment_request_id', '')::uuid
+        and (
+          request.request_type::text = 'reimbursement'
+          or request.beneficiary_profile_id is not null
+        )
+    )
+    union all
+    select document
+    from jsonb_array_elements(v_reimbursement_items) reimb(document)
+  )
+  select coalesce(jsonb_agg(ranked.document order by
+    ranked.account_match desc,
+    ranked.name_match desc,
+    ranked.request_number,
+    ranked.payment_request_id
+  ), '[]'::jsonb)
+    into v_items
+  from (
+    select
+      combined.document,
+      coalesce((combined.document ->> 'account_match')::boolean, false)
+        as account_match,
+      coalesce((combined.document ->> 'name_match')::boolean, false)
+        as name_match,
+      combined.document ->> 'request_number' as request_number,
+      nullif(combined.document ->> 'payment_request_id', '')::uuid
+        as payment_request_id
+    from combined
+    order by account_match desc, name_match desc,
+      request_number, payment_request_id
+    limit p_limit
+  ) ranked;
+
+  return jsonb_build_object(
+    'items', v_items,
+    'outcome', case jsonb_array_length(v_items)
+      when 0 then 'none'
+      when 1 then 'exact'
+      else 'multiple'
+    end,
+    'read_only', true
+  );
+end;
+$function$;
+
+revoke all on function public.find_payment_receipt_candidates(uuid, integer)
+  from public, anon;
+grant execute on function public.find_payment_receipt_candidates(uuid, integer)
+  to authenticated, service_role;
+
+alter function public.enqueue_payment_receipt_linked_notifications_internal(uuid)
+  rename to enqueue_payment_receipt_linked_notifications_provider;
+revoke all on function public.enqueue_payment_receipt_linked_notifications_provider(uuid)
+  from public, anon, authenticated;
+grant execute on function public.enqueue_payment_receipt_linked_notifications_provider(uuid)
+  to service_role;
+
+create or replace function public.enqueue_payment_receipt_linked_notifications_internal(
+  p_link_id uuid
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $function$
+declare
+  v_link public.payment_request_receipt_links%rowtype;
+  v_request public.payment_requests%rowtype;
+  v_evidence public.payment_operation_evidence%rowtype;
+  v_requester_profile public.profiles%rowtype;
+  v_beneficiary_profile public.profiles%rowtype;
+  v_company_name text;
+  v_intake_folio text;
+  v_external_folio text;
+  v_payee_name text;
+  v_requester_email text;
+  v_beneficiary_email text;
+  v_requester_state text;
+  v_beneficiary_state text;
+  v_unique_recipient_count integer := 0;
+  v_notification_resolution jsonb;
+  v_notification_event_ids uuid[] := array[]::uuid[];
+  v_notification_events_created integer := 0;
+  v_base_payload jsonb;
+  v_recipient record;
+  v_event_id uuid;
+  v_idempotency_key text;
+begin
+  select request.* into v_request
+  from public.payment_request_receipt_links link
+  join public.payment_requests request
+    on request.id = link.payment_request_id
+  where link.id = p_link_id;
+
+  if not found
+     or not (
+       coalesce(v_request.request_type::text = 'reimbursement', false)
+       or v_request.beneficiary_profile_id is not null
+     ) then
+    return public.enqueue_payment_receipt_linked_notifications_provider(
+      p_link_id
+    );
+  end if;
+
+  if p_link_id is null then
+    raise exception 'payment_receipt_notification_link_id_required';
+  end if;
+
+  select * into v_link
+  from public.payment_request_receipt_links link
+  where link.id = p_link_id;
+  if not found then
+    raise exception 'payment_receipt_notification_link_not_found';
+  end if;
+
+  select * into v_evidence
+  from public.payment_operation_evidence evidence
+  where evidence.id = v_link.evidence_id;
+  if not found then
+    raise exception 'payment_receipt_notification_evidence_not_found';
+  end if;
+
+  if v_request.id <> v_link.payment_request_id
+     or v_request.company_id <> v_link.company_id
+     or v_evidence.id <> v_link.evidence_id
+     or v_evidence.operation_id <> v_link.operation_id
+     or v_evidence.company_id <> v_link.company_id
+     or v_request.status::text <> 'paid'
+     or v_evidence.status <> 'shareable'
+     or v_evidence.page_count is distinct from 1
+     or not v_evidence.single_operation_attested
+     or v_evidence.storage_bucket <> 'payment-batch-documents'
+     or v_evidence.mime_type <> 'application/pdf'
+     or v_evidence.file_size_bytes is null
+     or v_evidence.file_size_bytes not between 1 and 26214400
+     or v_evidence.individual_sha256 is null
+     or v_evidence.individual_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'payment_receipt_notification_contract_invalid';
+  end if;
+
+  if v_request.requested_by is not null then
+    select * into v_requester_profile
+    from public.profiles profile
+    where profile.id = v_request.requested_by
+      and coalesce(profile.active, true);
+  end if;
+
+  if v_request.beneficiary_profile_id is null
+     or not public.has_active_company_membership(
+       v_request.beneficiary_profile_id,
+       v_request.company_id
+     ) then
+    raise exception 'payment_receipt_notification_beneficiary_not_found';
+  end if;
+
+  select * into v_beneficiary_profile
+  from public.profiles profile
+  where profile.id = v_request.beneficiary_profile_id
+    and coalesce(profile.active, true);
+  if not found then
+    raise exception 'payment_receipt_notification_beneficiary_not_found';
+  end if;
+
+  v_payee_name := coalesce(
+    private.payment_request_payee_document(v_request.id) ->> 'provider',
+    nullif(btrim(v_beneficiary_profile.full_name), ''),
+    'Beneficiario'
+  );
+
+  select company.name into v_company_name
+  from public.companies company
+  where company.id = v_link.company_id;
+
+  select intake.public_folio into v_intake_folio
+  from public.payment_intake intake
+  where intake.created_payment_request_id = v_request.id
+  limit 1;
+
+  v_external_folio := coalesce(
+    nullif(btrim(v_intake_folio), ''),
+    nullif(btrim(v_request.request_number), '')
+  );
+  v_requester_email := lower(btrim(coalesce(v_requester_profile.email, '')));
+  v_beneficiary_email := lower(btrim(coalesce(
+    v_beneficiary_profile.email,
+    ''
+  )));
+  v_requester_state := public.payment_receipt_notification_email_state(
+    v_requester_profile.email
+  );
+  v_beneficiary_state := public.payment_receipt_notification_email_state(
+    v_beneficiary_profile.email
+  );
+
+  select count(distinct candidate.email_normalized)::integer
+    into v_unique_recipient_count
+  from (
+    values
+      (v_requester_email, v_requester_state),
+      (v_beneficiary_email, v_beneficiary_state)
+  ) candidate(email_normalized, resolution)
+  where candidate.resolution = 'eligible';
+
+  v_notification_resolution := jsonb_build_object(
+    'requester', v_requester_state,
+    'beneficiary', v_beneficiary_state,
+    'provider', 'not_applicable',
+    'unique_recipient_count', v_unique_recipient_count
+  );
+
+  if v_external_folio is null then
+    return jsonb_build_object(
+      'notification_resolution', v_notification_resolution,
+      'notification_event_ids', to_jsonb(v_notification_event_ids),
+      'notification_events_created', 0,
+      'notification_events_total', 0,
+      'notification_block_reason', 'missing_external_folio'
+    );
+  end if;
+
+  v_base_payload := jsonb_build_object(
+    'contract_version', 'v1',
+    'folio', v_external_folio,
+    'provider', v_payee_name,
+    'payee_kind', 'employee_beneficiary',
+    'request_type', 'reimbursement',
+    'company', coalesce(nullif(btrim(v_company_name), ''), 'Empresa'),
+    'concept', coalesce(
+      nullif(btrim(v_request.concept), ''),
+      nullif(btrim(v_request.payment_concept), ''),
+      'Reembolso'
+    ),
+    'amount', v_request.amount_requested,
+    'currency', v_request.currency,
+    'payment_date', v_link.payment_date,
+    'reference_hint', v_link.reference_hint,
+    'status', 'paid',
+    'recipient_roles', '[]'::jsonb
+  );
+
+  for v_recipient in
+    with candidates as (
+      select
+        'requester'::text as recipient_role,
+        v_requester_email as email_normalized,
+        v_requester_state as resolution,
+        v_request.requested_by as profile_id
+      union all
+      select
+        'beneficiary'::text,
+        v_beneficiary_email,
+        v_beneficiary_state,
+        v_request.beneficiary_profile_id
+    )
+    select
+      candidate.email_normalized,
+      array_agg(
+        candidate.recipient_role
+        order by case candidate.recipient_role
+          when 'requester' then 1 else 2 end
+      ) as recipient_roles,
+      case
+        when bool_or(candidate.recipient_role = 'requester')
+          then 'usuario_solicitante'
+        else 'usuario_beneficiario'
+      end as recipient_type,
+      (
+        array_agg(candidate.profile_id order by
+          case candidate.recipient_role when 'requester' then 1 else 2 end
+        )
+      )[1] as recipient_profile_id
+    from candidates candidate
+    where candidate.resolution = 'eligible'
+    group by candidate.email_normalized
+    order by min(
+      case candidate.recipient_role when 'requester' then 1 else 2 end
+    )
+  loop
+    v_idempotency_key := format(
+      'notification:payment_receipt.linked:%s:%s:v1',
+      v_link.id,
+      md5(v_recipient.email_normalized)
+    );
+
+    insert into public.notification_events(
+      event_type,
+      source_table,
+      source_id,
+      source_folio,
+      recipient_type,
+      recipient_profile_id,
+      recipient_email,
+      recipient_role,
+      channel,
+      priority,
+      subject,
+      payload,
+      idempotency_key,
+      status,
+      next_attempt_at
+    ) values (
+      'payment_receipt.linked',
+      'payment_request_receipt_links',
+      v_link.id,
+      v_external_folio,
+      v_recipient.recipient_type,
+      v_recipient.recipient_profile_id,
+      v_recipient.email_normalized,
+      case
+        when v_recipient.recipient_roles =
+          array['requester', 'beneficiary']::text[]
+          then 'requester_beneficiary'
+        else v_recipient.recipient_roles[1]
+      end,
+      'email',
+      'normal',
+      format('Comprobante de reembolso disponible — %s', v_external_folio),
+      jsonb_set(
+        v_base_payload,
+        '{recipient_roles}',
+        to_jsonb(v_recipient.recipient_roles),
+        true
+      ),
+      v_idempotency_key,
+      'pending',
+      clock_timestamp()
+    )
+    on conflict (idempotency_key) do nothing
+    returning id into v_event_id;
+
+    if v_event_id is null then
+      select event.id into v_event_id
+      from public.notification_events event
+      where event.idempotency_key = v_idempotency_key;
+    else
+      v_notification_events_created := v_notification_events_created + 1;
+    end if;
+
+    if v_event_id is not null then
+      v_notification_event_ids := array_append(
+        v_notification_event_ids,
+        v_event_id
+      );
+    end if;
+    v_event_id := null;
+  end loop;
+
+  return jsonb_build_object(
+    'notification_resolution', v_notification_resolution,
+    'notification_event_ids', to_jsonb(v_notification_event_ids),
+    'notification_events_created', v_notification_events_created,
+    'notification_events_total', cardinality(v_notification_event_ids)
+  );
+end;
+$function$;
+
+revoke all on function public.enqueue_payment_receipt_linked_notifications_internal(uuid)
+  from public, anon, authenticated;
+grant execute on function public.enqueue_payment_receipt_linked_notifications_internal(uuid)
+  to service_role;
+
+alter function public.get_payment_receipt_notification_attachment(uuid)
+  rename to get_payment_receipt_notification_attachment_provider;
+revoke all on function public.get_payment_receipt_notification_attachment_provider(uuid)
+  from public, anon, authenticated;
+grant execute on function public.get_payment_receipt_notification_attachment_provider(uuid)
+  to service_role, postgres;
+
+create or replace function public.get_payment_receipt_notification_attachment(
+  p_notification_event_id uuid
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_event public.notification_events%rowtype;
+  v_link public.payment_request_receipt_links%rowtype;
+  v_request public.payment_requests%rowtype;
+  v_operation public.bank_payment_operations%rowtype;
+  v_evidence public.payment_operation_evidence%rowtype;
+  v_payee_document jsonb;
+  v_safe_folio text;
+  v_safe_payee text;
+  v_filename text;
+begin
+  select request.* into v_request
+  from public.notification_events event
+  join public.payment_request_receipt_links link
+    on link.id = event.source_id
+  join public.payment_requests request
+    on request.id = link.payment_request_id
+  where event.id = p_notification_event_id
+    and event.event_type = 'payment_receipt.linked'
+    and event.source_table = 'payment_request_receipt_links';
+
+  if not found
+     or not (
+       coalesce(v_request.request_type::text = 'reimbursement', false)
+       or v_request.beneficiary_profile_id is not null
+     ) then
+    return public.get_payment_receipt_notification_attachment_provider(
+      p_notification_event_id
+    );
+  end if;
+
+  if p_notification_event_id is null then
+    raise exception 'notification_event_required';
+  end if;
+
+  select * into v_event
+  from public.notification_events event
+  where event.id = p_notification_event_id;
+  if not found then
+    raise exception 'notification_event_not_found';
+  end if;
+  if v_event.event_type <> 'payment_receipt.linked'
+     or v_event.source_table <> 'payment_request_receipt_links'
+     or v_event.source_id is null then
+    raise exception 'notification_event_source_invalid';
+  end if;
+
+  select * into v_link
+  from public.payment_request_receipt_links link
+  where link.id = v_event.source_id;
+  if not found then
+    raise exception 'payment_receipt_link_not_found';
+  end if;
+
+  select * into v_operation
+  from public.bank_payment_operations operation
+  where operation.id = v_link.operation_id;
+  if not found then
+    raise exception 'bank_payment_operation_not_found';
+  end if;
+
+  select * into v_evidence
+  from public.payment_operation_evidence evidence
+  where evidence.id = v_link.evidence_id;
+  if not found then
+    raise exception 'payment_evidence_not_found';
+  end if;
+
+  if v_event.source_id <> v_link.id
+     or v_request.id <> v_link.payment_request_id
+     or v_operation.id <> v_link.operation_id
+     or v_evidence.id <> v_link.evidence_id
+     or v_evidence.operation_id <> v_operation.id
+     or v_request.company_id <> v_link.company_id
+     or v_operation.company_id <> v_link.company_id
+     or v_evidence.company_id <> v_link.company_id
+     or v_evidence.status <> 'shareable'
+     or v_evidence.page_count is distinct from 1
+     or not v_evidence.single_operation_attested
+     or v_evidence.storage_bucket <> 'payment-batch-documents'
+     or v_evidence.storage_path !~
+       '^[0-9a-f-]{36}/[0-9a-f-]{36}/evidence/[0-9a-f-]{36}\.pdf$'
+     or v_evidence.mime_type <> 'application/pdf'
+     or v_evidence.file_size_bytes is null
+     or v_evidence.file_size_bytes not between 1 and 26214400
+     or v_evidence.individual_sha256 is null
+     or v_evidence.individual_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'payment_receipt_attachment_contract_invalid';
+  end if;
+
+  v_payee_document := private.payment_request_payee_document(v_request.id);
+  v_safe_folio := regexp_replace(
+    coalesce(nullif(btrim(v_event.source_folio), ''), 'sin-folio'),
+    '[^a-zA-Z0-9._-]',
+    '-',
+    'g'
+  );
+  v_safe_payee := regexp_replace(
+    coalesce(
+      nullif(btrim(v_payee_document ->> 'provider'), ''),
+      'beneficiario'
+    ),
+    '[^a-zA-Z0-9._-]',
+    '-',
+    'g'
+  );
+  v_filename := left(
+    format('Comprobante_%s_%s.pdf', v_safe_folio, v_safe_payee),
+    120
+  );
+
+  return jsonb_build_object(
+    'bucket', v_evidence.storage_bucket,
+    'path', v_evidence.storage_path,
+    'mime_type', v_evidence.mime_type,
+    'size_bytes', v_evidence.file_size_bytes,
+    'sha256', v_evidence.individual_sha256,
+    'filename', v_filename
+  );
+end;
+$function$;
+
+revoke all on function public.get_payment_receipt_notification_attachment(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.get_payment_receipt_notification_attachment(uuid)
+  to service_role, postgres;
+
+alter function public.link_payment_receipt_to_request(uuid, uuid, text)
+  rename to link_payment_receipt_to_request_pre_reimb;
+revoke all on function public.link_payment_receipt_to_request_pre_reimb(
+  uuid, uuid, text
+) from public, anon, authenticated;
+grant execute on function public.link_payment_receipt_to_request_pre_reimb(
+  uuid, uuid, text
+) to service_role;
+
+create or replace function public.link_payment_receipt_to_request(
+  p_operation_id uuid,
+  p_payment_request_id uuid,
+  p_idempotency_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_initial public.bank_payment_operations%rowtype;
+  v_operation public.bank_payment_operations%rowtype;
+  v_request public.payment_requests%rowtype;
+  v_snapshot public.payable_snapshots%rowtype;
+  v_evidence public.payment_operation_evidence%rowtype;
+  v_legacy_receipt public.payment_receipts%rowtype;
+  v_beneficiary_account public.employee_bank_accounts%rowtype;
+  v_beneficiary_profile public.profiles%rowtype;
+  v_actor uuid;
+  v_payload jsonb;
+  v_payload_hash text;
+  v_replay jsonb;
+  v_beneficiary_match boolean;
+  v_link_id uuid;
+  v_event_id uuid;
+  v_linked_at timestamptz;
+  v_result jsonb;
+  v_notification jsonb;
+  v_updated integer;
+  v_layout_line_count integer := 0;
+  v_total_layout_lines integer := 0;
+  v_legacy_receipt_count integer := 0;
+  v_layout_line public.payment_layout_lines%rowtype;
+  v_layout public.payment_layouts%rowtype;
+  v_layout_final_status text;
+  v_is_reimbursement boolean := false;
+begin
+  select request.* into v_request
+  from public.payment_requests request
+  where request.id = p_payment_request_id;
+
+  v_is_reimbursement := found and (
+    coalesce(v_request.request_type::text = 'reimbursement', false)
+    or v_request.beneficiary_profile_id is not null
+  );
+  if not v_is_reimbursement then
+    return public.link_payment_receipt_to_request_pre_reimb(
+      p_operation_id,
+      p_payment_request_id,
+      p_idempotency_key
+    );
+  end if;
+
+  select * into v_initial
+  from public.bank_payment_operations operation
+  where operation.id = p_operation_id;
+  if not found then
+    raise exception 'bank_payment_operation_not_found';
+  end if;
+
+  v_actor := public.payment_reconciliation_require_finance(
+    v_initial.company_id
+  );
+  v_payload := jsonb_build_object(
+    'operation_id', p_operation_id,
+    'payment_request_id', p_payment_request_id
+  );
+  v_payload_hash := public.payment_reconciliation_payload_hash(v_payload);
+  v_replay := public.payment_reconciliation_command_replay(
+    v_initial.company_id,
+    'payment_receipt.link',
+    p_idempotency_key,
+    v_payload_hash,
+    v_actor
+  );
+  if v_replay is not null then return v_replay; end if;
+
+  select * into v_operation
+  from public.bank_payment_operations operation
+  where operation.id = p_operation_id
+  for update;
+  if v_operation.company_id <> v_initial.company_id then
+    raise exception 'bank_payment_operation_company_changed';
+  end if;
+  if v_operation.status = 'cancelled' then
+    raise exception 'bank_payment_operation_not_linkable';
+  end if;
+  if exists (
+    select 1
+    from public.payment_request_receipt_links link
+    where link.operation_id = v_operation.id
+  ) then
+    raise exception 'bank_receipt_already_linked';
+  end if;
+  if not exists (
+    select 1
+    from public.payment_document_extractions extraction
+    where extraction.id = v_operation.extraction_id
+      and extraction.status = 'accepted'
+  ) then
+    raise exception 'accepted_payment_extraction_required';
+  end if;
+
+  select * into v_request
+  from public.payment_requests request
+  where request.id = p_payment_request_id
+  for update;
+  if not found then raise exception 'payment_request_not_found'; end if;
+  if v_request.company_id <> v_operation.company_id then
+    raise exception 'payment_request_company_mismatch';
+  end if;
+  if not (
+       coalesce(v_request.request_type::text = 'reimbursement', false)
+       or v_request.beneficiary_profile_id is not null
+     ) then
+    raise exception 'payment_request_payee_kind_changed';
+  end if;
+  if v_request.status::text not in (
+    'approved', 'finance_validation', 'paid'
+  ) then
+    raise exception 'payment_request_must_be_approved_in_layout_or_paid_by_layout';
+  end if;
+  if exists (
+    select 1
+    from public.payment_request_receipt_links link
+    where link.payment_request_id = v_request.id
+  ) then
+    raise exception 'payment_request_already_has_receipt';
+  end if;
+  if v_request.status::text <> 'paid' and exists (
+    select 1
+    from public.payment_receipts legacy
+    where legacy.payment_request_id = v_request.id
+  ) then
+    raise exception 'payment_request_already_has_receipt';
+  end if;
+
+  if v_request.beneficiary_profile_id is null
+     or not public.has_active_company_membership(
+       v_request.beneficiary_profile_id,
+       v_request.company_id
+     ) then
+    raise exception 'reimbursement_beneficiary_membership_required';
+  end if;
+
+  select * into v_beneficiary_account
+  from public.employee_bank_accounts account
+  where account.profile_id = v_request.beneficiary_profile_id
+    and account.company_id = v_request.company_id;
+  if not found then
+    raise exception 'reimbursement_bank_account_not_found';
+  end if;
+
+  select * into v_beneficiary_profile
+  from public.profiles profile
+  where profile.id = v_request.beneficiary_profile_id
+    and coalesce(profile.active, true);
+  if not found then
+    raise exception 'reimbursement_beneficiary_profile_not_found';
+  end if;
+
+  if v_request.status::text = 'finance_validation' then
+    select count(*) into v_layout_line_count
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'included'
+      and layout.status in ('generated', 'uploaded');
+
+    if v_layout_line_count <> 1 then
+      raise exception 'payment_request_live_layout_line_required';
+    end if;
+
+    select line.* into v_layout_line
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'included'
+      and layout.status in ('generated', 'uploaded')
+    for update of line;
+
+    select * into v_layout
+    from public.payment_layouts layout
+    where layout.id = v_layout_line.layout_id
+    for update;
+
+    if v_layout.status not in ('generated', 'uploaded')
+       or v_layout_line.status <> 'included' then
+      raise exception 'payment_request_live_layout_line_changed';
+    end if;
+  elsif v_request.status::text = 'paid' then
+    if v_request.paid_by is null or v_request.paid_at is null then
+      raise exception 'paid_layout_request_audit_incomplete';
+    end if;
+
+    select count(*) into v_total_layout_lines
+    from public.payment_layout_lines line
+    where line.payment_request_id = v_request.id;
+
+    select count(*) into v_layout_line_count
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'paid'
+      and layout.status = 'confirmed';
+
+    if v_total_layout_lines <> 1 or v_layout_line_count <> 1 then
+      raise exception 'paid_request_confirmed_layout_line_required';
+    end if;
+
+    select line.* into v_layout_line
+    from public.payment_layout_lines line
+    join public.payment_layouts layout on layout.id = line.layout_id
+    where line.payment_request_id = v_request.id
+      and line.company_id = v_request.company_id
+      and line.proveedor_id is not distinct from v_request.proveedor_id
+      and line.status = 'paid'
+      and layout.status = 'confirmed'
+    for update of line;
+
+    select * into v_layout
+    from public.payment_layouts layout
+    where layout.id = v_layout_line.layout_id
+    for update;
+
+    if v_layout.status <> 'confirmed' or v_layout_line.status <> 'paid' then
+      raise exception 'paid_request_confirmed_layout_changed';
+    end if;
+
+    select count(*) into v_legacy_receipt_count
+    from public.payment_receipts legacy
+    where legacy.payment_request_id = v_request.id;
+
+    if v_legacy_receipt_count <> 1 then
+      raise exception 'paid_request_single_layout_receipt_required';
+    end if;
+
+    select * into v_legacy_receipt
+    from public.payment_receipts legacy
+    where legacy.payment_request_id = v_request.id
+      and legacy.layout_id = v_layout.id
+      and legacy.registered_by is not distinct from v_request.paid_by
+      and legacy.created_at is not distinct from v_request.paid_at
+    for update;
+
+    if not found then
+      raise exception 'paid_request_layout_receipt_provenance_mismatch';
+    end if;
+  end if;
+
+  select * into v_snapshot
+  from public.payable_snapshots snapshot
+  where snapshot.payment_request_id = v_request.id
+  order by snapshot.version desc
+  limit 1
+  for update;
+  if not found
+     or not public.payment_reconciliation_snapshot_is_receipt_matchable(
+       v_snapshot.id
+     ) then
+    raise exception 'payment_request_not_payable';
+  end if;
+  if v_snapshot.amount_minor <> v_operation.amount_minor then
+    raise exception 'receipt_request_amount_mismatch';
+  end if;
+  if v_snapshot.currency <> v_operation.currency then
+    raise exception 'receipt_request_currency_mismatch';
+  end if;
+  if v_layout_line.id is not null
+     and public.payment_amount_to_minor(
+       v_layout_line.amount,
+       v_snapshot.currency
+     ) <> v_snapshot.amount_minor then
+    raise exception 'layout_line_snapshot_amount_mismatch';
+  end if;
+  if v_legacy_receipt.id is not null
+     and public.payment_amount_to_minor(
+       v_legacy_receipt.amount,
+       v_snapshot.currency
+     ) <> v_snapshot.amount_minor then
+    raise exception 'layout_receipt_snapshot_amount_mismatch';
+  end if;
+
+  v_beneficiary_match := (
+    v_operation.destination_account_hash is not null
+    and (
+      v_operation.destination_account_hash =
+        public.payment_reconciliation_account_hash(v_beneficiary_account.clabe)
+      or v_operation.destination_account_hash =
+        public.payment_reconciliation_account_hash(v_beneficiary_account.cuenta)
+    )
+  ) or (
+    nullif(public.payment_receipt_normalize_match_text(
+      v_operation.beneficiary_name
+    ), '') is not null
+    and (
+      (
+        nullif(public.payment_receipt_normalize_match_text(
+          v_beneficiary_account.beneficiary_name
+        ), '') is not null
+        and public.payment_receipt_normalize_match_text(
+          v_operation.beneficiary_name
+        ) like '%' || public.payment_receipt_normalize_match_text(
+          v_beneficiary_account.beneficiary_name
+        ) || '%'
+      )
+      or (
+        nullif(public.payment_receipt_normalize_match_text(
+          v_beneficiary_profile.full_name
+        ), '') is not null
+        and public.payment_receipt_normalize_match_text(
+          v_operation.beneficiary_name
+        ) like '%' || public.payment_receipt_normalize_match_text(
+          v_beneficiary_profile.full_name
+        ) || '%'
+      )
+    )
+  );
+  if not v_beneficiary_match then
+    raise exception 'receipt_request_beneficiary_mismatch';
+  end if;
+
+  select * into v_evidence
+  from public.payment_operation_evidence evidence
+  where evidence.operation_id = v_operation.id
+    and evidence.status = 'shareable'
+    and evidence.page_count = 1
+    and evidence.single_operation_attested
+  for update;
+  if not found then
+    raise exception 'shareable_single_page_evidence_required';
+  end if;
+
+  v_linked_at := clock_timestamp();
+  begin
+    insert into public.payment_request_receipt_links(
+      company_id,
+      operation_id,
+      payment_request_id,
+      snapshot_id,
+      evidence_id,
+      amount_minor,
+      currency,
+      payment_date,
+      reference_hint,
+      linked_by,
+      linked_at
+    ) values (
+      v_operation.company_id,
+      v_operation.id,
+      v_request.id,
+      v_snapshot.id,
+      v_evidence.id,
+      v_operation.amount_minor,
+      v_operation.currency,
+      v_operation.application_date,
+      right(v_operation.bank_unique_folio, 6),
+      v_actor,
+      v_linked_at
+    ) returning id into v_link_id;
+  exception when unique_violation then
+    raise exception 'receipt_or_request_already_linked';
+  end;
+
+  if v_request.status::text <> 'paid' then
+    update public.payment_requests request
+    set status = 'paid'::public.payment_request_status,
+        paid_by = v_actor,
+        paid_at = v_linked_at,
+        updated_at = v_linked_at
+    where request.id = v_request.id
+      and request.status::text = v_request.status::text;
+    get diagnostics v_updated = row_count;
+    if v_updated <> 1 then
+      raise exception 'payment_request_changed_during_link';
+    end if;
+  end if;
+
+  if v_request.status::text = 'finance_validation' then
+    update public.payment_layout_lines line
+    set status = 'paid',
+        updated_at = v_linked_at
+    where line.id = v_layout_line.id
+      and line.status = 'included';
+    get diagnostics v_updated = row_count;
+    if v_updated <> 1 then
+      raise exception 'payment_layout_line_changed_during_link';
+    end if;
+
+    update public.payment_layouts layout
+    set status = case
+          when not exists (
+            select 1
+            from public.payment_layout_lines pending
+            where pending.layout_id = layout.id
+              and pending.status = 'included'
+          ) then 'confirmed'
+          else layout.status
+        end,
+        updated_at = v_linked_at
+    where layout.id = v_layout.id
+      and layout.status in ('generated', 'uploaded')
+    returning layout.status into v_layout_final_status;
+
+    if v_layout_final_status is null then
+      raise exception 'payment_layout_changed_during_link';
+    end if;
+  elsif v_request.status::text = 'paid' then
+    v_layout_final_status := 'confirmed';
+  end if;
+
+  v_notification :=
+    public.enqueue_payment_receipt_linked_notifications_internal(v_link_id);
+
+  v_event_id := public.append_financial_outbox_event_internal(
+    'payment_receipt.linked',
+    'payment_request_receipt_link',
+    v_link_id,
+    v_operation.company_id,
+    v_actor,
+    jsonb_build_object(
+      'amount_minor', v_operation.amount_minor,
+      'currency', v_operation.currency,
+      'evidence_id', v_evidence.id,
+      'operation_id', v_operation.id,
+      'payment_request_id', v_request.id,
+      'request_type', 'reimbursement',
+      'payee_kind', 'employee_beneficiary'
+    )
+    || case when v_layout_line.id is not null then jsonb_build_object(
+      'layout_id', v_layout.id,
+      'layout_line_id', v_layout_line.id,
+      'layout_status', v_layout_final_status
+    ) else '{}'::jsonb end
+    || jsonb_build_object(
+      'notification_resolution', v_notification -> 'notification_resolution'
+    ),
+    v_operation.id,
+    null,
+    'receipt-linked:' || v_payload_hash
+  );
+
+  v_result := jsonb_build_object(
+    'amount_minor', v_operation.amount_minor,
+    'currency', v_operation.currency,
+    'evidence_id', v_evidence.id,
+    'event_id', v_event_id,
+    'link_id', v_link_id,
+    'operation_id', v_operation.id,
+    'payment_date', v_operation.application_date,
+    'payment_request_id', v_request.id,
+    'reference_hint', right(v_operation.bank_unique_folio, 6),
+    'request_number', v_request.request_number,
+    'request_status', 'paid',
+    'request_type', 'reimbursement',
+    'payee_kind', 'employee_beneficiary',
+    'layout_id', v_layout.id,
+    'layout_line_id', v_layout_line.id,
+    'layout_status', v_layout_final_status
+  );
+  return public.payment_reconciliation_store_command(
+    v_operation.company_id,
+    'payment_receipt.link',
+    p_idempotency_key,
+    v_payload_hash,
+    v_actor,
+    v_result
+  );
+end;
+$function$;
+
+revoke all on function public.link_payment_receipt_to_request(
+  uuid, uuid, text
+) from public, anon;
+grant execute on function public.link_payment_receipt_to_request(
+  uuid, uuid, text
+) to authenticated, service_role;

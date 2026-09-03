@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import { renderEmail } from '../../supabase/functions/notification-dispatcher/index.ts'
 
 const migration = fs.readFileSync(
   'supabase/migrations/20260903061000_harden_reimbursement_permissions.sql',
@@ -19,6 +20,10 @@ const submittedPdf = fs.readFileSync(
 )
 const decisionPdf = fs.readFileSync(
   'supabase/functions/notification-dispatcher/approval_batch_decision_pdf.ts',
+  'utf8',
+)
+const notificationDispatcher = fs.readFileSync(
+  'supabase/functions/notification-dispatcher/index.ts',
   'utf8',
 )
 
@@ -214,4 +219,122 @@ test('new private helpers are not callable from the browser', () => {
     migration,
     /revoke all on function public\.approval_batch_payment_layout_candidates\([\s\S]*from public, anon, authenticated/,
   )
+})
+
+test('receipt snapshot matching is null-safe for reimbursement layout lines', () => {
+  assert.match(migration, /do \$receipt_baseline\$/)
+  assert.match(migration, /reimbursement_receipt_baseline_changed:snapshot/)
+  assert.match(migration, /reimbursement_receipt_baseline_changed:candidates/)
+  assert.match(migration, /reimbursement_receipt_baseline_changed:link/)
+  assert.match(migration, /reimbursement_receipt_baseline_changed:notification/)
+  assert.match(migration, /reimbursement_receipt_baseline_changed:attachment/)
+  assert.match(
+    migration,
+    /rename to payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb/,
+  )
+  assert.match(
+    migration,
+    /if not v_is_reimbursement then[\s\S]*payment_reconciliation_snapshot_is_receipt_matchable_pre_reimb/,
+  )
+  assert.match(
+    migration,
+    /line\.proveedor_id is not distinct from v_request\.proveedor_id/g,
+  )
+  assert.match(migration, /v_total_legacy_receipts <> 1/)
+  assert.match(migration, /approval_batch_request_has_current_direction_approval/)
+})
+
+test('receipt candidate matching uses the employee account inside the request company', () => {
+  assert.match(migration, /rename to find_payment_receipt_candidates_pre_reimb/)
+  assert.match(
+    migration,
+    /account\.profile_id = request\.beneficiary_profile_id[\s\S]*account\.company_id = request\.company_id/,
+  )
+  assert.match(migration, /payment_reconciliation_account_hash\(account\.clabe\)/)
+  assert.match(migration, /payment_reconciliation_account_hash\(account\.cuenta\)/)
+  assert.match(migration, /'payee_kind', 'employee_beneficiary'/)
+  assert.match(migration, /candidate\.account_match or candidate\.name_match/)
+})
+
+test('receipt linking delegates providers and closes reimbursements with beneficiary matching', () => {
+  assert.match(migration, /rename to link_payment_receipt_to_request_pre_reimb/)
+  assert.match(
+    migration,
+    /if not v_is_reimbursement then[\s\S]*link_payment_receipt_to_request_pre_reimb/,
+  )
+  assert.match(migration, /reimbursement_beneficiary_membership_required/)
+  assert.match(migration, /reimbursement_bank_account_not_found/)
+  assert.match(migration, /receipt_request_beneficiary_mismatch/)
+  assert.match(migration, /accepted_payment_extraction_required/)
+  assert.match(migration, /shareable_single_page_evidence_required/)
+  assert.match(migration, /payment_reconciliation_store_command/)
+  assert.match(migration, /status = 'paid'::public\.payment_request_status/)
+})
+
+test('paid reimbursement notifies requester and beneficiary with a private PDF', () => {
+  assert.match(
+    migration,
+    /alter table public\.notification_events[\s\S]*drop constraint notification_events_recipient_type_check/,
+  )
+  assert.match(migration, /'usuario_beneficiario'/)
+  assert.match(
+    migration,
+    /rename to enqueue_payment_receipt_linked_notifications_provider/,
+  )
+  assert.match(migration, /'beneficiary'::text/)
+  assert.match(migration, /'provider', 'not_applicable'/)
+  assert.match(migration, /'request_type', 'reimbursement'/)
+  assert.match(
+    migration,
+    /rename to get_payment_receipt_notification_attachment_provider/,
+  )
+  assert.match(migration, /private\.payment_request_payee_document\(v_request\.id\)/)
+  assert.match(
+    migration,
+    /revoke all on function public\.get_payment_receipt_notification_attachment\(uuid\)[\s\S]*from public, anon, authenticated, service_role/,
+  )
+  assert.match(notificationDispatcher, /Beneficiario del reembolso/)
+  assert.match(notificationDispatcher, /payload\.payee_kind/)
+
+  const baseEvent = {
+    id: '11111111-1111-4111-8111-111111111111',
+    event_type: 'payment_receipt.linked',
+    source_table: 'payment_request_receipt_links',
+    source_id: '22222222-2222-4222-8222-222222222222',
+    source_folio: 'REEM-2026-0001',
+    recipient_type: 'usuario_beneficiario',
+    recipient_profile_id: '33333333-3333-4333-8333-333333333333',
+    recipient_email: 'beneficiario@example.invalid',
+    subject: 'Comprobante de reembolso disponible — REEM-2026-0001',
+    payload: {
+      recipient_roles: ['beneficiary'],
+      folio: 'REEM-2026-0001',
+      provider: 'Persona Colaboradora',
+      company: 'Empresa de prueba',
+      concept: 'Reembolso de prueba',
+      amount: '123.45',
+      currency: 'MXN',
+      payment_date: '2026-09-03',
+      reference_hint: 'ABC123',
+      status: 'paid',
+      request_type: 'reimbursement',
+      payee_kind: 'employee_beneficiary',
+    },
+    attempt_count: 0,
+    priority: 'normal',
+  }
+  const reimbursementEmail = renderEmail(baseEvent, 'real')
+  assert.match(reimbursementEmail.text, /Beneficiario del reembolso: Persona Colaboradora/)
+  assert.doesNotMatch(reimbursementEmail.text, /Proveedor: Persona Colaboradora/)
+
+  const providerEmail = renderEmail({
+    ...baseEvent,
+    recipient_type: 'usuario_solicitante',
+    payload: {
+      ...baseEvent.payload,
+      request_type: 'provider_payment',
+      payee_kind: 'provider',
+    },
+  }, 'real')
+  assert.match(providerEmail.text, /Proveedor: Persona Colaboradora/)
 })
