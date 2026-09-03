@@ -2,7 +2,7 @@
    y de las extensiones (fase2, batch execution). CSS Modules; sin CSS global. */
 
 /* ── Page header ─────────────────────────────────────────────────────────── */
-.phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-shrink: 0; }
 .phead h1 { font-size: 22px; font-weight: 600; }
 .phead p { margin-top: 3px; font-size: 12.5px; color: var(--text-3); }
 
@@ -20,7 +20,7 @@
 .smallBtn:hover { background: var(--bg-hover); color: var(--text-1); }
 
 /* ── Stats grid ──────────────────────────────────────────────────────────── */
-.statsGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+.statsGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; flex-shrink: 0; }
 .kpi {
   border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; background: var(--bg-card);
   display: flex; flex-direction: column; gap: 6px;
@@ -35,21 +35,21 @@
 .kpi.info .kpiValue { color: var(--accent-text, var(--accent)); }
 
 /* ── Table card ──────────────────────────────────────────────────────────── */
-.tableCard { flex-shrink: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
-.toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 150px 190px minmax(180px, 260px); gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); }
+.tableCard { flex: 1 1 0; min-height: 240px; display: flex; flex-direction: column; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 150px 190px minmax(180px, 260px); gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .searchBox { display: flex; align-items: center; gap: 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; color: var(--text-3); }
 .searchBox input { flex: 1; background: transparent; border: 0; outline: none; color: var(--text-1); font: inherit; font-size: 12.5px; min-height: 36px; }
 .toolbar select { background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; color: var(--text-1); padding: 0 10px; min-height: 36px; font: inherit; font-size: 12.5px; }
 
-.filterSummary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-hover); color: var(--text-2); font-size: 12px; }
+.filterSummary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-hover); color: var(--text-2); font-size: 12px; flex-shrink: 0; }
 .filterPill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; border-radius: 999px; background: var(--accent-dim); color: var(--accent-text); border: 1px solid rgba(15, 118, 110, .22); font-weight: 700; }
 
-.messageBox { padding: 16px 18px; font-size: 13px; color: var(--text-3); }
+.messageBox { padding: 16px 18px; font-size: 13px; color: var(--text-3); flex-shrink: 0; }
 .messageBox.error { color: var(--ruby); }
 
-.tableWrap { overflow-x: auto; }
+.tableWrap { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 820px; }
-.table thead th { text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
+.table thead th { position: sticky; top: 0; z-index: 1; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
 .table tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--bg-hover); }
