@@ -258,7 +258,14 @@ export async function inspectFile(
 ): Promise<FileSlotState> {
   const config = SLOT_CONFIG[slot]
   const extension = String(file.name || '').split('.').pop()!.toLowerCase()
-  const mimeType = file.type || config?.mimes?.[0] || ''
+  // Algunos navegadores y selectores administrados entregan archivos locales
+  // con el MIME genérico application/octet-stream. En ese caso la extensión y
+  // la firma física siguen siendo las autoridades locales, y el servidor vuelve
+  // a validar los bytes antes de materializar la corrida.
+  const observedMime = String(file.type || '').toLowerCase()
+  const mimeType = !observedMime || observedMime === 'application/octet-stream'
+    ? config?.mimes?.[0] || ''
+    : observedMime
   if (!config || extension !== config.extension || !config.mimes.includes(mimeType) || file.size < 1 || file.size > MAX_BYTES) {
     throw new Error('PAYROLL_FILE_METADATA_INVALID')
   }

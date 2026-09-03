@@ -81,3 +81,11 @@ test('concurrency, duplicate and fallback edges stay fail-closed', () => {
   assert.match(modal, /Clasifica o quita los archivos no reconocidos/)
   assert.match(modal, /PAYROLL_SOURCE_ACCOUNT_MISMATCH/)
 })
+
+test('unknown browser MIME falls back to the slot contract without weakening byte validation', () => {
+  assert.match(logic, /observedMime === 'application\/octet-stream'/)
+  assert.match(logic, /config\?\.mimes\?\.\[0\]/)
+  assert.match(logic, /isZipSignature\(bytes\)/)
+  assert.match(logic, /hasBinaryNull\(bytes\)/)
+  assert.match(logic, /looksLikeXml\(bytes\)/)
+})
