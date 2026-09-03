@@ -24,6 +24,9 @@ const state = {
   regularizations: [],
   regularization: null,
   regularizationDecision: null,
+  companyScopeId: null,
+  companyScopeRequired: false,
+  companyScopeName: "",
 }
 const dom = {}
 
@@ -33,13 +36,20 @@ async function init() {
   cacheDom()
   bindEvents()
   applyTheme()
+  const params = new URLSearchParams(window.location.search)
+  state.companyScopeRequired = params.has("company_id")
+  state.companyScopeId = parseUuid(params.get("company_id"))
   const authorized = await resolveUser()
   if (!authorized) return
+  if (state.companyScopeRequired && !state.companyScopeId) {
+    renderCompanyScopeError("La empresa seleccionada no es valida. Regresa al sistema y vuelve a elegir una empresa.")
+    return
+  }
   try {
     await loadReferenceData()
     await loadDirectors()
     await loadDirectorCandidates()
-    state.selectedId = new URLSearchParams(window.location.search).get("batch_id") || null
+    state.selectedId = params.get("batch_id") || null
     await loadBatches()
     await loadRegularizations()
   } catch (error) {
@@ -125,6 +135,32 @@ function applyTheme() {
   if (saved) document.documentElement.dataset.theme = saved
 }
 
+function parseUuid(value) {
+  const normalized = String(value || "").trim()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)
+    ? normalized
+    : null
+}
+
+function isWithinCompanyScope(row) {
+  return !state.companyScopeId || row?.company_id === state.companyScopeId || row?.id === state.companyScopeId
+}
+
+function scopeCompanyRows(rows) {
+  return asArray(rows).filter(isWithinCompanyScope)
+}
+
+function renderCompanyScopeError(message) {
+  state.batches = []
+  state.selectedId = null
+  state.detail = null
+  dom.pageContext.textContent = "Empresa no disponible"
+  dom.createBatchBtn.hidden = true
+  dom.directorConfigBtn.hidden = true
+  if (dom.batchList) dom.batchList.innerHTML = `<div class="batch-empty">${escapeHtml(message)}</div>`
+  renderEmptyDetail(message)
+}
+
 async function resolveUser() {
   if (window.FluxAuth?.ready) await window.FluxAuth.ready()
   state.profile = window.FluxAuth?.getProfile?.() || null
@@ -164,18 +200,26 @@ function renderUnauthorized() {
 
 async function loadReferenceData() {
   if (!state.isFinance) return
-  const companies = await supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name")
+  let companyQuery = supabaseClient.from("companies").select("id,name,legal_name,active").eq("active", true).order("name")
+  if (state.companyScopeId) companyQuery = companyQuery.eq("id", state.companyScopeId)
+  const companies = await companyQuery
   if (companies.error) throw companies.error
-  state.companies = companies.data || []
+  state.companies = asArray(companies.data)
+  if (state.companyScopeId && state.companies.length !== 1) throw new Error("selected_company_not_available")
+  state.companyScopeName = state.companies.find((company) => company.id === state.companyScopeId)?.legal_name
+    || state.companies.find((company) => company.id === state.companyScopeId)?.name
+    || ""
   fillCompanyOptions()
   await loadCompanySettings()
 }
 
 async function loadCompanySettings() {
   state.companySettingsLoaded = false
-  const { data, error } = await supabaseClient
+  let settingsQuery = supabaseClient
     .from("approval_batch_company_settings")
     .select("company_id,regular_payments_require_closed_batch,enforcement_started_at,enabled_by,enabled_at,updated_at")
+  if (state.companyScopeId) settingsQuery = settingsQuery.eq("company_id", state.companyScopeId)
+  const { data, error } = await settingsQuery
   if (error) {
     state.companySettings = []
     syncEnforcementControl()
@@ -198,16 +242,17 @@ async function loadCompanySettings() {
 
 async function loadDirectors() {
   if (!state.isFinance) return
-  const { data, error } = await supabaseClient.rpc("list_company_directors", { p_company_id: null })
+  const { data, error } = await supabaseClient.rpc("list_company_directors", { p_company_id: state.companyScopeId || null })
   if (error) return showToast("No se cargaron directores", friendlyError(error), "warning")
-  state.directors = asArray(data)
+  state.directors = scopeCompanyRows(data)
   fillCreateDirectors()
   renderDirectorList()
 }
 
 async function loadDirectorCandidates(companyId = null) {
   if (!state.isFinance) return
-  const { data, error } = await supabaseClient.rpc("list_approval_batch_director_candidates", { p_company_id: companyId || null })
+  const requestedCompanyId = state.companyScopeId || companyId || null
+  const { data, error } = await supabaseClient.rpc("list_approval_batch_director_candidates", { p_company_id: requestedCompanyId })
   if (error) {
     state.directorCandidates = []
     fillProfileOptions()
@@ -223,7 +268,10 @@ async function loadBatches() {
     const rpc = state.view === "finance" ? "list_finance_approval_batches" : "list_director_approval_batches"
     const { data, error } = await supabaseClient.rpc(rpc, { p_status: null })
     if (error) throw error
-    state.batches = asArray(data)
+    state.batches = scopeCompanyRows(data)
+    if (state.companyScopeId && !state.companyScopeName && state.batches.length) {
+      state.companyScopeName = state.batches[0].company_name || ""
+    }
     if (state.view === "director") {
       state.batches.sort((a, b) => Number(b.status === "submitted") - Number(a.status === "submitted") || String(b.created_at || "").localeCompare(String(a.created_at || "")))
     }
@@ -251,19 +299,20 @@ async function refreshAll() {
   await loadCompanySettings()
   await loadDirectors()
   await loadBatches()
+  await loadRegularizations()
 }
 
 async function loadRegularizations() {
   if (!state.isAuthorized || !dom.regularizationList) return
   const { data, error } = await supabaseClient.rpc("list_extraordinary_regularizations", {
-    p_company_id: null,
+    p_company_id: state.companyScopeId || null,
   })
   if (error) {
     state.regularizations = []
     renderRegularizations()
     return showToast("No se cargaron contingencias", friendlyError(error), "warning")
   }
-  state.regularizations = asArray(data)
+  state.regularizations = scopeCompanyRows(data)
   renderRegularizations()
 }
 
@@ -414,7 +463,8 @@ function renderViewTabs() {
   })
   dom.createBatchBtn.hidden = !state.isFinance || state.view !== "finance"
   dom.directorConfigBtn.hidden = !state.isFinance || state.view !== "finance"
-  dom.pageContext.textContent = state.view === "finance" ? "Preparacion por Finanzas" : "Decision de Direccion"
+  const context = state.view === "finance" ? "Preparacion por Finanzas" : "Decision de Direccion"
+  dom.pageContext.textContent = state.companyScopeName ? `${context} · ${state.companyScopeName}` : context
 }
 
 function renderBatchList() {
@@ -439,6 +489,14 @@ function renderBatchList() {
 }
 
 async function openBatch(batchId) {
+  const listedBatch = state.batches.find((batch) => batch.id === batchId)
+  if (!listedBatch || !isWithinCompanyScope(listedBatch)) {
+    state.selectedId = null
+    state.detail = null
+    renderBatchList()
+    renderEmptyDetail("Este corte no pertenece a la empresa seleccionada.")
+    return
+  }
   if (state.selectedId !== batchId) state.selectedEligibleIds.clear()
   state.selectedId = batchId
   renderBatchList()
@@ -447,6 +505,7 @@ async function openBatch(batchId) {
     const { data, error } = await supabaseClient.rpc("get_approval_batch_detail", { p_batch_id: batchId })
     if (error) throw error
     state.detail = data || { batch: null, items: [] }
+    if (!isWithinCompanyScope(state.detail.batch)) throw new Error("batch_company_scope_mismatch")
     state.eligible = []
     state.ineligible = []
     if (state.isFinance && state.detail.batch?.status === "draft") {
@@ -1010,8 +1069,11 @@ async function createBatch(event) {
   const submit = dom.createBatchForm.querySelector('[type="submit"]')
   submit.disabled = true
   try {
+    const companyId = dom.createCompanyId.value
+    if (!companyId) throw new Error("select_company")
+    if (state.companyScopeId && companyId !== state.companyScopeId) throw new Error("company_scope_mismatch")
     const { data, error } = await supabaseClient.rpc("create_approval_batch", {
-      p_company_id: dom.createCompanyId.value,
+      p_company_id: companyId,
       p_label: dom.createLabel.value.trim() || null,
       p_period_start: dom.createPeriodStart.value,
       p_period_end: dom.createPeriodEnd.value,
@@ -1050,8 +1112,11 @@ async function saveDirector(event) {
   const submit = dom.directorForm.querySelector('[type="submit"]')
   submit.disabled = true
   try {
+    const companyId = dom.directorCompanyId.value
+    if (!companyId) throw new Error("select_company")
+    if (state.companyScopeId && companyId !== state.companyScopeId) throw new Error("company_scope_mismatch")
     const { error } = await supabaseClient.rpc("set_company_batch_configuration", {
-      p_company_id: dom.directorCompanyId.value,
+      p_company_id: companyId,
       p_director_profile_id: dom.directorProfileId.value,
       p_director_active: dom.directorActive.checked,
       p_enable_enforcement: Boolean(dom.batchEnforcementEnabled.checked),
@@ -1112,12 +1177,14 @@ async function releaseRejectedItem(event) {
 }
 
 function fillCompanyOptions() {
-  const options = state.companies.map((company) => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.legal_name || company.name)}</option>`).join("")
+  const companies = scopeCompanyRows(state.companies)
+  const options = companies.map((company) => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.legal_name || company.name)}</option>`).join("")
   ;[dom.createCompanyId, dom.directorCompanyId].forEach((select) => {
     if (!select) return
-    const current = select.value
+    const current = state.companyScopeId || select.value
     select.innerHTML = `<option value="">Selecciona...</option>${options}`
-    if (state.companies.some((company) => company.id === current)) select.value = current
+    if (companies.some((company) => company.id === current)) select.value = current
+    select.disabled = Boolean(state.companyScopeId)
   })
 }
 
@@ -1274,6 +1341,10 @@ function friendlyError(error) {
   const raw = String(error?.message || error || "Error no identificado")
   const known = {
     finance_role_required: "Se requiere rol de Finanzas.",
+    selected_company_not_available: "La empresa seleccionada no esta activa o no esta disponible para esta vista.",
+    company_scope_mismatch: "La operacion no corresponde a la empresa seleccionada.",
+    batch_company_scope_mismatch: "El corte solicitado pertenece a otra empresa.",
+    select_company: "Selecciona una empresa antes de continuar.",
     batch_director_required: "Solo el director asignado puede decidir este corte.",
     company_director_required: "Configura un director activo para la empresa.",
     select_company_director: "Selecciona uno de los directores activos.",
