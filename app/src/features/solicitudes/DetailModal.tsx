@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { formatDate, formatDateTime, numberValue } from '../../lib/format'
+import { useModules } from '../../lib/moduleAccess'
 import {
   getApproverDetails, loadApprovalHistory, loadPaymentReceipts, getReceiptUrl,
   decidePaymentRequest, getExecutionContext, loadRequestSummary, loadCashFund,
@@ -61,6 +62,8 @@ export function DetailModal({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
+  const { isEnabled } = useModules()
+  const showIncidencias = isEnabled('incidencias')
 
   const proveedor = proveedores.find((p) => p.id === request.proveedor_id) || null
   const company = companies.find((c) => c.id === request.company_id) || null
@@ -169,8 +172,8 @@ export function DetailModal({
         if (!cancelled) setReceiptSummary(rs)
       } catch { /* best-effort */ }
 
-      // Incidencias (canApprove)
-      if (canApprove) {
+      // Incidencias: solo en empresas que tienen habilitado el módulo.
+      if (canApprove && showIncidencias) {
         try {
           const { incidents: inc, membersById: m } = await loadIncidencias()
           if (cancelled) return
@@ -187,7 +190,7 @@ export function DetailModal({
 
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.id])
+  }, [request.id, canApprove, showIncidencias])
 
   const isReembolso = isReimbursement(fase2?.request_type ?? request.request_type)
 
@@ -377,8 +380,15 @@ export function DetailModal({
             <DataRow label="Validación presupuestal" value={<Badge variant={budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').variant}>{budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').label}</Badge>} />
             <DataRow label="Descripción" value={request.description || 'Sin descripción'} muted />
             {request.notes && <DataRow label="Notas" value={request.notes} muted />}
-            {request.invoice_storage_path && (
-              <DataRow label="Comprobante" value={<button type="button" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver comprobante</button>} />
+            {!isReembolso && (
+              <DataRow
+                label="Factura / comprobante de la solicitud"
+                value={request.invoice_storage_path
+                  ? <button type="button" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
+                  : canEdit
+                  ? <button type="button" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>
+                  : <span>Documento no disponible</span>}
+              />
             )}
           </div>
 
@@ -402,6 +412,7 @@ export function DetailModal({
               bank={beneficiaryBank}
               categories={budgetCategories}
               currency={currency}
+              onOpenReceipt={openInvoice}
             />
           )}
 
@@ -409,7 +420,7 @@ export function DetailModal({
           {context && summary && <BatchExecutionPanel context={context} onAuthorize={() => setExtraOpen(true)} onRevoke={() => setRevokeOpen(true)} />}
 
           {/* Comprobante de pago (Finanzas) */}
-          {receiptSummary && <ReceiptSection data={receiptSummary} onView={(id) => accessEvidence(id, false)} onDownload={(id) => accessEvidence(id, true)} />}
+          {receiptSummary && (isPaid || receiptSummary?.link) && <ReceiptSection data={receiptSummary} onView={(id) => accessEvidence(id, false)} onDownload={(id) => accessEvidence(id, true)} />}
 
           {/* Fondo y comprobacion (efectivo/cheque) */}
           {showCashFundSection && summary && (
@@ -478,8 +489,8 @@ export function DetailModal({
             </section>
           )}
 
-          {/* Incidencia asociada (canApprove) */}
-          {canApprove && (
+          {/* Incidencia asociada: solo aplica cuando el módulo está habilitado. */}
+          {canApprove && showIncidencias && (
             <div className={s.incidenciaSection}>
               <div className={s.sectionHeading}>Incidencia asociada</div>
               <div className={s.row}>
@@ -536,12 +547,14 @@ function ReimbursementDetailSection({
   bank,
   categories,
   currency,
+  onOpenReceipt,
 }: {
   items: ReimbursementItem[] | null
   beneficiaryName: string
   bank: EmployeeBankAccount | null
   categories: BudgetCategory[]
   currency: string
+  onOpenReceipt: (storagePath: string) => void
 }) {
   const total = (items ?? []).reduce((sum, item) => sum + numberValue(item.amount), 0)
   return (
@@ -571,6 +584,11 @@ function ReimbursementDetailSection({
                 {' · '}
                 {item.invoice_uuid ? `Folio fiscal ${item.invoice_uuid}` : 'Sin folio fiscal'}
               </span>
+              {item.storage_path ? (
+                <button type="button" className={s.invoiceLink} onClick={() => onOpenReceipt(item.storage_path!)}>Ver comprobante adjunto</button>
+              ) : (
+                <span>{item.deducible ? 'Comprobante faltante' : 'Sin comprobante fiscal'}</span>
+              )}
             </div>
           )
         })}
@@ -702,8 +720,8 @@ function ReceiptSection({ data, onView, onDownload }: { data: any; onView: (id: 
     <section className={s.decisionCard}>
       <div className={s.batchHead}>
         <div>
-          <h3>Comprobante de pago</h3>
-          <p style={{ margin: '3px 0 0' }}>Vista interna de Finanzas. El importe proviene del comprobante bancario vinculado.</p>
+          <h3>Comprobante bancario del pago</h3>
+          <p style={{ margin: '3px 0 0' }}>Se vincula después de ejecutar y conciliar el layout; no es la factura o comprobante adjunto al crear la solicitud.</p>
         </div>
         <Badge variant={link ? 'success' : 'neutral'}>{link ? 'Pagada' : 'Sin comprobante'}</Badge>
       </div>
