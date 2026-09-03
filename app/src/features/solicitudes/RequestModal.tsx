@@ -250,7 +250,10 @@ export function RequestModal({
     const myEmail = (profile?.email || '').trim().toLowerCase()
     const usesResponsible = budgetRows.some((r) => r.responsible_email)
     const scoped = usesResponsible && group !== 'sysadmin'
-      ? budgetRows.filter((r) => String(r.responsible_email || '').trim().toLowerCase() === myEmail)
+      ? budgetRows.filter((r) => (
+          String(r.responsible_email || '').trim().toLowerCase() === myEmail
+          || r.has_additional_access === true
+        ))
       : budgetRows
     const q = categorySearch.trim().toLowerCase()
     if (!q) return scoped
@@ -275,7 +278,8 @@ export function RequestModal({
     setCategoryDisabled(true)
     setCategoryHelp({ text: 'Consultando presupuesto activo para la combinacion seleccionada.', state: '' })
     try {
-      const data = await loadBudgetAvailability(nextCompany, nextCC, month)
+      if (!profile?.id) throw new Error('No se pudo identificar el perfil activo.')
+      const data = await loadBudgetAvailability(nextCompany, nextCC, month, profile.id)
       const rows = sortAvailabilityRows(data, categoryById)
       setBudgetRows(rows)
       if (!rows.length) {

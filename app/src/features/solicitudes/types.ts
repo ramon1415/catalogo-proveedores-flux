@@ -95,6 +95,7 @@ export type BudgetAvailabilityRow = {
   cost_center_id?: string | null
   budget_month?: string | null
   responsible_email?: string | null
+  has_additional_access?: boolean
   [key: string]: unknown
 }
 
