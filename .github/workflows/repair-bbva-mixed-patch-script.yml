@@ -1,0 +1,50 @@
+name: Repair BBVA mixed patch script
+
+on:
+  push:
+    branches:
+      - hotfix/bbva-clabe-012-mixed-prod
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[mixed-script-repaired]') && !contains(github.event.head_commit.message, '[bbva-clabe-mixed-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Repair Python string literals
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          old_seen = False
+          new_seen = False
+          for index, line in enumerate(lines):
+              if 'const prefix = format === BBVA_FORMAT_INTERBANK' in line and 'PAGOSBBV' in line:
+                  lines[index] = "    '  const prefix = format === BBVA_FORMAT_INTERBANK ? \\\"PAGOSINT\\\" : format === BBVA_FORMAT_CIE ? \\\"PAGOSCIE\\\" : \\\"PAGOSBBV\\\"',"
+                  old_seen = True
+              elif 'const prefix = format === BBVA_FORMAT_MIXED' in line and 'PAGOSMIX' in line:
+                  lines[index] = "    '  const prefix = format === BBVA_FORMAT_MIXED ? \\\"PAGOSMIX\\\" : format === BBVA_FORMAT_INTERBANK ? \\\"PAGOSINT\\\" : format === BBVA_FORMAT_CIE ? \\\"PAGOSCIE\\\" : \\\"PAGOSBBV\\\"',"
+                  new_seen = True
+          if not old_seen or not new_seen:
+              raise SystemExit(f'prefix literals not found old={old_seen} new={new_seen}')
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          python -m py_compile scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+
+      - name: Commit repaired script
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm .github/workflows/repair-bbva-mixed-patch-script.yml
+          git add scripts/ops/apply_bbva_clabe_012_mixed_hotfix.py
+          git commit -m "ci: reparar aplicador mixto [mixed-script-repaired]"
+          git push origin HEAD:hotfix/bbva-clabe-012-mixed-prod
