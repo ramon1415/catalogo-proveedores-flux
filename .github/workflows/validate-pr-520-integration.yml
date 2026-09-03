@@ -1,0 +1,38 @@
+name: Validate PR 520 integration
+
+on:
+  push:
+    branches:
+      - codex/520-validation
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout integrated tree
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run reimbursement and regression contracts
+        run: >-
+          node --test
+          scripts/qa/prod-reimbursement-ux-hotfix.test.mjs
+          scripts/qa/prod-reimbursement-permissions.test.mjs
+          scripts/qa/solicitudes-scroll-contract.test.mjs
+          scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs
+
+      - name: Build production React artifact
+        run: npm --prefix app run build
