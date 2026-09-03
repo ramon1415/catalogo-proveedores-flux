@@ -98,7 +98,7 @@ function Row({ row, kind, onAction }: { row: PreviewRow; kind: string; onAction:
   return (
     <div className={`${s.previewRow}${rowClass}`}>
       <div><strong>{row.request_number || 'Sin folio'}</strong><small>{row.company_name || 'Sin empresa'}</small></div>
-      <div>{row.provider_name || 'Sin proveedor'}</div>
+      <div>{row.provider_name || 'Sin proveedor / beneficiario'}</div>
       <div><strong>{formatPreviewMoney(row.amount, row.currency ?? undefined)}</strong></div>
       <div>{detailNode}</div>
       <div className={s.previewActions}>{actions}</div>

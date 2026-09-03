@@ -39,6 +39,7 @@ export function DetailModal({
   profiles,
   fase2,
   canApprove,
+  canEditRequest,
   currentProfileId,
   onClose,
   onEdit,
@@ -52,6 +53,7 @@ export function DetailModal({
   profiles: Profile[]
   fase2: Fase2Meta
   canApprove: boolean
+  canEditRequest: boolean
   currentProfileId: string | null
   onClose: () => void
   onEdit: () => void
@@ -220,7 +222,7 @@ export function DetailModal({
       ? { title: 'Excepción presupuestal', desc: 'Requiere revisión por excepción presupuestal.', variant: 'warning' as const }
       : { title: 'Presupuesto disponible', desc: 'Validada automáticamente con presupuesto disponible.', variant: 'info' as const }
 
-  const canEdit = canApprove && !isTerminalStatus(request.status)
+  const canEdit = canEditRequest && !isTerminalStatus(request.status)
 
   // ── Decision ──────────────────────────────────────────────────────────────
   const finalStatus = isFinalDecisionStatus(request.status)

@@ -5,7 +5,7 @@ import type {
   BudgetAvailabilityRow, ApproverCandidate, ApprovalHistoryRow, PaymentReceiptRow,
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
   EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
-  ReimbursementItemInsert,
+  ReimbursementItemInsert, ReimbursementUpdatePayload,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
@@ -301,11 +301,29 @@ export async function insertReimbursementItems(items: ReimbursementItemInsert[])
 export async function loadReimbursementItems(requestId: string): Promise<ReimbursementItem[]> {
   const { data, error } = await supabase
     .from('reimbursement_items')
-    .select('id,payment_request_id,company_id,budget_category_id,descripcion,amount,subtotal_amount,tax_amount,deducible,invoice_uuid,storage_path,created_at')
+    .select('id,payment_request_id,company_id,budget_category_id,descripcion,amount,subtotal_amount,tax_amount,deducible,invoice_uuid,cfdi_data,storage_path,created_at')
     .eq('payment_request_id', requestId)
     .order('created_at', { ascending: true })
   if (error) return []
   return (data ?? []) as ReimbursementItem[]
+}
+
+export async function updateReimbursementRequest(payload: ReimbursementUpdatePayload): Promise<any> {
+  const { data, error } = await supabase.rpc('update_reimbursement_request', {
+    p_payment_request_id: payload.payment_request_id,
+    p_beneficiary_profile_id: payload.beneficiary_profile_id,
+    p_cost_center_id: payload.cost_center_id,
+    p_budget_month: payload.budget_month,
+    p_currency: payload.currency,
+    p_exchange_rate: payload.exchange_rate,
+    p_description: payload.description,
+    p_notes: payload.notes,
+    p_payment_method: payload.payment_method,
+    p_is_extraordinary_adjustment: payload.is_extraordinary_adjustment,
+    p_items: payload.items,
+  })
+  if (error) throw error
+  return data
 }
 
 // Beneficiario de la solicitud. Consulta aparte de PAYMENT_REQUEST_COLUMNS para

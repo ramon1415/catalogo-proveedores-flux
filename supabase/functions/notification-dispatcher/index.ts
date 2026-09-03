@@ -596,6 +596,9 @@ function renderReceiptLinkedEmail(
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
   const subject = `${subjectPrefix}${event.subject || (providerOnly ? `Comprobante de pago — ${folio}` : `Comprobante de pago disponible — ${folio}`)}`;
   const amountText = money(payload.amount, payload.currency);
+  const payeeLabel = textValue(payload.payee_kind) === "employee_beneficiary"
+    ? "Beneficiario del reembolso"
+    : "Proveedor";
   const rows = (providerOnly
     ? [
       ["Folio", folio],
@@ -607,7 +610,7 @@ function renderReceiptLinkedEmail(
     ]
     : [
       ["Folio", folio],
-      ["Proveedor", payload.provider],
+      [payeeLabel, payload.provider],
       ["Empresa", payload.company],
       ["Concepto", payload.concept],
       ["Importe", amountText],

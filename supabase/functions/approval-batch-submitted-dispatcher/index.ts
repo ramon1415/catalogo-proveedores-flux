@@ -243,7 +243,7 @@ export function generateApprovalBatchPdfBytes(document, logoBytes = null) {
 
   autoTable(doc, {
     startY: 68,
-    head: [["Folio", "Proveedor", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]],
+    head: [["Folio", "Proveedor / beneficiario", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]],
     body: systemPdfRows(document),
     styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", textColor: [21, 33, 29] },
     headStyles: { fillColor: [23, 45, 41], textColor: [247, 247, 245] },

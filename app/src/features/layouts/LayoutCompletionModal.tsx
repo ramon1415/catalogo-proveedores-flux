@@ -200,7 +200,7 @@ export function LayoutCompletionModal({
       >
         <div className={s.formGrid}>
           <div className={`${s.fullRow} ${s.completionSummary}`}>
-            <strong>{request.provider_name || 'Sin proveedor'}</strong>
+            <strong>{request.provider_name || 'Sin proveedor / beneficiario'}</strong>
             <span>{formatPreviewMoney(request.amount, request.currency ?? undefined)}</span>
             <small>Pendiente: {formatMissingFields(missing)}</small>
           </div>

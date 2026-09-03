@@ -18,11 +18,13 @@ import {
   requestSearchHaystack, statusBadge, budgetDecisionBadge, companyName, costCenterName,
   proveedorAlias, formatCurrencyC, formatMonth, hasFinanceRole,
   requestTypeLabel, paymentMethodLabel, paymentMethodVariant,
+  isReimbursement,
   STATUS_FILTER_LABELS,
 } from './logic'
 import { RequestModal } from './RequestModal'
 import { DetailModal } from './DetailModal'
 import { EditModal } from './EditModal'
+import { ReimbursementEditModal } from './ReimbursementEditModal'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   StatusFilter, BudgetDecisionFilter,
@@ -37,6 +39,7 @@ export default function SolicitudesPage() {
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const canApprove = perms.canApprove(group)
+  const canEditRequest = perms.isAdminFinance(group)
   const isOperation = group === ROLE_GROUPS.OPERATION
   const currentProfileId = profile?.id ?? null
 
@@ -196,6 +199,10 @@ export default function SolicitudesPage() {
 
   const detailRequest = detailId ? scopedRequests.find((r) => r.id === detailId) || null : null
   const editRequest = editId ? scopedRequests.find((r) => r.id === editId) || null : null
+  const editRequestMeta = editRequest?.request_number ? fase2.get(editRequest.request_number) : undefined
+  const editIsReimbursement = Boolean(editRequest && isReimbursement(
+    editRequestMeta?.request_type ?? editRequest.request_type,
+  ))
 
   return (
     <>
@@ -350,6 +357,7 @@ export default function SolicitudesPage() {
           profiles={profiles}
           fase2={detailRequest.request_number ? fase2.get(detailRequest.request_number) : undefined}
           canApprove={canApprove}
+          canEditRequest={canEditRequest}
           currentProfileId={currentProfileId}
           onClose={() => setDetailId(null)}
           onEdit={() => { if (detailRequest) { setEditId(detailRequest.id) } }}
@@ -357,7 +365,22 @@ export default function SolicitudesPage() {
         />
       )}
 
-      {editRequest && (
+      {editRequest && editIsReimbursement && (
+        <ReimbursementEditModal
+          request={{
+            ...editRequest,
+            request_type: editRequestMeta?.request_type ?? editRequest.request_type,
+            payment_method: editRequestMeta?.payment_method ?? editRequest.payment_method,
+          }}
+          companies={companies}
+          costCenters={costCenters}
+          budgetCategories={budgetCategories}
+          onClose={() => setEditId(null)}
+          onSaved={async () => { setEditId(null); await loadRequests(); setDetailKey((k) => k + 1) }}
+        />
+      )}
+
+      {editRequest && !editIsReimbursement && (
         <EditModal
           request={editRequest}
           companies={companies}
