@@ -16,6 +16,7 @@ const fersanaMapping = fs.readFileSync(
 const api = fs.readFileSync('app/src/features/solicitudes/api.ts', 'utf8')
 const logic = fs.readFileSync('app/src/features/solicitudes/logic.ts', 'utf8')
 const types = fs.readFileSync('app/src/features/solicitudes/types.ts', 'utf8')
+const requestModal = fs.readFileSync('app/src/features/solicitudes/RequestModal.tsx', 'utf8')
 
 test('catalog and request keep separate no-budget flags', () => {
   assert.match(migration, /alter table public\.budget_categories[\s\S]*no_presupuestal boolean not null default false/)
@@ -61,4 +62,6 @@ test('React exposes mapped no-budget categories without a budget line', () => {
   assert.match(logic, /return `\$\{label\} \| No presupuestal`/)
   assert.match(logic, /decision === 'aprobable' && reason === 'no_presupuestal'/)
   assert.match(types, /no_presupuestal\?: boolean \| null/)
+  assert.match(requestModal, /availability \? budgetCategoryAvailabilityLabel\(category, availability\)/)
+  assert.match(requestModal, /Esta partida no consume presupuesto y seguirá el flujo normal de autorización\./)
 })
