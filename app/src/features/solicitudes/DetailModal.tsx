@@ -385,7 +385,9 @@ export function DetailModal({
                 label="Factura / comprobante de la solicitud"
                 value={request.invoice_storage_path
                   ? <button type="button" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
-                  : <button type="button" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>}
+                  : canEdit
+                  ? <button type="button" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>
+                  : <span>Documento no disponible</span>}
               />
             )}
           </div>

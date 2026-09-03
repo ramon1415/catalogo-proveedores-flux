@@ -119,6 +119,16 @@ using (
   bucket_id = 'payment-receipts'
   and name ~* '^solicitudes/drafts/[0-9a-f-]{36}/'
   and split_part(name, '/', 3) = public.current_profile_id()::text
+  and not exists (
+    select 1
+    from public.payment_requests request
+    where request.invoice_storage_path = storage.objects.name
+  )
+  and not exists (
+    select 1
+    from public.reimbursement_items item
+    where item.storage_path = storage.objects.name
+  )
 );
 
 -- Crea la solicitud y enlaza el documento dentro de una sola transacción de BD.
