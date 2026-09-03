@@ -86,8 +86,9 @@ export async function loadBudgetAvailability(
   companyId: string,
   costCenterId: string,
   budgetMonth: string,
+  profileId: string,
 ): Promise<BudgetAvailabilityRow[]> {
-  const [availRes, relRes] = await Promise.all([
+  const [availRes, relRes, accessRes] = await Promise.all([
     supabase
       .from('budget_availability')
       .select('*')
@@ -100,15 +101,27 @@ export async function loadBudgetAvailability(
       .select('budget_category_id, responsible_email')
       .eq('company_id', companyId)
       .eq('cost_center_id', costCenterId),
+    supabase
+      .from('budget_category_access_grants')
+      .select('budget_category_id')
+      .eq('company_id', companyId)
+      .eq('cost_center_id', costCenterId)
+      .eq('profile_id', profileId)
+      .eq('active', true),
   ])
   if (availRes.error) throw availRes.error
   if (relRes.error) throw relRes.error
+  if (accessRes.error) throw accessRes.error
   const respByCat = new Map(
     (relRes.data ?? []).map((r: { budget_category_id: string; responsible_email: string | null }) => [r.budget_category_id, r.responsible_email]),
+  )
+  const additionalAccess = new Set(
+    (accessRes.data ?? []).map((r: { budget_category_id: string }) => r.budget_category_id),
   )
   return (availRes.data ?? []).map((r) => ({
     ...(r as BudgetAvailabilityRow),
     responsible_email: respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? null,
+    has_additional_access: additionalAccess.has((r as { budget_category_id: string }).budget_category_id),
   }))
 }
 

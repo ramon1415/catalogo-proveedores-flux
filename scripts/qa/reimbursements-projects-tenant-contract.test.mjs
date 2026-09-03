@@ -28,7 +28,7 @@ test('the six DEV migrations are versioned with their exact normalized DDL', () 
 })
 
 test('the forward fix isolates bank data, reimbursement UUIDs and projects by company', () => {
-  const sql = read('20260902224339_reimbursements_projects_tenant_hardening.sql')
+  const sql = read('20260902230422_reimbursements_projects_tenant_hardening.sql')
   assert.match(sql, /employee_bank_accounts[\s\S]*add column if not exists company_id uuid/i)
   assert.match(sql, /primary key \(profile_id, company_id\)/i)
   assert.match(sql, /reimbursement_items[\s\S]*add column if not exists company_id uuid/i)
