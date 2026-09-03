@@ -1,0 +1,115 @@
+name: Payment request exception quick approve contract
+
+'on':
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - 'payment_request_exception_quick_approve.html'
+      - 'payment_request_exception_quick_approve.css'
+      - 'payment_request_exception_quick_approve.js'
+      - 'supabase/config.toml'
+      - 'supabase/functions/notification-dispatcher/**'
+      - 'supabase/functions/payment-request-exception-quick-approve/**'
+      - 'supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev.sql'
+      - 'scripts/qa/payment-request-exception-quick-approve-contract.test.mjs'
+      - '.github/workflows/payment-request-exception-quick-approve-contract.yml'
+      - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-request-exception-quick-approve-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Exception email, kill switch and environment binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Install exact renderer dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false --ignore-scripts \
+            jspdf@2.5.2 jspdf-autotable@3.8.4
+          npm ls jspdf jspdf-autotable
+
+      - name: Run focused executable contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --experimental-strip-types --test \
+            scripts/qa/payment-request-exception-quick-approve-contract.test.mjs
+          node --check payment_request_exception_quick_approve.js
+          node --experimental-strip-types --input-type=module -e \
+            "await import('./supabase/functions/payment-request-exception-quick-approve/index.ts')"
+
+      - name: Validate exact scope and scan for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/dev...HEAD
+          mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+
+          allowed='^((payment_request_exception_quick_approve\.(html|css|js))|(supabase/config\.toml)|(supabase/functions/notification-dispatcher/(index\.ts|deno\.json|jspdf_edge\.ts|pdf_logo\.ts|pdf_logo_embed\.ts))|(supabase/functions/payment-request-exception-quick-approve/index\.ts)|(supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev\.sql)|(scripts/qa/payment-request-exception-quick-approve-contract\.test\.mjs)|(\.github/workflows/payment-request-exception-quick-approve-contract\.yml)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
+            echo '::error::Exception quick-approve PR contains a non-authorized path.'
+            exit 1
+          fi
+
+          test -f supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev.sql
+          test ! -e supabase/migrations/20260903120000_payment_request_exception_quick_approve_dev.sql
+
+          mapfile -t scannable < <(
+            printf '%s\n' "${changed[@]}" |
+              grep -Ev '\.(png|jpg|jpeg|gif|webp|pdf)$' || true
+          )
+          if (( ${#scannable[@]} )); then
+            ! grep -R -E \
+              "re_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|service_role[^[:space:]]*eyJ|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@" \
+              "${scannable[@]}"
+            ! grep -R -E 'C:\\Users\\|/Users/|/home/' "${scannable[@]}"
+          fi
+
+          ! grep -R -E \
+            'catalogo-proveedores-flux-git-dev-quantta-team\.vercel\.app|scsirgbuqjcwoaxfacth' \
+            payment_request_exception_quick_approve.{html,js} \
+            supabase/functions/payment-request-exception-quick-approve/index.ts
+          ! grep -q 'const EXCEPTION_QUICK_APPROVE_BASE_URL' \
+            supabase/functions/notification-dispatcher/index.ts
+          ! grep -R -E 'localStorage|sessionStorage|document\.cookie' \
+            payment_request_exception_quick_approve.{html,js}
+          grep -q 'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ENABLED' \
+            supabase/functions/payment-request-exception-quick-approve/index.ts
+          grep -q 'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ALLOWED_ORIGIN' \
+            supabase/functions/payment-request-exception-quick-approve/index.ts
+          grep -q 'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_BASE_URL' \
+            supabase/functions/notification-dispatcher/index.ts
+          grep -q 'project_ref' payment_request_exception_quick_approve.js
+          grep -q '#token=' supabase/functions/notification-dispatcher/index.ts
+          ! grep -q '\?token=' supabase/functions/notification-dispatcher/index.ts
+
+          echo 'scope=PR_529_only'
+          echo 'quick_approve_default=off'
+          echo 'kill_switch=edge_enforced'
+          echo 'environment_urls=runtime_bound'
+          echo 'qa_email_send=0'
+          echo 'secret_scan=pass'
