@@ -189,6 +189,9 @@ export type ReimbursementDraftItem = {
   taxAmount: number | null
   invoiceUuid: string | null
   cfdiData: unknown | null
+  // En edición conserva el comprobante ya ligado. Si se elige un archivo
+  // nuevo, el editor lo sube y reemplaza este path al guardar.
+  existingStoragePath?: string | null
 }
 
 // Payload de insert de un renglón (sin id/created_at, que pone la BD).
@@ -206,6 +209,32 @@ export type ReimbursementItemInsert = {
   invoice_uuid: string | null
   cfdi_data: unknown | null
   storage_path: string | null
+}
+
+export type ReimbursementUpdateItem = {
+  budget_category_id: string
+  descripcion: string
+  amount: number
+  subtotal_amount: number | null
+  tax_amount: number | null
+  deducible: boolean
+  invoice_uuid: string | null
+  cfdi_data: unknown | null
+  storage_path: string | null
+}
+
+export type ReimbursementUpdatePayload = {
+  payment_request_id: string
+  beneficiary_profile_id: string
+  cost_center_id: string
+  budget_month: string
+  currency: string
+  exchange_rate: number
+  description: string
+  notes: string | null
+  payment_method: string
+  is_extraordinary_adjustment: boolean
+  items: ReimbursementUpdateItem[]
 }
 
 export type IncidentCharge = {

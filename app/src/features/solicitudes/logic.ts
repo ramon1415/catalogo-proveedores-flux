@@ -366,7 +366,7 @@ export function validateReimbursementItems(items: ReimbursementDraftItem[]): str
     if (!item.budgetCategoryId) {
       return `${position}: selecciona la partida presupuestal (obligatoria también en gastos sin comprobante).`
     }
-    if (item.deducible && !item.file) {
+    if (item.deducible && !item.file && !item.existingStoragePath) {
       return `${position}: adjunta el comprobante o márcalo como "sin comprobante fiscal".`
     }
   }
@@ -628,6 +628,15 @@ const ROUTING_ERRORS: Record<string, string> = {
   approver_not_eligible_for_company: 'El aprobador ya no es elegible para esta empresa.',
   requester_company_membership_required: 'El solicitante no tiene membresía activa en la empresa.',
   requester_cannot_be_own_approver: 'El solicitante no puede aprobar su propia solicitud.',
+  reimbursement_operator_must_be_own_beneficiary: 'Con rol de operador sólo puedes solicitar un reembolso a tu propio nombre.',
+  reimbursement_operator_edit_not_allowed: 'El operador no puede modificar un reembolso después de enviarlo.',
+  reimbursement_finance_role_required_for_edit: 'Sólo Finanzas puede editar un reembolso existente.',
+  reimbursement_terminal_request_immutable: 'Este reembolso ya está cerrado y no admite cambios.',
+  reimbursement_request_not_found: 'No se encontró el reembolso o no tienes acceso a su empresa.',
+  beneficiary_company_membership_required: 'El beneficiario no tiene una membresía activa en esta empresa.',
+  beneficiary_bank_account_required: 'El beneficiario no tiene datos bancarios completos para esta empresa.',
+  reimbursement_item_receipt_required: 'Cada gasto deducible debe conservar o adjuntar su comprobante.',
+  reimbursement_item_invoice_uuid_duplicate: 'El desglose contiene un folio fiscal repetido.',
 }
 
 export function friendlyError(error: any, operation = ''): string {

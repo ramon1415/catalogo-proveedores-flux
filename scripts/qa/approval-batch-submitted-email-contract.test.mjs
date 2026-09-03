@@ -98,7 +98,7 @@ test("PROD PDF matches the UAT-approved jsPDF/AutoTable system contract", async 
   const multiBinary = new TextDecoder("latin1").decode(multi.bytes);
   assert.ok(multi.pageCount >= 2);
   assert.match(multiBinary, /\/MediaBox \[0 0 792\.?0* 612\.?0*\]/);
-  for (const column of ["Folio", "Proveedor", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]) {
+  for (const column of ["Folio", "Proveedor / beneficiario", "Centro / partida", "Metodo", "Monto", "Solicitante", "Decision", "Motivo"]) {
     assert.match(multiBinary, new RegExp(column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
 });
