@@ -1,1 +1,1 @@
-Run the validated BBVA PAGOSINT bank-field hotfix once on this branch.
+Run the validated BBVA PAGOSINT bank-field hotfix once on this branch. Attempt 2.
