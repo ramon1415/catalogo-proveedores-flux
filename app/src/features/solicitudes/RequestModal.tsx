@@ -623,8 +623,14 @@ export function RequestModal({
       <form className={s.modal} onSubmit={onSubmit}>
         <div className={s.modalHead}>
           <div>
-            <h2>{success ? 'Solicitud creada correctamente' : 'Nueva solicitud de pago'}</h2>
-            <p>{success ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.' : 'Completa los datos operativos y financieros para validar presupuesto al guardar.'}</p>
+            <h2>{success
+              ? (isReembolso ? 'Reembolso creado correctamente' : 'Solicitud creada correctamente')
+              : (isReembolso ? 'Nueva solicitud de reembolso' : 'Nueva solicitud de pago')}</h2>
+            <p>{success
+              ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.'
+              : (isReembolso
+                  ? 'Captura cada gasto; el monto total se calculara automaticamente.'
+                  : 'Completa los datos operativos y financieros para validar presupuesto al guardar.')}</p>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -641,34 +647,33 @@ export function RequestModal({
             </section>
           </div>
         ) : (
-          <div className={s.modalScroll} style={{ padding: 0 }}>
-            <div className={s.requestLayout} style={{ padding: '0 2px 2px' }}>
+          <div className={s.modalScroll}>
+            <div className={s.requestLayout}>
               <div className={s.formSections}>
                 <section className={s.formSection}>
-                  <h3>Datos del pago</h3>
+                  <h3>{isReembolso ? 'Datos del reembolso' : 'Datos del pago'}</h3>
                   <div className={s.formGrid}>
-                    <label className={s.fullRow}>Metodo de pago *
-                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
-                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
-                    </label>
                     <label className={s.fullRow}>Tipo de solicitud *
                       <select className={s.formControl} value={requestType} onChange={(e) => setRequestType(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                       <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
                     </label>
-                    <label>Monto solicitado *
-                      {/* En reembolso el monto es la suma del desglose: se muestra
-                          calculado para que nadie lo edite por separado. */}
-                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
-                        value={isReembolso ? (reembolsoTotals.total || '') : amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        readOnly={isReembolso} required />
-                      {isReembolso && <span className={s.fieldHint}>Suma de los renglones del desglose de gastos.</span>}
+                    <label className={s.fullRow}>Metodo de pago *
+                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
+                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
                     </label>
-                    <label>Moneda *
+                    {!isReembolso && (
+                      <label>Monto solicitado *
+                        <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          required />
+                      </label>
+                    )}
+                    <label className={isReembolso ? s.fullRow : ''}>Moneda *
                       <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
                         <option value="MXN">MXN</option>
                         <option value="USD">USD</option>
@@ -701,7 +706,9 @@ export function RequestModal({
                       </label>
                     )}
                     <label className={s.fullRow}>Descripcion *
-                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => setDescription(e.target.value)} required />
+                      <textarea className={s.formControl} rows={3}
+                        placeholder={isReembolso ? 'Concepto general del reembolso...' : 'Concepto de la solicitud...'}
+                        value={description} onChange={(e) => setDescription(e.target.value)} required />
                     </label>
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -857,7 +864,7 @@ export function RequestModal({
               </div>
 
               <aside className={s.summaryPanel}>
-                <h3>Resumen</h3>
+                <h3>{isReembolso ? 'Resumen del reembolso' : 'Resumen'}</h3>
                 <p>Vista previa de la solicitud antes de validar.</p>
                 <div className={s.summaryList}>
                   <label>Empresa <span className={s.summaryValue}>{company ? companyName(company) : 'Sin seleccionar'}</span></label>
@@ -876,7 +883,7 @@ export function RequestModal({
                     <label>Proveedor <span className={s.summaryValue}>{proveedor ? proveedorLabel(proveedor) : 'Sin seleccionar'}</span></label>
                   )}
                   <label>Mes <span className={s.summaryValue}>{budgetMonth ? formatMonth(`${budgetMonth}-01`) : 'Sin seleccionar'}</span></label>
-                  <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
+                  <label>{isReembolso ? 'Total del reembolso' : 'Monto'} <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
                 <div className={s.summaryNote}>Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.</div>
@@ -894,7 +901,11 @@ export function RequestModal({
           ) : (
             <>
               <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-              <button type="submit" className={s.primaryBtn} disabled={submitting}>{submitting ? 'Creando solicitud...' : 'Crear solicitud'}</button>
+              <button type="submit" className={s.primaryBtn} disabled={submitting}>
+                {submitting
+                  ? (isReembolso ? 'Creando reembolso...' : 'Creando solicitud...')
+                  : (isReembolso ? 'Crear reembolso' : 'Crear solicitud')}
+              </button>
             </>
           )}
         </div>
