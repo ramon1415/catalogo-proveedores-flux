@@ -12,7 +12,7 @@ import type {
 const UPLOAD_BUCKET = 'payment-receipts'
 
 const PAYMENT_REQUEST_COLUMNS =
-  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at'
+  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at'
 
 // ── Cargas iniciales (paralelas) ──────────────────────────────────────────
 export async function loadCompanies(): Promise<Company[]> {
@@ -87,7 +87,7 @@ export async function loadBudgetAvailability(
   costCenterId: string,
   budgetMonth: string,
 ): Promise<BudgetAvailabilityRow[]> {
-  const [availRes, relRes, sharedRes] = await Promise.all([
+  const [availRes, relRes, sharedRes, noBudgetRes] = await Promise.all([
     supabase
       .from('budget_availability')
       .select('*')
@@ -99,7 +99,8 @@ export async function loadBudgetAvailability(
       .from('company_cost_center_budget_categories')
       .select('budget_category_id, responsible_email')
       .eq('company_id', companyId)
-      .eq('cost_center_id', costCenterId),
+      .eq('cost_center_id', costCenterId)
+      .eq('active', true),
     // Responsables compartidos: permite que una partida conserve a su titular
     // y sea visible para más integrantes sin sobrescribir la asignación previa.
     supabase
@@ -107,10 +108,16 @@ export async function loadBudgetAvailability(
       .select('budget_category_id, responsible_email')
       .eq('company_id', companyId)
       .eq('cost_center_id', costCenterId),
+    supabase
+      .from('budget_categories')
+      .select('id')
+      .eq('active', true)
+      .eq('no_presupuestal', true),
   ])
   if (availRes.error) throw availRes.error
   if (relRes.error) throw relRes.error
   if (sharedRes.error) throw sharedRes.error
+  if (noBudgetRes.error) throw noBudgetRes.error
   const respByCat = new Map<string, Set<string>>()
   function addResponsible(budgetCategoryId: string, email: string | null) {
     const normalized = String(email || '').trim().toLowerCase()
@@ -125,11 +132,38 @@ export async function loadBudgetAvailability(
   for (const row of sharedRes.data ?? []) {
     addResponsible(row.budget_category_id, row.responsible_email)
   }
-  return (availRes.data ?? []).map((r) => ({
+  const noBudgetIds = new Set(
+    (noBudgetRes.data ?? []).map((row: { id: string }) => row.id),
+  )
+  const rows = (availRes.data ?? []).map((r) => ({
     ...(r as BudgetAvailabilityRow),
     responsible_email: [...(respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? [])][0] ?? null,
     responsible_emails: [...(respByCat.get((r as { budget_category_id: string }).budget_category_id) ?? [])],
+    no_presupuestal: noBudgetIds.has((r as { budget_category_id: string }).budget_category_id),
   }))
+  const availableCategoryIds = new Set(rows.map((row) => row.budget_category_id))
+  const syntheticRows = (relRes.data ?? [])
+    .filter((relation: { budget_category_id: string }) => (
+      noBudgetIds.has(relation.budget_category_id)
+      && !availableCategoryIds.has(relation.budget_category_id)
+    ))
+    .map((relation: { budget_category_id: string }) => {
+      const responsibleEmails = [...(respByCat.get(relation.budget_category_id) ?? [])]
+      return {
+        company_id: companyId,
+        cost_center_id: costCenterId,
+        budget_category_id: relation.budget_category_id,
+        budget_month: budgetMonth,
+        budgeted: 0,
+        committed: 0,
+        executed: 0,
+        available: 0,
+        no_presupuestal: true,
+        responsible_email: responsibleEmails[0] ?? null,
+        responsible_emails: responsibleEmails,
+      } satisfies BudgetAvailabilityRow
+    })
+  return [...rows, ...syntheticRows]
 }
 
 // ── Aprobadores ────────────────────────────────────────────────────────────
