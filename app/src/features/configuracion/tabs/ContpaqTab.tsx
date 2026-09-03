@@ -786,6 +786,7 @@ export function ContpaqTab() {
           nombrePartida={nombrePartida}
           nombreBanco={nombreBanco}
           nombreProveedor={nombreProveedor}
+          cuentasDatalistId={datalistId}
         />
       )}
 
