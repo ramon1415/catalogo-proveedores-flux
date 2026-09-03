@@ -25,6 +25,7 @@ export type PaymentRequest = {
   budget_shortfall: number | null
   budget_checked_at: string | null
   budget_result: unknown
+  no_presupuestal?: boolean | null
   is_extraordinary_adjustment: boolean | null
   exception_status: string | null
   exception_action: string | null
@@ -70,6 +71,7 @@ export type BudgetCategory = {
   code?: string | null
   name?: string | null
   category?: string | null
+  no_presupuestal?: boolean | null
   active?: boolean | null
   activo?: boolean | null
   is_active?: boolean | null
@@ -96,6 +98,7 @@ export type BudgetAvailabilityRow = {
   budget_month?: string | null
   responsible_email?: string | null
   responsible_emails?: string[]
+  no_presupuestal?: boolean
   [key: string]: unknown
 }
 
