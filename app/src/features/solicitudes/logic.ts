@@ -636,6 +636,12 @@ const ROUTING_ERRORS: Record<string, string> = {
   beneficiary_company_membership_required: 'El beneficiario no tiene una membresía activa en esta empresa.',
   beneficiary_bank_account_required: 'El beneficiario no tiene datos bancarios completos para esta empresa.',
   reimbursement_item_receipt_required: 'Cada gasto deducible debe conservar o adjuntar su comprobante.',
+  reimbursement_document_path_invalid: 'La ruta temporal del comprobante de reembolso no es válida.',
+  reimbursement_document_path_duplicate: 'El mismo comprobante no puede usarse en dos renglones.',
+  reimbursement_document_not_found_or_not_owned: 'El comprobante no llegó a Storage o no pertenece a tu sesión. Vuelve a seleccionarlo.',
+  reimbursement_document_already_linked: 'El comprobante ya está vinculado a otra solicitud.',
+  reimbursement_item_payload_invalid: 'Uno de los gastos contiene datos inválidos.',
+  requester_profile_must_match_current_profile: 'La sesión no coincide con el solicitante del reembolso.',
   reimbursement_item_invoice_uuid_duplicate: 'El desglose contiene un folio fiscal repetido.',
 }
 
