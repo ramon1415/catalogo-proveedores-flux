@@ -47,7 +47,11 @@
 .messageBox { padding: 16px 18px; font-size: 13px; color: var(--text-3); flex-shrink: 0; }
 .messageBox.error { color: var(--ruby); }
 
-.tableWrap { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.tableWrap { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tableWrap::-webkit-scrollbar { width: 9px; height: 9px; }
+.tableWrap::-webkit-scrollbar-track { background: transparent; }
+.tableWrap::-webkit-scrollbar-thumb { background: var(--border-strong); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+.tableWrap::-webkit-scrollbar-corner { background: transparent; }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 820px; }
 .table thead th { position: sticky; top: 0; z-index: 1; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
 .table tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: middle; }
