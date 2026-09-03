@@ -80,6 +80,51 @@ export async function completeProviderPaymentExecutionData(params: {
   if (error) throw error
 }
 
+// Reembolsos: el destinatario del dinero es un empleado, no el proveedor de la
+// solicitud. `preview_payment_layout_eligibility` no devuelve ni request_type ni
+// beneficiary_profile_id, así que el diálogo de completado lo consulta aparte
+// para no escribir la CLABE del empleado sobre un registro de `proveedores`.
+export async function loadReimbursementBeneficiary(paymentRequestId: string): Promise<{
+  isReimbursement: boolean
+  beneficiaryProfileId: string | null
+  beneficiaryName: string | null
+  banco: string | null
+  clabe: string | null
+  cuenta: string | null
+} | null> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select('request_type,beneficiary_profile_id,company_id')
+    .eq('id', paymentRequestId)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as { request_type: string | null; beneficiary_profile_id: string | null; company_id: string | null }
+  const isReimbursement = String(row.request_type || '').trim().toLowerCase() === 'reimbursement'
+  if (!isReimbursement) {
+    return { isReimbursement: false, beneficiaryProfileId: null, beneficiaryName: null, banco: null, clabe: null, cuenta: null }
+  }
+  let banco: string | null = null
+  let clabe: string | null = null
+  let cuenta: string | null = null
+  let beneficiaryName: string | null = null
+  if (row.beneficiary_profile_id && row.company_id) {
+    const bank = await supabase
+      .from('employee_bank_accounts')
+      .select('banco,clabe,cuenta,beneficiary_name')
+      .eq('profile_id', row.beneficiary_profile_id)
+      .eq('company_id', row.company_id)
+      .maybeSingle()
+    if (!bank.error && bank.data) {
+      const account = bank.data as { banco: string | null; clabe: string | null; cuenta: string | null; beneficiary_name: string | null }
+      banco = account.banco
+      clabe = account.clabe
+      cuenta = account.cuenta
+      beneficiaryName = account.beneficiary_name
+    }
+  }
+  return { isReimbursement: true, beneficiaryProfileId: row.beneficiary_profile_id, beneficiaryName, banco, clabe, cuenta }
+}
+
 export async function completePaymentRequestLayoutData(params: {
   p_payment_request_id: string
   p_company_bank_account_id: string | null
