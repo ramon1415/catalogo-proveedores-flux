@@ -88,9 +88,19 @@ export function normalizeDestinationType(value: unknown): string {
     .replace(/^_+|_+$/g, '')
 }
 
-export function detectBbvaLayoutFormat(line: Pick<PaymentLayoutLine, 'destination_type'>): BbvaFormat {
+export const BBVA_CLABE_BANK_CODE = '012'
+
+export function isBbvaDestinationClabe(value: unknown): boolean {
+  const digits = cxcDigits(value)
+  return digits.length === CXC_ACCOUNT_LENGTH && digits.startsWith(BBVA_CLABE_BANK_CODE)
+}
+
+export function detectBbvaLayoutFormat(line: Pick<PaymentLayoutLine, 'destination_type' | 'destination_value'>): BbvaFormat {
   const type = normalizeDestinationType(line.destination_type)
   if (['cuenta', 'cuenta_bancaria', 'cuenta_bbva', 'mismo_banco', 'bbva'].includes(type)) return BBVA_FORMAT_SAME_BANK
+  // Una CLABE 012 pertenece a BBVA. Enviarla en PAGOSINT provoca que
+  // Net Cash la busque como banco interbancario para un registro de misma institución.
+  if (type === 'clabe' && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_SAME_BANK
   if (['clabe', 'interbancario', 'transferencia_interbancaria', 'tarjeta', 'tdc'].includes(type)) return BBVA_FORMAT_INTERBANK
   if (type === 'convenio') return BBVA_FORMAT_CIE
   throw new Error('Tipo de destino no soportado para layout BBVA; define cuenta, CLABE o convenio.')

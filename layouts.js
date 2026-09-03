@@ -2013,9 +2013,18 @@ function buildBbvaLayoutFiles(lines, layout) {
     })
 }
 
+const BBVA_CLABE_BANK_CODE = "012"
+
+function isBbvaDestinationClabe(value) {
+  const digits = cxcDigits(value)
+  return digits.length === CXC_ACCOUNT_LENGTH && digits.startsWith(BBVA_CLABE_BANK_CODE)
+}
+
 function detectBbvaLayoutFormat(line) {
   const type = normalizeDestinationType(line.destination_type)
   if (["cuenta", "cuenta_bancaria", "cuenta_bbva", "mismo_banco", "bbva"].includes(type)) return BBVA_FORMAT_SAME_BANK
+  // Una CLABE 012 pertenece a BBVA y debe ir por Pagos BBVA, no Pagos Inter.
+  if (type === "clabe" && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_SAME_BANK
   if (["clabe", "interbancario", "transferencia_interbancaria", "tarjeta", "tdc"].includes(type)) return BBVA_FORMAT_INTERBANK
   if (type === "convenio") return BBVA_FORMAT_CIE
   throw new Error("Tipo de destino no soportado para layout BBVA; define cuenta, CLABE o convenio.")

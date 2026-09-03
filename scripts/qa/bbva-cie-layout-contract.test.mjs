@@ -83,7 +83,7 @@ const sameBank = {
 const interbank = {
   status: "included",
   destination_type: "clabe",
-  destination_value: "012345678901234567",
+  destination_value: "002345678901234567",
   source_account_number: "000000001234567890",
   amount: "56.78",
   beneficiary_name: "BENEFICIARIO SINTETICO",
