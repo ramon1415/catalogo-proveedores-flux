@@ -81,6 +81,9 @@ export function statusBadge(status: string | null): BadgeDesc {
 }
 
 export function budgetDecisionBadge(decision: string | null, reason = ''): BadgeDesc {
+  if (decision === 'aprobable' && reason === 'no_presupuestal') {
+    return { label: 'No presupuestal', variant: 'success' }
+  }
   if (decision === 'aprobable') return { label: 'Aprobable', variant: 'success' }
   if (decision === 'bloqueado') return { label: reason ? `Excepción: ${reason}` : 'Excepción', variant: 'accent' }
   return { label: decision ? decision : 'Sin validar', variant: 'neutral' }
@@ -134,6 +137,9 @@ export function budgetCategoryAvailabilityLabel(
   row: BudgetAvailabilityRow,
 ): string {
   const label = budgetCategoryLabel(category)
+  if (category?.no_presupuestal === true || row.no_presupuestal === true) {
+    return `${label} | No presupuestal`
+  }
   const available = formatCurrencyC(getAvailableAmount(row), 'MXN')
   return `${label} | Disponible ${available}`
 }
