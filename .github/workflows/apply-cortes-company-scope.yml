@@ -1,0 +1,73 @@
+name: Apply weekly cuts company scope
+
+on:
+  push:
+    branches:
+      - hotfix/cortes-company-scope-prod
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[cortes-company-scope]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Apply focused company-scope fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_cortes_company_scope.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'state.companies = scopeCompanyRows(companies.data)'
+          new = 'state.companies = asArray(companies.data)'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one company assignment, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python .github/scripts/apply_cortes_company_scope.py
+
+      - name: Validate legacy syntax
+        run: node --check approval_batches.js
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused and regression contracts
+        run: >-
+          node --test
+          scripts/qa/approval-batches-company-scope-contract.test.mjs
+          scripts/qa/approval-batch-submitted-email-contract.test.mjs
+          scripts/qa/approval-batch-quick-approve-contract.test.mjs
+          scripts/qa/prod-reimbursement-permissions.test.mjs
+          scripts/qa/uniform-primary-table-scroll-contract.test.mjs
+
+      - name: Build production artifact
+        run: npm --prefix app run build
+
+      - name: Commit validated hotfix
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git rm \
+            .github/workflows/apply-cortes-company-scope.yml \
+            .github/scripts/apply_cortes_company_scope.py
+          git add \
+            approval_batches.js \
+            approval_batches.html \
+            scripts/qa/approval-batches-company-scope-contract.test.mjs
+          git commit -m "fix(cortes): aislar la vista por empresa activa [cortes-company-scope]"
+          git push origin HEAD:hotfix/cortes-company-scope-prod
