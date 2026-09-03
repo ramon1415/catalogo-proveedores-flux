@@ -232,12 +232,17 @@ export function RequestModal({
 
   const filteredCategoryRows = useMemo(() => {
     // Scoping por responsable: si la empresa usa el modelo (alguna partida tiene
-    // responsable), cada quien ve SOLO sus partidas. Sysadmin ve todas. Empresas
-    // sin responsables (p.ej. Operadora) no se filtran.
+    // responsable), cada quien ve SOLO sus partidas. Las partidas no presupuestales
+    // mapeadas a la empresa son compartidas; sysadmin ve todas. Empresas sin
+    // responsables (p.ej. Operadora) no se filtran.
     const myEmail = (profile?.email || '').trim().toLowerCase()
     const usesResponsible = budgetRows.some((r) => (r.responsible_emails?.length ?? 0) > 0 || r.responsible_email)
     const scoped = usesResponsible && group !== 'sysadmin'
       ? budgetRows.filter((r) => {
+          // FONACOT y cualquier partida no presupuestal activa/mapeada no consumen
+          // el presupuesto de un responsable, por lo que deben estar disponibles
+          // para cualquier integrante con acceso a esta empresa.
+          if (r.no_presupuestal) return true
           const emails = r.responsible_emails?.length
             ? r.responsible_emails
             : [String(r.responsible_email || '').trim().toLowerCase()]
