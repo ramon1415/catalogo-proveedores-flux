@@ -35,7 +35,7 @@
 .kpi.info .kpiValue { color: var(--accent-text, var(--accent)); }
 
 /* ── Table card ──────────────────────────────────────────────────────────── */
-.tableCard { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.tableCard { flex-shrink: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
 .toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 150px 190px minmax(180px, 260px); gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); }
 .searchBox { display: flex; align-items: center; gap: 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; color: var(--text-3); }
 .searchBox input { flex: 1; background: transparent; border: 0; outline: none; color: var(--text-1); font: inherit; font-size: 12.5px; min-height: 36px; }
