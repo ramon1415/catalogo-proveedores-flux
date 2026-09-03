@@ -33,10 +33,15 @@ jobs:
         run: >-
           node --test
           scripts/qa/layout-scheduled-date-window-guard.test.mjs
-          scripts/qa/layout-budget-exception-reference-contract.test.mjs
           scripts/qa/layout-client-uat-hotfix-contract.test.mjs
           scripts/qa/layout-concept-no-reauth-contract.test.mjs
           scripts/qa/prod-reimbursement-permissions.test.mjs
+
+      - name: Revalidate the approved-exception layout path
+        run: >-
+          node --test
+          --test-name-pattern="approved budget exception|budget exception changes only|approved exception completes"
+          scripts/qa/layout-budget-exception-reference-contract.test.mjs
 
       - name: Build production React artifact
         run: npm --prefix app run build
