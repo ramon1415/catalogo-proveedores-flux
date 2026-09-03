@@ -68,7 +68,7 @@ export default function LayoutsPage() {
             const layoutId = line.layout_id as string
             if (!companiesByLayout.has(layoutId)) companiesByLayout.set(layoutId, new Set())
             if (line.company_id) companiesByLayout.get(layoutId)!.add(line.company_id)
-            if (line.status === 'bank_rejected') continue
+            if (line.status !== 'included') continue
             if (!byLayout.has(layoutId)) byLayout.set(layoutId, [])
             byLayout.get(layoutId)!.push(line)
             if (lineNeedsPagosintReferenceCompletion(line)) counts.set(layoutId, (counts.get(layoutId) || 0) + 1)
@@ -146,7 +146,7 @@ export default function LayoutsPage() {
     })
     setFormatSummaries((prev) => {
       const next = new Map(prev)
-      next.set(layoutId, summarizeLayoutFormats(lines.filter((line) => line.status !== 'bank_rejected')))
+      next.set(layoutId, summarizeLayoutFormats(lines.filter((line) => line.status === 'included')))
       return next
     })
   }
@@ -190,7 +190,7 @@ export default function LayoutsPage() {
     }
     const { data: lines, error } = await fetchLayoutLines(layoutId)
     if (error) { showToast('No se pudo leer el layout', rlsHint('payment_layout_lines', 'select', error), 'error'); return }
-    const activeLines = (lines || []).filter((line) => line.status !== 'bank_rejected')
+    const activeLines = (lines || []).filter((line) => line.status === 'included')
     const selectedLines = activeLines.filter((line) => { try { return detectBbvaLayoutFormat(line) === format } catch { return false } })
     if (!selectedLines.length) {
       showToast('Sin lineas', `Este layout no tiene lineas ${bbvaFormatLabel(format)} para descargar.`, 'warning')
@@ -229,7 +229,7 @@ export default function LayoutsPage() {
     const { data: lines, error } = await fetchLayoutLines(layoutId)
     if (error) { showToast('No se pudo leer el layout', rlsHint('payment_layout_lines', 'select', error), 'error'); return }
     if (!lines?.length) { showToast('Sin lineas', 'Este layout no tiene lineas para generar archivo BBVA.', 'warning'); return }
-    const cxcLines = lines.filter((line) => line.status !== 'bank_rejected')
+    const cxcLines = lines.filter((line) => line.status === 'included')
     if (!cxcLines.length) { showToast('Sin lineas activas', 'Este layout no tiene lineas activas para generar archivo BBVA.', 'warning'); return }
     const invalidLines = validateLayoutLines(cxcLines)
     if (invalidLines.length) {
@@ -260,7 +260,7 @@ export default function LayoutsPage() {
     if (!layout) return
     const { data: lines, error } = await fetchLayoutLines(layoutId)
     if (error) { showToast('No se pudo validar', rlsHint('payment_layout_lines', 'select', error), 'error'); return }
-    const cxcLines = (lines || []).filter((line) => line.status !== 'bank_rejected')
+    const cxcLines = (lines || []).filter((line) => line.status === 'included')
     if (!cxcLines.length) { showToast('Sin lineas', 'Este layout no tiene lineas activas para validar.', 'warning'); return }
     const invalidLines = validateLayoutLines(cxcLines)
     if (invalidLines.length) {

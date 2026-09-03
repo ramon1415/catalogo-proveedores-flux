@@ -32,7 +32,7 @@ export function LinesModal({
   const [pagosintLine, setPagosintLine] = useState<PaymentLayoutLine | null>(null)
   const [rejectLineId, setRejectLineId] = useState<string | null>(null)
 
-  const activeLines = useMemo(() => lines.filter((line) => line.status !== 'bank_rejected'), [lines])
+  const activeLines = useMemo(() => lines.filter((line) => line.status === 'included'), [lines])
   const summary = useMemo(() => summarizeLayoutFormats(activeLines), [activeLines])
 
   function focusFirstPagosintReferenceLine() {

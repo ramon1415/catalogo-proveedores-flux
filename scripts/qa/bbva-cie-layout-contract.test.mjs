@@ -207,14 +207,14 @@ test("three rails remain isolated into separate files", () => {
   assert.match(files[2].fileName, /^PAGOSCIE_FLUX_/)
 })
 
-test("PAGOSBBV and PAGOSINT record contracts remain unchanged", () => {
+test("PAGOSBBV and PAGOSINT fixed-width contracts remain stable", () => {
   const pagosbbv = cie.buildBbvaSameBankRecord85(sameBank)
   const pagosint = cie.buildBbvaInterbankRecord128(interbank)
   assert.equal(pagosbbv.length, 85)
   assert.equal(pagosint.length, 128)
   assert.equal(pagosbbv.slice(36, 39), "MXP")
   assert.equal(pagosint.slice(36, 39), "MXP")
-  assert.equal(pagosint.slice(85, 90), "00042")
+  assert.equal(pagosint.slice(85, 90), "40002")
   assert.equal(pagosint.at(-1), "H")
 })
 
