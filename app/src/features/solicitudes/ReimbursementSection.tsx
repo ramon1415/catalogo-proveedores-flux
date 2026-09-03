@@ -5,12 +5,13 @@ import { useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { loadEmployeeBankAccount, upsertEmployeeBankAccount } from './api'
 import {
-  employeeBankAccountIssues, formatCurrencyC, isValidClabe, normalizeClabe,
-  reimbursementTotals, validateReceiptFile,
+  companyName, costCenterName, employeeBankAccountIssues, formatCurrencyC,
+  isValidClabe, normalizeClabe, reimbursementTotals, validateReceiptFile,
 } from './logic'
 import { parseCfdiFile } from './cfdi'
 import type {
-  BudgetAvailabilityRow, EmployeeBankAccount, Profile, ReimbursementDraftItem,
+  BudgetAvailabilityRow, Company, CostCenter, EmployeeBankAccount, Profile,
+  ReimbursementDraftItem,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -40,7 +41,16 @@ export function emptyReimbursementItem(): ReimbursementDraftItem {
 
 export function ReimbursementSection({
   profiles,
+  companies,
+  costCenters,
   companyId,
+  costCenterId,
+  budgetMonth,
+  companyLocked,
+  onCompanyChange,
+  onCostCenterChange,
+  onBudgetMonthChange,
+  categoryHelp,
   canChooseBeneficiary,
   beneficiaryId,
   onBeneficiaryChange,
@@ -55,7 +65,16 @@ export function ReimbursementSection({
   currency,
 }: {
   profiles: Profile[]
+  companies?: Company[]
+  costCenters?: CostCenter[]
   companyId: string
+  costCenterId?: string
+  budgetMonth?: string
+  companyLocked?: boolean
+  onCompanyChange?: (id: string) => void
+  onCostCenterChange?: (id: string) => void
+  onBudgetMonthChange?: (month: string) => void
+  categoryHelp?: { text: string; state: string }
   canChooseBeneficiary: boolean
   beneficiaryId: string
   onBeneficiaryChange: (id: string) => void
@@ -210,6 +229,58 @@ export function ReimbursementSection({
 
       <section className={s.formSection}>
         <h3>Desglose de gastos</h3>
+
+        {companies && costCenters && costCenterId !== undefined && budgetMonth !== undefined
+          && onCompanyChange && onCostCenterChange && onBudgetMonthChange && categoryHelp ? (
+          <div className={s.reimbursementScope}>
+            <div className={s.reimbursementScopeIntro}>
+            <strong>Empresa y periodo del reembolso</strong>
+            <span>Selecciona estos datos una sola vez. Después asigna la partida correspondiente en cada gasto.</span>
+          </div>
+          <div className={`${s.formGrid} ${s.reimbursementScopeGrid}`}>
+            <label>Empresa *
+              <select
+                className={s.formControl}
+                value={companyId}
+                onChange={(e) => onCompanyChange(e.target.value)}
+                required
+                disabled={companyLocked === true}
+              >
+                {companyLocked !== true && <option value="">Seleccionar empresa</option>}
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>{companyName(company)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Centro de costo *
+              <select
+                className={s.formControl}
+                value={costCenterId}
+                onChange={(e) => onCostCenterChange(e.target.value)}
+                required
+              >
+                <option value="">Seleccionar centro de costo</option>
+                {costCenters.map((center) => (
+                  <option key={center.id} value={center.id}>{costCenterName(center)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Mes presupuestal *
+              <input
+                className={s.formControl}
+                type="month"
+                value={budgetMonth}
+                onChange={(e) => onBudgetMonthChange(e.target.value)}
+                required
+              />
+            </label>
+            <div className={`${s.fieldHint} ${s.reimbursementScopeHelp} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>
+              {categoryHelp.text}
+            </div>
+          </div>
+          </div>
+        ) : null}
+
         <div className={`${s.fieldHint} ${s.fullRow}`}>
           Un renglón por gasto. La partida es obligatoria en todos: es la que atribuye el
           gasto a su área, tenga comprobante fiscal o no. Marcar “sin comprobante fiscal”
