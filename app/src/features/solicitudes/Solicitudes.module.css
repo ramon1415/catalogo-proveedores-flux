@@ -239,6 +239,12 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 .fundSummary strong { display: block; margin-top: 3px; color: var(--text-1); font-size: 11.5px; }
 
 /* ── Reembolsos: desglose por renglón + datos bancarios del empleado ─────── */
+.reimbursementScope { margin: 0 0 14px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-surface); }
+.reimbursementScopeIntro { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.reimbursementScopeIntro strong { color: var(--text-1); font-size: 12px; }
+.reimbursementScopeIntro span { color: var(--text-3); font-size: 11px; line-height: 1.4; }
+.reimbursementScopeGrid { grid-template-columns: minmax(180px, 1.2fr) minmax(180px, 1fr) minmax(150px, .8fr); gap: 10px; }
+.reimbursementScopeHelp { grid-column: 1 / -1; margin-top: -2px; }
 .itemsTable { display: grid; gap: 8px; margin-top: 4px; }
 .itemsHead, .itemsRow { display: grid; grid-template-columns: minmax(0, 1.6fr) 110px minmax(0, 1.5fr) 30px; gap: 9px; align-items: start; }
 .itemsHead span { color: var(--text-3); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
@@ -268,6 +274,7 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 @media (max-width: 900px) { .statsGrid { grid-template-columns: repeat(2, 1fr); } .toolbar { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 760px) {
   .formGrid { grid-template-columns: 1fr; }
+  .reimbursementScopeGrid { grid-template-columns: 1fr; }
   .extraSummary { grid-template-columns: 1fr 1fr; }
   .refGrid, .detailGrid { grid-template-columns: 1fr; }
   .itemsHead { display: none; }

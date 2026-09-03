@@ -726,7 +726,16 @@ export function RequestModal({
                 {isReembolso ? (
                   <ReimbursementSection
                     profiles={beneficiaryProfiles}
+                    companies={myCompanies}
+                    costCenters={costCenters}
                     companyId={companyId}
+                    costCenterId={costCenterId}
+                    budgetMonth={budgetMonth}
+                    companyLocked={lockedCompany}
+                    onCompanyChange={onCompanyChange}
+                    onCostCenterChange={onCostCenterChange}
+                    onBudgetMonthChange={onMonthChange}
+                    categoryHelp={categoryHelp}
                     canChooseBeneficiary={canChooseBeneficiary}
                     beneficiaryId={beneficiaryId}
                     onBeneficiaryChange={setBeneficiaryId}
@@ -755,42 +764,44 @@ export function RequestModal({
                   </section>
                 )}
 
-                <section className={s.formSection}>
-                  <h3>Clasificacion presupuestal</h3>
-                  <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
-                  <div className={s.formGrid}>
-                    <label>Empresa *
-                      <select className={s.formControl} value={companyId} onChange={(e) => onCompanyChange(e.target.value)} required disabled={lockedCompany}>
-                        {!lockedCompany && <option value="">Seleccionar empresa</option>}
-                        {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
-                      </select>
-                    </label>
-                    <label>Centro de costo *
-                      <select className={s.formControl} value={costCenterId} onChange={(e) => onCostCenterChange(e.target.value)} required>
-                        <option value="">Seleccionar centro de costo</option>
-                        {costCenters.map((c) => <option key={c.id} value={c.id}>{costCenterName(c)}</option>)}
-                      </select>
-                    </label>
-                    {/* En reembolso la partida se elige por renglón; la de la
-                        solicitud sale del renglón de mayor monto. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Partida presupuestal *
-                      <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
-                        value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
-                      <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required={!isReembolso}>
-                        <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
-                        {filteredCategoryRows.map((r) => (
-                          <option key={r.budget_category_id} value={r.budget_category_id!}>
-                            {budgetCategoryAvailabilityLabel(categoryById(r.budget_category_id!), r)}
-                          </option>
-                        ))}
-                      </select>
-                      <div className={`${s.fieldHint} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>{categoryHelp.text}</div>
-                    </label>
-                    <label>Mes presupuestal *
-                      <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
-                    </label>
-                  </div>
-                </section>
+                {!isReembolso && (
+                  <section className={s.formSection}>
+                    <h3>Clasificacion presupuestal</h3>
+                    <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
+                    <div className={s.formGrid}>
+                      <label>Empresa *
+                        <select className={s.formControl} value={companyId} onChange={(e) => onCompanyChange(e.target.value)} required disabled={lockedCompany}>
+                          {!lockedCompany && <option value="">Seleccionar empresa</option>}
+                          {myCompanies.map((c) => <option key={c.id} value={c.id}>{companyName(c)}</option>)}
+                        </select>
+                      </label>
+                      <label>Centro de costo *
+                        <select className={s.formControl} value={costCenterId} onChange={(e) => onCostCenterChange(e.target.value)} required>
+                          <option value="">Seleccionar centro de costo</option>
+                          {costCenters.map((c) => <option key={c.id} value={c.id}>{costCenterName(c)}</option>)}
+                        </select>
+                      </label>
+                      {/* En reembolso la partida se elige por renglón; la de la
+                          solicitud sale del renglón de mayor monto. */}
+                      <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Partida presupuestal *
+                        <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
+                          value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
+                        <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required={!isReembolso}>
+                          <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
+                          {filteredCategoryRows.map((r) => (
+                            <option key={r.budget_category_id} value={r.budget_category_id!}>
+                              {budgetCategoryAvailabilityLabel(categoryById(r.budget_category_id!), r)}
+                            </option>
+                          ))}
+                        </select>
+                        <div className={`${s.fieldHint} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>{categoryHelp.text}</div>
+                      </label>
+                      <label>Mes presupuestal *
+                        <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
+                      </label>
+                    </div>
+                  </section>
+                )}
 
                 {showIncidencias && (
                 <section className={s.formSection}>
