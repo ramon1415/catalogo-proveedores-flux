@@ -13,11 +13,16 @@ const BBVA_FORMAT_SAME_BANK = "same_bank"
 const BBVA_FORMAT_INTERBANK = "interbank"
 const BBVA_FORMAT_CIE = "cie"
 const BBVA_INTERBANK_BENEFICIARY_LENGTH = 30
+// `payment_reference` se conserva como dato operativo interno. Las posiciones
+// 86-90 del TXT son disponibilidad + banco, no esa referencia.
 const BBVA_INTERBANK_REFERENCE_LENGTH = 5
-const BBVA_INTERBANK_REFERENCE_INPUT_RULE = "1 a 5 digitos; el TXT completa con ceros a la izquierda"
+const BBVA_INTERBANK_REFERENCE_INPUT_RULE = "1 a 5 digitos como referencia operativa interna"
+const BBVA_INTERBANK_BANK_FIELD_PREFIX = "40"
+const BBVA_INTERBANK_BANK_CODE_LENGTH = 3
+const BBVA_INTERBANK_BANK_FIELD_LENGTH = 5
 const BBVA_INTERBANK_CONCEPT_LENGTH = 37
 const BBVA_INTERBANK_INDICATOR = "H"
-const BBVA_INTERBANK_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + BBVA_INTERBANK_BENEFICIARY_LENGTH + BBVA_INTERBANK_REFERENCE_LENGTH + BBVA_INTERBANK_CONCEPT_LENGTH + 1
+const BBVA_INTERBANK_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + BBVA_INTERBANK_BENEFICIARY_LENGTH + BBVA_INTERBANK_BANK_FIELD_LENGTH + BBVA_INTERBANK_CONCEPT_LENGTH + 1
 const BBVA_INTERBANK_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}\d{5}[A-Z0-9 .,&\/-]{37}H$/
 const BBVA_CIE_CONCEPT_LENGTH = 30
 const BBVA_CIE_CONVENIO_LENGTH = 7
@@ -1174,7 +1179,7 @@ function setNewLayoutFormLocked(locked) {
 }
 
 function createdLayoutDownloadFormats(lines) {
-  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const activeLines = (lines || []).filter((line) => line.status === "included")
   const formats = [BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].filter((format) => {
     const selected = activeLines.filter((line) => {
       try {
@@ -1189,7 +1194,7 @@ function createdLayoutDownloadFormats(lines) {
 }
 
 function singleReadyCreatedLayoutFormat(lines) {
-  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const activeLines = (lines || []).filter((line) => line.status === "included")
   if (!activeLines.length || validateLayoutLines(activeLines).length) return null
   const summary = summarizeLayoutFormats(activeLines)
   if (summary.unsupported.count) return null
@@ -1305,7 +1310,7 @@ function updateLayoutPagosintIssueCount(layoutId, lines) {
   const count = (lines || []).filter((line) => lineNeedsPagosintReferenceCompletion(line)).length
   if (count) layoutPagosintIssueCounts.set(layoutId, count)
   else layoutPagosintIssueCounts.delete(layoutId)
-  layoutFormatSummaries.set(layoutId, summarizeLayoutFormats((lines || []).filter((line) => line.status !== "bank_rejected")))
+  layoutFormatSummaries.set(layoutId, summarizeLayoutFormats((lines || []).filter((line) => line.status === "included")))
 }
 
 function closeLinesModal() {
@@ -1341,7 +1346,7 @@ function renderLinesTable(lines) {
 function renderLinesFormatSummary(lines) {
   if (!dom.linesFormatSummary) return
 
-  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const activeLines = (lines || []).filter((line) => line.status === "included")
   if (!activeLines.length) {
     dom.linesFormatSummary.innerHTML = `<span style="color:var(--text-3);font-size:12px">Sin lineas activas para generar archivos BBVA.</span>`
     return
@@ -1480,7 +1485,7 @@ async function downloadLayoutCxc(layoutId) {
 
   if (!lines?.length) { showToast("Sin lineas", "Este layout no tiene lineas para generar archivo BBVA.", "warning"); return }
 
-  const cxcLines = lines.filter((line) => line.status !== "bank_rejected")
+  const cxcLines = lines.filter((line) => line.status === "included")
   if (!cxcLines.length) { showToast("Sin lineas activas", "Este layout no tiene lineas activas para generar archivo BBVA.", "warning"); return }
 
   const invalidLines = validateLayoutLines(cxcLines)
@@ -1781,7 +1786,7 @@ function summarizeLayoutFormats(lines) {
   }
 
   for (const line of lines || []) {
-    if (line.status === "bank_rejected") continue
+    if (line.status !== "included") continue
     const amount = numberValue(line.amount)
 
     try {
@@ -1816,7 +1821,7 @@ async function downloadLayoutBbvaFormat(layoutId, format) {
   const { data: lines, error } = await fetchLayoutLines(layoutId)
   if (error) { showToast("No se pudo leer el layout", rlsHint("payment_layout_lines", "select", error), "danger"); return }
 
-  const activeLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const activeLines = (lines || []).filter((line) => line.status === "included")
   const selectedLines = activeLines.filter((line) => {
     try {
       return detectBbvaLayoutFormat(line) === format
@@ -1887,7 +1892,7 @@ function focusFirstPagosintReferenceLine() {
 
 function validateLayoutLines(lines) {
   return lines
-    .filter((line) => line.status !== "bank_rejected")
+    .filter((line) => line.status === "included")
     .map((line) => {
       const missing = []
       let format = null
@@ -1976,7 +1981,7 @@ function buildBbvaLayoutFiles(lines, layout) {
     [BBVA_FORMAT_CIE, []],
   ])
 
-  lines.forEach((line) => {
+  lines.filter((line) => line.status === "included").forEach((line) => {
     const format = detectBbvaLayoutFormat(line)
     groups.get(format).push(line)
   })
@@ -2094,7 +2099,7 @@ function buildBbvaInterbankRecord128(line) {
     CXC_CURRENCY,
     formatCxcAmount(line.amount).padStart(CXC_AMOUNT_LENGTH, "0"),
     formatBbvaText(line.beneficiary_name, BBVA_INTERBANK_BENEFICIARY_LENGTH, "titular PAGOSINT"),
-    formatBbvaReference(line.payment_reference),
+    formatBbvaInterbankBankField(line.destination_value),
     formatBbvaText(line.payment_concept, BBVA_INTERBANK_CONCEPT_LENGTH, "motivo PAGOSINT"),
     BBVA_INTERBANK_INDICATOR,
   ].join("")
@@ -2270,7 +2275,14 @@ function validateBbvaInterbankFields(line, lineNumber, errors) {
   if (fields.currency !== CXC_CURRENCY) errors.push(`Layout PAGOSINT invalido: moneda de linea ${lineNumber} debe ser ${CXC_CURRENCY}.`)
   if (!/^\d{13}\.\d{2}$/.test(fields.amount)) errors.push(`Layout PAGOSINT invalido: importe de linea ${lineNumber} debe medir 16 caracteres con punto decimal y 2 decimales.`)
   if (!/^[A-Z0-9 .,&\/-]{30}$/.test(fields.beneficiary)) errors.push(`Layout PAGOSINT invalido: titular de linea ${lineNumber} contiene caracteres no permitidos.`)
-  if (!/^\d{5}$/.test(fields.numericReference)) errors.push(`Layout PAGOSINT invalido: referencia numerica de linea ${lineNumber} debe ocupar 5 posiciones numericas; ${BBVA_INTERBANK_REFERENCE_INPUT_RULE}.`)
+  const expectedBankField = `${BBVA_INTERBANK_BANK_FIELD_PREFIX}${fields.destinationAccount.slice(0, BBVA_INTERBANK_BANK_CODE_LENGTH)}`
+  if (!/^\d{5}$/.test(fields.bankField)) {
+    errors.push(`Layout PAGOSINT invalido: campo banco de linea ${lineNumber} debe ocupar 5 posiciones numericas.`)
+  } else if (fields.destinationAccount.startsWith(BBVA_CLABE_BANK_CODE)) {
+    errors.push(`Layout PAGOSINT invalido: la CLABE de linea ${lineNumber} pertenece a BBVA y debe salir en PAGOSBBV.`)
+  } else if (fields.bankField !== expectedBankField) {
+    errors.push(`Layout PAGOSINT invalido: campo banco de linea ${lineNumber} debe ser ${expectedBankField}.`)
+  }
   if (!/^[A-Z0-9 .,&\/-]{37}$/.test(fields.concept)) errors.push(`Layout PAGOSINT invalido: motivo de linea ${lineNumber} contiene caracteres no permitidos.`)
   if (fields.indicator !== BBVA_INTERBANK_INDICATOR) errors.push(`Layout PAGOSINT invalido: indicador de linea ${lineNumber} debe ser ${BBVA_INTERBANK_INDICATOR}.`)
 }
@@ -2313,6 +2325,8 @@ function parseBbvaInterbankLine(line) {
     currency: line.slice(36, 39),
     amount: line.slice(39, 55),
     beneficiary: line.slice(55, 85),
+    bankField: line.slice(85, 90),
+    // Alias temporal para consumidores antiguos.
     numericReference: line.slice(85, 90),
     concept: line.slice(90, 127),
     indicator: line.slice(127, 128),
@@ -2351,7 +2365,7 @@ function maskBbvaLine(line, format) {
       `moneda ${fields.currency || "---"}`,
       `importe ${fields.amount || "---"}`,
       `titular ${fields.beneficiary.trim().slice(0, 18) || "---"}`,
-      `ref ${fields.numericReference || "---"}`,
+      `banco ${fields.bankField || "---"}`,
       `motivo ${fields.concept.trim().slice(0, 18) || "---"}`,
       `ind ${fields.indicator || "---"}`,
     ].join(" | ")
@@ -2383,7 +2397,7 @@ async function validateLayoutCxc(layoutId) {
   const { data: lines, error } = await fetchLayoutLines(layoutId)
   if (error) { showToast("No se pudo validar", rlsHint("payment_layout_lines", "select", error), "danger"); return }
 
-  const cxcLines = (lines || []).filter((line) => line.status !== "bank_rejected")
+  const cxcLines = (lines || []).filter((line) => line.status === "included")
   if (!cxcLines.length) { showToast("Sin lineas", "Este layout no tiene lineas activas para validar.", "warning"); return }
 
   const invalidLines = validateLayoutLines(cxcLines)
@@ -2460,6 +2474,20 @@ function formatBbvaReference(value) {
   if (!digits) throw new Error("referencia numerica PAGOSINT requerida")
   if (digits.length > BBVA_INTERBANK_REFERENCE_LENGTH) throw new Error("referencia numerica PAGOSINT acepta maximo 5 digitos")
   return digits.padStart(BBVA_INTERBANK_REFERENCE_LENGTH, "0")
+}
+
+// Contrato recuperado de archivos productivos aceptados por BBVA:
+// posiciones 86-90 = `40` + las primeras 3 posiciones de la CLABE.
+function formatBbvaInterbankBankField(destinationValue) {
+  const digits = cxcDigits(destinationValue)
+  if (digits.length !== CXC_ACCOUNT_LENGTH) {
+    throw new Error("CLABE PAGOSINT debe tener exactamente 18 digitos para derivar el banco")
+  }
+  const bankCode = digits.slice(0, BBVA_INTERBANK_BANK_CODE_LENGTH)
+  if (bankCode === BBVA_CLABE_BANK_CODE) {
+    throw new Error("CLABE BBVA 012 debe generarse en PAGOSBBV, no en PAGOSINT")
+  }
+  return `${BBVA_INTERBANK_BANK_FIELD_PREFIX}${bankCode}`
 }
 
 function normalizeCxcText(value) {

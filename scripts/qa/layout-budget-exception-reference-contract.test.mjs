@@ -282,6 +282,6 @@ test("legacy payment method fallback matches the canonical DB contract", () => {
 test("cache busters deliver every changed browser asset", () => {
   assert.match(config, /solicitudes_workboard_extension\.js\?v=20260818-default-active/)
   assert.match(solicitudesHtml, /config\.js\?v=20260818-provider-portal-reconciled/)
-  assert.match(layoutsHtml, /layouts\.js\?v=20260903-bbva-clabe-012-routing/)
+  assert.match(layoutsHtml, /layouts\.js\?v=20260903-pagosint-bank-field/)
   assert.match(layoutsHtml, /fase2_request_payment_method_extension\.js\?v=20260821-detalle-fix/)
 })
