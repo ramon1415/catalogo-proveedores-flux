@@ -1,5 +1,5 @@
 /* Page header */
-.phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-shrink: 0; }
 .phead h1 { font-size: 22px; font-weight: 600; }
 .phead p { margin-top: 3px; font-size: 12.5px; }
 
@@ -19,15 +19,19 @@
 .smallBtn.danger:hover { background: color-mix(in srgb, var(--ruby, #e05a6a) 12%, transparent); }
 
 /* Table card */
-.tableCard { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
-.toolbar { display: flex; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tableCard { flex: 1 1 0; min-height: 240px; display: flex; flex-direction: column; background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.toolbar { display: flex; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; }
 .searchBox { flex: 1; min-width: 220px; display: flex; align-items: center; gap: 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; padding: 0 10px; color: var(--text-3); }
 .searchBox input { flex: 1; background: transparent; border: 0; outline: none; color: var(--text-1); font: inherit; font-size: 12.5px; min-height: 36px; }
 .toolbar select { background: var(--bg-input); border: 1px solid var(--border); border-radius: 9px; color: var(--text-1); padding: 0 10px; min-height: 36px; font: inherit; font-size: 12.5px; }
 
-.tableWrap { overflow-x: auto; }
+.tableWrap { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.tableWrap::-webkit-scrollbar { width: 9px; height: 9px; }
+.tableWrap::-webkit-scrollbar-track { background: transparent; }
+.tableWrap::-webkit-scrollbar-thumb { background: var(--border-strong); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+.tableWrap::-webkit-scrollbar-corner { background: transparent; }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 820px; }
-.table thead th { text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
+.table thead th { position: sticky; top: 0; z-index: 1; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
 .table tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--bg-hover); }
