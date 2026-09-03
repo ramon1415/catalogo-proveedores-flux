@@ -12,7 +12,9 @@ name: Payment request exception quick approve contract
       - 'supabase/functions/notification-dispatcher/**'
       - 'supabase/functions/payment-request-exception-quick-approve/**'
       - 'supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev.sql'
+      - 'supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard.sql'
       - 'scripts/qa/payment-request-exception-quick-approve-contract.test.mjs'
+      - 'scripts/qa/payment-request-exception-quick-service-role-guard-contract.test.mjs'
       - '.github/workflows/payment-request-exception-quick-approve-contract.yml'
       - '.github/workflows/approval-batch-submitted-email-dev-contract.yml'
 
@@ -56,7 +58,8 @@ jobs:
           set -euo pipefail
           node --version
           node --experimental-strip-types --test \
-            scripts/qa/payment-request-exception-quick-approve-contract.test.mjs
+            scripts/qa/payment-request-exception-quick-approve-contract.test.mjs \
+            scripts/qa/payment-request-exception-quick-service-role-guard-contract.test.mjs
           node --check payment_request_exception_quick_approve.js
           node --experimental-strip-types --input-type=module -e \
             "await import('./supabase/functions/payment-request-exception-quick-approve/index.ts')"
@@ -69,13 +72,14 @@ jobs:
           mapfile -t changed < <(git diff --name-only origin/dev...HEAD | sort)
           printf '%s\n' "${changed[@]}"
 
-          allowed='^((payment_request_exception_quick_approve\.(html|css|js))|(supabase/config\.toml)|(supabase/functions/notification-dispatcher/(index\.ts|deno\.json|jspdf_edge\.ts|pdf_logo\.ts|pdf_logo_embed\.ts))|(supabase/functions/payment-request-exception-quick-approve/index\.ts)|(supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev\.sql)|(scripts/qa/payment-request-exception-quick-approve-contract\.test\.mjs)|(\.github/workflows/payment-request-exception-quick-approve-contract\.yml)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
+          allowed='^((payment_request_exception_quick_approve\.(html|css|js))|(supabase/config\.toml)|(supabase/functions/notification-dispatcher/(index\.ts|deno\.json|jspdf_edge\.ts|pdf_logo\.ts|pdf_logo_embed\.ts))|(supabase/functions/payment-request-exception-quick-approve/index\.ts)|(supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev\.sql)|(supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard\.sql)|(scripts/qa/payment-request-exception-quick-approve-contract\.test\.mjs)|(scripts/qa/payment-request-exception-quick-service-role-guard-contract\.test\.mjs)|(\.github/workflows/payment-request-exception-quick-approve-contract\.yml)|(\.github/workflows/approval-batch-submitted-email-dev-contract\.yml))$'
           if printf '%s\n' "${changed[@]}" | grep -Ev "${allowed}" | grep -q .; then
             echo '::error::Exception quick-approve PR contains a non-authorized path.'
             exit 1
           fi
 
           test -f supabase/migrations/20260903154601_payment_request_exception_quick_approve_dev.sql
+          test -f supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard.sql
           test ! -e supabase/migrations/20260903120000_payment_request_exception_quick_approve_dev.sql
 
           mapfile -t scannable < <(
@@ -106,10 +110,17 @@ jobs:
           grep -q 'project_ref' payment_request_exception_quick_approve.js
           grep -q '#token=' supabase/functions/notification-dispatcher/index.ts
           ! grep -q '\?token=' supabase/functions/notification-dispatcher/index.ts
+          grep -Fq "current_setting('role', true)" \
+            supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard.sql
+          grep -Fq 'from public, anon, authenticated, service_role;' \
+            supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard.sql
+          ! grep -Eqi 'grant execute on function public\.payment_request_exception_quick_require_service_role' \
+            supabase/migrations/20260903234917_payment_request_exception_quick_service_role_guard.sql
 
           echo 'scope=PR_529_only'
           echo 'quick_approve_default=off'
           echo 'kill_switch=edge_enforced'
           echo 'environment_urls=runtime_bound'
+          echo 'service_role_guard=effective_role_setting'
           echo 'qa_email_send=0'
           echo 'secret_scan=pass'
