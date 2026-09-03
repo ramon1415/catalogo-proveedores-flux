@@ -66,7 +66,8 @@ Ejemplo:
 El hotfix no mezcla registros de 85 y 128 en un mismo archivo.
 
 - `destination_type = cuenta` -> `PAGOSBBV`.
-- `destination_type = clabe` -> `PAGOSINT`.
+- `destination_type = clabe` con código bancario `012` -> `PAGOSBBV` (misma institución BBVA).
+- `destination_type = clabe` con cualquier otro código bancario -> `PAGOSINT`.
 - `destination_type = convenio` -> bloqueado para estos formatos; requiere CIE.
 - Tipo desconocido -> bloqueado y requiere correccion del proveedor.
 
