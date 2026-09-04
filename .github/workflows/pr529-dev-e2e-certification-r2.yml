@@ -110,7 +110,7 @@ jobs:
           cat scripts/qa/pr529-e2e-r2/part-*.sh > "$RUNNER_TEMP/pr529-e2e-r2.sh"
           chmod 700 "$RUNNER_TEMP/pr529-e2e-r2.sh"
           bash -n "$RUNNER_TEMP/pr529-e2e-r2.sh"
-          test "$(wc -l < "$RUNNER_TEMP/pr529-e2e-r2.sh")" -eq 593
+          test "$(wc -l < "$RUNNER_TEMP/pr529-e2e-r2.sh")" -eq 603
           psql --version
           supabase --version
           node --version
