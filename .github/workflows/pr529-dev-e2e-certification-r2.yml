@@ -1,0 +1,129 @@
+name: PR 529 DEV E2E certification R2
+
+'on':
+  push:
+    branches:
+      - qa/pr529-dev-e2e-cert-20260903-r2
+    paths:
+      - '.github/workflows/pr529-dev-e2e-certification-r2.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: pr529-dev-e2e-certification-r2
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: DEV marked email, approval, security and cleanup
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: DEV
+
+    env:
+      REPOSITORY: ramon1415/catalogo-proveedores-flux
+      PR_NUMBER: '529'
+      QA_BRANCH: qa/pr529-dev-e2e-cert-20260903-r2
+      FEATURE_BRANCH: feature/carlos-exception-quick-approve
+      FEATURE_HEAD: cd1dce238462244f91f3654f26ad22c7d0e5c44e
+      EXPECTED_DEV_HEAD: 38a5297abe30b47bf0f1d582ba418e0b60d43e67
+      DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+      FORBIDDEN_PROD_REF: ucantptjhwttexzmslvm
+      DISPATCHER_FUNCTION: notification-dispatcher
+      QUICK_FUNCTION: payment-request-exception-quick-approve
+      PREVIEW_ORIGIN: https://catalogo-proveedores-flux-git-feature-carlo-99cb5c-quantta-team.vercel.app
+      QA_REQUESTER_PROFILE_ID: 5c203bf6-9040-47c3-b89f-cd25f72f14dd
+      QA_REQUESTER_EMAIL: ramon.hipo1@gmail.com
+      QA_APPROVER_PROFILE_ID: 11aa563a-b84a-4a32-bf1f-fcb8d4c6ec27
+      QA_APPROVER_EMAIL: ramon@quantta.mx
+      OPERADORA_COMPANY_ID: 9680353c-9b86-4730-82e1-fce664f048a2
+      DIRECTOR_ROLE_ID: fc48e19a-d625-405e-a05f-f4f8d0bc9a4e
+      QA_PROVIDER_ID: 076b8d22-ba08-479c-a740-62cb3faa4aca
+      QA_COST_CENTER_ID: df0626f7-c318-47d6-8d7a-191ed31f3503
+      QA_BUDGET_CATEGORY_ID: 10589295-a66b-408e-93bc-43c3198ea755
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      NOTIFICATION_DISPATCHER_SECRET: ${{ secrets.NOTIFICATION_DISPATCHER_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+      PGTZ: UTC
+
+    steps:
+      - name: Check out exact QA commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard PR, branches, DEV and authorized QA accounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$REPOSITORY"
+          test "$GITHUB_REF_NAME" = "$QA_BRANCH"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test "$DEV_PROJECT_REF" != "$FORBIDDEN_PROD_REF"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_DEV_DB_URL"
+          test -n "$NOTIFICATION_DISPATCHER_SECRET"
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$NOTIFICATION_DISPATCHER_SECRET"
+          git merge-base --is-ancestor "$FEATURE_HEAD" HEAD
+
+          pr_json="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"
+          test "$(jq -r '.state' <<<"$pr_json")" = open
+          test "$(jq -r '.merged' <<<"$pr_json")" = false
+          test "$(jq -r '.base.ref' <<<"$pr_json")" = dev
+          test "$(jq -r '.base.sha' <<<"$pr_json")" = "$EXPECTED_DEV_HEAD"
+          test "$(jq -r '.head.ref' <<<"$pr_json")" = "$FEATURE_BRANCH"
+          test "$(jq -r '.head.sha' <<<"$pr_json")" = "$FEATURE_HEAD"
+          test "$(gh api "repos/${REPOSITORY}/git/ref/heads/dev" --jq .object.sha)" = "$EXPECTED_DEV_HEAD"
+          test "$(gh api "repos/${REPOSITORY}/git/ref/heads/${FEATURE_BRANCH}" --jq .object.sha)" = "$FEATURE_HEAD"
+          test "$QA_APPROVER_EMAIL" = 'ramon@quantta.mx'
+          test "$QA_REQUESTER_EMAIL" = 'ramon.hipo1@gmail.com'
+          case "$QA_APPROVER_EMAIL$QA_REQUESTER_EMAIL" in *[Cc][Ee][Ss][Aa][Rr]*) exit 1;; esac
+          echo PR529_R2_GUARDS_PASS
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+
+      - name: Assemble and validate the isolated runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends postgresql-client
+          fi
+          cat scripts/qa/pr529-e2e-r2/part-*.sh > "$RUNNER_TEMP/pr529-e2e-r2.sh"
+          chmod 700 "$RUNNER_TEMP/pr529-e2e-r2.sh"
+          bash -n "$RUNNER_TEMP/pr529-e2e-r2.sh"
+          test "$(wc -l < "$RUNNER_TEMP/pr529-e2e-r2.sh")" -eq 593
+          psql --version
+          supabase --version
+          node --version
+
+      - name: Execute controlled DEV certification
+        shell: bash
+        run: bash "$RUNNER_TEMP/pr529-e2e-r2.sh"
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pr529-dev-e2e-r2-evidence
+          path: ${{ runner.temp }}/pr529-dev-e2e-r2-evidence
+          if-no-files-found: warn
+          retention-days: 14
