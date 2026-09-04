@@ -389,7 +389,7 @@ function actionText(eventType: string): string {
     case "approval_batch.item_rebatched":
       return "Finanzas documento la correccion y habilito la solicitud para una nueva autorizacion.";
     case "payment_receipt.linked":
-      return "El pago fue confirmado y el comprobante individual se adjunta a este correo.";
+      return "Pago realizado — el comprobante va adjunto.";
     default:
       return "Hay una actualizacion disponible en Flux.";
   }
@@ -947,8 +947,8 @@ function renderReceiptLinkedEmail(
     ]).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
   const internalUrl = "https://flux.quantta.mx/solicitudes.html";
   const intro = providerOnly
-    ? "Confirmamos que el pago fue realizado. Adjuntamos el comprobante individual correspondiente."
-    : "El pago fue confirmado. Adjuntamos el comprobante individual de una página.";
+    ? "Tu pago ya fue realizado. Adjuntamos el comprobante; abajo el detalle."
+    : "Se confirmó el pago de esta solicitud. El comprobante va adjunto.";
   const textLines = [
     intro,
     "",
