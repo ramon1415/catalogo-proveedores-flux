@@ -399,6 +399,16 @@ export function RequestModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proveedorId, companyId, isReembolso])
 
+  // Sólo ofrecemos candidatas históricas que también estén disponibles en el
+// presupuesto vigente. Esto evita que una chip deje seleccionado un id que
+// el usuario no podría elegir desde el selector normal.
+const availablePredictionCandidates = useMemo(
+  () => prediction?.partida_candidates.filter((candidate) =>
+    budgetRows.some((row) => row.budget_category_id === candidate.budget_category_id),
+  ) ?? [],
+  [prediction, budgetRows],
+)
+
   // Pre-selección: si la sugerencia es confiable (1 candidata, share≥80%), el
   // usuario no ha tocado el selector y la partida está disponible en el
   // presupuesto cargado, se selecciona sola. Reacciona también a la carga de
@@ -500,9 +510,17 @@ export function RequestModal({
   // Click en una chip de partida frecuente: fija el selector y marca el campo
   // como tocado (elección explícita del usuario, ya editable).
   function applyPredictionCandidate(id: string) {
-    categoryTouched.current = true
-    setBudgetCategoryId(id)
+  if (!budgetRows.some((row) => row.budget_category_id === id)) {
+    showToast(
+      'Partida no disponible',
+      'La partida sugerida por historial no está disponible para la combinación seleccionada.',
+      'warning',
+    )
+    return
   }
+  categoryTouched.current = true
+  setBudgetCategoryId(id)
+}
 
   function onQuickCreated(p: Proveedor) {
     onProviderCreated(p)
@@ -884,10 +902,10 @@ export function RequestModal({
                       {!isReembolso && prediction && prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id && (
                         <div className={s.predictionHint}>Sugerida por historial ({prediction.n_cfdis} {prediction.n_cfdis === 1 ? 'factura' : 'facturas'}, {Math.round(prediction.share_dominante * 100)}%)</div>
                       )}
-                      {!isReembolso && prediction && !(prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id) && prediction.partida_candidates.length > 0 && (
+                      {!isReembolso && prediction && !(prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id) && availablePredictionCandidates.length > 0 && (
                         <div className={s.predictionChips}>
                           <span className={s.predictionChipsLabel}>Partidas frecuentes de este proveedor:</span>
-                          {prediction.partida_candidates.map((c) => (
+                          {availablePredictionCandidates.map((c) => (
                             <button type="button" key={c.budget_category_id}
                               className={`${s.predictionChip} ${budgetCategoryId === c.budget_category_id ? s.active : ''}`}
                               onClick={() => applyPredictionCandidate(c.budget_category_id)}>
@@ -896,6 +914,9 @@ export function RequestModal({
                           ))}
                         </div>
                       )}
+                      {!isReembolso && prediction && prediction.partida_candidates.length > 0 && availablePredictionCandidates.length === 0 && (
+              <div className={s.fieldHint}>El historial de este proveedor tiene partidas que no están disponibles para la combinación seleccionada.</div>
+            )}
                     </label>
                     {/* Señalización opcional: el solicitante no está seguro de la
                         partida y pide que Finanzas la confirme. Siempre disponible;
