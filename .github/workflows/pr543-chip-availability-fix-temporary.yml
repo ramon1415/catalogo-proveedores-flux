@@ -1,0 +1,125 @@
+name: PR 543 temporary chip availability fix
+
+'on':
+  push:
+    branches:
+      - ops/pr543-chip-availability-fix
+    paths:
+      - '.github/workflows/pr543-chip-availability-fix-temporary.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr543-chip-availability-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out target PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: feature/carlos-prediccion-partida-v2
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Patch prediction chips defensively
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/features/solicitudes/RequestModal.tsx')
+          text = path.read_text(encoding='utf-8')
+
+          marker = '''  // Pre-selección: si la sugerencia es confiable (1 candidata, share≥80%), el
+          // usuario no ha tocado el selector y la partida está disponible en el
+          // presupuesto cargado, se selecciona sola. Reacciona también a la carga de
+          // partidas (budgetRows), porque el proveedor puede elegirse antes que la
+          // empresa/CC/mes. Siempre editable.
+          '''
+          insertion = '''  // Sólo ofrecemos candidatas históricas que también estén disponibles en el
+          // presupuesto vigente. Esto evita que una chip deje seleccionado un id que
+          // el usuario no podría elegir desde el selector normal.
+          const availablePredictionCandidates = useMemo(
+            () => prediction?.partida_candidates.filter((candidate) =>
+              budgetRows.some((row) => row.budget_category_id === candidate.budget_category_id),
+            ) ?? [],
+            [prediction, budgetRows],
+          )
+
+          ''' + marker
+          if text.count(marker) != 1:
+            raise SystemExit('prediction preselection marker drifted')
+          text = text.replace(marker, insertion, 1)
+
+          old_apply = '''  function applyPredictionCandidate(id: string) {
+            categoryTouched.current = true
+            setBudgetCategoryId(id)
+          }
+          '''
+          new_apply = '''  function applyPredictionCandidate(id: string) {
+            if (!budgetRows.some((row) => row.budget_category_id === id)) {
+              showToast(
+                'Partida no disponible',
+                'La partida sugerida por historial no está disponible para la combinación seleccionada.',
+                'warning',
+              )
+              return
+            }
+            categoryTouched.current = true
+            setBudgetCategoryId(id)
+          }
+          '''
+          if text.count(old_apply) != 1:
+            raise SystemExit('applyPredictionCandidate source drifted')
+          text = text.replace(old_apply, new_apply, 1)
+
+          old_condition = '''                      {!isReembolso && prediction && !(prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id) && prediction.partida_candidates.length > 0 && (
+                        <div className={s.predictionChips}>
+                          <span className={s.predictionChipsLabel}>Partidas frecuentes de este proveedor:</span>
+                          {prediction.partida_candidates.map((c) => (
+          '''
+          new_condition = '''                      {!isReembolso && prediction && !(prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id) && availablePredictionCandidates.length > 0 && (
+                        <div className={s.predictionChips}>
+                          <span className={s.predictionChipsLabel}>Partidas frecuentes de este proveedor:</span>
+                          {availablePredictionCandidates.map((c) => (
+          '''
+          if text.count(old_condition) != 1:
+            raise SystemExit('prediction chip render source drifted')
+          text = text.replace(old_condition, new_condition, 1)
+
+          closing_marker = '''                        </div>
+                      )}
+          '''
+          hint = '''                        </div>
+                      )}
+                      {!isReembolso && prediction && prediction.partida_candidates.length > 0 && availablePredictionCandidates.length === 0 && (
+                        <div className={s.fieldHint}>El historial de este proveedor tiene partidas que no están disponibles para la combinación seleccionada.</div>
+                      )}
+          '''
+          # Replace only the first matching closing block after the chip label.
+          chip_pos = text.index('Partidas frecuentes de este proveedor:')
+          close_pos = text.index(closing_marker, chip_pos)
+          text = text[:close_pos] + hint + text[close_pos + len(closing_marker):]
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- app/src/features/solicitudes/RequestModal.tsx
+
+      - name: Commit fix to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git add app/src/features/solicitudes/RequestModal.tsx
+          git diff --cached --quiet && { echo 'No changes to commit'; exit 1; }
+          git commit -m 'fix: filter predicted partidas by current availability'
+          git push origin HEAD:feature/carlos-prediccion-partida-v2
