@@ -1,11 +1,21 @@
 // FB-7 · Sub-sección "Exportar" del tab Mapeo CONTPAQ: previsualiza y genera
 // el export contable del mes (pagos pagados → pólizas de egreso → .xls +
 // registro en accounting_exports).
-import { useEffect, useState } from 'react'
+//
+// Incluye la COLA DE REVISIÓN DE CUENTAS CONTABLES: antes de generar la póliza,
+// Finanzas revisa/confirma la cuenta de gasto por proveedor (perfilamiento
+// proveedor→cuenta), sembrando la capa autoritativa provider_account_mappings.
+import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import type { MapeoEmpresa } from '../../lib/contpaq/export'
-import { insertAccountingExports, loadExportLedger, loadPaidRequestsForExport } from './api'
+import {
+  confirmProviderAccount,
+  insertAccountingExports,
+  loadCuentaReviewData,
+  loadExportLedger,
+  loadPaidRequestsForExport,
+} from './api'
 import { errorMessage } from './logic'
 import {
   agruparFaltantes,
@@ -14,8 +24,16 @@ import {
   generarExport,
   nombreArchivoExport,
   procesarPagos,
-  type ResultadoPipeline,
 } from './exportarPolizas'
+import {
+  construirReview,
+  overrideDesdeReview,
+  pendientesDeRevision,
+  type CuentaReviewRow,
+  type PartidaPredictionLite,
+  type ProviderMappingLite,
+} from './cuentaReview'
+import type { PaidRequestRow } from './types'
 import s from './Configuracion.module.css'
 
 // Etiquetas humanas de las llaves de impuesto/cuentas especiales del motor.
@@ -46,20 +64,41 @@ type Props = {
   nombrePartida: Map<string, string>
   nombreBanco: Map<string, string>
   nombreProveedor: Map<string, string>
+  // Datalist compartido de cuentas de detalle (para el input de cuenta).
+  cuentasDatalistId?: string
 }
 
+// Insumos crudos de la previsualización: el pipeline y la cola de revisión se
+// DERIVAN de esto (más las ediciones locales) para que "lo que Finanzas ve =
+// lo que se exporta" sin re-fetch en cada edición.
 type PreviewState = {
-  resultado: ResultadoPipeline
+  rows: PaidRequestRow[]
+  exportadosIds: Set<string>
   foliosPorTipo: Record<string, number>
   mes: string
+  providerMappings: Map<string, ProviderMappingLite>
+  predictions: Map<string, PartidaPredictionLite>
 }
 
-export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, nombreBanco, nombreProveedor }: Props) {
+export function ExportarSection({
+  companyId,
+  companyName,
+  mapeo,
+  nombrePartida,
+  nombreBanco,
+  nombreProveedor,
+  cuentasDatalistId,
+}: Props) {
   const { showToast } = useToast()
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
   const [busy, setBusy] = useState<'preview' | 'export' | null>(null)
   const [preview, setPreview] = useState<PreviewState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Ediciones locales de Finanzas en la cola (proveedor_id → cuenta) y
+  // proveedores confirmados en la sesión (upsert ya persistido en DB).
+  const [edits, setEdits] = useState<Map<string, string>>(new Map())
+  const [confirmados, setConfirmados] = useState<Set<string>>(new Set())
+  const [confirmando, setConfirmando] = useState<string | null>(null)
 
   const config = companyId ? empresaConfigDe(companyId) : null
 
@@ -67,6 +106,8 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
   useEffect(() => {
     setPreview(null)
     setError(null)
+    setEdits(new Map())
+    setConfirmados(new Set())
   }, [companyId, mes, mapeo])
 
   function rangoMes(m: string): { inicio: string; fin: string } {
@@ -79,12 +120,23 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
     if (!companyId || !config) return
     setBusy('preview')
     setError(null)
+    setEdits(new Map())
+    setConfirmados(new Set())
     try {
       const { inicio, fin } = rangoMes(mes)
       const rows = await loadPaidRequestsForExport(companyId, inicio, fin)
-      const { exportadosIds, foliosPorTipo } = await loadExportLedger(companyId, inicio, rows.map((r) => r.id))
-      const resultado = procesarPagos(rows, mapeo, config, exportadosIds)
-      setPreview({ resultado, foliosPorTipo, mes })
+      const [{ exportadosIds, foliosPorTipo }, reviewData] = await Promise.all([
+        loadExportLedger(companyId, inicio, rows.map((r) => r.id)),
+        loadCuentaReviewData(companyId),
+      ])
+      setPreview({
+        rows,
+        exportadosIds,
+        foliosPorTipo,
+        mes,
+        providerMappings: reviewData.providerMappings,
+        predictions: reviewData.predictions,
+      })
     } catch (err: unknown) {
       setError(errorMessage(err))
     } finally {
@@ -92,10 +144,45 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
     }
   }
 
+  // Cola de revisión derivada del preview + ediciones locales.
+  const review = useMemo<CuentaReviewRow[]>(() => {
+    if (!preview) return []
+    return construirReview(preview.rows, {
+      providerMappings: preview.providerMappings,
+      predictions: preview.predictions,
+      edits,
+      confirmados,
+      nombreProveedor,
+    })
+  }, [preview, edits, confirmados, nombreProveedor])
+
+  // Override proveedor→cuenta que consume el pipeline (= lo que Finanzas ve).
+  const override = useMemo(() => overrideDesdeReview(review), [review])
+
+  // Pipeline derivado: se recalcula al editar/confirmar una cuenta, así el
+  // detalle por pago y el export reflejan la cola sin volver a previsualizar.
+  const resultado = useMemo(() => {
+    if (!preview || !config) return null
+    return procesarPagos(preview.rows, mapeo, config, preview.exportadosIds, override)
+  }, [preview, config, mapeo, override])
+
   async function exportar() {
-    if (!preview || !companyId || !config) return
-    const { listos } = preview.resultado
+    if (!resultado || !preview || !companyId || !config) return
+    const { listos } = resultado
     if (!listos.length) return
+
+    // Advertencia (no bloqueo): quedan proveedores 🟡 sin confirmar. El guard
+    // duro (problemas.length === 0) sigue vigente vía `puedeExportar`.
+    const pendientes = pendientesDeRevision(review)
+    if (pendientes.length > 0) {
+      const ok = window.confirm(
+        `Quedan ${pendientes.length} proveedor(es) en "A revisar" sin confirmar.\n` +
+          'Se exportarán con la cuenta tentativa mostrada (o el mapeo por partida si está vacía). ' +
+          '\n\n¿Generar la póliza de todas formas?',
+      )
+      if (!ok) return
+    }
+
     setBusy('export')
     let descargado = false
     try {
@@ -123,6 +210,47 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
     }
   }
 
+  function editarCuenta(proveedorId: string, valor: string) {
+    setEdits((prev) => {
+      const next = new Map(prev)
+      next.set(proveedorId, valor)
+      return next
+    })
+    // Si ya estaba confirmado y lo re-editan, deja de estar confirmado hasta que
+    // vuelvan a darle Confirmar (el valor podría diverger del persistido).
+    setConfirmados((prev) => {
+      if (!prev.has(proveedorId)) return prev
+      const next = new Set(prev)
+      next.delete(proveedorId)
+      return next
+    })
+  }
+
+  async function confirmar(fila: CuentaReviewRow) {
+    if (!companyId) return
+    const code = fila.cuenta.trim()
+    if (!code) {
+      showToast('Falta la cuenta', 'Captura una cuenta contable antes de confirmar.', 'error')
+      return
+    }
+    setConfirmando(fila.proveedorId)
+    try {
+      await confirmProviderAccount(companyId, fila.proveedorId, code)
+      // Refleja de inmediato en la cola (confirmada 🟢) sin re-fetch.
+      setEdits((prev) => {
+        const next = new Map(prev)
+        next.set(fila.proveedorId, code)
+        return next
+      })
+      setConfirmados((prev) => new Set(prev).add(fila.proveedorId))
+      showToast('Cuenta confirmada', `${fila.nombre} → ${code}`, 'success')
+    } catch (err: unknown) {
+      showToast('No se pudo confirmar', errorMessage(err), 'error')
+    } finally {
+      setConfirmando(null)
+    }
+  }
+
   function nombreFaltante(tipo: string, id: string): string {
     if (tipo === 'partida') return nombrePartida.get(id) ?? id
     if (tipo === 'banco') return nombreBanco.get(id) ?? id
@@ -131,7 +259,6 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
     return id
   }
 
-  const resultado = preview?.resultado ?? null
   const problemasMapeo = resultado?.problemas.filter((p) => p.kind === 'mapeo') ?? []
   const problemasDatos = resultado?.problemas.filter((p) => p.kind === 'datos') ?? []
   const faltantes = agruparFaltantes(problemasMapeo)
@@ -139,6 +266,9 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
   const sumaListos = listos.reduce((acc, p) => acc + p.monto, 0)
   const elegibles = resultado ? listos.length + resultado.problemas.length : 0
   const puedeExportar = Boolean(resultado && listos.length > 0 && resultado.problemas.length === 0 && !busy)
+
+  const seguras = review.filter((r) => r.bucket === 'segura')
+  const aRevisar = review.filter((r) => r.bucket === 'revisar')
 
   return (
     <section className={s.tableCard}>
@@ -195,6 +325,83 @@ export function ExportarSection({ companyId, companyName, mapeo, nombrePartida, 
               {resultado.yaExportados.length > 0 && ` · ${resultado.yaExportados.length} ya exportado(s) (se excluyen)`}
             </div>
           </div>
+
+          {/* ── Cola de revisión de cuentas contables ── */}
+          {review.length > 0 && (
+            <div className={s.panelToolbar} style={{ display: 'block', borderTop: 0 }}>
+              <div className={s.cellMain} style={{ marginBottom: 2 }}>Revisión de cuentas contables</div>
+              <div className={s.hint} style={{ marginBottom: 8 }}>
+                Cuenta de gasto por proveedor del lote. 🟢 seguras (confirmada o sugerida por historial) — revísalas;
+                🟡 a revisar (sin historial confiable) — Finanzas debe confirmar. La cuenta confirmada/sugerida es la
+                que se usa en la póliza.
+              </div>
+              {aRevisar.length > 0 && (
+                <div className={s.tableErr} style={{ fontWeight: 600, marginBottom: 6 }}>
+                  {aRevisar.length} proveedor{aRevisar.length === 1 ? '' : 'es'} a revisar
+                </div>
+              )}
+              <div className={s.mapperWrap} style={{ maxHeight: 320 }}>
+                <table className={s.table} style={{ minWidth: 720 }}>
+                  <thead>
+                    <tr>
+                      <th>Proveedor</th>
+                      <th>RFC</th>
+                      <th>Cuenta de gasto</th>
+                      <th>Origen / confianza</th>
+                      <th>Estado</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...aRevisar, ...seguras].map((r) => {
+                      const amarillo = r.bucket === 'revisar'
+                      return (
+                        <tr key={r.proveedorId} className={amarillo && !r.cuenta.trim() ? s.rowUnmapped : undefined}>
+                          <td>
+                            <span className={s.cellMain}>{r.nombre}</span>
+                            <span className={s.hint}>
+                              {r.nSolicitudes} solicitud{r.nSolicitudes === 1 ? '' : 'es'}
+                            </span>
+                          </td>
+                          <td>{r.rfc || <span className={s.hint}>sin RFC</span>}</td>
+                          <td>
+                            <input
+                              className={s.mapInput}
+                              style={{ maxWidth: 220 }}
+                              value={r.cuenta}
+                              list={cuentasDatalistId}
+                              placeholder={amarillo ? 'Capturar cuenta…' : ''}
+                              onChange={(e) => editarCuenta(r.proveedorId, e.target.value)}
+                              disabled={busy !== null}
+                            />
+                          </td>
+                          <td>
+                            <span className={s.hint}>{r.detalle}</span>
+                          </td>
+                          <td>
+                            {r.origen === 'confirmada' && <Badge variant="success">🟢 Confirmada</Badge>}
+                            {r.origen === 'sugerida' && <Badge variant="info">🟢 Sugerida</Badge>}
+                            {r.origen === 'sugerida_baja' && <Badge variant="warning">🟡 Revisar</Badge>}
+                            {r.origen === 'sin_dato' && <Badge variant="warning">🟡 Capturar</Badge>}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className={s.smallBtn}
+                              onClick={() => confirmar(r)}
+                              disabled={busy !== null || confirmando === r.proveedorId || !r.cuenta.trim() || r.confirmada}
+                            >
+                              {confirmando === r.proveedorId ? 'Guardando…' : r.confirmada ? 'Confirmada' : 'Confirmar'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Faltantes de mapeo, agrupados y accionables */}
           {faltantes.total > 0 && (

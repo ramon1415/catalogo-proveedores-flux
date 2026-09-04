@@ -366,7 +366,10 @@ export function DetailModal({
             <RefCell label="Mes presupuestal" value={formatMonth(request.budget_month)} muted />
             <div className={`${s.refCell} ${s.full}`}>
               <span className={s.refLabel}>Partida</span>
-              <span className={`${s.refValue} ${s.muted}`}>{budgetCategoryLabel(category)}</span>
+              <span className={`${s.refValue} ${s.muted}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                {budgetCategoryLabel(category)}
+                {request.partida_unsure && <Badge variant="warning">Partida por confirmar</Badge>}
+              </span>
             </div>
           </div>
 

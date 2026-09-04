@@ -29,12 +29,14 @@ import type {
   ProveedorRow,
   BankAccountRow,
   PaidRequestRow,
+  PartidaPredictionRow,
   AccountingExportRow,
   AccountingExportInsert,
   Project,
   ProjectPayload,
 } from './types'
 import { groupFromRoleNames } from './logic'
+import { normalizarRfc, type ProviderMappingLite, type PartidaPredictionLite } from './cuentaReview'
 
 // ── Cuentas origen ───────────────────────────────────────────────
 export async function loadOriginData(): Promise<{ companies: Company[]; accounts: OriginAccount[] }> {
@@ -507,6 +509,58 @@ export async function upsertBankMapping(companyId: string, bankAccountId: string
     },
     { onConflict: 'company_id,company_bank_account_id' },
   )
+  if (error) throw error
+}
+
+// ── Cola de revisión de cuentas contables (export CONTPAQ) ──────
+// Insumos para perfilar proveedor→cuenta en el export: la capa autoritativa
+// (provider_account_mappings) + el histórico seedeado (partida_predictions).
+export async function loadCuentaReviewData(companyId: string): Promise<{
+  providerMappings: Map<string, ProviderMappingLite>
+  predictions: Map<string, PartidaPredictionLite>
+}> {
+  const [provR, predR] = await Promise.all([
+    supabase
+      .from('provider_account_mappings')
+      .select('proveedor_id,contpaq_account_code,contpaq_provider_id')
+      .eq('company_id', companyId),
+    supabase
+      .from('partida_predictions')
+      .select('rfc_emisor,cuenta_gasto_dominante,share_dominante,n_cfdis,is_confident')
+      .eq('company_id', companyId),
+  ])
+  if (provR.error) throw provR.error
+  if (predR.error) throw predR.error
+
+  const providerMappings = new Map<string, ProviderMappingLite>()
+  for (const p of (provR.data || []) as ProviderMappingRow[]) {
+    providerMappings.set(p.proveedor_id, { code: p.contpaq_account_code, terceroId: p.contpaq_provider_id })
+  }
+  const predictions = new Map<string, PartidaPredictionLite>()
+  for (const r of (predR.data || []) as PartidaPredictionRow[]) {
+    predictions.set(normalizarRfc(r.rfc_emisor), {
+      cuentaDominante: r.cuenta_gasto_dominante,
+      share: r.share_dominante === null ? null : Number(r.share_dominante),
+      nCfdis: r.n_cfdis,
+      confident: Boolean(r.is_confident),
+    })
+  }
+  return { providerMappings, predictions }
+}
+
+// Finanzas confirma la cuenta de un proveedor desde el export. Via RPC
+// SECURITY DEFINER que valida rol finance y hace un upsert que fija SOLO la
+// cuenta (preserva el contpaq_provider_id/tercero de la sección Proveedores).
+export async function confirmProviderAccount(
+  companyId: string,
+  proveedorId: string,
+  code: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('confirm_provider_account', {
+    p_company_id: companyId,
+    p_proveedor_id: proveedorId,
+    p_account_code: code,
+  })
   if (error) throw error
 }
 

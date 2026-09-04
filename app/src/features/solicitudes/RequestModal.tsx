@@ -7,6 +7,7 @@ import {
   updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems, loadActiveProjects, setRequestProject,
+  fetchPartidaPrediction,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -30,6 +31,7 @@ import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
   ApproverCandidate, ApproverSelection, RequestPayload, Profile, IncidentCharge,
   EmployeeBankAccount, ReimbursementDraftItem, ReimbursementItemInsert, ProjectOption,
+  PartidaPrediction,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -96,6 +98,14 @@ export function RequestModal({
   const [budgetMonth, setBudgetMonth] = useState(defaultMonth())
   const [budgetCategoryId, setBudgetCategoryId] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
+  // Predicción de partida por proveedor (agregado histórico CONTPAQ). Solo aplica
+  // en modo solicitud normal; el reembolso clasifica por renglón aparte.
+  const [prediction, setPrediction] = useState<PartidaPrediction | null>(null)
+  // Se marca en cuanto el usuario toca el selector/chip: a partir de ahí no
+  // volvemos a auto-seleccionar, la sugerencia sigue siendo editable.
+  const categoryTouched = useRef(false)
+  // "No estoy seguro de la partida": el solicitante pide que Finanzas confirme.
+  const [partidaUnsure, setPartidaUnsure] = useState(false)
   const [proveedorId, setProveedorId] = useState('')
   const [providerSearch, setProviderSearch] = useState('')
   const [amount, setAmount] = useState('')
@@ -372,6 +382,38 @@ export function RequestModal({
     return () => { active = false }
   }, [companyId])
 
+  // ── Predicción de partida ────────────────────────────────────────────────
+  // Al cambiar el proveedor (o la empresa activa) consulta el histórico
+  // proveedor→partida. Solo en solicitud normal: el reembolso no usa la
+  // sugerencia global (clasifica por renglón).
+  useEffect(() => {
+    if (isReembolso) { setPrediction(null); return }
+    const prov = proveedores.find((p) => p.id === proveedorId) || null
+    const rfc = (prov?.rfc || '').trim()
+    if (!companyId || !proveedorId || !rfc) { setPrediction(null); return }
+    let active = true
+    fetchPartidaPrediction(companyId, rfc).then((p) => {
+      if (active) setPrediction(p)
+    })
+    return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proveedorId, companyId, isReembolso])
+
+  // Pre-selección: si la sugerencia es confiable (1 candidata, share≥80%), el
+  // usuario no ha tocado el selector y la partida está disponible en el
+  // presupuesto cargado, se selecciona sola. Reacciona también a la carga de
+  // partidas (budgetRows), porque el proveedor puede elegirse antes que la
+  // empresa/CC/mes. Siempre editable.
+  useEffect(() => {
+    if (isReembolso || categoryTouched.current) return
+    if (!prediction || !prediction.is_confident) return
+    const candId = prediction.partida_candidates[0]?.budget_category_id
+    if (!candId) return
+    if (!budgetRows.some((r) => r.budget_category_id === candId)) return
+    setBudgetCategoryId((prev) => (prev ? prev : candId))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prediction, budgetRows, isReembolso])
+
   // Recarga aprobadores cuando cambian empresa/CC (inmediato) o monto (debounce).
   useEffect(() => {
     loadApprovers()
@@ -446,11 +488,20 @@ export function RequestModal({
   function onProviderSelect(id: string, label: string) {
     setProveedorId(id)
     setProviderSearch(label)
+    // Nuevo proveedor: reabrimos la puerta a la auto-sugerencia de partida.
+    categoryTouched.current = false
     if (id) {
       // Aplica método de pago preferido del proveedor (bindProviderPreferredMethod).
       const p = proveedores.find((x) => x.id === id)
       if (p?.metodo_pago) setPaymentMethod(normalizePaymentMethod(p.metodo_pago))
     }
+  }
+
+  // Click en una chip de partida frecuente: fija el selector y marca el campo
+  // como tocado (elección explícita del usuario, ya editable).
+  function applyPredictionCandidate(id: string) {
+    categoryTouched.current = true
+    setBudgetCategoryId(id)
   }
 
   function onQuickCreated(p: Proveedor) {
@@ -508,6 +559,8 @@ export function RequestModal({
         ? (reembolsoTotals.subtotal == null ? null : 0)
         : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
       invoice_uuid: invoiceUuid || null,
+      // El reembolso clasifica por renglón, así que la bandera global no aplica.
+      partida_unsure: isReembolso ? false : partidaUnsure,
     }
   }
 
@@ -656,6 +709,7 @@ export function RequestModal({
     setSuccess(null)
     setRequestType('provider_payment'); setPaymentMethod('transfer')
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
+    setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
     setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
@@ -818,7 +872,7 @@ export function RequestModal({
                     <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Partida presupuestal *
                       <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
                         value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
-                      <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required={!isReembolso}>
+                      <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => { categoryTouched.current = true; setBudgetCategoryId(e.target.value) }} required={!isReembolso}>
                         <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
                         {filteredCategoryRows.map((r) => (
                           <option key={r.budget_category_id} value={r.budget_category_id!}>
@@ -827,7 +881,31 @@ export function RequestModal({
                         ))}
                       </select>
                       <div className={`${s.fieldHint} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>{categoryHelp.text}</div>
+                      {!isReembolso && prediction && prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id && (
+                        <div className={s.predictionHint}>Sugerida por historial ({prediction.n_cfdis} {prediction.n_cfdis === 1 ? 'factura' : 'facturas'}, {Math.round(prediction.share_dominante * 100)}%)</div>
+                      )}
+                      {!isReembolso && prediction && !(prediction.is_confident && budgetCategoryId === prediction.partida_candidates[0]?.budget_category_id) && prediction.partida_candidates.length > 0 && (
+                        <div className={s.predictionChips}>
+                          <span className={s.predictionChipsLabel}>Partidas frecuentes de este proveedor:</span>
+                          {prediction.partida_candidates.map((c) => (
+                            <button type="button" key={c.budget_category_id}
+                              className={`${s.predictionChip} ${budgetCategoryId === c.budget_category_id ? s.active : ''}`}
+                              onClick={() => applyPredictionCandidate(c.budget_category_id)}>
+                              {c.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </label>
+                    {/* Señalización opcional: el solicitante no está seguro de la
+                        partida y pide que Finanzas la confirme. Siempre disponible;
+                        no aplica en reembolso (clasifica por renglón). */}
+                    {!isReembolso && (
+                      <label className={`${s.checkboxCard} ${s.fullRow}`}>
+                        <input type="checkbox" checked={partidaUnsure} onChange={(e) => setPartidaUnsure(e.target.checked)} />
+                        No estoy seguro de la partida
+                      </label>
+                    )}
                     <label>Mes presupuestal *
                       <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
                     </label>

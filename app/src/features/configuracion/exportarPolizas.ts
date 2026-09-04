@@ -115,12 +115,21 @@ export type ResultadoPipeline = {
  * Corre el pipeline SIN escribir nada: clasifica cada pago del mes en
  * ya-exportado / listo / con problema, juntando TODOS los faltantes de mapeo
  * (resolverAsientos + resolverFiscal) para que el arreglo sea de una pasada.
+ *
+ * `providerAccounts` (opcional, proveedor_id → cuenta de gasto) es el override
+ * de la cola de revisión de cuentas: cuando un proveedor del lote tiene cuenta
+ * resuelta/confirmada, su(s) línea(s) de gasto se cargan a ESA cuenta en vez de
+ * la del mapeo por partida. Así el export usa exactamente lo que Finanzas ve en
+ * la cola. Solo cambia el CÓDIGO de cuenta del cargo (los importes no), así que
+ * la póliza sigue cuadrando por construcción. Sin override → comportamiento
+ * idéntico al mapeo por partida (retrocompatible).
  */
 export function procesarPagos(
   rows: PaidRequestRow[],
   mapeo: MapeoEmpresa,
   config: EmpresaConfigReal,
   exportadosIds: Set<string>,
+  providerAccounts?: Map<string, string>,
 ): ResultadoPipeline {
   const listos: PagoListo[] = []
   const problemas: PagoProblema[] = []
@@ -135,6 +144,15 @@ export function procesarPagos(
       problemas.push({ row, kind: 'datos', faltantes: [], mensaje: 'Pago sin fecha de pago (paid_at) — no se puede fechar la póliza.' })
       continue
     }
+
+    // Override proveedor→cuenta de la cola de revisión: la solicitud tiene UNA
+    // línea de distribución cuya partidaId = budget_category_id; se reemplaza su
+    // cuenta de gasto por la del proveedor cuando existe. Se clona el mapeo por
+    // fila para no mutar el compartido.
+    const cuentaProveedor = row.proveedor_id ? providerAccounts?.get(row.proveedor_id) : undefined
+    const mapeoRow: MapeoEmpresa = cuentaProveedor
+      ? { ...mapeo, partida: { ...mapeo.partida, [String(row.budget_category_id)]: cuentaProveedor } }
+      : mapeo
 
     let contrato: ContratoCanonico
     try {
@@ -165,7 +183,7 @@ export function procesarPagos(
     let asientos: Asiento[] | null = null
     let fiscales: RegistrosFiscales | null = null
     try {
-      asientos = resolverAsientos(contrato, mapeo)
+      asientos = resolverAsientos(contrato, mapeoRow)
     } catch (err: unknown) {
       const f = (err as { faltantes?: string[] }).faltantes
       if (f && f.length) faltantes.push(...f)
@@ -176,7 +194,7 @@ export function procesarPagos(
         // Sin CFDI regresa registrosFiscales: null → póliza de egreso simple;
         // con CFDI arma el bloque I/W2/V/AD (decisión: la presencia de
         // cfdi_data decide si la póliza lleva registros fiscales).
-        fiscales = resolverFiscal(contrato, mapeo, { empresaConfig: config }).registrosFiscales
+        fiscales = resolverFiscal(contrato, mapeoRow, { empresaConfig: config }).registrosFiscales
       } catch (err: unknown) {
         const f = (err as { faltantes?: string[] }).faltantes
         if (f && f.length) faltantes.push(...f.filter((x) => !faltantes.includes(x)))

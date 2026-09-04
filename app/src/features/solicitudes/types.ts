@@ -42,6 +42,9 @@ export type PaymentRequest = {
   // Reembolsos: empleado que cobra. En el resto de tipos va null y el
   // destinatario del dinero sigue siendo el proveedor.
   beneficiary_profile_id?: string | null
+  // "No estoy seguro de la partida": el solicitante marca que la partida debe
+  // confirmarse. Solo señalización; no bloquea el flujo.
+  partida_unsure?: boolean | null
   created_at: string | null
   updated_at: string | null
 }
@@ -339,6 +342,9 @@ export type RequestPayload = {
   // la MISMA transacción que la solicitud (antes iba en un UPDATE posterior,
   // que podía dejar la solicitud sin destinatario si fallaba).
   beneficiary_profile_id: string | null
+  // Señalización opcional: el solicitante no está seguro de la partida y pide
+  // que Finanzas la confirme. No bloquea nada.
+  partida_unsure: boolean
 }
 
 export type EditPayload = {
@@ -367,4 +373,21 @@ export type DecisionAction =
 export type ProjectOption = {
   id: string
   name: string
+}
+
+// ── Predicción de partida ──────────────────────────────────────────────────
+// Sugerencia histórica proveedor(RFC) -> partida, derivada offline de pólizas
+// CONTPAQ. Se seedea en la tabla partida_predictions (solo lectura por membresía).
+export type PartidaCandidate = {
+  budget_category_id: string
+  name: string
+}
+
+export type PartidaPrediction = {
+  rfc_emisor: string
+  cuenta_gasto_dominante: string
+  share_dominante: number
+  n_cfdis: number
+  partida_candidates: PartidaCandidate[]
+  is_confident: boolean
 }
