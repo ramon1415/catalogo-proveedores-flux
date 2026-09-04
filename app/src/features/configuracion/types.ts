@@ -338,6 +338,16 @@ export type PaidRequestRow = {
   proveedores: { rfc: string | null; nombre_completo: string | null; persona_tipo: string | null } | null
 }
 
+// Predicción histórica proveedor(RFC)→cuenta de gasto (seed del histórico),
+// insumo de la cola de revisión de cuentas del export.
+export type PartidaPredictionRow = {
+  rfc_emisor: string
+  cuenta_gasto_dominante: string | null
+  share_dominante: number | string | null
+  n_cfdis: number | null
+  is_confident: boolean | null
+}
+
 // Fila del ledger accounting_exports (subset que consume el export).
 export type AccountingExportRow = {
   source_feeder: string
