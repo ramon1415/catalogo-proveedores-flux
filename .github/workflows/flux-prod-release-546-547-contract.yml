@@ -1,0 +1,62 @@
+name: Flux PROD 546 547 control-plane contract
+
+'on':
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/flux-prod-release-546-547.yml'
+      - '.github/workflows/flux-prod-release-546-547-contract.yml'
+      - 'scripts/qa/flux-prod-release-546-547-contract.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Validate exact release control plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout platform candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Parse YAML and run executable contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path, aliases: true) }' \
+            .github/workflows/flux-prod-release-546-547.yml \
+            .github/workflows/flux-prod-release-546-547-contract.yml
+          node --check scripts/qa/flux-prod-release-546-547-contract.test.mjs
+          node --test scripts/qa/flux-prod-release-546-547-contract.test.mjs
+          git diff --check
+      - name: Enforce exact three-file platform scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA"...HEAD | sort > "$RUNNER_TEMP/changed.txt"
+          cat > "$RUNNER_TEMP/allowed.txt" <<'FILES'
+          .github/workflows/flux-prod-release-546-547-contract.yml
+          .github/workflows/flux-prod-release-546-547.yml
+          scripts/qa/flux-prod-release-546-547-contract.test.mjs
+          FILES
+          sort -o "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/allowed.txt"
+          diff -u "$RUNNER_TEMP/allowed.txt" "$RUNNER_TEMP/changed.txt"
+      - name: Scan control-plane source for embedded secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            .github/workflows/flux-prod-release-546-547.yml
+            .github/workflows/flux-prod-release-546-547-contract.yml
+            scripts/qa/flux-prod-release-546-547-contract.test.mjs
+          )
+          if grep -En '(sb_secret_[A-Za-z0-9_-]+|postgres(ql)?://[^$[:space:]]+:[^$[:space:]@]+@|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)' "${files[@]}"; then
+            echo 'Embedded secret-like value detected' >&2
+            exit 1
+          fi
