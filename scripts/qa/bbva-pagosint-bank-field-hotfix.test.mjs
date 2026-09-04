@@ -39,6 +39,7 @@ const context = vm.createContext({
 vm.runInContext(`${source}
 globalThis.__bankFieldContract = {
   BBVA_FORMAT_SAME_BANK,
+  BBVA_FORMAT_MIXED,
   BBVA_FORMAT_INTERBANK,
   detectBbvaLayoutFormat,
   formatBbvaInterbankBankField,
@@ -85,15 +86,15 @@ test("PAGOSINT validation rejects an operational reference placed in the bank fi
   assert.match(validation.errors.join("\n"), /campo banco.*40002/i)
 })
 
-test("BBVA CLABE 012 stays on PAGOSBBV and external CLABE stays on PAGOSINT", () => {
+test("BBVA CLABE 012 routes to PAGOSMIX and external CLABE stays on PAGOSINT", () => {
   assert.equal(
     bbva.detectBbvaLayoutFormat(line({ destination_value: "012914002012607667" })),
-    bbva.BBVA_FORMAT_SAME_BANK,
+    bbva.BBVA_FORMAT_MIXED,
   )
   assert.equal(bbva.detectBbvaLayoutFormat(line()), bbva.BBVA_FORMAT_INTERBANK)
   assert.throws(
     () => bbva.formatBbvaInterbankBankField("012914002012607667"),
-    /PAGOSBBV/,
+    /PAGOSMIX/,
   )
 })
 

@@ -6,7 +6,7 @@ import { numberValue } from '../../lib/format'
 import {
   summarizeLayoutFormats, layoutSourceAccountDisplay, layoutDestinationDisplay, lineStatusBadge,
   lineNeedsPagosintCompletion, lineNeedsPagosintReferenceCompletion, isPagosintLine,
-  BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE,
+  BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE,
 } from './logic'
 import { PagosintReferenceModal } from './PagosintReferenceModal'
 import { RejectLineModal } from './RejectLineModal'
@@ -47,6 +47,7 @@ export function LinesModal({
 
   const summaryRows = [
     { item: summary[BBVA_FORMAT_SAME_BANK], key: BBVA_FORMAT_SAME_BANK },
+    { item: summary[BBVA_FORMAT_MIXED], key: BBVA_FORMAT_MIXED },
     { item: summary[BBVA_FORMAT_INTERBANK], key: BBVA_FORMAT_INTERBANK },
     { item: summary[BBVA_FORMAT_CIE], key: BBVA_FORMAT_CIE },
     { item: summary.unsupported, key: 'unsupported' as const },
@@ -81,6 +82,13 @@ export function LinesModal({
                       let actionNode: React.ReactNode = <span style={{ color: 'var(--text-3)', fontSize: 11 }}>-</span>
                       if (key === BBVA_FORMAT_SAME_BANK) {
                         actionNode = <button className={s.smallBtn} type="button" onClick={() => onDownloadFormat(BBVA_FORMAT_SAME_BANK)}>▾ Pagos BBVA</button>
+                      } else if (key === BBVA_FORMAT_MIXED) {
+                        if (item.validationIssues > 0) {
+                          statusNode = <Badge variant="warning">{item.validationIssues} linea(s) mixta(s) por corregir</Badge>
+                          actionNode = <span style={{ color: 'var(--text-2)', fontSize: 12 }}>Revisa CLABE BBVA, cuenta origen, importe y concepto</span>
+                        } else {
+                          actionNode = <button className={s.smallBtn} type="button" onClick={() => onDownloadFormat(BBVA_FORMAT_MIXED)}>▾ Pagos Mixtos</button>
+                        }
                       } else if (key === BBVA_FORMAT_INTERBANK) {
                         if (item.referenceIssues > 0) {
                           statusNode = <Badge variant="warning">{item.referenceIssues} referencia(s) pendiente(s)</Badge>

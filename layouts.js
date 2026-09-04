@@ -10,8 +10,13 @@ const CXC_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUN
 const CXC_LINE_BREAK = "\r\n"
 const CXC_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}$/
 const BBVA_FORMAT_SAME_BANK = "same_bank"
+const BBVA_FORMAT_MIXED = "mixed"
 const BBVA_FORMAT_INTERBANK = "interbank"
 const BBVA_FORMAT_CIE = "cie"
+// Pagos Mixtos, registro Mismo Banco recuperado del VBA Hoja8.
+const BBVA_MIXED_SAME_BANK_OPERATION = "PTC"
+const BBVA_MIXED_SAME_BANK_LINE_LENGTH = 3 + CXC_LINE_LENGTH
+const BBVA_MIXED_SAME_BANK_LINE_PATTERN = /^PTC\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}$/
 const BBVA_INTERBANK_BENEFICIARY_LENGTH = 30
 // `payment_reference` se conserva como dato operativo interno. Las posiciones
 // 86-90 del TXT son disponibilidad + banco, no esa referencia.
@@ -356,11 +361,20 @@ function renderFormatDownloadActions(layout, summary) {
 
   const actions = []
   const sameBank = summary[BBVA_FORMAT_SAME_BANK]
+  const mixed = summary[BBVA_FORMAT_MIXED]
   const interbank = summary[BBVA_FORMAT_INTERBANK]
   const cie = summary[BBVA_FORMAT_CIE]
 
   if (sameBank.count > 0) {
     actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_SAME_BANK}')" style="white-space:nowrap">▾ Pagos BBVA</button>`)
+  }
+
+  if (mixed.count > 0) {
+    if (mixed.validationIssues > 0) {
+      actions.push(`<button class="small-btn warning" type="button" onclick="openLayoutLines('${layout.id}')" style="white-space:nowrap">Revisar Mixtos (${mixed.validationIssues})</button>`)
+    } else {
+      actions.push(`<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${layout.id}','${BBVA_FORMAT_MIXED}')" style="white-space:nowrap">▾ Pagos Mixtos</button>`)
+    }
   }
 
   if (interbank.count > 0) {
@@ -1180,7 +1194,7 @@ function setNewLayoutFormLocked(locked) {
 
 function createdLayoutDownloadFormats(lines) {
   const activeLines = (lines || []).filter((line) => line.status === "included")
-  const formats = [BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].filter((format) => {
+  const formats = [BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].filter((format) => {
     const selected = activeLines.filter((line) => {
       try {
         return detectBbvaLayoutFormat(line) === format
@@ -1355,6 +1369,7 @@ function renderLinesFormatSummary(lines) {
   const summary = summarizeLayoutFormats(activeLines)
   const rows = [
     renderFormatSummaryRow(summary[BBVA_FORMAT_SAME_BANK], BBVA_FORMAT_SAME_BANK),
+    renderFormatSummaryRow(summary[BBVA_FORMAT_MIXED], BBVA_FORMAT_MIXED),
     renderFormatSummaryRow(summary[BBVA_FORMAT_INTERBANK], BBVA_FORMAT_INTERBANK),
     renderFormatSummaryRow(summary[BBVA_FORMAT_CIE], BBVA_FORMAT_CIE),
     renderFormatSummaryRow(summary.unsupported, "unsupported"),
@@ -1391,6 +1406,13 @@ function renderFormatSummaryRow(item, key) {
 
   if (key === BBVA_FORMAT_SAME_BANK) {
     action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_SAME_BANK}')">▾ Pagos BBVA</button>`
+  } else if (key === BBVA_FORMAT_MIXED) {
+    if (item.validationIssues > 0) {
+      status = `<span class="badge warning">${item.validationIssues} linea(s) mixta(s) por corregir</span>`
+      action = `<span style="color:var(--text-2);font-size:12px">Revisa CLABE BBVA, cuenta origen, importe y concepto</span>`
+    } else {
+      action = `<button class="small-btn" type="button" onclick="downloadLayoutBbvaFormat('${activeLinesLayoutId}','${BBVA_FORMAT_MIXED}')">▾ Pagos Mixtos</button>`
+    }
   } else if (key === BBVA_FORMAT_INTERBANK) {
     if (item.referenceIssues > 0) {
       status = `<span class="badge warning">${item.referenceIssues} referencia(s) pendiente(s)</span>`
@@ -1780,6 +1802,7 @@ async function fetchLayoutLines(layoutId) {
 function summarizeLayoutFormats(lines) {
   const summary = {
     [BBVA_FORMAT_SAME_BANK]: { key: BBVA_FORMAT_SAME_BANK, label: "PAGOSBBV", count: 0, amount: 0, referenceIssues: 0, validationIssues: 0 },
+    [BBVA_FORMAT_MIXED]: { key: BBVA_FORMAT_MIXED, label: "PAGOSMIX", count: 0, amount: 0, referenceIssues: 0, validationIssues: 0 },
     [BBVA_FORMAT_INTERBANK]: { key: BBVA_FORMAT_INTERBANK, label: "PAGOSINT", count: 0, amount: 0, referenceIssues: 0, validationIssues: 0 },
     [BBVA_FORMAT_CIE]: { key: BBVA_FORMAT_CIE, label: "CIE", count: 0, amount: 0, referenceIssues: 0, validationIssues: 0 },
     unsupported: { key: "unsupported", label: "No soportado", count: 0, amount: 0, referenceIssues: 0, validationIssues: 0 },
@@ -1793,6 +1816,7 @@ function summarizeLayoutFormats(lines) {
       const format = detectBbvaLayoutFormat(line)
       summary[format].count += 1
       summary[format].amount += amount
+      if (format === BBVA_FORMAT_MIXED && collectBbvaMixedLineIssues(line).length) summary[format].validationIssues += 1
       if (format === BBVA_FORMAT_INTERBANK && lineNeedsPagosintReferenceCompletion(line)) summary[format].referenceIssues += 1
       if (format === BBVA_FORMAT_CIE && collectBbvaCieLineIssues(line).length) summary[format].validationIssues += 1
     } catch {
@@ -1808,8 +1832,8 @@ async function downloadLayoutBbvaFormat(layoutId, format) {
   const layout = layouts.find((item) => item.id === layoutId)
   if (!layout) return
 
-  if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].includes(format)) {
-    showToast("Formato no soportado", "Solo se pueden descargar PAGOSBBV, PAGOSINT o CIE.", "warning")
+  if (![BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE].includes(format)) {
+    showToast("Formato no soportado", "Solo se pueden descargar PAGOSBBV, PAGOSMIX, PAGOSINT o CIE.", "warning")
     return
   }
 
@@ -1903,6 +1927,11 @@ function validateLayoutLines(lines) {
         missing.push(error.message)
       }
 
+      if (format === BBVA_FORMAT_MIXED) {
+        missing.push(...collectBbvaMixedLineIssues(line))
+        return { line_id: line.id, payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
+      }
+
       if (format === BBVA_FORMAT_CIE) {
         missing.push(...collectBbvaCieLineIssues(line))
         return { line_id: line.id, payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
@@ -1938,6 +1967,20 @@ function validateLayoutLines(lines) {
       return { line_id: line.id, payment_request_id: line.payment_request_id, request_number: line.request_number, missing_fields: missing }
     })
     .filter((item) => item.missing_fields.length)
+}
+
+function collectBbvaMixedLineIssues(line) {
+  const issues = []
+  const checks = [
+    () => formatBbvaMixedDestinationClabe(line.destination_value),
+    () => formatCxcAccount(line.source_account_number, "cuenta origen PAGOSMIX"),
+    () => formatCxcAmount(line.amount),
+    () => formatBbvaText(line.payment_concept, CXC_CONCEPT_LENGTH, "concepto PAGOSMIX"),
+  ]
+  checks.forEach((check) => {
+    try { check() } catch (error) { issues.push(error.message) }
+  })
+  return issues
 }
 
 function collectBbvaCieLineIssues(line) {
@@ -1977,6 +2020,7 @@ function invalidLineNeedsPagosintReference(item) {
 function buildBbvaLayoutFiles(lines, layout) {
   const groups = new Map([
     [BBVA_FORMAT_SAME_BANK, []],
+    [BBVA_FORMAT_MIXED, []],
     [BBVA_FORMAT_INTERBANK, []],
     [BBVA_FORMAT_CIE, []],
   ])
@@ -1997,6 +2041,10 @@ function buildBbvaLayoutFiles(lines, layout) {
         content = buildCxcContent(groupLines)
         validation = validateCxcContent(content)
         lineLength = CXC_LINE_LENGTH
+      } else if (format === BBVA_FORMAT_MIXED) {
+        content = buildBbvaMixedContent(groupLines)
+        validation = validateBbvaMixedContent(content)
+        lineLength = BBVA_MIXED_SAME_BANK_LINE_LENGTH
       } else if (format === BBVA_FORMAT_INTERBANK) {
         content = buildBbvaInterbankContent(groupLines)
         validation = validateBbvaInterbankContent(content)
@@ -2025,11 +2073,19 @@ function isBbvaDestinationClabe(value) {
   return digits.length === CXC_ACCOUNT_LENGTH && digits.startsWith(BBVA_CLABE_BANK_CODE)
 }
 
+function formatBbvaMixedDestinationClabe(value) {
+  const digits = cxcDigits(value)
+  if (digits.length !== CXC_ACCOUNT_LENGTH || !digits.startsWith(BBVA_CLABE_BANK_CODE)) {
+    throw new Error("PAGOSMIX requiere una CLABE BBVA de 18 digitos con prefijo 012")
+  }
+  return digits
+}
+
 function detectBbvaLayoutFormat(line) {
   const type = normalizeDestinationType(line.destination_type)
   if (["cuenta", "cuenta_bancaria", "cuenta_bbva", "mismo_banco", "bbva"].includes(type)) return BBVA_FORMAT_SAME_BANK
-  // Una CLABE 012 pertenece a BBVA y debe ir por Pagos BBVA, no Pagos Inter.
-  if (type === "clabe" && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_SAME_BANK
+  // Una CLABE 012 expresada como CLABE usa el registro PTC del archivo mixto.
+  if (type === "clabe" && isBbvaDestinationClabe(line.destination_value)) return BBVA_FORMAT_MIXED
   if (["clabe", "interbancario", "transferencia_interbancaria", "tarjeta", "tdc"].includes(type)) return BBVA_FORMAT_INTERBANK
   if (type === "convenio") return BBVA_FORMAT_CIE
   throw new Error("Tipo de destino no soportado para layout BBVA; define cuenta, CLABE o convenio.")
@@ -2046,6 +2102,7 @@ function normalizeDestinationType(value) {
 }
 
 function bbvaFormatLabel(format) {
+  if (format === BBVA_FORMAT_MIXED) return "PAGOSMIX"
   if (format === BBVA_FORMAT_INTERBANK) return "PAGOSINT"
   if (format === BBVA_FORMAT_CIE) return "CIE"
   return "PAGOSBBV"
@@ -2053,6 +2110,10 @@ function bbvaFormatLabel(format) {
 
 function buildCxcContent(lines) {
   return buildBbvaContent(lines, buildBbvaSameBankRecord85)
+}
+
+function buildBbvaMixedContent(lines) {
+  return buildBbvaContent(lines, buildBbvaMixedSameBankRecord88)
 }
 
 function buildBbvaInterbankContent(lines) {
@@ -2089,6 +2150,21 @@ function buildBbvaSameBankRecord85(line) {
     throw new Error("cxc_line_invalid_characters")
   }
 
+  return row
+}
+
+function buildBbvaMixedSameBankRecord88(line) {
+  const row = [
+    BBVA_MIXED_SAME_BANK_OPERATION,
+    formatBbvaMixedDestinationClabe(line.destination_value),
+    formatCxcAccount(line.source_account_number, "cuenta origen PAGOSMIX"),
+    CXC_CURRENCY,
+    formatCxcAmount(line.amount).padStart(CXC_AMOUNT_LENGTH, "0"),
+    formatBbvaText(line.payment_concept, CXC_CONCEPT_LENGTH, "concepto PAGOSMIX"),
+  ].join("")
+
+  if (row.length !== BBVA_MIXED_SAME_BANK_LINE_LENGTH) throw new Error(`bbva_mixed_line_length_invalid_${row.length}`)
+  if (!BBVA_MIXED_SAME_BANK_LINE_PATTERN.test(row)) throw new Error("bbva_mixed_line_invalid_characters")
   return row
 }
 
@@ -2191,6 +2267,15 @@ function validateCxcContent(content) {
   })
 }
 
+function validateBbvaMixedContent(content) {
+  return validateBbvaContent(content, {
+    formatLabel: "PAGOSMIX",
+    lineLength: BBVA_MIXED_SAME_BANK_LINE_LENGTH,
+    linePattern: BBVA_MIXED_SAME_BANK_LINE_PATTERN,
+    validateLine: validateBbvaMixedFields,
+  })
+}
+
 function validateBbvaInterbankContent(content) {
   return validateBbvaContent(content, {
     formatLabel: "PAGOSINT",
@@ -2268,6 +2353,16 @@ function validateBbvaSameBankFields(line, lineNumber, errors) {
   if (!/^[A-Z0-9 .,&\/-]{30}$/.test(fields.concept)) errors.push(`Layout invalido: concepto de linea ${lineNumber} contiene caracteres no permitidos.`)
 }
 
+function validateBbvaMixedFields(line, lineNumber, errors) {
+  const fields = parseBbvaMixedLine(line)
+  if (fields.operation !== BBVA_MIXED_SAME_BANK_OPERATION) errors.push(`Layout PAGOSMIX invalido: tipo de operacion de linea ${lineNumber} debe ser ${BBVA_MIXED_SAME_BANK_OPERATION}.`)
+  if (!/^012\d{15}$/.test(fields.destinationAccount)) errors.push(`Layout PAGOSMIX invalido: destino de linea ${lineNumber} debe ser CLABE BBVA 012 de 18 digitos.`)
+  if (!/^\d{18}$/.test(fields.sourceAccount)) errors.push(`Layout PAGOSMIX invalido: cuenta origen de linea ${lineNumber} debe tener 18 digitos sin espacios.`)
+  if (fields.currency !== CXC_CURRENCY) errors.push(`Layout PAGOSMIX invalido: moneda de linea ${lineNumber} debe ser ${CXC_CURRENCY}.`)
+  if (!/^\d{13}\.\d{2}$/.test(fields.amount)) errors.push(`Layout PAGOSMIX invalido: importe de linea ${lineNumber} debe medir 16 caracteres con punto decimal y 2 decimales.`)
+  if (!/^[A-Z0-9 .,&\/-]{30}$/.test(fields.concept)) errors.push(`Layout PAGOSMIX invalido: concepto de linea ${lineNumber} contiene caracteres no permitidos.`)
+}
+
 function validateBbvaInterbankFields(line, lineNumber, errors) {
   const fields = parseBbvaInterbankLine(line)
   if (!/^\d{18}$/.test(fields.destinationAccount)) errors.push(`Layout PAGOSINT invalido: cuenta destino de linea ${lineNumber} debe tener 18 digitos sin espacios.`)
@@ -2318,6 +2413,17 @@ function parseCxcLine(line) {
   }
 }
 
+function parseBbvaMixedLine(line) {
+  return {
+    operation: line.slice(0, 3),
+    destinationAccount: line.slice(3, 21),
+    sourceAccount: line.slice(21, 39),
+    currency: line.slice(39, 42),
+    amount: line.slice(42, 58),
+    concept: line.slice(58, 88),
+  }
+}
+
 function parseBbvaInterbankLine(line) {
   return {
     destinationAccount: line.slice(0, 18),
@@ -2346,6 +2452,17 @@ function maskCxcLine(line) {
 }
 
 function maskBbvaLine(line, format) {
+  if (format === BBVA_FORMAT_MIXED) {
+    const fields = parseBbvaMixedLine(line.padEnd(BBVA_MIXED_SAME_BANK_LINE_LENGTH, " "))
+    return [
+      `tipo ${fields.operation || "---"}`,
+      `destino ${maskSensitiveSuffix(fields.destinationAccount, 4)}`,
+      `origen ${maskSensitiveSuffix(fields.sourceAccount, 4)}`,
+      `moneda ${fields.currency || "---"}`,
+      `importe ${fields.amount || "---"}`,
+      `concepto ${fields.concept.trim().slice(0, 18) || "---"}`,
+    ].join(" | ")
+  }
   if (format === BBVA_FORMAT_CIE) {
     const fields = parseBbvaCieLine(line.padEnd(BBVA_CIE_LINE_LENGTH, " "))
     return [
@@ -2442,7 +2559,7 @@ function buildCxcFileName(layout) {
 function buildBbvaFileName(layout, format) {
   const folio = sanitizeCxcFileToken(layout.layout_number || layout.name || "LAYOUT")
   const today = new Date().toISOString().slice(0, 10).replaceAll("-", "")
-  const prefix = format === BBVA_FORMAT_INTERBANK ? "PAGOSINT" : format === BBVA_FORMAT_CIE ? "PAGOSCIE" : "PAGOSBBV"
+  const prefix = format === BBVA_FORMAT_MIXED ? "PAGOSMIX" : format === BBVA_FORMAT_INTERBANK ? "PAGOSINT" : format === BBVA_FORMAT_CIE ? "PAGOSCIE" : "PAGOSBBV"
   return `${prefix}_FLUX_${folio}_${today}.${CXC_FILE_EXTENSION}`
 }
 
@@ -2485,7 +2602,7 @@ function formatBbvaInterbankBankField(destinationValue) {
   }
   const bankCode = digits.slice(0, BBVA_INTERBANK_BANK_CODE_LENGTH)
   if (bankCode === BBVA_CLABE_BANK_CODE) {
-    throw new Error("CLABE BBVA 012 debe generarse en PAGOSBBV, no en PAGOSINT")
+    throw new Error("CLABE BBVA 012 debe generarse en PAGOSMIX, no en PAGOSINT")
   }
   return `${BBVA_INTERBANK_BANK_FIELD_PREFIX}${bankCode}`
 }

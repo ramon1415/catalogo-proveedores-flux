@@ -2,7 +2,8 @@
 
 Este documento reemplaza la idea de un unico layout CxC. La evidencia operativa muestra al menos dos formatos distintos generados desde el simulador `SIM X.xlsm`:
 
-- `PAGOSBBV`: pagos mismo banco / CxC, 85 caracteres utiles por registro + CRLF.
+- `PAGOSBBV`: pagos mismo banco por número de cuenta, 85 caracteres utiles por registro + CRLF.
+- `PAGOSMIX`: registro mixto `PTC` para CLABE BBVA `012`, 88 caracteres utiles por registro + CRLF.
 - `PAGOSINT`: pagos interbancarios, 128 caracteres utiles por registro + CRLF.
 
 El `CRLF` final es terminador del ultimo registro, no una linea vacia adicional. Los archivos no deben llevar BOM, encabezado, pipes, comas ni tabs.
@@ -13,7 +14,7 @@ El `CRLF` final es terminador del ultimo registro, no una linea vacia adicional.
   - Hoja `Pagos Mismo Banco`: `CUENTA CARGO`, `CUENTA / TARJETA ABONO`, `MONEDA`, `IMPORTE`, `MOTIVO PAGO`.
   - Hoja `Pagos Interbancarios`: `CUENTA CARGO`, `CUENTA CLABE / TARJETA ABONO`, `IMPORTE`, `TITULAR`, `MOTIVO PAGO`, `REF_NUMERICA`.
   - Hoja `Pagos CIE`: existe, pero no se implementa en este hotfix.
-  - Hoja `Pagos Mixtos`: existe, pero no se implementa sin confirmacion operativa.
+  - Hoja `Pagos Mixtos`: contrato recuperado directamente de `Qna 15_2026 AFE Macro Cuentas interbancarias.xlsm` (SHA-256 `CC5B4376A2BD7C9B8E1DE02B29CAFBF186E03D371BC0B9CE7364BC4DA26DF556`) y su `vbaProject.bin` (SHA-256 `4785E40BC10DAC3AF4698D2F29FE1FCC72BB037CEA0FD8A93F16FA6C02945DCD`).
 - `PAGOSBBV020726 (2).txt`: 2 registros, 174 bytes, 85 caracteres utiles por registro + CRLF.
 - `PAGOSINT180626.txt`: 2 registros, 260 bytes, 128 caracteres utiles por registro + CRLF.
 
@@ -21,8 +22,9 @@ El `CRLF` final es terminador del ultimo registro, no una linea vacia adicional.
 
 | Formato | Archivo ejemplo | Longitud util | Terminador | Uso esperado |
 | --- | --- | ---: | --- | --- |
-| `PAGOSBBV` | `PAGOSBBV020726` | 85 | CRLF por registro | Cuenta/tarjeta BBVA compatible, mismo banco |
-| `PAGOSINT` | `PAGOSINT180626` | 128 | CRLF por registro | CLABE/interbancario/TDC cuando aplique |
+| `PAGOSBBV` | `PAGOSBBV020726` | 85 | CRLF por registro | Número de cuenta BBVA, mismo banco |
+| `PAGOSMIX` | VBA `Pagos Mixtos` / registro `PTC` | 88 | CRLF por registro | CLABE BBVA de 18 dígitos con prefijo `012` |
+| `PAGOSINT` | `PAGOSINT180626` | 128 | CRLF por registro | CLABE de banco externo/TDC cuando aplique |
 
 ## PAGOSBBV / mismo banco / 85 caracteres
 
@@ -40,6 +42,28 @@ Ejemplo:
 ```text
 000000000110363553000000000191134094MXP0000000156600.00RENTA JULIO                   \r\n
 ```
+
+## PAGOSMIX / Pagos Mixtos / registro PTC / 88 caracteres
+
+El procedimiento `Microft_Mixtos` de la hoja VBA `Hoja8` asigna `PTC` cuando el tipo de operación es `Mismo Banco`. El UDT `uExpTrasBmerMix` define el registro exacto:
+
+| Posicion | Longitud | Campo | Regla |
+| --- | ---: | --- | --- |
+| 1-3 | 3 | Tipo de operación | `PTC` |
+| 4-21 | 18 | Cuenta/CLABE de abono | Para este routing: CLABE BBVA completa con prefijo `012` |
+| 22-39 | 18 | Cuenta cargo | Número de cuenta origen con ceros a la izquierda |
+| 40-42 | 3 | Divisa | `MXP` |
+| 43-58 | 16 | Importe | `0000000000000.00` |
+| 59-88 | 30 | Motivo | Mayúsculas, normalizado y rellenado con espacios |
+| 89-90 | 2 | Terminador físico | `CRLF` |
+
+Ejemplo sintético:
+
+```text
+PTC012914000000000007000000000191134094MXP0000000000100.00PRUEBA CLABE BBVA            \r\n
+```
+
+La macro permite que el campo de abono ocupe 18 posiciones. Flux usa este rail únicamente cuando `destination_type = clabe` y la CLABE comienza con `012`; no intenta recortar ni deducir una cuenta BBVA de 10 dígitos.
 
 ## PAGOSINT / interbancario / 128 caracteres
 
@@ -66,7 +90,7 @@ Ejemplo:
 El hotfix no mezcla registros de 85 y 128 en un mismo archivo.
 
 - `destination_type = cuenta` -> `PAGOSBBV`.
-- `destination_type = clabe` con código bancario `012` -> `PAGOSBBV` (misma institución BBVA).
+- `destination_type = clabe` con código bancario `012` -> `PAGOSMIX`, registro `PTC`.
 - `destination_type = clabe` con cualquier otro código bancario -> `PAGOSINT`.
 - Solo las líneas con estado `included` se vuelven a descargar; una línea `paid` nunca se reemite en un archivo accionable.
 - `destination_type = convenio` -> bloqueado para estos formatos; requiere CIE.
@@ -75,9 +99,10 @@ El hotfix no mezcla registros de 85 y 128 en un mismo archivo.
 Si un layout contiene ambos formatos, el sistema descarga archivos separados:
 
 - `PAGOSBBV_FLUX_<FOLIO>_<YYYYMMDD>.txt`
+- `PAGOSMIX_FLUX_<FOLIO>_<YYYYMMDD>.txt`
 - `PAGOSINT_FLUX_<FOLIO>_<YYYYMMDD>.txt`
 
-La convencion deja el tipo de layout al inicio (`PAGOSBBV` o `PAGOSINT`), conserva el folio operativo del layout y cierra con fecha de generacion `YYYYMMDD` para facilitar busqueda, conciliacion y soporte con el banco.
+La convencion deja el tipo de layout al inicio (`PAGOSBBV`, `PAGOSMIX` o `PAGOSINT`), conserva el folio operativo del layout y cierra con fecha de generacion `YYYYMMDD` para facilitar busqueda, conciliacion y soporte con el banco.
 
 ## Campo banco PAGOSINT
 
@@ -89,7 +114,7 @@ Las posiciones 86-90 **no son una referencia capturada por el usuario**. Los arc
 
 Flux deriva este campo automáticamente al descargar el archivo. `payment_reference` se conserva como dato operativo interno de la solicitud/layout, pero no se serializa en ese bloque.
 
-Una CLABE `012` pertenece a BBVA y se genera en `PAGOSBBV`, no en `PAGOSINT`.
+Una CLABE `012` pertenece a BBVA y se genera en `PAGOSMIX` con tipo `PTC`, no en `PAGOSINT` ni en el archivo corto `PAGOSBBV`.
 
 ## Validaciones locales
 
@@ -107,6 +132,7 @@ Para ambos formatos:
 Validaciones adicionales:
 
 - `PAGOSBBV`: 85 caracteres utiles por registro.
+- `PAGOSMIX`: 88 caracteres utiles por registro, prefijo `PTC`, CLABE BBVA `012` completa y CRLF final.
 - `PAGOSINT`: 128 caracteres utiles por registro, titular 30, campo banco/disponibilidad de 5 posiciones, motivo 37, indicador final `H`.
 - `PAGOSINT`: el campo banco debe coincidir con `40` + las primeras 3 posiciones de la CLABE; no se toma de `payment_reference`.
 
@@ -114,7 +140,7 @@ Validaciones adicionales:
 
 - El indicador final `H` de `PAGOSINT` se toma del ejemplo recibido; si BBVA entrega catalogo formal, validar su significado.
 - Si hay pagos por convenio, debe implementarse o habilitarse layout `CIE` en otro PR.
-- Si operacion requiere lote mixto en un solo archivo, debe validarse contra la hoja `Pagos Mixtos` antes de implementarlo.
+- `PAGOSMIX` reproduce el registro `PTC` recuperado de la macro. La aceptación bancaria final se confirma con el primer upload real usando la opción **Lote mixto** de Net Cash.
 - Si una TDC debe ir por mismo banco y no por interbancario, hay que capturar ese tipo de destino de forma explicita; hoy Flux solo distingue `cuenta`, `clabe` y `convenio`.
 
 ## Alcance
