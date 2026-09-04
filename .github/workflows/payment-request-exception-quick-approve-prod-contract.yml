@@ -1,0 +1,113 @@
+name: Payment request exception quick approve PROD contract
+
+'on':
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'payment_request_exception_quick_approve.html'
+      - 'payment_request_exception_quick_approve.css'
+      - 'payment_request_exception_quick_approve.js'
+      - 'supabase/config.toml'
+      - 'supabase/functions/notification-dispatcher/**'
+      - 'supabase/functions/payment-request-exception-quick-approve/**'
+      - 'supabase/migrations/*_payment_request_exception_quick_approve_prod.sql'
+      - 'scripts/qa/payment-request-exception-quick-approve-contract.test.mjs'
+      - 'scripts/qa/payment-request-exception-quick-service-role-guard-contract.test.mjs'
+      - '.github/workflows/payment-request-exception-quick-approve-prod-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-request-exception-quick-approve-prod-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: PROD exception email, kill switch and environment binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.16.0'
+          cache: ''
+
+      - name: Install exact renderer dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --package-lock=false --ignore-scripts jspdf@2.5.2 jspdf-autotable@3.8.4
+          npm ls jspdf jspdf-autotable
+
+      - name: Run focused executable contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test \
+            scripts/qa/payment-request-exception-quick-approve-contract.test.mjs \
+            scripts/qa/payment-request-exception-quick-service-role-guard-contract.test.mjs
+          node --check payment_request_exception_quick_approve.js
+          node --experimental-strip-types --input-type=module -e "await import('./supabase/functions/payment-request-exception-quick-approve/index.ts')"
+
+      - name: Validate PROD-only scope, OFF-by-default activation and secret hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+
+          mapfile -t changed < <(git diff --name-only origin/main...HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+
+          mapfile -t migrations < <(printf '%s\n' "${changed[@]}" | grep -E '^supabase/migrations/[0-9]+_payment_request_exception_quick_approve_prod\.sql$' || true)
+          test "${#migrations[@]}" -eq 1
+          MIGRATION="${migrations[0]}"
+
+          ! printf '%s\n' "${changed[@]}" | grep -E 'dev-contract|_dev\.sql'
+          ! grep -q 'notification_dev_business_recipient_authorized\|devBusinessRecipientEventTypes' \
+            supabase/functions/notification-dispatcher/index.ts
+
+          grep -Fq 'EMAIL_LOGO_HTML' supabase/functions/notification-dispatcher/index.ts
+          grep -Fq 'bgcolor="${headerBg}" style="padding:20px 28px;background:${headerBg};">${EMAIL_LOGO_HTML}</td>' \
+            supabase/functions/notification-dispatcher/index.ts
+          grep -Fq "v_review_url text := 'https://flux.quantta.mx/aprobaciones.html';" "$MIGRATION"
+          ! grep -Fq 'catalogo-proveedores-flux-git-dev-quantta-team.vercel.app/aprobaciones.html' "$MIGRATION"
+
+          # The migration reads Vault config but does not create/enable a secret.
+          grep -Fq "lower(coalesce(v_enabled, 'false')) = 'true'" "$MIGRATION"
+          ! grep -Fq 'vault.create_secret' "$MIGRATION"
+
+          # Negative-test fixtures intentionally contain DEV strings. Scan only runtime/migration additions.
+          git diff origin/main...HEAD -U0 -- \
+            payment_request_exception_quick_approve.css \
+            payment_request_exception_quick_approve.html \
+            payment_request_exception_quick_approve.js \
+            supabase/config.toml \
+            supabase/functions/notification-dispatcher/index.ts \
+            supabase/functions/payment-request-exception-quick-approve/index.ts \
+            "$MIGRATION" > "$RUNNER_TEMP/prod-runtime.diff"
+          if grep '^+' "$RUNNER_TEMP/prod-runtime.diff" | grep -Ev '^\+\+\+' | \
+             grep -E 'scsirgbuqjcwoaxfacth|catalogo-proveedores-flux-git-dev-quantta-team\.vercel\.app'; then
+            echo 'DEV hardcode added to PROD runtime/migration' >&2
+            exit 1
+          fi
+
+          ! grep -R -E 'localStorage|sessionStorage|document\.cookie' \
+            payment_request_exception_quick_approve.html payment_request_exception_quick_approve.js
+          ! grep -R -E 're_[A-Za-z0-9]{20,}|sbp_[A-Za-z0-9]{20,}|postgres(ql)?://[^[:space:]]+:[^[:space:]]+@' \
+            payment_request_exception_quick_approve.html \
+            payment_request_exception_quick_approve.js \
+            supabase/functions/payment-request-exception-quick-approve/index.ts \
+            supabase/functions/notification-dispatcher/index.ts \
+            "$MIGRATION"
+
+          echo 'prod_release_scope=pr529_only'
+          echo 'quick_approve_activation=separate_gate'

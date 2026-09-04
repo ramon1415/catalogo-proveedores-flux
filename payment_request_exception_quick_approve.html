@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src https://*.supabase.co; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>Autorizar excepción · Flux</title>
+  <link rel="stylesheet" href="payment_request_exception_quick_approve.css">
+</head>
+<body>
+  <main class="shell" aria-labelledby="page-title">
+    <section class="card">
+      <header class="brand" aria-label="Flux">FLUX</header>
+      <div class="content">
+        <div id="status-icon" class="status-icon" aria-hidden="true"></div>
+        <p id="eyebrow" class="eyebrow">Autorización de excepción</p>
+        <h1 id="page-title">Validando enlace...</h1>
+        <p id="message" class="message" role="status" aria-live="polite">Espera un momento.</p>
+
+        <div id="exception-banner" class="exception-banner" hidden>
+          <strong>Fuera de presupuesto.</strong>
+          <span id="exception-detail">Esta solicitud excede el presupuesto disponible.</span>
+        </div>
+
+        <dl id="summary" class="summary" hidden>
+          <div><dt>Folio</dt><dd id="folio">—</dd></div>
+          <div><dt>Proveedor</dt><dd id="provider">—</dd></div>
+          <div><dt>Importe</dt><dd id="amount">—</dd></div>
+          <div><dt>Partida</dt><dd id="budget-category">—</dd></div>
+          <div><dt>Centro de costo</dt><dd id="cost-center">—</dd></div>
+          <div><dt>Solicitante</dt><dd id="requester">—</dd></div>
+          <div id="shortfall-row" hidden><dt>Faltante</dt><dd id="shortfall">—</dd></div>
+        </dl>
+
+        <p id="confirmation" class="confirmation" hidden>¿Confirmas la autorización de esta excepción de presupuesto?</p>
+        <div class="actions">
+          <button id="approve-button" class="button button-primary" type="button" hidden>
+            Confirmar autorización
+          </button>
+          <a id="review-link" class="button button-secondary" href="aprobaciones.html" hidden>
+            Revisar primero en Flux
+          </a>
+        </div>
+        <p id="privacy-note" class="privacy">Este enlace sólo permite autorizar esta excepción. No permite editar, rechazar ni modificar el monto. Para rechazar o pedir cambios entra a Flux.</p>
+      </div>
+    </section>
+  </main>
+  <script src="payment_request_exception_quick_approve.js" defer></script>
+</body>
+</html>

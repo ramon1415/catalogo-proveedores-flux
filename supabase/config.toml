@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.approval-batch-quick-approve]
 verify_jwt = false
+
+[functions.payment-request-exception-quick-approve]
+verify_jwt = false
