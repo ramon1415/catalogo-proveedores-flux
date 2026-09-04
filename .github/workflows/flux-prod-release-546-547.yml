@@ -1,0 +1,566 @@
+name: Flux protected PROD release 546 547
+
+'on':
+  workflow_dispatch:
+    inputs:
+      release_kind:
+        description: Exact protected release slice
+        required: true
+        type: choice
+        options:
+          - pr546_db
+          - pr547_db
+          - pr546_edges
+      mode:
+        description: Zero-write preflight or separately authorized apply
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - apply
+      release_pr_number:
+        description: Release PR number bound to the selected slice
+        required: true
+        type: string
+      target_git_sha:
+        description: Exact immutable release head (DB) or live main (Edge)
+        required: true
+        type: string
+      confirm_prod:
+        description: Type the exact fixed PROD project ref
+        required: true
+        type: string
+      confirm_apply:
+        description: Apply only - exact confirmation phrase for the selected slice
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: flux-protected-prod-release-546-547
+  cancel-in-progress: false
+
+env:
+  EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+  FORBIDDEN_DEV_REF: scsirgbuqjcwoaxfacth
+  SUPABASE_CLI_VERSION: 2.116.0
+
+jobs:
+  database-release:
+    name: Exact DB ${{ inputs.release_kind }} ${{ inputs.mode }}
+    if: inputs.release_kind == 'pr546_db' || inputs.release_kind == 'pr547_db'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: supabase-production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_KIND: ${{ inputs.release_kind }}
+      MODE: ${{ inputs.mode }}
+      RELEASE_PR_NUMBER: ${{ inputs.release_pr_number }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+
+    steps:
+      - name: Initialize sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/flux-prod-release-546-547-db"
+          mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Validate immutable GitHub release authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.request
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          repo = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          kind = os.environ['RELEASE_KIND']
+          mode = os.environ['MODE']
+          target = os.environ['TARGET_GIT_SHA'].lower()
+
+          specs = {
+            'pr546_db': {
+              'pr': 546,
+              'confirm': 'APPLY-PR546-DB',
+              'migrations': [
+                'supabase/migrations/20260904192129_payment_request_exception_quick_approve_prod.sql',
+              ],
+            },
+            'pr547_db': {
+              'pr': 547,
+              'confirm': 'APPLY-PR547-DB',
+              'migrations': [
+                'supabase/migrations/20260904194016_partida_predictions_prod.sql',
+                'supabase/migrations/20260904194019_partida_unsure_prod.sql',
+                'supabase/migrations/20260904194022_partida_predictions_seed_prod.sql',
+              ],
+            },
+          }
+          def stop(code, extra=None):
+            payload = {'status':'STOP','code':code,'kind':kind,'mode':mode}
+            if extra: payload.update(extra)
+            (root/'github-authority.json').write_text(json.dumps(payload, indent=2)+'\n')
+            (root/'result.txt').write_text(f'STOP / {code}\n')
+            raise SystemExit(code)
+          if kind not in specs: stop('RELEASE_KIND_INVALID')
+          if mode not in ('preflight','apply'): stop('MODE_INVALID')
+          if not re.fullmatch(r'[0-9a-f]{40}', target): stop('TARGET_SHA_INVALID')
+          if os.environ['GITHUB_EVENT_NAME'] != 'workflow_dispatch': stop('WORKFLOW_DISPATCH_REQUIRED')
+          if os.environ['GITHUB_REF'] != 'refs/heads/main': stop('MAIN_REF_REQUIRED')
+          if os.environ['CONFIRM_PROD'] != os.environ['EXPECTED_PROD_REF']: stop('PROD_CONFIRMATION_MISMATCH')
+          expected_pr = specs[kind]['pr']
+          try: supplied_pr = int(os.environ['RELEASE_PR_NUMBER'])
+          except Exception: stop('PR_NUMBER_INVALID')
+          if supplied_pr != expected_pr: stop('PR_NUMBER_MISMATCH')
+          if mode == 'apply' and os.environ['CONFIRM_APPLY'] != specs[kind]['confirm']:
+            stop('EXPLICIT_APPLY_CONFIRMATION_REQUIRED')
+          if mode == 'preflight' and os.environ['CONFIRM_APPLY']:
+            stop('APPLY_CONFIRMATION_FORBIDDEN_IN_PREFLIGHT')
+
+          def api(path):
+            request = urllib.request.Request(
+              'https://api.github.com'+path,
+              headers={
+                'Accept':'application/vnd.github+json',
+                'Authorization':'Bearer '+token,
+                'X-GitHub-Api-Version':'2022-11-28',
+                'User-Agent':'flux-prod-546-547-control-plane',
+              },
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+              return json.load(response)
+          main = api(f'/repos/{repo}/git/ref/heads/main')['object']['sha'].lower()
+          pr = api(f'/repos/{repo}/pulls/{expected_pr}')
+          files = []
+          page = 1
+          while True:
+            batch = api(f'/repos/{repo}/pulls/{expected_pr}/files?per_page=100&page={page}')
+            files.extend(batch)
+            if len(batch) < 100: break
+            page += 1
+          changed = sorted(x['filename'] for x in files)
+          changed_migrations = sorted(x for x in changed if x.startswith('supabase/migrations/') and x.endswith('.sql'))
+          expected_migrations = sorted(specs[kind]['migrations'])
+          checks = {
+            'workflow_sha_is_live_main': os.environ['GITHUB_SHA'].lower() == main,
+            'pr_open': pr['state'] == 'open',
+            'pr_unmerged': not bool(pr.get('merged')),
+            'pr_base_main': pr['base']['ref'] == 'main',
+            'target_matches_pr_head': pr['head']['sha'].lower() == target,
+            'migration_set_exact': changed_migrations == expected_migrations,
+          }
+          payload = {
+            'status':'PASS' if all(checks.values()) else 'STOP',
+            'kind':kind,'mode':mode,'main_sha':main,'target_git_sha':target,
+            'release_pr':{'number':expected_pr,'state':pr['state'],'draft':pr['draft'],'base':pr['base']['ref'],'head':pr['head']['ref'],'head_sha':pr['head']['sha']},
+            'changed_migrations':changed_migrations,'expected_migrations':expected_migrations,'checks':checks,
+          }
+          (root/'github-authority.json').write_text(json.dumps(payload, indent=2)+'\n')
+          (root/'migration-allowlist.json').write_text(json.dumps(expected_migrations, indent=2)+'\n')
+          if payload['status'] != 'PASS': stop('RELEASE_STATE_OR_MIGRATION_SET_INVALID', payload)
+          PY
+
+      - name: Checkout immutable release head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify canonical migration blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_GIT_SHA"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path(os.environ['EVIDENCE_DIR'])
+          specs = {
+            'pr546_db': {
+              'supabase/migrations/20260904192129_payment_request_exception_quick_approve_prod.sql':'07c696220dcb3f1aef212611cee286a8a586edd2',
+            },
+            'pr547_db': {
+              'supabase/migrations/20260904194016_partida_predictions_prod.sql':'59236bd270d8957a9f3f5479837db67b17e58837',
+              'supabase/migrations/20260904194019_partida_unsure_prod.sql':'19ea7af46c04e2be22426a03f4b44658101ad8af',
+              'supabase/migrations/20260904194022_partida_predictions_seed_prod.sql':'7ad75b5aaa7ab86b2ab6028c55d6f8620dda9d77',
+            },
+          }
+          expected = specs[os.environ['RELEASE_KIND']]
+          evidence = {}
+          for path, blob in expected.items():
+            p = pathlib.Path(path)
+            if not p.is_file(): raise SystemExit('MIGRATION_FILE_MISSING:'+path)
+            actual = subprocess.check_output(['git','hash-object',path], text=True).strip()
+            if actual != blob: raise SystemExit(f'MIGRATION_BLOB_MISMATCH:{path}:{actual}')
+            import hashlib
+            evidence[path] = {'git_blob':actual,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
+          (root/'migration-bytes.json').write_text(json.dumps(evidence, indent=2)+'\n')
+          PY
+
+      - name: Verify fixed PROD identity and backup availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { printf '%s\n' "STOP / $1" > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF" || fail PROD_PROJECT_IDENTITY_MISMATCH
+          test "$SUPABASE_PROJECT_REF_PROD" != "$FORBIDDEN_DEV_REF" || fail PROD_PROJECT_IDENTITY_MISMATCH
+          test -n "$SUPABASE_ACCESS_TOKEN" || fail SUPABASE_ACCESS_TOKEN_MISSING
+          test -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL" || fail PROD_DATABASE_URL_MISSING
+          printf '::add-mask::%s\n' "$SUPABASE_ACCESS_TOKEN"
+          printf '::add-mask::%s\n' "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          curl --silent --show-error --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF" > "$RUNNER_TEMP/prod-project.json"
+          curl --silent --show-error --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF/database/backups" > "$RUNNER_TEMP/prod-backups.json"
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.parse
+          root=pathlib.Path(os.environ['EVIDENCE_DIR'])
+          project=json.loads(pathlib.Path(os.environ['RUNNER_TEMP']+'/prod-project.json').read_text())
+          payload=json.loads(pathlib.Path(os.environ['RUNNER_TEMP']+'/prod-backups.json').read_text())
+          backups=payload.get('backups',[]) if isinstance(payload,dict) else payload
+          pitr=bool(payload.get('pitr_enabled',False)) if isinstance(payload,dict) else False
+          good=[x for x in backups if str(x.get('status','')).lower() in ('completed','success')]
+          raw=os.environ['SUPABASE_PROD_SESSION_POOLER_DB_URL']
+          url=urllib.parse.urlsplit(raw)
+          user=urllib.parse.unquote(url.username or '')
+          checks={
+            'project_ref':str(project.get('id') or project.get('ref') or '')==os.environ['EXPECTED_PROD_REF'],
+            'project_status':project.get('status')=='ACTIVE_HEALTHY',
+            'pooler_host':(url.hostname or '').lower().endswith('.pooler.supabase.com'),
+            'pooler_user':user=='postgres.'+os.environ['EXPECTED_PROD_REF'],
+            'pooler_port':url.port==5432,
+            'pooler_password':bool(url.password),
+            'backup_or_pitr':pitr or bool(good),
+            'dev_ref_absent':os.environ['FORBIDDEN_DEV_REF'] not in raw,
+          }
+          out={'status':'PASS' if all(checks.values()) else 'STOP','checks':checks,'pitr_enabled':pitr,'successful_backups':len(good)}
+          (root/'prod-identity-backup.json').write_text(json.dumps(out,indent=2)+'\n')
+          if out['status']!='PASS': raise SystemExit('PROD_IDENTITY_OR_BACKUP_INVALID')
+          PY
+          rm -f "$RUNNER_TEMP/prod-project.json" "$RUNNER_TEMP/prod-backups.json"
+
+      - name: Install pinned Supabase CLI and PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" --version | tee "$EVIDENCE_DIR/supabase-version.txt"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" db push --help >/dev/null
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-client
+          fi
+
+      - name: Read-only schema and tenant preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          roq() {
+            PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=5000 -c application_name=flux_546_547_preflight" \
+              psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -c "$1"
+          }
+          identity="$(roq "select session_user||'|'||current_user||'|'||current_setting('transaction_read_only');")"
+          IFS='|' read -r session_role current_role read_only <<< "$identity"
+          [[ "$read_only" = on ]] || { printf '%s\n' 'STOP / PROD_READ_ONLY_IDENTITY_INVALID' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ "$session_role" = postgres || "$session_role" = "postgres.${EXPECTED_PROD_REF}" ]] || { printf '%s\n' 'STOP / PROD_READ_ONLY_IDENTITY_INVALID' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          [[ "$current_role" = postgres || "$current_role" = "postgres.${EXPECTED_PROD_REF}" ]] || { printf '%s\n' 'STOP / PROD_READ_ONLY_IDENTITY_INVALID' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+
+          python3 - <<'PY'
+          import json, os, pathlib
+          root=pathlib.Path(os.environ['EVIDENCE_DIR'])
+          allow=json.loads((root/'migration-allowlist.json').read_text())
+          versions=[pathlib.Path(x).name.split('_',1)[0] for x in allow]
+          (root/'target-versions.json').write_text(json.dumps(versions,indent=2)+'\n')
+          PY
+          versions_csv="$(jq -r 'map("'"'"'" + . + "'"'"'")|join(",")' "$EVIDENCE_DIR/target-versions.json")"
+          target_count="$(roq "select count(*) from supabase_migrations.schema_migrations where version in ($versions_csv);")"
+          [[ "$target_count" = 0 ]] || { printf '%s\n' 'STOP / TARGET_MIGRATION_ALREADY_PRESENT' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+
+          if [[ "$RELEASE_KIND" = pr546_db ]]; then
+            prereq="$(roq "select to_regclass('public.payment_requests') is not null and to_regclass('public.notification_events') is not null and to_regclass('public.profiles') is not null and to_regprocedure('public.current_profile_id()') is not null;")"
+            [[ "$prereq" = t ]] || { printf '%s\n' 'STOP / PR546_DB_PREREQUISITE_MISSING' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          else
+            prereq="$(roq "select to_regclass('public.payment_requests') is not null and to_regclass('public.companies') is not null and to_regprocedure('public.create_payment_request(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text)') is not null and to_regprocedure('public.create_payment_request_with_document(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text,text)') is not null and exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='create_reimbursement_request_with_documents') and exists(select 1 from public.companies where id='9680353c-9b86-4730-82e1-fce664f048a2'::uuid) and exists(select 1 from public.companies where id='68b61801-74c0-44ea-a33b-f20e4bf53aa7'::uuid);")"
+            [[ "$prereq" = t ]] || { printf '%s\n' 'STOP / PR547_DB_PREREQUISITE_OR_TENANT_IDENTITY_MISSING' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          fi
+
+          roq "select json_build_object(
+            'payment_requests_count',(select count(*) from public.payment_requests),
+            'payment_requests_core_digest',(select md5(coalesce(string_agg(md5(json_build_object('id',id,'request_number',request_number,'status',status,'amount_requested',amount_requested,'proveedor_id',proveedor_id,'requested_by',requested_by,'approver_id',approver_id,'budget_category_id',budget_category_id,'beneficiary_profile_id',beneficiary_profile_id)::text),'' order by id::text),'')) from public.payment_requests),
+            'notification_events_count',(select count(*) from public.notification_events),
+            'notification_events_digest',(select md5(coalesce(string_agg(md5(to_jsonb(n)::text),'' order by n.id::text),'')) from public.notification_events n)
+          )::text;" > "$EVIDENCE_DIR/data-before.json"
+          printf '%s\n' PASS > "$EVIDENCE_DIR/read-only-preflight.txt"
+
+      - name: Build synthetic exact migration ledger and dry-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          RELEASE_DIR="$RUNNER_TEMP/exact-release"
+          mkdir -p "$RELEASE_DIR/supabase/migrations"
+          printf 'project_id = "flux-546-547-exact-release"\n' > "$RELEASE_DIR/supabase/config.toml"
+          PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=flux_546_547_history' \
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 \
+            -c "begin transaction read only; select version from supabase_migrations.schema_migrations order by version; rollback;" \
+            > "$RUNNER_TEMP/prod-history.txt"
+          while IFS= read -r version; do
+            [[ "$version" =~ ^[0-9]+$ ]] || { echo REMOTE_MIGRATION_HISTORY_INVALID >&2; exit 1; }
+            : > "$RELEASE_DIR/supabase/migrations/${version}_remote_history.sql"
+          done < "$RUNNER_TEMP/prod-history.txt"
+          while IFS= read -r path; do
+            cp "$path" "$RELEASE_DIR/supabase/migrations/$(basename "$path")"
+          done < <(jq -r '.[]' "$EVIDENCE_DIR/migration-allowlist.json")
+          (
+            cd "$RELEASE_DIR"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push \
+              --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --include-all --dry-run 2>&1 \
+              | tee "$EVIDENCE_DIR/db-dry-run.txt"
+          )
+          while IFS= read -r path; do
+            grep -Fq "$(basename "$path" .sql)" "$EVIDENCE_DIR/db-dry-run.txt" || { echo "DRY_RUN_TARGET_MISSING:$path" >&2; exit 1; }
+          done < <(jq -r '.[]' "$EVIDENCE_DIR/migration-allowlist.json")
+          if [[ "$MODE" = preflight ]]; then
+            printf '%s\n' 'PASS / ZERO_WRITE_PREFLIGHT / EXACT_SYNTHETIC_LEDGER' > "$EVIDENCE_DIR/result.txt"
+          fi
+
+      - name: Revalidate authority immediately before apply
+        if: inputs.mode == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request
+          repo=os.environ['GITHUB_REPOSITORY']; token=os.environ['GH_TOKEN']
+          pr=int(os.environ['RELEASE_PR_NUMBER']); target=os.environ['TARGET_GIT_SHA'].lower()
+          def api(path):
+            req=urllib.request.Request('https://api.github.com'+path,headers={'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28','User-Agent':'flux-prod-546-547-recheck'})
+            with urllib.request.urlopen(req,timeout=30) as response: return json.load(response)
+          live=api(f'/repos/{repo}/pulls/{pr}')
+          main=api(f'/repos/{repo}/git/ref/heads/main')['object']['sha'].lower()
+          if live['state']!='open' or live.get('merged') or live['base']['ref']!='main' or live['head']['sha'].lower()!=target:
+            raise SystemExit('RELEASE_AUTHORITY_DRIFT')
+          if os.environ['GITHUB_SHA'].lower()!=main:
+            raise SystemExit('CONTROL_PLANE_MAIN_DRIFT')
+          PY
+
+      - name: Apply exact synthetic ledger and run postchecks
+        if: inputs.mode == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          RELEASE_DIR="$RUNNER_TEMP/exact-release"
+          (
+            cd "$RELEASE_DIR"
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" db push \
+              --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --include-all --yes 2>&1 \
+              | tee "$EVIDENCE_DIR/db-apply.txt"
+          )
+          psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/data-after.json"
+          begin transaction read only;
+          select json_build_object(
+            'payment_requests_count',(select count(*) from public.payment_requests),
+            'payment_requests_core_digest',(select md5(coalesce(string_agg(md5(json_build_object('id',id,'request_number',request_number,'status',status,'amount_requested',amount_requested,'proveedor_id',proveedor_id,'requested_by',requested_by,'approver_id',approver_id,'budget_category_id',budget_category_id,'beneficiary_profile_id',beneficiary_profile_id)::text),'' order by id::text),'')) from public.payment_requests),
+            'notification_events_count',(select count(*) from public.notification_events),
+            'notification_events_digest',(select md5(coalesce(string_agg(md5(to_jsonb(n)::text),'' order by n.id::text),'')) from public.notification_events n)
+          )::text;
+          rollback;
+          SQL
+          cmp -s "$EVIDENCE_DIR/data-before.json" "$EVIDENCE_DIR/data-after.json" || { printf '%s\n' 'STOP / UNEXPECTED_BUSINESS_DATA_CHANGE' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+
+          if [[ "$RELEASE_KIND" = pr546_db ]]; then
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/schema-postcheck.json"
+            begin transaction read only;
+            select json_build_object(
+              'ledger',(select count(*) from supabase_migrations.schema_migrations where version='20260904192129'),
+              'uses_table',to_regclass('public.payment_request_exception_quick_approval_uses') is not null,
+              'runtime_config',to_regprocedure('public.get_payment_request_exception_quick_approval_runtime_config()') is not null,
+              'token_material',exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='get_payment_request_exception_quick_approval_token_material'),
+              'approve_rpc',exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='approve_payment_request_exception_from_quick_link')
+            )::text;
+            rollback;
+            SQL
+            jq -e '.ledger==1 and .uses_table and .runtime_config and .token_material and .approve_rpc' "$EVIDENCE_DIR/schema-postcheck.json" >/dev/null
+          else
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 <<'SQL' > "$EVIDENCE_DIR/schema-postcheck.json"
+            begin transaction read only;
+            select json_build_object(
+              'ledger',(select count(*) from supabase_migrations.schema_migrations where version in ('20260904194016','20260904194019','20260904194022')),
+              'table_exists',to_regclass('public.partida_predictions') is not null,
+              'operadora',(select count(*) from public.partida_predictions where company_id='9680353c-9b86-4730-82e1-fce664f048a2'::uuid),
+              'fersana',(select count(*) from public.partida_predictions where company_id='68b61801-74c0-44ea-a33b-f20e4bf53aa7'::uuid),
+              'column_exists',exists(select 1 from information_schema.columns where table_schema='public' and table_name='payment_requests' and column_name='partida_unsure'),
+              'create_rpc',to_regprocedure('public.create_payment_request(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text,boolean)') is not null,
+              'document_rpc',to_regprocedure('public.create_payment_request_with_document(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text,text,boolean)') is not null
+            )::text;
+            rollback;
+            SQL
+            jq -e '.ledger==3 and .table_exists and .operadora==98 and .fersana==62 and .column_exists and .create_rpc and .document_rpc' "$EVIDENCE_DIR/schema-postcheck.json" >/dev/null
+          fi
+          printf '%s\n' 'PASS / EXACT_DB_APPLY / LEDGER_RECORDED / POSTCHECKS_PASS / NO_UNEXPECTED_BUSINESS_DATA_CHANGE' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Cleanup DB runner
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          unset SUPABASE_ACCESS_TOKEN SUPABASE_PROD_SESSION_POOLER_DB_URL PGSSLMODE PGCONNECT_TIMEOUT
+          rm -f "$RUNNER_TEMP/prod-history.txt" "$RUNNER_TEMP/prod-project.json" "$RUNNER_TEMP/prod-backups.json"
+          printf '%s\n' PASS > "$EVIDENCE_DIR/cleanup.txt"
+
+      - name: Upload sanitized DB evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flux-prod-546-547-db-${{ github.run_id }}
+          path: ${{ runner.temp }}/flux-prod-release-546-547-db
+          if-no-files-found: error
+          retention-days: 30
+
+  edge-release:
+    name: Exact PR546 Edge ${{ inputs.mode }}
+    if: inputs.release_kind == 'pr546_edges'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: supabase-production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode }}
+      RELEASE_PR_NUMBER: ${{ inputs.release_pr_number }}
+      TARGET_GIT_SHA: ${{ inputs.target_git_sha }}
+      CONFIRM_PROD: ${{ inputs.confirm_prod }}
+      CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+
+    steps:
+      - name: Initialize sanitized edge evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/flux-prod-release-546-edges"
+          mkdir -p "$EVIDENCE_DIR"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' 'NOT_RUN' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Validate merged PR546 and live main authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re, urllib.request
+          root=pathlib.Path(os.environ['EVIDENCE_DIR'])
+          def stop(code):
+            (root/'result.txt').write_text(f'STOP / {code}\n'); raise SystemExit(code)
+          if os.environ['MODE'] not in ('preflight','apply'): stop('MODE_INVALID')
+          if os.environ['GITHUB_REF']!='refs/heads/main': stop('MAIN_REF_REQUIRED')
+          if os.environ['CONFIRM_PROD']!=os.environ['EXPECTED_PROD_REF']: stop('PROD_CONFIRMATION_MISMATCH')
+          if os.environ['RELEASE_PR_NUMBER']!='546': stop('PR_NUMBER_MISMATCH')
+          if not re.fullmatch(r'[0-9a-f]{40}',os.environ['TARGET_GIT_SHA'].lower()): stop('TARGET_SHA_INVALID')
+          if os.environ['MODE']=='apply' and os.environ['CONFIRM_APPLY']!='DEPLOY-PR546-EDGES': stop('EXPLICIT_APPLY_CONFIRMATION_REQUIRED')
+          if os.environ['MODE']=='preflight' and os.environ['CONFIRM_APPLY']: stop('APPLY_CONFIRMATION_FORBIDDEN_IN_PREFLIGHT')
+          repo=os.environ['GITHUB_REPOSITORY']; token=os.environ['GH_TOKEN']
+          def api(path):
+            req=urllib.request.Request('https://api.github.com'+path,headers={'Accept':'application/vnd.github+json','Authorization':'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28','User-Agent':'flux-prod-546-edge-control'})
+            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          main=api(f'/repos/{repo}/git/ref/heads/main')['object']['sha'].lower()
+          pr=api(f'/repos/{repo}/pulls/546')
+          checks={
+            'workflow_sha_is_main':os.environ['GITHUB_SHA'].lower()==main,
+            'target_is_main':os.environ['TARGET_GIT_SHA'].lower()==main,
+            'pr_merged':bool(pr.get('merged')),
+            'pr_base_main':pr['base']['ref']=='main',
+          }
+          out={'status':'PASS' if all(checks.values()) else 'STOP','main_sha':main,'checks':checks,'pr_merge_sha':pr.get('merge_commit_sha')}
+          (root/'github-authority.json').write_text(json.dumps(out,indent=2)+'\n')
+          if out['status']!='PASS':stop('PR546_NOT_MERGED_OR_MAIN_DRIFT')
+          PY
+
+      - name: Checkout immutable live main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.target_git_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify certified Edge source blobs and DB gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF"
+          test "$SUPABASE_PROJECT_REF_PROD" != "$FORBIDDEN_DEV_REF"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          printf '::add-mask::%s\n' "$SUPABASE_ACCESS_TOKEN"
+          printf '::add-mask::%s\n' "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          test "$(git hash-object supabase/functions/notification-dispatcher/index.ts)" = '3be0200a980ee48a49ab857a21a0e6fa19676178'
+          test "$(git hash-object supabase/functions/payment-request-exception-quick-approve/index.ts)" = 'fd23dc1830cef160a009f9dfea3e2a01718d6ae7'
+          export PGSSLMODE=require PGCONNECT_TIMEOUT=20
+          db_gate="$(PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=flux_546_edge_gate' psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -c "begin transaction read only; select (select count(*)=1 from supabase_migrations.schema_migrations where version='20260904192129') and to_regclass('public.payment_request_exception_quick_approval_uses') is not null and to_regprocedure('public.get_payment_request_exception_quick_approval_runtime_config()') is not null; rollback;")"
+          [[ "$db_gate" = t ]] || { printf '%s\n' 'STOP / PR546_DB_GATE_NOT_APPLIED' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          enabled="$(PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=60000 -c application_name=flux_546_edge_flag' psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" -X -Atq -v ON_ERROR_STOP=1 -c "begin transaction read only; select coalesce((public.get_payment_request_exception_quick_approval_runtime_config()->>'enabled')::boolean,false); rollback;")"
+          [[ "$enabled" = f ]] || { printf '%s\n' 'STOP / QUICK_APPROVE_MUST_REMAIN_OFF' > "$EVIDENCE_DIR/result.txt"; exit 1; }
+          printf '%s\n' 'quick_approve_enabled=false' > "$EVIDENCE_DIR/runtime-flag.txt"
+
+      - name: Set up pinned Supabase CLI and preflight function list
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" --version | tee "$EVIDENCE_DIR/supabase-version.txt"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions deploy --help > "$EVIDENCE_DIR/functions-deploy-help.txt"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions list --project-ref "$EXPECTED_PROD_REF" | tee "$EVIDENCE_DIR/functions-before.txt"
+          if [[ "$MODE" = preflight ]]; then
+            printf '%s\n' 'PASS / ZERO_WRITE_EDGE_PREFLIGHT / DB_APPLIED / QUICK_APPROVE_OFF / SOURCE_BLOBS_EXACT' > "$EVIDENCE_DIR/result.txt"
+          fi
+
+      - name: Deploy exactly PR546 Edge Functions without secret changes or invocation
+        if: inputs.mode == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          [[ "$current_main" = "$TARGET_GIT_SHA" ]]
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions deploy payment-request-exception-quick-approve \
+            --project-ref "$EXPECTED_PROD_REF" --no-verify-jwt --use-api \
+            > "$EVIDENCE_DIR/quick-deploy-stdout.txt" 2> "$EVIDENCE_DIR/quick-deploy-stderr.txt"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions deploy notification-dispatcher \
+            --project-ref "$EXPECTED_PROD_REF" --no-verify-jwt --use-api \
+            > "$EVIDENCE_DIR/dispatcher-deploy-stdout.txt" 2> "$EVIDENCE_DIR/dispatcher-deploy-stderr.txt"
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" functions list --project-ref "$EXPECTED_PROD_REF" | tee "$EVIDENCE_DIR/functions-after.txt"
+          grep -Fq 'payment-request-exception-quick-approve' "$EVIDENCE_DIR/functions-after.txt"
+          grep -Fq 'notification-dispatcher' "$EVIDENCE_DIR/functions-after.txt"
+          printf '%s\n' 'PASS / EXACT_EDGE_DEPLOY / QUICK_APPROVE_OFF / SECRETS_UNCHANGED / FUNCTIONS_NOT_INVOKED' > "$EVIDENCE_DIR/result.txt"
+
+      - name: Cleanup Edge runner
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          unset SUPABASE_ACCESS_TOKEN SUPABASE_PROD_SESSION_POOLER_DB_URL PGSSLMODE PGCONNECT_TIMEOUT
+          printf '%s\n' PASS > "$EVIDENCE_DIR/cleanup.txt"
+
+      - name: Upload sanitized Edge evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flux-prod-546-edges-${{ github.run_id }}
+          path: ${{ runner.temp }}/flux-prod-release-546-edges
+          if-no-files-found: error
+          retention-days: 30
