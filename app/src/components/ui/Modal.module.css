@@ -7,5 +7,16 @@
 .head p { font-size: 11.5px; margin-top: 2px; }
 .iconBtn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; padding: 4px 8px; border-radius: 7px; }
 .iconBtn:hover { background: var(--bg-hover); color: var(--text-1); }
-.scroll { overflow-y: auto; padding: 18px 22px; }
+.scroll { min-height: 0; overflow-y: auto; padding: 18px 22px; overscroll-behavior: contain; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
+.head, .actions { flex-shrink: 0; }
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  .dialog, .dialog.lg { max-width: calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .content { max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .head { padding: 16px; }
+  .head > div { min-width: 0; overflow-wrap: anywhere; }
+  .iconBtn { min-width: 44px; min-height: 44px; flex-shrink: 0; }
+  .scroll { padding: 16px; }
+  .actions { padding: 12px 16px; flex-wrap: wrap; }
+  .actions > button { flex: 1 1 auto; }
+}

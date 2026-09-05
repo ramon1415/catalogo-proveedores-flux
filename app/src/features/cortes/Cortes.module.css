@@ -160,6 +160,12 @@
 }
 
 @media (max-width: 720px) {
+  .phead { flex-direction: column; }
+  .toolbar { width: 100%; }
+  .toolbar > button { flex: 1 1 auto; }
+  .sectionHead { flex-wrap: wrap; }
+  .confirmRow { flex-wrap: wrap; gap: 4px; }
+  .confirmRow strong { overflow-wrap: anywhere; }
   .workspace { display: block; height: auto; overflow: visible; }
   .list { max-height: 260px; overflow: auto; }
   .detail { overflow: visible; }

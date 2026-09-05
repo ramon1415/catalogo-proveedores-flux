@@ -80,7 +80,7 @@
 .modalHead p { font-size: 11.5px; margin-top: 2px; color: var(--text-3); }
 .iconBtn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; padding: 4px 8px; border-radius: 7px; }
 .iconBtn:hover { background: var(--bg-hover); color: var(--text-1); }
-.modalScroll { overflow-y: auto; padding: 18px 22px; }
+.modalScroll { min-height: 0; overflow-y: auto; padding: 18px 22px; overscroll-behavior: contain; }
 .modalActions { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
 .modalActions .spacerBtn { margin-right: auto; }
 
@@ -248,6 +248,8 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 .itemsHead span { color: var(--text-3); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
 .itemsRow { padding: 9px 0; border-top: 1px solid var(--border); }
 .itemsFile { display: grid; gap: 3px; min-width: 0; }
+.itemField { display: grid; gap: 5px; min-width: 0; }
+.itemFieldLabel { display: none; color: var(--text-2); font-size: 11px; font-weight: 600; }
 .itemsFile input[type="file"] { font-size: 10.5px; color: var(--text-3); max-width: 100%; }
 .itemsFooter { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 .itemsTotals { display: grid; gap: 2px; justify-items: end; text-align: right; }
@@ -261,6 +263,45 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 
 @media (max-width: 1100px) { .requestLayout { grid-template-columns: 1fr; } .summaryPanel { position: static; } }
 @media (max-width: 900px) { .statsGrid { grid-template-columns: repeat(2, 1fr); } .toolbar { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 1000px) { .itemsHead { display: none; } .itemsRow { grid-template-columns: 1fr 1fr; } .itemsFile { grid-column: 1 / -1; } }
+@media (max-width: 1000px) { .itemsHead { display: none; } .itemFieldLabel { display: block; } .itemsRow { grid-template-columns: 1fr 1fr; } .itemsFile { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .formGrid { grid-template-columns: 1fr; } .extraSummary { grid-template-columns: 1fr 1fr; } .refGrid, .detailGrid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .statsGrid { grid-template-columns: 1fr; } .toolbar { grid-template-columns: 1fr; } }
+
+@media (max-width: 760px) {
+  .phead { flex-direction: column; gap: 12px; margin-bottom: 12px; }
+  .phead > div { max-width: 100%; flex-wrap: wrap; }
+  .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .kpi { padding: 12px; min-width: 0; }
+  .kpiValue { font-size: 20px; overflow-wrap: anywhere; }
+  .tableCard { min-width: 0; flex: 0 0 auto; min-height: 320px; }
+  .tableWrap { flex: 0 1 auto; max-height: 60dvh; overscroll-behavior-x: contain; }
+  .toolbar { padding: 12px; }
+  .searchBox input { width: 100%; }
+  .filterSummary { flex-wrap: wrap; }
+  .dialog.wide, .dialog.detail, .dialog.narrow, .dialog { max-width: calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .modal { max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .modalHead, .modalActions { flex-shrink: 0; padding: 12px 14px; }
+  .modalHead > div { min-width: 0; }
+  .modalHead h2 { overflow-wrap: anywhere; }
+  .modalScroll { padding: 14px; }
+  .modalActions { flex-wrap: wrap; gap: 8px; }
+  .modalActions > button { flex: 1 1 auto; justify-content: center; }
+  .modalActions .spacerBtn { margin-right: 0; }
+  .iconBtn, .providerPlusBtn { min-width: 44px; min-height: 44px; flex-shrink: 0; }
+  .formSection, .summaryPanel, .decisionCard { padding: 12px; min-width: 0; }
+  .formGrid label { min-width: 0; }
+  .checkboxCard { min-height: 44px; }
+  .comboList li { min-height: 44px; }
+  .dataRow { flex-direction: column; gap: 4px; }
+  .dataValue { text-align: left; }
+  .amountBig { font-size: 24px; overflow-wrap: anywhere; }
+  .fundSummary { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .itemsRow { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .itemsRow > button { justify-self: end; min-width: 44px; }
+  .itemsFooter { align-items: stretch; flex-direction: column; }
+  .itemsTotals { justify-items: start; text-align: left; }
+  .notice { flex-wrap: wrap; }
+  .decisionActions > button { flex: 1 1 100%; }
+}
