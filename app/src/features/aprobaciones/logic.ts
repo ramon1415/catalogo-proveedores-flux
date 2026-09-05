@@ -56,24 +56,41 @@ export function isException(r: PaymentRequest): boolean {
     ['pending', 'requested'].includes(r.exception_status || '')
   )
 }
+const APPROVAL_HISTORY_APPROVED_ACTIONS = new Set(['approved', 'exception_approved'])
+const APPROVAL_HISTORY_CLOSED_ACTIONS = new Set(['rejected', 'exception_rejected'])
+
+// La cola de aprobación debe conservar la decisión aunque la solicitud ya
+// haya avanzado a Finanzas, layout o pago. El status actual representa el
+// flujo operativo; el historial representa la decisión del aprobador.
+export function approvalDecisionColumn(r: PaymentRequest): ColumnKey | null {
+  const action = r.__approvalEvent?.action || ''
+  if (APPROVAL_HISTORY_APPROVED_ACTIONS.has(action)) return 'approved'
+  if (APPROVAL_HISTORY_CLOSED_ACTIONS.has(action)) return 'closed'
+  if (r.exception_status === 'approved' || Boolean(r.exception_approved_at)) return 'approved'
+  if (r.exception_status === 'rejected') return 'closed'
+  if (['approved', 'finance_validation', 'paid'].includes(r.status || '')) return 'approved'
+  if (['rejected', 'cancelled'].includes(r.status || '')) return 'closed'
+  return null
+}
+
 export function columnKey(r: PaymentRequest): ColumnKey {
-  if (r.status === 'approved') return 'approved'
-  if (r.status === 'rejected' || r.status === 'cancelled') return 'closed'
+  const historyColumn = approvalDecisionColumn(r)
+  if (historyColumn) return historyColumn
   if (isChanges(r)) return 'changes'
   if (isException(r)) return 'exceptions'
   return 'pending'
 }
 
-// Filas relevantes para la bandeja (misma ventana de 100 días para el historial).
+// Filas relevantes para la bandeja. Las decisiones permanecen 100 días en
+// Historial aunque la solicitud avance a finance_validation o paid.
 export function approvalRows(requests: PaymentRequest[]): PaymentRequest[] {
   const cutoff = Date.now() - 100 * 24 * 60 * 60 * 1000
   return requests.filter((r) => {
-    if (['paid', 'cancelled'].includes(r.status || '')) return false
-    if (isPending(r) || isException(r) || isChanges(r)) return true
-    if (r.status === 'approved' || r.status === 'rejected') {
+    if (approvalDecisionColumn(r)) {
       const t = new Date(historyRelevantDate(r) || r.created_at || '').getTime()
       return Number.isNaN(t) || t >= cutoff
     }
+    if (isPending(r) || isException(r) || isChanges(r)) return true
     return false
   })
 }
@@ -101,9 +118,12 @@ export function approvalDateMeta(request: PaymentRequest): DateMeta | null {
   if (event?.created_at) return { label: decisionDateLabel(event.action), value: event.created_at }
   if (request.exception_approved_at) return { label: 'Excepción autorizada', value: request.exception_approved_at }
   if (request.approved_at) return { label: 'Aprobada', value: request.approved_at }
-  if ((request.status === 'approved' || request.status === 'rejected') && request.updated_at) {
+  if (['approved', 'finance_validation', 'paid'].includes(request.status || '') && request.updated_at) {
+    return { label: 'Aprobada/actualizada', value: request.updated_at }
+  }
+  if (['rejected', 'cancelled'].includes(request.status || '') && request.updated_at) {
     return {
-      label: request.status === 'rejected' ? 'Rechazada/actualizada' : 'Aprobada/actualizada',
+      label: request.status === 'cancelled' ? 'Cerrada/actualizada' : 'Rechazada/actualizada',
       value: request.updated_at,
     }
   }
@@ -226,7 +246,7 @@ export function decisionActionsFor(
   if (request.approver_id && request.approver_id !== profileId) {
     return { kind: 'message', text: 'Asignada a otro aprobador' }
   }
-  if (['approved', 'rejected', 'paid', 'cancelled'].includes(request.status || '') && !isException(request)) {
+  if (approvalDecisionColumn(request)) {
     return { kind: 'message', text: 'Esta solicitud ya tiene una decision registrada' }
   }
   if (isException(request)) {
