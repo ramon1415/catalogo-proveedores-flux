@@ -1,0 +1,222 @@
+name: Apply approval history downstream-status hotfix v3
+
+on:
+  push:
+    branches:
+      - hotfix/approval-history-downstream-statuses-prod
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[approval-history-fixed]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout hotfix branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Apply focused history classification fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          logic = Path('app/src/features/aprobaciones/logic.ts')
+          replace_once(
+              logic,
+              """export function columnKey(r: PaymentRequest): ColumnKey {
+            if (r.status === 'approved') return 'approved'
+            if (r.status === 'rejected' || r.status === 'cancelled') return 'closed'
+            if (isChanges(r)) return 'changes'
+            if (isException(r)) return 'exceptions'
+            return 'pending'
+          }
+
+          // Filas relevantes para la bandeja (misma ventana de 100 días para el historial).
+          export function approvalRows(requests: PaymentRequest[]): PaymentRequest[] {
+            const cutoff = Date.now() - 100 * 24 * 60 * 60 * 1000
+            return requests.filter((r) => {
+              if (['paid', 'cancelled'].includes(r.status || '')) return false
+              if (isPending(r) || isException(r) || isChanges(r)) return true
+              if (r.status === 'approved' || r.status === 'rejected') {
+                const t = new Date(historyRelevantDate(r) || r.created_at || '').getTime()
+                return Number.isNaN(t) || t >= cutoff
+              }
+              return false
+            })
+          }""",
+              """const APPROVAL_HISTORY_APPROVED_ACTIONS = new Set(['approved', 'exception_approved'])
+          const APPROVAL_HISTORY_CLOSED_ACTIONS = new Set(['rejected', 'exception_rejected'])
+
+          // La cola de aprobación debe conservar la decisión aunque la solicitud ya
+          // haya avanzado a Finanzas, layout o pago. El status actual representa el
+          // flujo operativo; el historial representa la decisión del aprobador.
+          export function approvalDecisionColumn(r: PaymentRequest): ColumnKey | null {
+            const action = r.__approvalEvent?.action || ''
+            if (APPROVAL_HISTORY_APPROVED_ACTIONS.has(action)) return 'approved'
+            if (APPROVAL_HISTORY_CLOSED_ACTIONS.has(action)) return 'closed'
+            if (r.exception_status === 'approved' || Boolean(r.exception_approved_at)) return 'approved'
+            if (r.exception_status === 'rejected') return 'closed'
+            if (['approved', 'finance_validation', 'paid'].includes(r.status || '')) return 'approved'
+            if (['rejected', 'cancelled'].includes(r.status || '')) return 'closed'
+            return null
+          }
+
+          export function columnKey(r: PaymentRequest): ColumnKey {
+            const historyColumn = approvalDecisionColumn(r)
+            if (historyColumn) return historyColumn
+            if (isChanges(r)) return 'changes'
+            if (isException(r)) return 'exceptions'
+            return 'pending'
+          }
+
+          // Filas relevantes para la bandeja. Las decisiones permanecen 100 días en
+          // Historial aunque la solicitud avance a finance_validation o paid.
+          export function approvalRows(requests: PaymentRequest[]): PaymentRequest[] {
+            const cutoff = Date.now() - 100 * 24 * 60 * 60 * 1000
+            return requests.filter((r) => {
+              if (approvalDecisionColumn(r)) {
+                const t = new Date(historyRelevantDate(r) || r.created_at || '').getTime()
+                return Number.isNaN(t) || t >= cutoff
+              }
+              if (isPending(r) || isException(r) || isChanges(r)) return true
+              return false
+            })
+          }""",
+          )
+          replace_once(
+              logic,
+              """  if ((request.status === 'approved' || request.status === 'rejected') && request.updated_at) {
+              return {
+                label: request.status === 'rejected' ? 'Rechazada/actualizada' : 'Aprobada/actualizada',
+                value: request.updated_at,
+              }
+            }""",
+              """  if (['approved', 'finance_validation', 'paid'].includes(request.status || '') && request.updated_at) {
+              return { label: 'Aprobada/actualizada', value: request.updated_at }
+            }
+            if (['rejected', 'cancelled'].includes(request.status || '') && request.updated_at) {
+              return {
+                label: request.status === 'cancelled' ? 'Cerrada/actualizada' : 'Rechazada/actualizada',
+                value: request.updated_at,
+              }
+            }""",
+          )
+          replace_once(
+              logic,
+              """  if (['approved', 'rejected', 'paid', 'cancelled'].includes(request.status || '') && !isException(request)) {
+              return { kind: 'message', text: 'Esta solicitud ya tiene una decision registrada' }
+            }""",
+              """  if (approvalDecisionColumn(request)) {
+              return { kind: 'message', text: 'Esta solicitud ya tiene una decision registrada' }
+            }""",
+          )
+          PY
+
+      - name: Add focused behavior contract
+        shell: bash
+        run: |
+          cat > scripts/qa/approval-history-downstream-statuses.test.mjs <<'EOF'
+          import assert from 'node:assert/strict'
+          import { createRequire } from 'node:module'
+          import { readFileSync } from 'node:fs'
+          import test from 'node:test'
+          import vm from 'node:vm'
+
+          const require = createRequire(import.meta.url)
+          const ts = require('../../app/node_modules/typescript')
+          const source = readFileSync('app/src/features/aprobaciones/logic.ts', 'utf8')
+          const compiled = ts.transpileModule(source, {
+            compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+          }).outputText
+          const module = { exports: {} }
+          const sandbox = {
+            module,
+            exports: module.exports,
+            require(id) {
+              if (id === '../../lib/format') return { normalize: (value) => String(value || '').toLowerCase() }
+              throw new Error(`Unexpected runtime import: ${id}`)
+            },
+            Intl, Date, Number, Set, console,
+          }
+          vm.runInNewContext(compiled, sandbox, { filename: 'logic.js' })
+          const { approvalRows, columnKey, approvalDateMeta, decisionActionsFor } = module.exports
+          const now = new Date().toISOString()
+          const base = {
+            id: 'request', status: 'submitted', created_at: now, updated_at: now,
+            exception_status: null, exception_action: null, exception_approved_at: null,
+            budget_decision: 'aprobable', is_extraordinary_adjustment: false, approver_id: null,
+          }
+
+          test('paid approvals remain in history', () => {
+            const row = { ...base, id: 'fersana-paid', status: 'paid', __approvalEvent: { payment_request_id: 'fersana-paid', action: 'approved', created_at: now } }
+            assert.equal(columnKey(row), 'approved')
+            assert.equal(approvalRows([row]).length, 1)
+            assert.equal(approvalDateMeta(row)?.label, 'Aprobada')
+          })
+          test('finance validation after approval remains in history', () => {
+            const row = { ...base, id: 'operadora-finance', status: 'finance_validation', __approvalEvent: { payment_request_id: 'operadora-finance', action: 'approved', created_at: now } }
+            assert.equal(columnKey(row), 'approved')
+            assert.equal(approvalRows([row]).length, 1)
+          })
+          test('paid fallback remains approved history without event', () => {
+            const row = { ...base, id: 'legacy-paid', status: 'paid' }
+            assert.equal(columnKey(row), 'approved')
+            assert.equal(approvalRows([row]).length, 1)
+            assert.equal(approvalDateMeta(row)?.label, 'Aprobada/actualizada')
+          })
+          test('rejected decisions remain closed history', () => {
+            const row = { ...base, id: 'rejected', __approvalEvent: { payment_request_id: 'rejected', action: 'rejected', created_at: now } }
+            assert.equal(columnKey(row), 'closed')
+            assert.equal(approvalRows([row]).length, 1)
+          })
+          test('undecided submitted stays pending', () => {
+            const row = { ...base, id: 'pending' }
+            assert.equal(columnKey(row), 'pending')
+          })
+          test('paid exception cannot expose approval actions again', () => {
+            const row = { ...base, id: 'paid-exception', status: 'paid', budget_decision: 'bloqueado', is_extraordinary_adjustment: true, __approvalEvent: { payment_request_id: 'paid-exception', action: 'exception_approved', created_at: now } }
+            assert.equal(decisionActionsFor(row, true, 'approver').kind, 'message')
+          })
+          test('history stays bounded to 100 days', () => {
+            const old = new Date(Date.now() - 101 * 24 * 60 * 60 * 1000).toISOString()
+            const row = { ...base, id: 'old-paid', status: 'paid', created_at: old, updated_at: old, __approvalEvent: { payment_request_id: 'old-paid', action: 'approved', created_at: old } }
+            assert.equal(approvalRows([row]).length, 0)
+          })
+          EOF
+          sed -i 's/^          //' scripts/qa/approval-history-downstream-statuses.test.mjs
+
+      - name: Install React dependencies
+        run: npm --prefix app ci
+
+      - name: Run focused contract
+        run: node --test scripts/qa/approval-history-downstream-statuses.test.mjs
+
+      - name: Build production artifact
+        run: npm --prefix app run build
+
+      - name: Commit and push validated files
+        shell: bash
+        run: |
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
+          git add app/src/features/aprobaciones/logic.ts scripts/qa/approval-history-downstream-statuses.test.mjs
+          git commit -m "fix(aprobaciones): conservar historial tras finanzas y pago [approval-history-fixed]"
+          git push origin HEAD:hotfix/approval-history-downstream-statuses-prod
