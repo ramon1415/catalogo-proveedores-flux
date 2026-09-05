@@ -191,11 +191,16 @@ on conflict (company_id, rfc_emisor) do update set
 
 
 -- Resolve every historical candidate to the current PROD budget-category UUID.
--- The raw aggregate carries DEV UUIDs only as provenance; they never commit to PROD.
+-- Rules are deliberately conservative:
+--   1) exact case-sensitive PROD name wins (this disambiguates the two distinct Invernadero rows),
+--   2) one explicit historical typo alias is allowed,
+--   3) exactly two retired historical categories are dropped instead of guessed,
+--   4) every other missing or ambiguous category aborts the entire transaction.
 do $category_precheck$
 declare
   v record;
   v_matches integer;
+  v_target_name text;
 begin
   for v in
     select distinct
@@ -208,6 +213,11 @@ begin
     where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
       and p.source = 'contpaq_historical_2024_2026'
   loop
+    v_target_name := case v.category_name
+      when 'Adquisiciòn de herramientas' then 'Adquisición de herramientas'
+      else v.category_name
+    end;
+
     select count(distinct bc.id)
       into v_matches
     from public.company_cost_center_budget_categories ccb
@@ -215,7 +225,11 @@ begin
     where ccb.company_id = v.company_id
       and coalesce(ccb.active, true)
       and coalesce(bc.active, true)
-      and lower(btrim(bc.name)) = lower(btrim(v.category_name));
+      and btrim(bc.name) = btrim(v_target_name);
+
+    if v_matches = 0 and v.category_name in ('Gastos extraordinarios', 'Servicios y suministros') then
+      continue;
+    end if;
 
     if v.category_name is null or v_matches <> 1 then
       raise exception 'partida_prediction_category_resolution_failed:%:%:%',
@@ -225,29 +239,49 @@ begin
 end
 $category_precheck$;
 
-update public.partida_predictions p
-set partida_candidates = (
-  select jsonb_agg(
-    (candidate.value - 'budget_category_id')
-    || jsonb_build_object('budget_category_id', resolved.id::text)
-    order by candidate.ordinality
-  )
-  from jsonb_array_elements(p.partida_candidates) with ordinality
+with resolved_candidates as (
+  select
+    p.id as prediction_id,
+    coalesce(
+      jsonb_agg(
+        (candidate.value - 'budget_category_id' - 'name')
+        || jsonb_build_object(
+          'budget_category_id', resolved.id::text,
+          'name', resolved.name
+        )
+        order by candidate.ordinality
+      ) filter (where resolved.id is not null),
+      '[]'::jsonb
+    ) as resolved_json,
+    count(resolved.id) as resolved_count
+  from public.partida_predictions p
+  cross join lateral jsonb_array_elements(p.partida_candidates) with ordinality
     as candidate(value, ordinality)
-  cross join lateral (
-    select bc.id
+  left join lateral (
+    select bc.id, bc.name
     from public.company_cost_center_budget_categories ccb
     join public.budget_categories bc on bc.id = ccb.budget_category_id
     where ccb.company_id = p.company_id
       and coalesce(ccb.active, true)
       and coalesce(bc.active, true)
-      and lower(btrim(bc.name)) = lower(btrim(candidate.value->>'name'))
-    group by bc.id
+      and btrim(bc.name) = btrim(
+        case candidate.value->>'name'
+          when 'Adquisiciòn de herramientas' then 'Adquisición de herramientas'
+          else candidate.value->>'name'
+        end
+      )
+    group by bc.id, bc.name
     limit 1
-  ) resolved
+  ) resolved on true
+  where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
+    and p.source = 'contpaq_historical_2024_2026'
+  group by p.id
 )
-where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
-  and p.source = 'contpaq_historical_2024_2026';
+update public.partida_predictions p
+set partida_candidates = rc.resolved_json,
+    is_confident = case when rc.resolved_count = 0 then false else p.is_confident end
+from resolved_candidates rc
+where p.id = rc.prediction_id;
 
 
 do $postcheck$
@@ -259,6 +293,45 @@ begin
   select count(*) into v_fersana from public.partida_predictions where company_id='20cd72aa-f281-4985-931b-a83422404b66'::uuid;
   if v_operadora <> 98 or v_fersana <> 62 then
     raise exception 'partida_prediction_seed_count_mismatch: %/%', v_operadora, v_fersana;
+  end if;
+
+  if exists (
+    select 1
+    from public.partida_predictions p
+    cross join lateral jsonb_array_elements(p.partida_candidates) candidate(value)
+    left join public.company_cost_center_budget_categories ccb
+      on ccb.company_id = p.company_id
+     and ccb.budget_category_id = nullif(candidate.value->>'budget_category_id', '')::uuid
+     and coalesce(ccb.active, true)
+    left join public.budget_categories bc
+      on bc.id = ccb.budget_category_id
+     and coalesce(bc.active, true)
+    where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
+      and p.source = 'contpaq_historical_2024_2026'
+      and bc.id is null
+  ) then
+    raise exception 'partida_prediction_resolved_candidate_invalid';
+  end if;
+
+  if exists (
+    select 1
+    from public.partida_predictions p
+    where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
+      and p.source = 'contpaq_historical_2024_2026'
+      and p.is_confident
+      and jsonb_array_length(p.partida_candidates) = 0
+  ) then
+    raise exception 'partida_prediction_empty_candidate_still_confident';
+  end if;
+
+  if exists (
+    select 1
+    from public.partida_predictions p
+    cross join lateral jsonb_array_elements(p.partida_candidates) candidate(value)
+    where p.company_id in ('144042c1-e493-4256-a86c-cd088a8898ce'::uuid, '20cd72aa-f281-4985-931b-a83422404b66'::uuid)
+      and candidate.value->>'name' in ('Gastos extraordinarios', 'Servicios y suministros', 'Adquisiciòn de herramientas')
+  ) then
+    raise exception 'partida_prediction_stale_candidate_survived';
   end if;
 end
 $postcheck$;
