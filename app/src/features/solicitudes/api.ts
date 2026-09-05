@@ -5,14 +5,14 @@ import type {
   BudgetAvailabilityRow, ApproverCandidate, ApprovalHistoryRow, PaymentReceiptRow,
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
   EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
-  ReimbursementItemInsert, ReimbursementUpdateItem, ReimbursementUpdatePayload,
+  ReimbursementItemInsert, ReimbursementUpdateItem, ReimbursementUpdatePayload, PartidaPrediction, PartidaCandidate,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
 const UPLOAD_BUCKET = 'payment-receipts'
 
 const PAYMENT_REQUEST_COLUMNS =
-  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,created_at,updated_at'
+  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,partida_unsure,created_at,updated_at'
 
 // ── Cargas iniciales (paralelas) ──────────────────────────────────────────
 export async function loadCompanies(): Promise<Company[]> {
@@ -212,6 +212,7 @@ export async function createPaymentRequest(payload: RequestPayload): Promise<any
     p_invoice_uuid: payload.invoice_uuid,
     p_beneficiary_profile_id: payload.beneficiary_profile_id,
     p_request_type: payload.request_type,
+    p_partida_unsure: payload.partida_unsure,
   })
   if (error) throw error
   return data
@@ -243,6 +244,7 @@ export async function createPaymentRequestWithDocument(
     p_beneficiary_profile_id: payload.beneficiary_profile_id,
     p_request_type: payload.request_type,
     p_invoice_storage_path: invoiceStoragePath,
+    p_partida_unsure: payload.partida_unsure,
   })
   if (error) throw error
   return data
@@ -607,6 +609,47 @@ export async function createSignedUrl(bucket: string, path: string, ttl: number)
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, ttl)
   if (error || !data?.signedUrl) return null
   return data.signedUrl
+}
+
+
+// Predicción histórica proveedor(RFC) → partida. Es una sugerencia opcional:
+// cualquier fallo se trata como “sin predicción” y nunca bloquea la captura.
+export async function fetchPartidaPrediction(companyId: string, rfc: string): Promise<PartidaPrediction | null> {
+  const normalizedRfc = (rfc ?? '').trim().toUpperCase()
+  if (!companyId || !normalizedRfc) return null
+  try {
+    const { data, error } = await supabase
+      .from('partida_predictions')
+      .select('rfc_emisor,cuenta_gasto_dominante,share_dominante,n_cfdis,partida_candidates,is_confident')
+      .eq('company_id', companyId)
+      .eq('rfc_emisor', normalizedRfc)
+      .maybeSingle()
+    if (error || !data) return null
+    const row = data as {
+      rfc_emisor: string
+      cuenta_gasto_dominante: string
+      share_dominante: number | string
+      n_cfdis: number
+      partida_candidates: unknown
+      is_confident: boolean
+    }
+    const candidates = Array.isArray(row.partida_candidates)
+      ? (row.partida_candidates as PartidaCandidate[]).filter(
+          (candidate) => candidate && typeof candidate.budget_category_id === 'string',
+        )
+      : []
+    if (!candidates.length) return null
+    return {
+      rfc_emisor: row.rfc_emisor,
+      cuenta_gasto_dominante: row.cuenta_gasto_dominante,
+      share_dominante: Number(row.share_dominante),
+      n_cfdis: row.n_cfdis,
+      partida_candidates: candidates,
+      is_confident: Boolean(row.is_confident),
+    }
+  } catch {
+    return null
+  }
 }
 
 // ── Fondo de efectivo (cash_flow_extension) ────────────────────────────────
