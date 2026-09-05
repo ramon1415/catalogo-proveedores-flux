@@ -1,0 +1,30 @@
+name: Fix CONTPAQ builder gate
+on:
+  push:
+    branches: [release/contpaq-dark-launch-prod-r1]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[builder-gate-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix ROLE_GROUPS naming and self-remove
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/build-contpaq-dark-launch-prod.yml')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('ROLES.SYSADMIN','ROLE_GROUPS.SYSADMIN')
+          s=s.replace('ROLES.ADMIN','ROLE_GROUPS.ADMIN')
+          s=s.replace('ROLES.DIRECTION','ROLE_GROUPS.DIRECTION')
+          p.write_text(s,encoding='utf-8')
+          PY
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git rm .github/workflows/fix-contpaq-builder.yml
+          git add .github/workflows/build-contpaq-dark-launch-prod.yml
+          git commit -m 'chore: corregir ROLE_GROUPS del builder [builder-gate-fixed]'
+          git push origin HEAD:release/contpaq-dark-launch-prod-r1
