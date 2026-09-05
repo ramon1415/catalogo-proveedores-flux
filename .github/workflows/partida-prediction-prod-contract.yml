@@ -100,8 +100,16 @@ jobs:
           grep -Fq 'atomic_reimbursement_wrapper_regressed' "$UNSURE"
 
           grep -Fq 'partida_prediction_company_identity_mismatch' "$SEED"
-          grep -Fq "'9680353c-9b86-4730-82e1-fce664f048a2'" "$SEED"
-          grep -Fq "'68b61801-74c0-44ea-a33b-f20e4bf53aa7'" "$SEED"
+          grep -Fq "'144042c1-e493-4256-a86c-cd088a8898ce'" "$SEED"
+          grep -Fq "'20cd72aa-f281-4985-931b-a83422404b66'" "$SEED"
+          ! grep -Fq "'9680353c-9b86-4730-82e1-fce664f048a2'" "$SEED"
+          ! grep -Fq "'68b61801-74c0-44ea-a33b-f20e4bf53aa7'" "$SEED"
+          grep -Fq 'partida_prediction_category_resolution_failed' "$SEED"
+          grep -Fq 'partida_prediction_resolved_candidate_invalid' "$SEED"
+          grep -Fq 'partida_prediction_empty_candidate_still_confident' "$SEED"
+          grep -Fq 'partida_prediction_stale_candidate_survived' "$SEED"
+          grep -Fq "when 'Adquisiciòn de herramientas' then 'Adquisición de herramientas'" "$SEED"
+          grep -Fq "v.category_name in ('Gastos extraordinarios', 'Servicios y suministros')" "$SEED"
           grep -Fq 'v_operadora <> 98 or v_fersana <> 62' "$SEED"
           grep -Fq 'on conflict (company_id, rfc_emisor) do update set' "$SEED"
           test "$(grep -c "^  ('" supabase/seed/partida_predictions_seed.sql)" -eq 160
@@ -113,5 +121,6 @@ jobs:
 
           echo 'scope=requester_only'
           echo 'seed=98_operadora+62_fersana'
+          echo 'prod_category_resolution=87_unique+2_retired_dropped'
           echo 'pr543b_contpaq=blocked_by_pr498'
           echo 'prod_db_apply=not_part_of_this_contract'
