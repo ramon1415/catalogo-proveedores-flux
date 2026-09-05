@@ -64,10 +64,10 @@ jobs:
           from pathlib import Path
           p = Path('app/src/features/configuracion/logic.ts')
           s = p.read_text(encoding='utf-8')
-          old = "contpaq: [ROLES.SYSADMIN, ROLES.ADMIN, ROLES.DIRECTION]"
+          old = "contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION]"
           if old not in s:
               raise SystemExit('Expected current PROD CONTPAQ access line not found')
-          s = s.replace(old, "contpaq: [ROLES.SYSADMIN]", 1)
+          s = s.replace(old, "contpaq: [ROLE_GROUPS.SYSADMIN]", 1)
           s = s.replace("contpaq: 'Adm/Dir'", "contpaq: 'SysAdmin'", 1)
           p.write_text(s, encoding='utf-8')
           PY
@@ -560,9 +560,9 @@ jobs:
           const api=readFileSync('app/src/features/configuracion/api.ts','utf8')
 
           test('dark launch UI is SysAdmin only',()=>{
-            assert.match(logic,/contpaq:\s*\[ROLES\.SYSADMIN\]/)
-            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLES\.ADMIN/)
-            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLES\.DIRECTION/)
+            assert.match(logic,/contpaq:\s*\[ROLE_GROUPS\.SYSADMIN\]/)
+            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLE_GROUPS\.ADMIN/)
+            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLE_GROUPS\.DIRECTION/)
           })
           test('schema is additive and dedicated',()=>{
             assert.match(schema,/contpaq_dark_launch_access/)
@@ -644,8 +644,8 @@ jobs:
       - name: Commit validated candidate
         shell: bash
         run: |
-          git config user.name 'ramon1415'
-          git config user.email 'ramon@quantta.mx'
+          git config user.name "ramon1415"
+          git config user.email "ramon@quantta.mx"
           git rm .github/workflows/build-contpaq-dark-launch-prod.yml
           git add app/package.json app/package-lock.json \
             app/src/features/configuracion \
@@ -655,5 +655,5 @@ jobs:
             supabase/seed/contpaq \
             scripts/qa/contpaq-dark-launch-prod-contract.test.mjs \
             .github/workflows/contpaq-dark-launch-prod-contract.yml
-          git commit -m 'feat(contpaq): preparar dark launch PROD aislado [contpaq-dark-launch-built]'
+          git commit -m "feat(contpaq): preparar dark launch PROD aislado [contpaq-dark-launch-built]"
           git push origin HEAD:release/contpaq-dark-launch-prod-r1
