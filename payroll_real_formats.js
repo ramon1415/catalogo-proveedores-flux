@@ -13,6 +13,7 @@
     'RFC','CURP','Nombre completo','Banco','Cuenta banco','CLABE',
     'Vales De Despensa','Neto a pagar','Neto en efectivo (sin vales)'
   ]);
+  const OPTIONAL_COVER_HEADERS = Object.freeze(['Retroactivo Vales Despensa']);
   const MAX_SAFE_MINOR = BigInt(Number.MAX_SAFE_INTEGER);
 
   const ISSUE = Object.freeze({
@@ -214,7 +215,7 @@
       cells.forEach(function (value, ref) {
         if (!ref.endsWith('5')) return;
         const label = String(value || '').trim();
-        if (REQUIRED_COVER_HEADERS.includes(label)) headerMap[label] = columnNumber(ref);
+        if (REQUIRED_COVER_HEADERS.includes(label) || OPTIONAL_COVER_HEADERS.includes(label)) headerMap[label] = columnNumber(ref);
       });
       if (REQUIRED_COVER_HEADERS.some(function (h) { return !headerMap[h]; })) {
         return { contractVersion: COVER_CONTRACT_VERSION, valid: false, people: [], issues: [issue(ISSUE.COVER_CONTRACT_MISMATCH, 'caratula', 5, 'headers')] };
@@ -228,8 +229,12 @@
         const rfc = normalizeIdentifier(rfcRaw); const curp = normalizeIdentifier(curpRaw);
         const bankName = String(value(row, 'Banco') || '').trim(); const account = normalizeAccount(value(row, 'Cuenta banco'));
         const clabe = normalizeAccount(value(row, 'CLABE'));
-        const vouchers = spreadsheetMinor(value(row, 'Vales De Despensa')); const net = spreadsheetMinor(value(row, 'Neto a pagar')); const cash = spreadsheetMinor(value(row, 'Neto en efectivo (sin vales)'));
-        if (!employeeName || (!rfc && !curp) || [vouchers, net, cash].some(function (x) { return x === null; })) {
+        const regularVouchers = spreadsheetMinor(value(row, 'Vales De Despensa'));
+        const retroactiveValue = headerMap['Retroactivo Vales Despensa'] ? value(row, 'Retroactivo Vales Despensa') : '0';
+        const retroactiveVouchers = String(retroactiveValue == null ? '' : retroactiveValue).trim() === '' ? 0 : spreadsheetMinor(retroactiveValue);
+        const vouchers = regularVouchers === null || retroactiveVouchers === null ? null : regularVouchers + retroactiveVouchers;
+        const net = spreadsheetMinor(value(row, 'Neto a pagar')); const cash = spreadsheetMinor(value(row, 'Neto en efectivo (sin vales)'));
+        if (!employeeName || (!rfc && !curp) || [regularVouchers, retroactiveVouchers, vouchers, net, cash].some(function (x) { return x === null || !Number.isSafeInteger(x); })) {
           issues.push(issue(ISSUE.COVER_ROW_INVALID, 'caratula', row)); continue;
         }
         if (net < 0 || cash < 0 || vouchers < 0 || net !== cash + vouchers) {
@@ -332,5 +337,5 @@
       employeeNetTotalMinor:employeeNet,treasuryRequestAmountMinor:treasuryTotal,issues,warnings};
   }
 
-  return Object.freeze({CONTRACT_VERSION,COVER_CONTRACT_VERSION,SAME_BANK_CONTRACT_VERSION,TOKA_CFDI_CONTRACT_VERSION,COVER_SHEET_NAME,REQUIRED_COVER_HEADERS,ISSUE,WARNING,parseCoverXlsx,parseSameBank108,parseTokaCfdi,reconcilePackage,normalizeAccount,normalizeIdentifier,normalizeName});
+  return Object.freeze({CONTRACT_VERSION,COVER_CONTRACT_VERSION,SAME_BANK_CONTRACT_VERSION,TOKA_CFDI_CONTRACT_VERSION,COVER_SHEET_NAME,REQUIRED_COVER_HEADERS,OPTIONAL_COVER_HEADERS,ISSUE,WARNING,parseCoverXlsx,parseSameBank108,parseTokaCfdi,reconcilePackage,normalizeAccount,normalizeIdentifier,normalizeName});
 });
