@@ -1,0 +1,190 @@
+name: Apply PR547 PROD main temporary
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-pr547-prod-main-temporary.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PRODUCT_MAIN_SHA: ba13af14057fa13a2e489cf032163e3e33e0d5a6
+  EXPECTED_PROD_REF: ucantptjhwttexzmslvm
+  M1_VERSION: '20260904194016'
+  M1_FILE: supabase/migrations/20260904194016_partida_predictions_prod.sql
+  M2_VERSION: '20260904194019'
+  M2_FILE: supabase/migrations/20260904194019_partida_unsure_prod.sql
+  M3_VERSION: '20260904194022'
+  M3_FILE: supabase/migrations/20260904194022_partida_predictions_seed_prod.sql
+  PROD_OPERADORA: 144042c1-e493-4256-a86c-cd088a8898ce
+  PROD_FERSANA: 20cd72aa-f281-4985-931b-a83422404b66
+
+jobs:
+  apply:
+    name: Authorized PR547 PROD database apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: supabase-production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF_PROD: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
+      SUPABASE_PROD_SESSION_POOLER_DB_URL: ${{ secrets.SUPABASE_PROD_SESSION_POOLER_DB_URL }}
+    steps:
+      - name: Checkout exact operational commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Fail closed on exact release chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_REF_PROD" = "$EXPECTED_PROD_REF"
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+          test "$(git rev-parse HEAD^)" = "$PRODUCT_MAIN_SHA"
+          test "$(git diff --name-only HEAD^..HEAD | tr '\n' '|')" = ".github/workflows/apply-pr547-prod-main-temporary.yml|"
+          for path in "$M1_FILE" "$M2_FILE" "$M3_FILE"; do
+            git cat-file -e "$PRODUCT_MAIN_SHA:$path"
+          done
+
+      - name: Verify backup availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --fail -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$EXPECTED_PROD_REF/database/backups" > "$RUNNER_TEMP/backups.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          p=json.loads(pathlib.Path(os.environ['RUNNER_TEMP']+'/backups.json').read_text())
+          backups=p.get('backups',[]) if isinstance(p,dict) else p
+          pitr=bool(p.get('pitr_enabled',False)) if isinstance(p,dict) else False
+          good=[b for b in backups if str(b.get('status','')).lower() in ('completed','success')]
+          if not (pitr or good):
+              raise SystemExit('PROD_BACKUP_UNAVAILABLE')
+          print('PROD_BACKUP_AVAILABLE=pass')
+          PY
+
+      - name: Install pinned Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql --version
+          npx --yes supabase@2.116.0 --version
+          npx --yes supabase@2.116.0 migration repair --help >/dev/null
+
+      - name: Live read-only preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 <<SQL
+          select concat_ws('|',
+            (select count(*) from supabase_migrations.schema_migrations where version in ('$M1_VERSION','$M2_VERSION','$M3_VERSION')),
+            case when to_regclass('public.partida_predictions') is null then 0 else 1 end,
+            (select count(*) from information_schema.columns where table_schema='public' and table_name='payment_requests' and column_name='partida_unsure'),
+            case when to_regprocedure('public.confirm_provider_account(uuid,uuid,text)') is null then 0 else 1 end,
+            (select count(*) from vault.decrypted_secrets where name in (
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_SECRET',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ENABLED',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_BASE_URL',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ALLOWED_ORIGIN',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_TTL_HOURS'
+            ))
+          );
+          SQL
+          )
+          echo "preflight=$out"
+          test "$out" = "0|0|0|0|0"
+
+      - name: Materialize exact merged migration bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "$PRODUCT_MAIN_SHA:$M1_FILE" > "$RUNNER_TEMP/m1.sql"
+          git show "$PRODUCT_MAIN_SHA:$M2_FILE" > "$RUNNER_TEMP/m2.sql"
+          git show "$PRODUCT_MAIN_SHA:$M3_FILE" > "$RUNNER_TEMP/m3.sql"
+          sha256sum "$RUNNER_TEMP/m1.sql" "$RUNNER_TEMP/m2.sql" "$RUNNER_TEMP/m3.sql"
+          ! grep -Fq '9680353c-9b86-4730-82e1-fce664f048a2' "$RUNNER_TEMP/m3.sql"
+          ! grep -Fq '68b61801-74c0-44ea-a33b-f20e4bf53aa7' "$RUNNER_TEMP/m3.sql"
+          grep -Fq "$PROD_OPERADORA" "$RUNNER_TEMP/m3.sql"
+          grep -Fq "$PROD_FERSANA" "$RUNNER_TEMP/m3.sql"
+          grep -Fq 'partida_prediction_category_resolution_failed' "$RUNNER_TEMP/m3.sql"
+          grep -Fq 'partida_prediction_stale_candidate_survived' "$RUNNER_TEMP/m3.sql"
+
+      - name: Apply exact PR547 migrations in order
+        shell: bash
+        run: |
+          set -euo pipefail
+          apply_one() {
+            version="$1"; file="$2"
+            before=$(psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 -c "select count(*) from supabase_migrations.schema_migrations where version='$version';")
+            test "$before" = "0"
+            psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --no-psqlrc -v ON_ERROR_STOP=1 -f "$file"
+            npx --yes supabase@2.116.0 migration repair "$version" --status applied --db-url "$SUPABASE_PROD_SESSION_POOLER_DB_URL"
+            after=$(psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 -c "select count(*) from supabase_migrations.schema_migrations where version='$version';")
+            test "$after" = "1"
+          }
+          apply_one "$M1_VERSION" "$RUNNER_TEMP/m1.sql"
+          apply_one "$M2_VERSION" "$RUNNER_TEMP/m2.sql"
+          apply_one "$M3_VERSION" "$RUNNER_TEMP/m3.sql"
+
+      - name: Postcheck PROD material state
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(psql "$SUPABASE_PROD_SESSION_POOLER_DB_URL" --no-psqlrc -qAtX -v ON_ERROR_STOP=1 <<SQL
+          with stats as (
+            select
+              count(*) as total,
+              count(*) filter (where company_id='$PROD_OPERADORA'::uuid) as operadora,
+              count(*) filter (where company_id='$PROD_FERSANA'::uuid) as fersana,
+              count(*) filter (where is_confident and jsonb_array_length(partida_candidates)=0) as confident_empty
+            from public.partida_predictions
+          ), invalid_candidates as (
+            select count(*) as n
+            from public.partida_predictions p
+            cross join lateral jsonb_array_elements(p.partida_candidates) candidate(value)
+            left join public.company_cost_center_budget_categories ccb
+              on ccb.company_id=p.company_id
+             and ccb.budget_category_id=nullif(candidate.value->>'budget_category_id','')::uuid
+             and coalesce(ccb.active,true)
+            left join public.budget_categories bc
+              on bc.id=ccb.budget_category_id and coalesce(bc.active,true)
+            where bc.id is null
+          ), stale_candidates as (
+            select count(*) as n
+            from public.partida_predictions p
+            cross join lateral jsonb_array_elements(p.partida_candidates) candidate(value)
+            where candidate.value->>'name' in ('Gastos extraordinarios','Servicios y suministros','Adquisiciòn de herramientas')
+          )
+          select concat_ws('|',
+            (select count(*) from supabase_migrations.schema_migrations where version in ('$M1_VERSION','$M2_VERSION','$M3_VERSION')),
+            case when to_regclass('public.partida_predictions') is not null then 1 else 0 end,
+            (select count(*) from information_schema.columns where table_schema='public' and table_name='payment_requests' and column_name='partida_unsure'),
+            case when to_regprocedure('public.create_payment_request(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text,boolean)') is not null then 1 else 0 end,
+            case when to_regprocedure('public.create_payment_request_with_document(uuid,uuid,uuid,uuid,date,numeric,text,numeric,text,text,uuid,boolean,uuid,uuid,numeric,numeric,numeric,text,uuid,text,text,boolean)') is not null then 1 else 0 end,
+            (select total from stats),
+            (select operadora from stats),
+            (select fersana from stats),
+            (select confident_empty from stats),
+            (select n from invalid_candidates),
+            (select n from stale_candidates),
+            case when to_regprocedure('public.confirm_provider_account(uuid,uuid,text)') is null then 0 else 1 end,
+            (select count(*) from vault.decrypted_secrets where name in (
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_SECRET',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ENABLED',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_BASE_URL',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ALLOWED_ORIGIN',
+              'PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_TTL_HOURS'
+            ))
+          );
+          SQL
+          )
+          echo "postcheck=$out"
+          test "$out" = "3|1|1|1|1|160|98|62|0|0|0|0|0"
+          echo PR547_PROD_DB_APPLY_PASS
