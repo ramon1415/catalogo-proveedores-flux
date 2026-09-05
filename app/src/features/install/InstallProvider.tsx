@@ -49,8 +49,11 @@ export function InstallProvider({ children }: { children: ReactNode }) {
   }, [])
 
   async function install() {
-    if (installed || busyRef.current) return
+    if (installed) return
     setFailed(false)
+    // Some browsers keep the native prompt pending. A second click can always
+    // open instructions without reusing the prompt or blocking the user.
+    if (busyRef.current) { setGuide(true); return }
     const event = promptRef.current
     if (!event) { setGuide(true); return }
     // Single-use prompt, retained across Login -> App. No automatic retries.
