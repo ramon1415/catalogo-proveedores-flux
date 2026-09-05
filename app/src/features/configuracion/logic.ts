@@ -46,7 +46,7 @@ const TAB_ACCESS: Record<ConfigTab, RoleGroup[]> = {
   members: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.DIRECTION],
   originAccounts: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
-  contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+  contpaq: [ROLE_GROUPS.SYSADMIN],
   system: [ROLE_GROUPS.SYSADMIN],
 }
 
@@ -64,7 +64,7 @@ export const TAB_BADGES: Record<ConfigTab, string> = {
   members: 'Dir',
   originAccounts: 'Adm/Dir',
   budgets: 'Trim.',
-  contpaq: 'Adm/Dir',
+  contpaq: 'SysAdmin',
   system: 'SysAdmin',
 }
 

@@ -1,0 +1,30 @@
+name: CONTPAQ dark launch PROD contract
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - app/src/features/configuracion/**
+      - app/src/lib/contpaq/**
+      - app/package.json
+      - app/package-lock.json
+      - supabase/migrations/20260905220*.sql
+      - supabase/seed/contpaq/**
+      - scripts/qa/contpaq-dark-launch-prod-contract.test.mjs
+      - .github/workflows/contpaq-dark-launch-prod-contract.yml
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm --prefix app ci
+      - run: node --test scripts/qa/contpaq-dark-launch-prod-contract.test.mjs
+      - run: npm --prefix app run typecheck
+      - run: npm --prefix app run build
