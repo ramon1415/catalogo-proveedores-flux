@@ -42,6 +42,8 @@ export type PaymentRequest = {
   // Reembolsos: empleado que cobra. En el resto de tipos va null y el
   // destinatario del dinero sigue siendo el proveedor.
   beneficiary_profile_id?: string | null
+  // Señalización: Finanzas debe confirmar la partida seleccionada.
+  partida_unsure?: boolean | null
   created_at: string | null
   updated_at: string | null
 }
@@ -368,6 +370,8 @@ export type RequestPayload = {
   // la MISMA transacción que la solicitud (antes iba en un UPDATE posterior,
   // que podía dejar la solicitud sin destinatario si fallaba).
   beneficiary_profile_id: string | null
+  // Señalización opcional; en reembolso siempre viaja false.
+  partida_unsure: boolean
 }
 
 export type EditPayload = {
@@ -390,3 +394,19 @@ export type DecisionAction =
   | 'approved' | 'rejected' | 'changes_requested'
   | 'exception_approved' | 'exception_rejected'
   | 'amount_change_requested' | 'category_change_requested' | 'budget_adjustment_requested'
+
+
+// ── Predicción de partida ──────────────────────────────────────────────────
+export type PartidaCandidate = {
+  budget_category_id: string
+  name: string
+}
+
+export type PartidaPrediction = {
+  rfc_emisor: string
+  cuenta_gasto_dominante: string
+  share_dominante: number
+  n_cfdis: number
+  partida_candidates: PartidaCandidate[]
+  is_confident: boolean
+}
