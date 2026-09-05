@@ -11,12 +11,16 @@ export function InstallGuide({ failed, onClose }: { failed: boolean; onClose: ()
     const dialog = ref.current
     if (dialog && !dialog.open) dialog.showModal()
   }, [])
+  function close() {
+    ref.current?.close()
+    onClose()
+  }
   return (
-    <dialog ref={ref} className={s.dialog} aria-labelledby={titleId} onCancel={onClose} onClose={onClose}>
+    <dialog ref={ref} className={s.dialog} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); close() }} onClose={onClose}>
       <div className={s.guide}>
         <header className={s.head}>
           <div><p className={s.eyebrow}>Flux en tu celular</p><h2 id={titleId}>Un toque para entrar</h2></div>
-          <button type="button" className={s.close} onClick={onClose} aria-label="Cerrar instrucciones">✕</button>
+          <button type="button" className={s.close} onClick={close} aria-label="Cerrar instrucciones">✕</button>
         </header>
         <div className={s.body}>
           <p>Agrega Flux a tu pantalla de inicio para abrirlo desde su ícono.</p>
@@ -41,7 +45,7 @@ export function InstallGuide({ failed, onClose }: { failed: boolean; onClose: ()
           )}
           <p className={s.note}>Usarás tu misma cuenta. Es posible que debas iniciar sesión al abrirlo por primera vez. Necesitas conexión a internet para trabajar en Flux.</p>
         </div>
-        <footer className={s.actions}><button type="button" className={s.done} onClick={onClose}>Entendido</button></footer>
+        <footer className={s.actions}><button type="button" className={s.done} onClick={close}>Entendido</button></footer>
       </div>
     </dialog>
   )
