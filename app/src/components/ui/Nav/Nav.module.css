@@ -79,3 +79,5 @@
 .logout { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-3); cursor: pointer; display: grid; place-items: center; }
 .logout:hover { color: var(--ruby, #e03e52); border-color: rgba(224, 62, 82, .4); }
 .logout svg { width: 15px; height: 15px; }
+.install { flex-shrink: 0; padding: 4px 8px; }
+.install:has(button) { border-top: 1px solid var(--border); }
