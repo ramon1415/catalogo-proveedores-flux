@@ -1,0 +1,659 @@
+name: Build isolated CONTPAQ dark launch candidate
+
+on:
+  push:
+    branches:
+      - release/contpaq-dark-launch-prod-r1
+
+permissions:
+  contents: write
+
+jobs:
+  build-candidate:
+    if: ${{ !contains(github.event.head_commit.message, '[contpaq-dark-launch-built]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch certified source commits
+        run: |
+          git fetch origin 865f37e4e3a4c75c35a3871d6843030e5d635504
+          git fetch origin 036f4a285c9ec3306dcf9c8b1f255c656b8c83d6
+          git fetch origin 44fb20a20daf59032d3fcc4187607c783dac9fd3
+          git fetch origin 992f9bf1b09f47dfc3092050afb7fc4751fb7855
+
+      - name: Port only CONTPAQ frontend and serializer from PR 498
+        shell: bash
+        run: |
+          git diff --binary \
+            865f37e4e3a4c75c35a3871d6843030e5d635504 \
+            036f4a285c9ec3306dcf9c8b1f255c656b8c83d6 -- \
+            app/package.json \
+            app/package-lock.json \
+            app/src/features/configuracion/ExportarSection.tsx \
+            app/src/features/configuracion/api.ts \
+            app/src/features/configuracion/exportarPolizas.ts \
+            app/src/features/configuracion/tabs/ContpaqTab.tsx \
+            app/src/features/configuracion/types.ts \
+            app/src/lib/contpaq \
+          | git apply --3way
+
+      - name: Overlay account-review changes from PR 543-B only
+        shell: bash
+        run: |
+          git diff --binary \
+            44fb20a20daf59032d3fcc4187607c783dac9fd3 \
+            992f9bf1b09f47dfc3092050afb7fc4751fb7855 -- \
+            app/src/features/configuracion/ExportarSection.tsx \
+            app/src/features/configuracion/api.ts \
+            app/src/features/configuracion/cuentaReview.ts \
+            app/src/features/configuracion/exportarPolizas.ts \
+            app/src/features/configuracion/tabs/ContpaqTab.tsx \
+            app/src/features/configuracion/types.ts \
+          | git apply --3way
+
+      - name: Gate CONTPAQ UI to SysAdmin only
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/features/configuracion/logic.ts')
+          s = p.read_text(encoding='utf-8')
+          old = "contpaq: [ROLES.SYSADMIN, ROLES.ADMIN, ROLES.DIRECTION]"
+          if old not in s:
+              raise SystemExit('Expected current PROD CONTPAQ access line not found')
+          s = s.replace(old, "contpaq: [ROLES.SYSADMIN]", 1)
+          s = s.replace("contpaq: 'Adm/Dir'", "contpaq: 'SysAdmin'", 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Bring deterministic seed sources without DEV migrations
+        shell: bash
+        run: |
+          mkdir -p supabase/seed/contpaq
+          for f in \
+            10_catalogo_operadora.sql \
+            11_catalogo_soporte_fersana.sql \
+            20_renglones_operadora.sql \
+            21_renglones_soporte_fersana.sql \
+            30_terceros_operadora.sql \
+            40_mapeos_soporte_fersana.sql \
+            MANIFEST.txt README.md; do
+            git show 036f4a285c9ec3306dcf9c8b1f255c656b8c83d6:supabase/seed/contpaq/$f > supabase/seed/contpaq/$f
+          done
+
+      - name: Add current Operadora mapping snapshot as PROD-safe seed
+        shell: bash
+        run: |
+          cat > supabase/seed/contpaq/41_mapeos_operadora_prod.sql <<'SQL'
+          -- Snapshot read-only de DEV validado antes del release, remapeado por código de partida.
+          -- PROD company: Operadora Tlacatecpan 144042c1-e493-4256-a86c-cd088a8898ce.
+          -- 87 partidas; 6 conservan revisión pendiente. No aprueba ni reemplaza decisiones existentes.
+          insert into public.budget_account_mappings
+            (company_id,budget_category_id,contpaq_account_code,needs_review,mapping_method,mapping_reason)
+          select '144042c1-e493-4256-a86c-cd088a8898ce'::uuid,
+                 bc.id, v.account_code, v.needs_review, v.mapping_method, v.mapping_reason
+          from (values
+          ('602-01-001-000','60201001000',false,'judgment',NULL),
+          ('602-01-005-000','60201005000',false,'judgment',NULL),
+          ('602-01-006-000','60201006000',false,'exact_name',NULL),
+          ('602-02-001-000','60202006000',true,'judgment',NULL),
+          ('602-02-002-000','60382000005',false,'judgment',NULL),
+          ('602-03-000-000','60208002000',false,'exact_name',NULL),
+          ('602-03-001-000','60207005000',false,'exact_name',NULL),
+          ('602-03-004-000','60208008000',false,'judgment',NULL),
+          ('602-03-005-000','60208004000',false,'exact_name',NULL),
+          ('602-04-005-000','60208010000',false,'judgment',NULL),
+          ('602-04-006-000','60208019000',false,'judgment',NULL),
+          ('602-04-011-000','60256000000',false,'judgment',NULL),
+          ('602-04-012-000','60208018000',false,'judgment',NULL),
+          ('602-05-000-000','60208016000',false,'exact_name',NULL),
+          ('602-05-001-000','60208018000',false,'judgment',NULL),
+          ('602-08-003-000','60204012000',false,'exact_name',NULL),
+          ('602-08-004-000','60204013000',false,'exact_name',NULL),
+          ('602-08-005-000','60207008000',false,'judgment',NULL),
+          ('602-08-006-000','60252000000',false,'judgment',NULL),
+          ('602-08-007-000','60204003000',false,'exact_name',NULL),
+          ('602-08-011-000','60202012000',false,'judgment',NULL),
+          ('602-08-012-000','60208001000',false,'judgment',NULL),
+          ('602-08-018-000','60206001000',false,'judgment',NULL),
+          ('602-09-000-000','60208001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-010','60201010000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-013','60201002000',true,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-014','60201004000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-015','60202005000',true,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-016','60201014000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-017','60382000004',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-018','60202007000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-019','60217000000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-020','60201007000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-021','60201007000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-022','60201008000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-023','60382000002',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-024','60382000002',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-025','60201008000',true,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-026','60202003000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-027','60202006000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-028','60249000000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-031','60203004000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-034','60202003000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-035','60332000000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-040','60204014000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-045','60208009000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-048','60208010000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-050','60256000000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-052','60205003000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-053','60208011000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-054','60208014000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-055','60208017000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-057','60208017000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-059','60208015000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-062','60205001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-063','60205001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-064','60202010000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-065','60208011000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-066','60205001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-067','60208019000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-068','60208019000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-069','60208019000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-070','60208019000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-073','60204011000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-078','60207009000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-087','60208001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-091','60208001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-092','60208001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-093','60208001000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-094','60202009000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-097','60207007000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-100','60204002000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-101','60204005000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-102','60208005000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-105','60207003000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-106','60207002000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-107','60207004000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-110','60205001000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-111','60277000000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-112','60205002000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-113','60202010000',false,'judgment',NULL),
+          ('AUTO-RSJT-2026-ROW-116','60204004000',false,'exact_name',NULL),
+          ('AUTO-RSJT-2026-ROW-119','60208020000',false,'judgment',NULL),
+          ('OP-001','60256000000',false,'judgment',NULL),
+          ('OP-002','60204017000',true,'judgment',NULL),
+          ('OP-003','60202002000',true,'judgment',NULL),
+          ('REC-RSJT-2026-001','60204016000',false,'judgment',NULL)
+          ) as v(category_code,account_code,needs_review,mapping_method,mapping_reason)
+          join public.budget_categories bc on bc.code=v.category_code
+          where exists (
+            select 1 from public.company_cost_center_budget_categories ccb
+            where ccb.company_id='144042c1-e493-4256-a86c-cd088a8898ce'::uuid
+              and ccb.budget_category_id=bc.id
+              and coalesce(ccb.active,true)
+          )
+          on conflict (company_id,budget_category_id) do nothing;
+          SQL
+          sed -i 's/^          //' supabase/seed/contpaq/41_mapeos_operadora_prod.sql
+
+      - name: Generate isolated PROD schema migration
+        shell: bash
+        run: |
+          cat > supabase/migrations/20260905220000_contpaq_dark_launch_schema_prod.sql <<'SQL'
+          begin;
+
+          -- CONTPAQ dark launch PROD. ADITIVO: no reemplaza RPCs de pagos,
+          -- reembolsos, layouts, presupuestos ni notificaciones existentes.
+          do $pre$
+          begin
+            if to_regclass('public.companies') is null
+               or to_regclass('public.budget_categories') is null
+               or to_regclass('public.company_cost_center_budget_categories') is null
+               or to_regclass('public.profiles') is null
+               or to_regclass('public.proveedores') is null
+               or to_regclass('public.company_bank_accounts') is null
+               or to_regclass('public.payment_requests') is null then
+              raise exception 'contpaq_dark_launch_core_prerequisite_missing';
+            end if;
+            if to_regclass('public.contpaq_accounts') is not null
+               or to_regclass('public.budget_account_mappings') is not null
+               or to_regclass('public.accounting_exports') is not null then
+              raise exception 'contpaq_dark_launch_target_already_exists';
+            end if;
+          end
+          $pre$;
+
+          create or replace function public.contpaq_dark_launch_access(p_company_id uuid)
+          returns boolean
+          language sql
+          stable
+          security invoker
+          set search_path = public, pg_temp
+          as $$
+            select public.current_user_has_role(public.flux_sysadmin_roles());
+          $$;
+          revoke all on function public.contpaq_dark_launch_access(uuid) from public, anon;
+          grant execute on function public.contpaq_dark_launch_access(uuid) to authenticated, service_role;
+
+          create table public.contpaq_accounts (
+            company_id uuid not null references public.companies(id),
+            code text not null,
+            name text not null,
+            is_detail boolean not null default false,
+            sat_group text,
+            cta_sup text,
+            cta_mayor smallint,
+            tipo text,
+            rubro_nif text,
+            activo boolean not null default true,
+            sincronizado_el timestamptz default now(),
+            created_at timestamptz not null default now(),
+            primary key (company_id, code),
+            constraint contpaq_accounts_code_normalized_check check (code ~ '^[0-9A-Za-z]+$'),
+            constraint contpaq_accounts_cta_sup_normalized_check check (cta_sup is null or cta_sup ~ '^[0-9A-Za-z]+$'),
+            constraint contpaq_accounts_cta_mayor_check check (cta_mayor is null or cta_mayor between 1 and 4),
+            constraint contpaq_accounts_tipo_check check (tipo is null or upper(tipo) = any(array['A','B','D','E','F','G','H','K','L']::text[]))
+          );
+          create index contpaq_accounts_parent_idx on public.contpaq_accounts(company_id,cta_sup);
+          create index contpaq_accounts_mapper_idx on public.contpaq_accounts(company_id,activo,tipo,cta_mayor);
+
+          create table public.budget_account_mappings (
+            id uuid primary key default gen_random_uuid(),
+            company_id uuid not null references public.companies(id),
+            budget_category_id uuid not null references public.budget_categories(id),
+            contpaq_account_code text not null,
+            needs_review boolean not null default false,
+            mapping_method text not null default 'manual' check (mapping_method = any(array['exact_name','judgment','manual','imported']::text[])),
+            mapping_reason text,
+            created_at timestamptz not null default now(),
+            updated_by uuid references public.profiles(id),
+            updated_at timestamptz not null default now(),
+            unique (company_id,budget_category_id),
+            constraint budget_account_mappings_company_account_fkey
+              foreign key (company_id,contpaq_account_code)
+              references public.contpaq_accounts(company_id,code)
+          );
+          create index budget_account_mappings_account_idx on public.budget_account_mappings(company_id,contpaq_account_code);
+          create index budget_account_mappings_review_idx on public.budget_account_mappings(company_id,needs_review) where needs_review;
+
+          create or replace view public.contpaq_account_mapper_candidates
+          with (security_invoker=true)
+          as
+          select a.company_id,a.code,a.name,a.is_detail,a.sat_group,a.cta_sup,a.cta_mayor,a.tipo,a.rubro_nif,a.activo,a.sincronizado_el,
+                 not exists(select 1 from public.contpaq_accounts ch where ch.company_id=a.company_id and ch.cta_sup=a.code) as es_hoja,
+                 (a.activo and a.sincronizado_el is not null and a.cta_mayor=2 and upper(a.tipo)='G'
+                   and not exists(select 1 from public.contpaq_accounts ch where ch.company_id=a.company_id and ch.cta_sup=a.code)) as elegible_mapper
+          from public.contpaq_accounts a;
+
+          create or replace function public.assert_budget_account_mapping_eligible()
+          returns trigger
+          language plpgsql
+          security invoker
+          set search_path=public,pg_temp
+          as $$
+          declare v_account public.contpaq_accounts%rowtype;
+          begin
+            if not public.contpaq_dark_launch_access(new.company_id) and current_user not in ('postgres','service_role','supabase_admin') then
+              raise exception using errcode='42501',message='contpaq_dark_launch_sysadmin_required';
+            end if;
+            if not exists (
+              select 1 from public.company_cost_center_budget_categories ccb
+              where ccb.company_id=new.company_id and ccb.budget_category_id=new.budget_category_id and coalesce(ccb.active,true)
+            ) then
+              raise exception using errcode='23503',message='contpaq_budget_category_not_enabled_for_company';
+            end if;
+            select * into v_account from public.contpaq_accounts
+              where company_id=new.company_id and code=new.contpaq_account_code;
+            if not found then raise exception using errcode='23503',message='contpaq_mapping_account_not_found'; end if;
+            if not v_account.activo or v_account.sincronizado_el is null then raise exception using errcode='23514',message='contpaq_mapping_account_inactive'; end if;
+            if not v_account.is_detail or v_account.cta_mayor<>2 then raise exception using errcode='23514',message='contpaq_mapping_account_not_detail'; end if;
+            if upper(v_account.tipo)<>'G' then raise exception using errcode='23514',message='contpaq_mapping_account_not_expense'; end if;
+            if exists(select 1 from public.contpaq_accounts ch where ch.company_id=new.company_id and ch.cta_sup=new.contpaq_account_code) then
+              raise exception using errcode='23514',message='contpaq_mapping_account_has_children';
+            end if;
+            new.updated_at:=now();
+            if tg_op='UPDATE' then new.created_at:=old.created_at; end if;
+            return new;
+          end;
+          $$;
+          revoke all on function public.assert_budget_account_mapping_eligible() from public,anon;
+          grant execute on function public.assert_budget_account_mapping_eligible() to authenticated,service_role;
+          create trigger budget_account_mappings_eligible_guard
+            before insert or update of company_id,budget_category_id,contpaq_account_code
+            on public.budget_account_mappings for each row
+            execute function public.assert_budget_account_mapping_eligible();
+
+          create table public.account_report_lines (
+            company_id uuid not null references public.companies(id),
+            account_code text not null,
+            layer text not null check(layer in ('balance','resultados','anexo')),
+            line_name text not null,
+            created_at timestamptz not null default now(),
+            primary key(company_id,account_code,layer)
+          );
+
+          create table public.accounting_exports (
+            id uuid primary key default gen_random_uuid(),
+            source_feeder text not null,
+            source_id text not null,
+            source_kind text not null default 'directo' check(source_kind in ('provision','pago','directo')),
+            company_id uuid not null references public.companies(id),
+            tipo_pol int not null,
+            folio int not null,
+            periodo date not null,
+            uuid_cfdi text,
+            status text not null check(status in ('exported','cancelled')),
+            content_hash text not null,
+            exported_at timestamptz not null default now(),
+            cancelled_at timestamptz,
+            reversal_of uuid,
+            unique(company_id,id),
+            constraint accounting_exports_reversal_same_company_fkey
+              foreign key(company_id,reversal_of) references public.accounting_exports(company_id,id)
+          );
+          create unique index accounting_exports_source_vigente_uq
+            on public.accounting_exports(source_feeder,source_id,source_kind) where status='exported';
+          create index accounting_exports_source_idx on public.accounting_exports(source_feeder,source_id);
+          create index accounting_exports_company_periodo_idx on public.accounting_exports(company_id,periodo);
+          create index accounting_exports_uuid_cfdi_idx on public.accounting_exports(uuid_cfdi) where uuid_cfdi is not null;
+          create index accounting_exports_company_reversal_of_idx on public.accounting_exports(company_id,reversal_of) where reversal_of is not null;
+
+          create table public.tax_account_mappings (
+            company_id uuid not null references public.companies(id),
+            tax_key text not null check(tax_key in ('ivaAcreditablePagado','ivaRetenidoAcreditable','retIvaPasivo','retIsrPasivo','ivaPendiente','ajusteRedondeo','noDeducibles')),
+            contpaq_account_code text not null,
+            needs_review boolean not null default false,
+            updated_at timestamptz not null default now(),
+            primary key(company_id,tax_key),
+            foreign key(company_id,contpaq_account_code) references public.contpaq_accounts(company_id,code)
+          );
+
+          create table public.provider_account_mappings (
+            company_id uuid not null references public.companies(id),
+            proveedor_id uuid not null references public.proveedores(id),
+            contpaq_account_code text not null,
+            contpaq_provider_id text,
+            updated_at timestamptz not null default now(),
+            primary key(company_id,proveedor_id),
+            foreign key(company_id,contpaq_account_code) references public.contpaq_accounts(company_id,code)
+          );
+          create index provider_account_mappings_proveedor_id_idx on public.provider_account_mappings(proveedor_id);
+
+          create unique index if not exists company_bank_accounts_company_id_id_uq
+            on public.company_bank_accounts(company_id,id);
+          create table public.bank_account_mappings (
+            company_id uuid not null references public.companies(id),
+            company_bank_account_id uuid not null,
+            contpaq_account_code text not null,
+            updated_at timestamptz not null default now(),
+            primary key(company_id,company_bank_account_id),
+            foreign key(company_id,company_bank_account_id) references public.company_bank_accounts(company_id,id),
+            foreign key(company_id,contpaq_account_code) references public.contpaq_accounts(company_id,code)
+          );
+          create index bank_account_mappings_company_bank_account_id_idx on public.bank_account_mappings(company_bank_account_id);
+
+          create table public.contpaq_terceros (
+            company_id uuid not null references public.companies(id),
+            id_contpaq text not null,
+            nombre text not null,
+            rfc text,
+            tipo_tercero text,
+            sincronizado_el timestamptz not null default now(),
+            primary key(company_id,id_contpaq)
+          );
+
+          alter table public.payment_requests add column if not exists cfdi_data jsonb;
+          comment on column public.payment_requests.cfdi_data is
+            'CFDI parseado al subir la factura; snapshot opcional para el feeder CONTPAQ.';
+
+          -- Dark launch: todas las tablas nuevas quedan detrás de SysAdmin.
+          do $rls$
+          declare t text;
+          begin
+            foreach t in array array['contpaq_accounts','budget_account_mappings','account_report_lines','tax_account_mappings','provider_account_mappings','bank_account_mappings','contpaq_terceros','accounting_exports'] loop
+              execute format('alter table public.%I enable row level security',t);
+              execute format('alter table public.%I force row level security',t);
+              execute format('revoke all on table public.%I from public,anon,authenticated',t);
+              execute format('grant select on table public.%I to authenticated',t);
+              execute format('grant all on table public.%I to service_role',t);
+              execute format('create policy %I on public.%I for select to authenticated using (public.contpaq_dark_launch_access(company_id))',t||'_select_dark',t);
+            end loop;
+          end
+          $rls$;
+          grant insert,update,delete on public.budget_account_mappings,public.tax_account_mappings,public.provider_account_mappings,public.bank_account_mappings to authenticated;
+          grant insert,update on public.accounting_exports to authenticated;
+          create policy budget_account_mappings_insert_dark on public.budget_account_mappings for insert to authenticated with check(public.contpaq_dark_launch_access(company_id));
+          create policy budget_account_mappings_update_dark on public.budget_account_mappings for update to authenticated using(public.contpaq_dark_launch_access(company_id)) with check(public.contpaq_dark_launch_access(company_id));
+          create policy budget_account_mappings_delete_dark on public.budget_account_mappings for delete to authenticated using(public.contpaq_dark_launch_access(company_id));
+          create policy tax_account_mappings_insert_dark on public.tax_account_mappings for insert to authenticated with check(public.contpaq_dark_launch_access(company_id));
+          create policy tax_account_mappings_update_dark on public.tax_account_mappings for update to authenticated using(public.contpaq_dark_launch_access(company_id)) with check(public.contpaq_dark_launch_access(company_id));
+          create policy tax_account_mappings_delete_dark on public.tax_account_mappings for delete to authenticated using(public.contpaq_dark_launch_access(company_id));
+          create policy provider_account_mappings_insert_dark on public.provider_account_mappings for insert to authenticated with check(public.contpaq_dark_launch_access(company_id));
+          create policy provider_account_mappings_update_dark on public.provider_account_mappings for update to authenticated using(public.contpaq_dark_launch_access(company_id)) with check(public.contpaq_dark_launch_access(company_id));
+          create policy provider_account_mappings_delete_dark on public.provider_account_mappings for delete to authenticated using(public.contpaq_dark_launch_access(company_id));
+          create policy bank_account_mappings_insert_dark on public.bank_account_mappings for insert to authenticated with check(public.contpaq_dark_launch_access(company_id));
+          create policy bank_account_mappings_update_dark on public.bank_account_mappings for update to authenticated using(public.contpaq_dark_launch_access(company_id)) with check(public.contpaq_dark_launch_access(company_id));
+          create policy bank_account_mappings_delete_dark on public.bank_account_mappings for delete to authenticated using(public.contpaq_dark_launch_access(company_id));
+          create policy accounting_exports_insert_dark on public.accounting_exports for insert to authenticated with check(public.contpaq_dark_launch_access(company_id));
+          create policy accounting_exports_update_dark on public.accounting_exports for update to authenticated using(public.contpaq_dark_launch_access(company_id)) with check(public.contpaq_dark_launch_access(company_id));
+
+          revoke all on table public.contpaq_account_mapper_candidates from public,anon;
+          grant select on table public.contpaq_account_mapper_candidates to authenticated,service_role;
+
+          create or replace function public.confirm_provider_account(
+            p_company_id uuid,
+            p_proveedor_id uuid,
+            p_account_code text
+          ) returns jsonb
+          language plpgsql security definer set search_path=public,pg_temp
+          as $$
+          declare v_code text:=upper(regexp_replace(coalesce(p_account_code,''),'[^0-9A-Za-z]','','g'));
+          begin
+            if not public.current_user_has_role(public.flux_sysadmin_roles()) then
+              raise exception using errcode='42501',message='contpaq_dark_launch_sysadmin_required';
+            end if;
+            if p_proveedor_id is null then raise exception using errcode='23514',message='proveedor_id_required'; end if;
+            if char_length(v_code)=0 then raise exception using errcode='23514',message='account_code_required'; end if;
+            if not exists(select 1 from public.contpaq_accounts a where a.company_id=p_company_id and a.code=v_code and a.is_detail and a.activo) then
+              raise exception using errcode='23503',message='contpaq_account_not_found_or_not_detail: '||v_code;
+            end if;
+            insert into public.provider_account_mappings(company_id,proveedor_id,contpaq_account_code,updated_at)
+            values(p_company_id,p_proveedor_id,v_code,now())
+            on conflict(company_id,proveedor_id) do update
+              set contpaq_account_code=excluded.contpaq_account_code,updated_at=now();
+            return jsonb_build_object('ok',true,'proveedor_id',p_proveedor_id,'contpaq_account_code',v_code);
+          end;
+          $$;
+          revoke all on function public.confirm_provider_account(uuid,uuid,text) from public,anon;
+          grant execute on function public.confirm_provider_account(uuid,uuid,text) to authenticated,service_role;
+
+          do $post$
+          begin
+            if has_table_privilege('anon','public.contpaq_accounts','select') then raise exception 'contpaq_dark_launch_anon_leak'; end if;
+            if not exists(select 1 from pg_views where schemaname='public' and viewname='contpaq_account_mapper_candidates') then raise exception 'contpaq_mapper_view_missing'; end if;
+            if to_regprocedure('public.confirm_provider_account(uuid,uuid,text)') is null then raise exception 'confirm_provider_account_missing'; end if;
+          end
+          $post$;
+
+          commit;
+          SQL
+          sed -i 's/^          //' supabase/migrations/20260905220000_contpaq_dark_launch_schema_prod.sql
+
+      - name: Generate deterministic PROD seed migration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('supabase/seed/contpaq')
+          prod_opt = "'144042c1-e493-4256-a86c-cd088a8898ce'::uuid"
+          prod_sf = "'20cd72aa-f281-4985-931b-a83422404b66'::uuid"
+
+          def load(name, company):
+              s=(root/name).read_text(encoding='utf-8')
+              s=s.replace(':company_id', company)
+              for table in ['contpaq_accounts','account_report_lines','contpaq_terceros','budget_account_mappings']:
+                  s=s.replace(f'insert into {table}',f'insert into public.{table}')
+              return s
+
+          sf_maps=load('40_mapeos_soporte_fersana.sql',prod_sf)
+          sf_maps=sf_maps.replace('on conflict (company_id, budget_category_id, contpaq_account_code) do nothing',
+                                  'on conflict (company_id, budget_category_id) do nothing')
+
+          parts=[
+              'begin;\n',
+              "do $pre$ begin if not exists(select 1 from public.companies where id='144042c1-e493-4256-a86c-cd088a8898ce'::uuid and name='Operadora Tlacatecpan' and active) or not exists(select 1 from public.companies where id='20cd72aa-f281-4985-931b-a83422404b66'::uuid and name='Soporte Fersana' and active) then raise exception 'contpaq_prod_company_identity_mismatch'; end if; end $pre$;\n",
+              load('10_catalogo_operadora.sql',prod_opt),
+              load('11_catalogo_soporte_fersana.sql',prod_sf),
+              load('20_renglones_operadora.sql',prod_opt),
+              load('21_renglones_soporte_fersana.sql',prod_sf),
+              load('30_terceros_operadora.sql',prod_opt),
+              sf_maps,
+              (root/'41_mapeos_operadora_prod.sql').read_text(encoding='utf-8'),
+              """
+          insert into public.tax_account_mappings(company_id,tax_key,contpaq_account_code,needs_review) values
+            ('144042c1-e493-4256-a86c-cd088a8898ce','ivaAcreditablePagado','11801100000',false),
+            ('144042c1-e493-4256-a86c-cd088a8898ce','ivaRetenidoAcreditable','11801200000',false),
+            ('144042c1-e493-4256-a86c-cd088a8898ce','retIvaPasivo','21308000000',true),
+            ('144042c1-e493-4256-a86c-cd088a8898ce','retIsrPasivo','21309000000',true),
+            ('144042c1-e493-4256-a86c-cd088a8898ce','ajusteRedondeo','66001060300',false),
+            ('144042c1-e493-4256-a86c-cd088a8898ce','noDeducibles','66001060300',false)
+          on conflict(company_id,tax_key) do nothing;
+          """,
+              """
+          do $post$
+          declare opt uuid:='144042c1-e493-4256-a86c-cd088a8898ce'; sf uuid:='20cd72aa-f281-4985-931b-a83422404b66';
+          begin
+            if (select count(*) from public.contpaq_accounts where company_id=opt)<>1646 then raise exception 'contpaq_seed_opt_accounts_count'; end if;
+            if (select count(*) from public.contpaq_accounts where company_id=sf)<>694 then raise exception 'contpaq_seed_sf_accounts_count'; end if;
+            if (select count(*) from public.account_report_lines where company_id=opt)<>95 then raise exception 'contpaq_seed_opt_lines_count'; end if;
+            if (select count(*) from public.account_report_lines where company_id=sf)<>396 then raise exception 'contpaq_seed_sf_lines_count'; end if;
+            if (select count(*) from public.contpaq_terceros where company_id=opt)<>187 then raise exception 'contpaq_seed_opt_terceros_count'; end if;
+            if (select count(*) from public.budget_account_mappings where company_id=opt)<>87 then raise exception 'contpaq_seed_opt_maps_count'; end if;
+            if (select count(*) from public.budget_account_mappings where company_id=sf)<>60 then raise exception 'contpaq_seed_sf_maps_count'; end if;
+            if (select count(*) from public.budget_account_mappings where company_id=opt and needs_review)<>6 then raise exception 'contpaq_seed_opt_review_count'; end if;
+            if (select count(*) from public.budget_account_mappings where company_id=sf and needs_review)<>18 then raise exception 'contpaq_seed_sf_review_count'; end if;
+            if (select count(*) from public.tax_account_mappings where company_id=opt)<>6 then raise exception 'contpaq_seed_opt_tax_count'; end if;
+            if exists(select 1 from public.budget_account_mappings m left join public.contpaq_accounts a on a.company_id=m.company_id and a.code=m.contpaq_account_code where a.code is null or not a.is_detail or not a.activo) then raise exception 'contpaq_seed_invalid_mapping_account'; end if;
+          end
+          $post$;
+          commit;
+          """
+          ]
+          out=Path('supabase/migrations/20260905220100_contpaq_dark_launch_seed_prod.sql')
+          out.write_text('\n'.join(parts),encoding='utf-8')
+          PY
+
+      - name: Add focused candidate contract
+        shell: bash
+        run: |
+          cat > scripts/qa/contpaq-dark-launch-prod-contract.test.mjs <<'EOF'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          import test from 'node:test'
+
+          const logic=readFileSync('app/src/features/configuracion/logic.ts','utf8')
+          const schema=readFileSync('supabase/migrations/20260905220000_contpaq_dark_launch_schema_prod.sql','utf8')
+          const seed=readFileSync('supabase/migrations/20260905220100_contpaq_dark_launch_seed_prod.sql','utf8')
+          const api=readFileSync('app/src/features/configuracion/api.ts','utf8')
+
+          test('dark launch UI is SysAdmin only',()=>{
+            assert.match(logic,/contpaq:\s*\[ROLES\.SYSADMIN\]/)
+            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLES\.ADMIN/)
+            assert.doesNotMatch(logic,/contpaq:\s*\[[^\]]*ROLES\.DIRECTION/)
+          })
+          test('schema is additive and dedicated',()=>{
+            assert.match(schema,/contpaq_dark_launch_access/)
+            assert.match(schema,/add column if not exists cfdi_data jsonb/)
+            assert.doesNotMatch(schema,/create or replace function public\.create_payment_request/)
+            assert.doesNotMatch(schema,/reimbursement_items/)
+            assert.doesNotMatch(schema,/payment_request_exception_quick_approve/)
+          })
+          test('dark launch uses dedicated SysAdmin RLS',()=>{
+            assert.match(schema,/current_user_has_role\(public\.flux_sysadmin_roles\(\)\)/)
+            assert.match(schema,/force row level security/)
+            assert.match(schema,/revoke all on table public\.%I from public,anon,authenticated/)
+          })
+          test('seed uses only PROD tenant ids and exact expected counts',()=>{
+            assert.match(seed,/144042c1-e493-4256-a86c-cd088a8898ce/)
+            assert.match(seed,/20cd72aa-f281-4985-931b-a83422404b66/)
+            assert.doesNotMatch(seed,/9680353c-9b86-4730-82e1-fce664f048a2/)
+            assert.doesNotMatch(seed,/68b61801-74c0-44ea-a33b-f20e4bf53aa7/)
+            for (const marker of ['<>1646','<>694','<>95','<>396','<>187','<>87','<>60']) assert.ok(seed.includes(marker),marker)
+          })
+          test('account review is wired but stays behind module gate',()=>{
+            assert.match(api,/loadCuentaReviewData/)
+            assert.match(api,/confirmProviderAccount/)
+            assert.match(schema,/confirm_provider_account/)
+          })
+          EOF
+
+          cat > .github/workflows/contpaq-dark-launch-prod-contract.yml <<'EOF'
+          name: CONTPAQ dark launch PROD contract
+          on:
+            pull_request:
+              branches: [main]
+              paths:
+                - app/src/features/configuracion/**
+                - app/src/lib/contpaq/**
+                - app/package.json
+                - app/package-lock.json
+                - supabase/migrations/20260905220*.sql
+                - supabase/seed/contpaq/**
+                - scripts/qa/contpaq-dark-launch-prod-contract.test.mjs
+                - .github/workflows/contpaq-dark-launch-prod-contract.yml
+          permissions:
+            contents: read
+          jobs:
+            contract:
+              runs-on: ubuntu-latest
+              timeout-minutes: 20
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-node@v4
+                  with:
+                    node-version: 22
+                    cache: npm
+                    cache-dependency-path: app/package-lock.json
+                - run: npm --prefix app ci
+                - run: node --test scripts/qa/contpaq-dark-launch-prod-contract.test.mjs
+                - run: npm --prefix app run typecheck
+                - run: npm --prefix app run build
+          EOF
+
+      - name: Install and validate React candidate
+        run: |
+          npm --prefix app ci
+          node --test scripts/qa/contpaq-dark-launch-prod-contract.test.mjs
+          npm --prefix app run typecheck
+          npm --prefix app run build
+          git diff --check
+
+      - name: Enforce frozen-PROD scope
+        shell: bash
+        run: |
+          if git diff --name-only HEAD | grep -E '^app/src/features/solicitudes/'; then
+            echo 'Solicitudes is frozen for this release'; exit 1
+          fi
+          if grep -R -n -E '9680353c-9b86-4730-82e1-fce664f048a2|68b61801-74c0-44ea-a33b-f20e4bf53aa7' supabase/migrations/20260905220*.sql; then
+            echo 'DEV tenant id leaked into PROD migration'; exit 1
+          fi
+
+      - name: Commit validated candidate
+        shell: bash
+        run: |
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git rm .github/workflows/build-contpaq-dark-launch-prod.yml
+          git add app/package.json app/package-lock.json \
+            app/src/features/configuracion \
+            app/src/lib/contpaq \
+            supabase/migrations/20260905220000_contpaq_dark_launch_schema_prod.sql \
+            supabase/migrations/20260905220100_contpaq_dark_launch_seed_prod.sql \
+            supabase/seed/contpaq \
+            scripts/qa/contpaq-dark-launch-prod-contract.test.mjs \
+            .github/workflows/contpaq-dark-launch-prod-contract.yml
+          git commit -m 'feat(contpaq): preparar dark launch PROD aislado [contpaq-dark-launch-built]'
+          git push origin HEAD:release/contpaq-dark-launch-prod-r1
