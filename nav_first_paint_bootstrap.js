@@ -1,4 +1,28 @@
 ;(function bootstrapFluxFirstPaintNav() {
+  // Hygiene global, deliberadamente pequeña y aditiva.
+  // 1) Los controles nativos siguen el tema Flux.
+  // 2) Se retiran únicamente avatares estáticos "FL" sin identidad real.
+  const hygieneStyleId = "flux-ui-hygiene-native-theme"
+  if (!document.getElementById(hygieneStyleId)) {
+    const style = document.createElement("style")
+    style.id = hygieneStyleId
+    style.textContent = '[data-theme="dark"]{color-scheme:dark}[data-theme="light"]{color-scheme:light}'
+    document.head.appendChild(style)
+  }
+
+  function removeOrphanFluxAvatars() {
+    document.querySelectorAll(".topbar-user > .avatar").forEach((avatar) => {
+      const label = String(avatar.textContent || "").trim()
+      if (label === "FL" && !avatar.dataset.profileAvatar) avatar.remove()
+    })
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", removeOrphanFluxAvatars, { once: true })
+  } else {
+    removeOrphanFluxAvatars()
+  }
+
   const nav = document.querySelector(".sidebar .nav")
   if (!nav || nav.dataset.fluxNavMode === "role") return
   if (nav.children.length) {
