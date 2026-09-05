@@ -1,0 +1,16 @@
+// Barrel del motor de export CONTPAQ vendorizado (carlosquantta/flux-contpaq-export).
+// Un solo punto de entrada para la app; los tipos viven en export.d.ts.
+export { paymentRequestAContrato } from './adapters/paymentRequest.js'
+export { assertContrato, ContratoError } from './contrato/schema.js'
+export { resolverAsientos, MapeoError } from './mapeo/resolver.js'
+export { resolverFiscal } from './mapeo/resolverFiscal.js'
+export { buildPoliza, aSerialExcel } from './serializer/buildPoliza.js'
+export { armarPolizaFiscal } from './serializer/fiscal.js'
+export { validateCuadre, ValidacionError } from './serializer/validate.js'
+export { renderLayout } from './serializer/renderLayout.js'
+export { transformCuenta, CuentaError } from './serializer/cuentas.js'
+export { operadoraConfig } from './serializer/configs/operadora.js'
+export { soporteFersanaConfig } from './serializer/configs/soporteFersana.js'
+export { crearFolioProvider, FOLIO_CONFIG_DEFAULT } from './ciclo/folio.js'
+export { hashContenido, planRegistro, yaExportado } from './ledger/contract.js'
+export { sha256Sync } from './sha256sync.js'
