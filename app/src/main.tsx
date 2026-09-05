@@ -6,6 +6,7 @@ import { CompanyProvider } from './lib/company'
 import { ModulesProvider } from './lib/moduleAccess'
 import { ToastProvider } from './components/ui/Toast'
 import App from './App'
+import { InstallProvider } from './features/install/InstallProvider'
 import './theme/tokens.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -15,7 +16,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <CompanyProvider>
           <ModulesProvider>
             <ToastProvider>
-              <App />
+              <InstallProvider>
+                <App />
+              </InstallProvider>
             </ToastProvider>
           </ModulesProvider>
         </CompanyProvider>

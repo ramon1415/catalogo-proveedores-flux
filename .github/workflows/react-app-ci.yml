@@ -41,3 +41,5 @@ jobs:
 
       - name: Build
         run: npm run build
+      - name: Verify installable app package
+        run: npm run check:pwa
