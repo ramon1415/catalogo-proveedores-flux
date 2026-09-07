@@ -326,8 +326,22 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       return
     }
     try {
+      // La asignación manual nunca puede saltarse el contrato físico. Si el
+      // parser canónico no reconoce exactamente este slot, el servidor también
+      // lo rechazará; fallamos antes de subir y evitamos un falso "Guardado".
+      const classified = await classifyPayrollFile(entry.file)
+      if (!classified || classified.slot !== slot) throw new Error('PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH')
       const inspected = await inspectFile(slot, entry.file, sourceCandidates)
-      const nextFiles = { ...files, [slot]: { ...inspected, fileName: entry.file.name } }
+      const nextFiles = {
+        ...files,
+        [slot]: {
+          ...inspected,
+          fileName: entry.file.name,
+          localDiagnostic: classified.diagnostic,
+          recordCount: classified.diagnostic.recordCount,
+          totalAmountMinor: classified.diagnostic.totalAmountMinor,
+        },
+      }
       const nextUnknown = unrecognized.filter((item) => item.id !== entry.id)
       setFiles(nextFiles)
       setUnrecognized(nextUnknown)
