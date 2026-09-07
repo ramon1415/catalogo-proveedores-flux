@@ -97,19 +97,18 @@ async function reserveFile(sessionId: string, expectedVersion: number, slot: Pay
   return data as Reservation
 }
 
-// Descarga de un archivo ya guardado: URL firmada emitida por el servidor bajo
-// el gate de captura (no exponemos la ruta de storage al cliente). El endpoint
-// `get_payroll_capture_file_url` es el único hook de backend pendiente para que
-// la descarga funcione también en sesiones reabiertas (el mismo día, el archivo
-// vive en memoria y se descarga sin ir al servidor).
+// Descarga de un archivo ya guardado: el Edge valida el JWT, aplica el gate
+// de captura vía get_payroll_capture_file_url y firma una URL de Storage por
+// sólo 120 segundos. El navegador nunca recibe storage_bucket/storage_path.
 export async function getCaptureFileUrl(fileId: string): Promise<string> {
-  const { data, error } = await supabase.rpc('get_payroll_capture_file_url', { p_file_id: fileId })
-  if (error) throw error
-  const url = typeof data === 'string' ? data : (data as { url?: string } | null)?.url
-  if (!url) throw new Error('payroll_capture_file_url_unavailable')
+  const { data, error } = await supabase.functions.invoke('payroll-capture-file-url', {
+    body: { p_file_id: fileId },
+  })
+  if (error) await throwFunctionInvokeError(error)
+  const url = (data as { url?: string } | null)?.url
+  if (!url) throw new Error('PAYROLL_CAPTURE_FILE_URL_UNAVAILABLE')
   return url
 }
-
 // ── RPC 4: confirm_payroll_capture_file(p_file_id, p_sha256) ───────────────
 async function confirmFile(fileId: string, sha256: string): Promise<{ version: number }> {
   const { data, error } = await supabase.rpc('confirm_payroll_capture_file', { p_file_id: fileId, p_sha256: sha256 })

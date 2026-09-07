@@ -389,8 +389,8 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     try {
       const url = await getCaptureFileUrl(state.fileId)
       window.open(url, '_blank', 'noopener')
-    } catch {
-      showToast('Descarga no disponible', 'La descarga de archivos de una captura ya guardada se habilita al integrar el endpoint del servidor.', 'warning')
+    } catch (error) {
+      showToast('Descarga no disponible', friendlyError(error), 'warning')
     }
   }
 
