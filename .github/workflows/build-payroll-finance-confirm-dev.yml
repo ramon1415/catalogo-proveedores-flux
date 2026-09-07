@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   build:
-    if: "${{ !contains(github.event.head_commit.message, '[payroll-finance-confirm-built]') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
