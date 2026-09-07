@@ -472,6 +472,9 @@ const ERROR_MAP: Record<string, string> = {
   PAYROLL_SAME_BANK_SERVER_PARSE_FAILED: 'El archivo BBVA mismo banco no coincide con Nómina 108.',
   PAYROLL_TOKA_CFDI_SERVER_PARSE_FAILED: 'El CFDI TOKA no coincide con el contrato certificado.',
   PAYROLL_TOKA_FUNDING_SERVER_PARSE_FAILED: 'El TXT de fondeo TOKA no coincide con el contrato certificado.',
+  PAYROLL_NON_BUDGET_CONTEXT_REQUIRED: 'Esta corrida no tiene el nuevo contexto no presupuestal. Crea una captura nueva para usar el flujo actual.',
+  PAYROLL_APPROVAL_FLOW_DISABLED: 'La Nómina ya no usa aprobación. Revisa los montos y confirma la corrida desde Finanzas.',
+  PAYROLL_FINANCE_CONFIRM_RPC_REQUIRED: 'La confirmación debe realizarse desde la acción de revisión de Finanzas.',
 }
 
 export function friendlyError(error: unknown): string {
