@@ -222,6 +222,15 @@ export async function acknowledgeTokaVariance(paymentRequestId: string, note: st
   if (error) throw error
 }
 
+// Confirmación explícita de Finanzas para Nómina no presupuestal.
+export async function confirmPayrollFinanceReview(paymentRequestId: string): Promise<{ status: string; payment_request_id: string; request_number?: string }> {
+  const { data, error } = await supabase.rpc('confirm_payroll_finance_review', {
+    p_payment_request_id: paymentRequestId,
+  })
+  if (error) throw error
+  return data as { status: string; payment_request_id: string; request_number?: string }
+}
+
 // ── RPC 8: submit_payroll_for_approval(p_payment_request_id, p_approver_id, p_approver_assignment_id)
 export async function submitForApproval(
   paymentRequestId: string,
