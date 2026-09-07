@@ -92,9 +92,14 @@ test('3. continuidad tras el merge: #504 (UUID CFDI, CSF) y FB-2 (cfdi_data) con
   assert.match(modal, /setSubtotal\(\(prev\) => prev \|\| String\(cfdi\.subtotal\)\)/)
   // FB-2: snapshot completo con el parser certificado, reseteado con el adjunto
   assert.match(modal, /import \{ parseCfdiXml, type CfdiParsed \} from '\.\.\/\.\.\/lib\/contpaq\/cfdiBrowser'/)
-  assert.match(modal, /function onFile\([\s\S]*?setInvoiceUuid\(''\)\s*\n\s*cfdiFull\.current = null/)
+  // Ambos resets deben ocurrir antes de leer otro adjunto; no tienen que ser
+  // líneas contiguas (E1 también limpia sus avisos y datos de precarga).
+  const reset = modal.slice(modal.indexOf('function onFile('), modal.indexOf('if (!f)', modal.indexOf('function onFile(')))
+  assert.match(reset, /setInvoiceUuid\(''\)/)
+  assert.match(reset, /cfdiFull\.current = null/)
   assert.match(modal, /cfdiFull\.current = parseCfdiXml\(xml\)/)
-  assert.match(modal, /const cfdiWarning = await saveCfdiData\(requestId, cfdiFull\.current\)/)
+  assert.match(modal, /const cfdiSnapshot = cfdiFull\.current[\s\S]*?await createPaymentRequest\(payload\)/)
+  assert.match(modal, /const cfdiWarning = await saveCfdiData\(requestId, cfdiSnapshot\)/)
   assert.match(api, /export async function saveCfdiData\(requestId: string, cfdi: unknown\)/)
   assert.match(api, /\.update\(\{ cfdi_data: cfdi/)
   // Precarga CSF (de #504) sigue en ProviderModal
