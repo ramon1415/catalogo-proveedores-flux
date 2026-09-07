@@ -16,17 +16,6 @@ SELECT jsonb_build_object(
  WHERE n.nspname IN ('public','private') AND p.prokind='f' AND p.proname ~ '(provider_intake|provider_match|payment_reconciliation|payment_receipt|payment_operation_evidence|payment_document_extraction|extraordinary|materialize_closed_batch|create_payable_snapshot|financial_outbox|mark_payment_request_material|complete_payment_request_layout|provider_payment|save_provider_catalog|guard_payment_request_execution|company_director_for_future_batches|approval_batch|approve_entire_batch|decide_approval_batch_items|list_director_approval_batches|claim_notification_events|notification_receipt_linked|notification_payment_outcome)'),
  'recovery_jobs', (SELECT jsonb_agg(jsonb_build_object('jobname',jobname,'schedule',schedule,'active',active,'command',command)) FROM cron.job WHERE command='select public.notification_payment_outcome_recovery_wakeup_internal();'),
  'financial_catch_all_count', (SELECT count(*) FROM public.approval_rules rule JOIN public.roles role ON role.id=rule.role_id WHERE lower(btrim(role.name))=ANY(ARRAY['administracion','finance','finanzas','tesoreria','treasury']) AND rule.active AND rule.company_id IS NULL AND rule.cost_center_id IS NULL AND coalesce(rule.amount_min,0)=0 AND rule.amount_max IS NULL),
- 'fingerprint_probes', (SELECT jsonb_object_agg(label, public.provider_intake_action_fingerprint(2,kind,'11111111-1111-4111-8111-111111111111'::uuid,actor::uuid,status,stamp::timestamptz,target,notes)) FROM (VALUES
- ('base','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.123Z','in_review','Nota QA'),
- ('trim','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.123Z','in_review','  Nota QA  '),
- ('timezone','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T06:34:56.123-06:00','in_review','Nota QA'),
- ('actor','transition','33333333-3333-4333-8333-333333333333','received','2026-01-01T12:34:56.123Z','in_review','Nota QA'),
- ('status','transition','22222222-2222-4222-8222-222222222222','in_review','2026-01-01T12:34:56.123Z','in_review','Nota QA'),
- ('stamp','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.124Z','in_review','Nota QA'),
- ('target','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.123Z','rejected','Nota QA'),
- ('notes','transition','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.123Z','in_review','Otra nota'),
- ('operation','internal_note','22222222-2222-4222-8222-222222222222','received','2026-01-01T12:34:56.123Z','in_review','Nota QA')
- ) AS probes(label,kind,actor,status,stamp,target,notes)),
  'tables', (SELECT jsonb_agg(jsonb_build_object('name',c.relname,'rls',c.relrowsecurity,
    'anon_select',has_table_privilege('anon',c.oid,'SELECT'),
    'authenticated_select',has_table_privilege('authenticated',c.oid,'SELECT'),

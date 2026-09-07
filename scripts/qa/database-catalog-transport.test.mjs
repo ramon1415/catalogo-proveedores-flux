@@ -20,6 +20,7 @@ test('API capture sends the reviewed SELECT, leaving transaction ownership to th
     assert.equal(body.read_only, true)
     assert.equal(body.query, sql.slice(sql.indexOf('SELECT'), sql.lastIndexOf('COMMIT;')).trim())
     assert.doesNotMatch(body.query, /^BEGIN|COMMIT;\s*$/)
+    assert.doesNotMatch(body.query, /public\.provider_intake_action_fingerprint\(/)
     return new Response(JSON.stringify([{ catalog }]), { status: 201 })
   })
   assert.equal(calls, 1)
