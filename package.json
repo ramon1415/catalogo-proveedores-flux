@@ -9,6 +9,7 @@
     "test:db:fingerprint": "node --test scripts/qa/manual-database/*.test.mjs"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.16",
     "jspdf": "2.5.2",
     "jspdf-autotable": "3.8.4"
   }
