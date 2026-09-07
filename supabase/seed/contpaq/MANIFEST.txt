@@ -1,0 +1,34 @@
+# MANIFEST · semilla FB-Integración (catálogos, renglones, terceros, mapeos SF)
+# Verificar: python3 tools/verificar_manifest.py  (apply.sh lo corre antes de tocar la base)
+# Formato: <sha256>  <ruta relativa a supabase/seed/contpaq>
+
+## Archivos de la semilla (los que se aplican)
+3c68d1579e68b694975d460325d156226d93a46986036c35afbce1d7e77ba4a8  10_catalogo_operadora.sql
+6ed6a7373b54ebba3c70d884bb46c102f2bec7b06a88e120cb2d942152bf389b  11_catalogo_soporte_fersana.sql
+aa9727c600a722a80c5fec54fb62e6fc4968b6729257049e897dea27c2872931  20_renglones_operadora.sql
+dff59792e8af47ad32bd14de766a9e0113a285119c70ed9b6887c61f08798001  21_renglones_soporte_fersana.sql
+ebf51393e048cadb716c5d9318beb9e6327330cf1fbaf324da389d457015ab0b  30_terceros_operadora.sql
+04baa5eca4de60eebddb32792958251c1a98690c23c01aafad6b250e335802c2  40_mapeos_soporte_fersana.sql
+c4e6b54d6112c8c1b898218ba9637b1e6f3d4f2450f02aa0da7f14554dbc552c  data/mapeos_soporte_fersana.json
+aa59c7fbb4e336a2d729192bdf54cdee55d9fd39c9831d18ae44d9ff15341583  postcheck.sql
+
+## Conteos esperados (filas por archivo = filas en DEV tras la carga)
+1646  10_catalogo_operadora.sql        → contpaq_accounts (Operadora)
+694   11_catalogo_soporte_fersana.sql  → contpaq_accounts (Soporte Fersana)
+95    20_renglones_operadora.sql       → account_report_lines (Operadora)
+396   21_renglones_soporte_fersana.sql → account_report_lines (Soporte Fersana)
+187   30_terceros_operadora.sql        → contpaq_terceros (Operadora; 189 filas fuente, ids 30 y 34 en ambos padrones)
+60    40_mapeos_soporte_fersana.sql    → budget_account_mappings (Soporte Fersana; 18 needs_review se conservan)
+
+## Fuentes controladas (viven en el módulo flux-contpaq-export, no en este repo)
+b7d1e138f19aa7bfae8750f99bf6302ed767a7240e5fa64eb464549623396182  fixtures/OPT - Catalogo de cuentas.xls (→ 10_)
+442b5b482e7180af8295d0778b75dfa0a7786684349cb4689683135bddc506e0  fixtures/SF - Catalogo de cuentas.xls (→ 11_)
+49a3626f4343f2aec3947132fe0c9fe5fc996d388dd071b11d020d82e4672a05  data/contpaq/mapeo_renglones_ejecutivos.csv (→ 20_, 21_)
+979deadee4d27528dc134f6cc0c5aef58c3c5afdc6501020de5fcf0df0c9381b  data/contpaq/opt_padron_terceros.csv (→ 30_)
+(40_ se genera de data/mapeos_soporte_fersana.json, snapshot de DEV 2026-09-02, incluido arriba)
+
+## Generadores
+10_/11_  flux-contpaq-export/scripts/generar_seed_contable.mjs
+20_/21_  flux-contpaq-export/scripts/generar_seed_renglones.mjs
+30_      tools/generar_terceros.py (en este directorio)
+40_      tools/generar_mapeos_fersana.py (en este directorio)

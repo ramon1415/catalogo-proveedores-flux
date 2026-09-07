@@ -135,6 +135,7 @@ export type FileSlotState = {
   uploaded: boolean
   status: string
   file?: File
+  fileId?: string
   fileName?: string
   extension?: string
   mimeType?: string

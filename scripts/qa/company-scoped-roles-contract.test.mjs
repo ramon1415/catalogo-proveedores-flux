@@ -37,6 +37,7 @@ test('database and SPA reserve platform power for Carlos and Ramon', () => {
   // exige junto con el grupo sysadmin. Y el allowlist no crece por descuido.
   assert.match(auth, /import \{ hasPlatformPowerEmail \} from '\.\/platformPower'/)
   assert.match(auth, /hasPlatformPowerEmail\(profile\?\.email\)/)
+  assert.match(platformPower, /PLATFORM_POWER_EMAILS\.has/)
   assert.match(auth, /globalGroup === ROLE_GROUPS\.SYSADMIN\s*\n?\s*&& hasPlatformPowerEmail/)
   assert.equal((platformPower.match(/@/g) || []).length, 2, 'el allowlist de poder de plataforma son exactamente dos correos')
 })

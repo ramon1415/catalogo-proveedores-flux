@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
+import { useAuth } from '../../lib/auth'
 import { ProviderCombo } from './ProviderCombo'
 import { loadBudgetAvailability, updatePaymentRequest, uploadReceipt } from './api'
 import {
@@ -32,6 +33,7 @@ export function EditModal({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
+  const { profile } = useAuth()
 
   const [companyId, setCompanyId] = useState(request.company_id || '')
   const [costCenterId, setCostCenterId] = useState(request.cost_center_id || '')
@@ -77,7 +79,8 @@ export function EditModal({
     }
     setCategoryDisabled(true)
     try {
-      const data = await loadBudgetAvailability(nextCompany, nextCC, month)
+      if (!profile?.id) throw new Error('No se pudo identificar el perfil activo.')
+      const data = await loadBudgetAvailability(nextCompany, nextCC, month, profile.id)
       const rows = sortAvailabilityRows(data, categoryById)
       setBudgetRows(rows)
       if (!rows.length) {

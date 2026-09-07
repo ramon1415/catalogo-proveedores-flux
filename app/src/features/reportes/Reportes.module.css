@@ -12,3 +12,16 @@
 .table th:not(:first-child), .table td:not(:first-child) { text-align: right; }
 .msg { text-align: center; color: var(--muted, #888); padding: 20px; }
 .totalRow td { border-top: 2px solid var(--border, rgba(120,120,120,.3)); border-bottom: none; }
+
+/* Costo por proyecto */
+.yearFilter { display: flex; align-items: center; gap: 8px; color: var(--muted, #888); }
+.yearFilter select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border, rgba(120,120,120,.3)); background: var(--bg-card, transparent); color: inherit; }
+.clickableRow { cursor: pointer; }
+.clickableRow:hover { background: var(--bg-hover, rgba(120,120,120,.06)); }
+.projectName { font-weight: 600; }
+.projectDesc { color: var(--muted, #888); font-size: .85em; margin-top: 2px; white-space: normal; }
+/* El detalle vive dentro de la fila del proyecto: se hunde un poco para que se
+   lea como sub-tabla y no como más renglones del resumen. */
+.detailCell { padding: 0 0 0 24px; background: var(--bg-sunken, rgba(120,120,120,.04)); }
+.detailCell .table th { font-size: .8em; color: var(--muted, #888); }
+.footnote { color: var(--muted, #888); font-size: .85em; margin-top: 12px; }

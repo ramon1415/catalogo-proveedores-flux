@@ -150,7 +150,8 @@ export default function DashboardPage() {
   const enterHistYear = useCallback(async (year: number, mapeo: HistMapeo) => {
     setHistChart({ labels: [], series: [], subtitle: `Cargando histórico ${year}...` })
     try {
-      const rows = await fetchHistoricalYear(year)
+      if (!companyId) return
+      const rows = await fetchHistoricalYear(companyId, year)
       const agg = aggregateHistYear(rows, year)
       setHistChart({
         labels: agg.labels,
@@ -196,12 +197,13 @@ export default function DashboardPage() {
       setHistChart({ labels: [], series: [], subtitle: 'No se pudo cargar el histórico' })
       showToast('Error al cargar histórico', friendlyError(err), 'error')
     }
-  }, [showToast])
+  }, [showToast, companyId])
 
   const enterAllYears = useCallback(async (mapeo: HistMapeo) => {
     setHistChart({ labels: [], series: [], subtitle: 'Cargando todos los años...' })
     try {
-      const rows = await fetchHistoricalAll()
+      if (!companyId) return
+      const rows = await fetchHistoricalAll(companyId)
       const { yy, anios, cuentas, porAnioMes } = aggregateHistAll(rows)
       const labels = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('es-MX', { month: 'short' }))
       const series: Serie[] = []
@@ -256,7 +258,7 @@ export default function DashboardPage() {
       setHistChart({ labels: [], series: [], subtitle: 'No se pudo cargar' })
       showToast('Error al cargar histórico', friendlyError(err), 'error')
     }
-  }, [showToast])
+  }, [showToast, companyId])
 
   // Init: carga operativa siempre; luego anual si aplica.
   useEffect(() => {
@@ -269,7 +271,8 @@ export default function DashboardPage() {
       if (cancelled) return
       setHistMapeoState(mapeo)
       try {
-        const periods = await fetchHistoricalPeriods()
+        if (!companyId) return
+        const periods = await fetchHistoricalPeriods(companyId)
         const yrs = [...new Set((periods || []).map((r) => String(r.period_month).slice(0, 4)))]
         if (cancelled) return
         if (!yrs.length) {

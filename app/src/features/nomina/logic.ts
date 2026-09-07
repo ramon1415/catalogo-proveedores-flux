@@ -258,7 +258,13 @@ export async function inspectFile(
 ): Promise<FileSlotState> {
   const config = SLOT_CONFIG[slot]
   const extension = String(file.name || '').split('.').pop()!.toLowerCase()
-  const mimeType = file.type || config?.mimes?.[0] || ''
+  // Algunos navegadores y selectores administrados entregan archivos locales
+  // con MIME vacío, genérico o no estándar. Si el MIME observado no pertenece
+  // al contrato del slot, usamos el canónico: la extensión y la firma física
+  // siguen siendo obligatorias, y el servidor vuelve a validar los bytes antes
+  // de materializar la corrida.
+  const observedMime = String(file.type || '').toLowerCase()
+  const mimeType = config?.mimes.includes(observedMime) ? observedMime : config?.mimes?.[0] || ''
   if (!config || extension !== config.extension || !config.mimes.includes(mimeType) || file.size < 1 || file.size > MAX_BYTES) {
     throw new Error('PAYROLL_FILE_METADATA_INVALID')
   }
@@ -455,10 +461,20 @@ const ERROR_MAP: Record<string, string> = {
   PAYROLL_SERVER_PACKAGE_VALIDATION_FAILED: 'Los archivos no conciliaron entre sí en la verificación del servidor.',
   PAYROLL_SOURCE_ACCOUNT_MISMATCH: 'La cuenta origen codificada en los layouts no coincide con la cuenta seleccionada.',
   PAYROLL_REQUIRED_FILES_MISSING: 'Faltan archivos obligatorios del paquete.',
+  PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH: 'Ese archivo no coincide con el formato físico del tipo seleccionado.',
+  PAYROLL_FILE_PATH_MISMATCH: 'El archivo guardado no pertenece a esta corrida.',
+  PAYROLL_STORAGE_OBJECT_MISSING: 'No se encontró el archivo privado guardado. Vuelve a cargarlo en una captura nueva.',
+  PAYROLL_FILE_SIZE_MISMATCH: 'El tamaño del archivo guardado no coincide con la evidencia registrada.',
+  PAYROLL_FILE_MIME_MISMATCH: 'El tipo físico del archivo guardado no coincide con el formato esperado.',
+  PAYROLL_FILE_HASH_MISMATCH: 'La huella SHA-256 del archivo guardado no coincide.',
+  PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED: 'La base de provisión de la carátula no pudo validarse en el servidor.',
   PAYROLL_COVER_SHEET_SERVER_PARSE_FAILED: 'La carátula no coincide con el contrato físico certificado.',
   PAYROLL_SAME_BANK_SERVER_PARSE_FAILED: 'El archivo BBVA mismo banco no coincide con Nómina 108.',
   PAYROLL_TOKA_CFDI_SERVER_PARSE_FAILED: 'El CFDI TOKA no coincide con el contrato certificado.',
   PAYROLL_TOKA_FUNDING_SERVER_PARSE_FAILED: 'El TXT de fondeo TOKA no coincide con el contrato certificado.',
+  PAYROLL_NON_BUDGET_CONTEXT_REQUIRED: 'Esta corrida no tiene el nuevo contexto no presupuestal. Crea una captura nueva para usar el flujo actual.',
+  PAYROLL_APPROVAL_FLOW_DISABLED: 'La Nómina ya no usa aprobación. Revisa los montos y confirma la corrida desde Finanzas.',
+  PAYROLL_FINANCE_CONFIRM_RPC_REQUIRED: 'La confirmación debe realizarse desde la acción de revisión de Finanzas.',
 }
 
 export function friendlyError(error: unknown): string {

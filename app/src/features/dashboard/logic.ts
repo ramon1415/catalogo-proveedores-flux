@@ -316,6 +316,15 @@ export function yearColor(i: number, alpha: string): string {
 
 type CuentaAgg = { nombre: string; fam: string; meses: Record<string, number>; total: number }
 
+
+// Flujo de una fila histórica: la columna clasificada al cargar manda;
+// el prefijo (4/6) queda solo como fallback para filas OPT antiguas.
+function flujoDe(r: HistoricalActual): 'ingreso' | 'egreso' | null {
+  if (r.flujo === 'ingreso' || r.flujo === 'egreso') return r.flujo
+  const fam = String(r.account_code || '')[0]
+  return fam === '4' ? 'ingreso' : fam === '6' ? 'egreso' : null
+}
+
 // enterHistYear: agrega filas de un año en meses + cuentas.
 export function aggregateHistYear(rows: HistoricalActual[], year: number) {
   const meses: Record<number, { ingresos: number; egresos: number }> = {}
@@ -323,12 +332,12 @@ export function aggregateHistYear(rows: HistoricalActual[], year: number) {
   for (const r of rows) {
     const m = Number(String(r.period_month).slice(5, 7))
     meses[m] = meses[m] || { ingresos: 0, egresos: 0 }
-    const fam = String(r.account_code || '')[0]
-    if (fam === '4') meses[m].ingresos += num(r.amount)
-    else if (fam === '6') meses[m].egresos += num(r.amount)
-    if (fam === '4' || fam === '6') {
+    const fj = flujoDe(r)
+    if (fj === 'ingreso') meses[m].ingresos += num(r.amount)
+    else if (fj === 'egreso') meses[m].egresos += num(r.amount)
+    if (fj) {
       const code = r.account_code || ''
-      const c = cuentas.get(code) || { nombre: r.account_name || '', fam, meses: {}, total: 0 }
+      const c = cuentas.get(code) || { nombre: r.account_name || '', fam: fj === 'ingreso' ? '4' : '6', meses: {}, total: 0 }
       c.meses[m] = (c.meses[m] || 0) + num(r.amount)
       c.total += num(r.amount)
       cuentas.set(code, c)
@@ -349,12 +358,12 @@ export function aggregateHistAll(rows: HistoricalActual[]) {
   for (const r of rows) {
     const y = String(r.period_month).slice(0, 4)
     anios[y] = anios[y] || { ingresos: 0, egresos: 0 }
-    const fam = String(r.account_code || '')[0]
-    if (fam === '4') anios[y].ingresos += num(r.amount)
-    else if (fam === '6') anios[y].egresos += num(r.amount)
-    if (fam === '4' || fam === '6') {
+    const fj = flujoDe(r)
+    if (fj === 'ingreso') anios[y].ingresos += num(r.amount)
+    else if (fj === 'egreso') anios[y].egresos += num(r.amount)
+    if (fj) {
       const code = r.account_code || ''
-      const c = cuentas.get(code) || { nombre: r.account_name || '', fam, meses: {}, total: 0 }
+      const c = cuentas.get(code) || { nombre: r.account_name || '', fam: fj === 'ingreso' ? '4' : '6', meses: {}, total: 0 }
       c.meses[y] = (c.meses[y] || 0) + num(r.amount)
       c.total += num(r.amount)
       cuentas.set(code, c)
@@ -362,8 +371,8 @@ export function aggregateHistAll(rows: HistoricalActual[]) {
     const m = Number(String(r.period_month).slice(5, 7))
     porAnioMes[y] = porAnioMes[y] || {}
     porAnioMes[y][m] = porAnioMes[y][m] || { ingresos: 0, egresos: 0 }
-    if (fam === '4') porAnioMes[y][m].ingresos += num(r.amount)
-    else if (fam === '6') porAnioMes[y][m].egresos += num(r.amount)
+    if (fj === 'ingreso') porAnioMes[y][m].ingresos += num(r.amount)
+    else if (fj === 'egreso') porAnioMes[y][m].egresos += num(r.amount)
   }
   const yy = Object.keys(anios).sort()
   return { yy, anios, cuentas, porAnioMes }

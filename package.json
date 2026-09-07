@@ -1,10 +1,11 @@
 {
   "name": "flux-qa-harness",
   "private": true,
-  "description": "Raíz del repo: existe para que la suite de contratos (scripts/qa) resuelva las dependencias que importan las Edge Functions. La app vive en app/ con su propio package.json y es la que Vercel construye (ver installCommand en vercel.json). La suite completa necesita AMBAS instalaciones: `npm run qa:setup`.",
+  "description": "Ra\u00edz del repo: existe para que la suite de contratos (scripts/qa) resuelva las dependencias que importan las Edge Functions. La app vive en app/ con su propio package.json y es la que Vercel construye (ver installCommand en vercel.json). La suite completa necesita AMBAS instalaciones: `npm run qa:setup`.",
   "scripts": {
-    "qa:setup": "npm install && npm --prefix app ci",
-    "test": "node --test scripts/qa/*.test.mjs"
+    "qa:setup": "npm ci && npm --prefix app ci",
+    "test": "node --test --test-reporter=tap scripts/qa/*.test.mjs",
+    "test:db": "node scripts/qa/run-database-contracts.mjs"
   },
   "devDependencies": {
     "jspdf": "2.5.2",

@@ -22,15 +22,19 @@ export function Modal({
     const dlg = ref.current
     if (dlg && !dlg.open) dlg.showModal()
   }, [])
+  function close() {
+    ref.current?.close()
+    onClose()
+  }
   return (
-    <dialog ref={ref} className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`} onCancel={onClose} onClose={onClose}>
+    <dialog ref={ref} className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`} onCancel={(event) => { event.preventDefault(); close() }} onClose={onClose}>
       <div className={s.content}>
         <div className={s.head}>
           <div>
             <h2>{title}</h2>
             {subtitle != null && <p className="muted">{subtitle}</p>}
           </div>
-          <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
+          <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={close}>✕</button>
         </div>
         <div className={s.scroll}>{children}</div>
         {actions && <div className={s.actions}>{actions}</div>}

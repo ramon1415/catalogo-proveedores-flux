@@ -7,6 +7,7 @@ import { AppShell } from './components/ui/AppShell'
 import AccessRequestPage from './features/access/AccessRequestPage'
 import PendingAccessPage from './features/access/PendingAccessPage'
 import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
+import CostoPorProyectoPage from './features/reportes/CostoPorProyectoPage'
 
 // Migración completa del intake (7 rebanadas); el vanilla queda como
 // respaldo directo en /provider_intakes.html mientras se valida paridad.
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="solicitudes-proveedores" element={<ProviderIntakesPage />} />
           <Route path="cortes-semanales" element={<CortesPage />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
+          <Route path="costo-por-proyecto" element={<CostoPorProyectoPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Route>
       </Routes>

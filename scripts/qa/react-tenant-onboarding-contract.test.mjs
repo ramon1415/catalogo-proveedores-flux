@@ -5,6 +5,7 @@ import test from 'node:test'
 const api = fs.readFileSync('app/src/features/configuracion/api.ts', 'utf8')
 const wizard = fs.readFileSync('app/src/features/configuracion/TenantOnboardingWizard.tsx', 'utf8')
 const system = fs.readFileSync('app/src/features/configuracion/tabs/SystemTab.tsx', 'utf8')
+const companies = fs.readFileSync('app/src/features/configuracion/tabs/EmpresasTab.tsx', 'utf8')
 const onboardingApi = api.slice(
   api.indexOf('// ── Onboarding de tenant'),
   api.indexOf('// ── Mapeo CONTPAQ'),
@@ -27,8 +28,9 @@ test('one confirmed bulk upsert seeds company_modules under the existing unique 
   assert.doesNotMatch(api, /service_role|SUPABASE_SERVICE/)
 })
 
-test('wizard is sysadmin-scoped through System and requires review plus confirmation', () => {
-  assert.match(system, /<TenantOnboardingWizard \/>/)
+test('wizard is isolated in the Empresas tab and requires review plus confirmation', () => {
+  assert.match(companies, /<TenantOnboardingWizard \/>/)
+  assert.doesNotMatch(system, /<TenantOnboardingWizard \/>/)
   assert.match(wizard, /Paso \$\{step\} de 3/)
   assert.match(wizard, /Revisar cambios/)
   assert.match(wizard, /Confirmo que esta configuración corresponde únicamente a/)

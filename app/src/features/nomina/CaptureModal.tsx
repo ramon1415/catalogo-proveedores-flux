@@ -22,19 +22,19 @@ import {
   validateMetadata,
 } from './logic'
 import { classifyPayrollFile } from './physicalParsers'
+import { ChannelOperations } from './ChannelOperations'
 import {
   acknowledgeTokaVariance,
+  getCaptureFileUrl,
   getCaptureSessions,
   getSubmissionSummary,
-  listApproverOptions,
+  confirmPayrollFinanceReview,
   materializeCapture,
   revalidateMaterializedCapture,
   saveCaptureSession,
-  submitForApproval,
   uploadReservedFile,
 } from './api'
 import type {
-  ApproverCandidate,
   BankAccount,
   Company,
   CompanyCostCenter,
@@ -95,6 +95,13 @@ function moneyFromMinor(value: number | null | undefined): string {
   return Number.isSafeInteger(value) ? formatMoney(Number(value) / 100) : '—'
 }
 
+function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`
+}
+
 export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
   const { showToast } = useToast()
 
@@ -116,8 +123,6 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const persistedSourceAccountId = useRef<string | null>(null)
 
   const [summary, setSummary] = useState<SubmissionSummary | null>(null)
-  const [approvers, setApprovers] = useState<ApproverCandidate[]>([])
-  const [approverValue, setApproverValue] = useState('')
   const [varianceNote, setVarianceNote] = useState('')
 
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -207,6 +212,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
         uploaded: true,
         uploadable: false,
         status: file.parsing_status || 'server_verification_pending',
+        fileId: file.id,
         fileName: slotLabel(file.kind),
         recordCount: file.record_count,
         totalAmountMinor: file.total_amount_minor,
@@ -326,8 +332,22 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       return
     }
     try {
+      // La asignación manual nunca puede saltarse el contrato físico. Si el
+      // parser canónico no reconoce exactamente este slot, el servidor también
+      // lo rechazará; fallamos antes de subir y evitamos un falso "Guardado".
+      const classified = await classifyPayrollFile(entry.file)
+      if (!classified || classified.slot !== slot) throw new Error('PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH')
       const inspected = await inspectFile(slot, entry.file, sourceCandidates)
-      const nextFiles = { ...files, [slot]: { ...inspected, fileName: entry.file.name } }
+      const nextFiles = {
+        ...files,
+        [slot]: {
+          ...inspected,
+          fileName: entry.file.name,
+          localDiagnostic: classified.diagnostic,
+          recordCount: classified.diagnostic.recordCount,
+          totalAmountMinor: classified.diagnostic.totalAmountMinor,
+        },
+      }
       const nextUnknown = unrecognized.filter((item) => item.id !== entry.id)
       setFiles(nextFiles)
       setUnrecognized(nextUnknown)
@@ -345,6 +365,30 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     delete next[slot]
     setFiles(next)
     setChannels(channelsFromFiles(next))
+  }
+
+  // Descargar para verificar que el archivo subió bien. Si es de esta sesión, el
+  // File está en memoria (descarga directa). Si la sesión se reabrió, pedimos al
+  // servidor una URL firmada por file_id (bajo el gate de captura).
+  async function downloadFile(slot: PayrollSlot, state: FileSlotState) {
+    if (state.file) {
+      const url = URL.createObjectURL(state.file)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = state.fileName || state.file.name || `${slot}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      return
+    }
+    if (!state.fileId) return
+    try {
+      const url = await getCaptureFileUrl(state.fileId)
+      window.open(url, '_blank', 'noopener')
+    } catch (error) {
+      showToast('Descarga no disponible', friendlyError(error), 'warning')
+    }
   }
 
   async function validatePendingFiles(): Promise<FileMap> {
@@ -365,23 +409,10 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     return checked
   }
 
-  async function loadSubmissionSummary(requestId: string): Promise<{ data: SubmissionSummary; options: ApproverCandidate[] }> {
+  async function loadSubmissionSummary(requestId: string): Promise<SubmissionSummary> {
     const data = await getSubmissionSummary(requestId)
     setSummary(data)
-    let options: ApproverCandidate[] = []
-    if (data.status === 'draft') {
-      try {
-        options = await listApproverOptions(data.company_id, data.cost_center_id, Number(data.amount_requested))
-      } catch (error) {
-        showToast('Aprobadores no disponibles', friendlyError(error), 'warning')
-      }
-    }
-    setApprovers(options)
-    setApproverValue((current) => {
-      if (options.some((option) => option.profile_id === current)) return current
-      return options.length === 1 ? options[0].profile_id : ''
-    })
-    return { data, options }
+    return data
   }
 
   async function registerAndAdvance() {
@@ -456,36 +487,16 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       setMaterializedRequestId(requestId)
       if (current) hydrate(current, false)
 
-      setProgressText('Preparando aprobación…')
+      setProgressText('Preparando revisión de Finanzas…')
       const loaded = await loadSubmissionSummary(requestId)
-      const vales = loaded.data.channels?.find((channel) => channel.channel === 'vales')
+      const vales = loaded.channels?.find((channel) => channel.channel === 'vales')
       const variance = Number(vales?.funding_variance || 0)
-      if (variance !== 0 && !vales?.funding_variance_acknowledged) {
-        showToast('Corrida registrada', 'Revisa y reconoce la diferencia TOKA para continuar a aprobación.', 'warning')
-        onSaved()
-        return
-      }
-      if (loaded.data.budget_ready !== true) {
-        showToast('Corrida registrada', 'El paquete quedó validado; falta completar el gate presupuestal.', 'warning')
-        onSaved()
-        return
-      }
-      if (loaded.options.length !== 1) {
-        showToast(
-          'Corrida registrada',
-          loaded.options.length > 1 ? 'Selecciona el aprobador para completar el envío.' : 'No hay un aprobador elegible para este contexto.',
-          'warning',
-        )
-        onSaved()
-        return
-      }
-
-      setProgressText('Enviando a aprobación…')
-      const option = loaded.options[0]
-      await submitForApproval(requestId, option.profile_id, option.assignment_id || null)
-      await loadSubmissionSummary(requestId)
       onSaved()
-      showToast('Nómina enviada', 'La corrida quedó registrada y enviada a aprobación.', 'success')
+      if (variance !== 0 && !vales?.funding_variance_acknowledged) {
+        showToast('Corrida registrada', 'Revisa y reconoce la diferencia TOKA; después confirma que los montos son correctos.', 'warning')
+        return
+      }
+      showToast('Corrida registrada', 'El paquete quedó validado. Revisa los montos y confirma que son correctos para habilitar la dispersión.', 'success')
     } catch (error) {
       showToast('No se pudo completar la corrida', friendlyError(error), 'error')
     } finally {
@@ -528,25 +539,20 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     }
   }
 
-  async function submit() {
-    if (submitting || !summary || !materializedRequestId) return
-    const option = approvers.find((candidate) => candidate.profile_id === approverValue)
-    if (!option) {
-      showToast('Aprobador requerido', 'Selecciona un aprobador elegible.', 'warning')
-      return
-    }
-    if (summary.status === 'draft' && summary.budget_ready === false) {
-      showToast('Presupuesto requerido', 'Configura y valida el presupuesto antes de enviar la Nómina a aprobación.', 'warning')
+  async function confirmAmounts() {
+    if (submitting || !summary || !materializedRequestId || summary.status !== 'draft') return
+    if (needsReview) {
+      showToast('Revisión TOKA pendiente', 'Reconoce primero la diferencia de fondeo TOKA.', 'warning')
       return
     }
     setSubmitting(true)
     try {
-      await submitForApproval(materializedRequestId, option.profile_id, option.assignment_id || null)
+      await confirmPayrollFinanceReview(materializedRequestId)
       await loadSubmissionSummary(materializedRequestId)
       onSaved()
-      showToast('Enviada a aprobación', 'La Nómina quedó enviada al aprobador seleccionado.', 'success')
+      showToast('Montos confirmados', 'Finanzas confirmó la corrida. Ya está lista para dispersión y comprobantes bancarios por canal.', 'success')
     } catch (error) {
-      showToast('No se pudo enviar', friendlyError(error), 'error')
+      showToast('No se pudo confirmar la corrida', friendlyError(error), 'error')
     } finally {
       setSubmitting(false)
     }
@@ -573,9 +579,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const variance = Number(valesChannel?.funding_variance || 0)
   const needsReview = variance !== 0 && !valesChannel?.funding_variance_acknowledged
   const isDraft = summary?.status === 'draft'
-  const budgetReady = summary?.budget_ready === true
-  const approvalReady = isDraft && !needsReview && budgetReady
-  const budgetBlocked = summary?.budget_decision === 'bloqueado'
+  const financeReviewReady = isDraft && !needsReview
 
   const metadataMissing = !sourceAccountId || !costCenterId || !periodStart || !periodEnd || concept.trim().length < 3
   const packageReady =
@@ -597,19 +601,14 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   return (
     <Modal
       title="Captura de nómina"
-      subtitle="Arrastra el paquete, revisa el resumen y envíalo con una sola acción."
+      subtitle="Sube el paquete, revisa los montos y confirma la corrida. Nómina no consume presupuesto y Flux no ejecuta pagos."
       size="lg"
       onClose={onClose}
       actions={actions}
     >
       <div className={s.section}>
         <div className={s.introRow}>
-          <div>
-            <span className={s.devPill}>DEV · Captura simplificada</span>
-            <p className={s.sectionCopy}>
-              Flux valida archivos y registra la corrida; no calcula sueldos, no genera layouts y no ejecuta pagos.
-            </p>
-          </div>
+          <span className={s.devPill}>DEV · Captura simplificada</span>
           <span className={s.privatePill}>Privado · Finanzas</span>
         </div>
 
@@ -666,8 +665,13 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
             {(Object.entries(files) as Array<[PayrollSlot, FileSlotState]>).map(([slot, state]) => (
               <article key={slot} className={s.fileRow}>
                 <div>
-                  <strong>{state.fileName || slotLabel(slot)}</strong>
-                  <span>{slotLabel(slot)} · detectado por contenido</span>
+                  <strong>{slotLabel(slot)}</strong>
+                  {(() => {
+                    const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
+                    const size = formatBytes(state.sizeBytes)
+                    const meta = [distinctName, size].filter(Boolean).join(' · ')
+                    return meta ? <span>{meta}</span> : null
+                  })()}
                 </div>
                 <div className={s.fileAggregate}>
                   {state.recordCount != null && <span>{state.recordCount} registros</span>}
@@ -676,6 +680,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
                 </span>
+                {(state.file || state.fileId) && (
+                  <button type="button" className={s.iconBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
+                    Descargar
+                  </button>
+                )}
                 {!state.uploaded && !locked && (
                   <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
                     Quitar
@@ -716,27 +725,33 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
             </span>
           </div>
 
-          <div className={s.summaryMetrics}>
-            <div className={s.metric}>
-              <span>Total neto</span>
-              <strong>{summary ? formatMoney(summary.employee_net) : moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Empleados</span>
-              <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Canales</span>
-              <strong>{channels.length || '—'}</strong>
-            </div>
-          </div>
+          {/* Estimación local antes de registrar. Cuando el servidor devuelve el
+              resumen autoritativo (sección de abajo), no lo repetimos aquí. */}
+          {!summary && (
+            <>
+              <div className={s.summaryMetrics}>
+                <div className={s.metric}>
+                  <span>Total neto</span>
+                  <strong>{moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Empleados</span>
+                  <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Canales</span>
+                  <strong>{channels.length || '—'}</strong>
+                </div>
+              </div>
 
-          {channels.length > 0 && (
-            <div className={s.channelList}>
-              {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
-            </div>
+              {channels.length > 0 && (
+                <div className={s.channelList}>
+                  {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
+                </div>
+              )}
+            </>
           )}
 
           {(cashDifference !== null || vouchersDifference !== null || localVariance !== null) && (
@@ -811,9 +826,9 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 onClick={registerAndAdvance}
                 disabled={workflowBusy || classifying || !packageReady || metadataMissing}
               >
-                {workflowBusy ? progressText || 'Procesando…' : 'Registrar y enviar a aprobación'}
+                {workflowBusy ? progressText || 'Procesando…' : 'Registrar y revisar montos'}
               </button>
-              <small>Se conservan las mismas RPC, carga privada, SHA-256, validación del servidor y auditoría.</small>
+              <small>La corrida se valida en servidor. No hace comprobación presupuestal ni requiere aprobador.</small>
             </div>
           )}
         </section>
@@ -838,41 +853,30 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               </div>
             )}
 
-            {isDraft && !budgetReady && (
-              <div className={`${s.budgetGate} ${budgetBlocked ? s.budgetBlocked : s.budgetPending}`}>
-                <div>
-                  <strong>{budgetBlocked ? 'Presupuesto bloqueado' : 'Presupuesto pendiente'}</strong>
-                  <p>{summary.budget_block_reason || 'Configura mes y partida presupuestal antes de enviar.'}</p>
-                </div>
-                {materializedRequestId && <a className={s.secondaryBtn} href={`/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>Configurar presupuesto</a>}
-              </div>
-            )}
-
-            {approvalReady && (
+            {financeReviewReady && (
               <div className={s.approval}>
-                <label>
-                  Aprobador *
-                  <select value={approverValue} onChange={(event) => setApproverValue(event.target.value)}>
-                    <option value="">Selecciona aprobador</option>
-                    {approvers.map((approver) => <option key={approver.profile_id} value={approver.profile_id}>{approver.option_label || approver.display_name || approver.email || approver.profile_id}</option>)}
-                  </select>
-                </label>
-                <button type="button" className={s.primaryBtn} onClick={submit} disabled={!approverValue || submitting}>{submitting ? 'Enviando…' : 'Continuar y enviar a aprobación'}</button>
+                <div>
+                  <strong>Revisión de Finanzas</strong>
+                  <p>Verifica el neto y los importes de BBVA, SPEI y TOKA. Al confirmar, la corrida queda lista para registrar dispersión y comprobantes. Flux no ejecuta pagos.</p>
+                </div>
+                <button type="button" className={s.primaryBtn} onClick={confirmAmounts} disabled={submitting}>{submitting ? 'Confirmando…' : 'Confirmar montos correctos'}</button>
               </div>
             )}
 
             <p className={s.submissionState}>
               {isDraft
                 ? needsReview
-                  ? 'Reconoce la diferencia TOKA antes de continuar.'
-                  : !budgetReady
-                    ? 'Completa el gate presupuestal antes de continuar.'
-                    : approvers.length
-                      ? 'Lista para enviar.'
-                      : 'No hay aprobadores elegibles para este contexto.'
-                : `Estado de solicitud: ${summary.status}`}
+                  ? 'Reconoce la diferencia TOKA antes de confirmar la corrida.'
+                  : 'Lista para confirmación de Finanzas. Sin presupuesto y sin aprobador.'
+                : summary.status === 'approved'
+                  ? 'Corrida confirmada por Finanzas · lista para dispersión y comprobantes.'
+                  : `Estado de solicitud: ${summary.status}`}
             </p>
           </section>
+        )}
+
+        {summary?.status === 'approved' && materializedRequestId && (
+          <ChannelOperations paymentRequestId={materializedRequestId} />
         )}
 
         <p className={s.piiNote}>

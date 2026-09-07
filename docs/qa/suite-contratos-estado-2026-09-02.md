@@ -2,6 +2,8 @@
 
 Fecha: 2 de septiembre de 2026 · rama `fix/qa-suite-rot`
 
+> Estado histórico. La decisión sobre las 18 familias, la suite recuperada, el nuevo CI y la recertificación actual del dispatcher están en [validación del 7 de septiembre](pr508-validacion-2026-09-07.md). Los conteos, hashes y versiones de esta nota corresponden al 2 de septiembre.
+
 ## Resumen
 
 Correr la suite completa desde la raíz daba **28 fallas**, ninguna del producto.

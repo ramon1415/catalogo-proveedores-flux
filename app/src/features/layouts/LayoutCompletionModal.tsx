@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
 import {
   cleanText, friendlyRpcError, formatMissingFields, formatPreviewMoney, layoutAccountLabel,
   providerExecutionLayoutFields,
 } from './logic'
-import { completeProviderPaymentExecutionData, completePaymentRequestLayoutData } from './api'
+import {
+  completeProviderPaymentExecutionData, completePaymentRequestLayoutData,
+  loadReimbursementBeneficiary,
+} from './api'
 import type { PreviewRow, CompanyBankAccount } from './types'
 import s from './Layouts.module.css'
 
@@ -34,7 +37,14 @@ export function LayoutCompletionModal({
   )
 
   const providerMissing = useMemo(() => missing.filter((field) => providerExecutionLayoutFields().includes(field)), [missing])
-  const showProviderFields = providerMissing.length > 0
+
+  // Reembolso: los datos bancarios que faltan son los del EMPLEADO, no los de
+  // un proveedor. Escribirlos con complete_provider_payment_execution_data
+  // volcaría la CLABE de una persona sobre un registro del catálogo de
+  // proveedores, así que en ese caso ese RPC no se llama.
+  const [reimbursement, setReimbursement] = useState<Awaited<ReturnType<typeof loadReimbursementBeneficiary>>>(null)
+  const isReimbursement = reimbursement?.isReimbursement === true
+  const showProviderFields = providerMissing.length > 0 && !isReimbursement
 
   const [bankAccount, setBankAccount] = useState(
     eligibleAccounts.some((a) => a.id === request.company_bank_account_id) ? (request.company_bank_account_id as string) : '',
@@ -65,6 +75,14 @@ export function LayoutCompletionModal({
     convenio: useRef<HTMLInputElement>(null),
     providerBank: useRef<HTMLInputElement>(null),
   }
+
+  useEffect(() => {
+    let cancelled = false
+    loadReimbursementBeneficiary(request.payment_request_id)
+      .then((data) => { if (!cancelled) setReimbursement(data) })
+      .catch(() => { /* best-effort: sin dato se comporta como pago a proveedor */ })
+    return () => { cancelled = true }
+  }, [request.payment_request_id])
 
   const impact = request.direction_approval_current
     ? 'Estos son datos operativos de ejecución. Al guardarlos se conserva la autorización vigente de Dirección.'
@@ -206,6 +224,35 @@ export function LayoutCompletionModal({
           <label className={s.fullRow}>Concepto de pago
             <input ref={refs.concept} type="text" maxLength={120} value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="Concepto que aparecera en el layout" />
           </label>
+
+          {isReimbursement && (
+            <fieldset className={`${s.fullRow} ${s.providerFields}`}>
+              <legend>Reembolso a empleado</legend>
+              <div className={s.fieldHint}>
+                {reimbursement?.beneficiaryProfileId ? (
+                  reimbursement.clabe || reimbursement.cuenta ? (
+                    <>
+                      Destino real del pago: <strong>{reimbursement.beneficiaryName || 'Beneficiario sin nombre'}</strong>
+                      {' · '}{reimbursement.banco || 'Sin banco'}
+                      {' · '}{reimbursement.clabe ? `CLABE ${reimbursement.clabe}` : `Cuenta ${reimbursement.cuenta}`}.
+                      {' '}Estos datos están registrados en la cuenta del empleado; no se capturan aquí para no
+                      escribirlos sobre un proveedor del catálogo.
+                      {providerMissing.length > 0 && (
+                        <>
+                          {' '}<strong>El layout todavía arma la línea con los datos del proveedor</strong>, así que
+                          esta solicitud no se dispersará al empleado hasta que se ajuste el lado servidor.
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <>El beneficiario no tiene datos bancarios completos. Deben capturarse desde la solicitud de reembolso, no aquí.</>
+                  )
+                ) : (
+                  <>Esta solicitud es un reembolso pero no tiene beneficiario registrado. Corrígelo en la solicitud.</>
+                )}
+              </div>
+            </fieldset>
+          )}
 
           {showProviderFields && (
             <fieldset className={`${s.fullRow} ${s.providerFields}`}>

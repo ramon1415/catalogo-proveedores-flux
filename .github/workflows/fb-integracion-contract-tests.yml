@@ -1,0 +1,34 @@
+name: FB-Integración CONTPAQ contract tests
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - app/src/lib/contpaq/**
+      - app/src/features/configuracion/**
+      - app/src/features/solicitudes/RequestModal.tsx
+      - app/src/features/solicitudes/api.ts
+      - app/src/features/solicitudes/cfdi.ts
+      - supabase/migrations/20260901232529_fb_integracion_contable.sql
+      - supabase/migrations/20260901235805_contpaq_accounts_relax_detail_check.sql
+      - supabase/migrations/20260902045510_fb_integracion_tanda2_mapeos.sql
+      - supabase/migrations/20260902200000_fb_integracion_forward_fix_tenant_integrity.sql
+      - supabase/migrations/20260902201500_accounting_exports_reversal_covering_index.sql
+      - supabase/seed/contpaq/**
+      - scripts/qa/fb-integracion-contract.test.mjs
+      - .github/workflows/fb-integracion-contract-tests.yml
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Semilla íntegra (sha256 del MANIFEST)
+        run: python3 supabase/seed/contpaq/tools/verificar_manifest.py
+      - name: Contrato FB-Integración
+        run: node --test scripts/qa/fb-integracion-contract.test.mjs

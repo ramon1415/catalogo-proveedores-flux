@@ -46,26 +46,38 @@ const TAB_ACCESS: Record<ConfigTab, RoleGroup[]> = {
   members: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.DIRECTION],
   originAccounts: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
   budgets: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
-  contpaq: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
+  // DARK LAUNCH: el módulo CONTPAQ (mapeos + export + revisión de cuentas) se
+  // despliega a prod pero visible solo para SysAdmin, para poder correr el UAT
+  // contra datos reales sin exponerlo a Finanzas. Para encenderlo a Finanzas,
+  // regresar a [SYSADMIN, ADMIN, DIRECTION] y el badge a 'Adm/Dir'.
+  contpaq: [ROLE_GROUPS.SYSADMIN],
   system: [ROLE_GROUPS.SYSADMIN],
+  empresas: [ROLE_GROUPS.SYSADMIN],
+  // El catálogo lo da de alta Finanzas (ADMIN = grupo finanzas/tesorería);
+  // Dirección lo consulta porque es quien lee el reporte de costo por proyecto.
+  proyectos: [ROLE_GROUPS.SYSADMIN, ROLE_GROUPS.ADMIN, ROLE_GROUPS.DIRECTION],
 }
 
-export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system']
+export const CONFIG_TABS: ConfigTab[] = ['members', 'originAccounts', 'budgets', 'contpaq', 'system', 'empresas', 'proyectos']
 
 export const TAB_LABELS: Record<ConfigTab, string> = {
   members: 'Socios',
   originAccounts: 'Cuentas origen',
   budgets: 'Presupuestos',
   contpaq: 'Mapeo CONTPAQ',
-  system: 'Sistema',
+  system: 'Usuarios',
+  empresas: 'Empresas',
+  proyectos: 'Proyectos',
 }
 
 export const TAB_BADGES: Record<ConfigTab, string> = {
   members: 'Dir',
   originAccounts: 'Adm/Dir',
   budgets: 'Trim.',
-  contpaq: 'Adm/Dir',
+  contpaq: 'SysAdmin',
   system: 'SysAdmin',
+  empresas: 'SysAdmin',
+  proyectos: 'Adm/Dir',
 }
 
 export function canAccessConfigTab(tab: string, group: RoleGroup): boolean {
@@ -86,6 +98,10 @@ const TAB_QUERY_MAP: Record<string, ConfigTab> = {
   contpaq: 'contpaq',
   system: 'system',
   sistema: 'system',
+  usuarios: 'system',
+  empresas: 'empresas',
+  proyectos: 'proyectos',
+  projects: 'proyectos',
 }
 
 export function resolveRequestedTab(raw: string): string {
@@ -282,4 +298,24 @@ export function friendlyRoutingError(error: any): string {
 // ── Mapeo CONTPAQ ────────────────────────────────────────────────
 export function errorMessage(err: any): string {
   return err?.message || String(err)
+}
+
+// ── Proyectos ────────────────────────────────────────────────────
+// El índice único es por (company_id, lower(trim(name))): el duplicado es el
+// error esperable al capturar, así que se nombra en vez de mostrar el 23505.
+export function projectErrorMessage(err: any): string {
+  const code = String(err?.code || '')
+  const msg = String(err?.message || err || '')
+  if (code === '23505' || msg.includes('projects_company_name')) {
+    return 'Ya existe un proyecto con ese nombre en esta empresa.'
+  }
+  if (code === '42501' || msg.toLowerCase().includes('row-level security')) {
+    return 'No tienes permiso para administrar proyectos de esta empresa.'
+  }
+  return msg || 'Error desconocido'
+}
+
+export function validateProject(name: string): string {
+  if (!name.trim()) return 'Captura el nombre del proyecto.'
+  return ''
 }

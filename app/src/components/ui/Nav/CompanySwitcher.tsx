@@ -31,7 +31,7 @@ function IcCheck() {
 // Launcher de empresa activa (junto al logo). Muestra la empresa actual; si hay
 // más de una, abre un modal para cambiarla. Se apoya en profile_company_memberships
 // (via useAuth) + useCompany (activa/persistida).
-export function CompanySwitcher() {
+export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
   const { memberships } = useAuth()
   const { companyId, companyName, setCompany } = useCompany()
   const [open, setOpen] = useState(false)
@@ -45,7 +45,7 @@ export function CompanySwitcher() {
     <>
       <button
         type="button"
-        className={s.companyLauncher}
+        className={`${s.companyLauncher} ${compact ? s.companyCompact : ''}`}
         onClick={() => canSwitch && setOpen(true)}
         disabled={!canSwitch}
         title={canSwitch ? `${current} · cambiar empresa` : current}

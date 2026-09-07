@@ -108,6 +108,42 @@ const FLUX_URL = "https://flux.quantta.mx";
 const SYSTEM_PDF_LOGO_URL = `${FLUX_URL}/assets/logo-flux-verde.webp`;
 const MAX_APPROVAL_BATCH_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+const DEFAULT_EXCEPTION_QUICK_APPROVE_TTL_HOURS = 72;
+const MAX_EXCEPTION_QUICK_APPROVE_TTL_HOURS = 168;
+const SUPABASE_PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
+
+function normalizeHttpsOrigin(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      (parsed.pathname !== "" && parsed.pathname !== "/") ||
+      parsed.search ||
+      parsed.hash
+    ) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function exceptionQuickApprovalBaseUrl(runtime: Runtime): string | null {
+  return normalizeHttpsOrigin(
+    optionalEnv(runtime, "PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_BASE_URL"),
+  );
+}
+
+function projectRefFromSupabaseUrl(value: string): string {
+  const parsed = new URL(value);
+  const match = parsed.hostname.match(/^([a-z0-9]{20})\.supabase\.co$/);
+  if (!match || !SUPABASE_PROJECT_REF_PATTERN.test(match[1])) {
+    throw new Error("supabase_project_ref_invalid");
+  }
+  return match[1];
+}
+
 const allowedEventTypes = new Set([
   "payment_request.created",
   "payment_request.approved",
@@ -593,15 +629,161 @@ function renderApprovalBatchDecisionEmail(
   return { subject, text, html };
 }
 
+export function isExceptionPaymentRequest(payload: Record<string, unknown>): boolean {
+  const decision = String(payload?.budget_decision ?? "").trim().toLowerCase();
+  return payload?.is_extraordinary_adjustment === true ||
+    decision === "bloqueado" || decision === "blocked";
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function utf8ToBase64Url(value: string): string {
+  return bytesToBase64Url(new TextEncoder().encode(value));
+}
+
+type ExceptionQuickApprovalMaterial = {
+  version: number;
+  project_ref: string;
+  notification_event_id: string;
+  payment_request_id: string;
+  approver_profile_id: string;
+  submitted_at: string;
+  snapshot_hash: string;
+  expires_at: string;
+  jti: string;
+};
+
+export async function signExceptionQuickApprovalToken(
+  material: ExceptionQuickApprovalMaterial,
+  secret: string,
+): Promise<string> {
+  if (typeof secret !== "string" || secret.trim().length < 32) {
+    throw new Error("quick_approval_secret_invalid");
+  }
+  if (!SUPABASE_PROJECT_REF_PATTERN.test(material.project_ref)) {
+    throw new Error("quick_approval_project_ref_invalid");
+  }
+  const payload = {
+    version: material.version,
+    project_ref: material.project_ref,
+    notification_event_id: material.notification_event_id,
+    payment_request_id: material.payment_request_id,
+    approver_profile_id: material.approver_profile_id,
+    submitted_at: material.submitted_at,
+    snapshot_hash: material.snapshot_hash,
+    expires_at: material.expires_at,
+    jti: material.jti,
+  };
+  const payloadSegment = utf8ToBase64Url(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret.trim()),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(payloadSegment),
+  ));
+  return `${payloadSegment}.${bytesToBase64Url(signature)}`;
+}
+
+function exceptionQuickApprovalTtlSeconds(runtime: Runtime): number {
+  const raw = optionalEnv(
+    runtime,
+    "PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_TTL_HOURS",
+    String(DEFAULT_EXCEPTION_QUICK_APPROVE_TTL_HOURS),
+  );
+  const hours = Number(raw);
+  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_EXCEPTION_QUICK_APPROVE_TTL_HOURS) {
+    throw new Error("exception_quick_approval_ttl_invalid");
+  }
+  return hours * 3600;
+}
+
+// Builds the signed approve-from-email URL for a budget exception. Returns null
+// (falls back to the standard email) when the feature flag is off, the secret is
+// unavailable, or the token material RPC rejects the event for any reason.
+async function buildExceptionQuickApprovalUrl(
+  event: NotificationEvent,
+  workerId: string,
+  runtime: Runtime,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<string | null> {
+  try {
+    const explicitFlag = optionalEnv(
+      runtime,
+      "PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_ENABLED",
+    ).toLowerCase();
+    if (explicitFlag && explicitFlag !== "true" && explicitFlag !== "false") {
+      return null;
+    }
+    if (explicitFlag === "false") return null;
+
+    let secret = optionalEnv(runtime, "PAYMENT_REQUEST_EXCEPTION_QUICK_APPROVE_SECRET");
+    let config: { enabled?: unknown; secret?: unknown } | null = null;
+    if (explicitFlag !== "true" || secret.length < 32) {
+      config = await callRpc<{ enabled?: unknown; secret?: unknown }>(
+        runtime.fetch,
+        supabaseUrl,
+        serviceRoleKey,
+        "get_payment_request_exception_quick_approval_runtime_config",
+        {},
+      );
+    }
+
+    const enabled = explicitFlag === "true" || (
+      explicitFlag === "" && config?.enabled === true
+    );
+    if (!enabled) return null;
+
+    if (secret.length < 32) {
+      secret = typeof config?.secret === "string" ? config.secret.trim() : "";
+    }
+    const baseUrl = exceptionQuickApprovalBaseUrl(runtime);
+    if (secret.length < 32 || !baseUrl) return null;
+
+    const materialFromDatabase = await callRpc<Omit<ExceptionQuickApprovalMaterial, "project_ref">>(
+      runtime.fetch,
+      supabaseUrl,
+      serviceRoleKey,
+      "get_payment_request_exception_quick_approval_token_material",
+      {
+        p_notification_event_id: event.id,
+        p_worker_id: workerId,
+        p_ttl_seconds: exceptionQuickApprovalTtlSeconds(runtime),
+      },
+    );
+    const material: ExceptionQuickApprovalMaterial = {
+      ...materialFromDatabase,
+      project_ref: projectRefFromSupabaseUrl(supabaseUrl),
+    };
+    const token = await signExceptionQuickApprovalToken(material, secret);
+    return `${baseUrl}/payment_request_exception_quick_approve.html#token=${token}`;
+  } catch {
+    return null;
+  }
+}
+
 function renderPaymentRequestCreatedEmail(
   event: NotificationEvent,
   sendMode: string,
+  quickApprovalUrl: string | null = null,
 ): { subject: string; text: string; html: string } {
   const payload = event.payload || {};
   const folio = textValue(payload.folio) || event.source_folio || "sin folio";
   const subjectPrefix = sendMode === "test_only" ? "[DEV TEST] " : "";
-  const subject = `${subjectPrefix}${event.subject || `Nueva solicitud de pago: ${folio}`}`;
+  const isException = isExceptionPaymentRequest(payload);
   const amountText = money(payload.amount, payload.currency);
+  const shortfallText = money(payload.budget_shortfall, payload.currency);
+  const subject = isException
+    ? `${subjectPrefix}⚠️ EXCEPCIÓN (fuera de presupuesto) — ${folio}`
+    : `${subjectPrefix}${event.subject || `Nueva solicitud de pago: ${folio}`}`;
   const rows = [
     ["Folio", folio],
     ["Empresa", payload.company],
@@ -612,19 +794,50 @@ function renderPaymentRequestCreatedEmail(
     ["Partida presupuestal", payload.budget_category],
   ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
   const approvalUrl = "https://flux.quantta.mx/aprobaciones.html";
-  const intro = "Se generó una solicitud de pago que requiere tu revisión.";
+  const heading = isException
+    ? "Solicitud FUERA DE PRESUPUESTO por autorizar"
+    : "Nueva solicitud por revisar";
+  const intro = isException
+    ? "Esta solicitud de pago entró como EXCEPCIÓN: está fuera del presupuesto disponible y requiere tu autorización explícita."
+    : "Se generó una solicitud de pago que requiere tu revisión.";
+  const exceptionKind = payload.is_extraordinary_adjustment === true
+    ? "Ajuste extraordinario fuera del presupuesto aprobado."
+    : "El importe excede el presupuesto disponible de la partida.";
+
+  // ----- plain text -----
+  const calloutTextLines = isException
+    ? [
+      "*** EXCEPCION: FUERA DE PRESUPUESTO ***",
+      exceptionKind,
+      ...(amountText ? [`Monto solicitado: ${amountText}`] : []),
+      ...(textValue(payload.budget_category) ? [`Partida: ${payload.budget_category}`] : []),
+      ...(shortfallText ? [`Faltante de presupuesto: ${shortfallText}`] : []),
+      "",
+    ]
+    : [];
+  const quickTextLines = isException && quickApprovalUrl
+    ? [
+      `Autorizar excepción (sin entrar al sistema): ${quickApprovalUrl}`,
+      "La autorización rápida solo aprueba esta excepción. Para rechazar o pedir cambios entra a Flux.",
+      "",
+    ]
+    : [];
   const textLines = [
-    "Nueva solicitud por revisar",
+    heading,
     "",
     intro,
     "",
+    ...calloutTextLines,
     ...rows.map(([label, value]) => `${label}: ${value}`),
     "",
-    `Revisar solicitud: ${approvalUrl}`,
+    ...quickTextLines,
+    `${isException ? "Rechazar / revisar en Flux" : "Revisar solicitud"}: ${approvalUrl}`,
     ...(sendMode === "test_only"
       ? ["", "Modo DEV TEST: este correo fue redirigido al destinatario de prueba."]
       : []),
   ];
+
+  // ----- html -----
   const htmlRows = rows
     .map(([label, value]) => `
       <tr>
@@ -632,6 +845,38 @@ function renderPaymentRequestCreatedEmail(
         <td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;"><strong>${escapeHtml(value)}</strong></td>
       </tr>`)
     .join("");
+  const calloutHtml = isException
+    ? `<div style="margin:0 0 18px;padding:14px 16px;border-left:5px solid #b42318;background:#fef3f2;color:#7a271a;font-size:14px;line-height:1.5;">
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px;">Fuera de presupuesto</div>
+        <div style="margin-bottom:8px;">${escapeHtml(exceptionKind)}</div>
+        ${amountText ? `<div>Monto solicitado: <strong>${escapeHtml(amountText)}</strong></div>` : ""}
+        ${textValue(payload.budget_category) ? `<div>Partida: <strong>${escapeHtml(payload.budget_category)}</strong></div>` : ""}
+        ${shortfallText ? `<div>Faltante de presupuesto: <strong>${escapeHtml(shortfallText)}</strong></div>` : ""}
+      </div>`
+    : "";
+  const primaryButton = isException && quickApprovalUrl
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin-top:22px;">
+        <tr><td><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+          <td bgcolor="#176b50" align="center" style="border-radius:6px;">
+            <a href="${escapeHtml(quickApprovalUrl)}" style="display:block;min-height:44px;padding:13px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:18px;text-decoration:none;box-sizing:border-box;">Autorizar excepción</a>
+          </td>
+        </tr></table></td></tr>
+        <tr><td style="padding-top:10px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr>
+          <td bgcolor="#16322d" align="center" style="border-radius:6px;">
+            <a href="${approvalUrl}" style="display:block;min-height:44px;padding:13px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:18px;text-decoration:none;box-sizing:border-box;">Rechazar / revisar en Flux</a>
+          </td>
+        </tr></table></td></tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:#68716d;">La autorización rápida solo aprueba esta excepción. Para rechazar o pedir cambios entra a Flux.</p>`
+    : `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;">
+        <tr>
+          <td bgcolor="#16322d" style="border-radius:6px;">
+            <a href="${approvalUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">${isException ? "Revisar en Flux" : "Revisar solicitud"}</a>
+          </td>
+        </tr>
+      </table>`;
+  const headerBg = isException ? "#7a1f16" : "#16322d";
+  const topBorder = isException ? "#b42318" : "#16322d";
   const testBanner = sendMode === "test_only"
     ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">Modo DEV TEST: este correo fue redirigido al destinatario de prueba.</div>`
     : "";
@@ -643,25 +888,20 @@ function renderPaymentRequestCreatedEmail(
 <html lang="es">
   <body style="margin:0;padding:0;background:#eef1e9;">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(subject)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid ${topBorder};background:#eef1e9;">
       <tr>
         <td align="center" style="padding:24px 12px 18px;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
             <tr>
-              <td bgcolor="#16322d" style="padding:20px 28px;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
+              <td bgcolor="${headerBg}" style="padding:20px 28px;background:${headerBg};color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;">Flux</td>
             </tr>
             <tr>
               <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;">
-                <h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">Nueva solicitud por revisar</h1>
+                <h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:${headerBg};">${escapeHtml(heading)}</h1>
                 <p style="margin:0 0 16px;font-size:14px;line-height:1.5;color:#1f2926;">${escapeHtml(intro)}</p>
+                ${calloutHtml}
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table>
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;">
-                  <tr>
-                    <td bgcolor="#16322d" style="border-radius:6px;">
-                      <a href="${approvalUrl}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">Revisar solicitud</a>
-                    </td>
-                  </tr>
-                </table>
+                ${primaryButton}
                 ${testBanner}
               </td>
             </tr>
@@ -768,9 +1008,13 @@ function renderReceiptLinkedEmail(
   };
 }
 
-export function renderEmail(event: NotificationEvent, sendMode: string): { subject: string; text: string; html: string } {
+export function renderEmail(
+  event: NotificationEvent,
+  sendMode: string,
+  quickApprovalUrl: string | null = null,
+): { subject: string; text: string; html: string } {
   if (event.event_type === "payment_request.created") {
-    return renderPaymentRequestCreatedEmail(event, sendMode);
+    return renderPaymentRequestCreatedEmail(event, sendMode, quickApprovalUrl);
   }
   if (event.event_type === "payment_receipt.linked") {
     return renderReceiptLinkedEmail(event, sendMode);
@@ -1091,11 +1335,27 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
         sendMode,
         testEmail,
       );
-      const rendered = renderEmail(event, sendMode);
       let providerMessageId: string | null = null;
       let attachment: PreparedAttachment | undefined;
 
       try {
+        // Budget-exception created events can carry a signed approve-from-email
+        // link (mirror of the weekly-cut quick approval). Built inside the try
+        // block so any RPC/HMAC failure falls back to the standard email.
+        let exceptionQuickApprovalUrl: string | null = null;
+        if (
+          event.event_type === "payment_request.created" &&
+          isExceptionPaymentRequest(event.payload || {})
+        ) {
+          exceptionQuickApprovalUrl = await buildExceptionQuickApprovalUrl(
+            event,
+            workerId,
+            runtime,
+            supabaseUrl,
+            serviceRoleKey,
+          );
+        }
+        const rendered = renderEmail(event, sendMode, exceptionQuickApprovalUrl);
         if (
           sendMode === "test_only" &&
           devBusinessRecipientEventTypes.has(event.event_type)

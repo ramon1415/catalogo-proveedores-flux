@@ -7,3 +7,5 @@ preview_*.html
 
 # Dependencias del harness de QA en la raíz (ver package.json)
 node_modules/
+
+.vercel-static/

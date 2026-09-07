@@ -59,6 +59,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: 'dashboard', label: 'Dashboard operativo', path: '/dashboard', icon: <IcDashboard />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'dashboard-anual', label: 'Dashboard anual', path: '/dashboard-anual', icon: <IcDashboardAnnual />, groups: MANAGE, moduleKey: 'dashboard', migrated: true },
       { key: 'presupuesto-anual', label: 'Presupuesto anual', path: '/presupuesto-anual', icon: <IcDashboardAnnual />, groups: MANAGE },
+      { key: 'costo-por-proyecto', label: 'Costo por proyecto', path: '/costo-por-proyecto', icon: <IcDashboardAnnual />, groups: MANAGE },
     ],
   },
   {

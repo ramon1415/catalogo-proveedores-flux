@@ -34,7 +34,7 @@ jobs:
 
     env:
       SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
-      EXPECTED_FUNCTION_BLOB: 414b318f05d88f4ee4fbab5daf7ce141010ef774
+      EXPECTED_FUNCTION_BLOB: 410ba33a81a8b69d3e3929f16dc55ed5d99c4804
       CONFIRM_DEV: ${{ inputs.confirm_dev }}
       CONFIRM_MODE: ${{ inputs.confirm_mode }}
       CONFIRM_FUNCTION: ${{ inputs.confirm_function }}
@@ -156,20 +156,8 @@ jobs:
               raise SystemExit(f"unexpected function config keys or values: {actual!r}")
           PY
 
-          mapfile -t function_files < <(find "supabase/functions/${FUNCTION_NAME}" -type f -print | sort)
-          if [ "${#function_files[@]}" != "1" ] || [ "${function_files[0]}" != "supabase/functions/${FUNCTION_NAME}/index.ts" ]; then
-            echo "::error::The dispatcher bundle must contain only its certified index.ts."
-            exit 1
-          fi
+          node scripts/qa/verify-dispatcher-bundle.mjs | tee "${EVIDENCE_DIR}/certified-bundle.json"
 
-          actual_blob="$(git hash-object "supabase/functions/${FUNCTION_NAME}/index.ts")"
-          if [ "${actual_blob}" != "${EXPECTED_FUNCTION_BLOB}" ]; then
-            echo "::error::Function source does not match the certified branded renderer."
-            exit 1
-          fi
-          printf '%s\n' "${actual_blob}" | tee "${EVIDENCE_DIR}/function-source-git-blob.txt"
-
-          printf '%s\n' "${function_files[@]}" | tee "${EVIDENCE_DIR}/function-files.txt"
           cp supabase/config.toml "${EVIDENCE_DIR}/config.toml"
 
       - name: Deploy notification-dispatcher to Supabase DEV
