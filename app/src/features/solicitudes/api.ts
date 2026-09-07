@@ -338,6 +338,25 @@ export async function quickCreateProvider(payload: Record<string, unknown>): Pro
   return data as Proveedor
 }
 
+// E1 · Aviso de duplicado antes de crear: ¿ya existe una solicitud con este
+// CFDI en la empresa? La unicidad dura la refuerza la base (anti-duplicado por
+// invoice_uuid); esto solo adelanta el aviso en pantalla. Puede quedar corto si
+// RLS oculta solicitudes de otras personas — por eso el candado real es la BD.
+export async function findRequestByInvoiceUuid(
+  companyId: string,
+  uuid: string,
+): Promise<{ id: string; request_number: string | null; status: string | null } | null> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select('id,request_number,status')
+    .eq('company_id', companyId)
+    .eq('invoice_uuid', uuid)
+    .limit(1)
+    .maybeSingle()
+  if (error) return null
+  return (data as { id: string; request_number: string | null; status: string | null } | null) ?? null
+}
+
 // ── Edición de solicitud ───────────────────────────────────────────────────
 export async function updatePaymentRequest(id: string, payload: EditPayload): Promise<void> {
   const { error } = await supabase.from('payment_requests').update(payload).eq('id', id)

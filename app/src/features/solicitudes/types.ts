@@ -54,6 +54,7 @@ export type Company = {
   name?: string | null
   legal_name?: string | null
   display_name?: string | null
+  rfc?: string | null
   active?: boolean | null
   activo?: boolean | null
   is_active?: boolean | null

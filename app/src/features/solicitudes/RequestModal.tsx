@@ -23,7 +23,7 @@ import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSec
 import { numberValue } from '../../lib/format'
 import { parseCfdiFile } from './cfdi'
 import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
-import { saveCfdiData } from './api'
+import { saveCfdiData, findRequestByInvoiceUuid } from './api'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { useModules } from '../../lib/moduleAccess'
@@ -115,6 +115,10 @@ export function RequestModal({
   const [withholding, setWithholding] = useState('')
   const [invoiceUuid, setInvoiceUuid] = useState('')
   const [cfdiHint, setCfdiHint] = useState('')
+  // E1 · Solicitud desde factura: aviso de duplicado por UUID y prefill del
+  // alta rápida cuando el emisor del CFDI no está en el padrón.
+  const [dupWarning, setDupWarning] = useState<{ folio: string; status: string } | null>(null)
+  const [providerPrefill, setProviderPrefill] = useState<{ nombre: string; rfc: string } | null>(null)
   // FB-2: el CFDI completo parseado con el parser certificado del módulo
   // CONTPAQ; se persiste tras crear la solicitud para el feeder contable.
   const cfdiFull = useRef<CfdiParsed | null>(null)
@@ -452,25 +456,65 @@ const availablePredictionCandidates = useMemo(
     setFile(f)
     setCfdiHint('')
     setInvoiceUuid('')
+    setDupWarning(null)
+    setProviderPrefill(null)
     cfdiFull.current = null // el snapshot pertenece al adjunto vigente
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
     setFileHint(res.message)
-    // Autollenado del desglose desde el CFDI (XML). Solo rellena vacíos;
-    // nunca pisa lo que el usuario ya capturó.
+    // E1 · Solicitud desde factura: al subir el XML se precarga lo que trae el
+    // CFDI. Solo rellena vacíos; nunca pisa lo que el usuario ya capturó.
     if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
       parseCfdiFile(f).then((cfdi) => {
         if (parseVersion !== cfdiParseVersion.current) return
         if (!cfdi) return
+        // Desglose fiscal.
         if (cfdi.subtotal != null) setSubtotal((prev) => prev || String(cfdi.subtotal))
         if (cfdi.traslados != null) setTaxAmount((prev) => prev || String(cfdi.traslados))
         if (cfdi.retenciones != null) setWithholding((prev) => prev || String(cfdi.retenciones))
         if (cfdi.total != null) setAmount((prev) => prev || String(cfdi.total))
         if (cfdi.uuid) setInvoiceUuid(cfdi.uuid)
+        // Concepto de la solicitud desde la descripción de los conceptos.
+        if (cfdi.conceptos) setDescription((prev) => prev || cfdi.conceptos!)
+
+        // Empresa ← RFC del receptor. Solo entre las empresas del usuario; si el
+        // receptor es una empresa del grupo sin acceso, se avisa y no se fija.
+        let resolvedCompanyId = companyId
+        let accessNote = ''
+        if (cfdi.rfcReceptor) {
+          const match = companies.find((c) => (c.rfc ?? '').trim().toUpperCase() === cfdi.rfcReceptor)
+          if (match) {
+            if (myCompanies.some((c) => c.id === match.id)) {
+              if (!lockedCompany && !companyId) { onCompanyChange(match.id); resolvedCompanyId = match.id }
+            } else {
+              accessNote = ` La factura es a nombre de ${companyName(match)}, empresa donde no tienes acceso.`
+            }
+          }
+        }
+
+        // Proveedor ← RFC del emisor. Si no está en el padrón, se ofrece alta
+        // rápida prellenada con nombre y RFC del CFDI (providerPrefill).
+        if (cfdi.rfcEmisor && !proveedorId && !isReembolso) {
+          const match = proveedores.find((p) => (p.rfc ?? '').trim().toUpperCase() === cfdi.rfcEmisor)
+          if (match) onProviderSelect(match.id, proveedorLabel(match))
+          else setProviderPrefill({ nombre: cfdi.nombreEmisor ?? '', rfc: cfdi.rfcEmisor })
+        }
+
+        const ref = [cfdi.serie, cfdi.folio].filter(Boolean).join('-')
+        const fechaShort = cfdi.fecha ? cfdi.fecha.slice(0, 10) : ''
         setCfdiHint(
-          `Desglose leído del CFDI${cfdi.uuid ? ` (folio fiscal …${cfdi.uuid.slice(-12)})` : ''}. Verifica los importes antes de enviar.`,
+          `Leído del CFDI${ref ? ` · folio ${ref}` : ''}${fechaShort ? ` · ${fechaShort}` : ''}. Verifica los datos antes de enviar.${accessNote}`,
         )
+
+        // Aviso de duplicado por UUID en la empresa resuelta (el candado real
+        // es la unicidad en la base; esto solo adelanta el aviso).
+        if (cfdi.uuid && resolvedCompanyId) {
+          findRequestByInvoiceUuid(resolvedCompanyId, cfdi.uuid).then((dup) => {
+            if (parseVersion !== cfdiParseVersion.current) return
+            if (dup) setDupWarning({ folio: dup.request_number ?? '—', status: dup.status ?? '' })
+          })
+        }
       })
       // FB-2: parse completo con el parser certificado, para contabilidad.
       // Independiente del prefill: si el XML no cumple el contrato fiscal
@@ -731,6 +775,7 @@ const availablePredictionCandidates = useMemo(
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
     setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
+    setDupWarning(null); setProviderPrefill(null)
     setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
@@ -834,6 +879,12 @@ const availablePredictionCandidates = useMemo(
                       <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
+                    {dupWarning && (
+                      <div className={`${s.fullRow} ${s.fieldHint}`} style={{ color: 'var(--ruby)', fontWeight: 600 }}>
+                        ⚠ Ya existe una solicitud con esta factura en la empresa: {dupWarning.folio}
+                        {dupWarning.status ? ` (${dupWarning.status})` : ''}. Revisa antes de crear otra.
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -863,8 +914,17 @@ const availablePredictionCandidates = useMemo(
                     <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
                     <div className={s.formGrid}>
                       <label className={s.fullRow}>Proveedor *
-                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
+                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
                       </label>
+                      {providerPrefill && !proveedorId && (
+                        <div className={`${s.fieldHint} ${s.fullRow}`}>
+                          El emisor del CFDI no está en el padrón{providerPrefill.rfc ? ` (RFC ${providerPrefill.rfc})` : ''}.{' '}
+                          <button type="button" onClick={() => setQuickOpen(true)}
+                            style={{ background: 'none', border: 0, padding: 0, color: 'var(--accent-text)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
+                            Darlo de alta
+                          </button>{' '}con los datos de la factura.
+                        </div>
+                      )}
                     </div>
                   </section>
                 )}
@@ -1064,7 +1124,7 @@ const availablePredictionCandidates = useMemo(
         </div>
       </form>
 
-      {quickOpen && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} />}
+      {quickOpen && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} prefill={providerPrefill} />}
     </dialog>
   )
 }
