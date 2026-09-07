@@ -143,12 +143,26 @@ export type RevalidateResult = {
   validated_at: string
 }
 
+async function throwFunctionInvokeError(error: unknown): Promise<never> {
+  const context = (error as { context?: Response | null })?.context
+  if (context && typeof context.clone === 'function') {
+    try {
+      const payload = (await context.clone().json()) as { error?: unknown }
+      const code = typeof payload?.error === 'string' ? payload.error.trim() : ''
+      if (code) throw new Error(code)
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.startsWith('PAYROLL_')) throw cause
+    }
+  }
+  throw error
+}
+
 export async function materializeCapture(sessionId: string, expectedVersion: number): Promise<MaterializeResult> {
   const idempotencyKey = `payroll-n3g:${sessionId}:v${expectedVersion}`
   const { data, error } = await supabase.functions.invoke('payroll-materialize', {
     body: { capture_session_id: sessionId, expected_version: expectedVersion, idempotency_key: idempotencyKey },
   })
-  if (error) throw error
+  if (error) await throwFunctionInvokeError(error)
   if (!data || !['materialized', 'already_materialized'].includes((data as MaterializeResult).status)) {
     throw new Error('PAYROLL_MATERIALIZATION_FAILED')
   }
@@ -159,7 +173,7 @@ export async function revalidateMaterializedCapture(sessionId: string, expectedV
   const { data, error } = await supabase.functions.invoke('payroll-materialize', {
     body: { capture_session_id: sessionId, expected_version: expectedVersion, mode: 'validate_only' },
   })
-  if (error) throw error
+  if (error) await throwFunctionInvokeError(error)
   if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')
   return data as RevalidateResult
 }
