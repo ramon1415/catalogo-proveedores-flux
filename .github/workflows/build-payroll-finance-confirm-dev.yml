@@ -2,14 +2,15 @@ name: Build payroll finance confirm DEV
 
 on:
   push:
-    branches: [feature/payroll-finance-confirm-nonbudget-dev]
+    branches:
+      - feature/payroll-finance-confirm-nonbudget-dev
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: ${{ !contains(github.event.head_commit.message, '[payroll-finance-confirm-built]') }}
+    if: "${{ !contains(github.event.head_commit.message, '[payroll-finance-confirm-built]') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -20,7 +21,6 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           api = Path('app/src/features/nomina/api.ts')
           text = api.read_text(encoding='utf-8')
@@ -43,7 +43,6 @@ export async function confirmPayrollFinanceReview(paymentRequestId: string): Pro
 
           modal = Path('app/src/features/nomina/CaptureModal.tsx')
           text = modal.read_text(encoding='utf-8')
-
           text = text.replace('  listApproverOptions,\n', '')
           text = text.replace('  submitForApproval,\n', '')
           text = text.replace('  getSubmissionSummary,\n', '  getSubmissionSummary,\n  confirmPayrollFinanceReview,\n')
@@ -244,7 +243,6 @@ export async function confirmPayrollFinanceReview(paymentRequestId: string): Pro
           if old_state not in text:
               raise SystemExit('submission state block not found')
           text = text.replace(old_state, new_state, 1)
-
           modal.write_text(text, encoding='utf-8')
 
           logic = Path('app/src/features/nomina/logic.ts')
