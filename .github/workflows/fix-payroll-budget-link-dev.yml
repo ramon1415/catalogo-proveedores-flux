@@ -1,0 +1,63 @@
+name: Fix payroll budget navigation DEV
+
+on:
+  push:
+    branches: [fix/payroll-budget-link-dev]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[payroll-budget-link-fixed]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point React budget gate to deployed legacy budget surface
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          modal = Path('app/src/features/nomina/CaptureModal.tsx')
+          text = modal.read_text(encoding='utf-8')
+          old = 'href={`/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}'
+          new = 'href={`/legacy/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}'
+          if old not in text:
+              raise SystemExit('Expected payroll budget href not found')
+          text = text.replace(old, new, 1)
+          modal.write_text(text, encoding='utf-8')
+
+          legacy = Path('nomina_presupuesto.html')
+          html = legacy.read_text(encoding='utf-8')
+          old_back = '<a class="secondary-btn" href="./solicitudes.html">Volver a Solicitudes</a>'
+          new_back = '<a class="secondary-btn" href="/nomina">Volver a Nómina</a>'
+          if old_back in html:
+              html = html.replace(old_back, new_back, 1)
+          legacy.write_text(html, encoding='utf-8')
+          PY
+
+      - name: Validate React and static deployment contract
+        shell: bash
+        run: |
+          npm --prefix app ci
+          npm --prefix app run typecheck
+          npm --prefix app run build
+          node scripts/build-vercel-static.mjs
+          grep -F '/legacy/nomina_presupuesto.html?request_id=' app/src/features/nomina/CaptureModal.tsx
+          test -f .vercel-static/legacy/nomina_presupuesto.html
+          grep -F 'payroll_budget_gate.js' .vercel-static/legacy/nomina_presupuesto.html
+          grep -F 'payroll_budget_deeplink.js' .vercel-static/legacy/nomina_presupuesto.html
+          grep -F 'href="/nomina"' .vercel-static/legacy/nomina_presupuesto.html
+
+      - name: Commit validated fix
+        shell: bash
+        run: |
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git rm .github/workflows/fix-payroll-budget-link-dev.yml
+          git add app/src/features/nomina/CaptureModal.tsx nomina_presupuesto.html
+          git commit -m 'fix(payroll): habilitar configuración de presupuesto desde React [payroll-budget-link-fixed]'
+          git push origin HEAD:fix/payroll-budget-link-dev
