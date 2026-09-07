@@ -28,12 +28,18 @@ test('database and SPA reserve platform power for Carlos and Ramon', () => {
     const escaped = email.replace('.', '\\.')
     assert.match(migration, new RegExp(escaped))
     assert.match(hardening, new RegExp(escaped))
+    // El allowlist salió de auth.tsx a su propio módulo; auth.tsx lo consume.
     assert.match(platformPower, new RegExp(escaped))
   }
   assert.match(hardening, /security definer\s+set search_path = ''/i)
   assert.match(hardening, /company_role_power_override_hardening_failed/)
-  assert.match(auth, /hasPlatformPowerEmail/)
+  // La compuerta sigue cableada: auth.tsx consume el helper del allowlist y lo
+  // exige junto con el grupo sysadmin. Y el allowlist no crece por descuido.
+  assert.match(auth, /import \{ hasPlatformPowerEmail \} from '\.\/platformPower'/)
+  assert.match(auth, /hasPlatformPowerEmail\(profile\?\.email\)/)
   assert.match(platformPower, /PLATFORM_POWER_EMAILS\.has/)
+  assert.match(auth, /globalGroup === ROLE_GROUPS\.SYSADMIN\s*\n?\s*&& hasPlatformPowerEmail/)
+  assert.equal((platformPower.match(/@/g) || []).length, 2, 'el allowlist de poder de plataforma son exactamente dos correos')
 })
 
 test('access approval and admin edits write the exact company membership role', () => {
