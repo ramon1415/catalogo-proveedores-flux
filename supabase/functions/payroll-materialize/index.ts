@@ -19,6 +19,7 @@ type RealFormats = {
   TOKA_CFDI_CONTRACT_VERSION: string;
   parseCoverXlsx(input: Uint8Array): Promise<any>;
   parseSameBank108(input: Uint8Array): any;
+  parseSameBank?(input: Uint8Array): any;
   parseTokaCfdi(input: Uint8Array): any;
   normalizeAccount(value: unknown): string;
   normalizeName(value: unknown): string;
@@ -93,7 +94,7 @@ async function verifyFile(base:string,serviceKey:string,context:Context,file:Cap
     return {meta:safeMeta(file,digest,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,parsed.contractVersion,parsed.people.length,parsed.totals.netAmountMinor),parsed};
   }
   if(file.kind==="layout_mismo_banco"){
-    const parsed=globalThis.FluxPayrollRealFormats.parseSameBank108(bytes); if(!parsed.valid) throw new Error("PAYROLL_SAME_BANK_SERVER_PARSE_FAILED");
+    const parsed=globalThis.FluxPayrollRealFormats.parseSameBank ? globalThis.FluxPayrollRealFormats.parseSameBank(bytes) : globalThis.FluxPayrollRealFormats.parseSameBank108(bytes); if(!parsed.valid) throw new Error("PAYROLL_SAME_BANK_SERVER_PARSE_FAILED");
     return {meta:safeMeta(file,digest,globalThis.FluxPayrollRealFormats.CONTRACT_VERSION,parsed.contractVersion,parsed.recordCount,parsed.totalAmountMinor),parsed};
   }
   if(file.kind==="cfdi_vales"){

@@ -125,7 +125,18 @@
     }
 
     if (expectedChannels.includes('banco')) assignBank(sameBank.records, 'banco');
-    if (expectedChannels.includes('spei')) assignBank(spei.records, 'spei');
+    const pensionSpeiRecords = expectedChannels.includes('spei')
+      ? (spei.records || []).filter(function (record) { return normalizeName(record.paymentReference || '').indexOf('PENSION ALIMENTICIA') === 0; })
+      : [];
+    const employeeSpeiRecords = expectedChannels.includes('spei')
+      ? (spei.records || []).filter(function (record) { return !pensionSpeiRecords.includes(record); })
+      : [];
+    if (expectedChannels.includes('spei')) assignBank(employeeSpeiRecords, 'spei');
+    const expectedPensionAmountMinor = people.reduce(function (sum, person) { return sum + Number(person.pensionAmountMinor || 0); }, 0);
+    const actualPensionAmountMinor = recordTotal(pensionSpeiRecords) || 0;
+    if (expectedPensionAmountMinor !== actualPensionAmountMinor) {
+      issues.push(issue(ISSUE.CHANNEL_TOTAL_INVALID, 'layout_spei', null, 'pension_alimenticia'));
+    }
 
     if (expectedChannels.includes('vales')) {
       tokaCfdi.records.forEach(function (record) {
@@ -188,7 +199,7 @@
     if ([bankTotal, speiTotal, benefitTotal].some(function (value) { return value === null; })) issues.push(issue(ISSUE.CHANNEL_TOTAL_INVALID, 'channels'));
 
     const calculatedBank = people.reduce(function (sum, person) { return sum + person.bankAmountMinor; }, 0);
-    const calculatedSpei = people.reduce(function (sum, person) { return sum + person.speiAmountMinor; }, 0);
+    const calculatedSpei = people.reduce(function (sum, person) { return sum + person.speiAmountMinor; }, 0) + actualPensionAmountMinor;
     const calculatedBenefit = people.reduce(function (sum, person) { return sum + person.vouchersAmountMinor; }, 0);
     if (calculatedBank !== bankTotal || calculatedSpei !== speiTotal || calculatedBenefit !== benefitTotal) {
       issues.push(issue(ISSUE.CHANNEL_TOTAL_INVALID, 'channels'));

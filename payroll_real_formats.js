@@ -6,9 +6,12 @@
 
   const CONTRACT_VERSION = 'payroll-real-physical-v1';
   const COVER_CONTRACT_VERSION = 'operadora-tlacatecpan-cover-v1';
+  const FERSANA_COVER_CONTRACT_VERSION = 'soporte-fersana-cover-v1';
   const SAME_BANK_CONTRACT_VERSION = 'bbva-payroll-nomina108-v1';
+  const FERSANA_SAME_BANK_CONTRACT_VERSION = 'bbva-pagosbbv-85-v1';
   const TOKA_CFDI_CONTRACT_VERSION = 'toka-cfdi-vales-v1';
   const COVER_SHEET_NAME = 'OPERADORA TLACATECPAN';
+  const FERSANA_COVER_SHEET_NAME = 'SOPORTE FERSANA';
   const REQUIRED_COVER_HEADERS = Object.freeze([
     'RFC','CURP','Nombre completo','Banco','Cuenta banco','CLABE',
     'Vales De Despensa','Neto a pagar','Neto en efectivo (sin vales)'
@@ -206,21 +209,30 @@
     if (!bytes || bytes.byteLength < 22) return { contractVersion: COVER_CONTRACT_VERSION, valid: false, people: [], issues: [issue(ISSUE.COVER_ZIP_INVALID, 'caratula')] };
     try {
       const entries = await unzip(bytes);
-      const target = sheetTarget(entries, COVER_SHEET_NAME);
+      const contracts = [
+        { sheetName: COVER_SHEET_NAME, contractVersion: COVER_CONTRACT_VERSION, cashHeader: 'Neto en efectivo (sin vales)', retroHeader: null, pensionHeader: null },
+        { sheetName: FERSANA_COVER_SHEET_NAME, contractVersion: FERSANA_COVER_CONTRACT_VERSION, cashHeader: 'Neto en efectivo', retroHeader: 'Retroactivo Vales Despensa', pensionHeader: 'Pension Alimenticia' }
+      ];
+      let selected = null; let target = '';
+      for (const contract of contracts) {
+        try { target = sheetTarget(entries, contract.sheetName); selected = contract; break; } catch (_) {}
+      }
+      if (!selected || !target) throw new Error(ISSUE.COVER_CONTRACT_MISMATCH);
       const sheet = xmlText(entries.get(target) || new Uint8Array());
       const shared = sharedStrings(entries.has('xl/sharedStrings.xml') ? xmlText(entries.get('xl/sharedStrings.xml')) : '');
       const cells = parseCells(sheet, shared);
+      const requiredHeaders = ['RFC','CURP','Nombre completo','Banco','Cuenta banco','CLABE','Vales De Despensa','Neto a pagar',selected.cashHeader];
       const headerMap = {};
       cells.forEach(function (value, ref) {
         if (!ref.endsWith('5')) return;
         const label = String(value || '').trim();
-        if (REQUIRED_COVER_HEADERS.includes(label)) headerMap[label] = columnNumber(ref);
+        if (requiredHeaders.includes(label) || label === selected.retroHeader || label === selected.pensionHeader) headerMap[label] = columnNumber(ref);
       });
-      if (REQUIRED_COVER_HEADERS.some(function (h) { return !headerMap[h]; })) {
-        return { contractVersion: COVER_CONTRACT_VERSION, valid: false, people: [], issues: [issue(ISSUE.COVER_CONTRACT_MISMATCH, 'caratula', 5, 'headers')] };
+      if (requiredHeaders.some(function (h) { return !headerMap[h]; })) {
+        return { contractVersion: selected.contractVersion, valid: false, people: [], issues: [issue(ISSUE.COVER_CONTRACT_MISMATCH, 'caratula', 5, 'headers')] };
       }
-      function value(row, header) { return cells.get(columnLetters(headerMap[header]) + row); }
-      const people = []; const issues = []; let netTotal = 0; let cashTotal = 0; let voucherTotal = 0;
+      function value(row, header) { return header && headerMap[header] ? cells.get(columnLetters(headerMap[header]) + row) : undefined; }
+      const people = []; const issues = []; let netTotal = 0; let cashTotal = 0; let voucherTotal = 0; let pensionTotal = 0;
       for (let row = 6; row <= 1000; row += 1) {
         const employeeName = String(value(row, 'Nombre completo') || '').trim();
         const rfcRaw = value(row, 'RFC'); const curpRaw = value(row, 'CURP');
@@ -228,24 +240,32 @@
         const rfc = normalizeIdentifier(rfcRaw); const curp = normalizeIdentifier(curpRaw);
         const bankName = String(value(row, 'Banco') || '').trim(); const account = normalizeAccount(value(row, 'Cuenta banco'));
         const clabe = normalizeAccount(value(row, 'CLABE'));
-        const vouchers = spreadsheetMinor(value(row, 'Vales De Despensa')); const net = spreadsheetMinor(value(row, 'Neto a pagar')); const cash = spreadsheetMinor(value(row, 'Neto en efectivo (sin vales)'));
-        if (!employeeName || (!rfc && !curp) || [vouchers, net, cash].some(function (x) { return x === null; })) {
+        const regularVouchers = spreadsheetMinor(value(row, 'Vales De Despensa'));
+        const retroVouchers = selected.retroHeader ? spreadsheetMinor(value(row, selected.retroHeader)) : 0;
+        const pension = selected.pensionHeader ? spreadsheetMinor(value(row, selected.pensionHeader)) : 0;
+        const net = spreadsheetMinor(value(row, 'Neto a pagar')); const cash = spreadsheetMinor(value(row, selected.cashHeader));
+        if (!employeeName || (!rfc && !curp) || [regularVouchers, retroVouchers, pension, net, cash].some(function (x) { return x === null; })) {
           issues.push(issue(ISSUE.COVER_ROW_INVALID, 'caratula', row)); continue;
         }
-        if (net < 0 || cash < 0 || vouchers < 0 || net !== cash + vouchers) {
+        const vouchers = regularVouchers + retroVouchers;
+        if (net < 0 || cash < 0 || vouchers < 0 || pension < 0 || net !== cash + vouchers) {
           issues.push(issue(ISSUE.EMPLOYEE_TOTAL_MISMATCH, 'caratula', row)); continue;
         }
         if (cash > 0 && !account && !clabe) { issues.push(issue(ISSUE.COVER_ROW_INVALID, 'caratula', row, 'destination')); continue; }
         if (clabe && !/^\d{18}$/.test(clabe)) { issues.push(issue(ISSUE.COVER_ROW_INVALID, 'caratula', row, 'CLABE')); continue; }
-        people.push({ sourceRow: row, employeeName, normalizedName: normalizeName(employeeName), rfc, curp, nss: '', bankName, account, clabe,
+        const person = { sourceRow: row, employeeName, normalizedName: normalizeName(employeeName), rfc, curp, nss: '', bankName, account, clabe,
           netAmountMinor: net, coverCashAmountMinor: cash, coverVouchersAmountMinor: vouchers,
-          bankAmountMinor: 0, speiAmountMinor: 0, vouchersAmountMinor: 0 });
-        netTotal += net; cashTotal += cash; voucherTotal += vouchers;
-        if (![netTotal,cashTotal,voucherTotal].every(Number.isSafeInteger)) issues.push(issue(ISSUE.CHANNEL_TOTAL_INVALID, 'caratula'));
+          bankAmountMinor: 0, speiAmountMinor: 0, vouchersAmountMinor: 0 };
+        if (selected.contractVersion === FERSANA_COVER_CONTRACT_VERSION) person.pensionAmountMinor = pension;
+        people.push(person);
+        netTotal += net; cashTotal += cash; voucherTotal += vouchers; pensionTotal += pension;
+        if (![netTotal,cashTotal,voucherTotal,pensionTotal].every(Number.isSafeInteger)) issues.push(issue(ISSUE.CHANNEL_TOTAL_INVALID, 'caratula'));
       }
       if (!people.length) issues.push(issue(ISSUE.COVER_CONTRACT_MISMATCH, 'caratula'));
-      return { contractVersion: COVER_CONTRACT_VERSION, sheetName: COVER_SHEET_NAME, valid: issues.length === 0,
-        people: issues.length ? [] : people, totals: issues.length ? null : { netAmountMinor: netTotal, cashAmountMinor: cashTotal, vouchersAmountMinor: voucherTotal }, issues };
+      const totals = { netAmountMinor: netTotal, cashAmountMinor: cashTotal, vouchersAmountMinor: voucherTotal };
+      if (selected.contractVersion === FERSANA_COVER_CONTRACT_VERSION) totals.pensionAmountMinor = pensionTotal;
+      return { contractVersion: selected.contractVersion, sheetName: selected.sheetName, valid: issues.length === 0,
+        people: issues.length ? [] : people, totals: issues.length ? null : totals, issues };
     } catch (error) {
       const code = error && Object.values(ISSUE).includes(error.message) ? error.message : ISSUE.COVER_ZIP_INVALID;
       return { contractVersion: COVER_CONTRACT_VERSION, valid: false, people: [], issues: [issue(code, 'caratula')] };
@@ -271,6 +291,34 @@
     }
     const total = records.reduce(function (s,r) { return s+r.amountMinor; },0);
     return { contractVersion: SAME_BANK_CONTRACT_VERSION, valid: issues.length===0 && records.length>0, recordCount: issues.length?0:records.length, totalAmountMinor: issues.length?null:total, records: issues.length?[]:records, issues };
+  }
+
+  function parseSameBank85(input) {
+    const bytes = asBytes(input); const issues = []; const records = [];
+    if (!bytes || !bytes.length || bytes.length % 87 !== 0) return { contractVersion: FERSANA_SAME_BANK_CONTRACT_VERSION, valid: false, records: [], issues: [issue(ISSUE.SAME_BANK_BYTE_CONTRACT_INVALID, 'layout_mismo_banco', null, 'length')] };
+    const count = bytes.length / 87;
+    for (let row = 1; row <= count; row += 1) {
+      const offset = (row - 1) * 87;
+      if (bytes[offset + 85] !== 0x0d || bytes[offset + 86] !== 0x0a) { issues.push(issue(ISSUE.SAME_BANK_BYTE_CONTRACT_INVALID, 'layout_mismo_banco', row, 'crlf')); continue; }
+      let line = '';
+      for (let i=0;i<85;i+=1) { const b=bytes[offset+i]; if (b<0x20 || b>0x7e) { issues.push(issue(ISSUE.SAME_BANK_BYTE_CONTRACT_INVALID,'layout_mismo_banco',row,'encoding')); line=''; break; } line += String.fromCharCode(b); }
+      if (!line) continue;
+      const destination=line.slice(0,18), sourceAccount=line.slice(18,36), currency=line.slice(36,39), amountField=line.slice(39,55), concept=line.slice(55,85).trimEnd();
+      const account=normalizeAccount(destination).replace(/^0+(?=\d)/,''); const amountMinor=/^\d{13}\.\d{2}$/.test(amountField) ? minor(amountField) : null;
+      if (!/^\d{18}$/.test(destination) || !/^\d{18}$/.test(sourceAccount) || currency!=='MXP' || !account || amountMinor===null || amountMinor<=0 || !concept) {
+        issues.push(issue(ISSUE.SAME_BANK_BYTE_CONTRACT_INVALID,'layout_mismo_banco',row,'record')); continue;
+      }
+      records.push({ sourceRow:row, account, sourceAccount, amountMinor, employeeName:concept, normalizedName:normalizeName(concept), concept });
+    }
+    const total=records.reduce(function(s,r){return s+r.amountMinor;},0);
+    return { contractVersion:FERSANA_SAME_BANK_CONTRACT_VERSION, valid:issues.length===0&&records.length>0, recordCount:issues.length?0:records.length, totalAmountMinor:issues.length?null:total, records:issues.length?[]:records, issues };
+  }
+
+  function parseSameBank(input) {
+    const bytes=asBytes(input);
+    if (bytes && bytes.length && bytes.length % 110 === 0) return parseSameBank108(bytes);
+    if (bytes && bytes.length && bytes.length % 87 === 0) return parseSameBank85(bytes);
+    return { contractVersion:SAME_BANK_CONTRACT_VERSION, valid:false, records:[], issues:[issue(ISSUE.SAME_BANK_BYTE_CONTRACT_INVALID,'layout_mismo_banco',null,'length')] };
   }
 
   function parseTokaCfdi(input) {
@@ -332,5 +380,5 @@
       employeeNetTotalMinor:employeeNet,treasuryRequestAmountMinor:treasuryTotal,issues,warnings};
   }
 
-  return Object.freeze({CONTRACT_VERSION,COVER_CONTRACT_VERSION,SAME_BANK_CONTRACT_VERSION,TOKA_CFDI_CONTRACT_VERSION,COVER_SHEET_NAME,REQUIRED_COVER_HEADERS,ISSUE,WARNING,parseCoverXlsx,parseSameBank108,parseTokaCfdi,reconcilePackage,normalizeAccount,normalizeIdentifier,normalizeName});
+  return Object.freeze({CONTRACT_VERSION,COVER_CONTRACT_VERSION,FERSANA_COVER_CONTRACT_VERSION,SAME_BANK_CONTRACT_VERSION,FERSANA_SAME_BANK_CONTRACT_VERSION,TOKA_CFDI_CONTRACT_VERSION,COVER_SHEET_NAME,FERSANA_COVER_SHEET_NAME,REQUIRED_COVER_HEADERS,ISSUE,WARNING,parseCoverXlsx,parseSameBank108,parseSameBank85,parseSameBank,parseTokaCfdi,reconcilePackage,normalizeAccount,normalizeIdentifier,normalizeName});
 });
