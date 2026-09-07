@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { DEV_PROJECT_REF, validateCatalog } from './database-catalog.mjs'
+import { validateCatalog } from './database-catalog.mjs'
+import { captureDevCatalog } from './capture-database-catalog.mjs'
 
 // This runner captures schema metadata only. It never executes a migration or a payment RPC.
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -14,16 +15,7 @@ try {
     const token = process.env.SUPABASE_ACCESS_TOKEN
     if (!token) throw new Error('SUPABASE_ACCESS_TOKEN is required to read DEV; or supply a fresh FLUX_QA_CATALOG exported with database-catalog-readonly.sql')
     const query = readFileSync(new URL('./database-catalog-readonly.sql', import.meta.url), 'utf8')
-    if (!query.startsWith('BEGIN TRANSACTION READ ONLY;') || !query.trimEnd().endsWith('COMMIT;')) throw new Error('Read-only catalog transaction guard is missing')
-    const response = await fetch(`https://api.supabase.com/v1/projects/${DEV_PROJECT_REF}/database/query`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, read_only: true }),
-      signal: AbortSignal.timeout(60_000),
-    })
-    if (!response.ok) throw new Error(`DEV catalog request failed (HTTP ${response.status}); no database contracts were certified`)
-    const data = await response.json()
-    const catalog = validateCatalog(data[0]?.catalog)
+    const catalog = await captureDevCatalog(token, query)
     temporary = mkdtempSync(join(tmpdir(), 'flux-dev-catalog-'))
     catalogPath = join(temporary, 'catalog.json')
     writeFileSync(catalogPath, JSON.stringify(catalog), { mode: 0o600 })

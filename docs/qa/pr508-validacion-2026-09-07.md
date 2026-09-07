@@ -56,6 +56,10 @@ La consulta fija DEV `scsirgbuqjcwoaxfacth`, usa una transacción `READ ONLY` y 
 
 El aumento de pruebas registradas se debe principalmente a que los archivos vuelven a cargar: antes, un error de lectura al inicio impedía registrar todos sus casos. Los resultados locales del catálogo se obtuvieron con la consulta real por Supabase MCP y `FLUX_QA_CATALOG`; el camino HTTP con secret se verifica en CI después del merge.
 
+### Corrección del transporte posterior al merge
+
+#508 se integró como `0d9d7fd` con las 1064 pruebas locales y Vercel en verde. El job de catálogo devolvió HTTP 400 antes de certificar contratos. El adaptador HTTP ahora envía únicamente el SELECT contenido en el archivo; la Management API establece su propia transacción con `read_only: true`. La exportación SQL para ejecución directa conserva `BEGIN TRANSACTION READ ONLY` / `COMMIT`. La captura devuelta debe seguir declarando `transaction_read_only = on`. No hay fallback a escritura. Se añade diagnóstico del error sin token y cinco pruebas del transporte. Referencia: [Management API — Run a query](https://supabase.com/docs/reference/api/v1-run-a-query).
+
 ## Dispatcher DEV recertificado
 
 DEV devuelve la versión 83 del dispatcher. Los cuatro archivos de código devueltos por `get_edge_function` son idénticos a DEV en el repositorio. El metadata declara import map y JWT desactivado; `deno.json` conserva las tres dependencias locales/versionadas esperadas. El API no devuelve el contenido de `deno.json`, por lo que su hash certifica el archivo revisado del repositorio, no una lectura de ese quinto archivo desplegado.
