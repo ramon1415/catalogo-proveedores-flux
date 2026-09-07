@@ -1,0 +1,122 @@
+name: Build DEV payroll error/physical guard hotfix
+
+on:
+  push:
+    branches: [fix/payroll-dev-edge-error-and-physical-guard]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[payroll-dev-hotfix-built]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch payroll DEV UX safely
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          api = Path('app/src/features/nomina/api.ts')
+          s = api.read_text(encoding='utf-8')
+          marker = "export async function materializeCapture(sessionId: string, expectedVersion: number): Promise<MaterializeResult> {"
+          helper = '''async function throwFunctionInvokeError(error: unknown): Promise<never> {\n  const context = (error as { context?: Response | null })?.context\n  if (context && typeof context.clone === 'function') {\n    try {\n      const payload = (await context.clone().json()) as { error?: unknown }\n      const code = typeof payload?.error === 'string' ? payload.error.trim() : ''\n      if (code) throw new Error(code)\n    } catch (cause) {\n      if (cause instanceof Error && cause.message.startsWith('PAYROLL_')) throw cause\n    }\n  }\n  throw error\n}\n\n'''
+          if helper.strip() not in s:
+              if marker not in s:
+                  raise SystemExit('materialize marker missing')
+              s = s.replace(marker, helper + marker, 1)
+          old1 = """  if (error) throw error\n  if (!data || !['materialized', 'already_materialized'].includes((data as MaterializeResult).status)) {"""
+          new1 = """  if (error) await throwFunctionInvokeError(error)\n  if (!data || !['materialized', 'already_materialized'].includes((data as MaterializeResult).status)) {"""
+          if old1 not in s:
+              raise SystemExit('materialize error line missing')
+          s = s.replace(old1, new1, 1)
+          old2 = """  if (error) throw error\n  if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')"""
+          new2 = """  if (error) await throwFunctionInvokeError(error)\n  if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')"""
+          if old2 not in s:
+              raise SystemExit('revalidate error line missing')
+          s = s.replace(old2, new2, 1)
+          api.write_text(s, encoding='utf-8')
+
+          modal = Path('app/src/features/nomina/CaptureModal.tsx')
+          s = modal.read_text(encoding='utf-8')
+          old = '''    try {\n      const inspected = await inspectFile(slot, entry.file, sourceCandidates)\n      const nextFiles = { ...files, [slot]: { ...inspected, fileName: entry.file.name } }'''
+          new = '''    try {\n      // La asignación manual nunca puede saltarse el contrato físico. Si el\n      // parser canónico no reconoce exactamente este slot, el servidor también\n      // lo rechazará; fallamos antes de subir y evitamos un falso "Guardado".\n      const classified = await classifyPayrollFile(entry.file)\n      if (!classified || classified.slot !== slot) throw new Error('PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH')\n      const inspected = await inspectFile(slot, entry.file, sourceCandidates)\n      const nextFiles = {\n        ...files,\n        [slot]: {\n          ...inspected,\n          fileName: entry.file.name,\n          localDiagnostic: classified.diagnostic,\n          recordCount: classified.diagnostic.recordCount,\n          totalAmountMinor: classified.diagnostic.totalAmountMinor,\n        },\n      }'''
+          if old not in s:
+              raise SystemExit('manual slot block missing')
+          s = s.replace(old, new, 1)
+          modal.write_text(s, encoding='utf-8')
+
+          logic = Path('app/src/features/nomina/logic.ts')
+          s = logic.read_text(encoding='utf-8')
+          anchor = "  PAYROLL_REQUIRED_FILES_MISSING: 'Faltan archivos obligatorios del paquete.',\n"
+          additions = """  PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH: 'Ese archivo no coincide con el formato físico del tipo seleccionado.',\n  PAYROLL_FILE_PATH_MISMATCH: 'El archivo guardado no pertenece a esta corrida.',\n  PAYROLL_STORAGE_OBJECT_MISSING: 'No se encontró el archivo privado guardado. Vuelve a cargarlo en una captura nueva.',\n  PAYROLL_FILE_SIZE_MISMATCH: 'El tamaño del archivo guardado no coincide con la evidencia registrada.',\n  PAYROLL_FILE_MIME_MISMATCH: 'El tipo físico del archivo guardado no coincide con el formato esperado.',\n  PAYROLL_FILE_HASH_MISMATCH: 'La huella SHA-256 del archivo guardado no coincide.',\n  PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED: 'La base de provisión de la carátula no pudo validarse en el servidor.',\n"""
+          if additions.strip() not in s:
+              if anchor not in s:
+                  raise SystemExit('error map anchor missing')
+              s = s.replace(anchor, anchor + additions, 1)
+          logic.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Add focused regression contract
+        shell: bash
+        run: |
+          cat > scripts/qa/payroll-dev-edge-error-physical-guard.test.mjs <<'EOF'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          import test from 'node:test'
+
+          const api = readFileSync('app/src/features/nomina/api.ts', 'utf8')
+          const modal = readFileSync('app/src/features/nomina/CaptureModal.tsx', 'utf8')
+          const logic = readFileSync('app/src/features/nomina/logic.ts', 'utf8')
+          const formats = readFileSync('payroll_real_formats.js', 'utf8')
+
+          test('Edge non-2xx keeps the safe PAYROLL_* server code', () => {
+            assert.match(api, /async function throwFunctionInvokeError/)
+            assert.equal((api.match(/await throwFunctionInvokeError\(error\)/g) || []).length, 2)
+            assert.match(api, /context\.clone\(\)\.json\(\)/)
+          })
+
+          test('manual assignment cannot bypass canonical physical parser', () => {
+            assert.match(modal, /const classified = await classifyPayrollFile\(entry\.file\)/)
+            assert.match(modal, /classified\.slot !== slot/)
+            assert.match(modal, /PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH/)
+          })
+
+          test('same-bank server contract remains Nómina108 and is not relaxed', () => {
+            assert.match(formats, /bytes\.length % 110 !== 0/)
+            assert.match(formats, /SAME_BANK_CONTRACT_VERSION = 'bbva-payroll-nomina108-v1'/)
+          })
+
+          test('friendly errors cover physical and provision failures', () => {
+            for (const code of [
+              'PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH',
+              'PAYROLL_FILE_SIZE_MISMATCH',
+              'PAYROLL_FILE_MIME_MISMATCH',
+              'PAYROLL_FILE_HASH_MISMATCH',
+              'PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED',
+            ]) assert.ok(logic.includes(code), code)
+          })
+          EOF
+
+      - name: Validate
+        run: |
+          npm --prefix app ci
+          node --test scripts/qa/payroll-dev-edge-error-physical-guard.test.mjs
+          npm --prefix app run typecheck
+          npm --prefix app run build
+          git diff --check
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git add app/src/features/nomina/api.ts app/src/features/nomina/CaptureModal.tsx app/src/features/nomina/logic.ts scripts/qa/payroll-dev-edge-error-physical-guard.test.mjs
+          git commit -m 'fix(payroll): mostrar error real y bloquear formato forzado [payroll-dev-hotfix-built]'
+          git push origin HEAD:fix/payroll-dev-edge-error-and-physical-guard
