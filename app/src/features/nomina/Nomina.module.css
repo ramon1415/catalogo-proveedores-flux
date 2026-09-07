@@ -755,3 +755,10 @@
     text-align: left;
   }
 }
+
+/* Gate presupuestal inline (N5A en el modal) */
+.budgetInlineGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .budgetInlineGrid { grid-template-columns: 1fr; } }
+.budgetInlineGrid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-2); }
+.budgetInlineKpis { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-3); }
+.budgetInlineKpis strong { color: var(--text-1); font-weight: 600; margin-left: 4px; }

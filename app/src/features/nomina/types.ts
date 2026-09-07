@@ -191,6 +191,18 @@ export type SubmissionSummary = {
   channels: SummaryChannel[]
 }
 
+// Opción de partida para el gate presupuestal de nómina
+// (get_payroll_budget_context_options).
+export type PayrollBudgetOption = {
+  budget_category_id: string
+  code: string | null
+  name: string | null
+  budgeted: number | null
+  committed: number | null
+  executed: number | null
+  available: number | null
+}
+
 // Candidato de list_payment_request_approver_options (idéntico a solicitudes).
 export type ApproverCandidate = {
   profile_id: string

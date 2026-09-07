@@ -22,6 +22,7 @@ import {
   validateMetadata,
 } from './logic'
 import { classifyPayrollFile } from './physicalParsers'
+import { BudgetGateInline } from './BudgetGateInline'
 import {
   acknowledgeTokaVariance,
   getCaptureFileUrl,
@@ -896,14 +897,12 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               </div>
             )}
 
-            {isDraft && !budgetReady && (
-              <div className={`${s.budgetGate} ${budgetBlocked ? s.budgetBlocked : s.budgetPending}`}>
-                <div>
-                  <strong>{budgetBlocked ? 'Presupuesto bloqueado' : 'Presupuesto pendiente'}</strong>
-                  <p>{summary.budget_block_reason || 'Configura mes y partida presupuestal antes de enviar.'}</p>
-                </div>
-                {materializedRequestId && <a className={s.secondaryBtn} href={`/legacy/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>Configurar presupuesto</a>}
-              </div>
+            {isDraft && !budgetReady && materializedRequestId && (
+              <BudgetGateInline
+                requestId={materializedRequestId}
+                summary={summary}
+                onUpdated={async () => { await loadSubmissionSummary(materializedRequestId) }}
+              />
             )}
 
             {approvalReady && (

@@ -7,6 +7,7 @@ import type {
   CostCenter,
   CaptureSession,
   FileSlotState,
+  PayrollBudgetOption,
   PayrollSlot,
   SavePayload,
   SubmissionSummary,
@@ -189,6 +190,33 @@ export async function revalidateMaterializedCapture(sessionId: string, expectedV
   if (error) await throwFunctionInvokeError(error)
   if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')
   return data as RevalidateResult
+}
+
+// ── Gate presupuestal inline (N5A) ──────────────────────────────────────────
+// Reemplaza la pantalla legacy nomina_presupuesto.html: asignar mes + partida
+// sin salir del modal. Mismos RPCs que payroll_budget_gate.js. p_budget_month
+// va como fecha 'YYYY-MM-01'.
+export async function getPayrollBudgetOptions(paymentRequestId: string, monthYYYYMM: string): Promise<PayrollBudgetOption[]> {
+  const { data, error } = await supabase.rpc('get_payroll_budget_context_options', {
+    p_payment_request_id: paymentRequestId,
+    p_budget_month: `${monthYYYYMM}-01`,
+  })
+  if (error) throw error
+  return Array.isArray(data) ? (data as PayrollBudgetOption[]) : []
+}
+
+export async function setPayrollBudgetContext(
+  paymentRequestId: string,
+  budgetCategoryId: string,
+  monthYYYYMM: string,
+): Promise<{ status: string | null }> {
+  const { data, error } = await supabase.rpc('set_payroll_budget_context', {
+    p_payment_request_id: paymentRequestId,
+    p_budget_category_id: budgetCategoryId,
+    p_budget_month: `${monthYYYYMM}-01`,
+  })
+  if (error) throw error
+  return { status: (data as { status?: string } | null)?.status ?? null }
 }
 
 // ── RPC 5: get_payroll_submission_summary(p_payment_request_id) ────────────
