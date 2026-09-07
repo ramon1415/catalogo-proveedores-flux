@@ -858,7 +858,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                   <strong>{budgetBlocked ? 'Presupuesto bloqueado' : 'Presupuesto pendiente'}</strong>
                   <p>{summary.budget_block_reason || 'Configura mes y partida presupuestal antes de enviar.'}</p>
                 </div>
-                {materializedRequestId && <a className={s.secondaryBtn} href={`/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>Configurar presupuesto</a>}
+                {materializedRequestId && <a className={s.secondaryBtn} href={`/legacy/nomina_presupuesto.html?request_id=${encodeURIComponent(materializedRequestId)}`}>Configurar presupuesto</a>}
               </div>
             )}
 
