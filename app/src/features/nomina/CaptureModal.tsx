@@ -22,6 +22,7 @@ import {
   validateMetadata,
 } from './logic'
 import { classifyPayrollFile } from './physicalParsers'
+import { ChannelOperations } from './ChannelOperations'
 import {
   acknowledgeTokaVariance,
   getCaptureFileUrl,
@@ -931,6 +932,10 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 : `Estado de solicitud: ${summary.status}`}
             </p>
           </section>
+        )}
+
+        {summary?.status === 'approved' && materializedRequestId && (
+          <ChannelOperations paymentRequestId={materializedRequestId} />
         )}
 
         <p className={s.piiNote}>
