@@ -40,7 +40,7 @@ npm run test:db
 
 `test:db` requiere `SUPABASE_ACCESS_TOKEN` para capturar el catálogo de DEV mediante Management API. Alternativamente acepta `FLUX_QA_CATALOG` con una exportación de `scripts/qa/database-catalog-readonly.sql` de menos de 30 minutos. La ausencia de credenciales, captura inválida/vencida o consulta fallida causa error; no omite pruebas para producir verde.
 
-La consulta fija DEV `scsirgbuqjcwoaxfacth`, usa una transacción `READ ONLY` y `read_only: true` en la API. Lee metadatos, flags de buckets, un conteo de reglas y configuración del cron; las únicas sondas SQL ejecutan el helper puro de fingerprint con valores ficticios. No llama RPCs de pagos ni envía correos. La captura temporal se elimina y el token no se hereda al proceso de pruebas. El catálogo completo no se publica como artifact ni se imprime.
+La consulta fija DEV `scsirgbuqjcwoaxfacth`, usa una transacción `READ ONLY` y `read_only: true` en la API. Lee metadatos, flags de buckets, un conteo de reglas y configuración del cron; no ejecuta helpers privados ni RPCs de negocio. La captura temporal se elimina y el token no se hereda al proceso de pruebas. El catálogo completo no se publica como artifact ni se imprime.
 
 `.github/workflows/contract-suite.yml` instala con los lockfiles, construye el artifact estático y ejecuta toda la suite local en cada PR a DEV y push a DEV. El segundo job comprueba la base desplegada después del merge y por ejecución manual sobre DEV, usando el secret del entorno DEV. Los PR no reciben ese token. No hay ejecución sobre PROD ni deploy de Edge Functions.
 
@@ -59,6 +59,10 @@ El aumento de pruebas registradas se debe principalmente a que los archivos vuel
 ### Corrección del transporte posterior al merge
 
 #508 se integró como `0d9d7fd` con las 1064 pruebas locales y Vercel en verde. El job de catálogo devolvió HTTP 400 antes de certificar contratos. El adaptador HTTP ahora envía únicamente el SELECT contenido en el archivo; la Management API establece su propia transacción con `read_only: true`. La exportación SQL para ejecución directa conserva `BEGIN TRANSACTION READ ONLY` / `COMMIT`. La captura devuelta debe seguir declarando `transaction_read_only = on`. No hay fallback a escritura. Se añade diagnóstico del error sin token y cinco pruebas del transporte. Referencia: [Management API — Run a query](https://supabase.com/docs/reference/api/v1-run-a-query).
+
+El diagnóstico de #566 identificó `42501: permission denied for function provider_intake_action_fingerprint`: la credencial de CI no puede ejecutar ese helper privado. No se amplían sus permisos. Las 108 comprobaciones automáticas usan únicamente el catálogo y siguen comprobando las restricciones de EXECUTE y la normalización dentro de las RPCs.
+
+La sonda SQL de fingerprint se conserva por separado en `database-fingerprint-probes-readonly.sql` y `npm run test:db:fingerprint`, con `FLUX_QA_FINGERPRINT_CATALOG` apuntando a una exportación de menos de 30 minutos hecha por un operador ya autorizado. Es una comprobación adicional explícita, no una prueba omitida ni un requisito de privilegios más amplios para CI. La verificación inicial de esa sonda pasó usando la conexión Supabase MCP autorizada; no se afirma que CI ejecute el helper.
 
 ## Dispatcher DEV recertificado
 

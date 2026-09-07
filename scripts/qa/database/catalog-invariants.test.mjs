@@ -187,12 +187,7 @@ test('DEV financial approval catch-all rules stay disabled', () => {
   assert.equal(catalog.financial_catch_all_count,0)
 })
 
-test('DEV SQL fingerprint probes preserve UTC equivalence and distinguish material input', () => {
-  const probes = catalog.fingerprint_probes
-  for (const value of Object.values(probes)) assert.match(value, /^[a-f0-9]{64}$/)
-  assert.equal(probes.base, probes.timezone)
-  for (const key of ['actor','status','stamp','target','notes','operation','trim']) assert.notEqual(probes.base,probes[key],key)
-  // The SQL helper hashes the caller material. Both RPCs normalize notes before calling it.
+test('DEV intake RPCs normalize notes before computing the action fingerprint', () => {
   for (const name of ['transition_provider_intake','add_provider_intake_note']) assert.match(fn(name), /v_notes := nullif\(btrim\(coalesce\(p_notes, ''\)\), ''\)/)
 })
 
