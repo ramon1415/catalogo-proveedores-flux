@@ -1,0 +1,90 @@
+name: Build payroll capture download DEV
+
+on:
+  push:
+    branches: [fix/payroll-capture-download-dev]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[payroll-download-built]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wire React to secure Edge signer
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          api = Path('app/src/features/nomina/api.ts')
+          text = api.read_text(encoding='utf-8')
+          old = """// Descarga de un archivo ya guardado: URL firmada emitida por el servidor bajo
+          // el gate de captura (no exponemos la ruta de storage al cliente). El endpoint
+          // `get_payroll_capture_file_url` es el único hook de backend pendiente para que
+          // la descarga funcione también en sesiones reabiertas (el mismo día, el archivo
+          // vive en memoria y se descarga sin ir al servidor).
+          export async function getCaptureFileUrl(fileId: string): Promise<string> {
+            const { data, error } = await supabase.rpc('get_payroll_capture_file_url', { p_file_id: fileId })
+            if (error) throw error
+            const url = typeof data === 'string' ? data : (data as { url?: string } | null)?.url
+            if (!url) throw new Error('payroll_capture_file_url_unavailable')
+            return url
+          }
+          """.replace('          ', '')
+          new = """// Descarga de un archivo ya guardado: el Edge valida el JWT, aplica el gate
+          // de captura vía get_payroll_capture_file_url y firma una URL de Storage por
+          // sólo 120 segundos. El navegador nunca recibe storage_bucket/storage_path.
+          export async function getCaptureFileUrl(fileId: string): Promise<string> {
+            const { data, error } = await supabase.functions.invoke('payroll-capture-file-url', {
+              body: { p_file_id: fileId },
+            })
+            if (error) await throwFunctionInvokeError(error)
+            const url = (data as { url?: string } | null)?.url
+            if (!url) throw new Error('PAYROLL_CAPTURE_FILE_URL_UNAVAILABLE')
+            return url
+          }
+          """.replace('          ', '')
+          if old not in text:
+              raise SystemExit('getCaptureFileUrl block not found')
+          api.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          modal = Path('app/src/features/nomina/CaptureModal.tsx')
+          text = modal.read_text(encoding='utf-8')
+          old = """    } catch {
+                showToast('Descarga no disponible', 'La descarga de archivos de una captura ya guardada se habilita al integrar el endpoint del servidor.', 'warning')
+              }
+          """.replace('      ', '')
+          new = """    } catch (error) {
+                showToast('Descarga no disponible', friendlyError(error), 'warning')
+              }
+          """.replace('      ', '')
+          if old not in text:
+              raise SystemExit('downloadFile catch block not found')
+          modal.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Validate contracts and React build
+        run: |
+          grep -q "functions.invoke('payroll-capture-file-url'" app/src/features/nomina/api.ts
+          grep -q "get_payroll_capture_file_url" supabase/functions/payroll-capture-file-url/index.ts
+          grep -q "createSignedUrl(context.storage_path, 120" supabase/functions/payroll-capture-file-url/index.ts
+          grep -q "PAYROLL_CAPTURE_FINANCE_REQUIRED" supabase/migrations/20260907161500_payroll_capture_file_download_context.sql
+          npm --prefix app ci
+          npm --prefix app run typecheck
+          npm --prefix app run build
+          git diff --check
+
+      - name: Commit validated candidate
+        shell: bash
+        run: |
+          git config user.name 'ramon1415'
+          git config user.email 'ramon@quantta.mx'
+          git rm .github/workflows/build-payroll-capture-download-dev.yml
+          git add app/src/features/nomina/api.ts app/src/features/nomina/CaptureModal.tsx
+          git commit -m 'feat(payroll): completar descarga segura de capturas DEV [payroll-download-built]'
+          git push origin HEAD:fix/payroll-capture-download-dev
