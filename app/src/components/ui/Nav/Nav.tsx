@@ -7,6 +7,7 @@ import { useModules } from '../../../lib/moduleAccess'
 import { IcUser, IcLogout } from '../icons'
 import { CompanySwitcher } from './CompanySwitcher'
 import { NAV_SECTIONS } from './navModel'
+import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
 
 export function Nav() {
   const { profile, session, group, signOut } = useAuth()
@@ -51,6 +52,7 @@ export function Nav() {
         ))}
       </nav>
 
+      <div className={s.install}><InstallFluxButton labelClassName={s.txt} /></div>
       <div className={s.foot}>
         <div className={s.uicon}><IcUser /></div>
         <div className={`${s.uinfo} ${s.txt}`}>
