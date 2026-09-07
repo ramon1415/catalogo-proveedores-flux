@@ -768,27 +768,33 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
             </span>
           </div>
 
-          <div className={s.summaryMetrics}>
-            <div className={s.metric}>
-              <span>Total neto</span>
-              <strong>{summary ? formatMoney(summary.employee_net) : moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Empleados</span>
-              <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Canales</span>
-              <strong>{channels.length || '—'}</strong>
-            </div>
-          </div>
+          {/* Estimación local antes de registrar. Cuando el servidor devuelve el
+              resumen autoritativo (sección de abajo), no lo repetimos aquí. */}
+          {!summary && (
+            <>
+              <div className={s.summaryMetrics}>
+                <div className={s.metric}>
+                  <span>Total neto</span>
+                  <strong>{moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Empleados</span>
+                  <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Canales</span>
+                  <strong>{channels.length || '—'}</strong>
+                </div>
+              </div>
 
-          {channels.length > 0 && (
-            <div className={s.channelList}>
-              {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
-            </div>
+              {channels.length > 0 && (
+                <div className={s.channelList}>
+                  {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
+                </div>
+              )}
+            </>
           )}
 
           {(cashDifference !== null || vouchersDifference !== null || localVariance !== null) && (
