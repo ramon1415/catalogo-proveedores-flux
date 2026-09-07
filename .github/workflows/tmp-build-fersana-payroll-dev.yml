@@ -16,7 +16,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply patch
-        run: python scripts/tmp_fersana_payroll_patch.py
+        run: |
+          python scripts/tmp_fersana_payroll_patch.py
+          python scripts/tmp_fersana_payroll_compat.py
       - name: Add focused test
         shell: bash
         run: |
@@ -39,16 +41,18 @@ jobs:
             assert.equal(parsed.contractVersion,'bbva-pagosbbv-85-v1')
             assert.equal(parsed.recordCount,1)
             assert.equal(parsed.totalAmountMinor,1234567)
+            assert.equal(parsed.records[0].account,'123456789')
           })
           test('legacy 108 remains exported',()=>{
             assert.equal(typeof formats.parseSameBank108,'function')
             assert.equal(typeof formats.parseSameBank,'function')
           })
-          test('Fersana cover contract is explicit',()=>{
+          test('Fersana cover contract is explicit and conditional',()=>{
             const src=readFileSync('payroll_real_formats.js','utf8')
             assert.match(src,/SOPORTE FERSANA/)
             assert.match(src,/Retroactivo Vales Despensa/)
             assert.match(src,/Pension Alimenticia/)
+            assert.match(src,/selected\.contractVersion === FERSANA_COVER_CONTRACT_VERSION/)
           })
           test('pension is treasury SPEI not employee net',()=>{
             assert.match(reconcileSource,/PENSION ALIMENTICIA/)
@@ -76,7 +80,7 @@ jobs:
         run: |
           git config user.name 'ramon1415'
           git config user.email 'ramon@quantta.mx'
-          git rm .github/workflows/tmp-build-fersana-payroll-dev.yml scripts/tmp_fersana_payroll_patch.py
+          git rm .github/workflows/tmp-build-fersana-payroll-dev.yml scripts/tmp_fersana_payroll_patch.py scripts/tmp_fersana_payroll_compat.py
           git add payroll_real_formats.js payroll_real_reconcile.js payroll_provision_base.js app/src/features/nomina/physicalParsers.ts supabase/functions/payroll-materialize/index.ts scripts/qa/payroll-fersana-real-format-contract.test.mjs
           git commit -m 'feat(payroll): certificar formatos reales Fersana en DEV [fersana-payroll-built]'
           git push origin HEAD:feature/fersana-payroll-real-format-dev
