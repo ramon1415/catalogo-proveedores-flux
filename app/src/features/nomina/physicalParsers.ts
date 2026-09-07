@@ -42,6 +42,7 @@ type TokaCfdiResult = {
 type RealFormatsApi = {
   parseCoverXlsx(input: ArrayBuffer | ArrayBufferView): Promise<CoverResult>
   parseSameBank108(input: ArrayBuffer | ArrayBufferView): SameBankResult
+  parseSameBank?(input: ArrayBuffer | ArrayBufferView): SameBankResult
   parseTokaCfdi(input: ArrayBuffer | ArrayBufferView): TokaCfdiResult
 }
 
@@ -115,7 +116,7 @@ export async function classifyPayrollFile(file: File): Promise<ClassifiedPayroll
 
   // Nómina 108 tiene un contrato de 110 bytes por renglón; se prueba primero
   // para no interpretar sus offsets como SPEI por accidente.
-  const sameBank = physical.parseSameBank108(buffer)
+  const sameBank = physical.parseSameBank ? physical.parseSameBank(buffer) : physical.parseSameBank108(buffer)
   if (sameBank.valid) {
     return {
       slot: 'layout_mismo_banco',

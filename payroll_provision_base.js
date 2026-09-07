@@ -6,6 +6,7 @@
 
   const CONTRACT_VERSION = 'payroll-provision-base-v1';
   const SHEET_NAME = 'OPERADORA TLACATECPAN';
+  const SHEET_NAMES = Object.freeze(['OPERADORA TLACATECPAN', 'SOPORTE FERSANA']);
   const REQUIRED_HEADERS = Object.freeze(['Sueldo', 'Sueldo Vacaciones']);
   const MAX_SAFE_MINOR = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -134,7 +135,11 @@
     if (!bytes || bytes.byteLength < 22) return { contractVersion: CONTRACT_VERSION, valid: false, baseAmountMinor: null, rowCount: 0, issues: ['PAYROLL_PROVISION_BASE_ZIP_INVALID'] };
     try {
       const entries = await unzip(bytes);
-      const target = sheetTarget(entries, SHEET_NAME);
+      let target = '';
+      for (const candidate of SHEET_NAMES) {
+        try { target = sheetTarget(entries, candidate); break; } catch (_) {}
+      }
+      if (!target) throw new Error('PAYROLL_PROVISION_BASE_CONTRACT_MISMATCH');
       const sheet = xmlText(entries.get(target) || new Uint8Array());
       const shared = sharedStrings(entries.has('xl/sharedStrings.xml') ? xmlText(entries.get('xl/sharedStrings.xml')) : '');
       const cells = parseCells(sheet, shared);
@@ -166,5 +171,5 @@
     }
   }
 
-  return Object.freeze({ CONTRACT_VERSION, SHEET_NAME, REQUIRED_HEADERS, parseProvisionBaseXlsx });
+  return Object.freeze({ CONTRACT_VERSION, SHEET_NAME, SHEET_NAMES, REQUIRED_HEADERS, parseProvisionBaseXlsx });
 });
