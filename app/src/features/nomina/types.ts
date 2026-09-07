@@ -190,6 +190,38 @@ export type SubmissionSummary = {
   channels: SummaryChannel[]
 }
 
+// ── Conciliación por canal (N4B) ────────────────────────────────────────────
+// Una corrida de nómina genera varios pagos (uno por canal). La comprobación
+// sube UN comprobante por canal. Contrato de get_payroll_reconciliation_*.
+export type ReconChannel = {
+  id: string
+  channel: PayrollChannel
+  amount: number | null
+  currency: string | null
+  dispersion_status?: string | null
+  reconciliation_status: string | null
+  receipt_payment_date: string | null
+  reference_hint: string | null
+}
+
+export type ReconSummary = {
+  payment_request_id: string
+  request_number: string | null
+  company_name: string | null
+  request_status: string | null
+  channels: ReconChannel[]
+}
+
+export type ReconQueueRow = {
+  payment_request_id: string
+  request_number: string | null
+  company_name: string | null
+  amount_requested: number | null
+  currency: string | null
+  reconciled_count: number | null
+  channel_count: number | null
+}
+
 // Candidato de list_payment_request_approver_options (idéntico a solicitudes).
 export type ApproverCandidate = {
   profile_id: string

@@ -6,6 +6,7 @@ import { IcPlus } from '../../components/ui/icons'
 import { captureStateLabel, hasFinanceRole } from './logic'
 import { getCaptureSessions, loadAccountingScope, loadSourceAccounts } from './api'
 import { CaptureModal } from './CaptureModal'
+import { ReconciliationModal } from './ReconciliationModal'
 import type { BankAccount, Company, CompanyCostCenter, CostCenter, CaptureSession } from './types'
 import s from './Nomina.module.css'
 
@@ -29,6 +30,7 @@ export default function NominaPage() {
   const [costCenters, setCostCenters] = useState<CostCenter[]>([])
   const [mappings, setMappings] = useState<CompanyCostCenter[]>([])
   const [modal, setModal] = useState<{ session: CaptureSession | null } | null>(null)
+  const [reconOpen, setReconOpen] = useState(false)
 
   async function reloadSessions() {
     if (!companyId) return setSessions([])
@@ -103,9 +105,14 @@ export default function NominaPage() {
             Tesorería a aprobación; no calcula sueldos ni ejecuta pagos.
           </p>
         </div>
-        <button className={s.primaryBtn} disabled={!companyId} onClick={() => setModal({ session: null })}>
-          <IcPlus size={16} /> Nueva captura
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={s.secondaryBtn} disabled={!companyId} onClick={() => setReconOpen(true)}>
+            Comprobar pagos
+          </button>
+          <button className={s.primaryBtn} disabled={!companyId} onClick={() => setModal({ session: null })}>
+            <IcPlus size={16} /> Nueva captura
+          </button>
+        </div>
       </div>
 
       <section className={s.board}>
@@ -158,6 +165,10 @@ export default function NominaPage() {
           onClose={() => setModal(null)}
           onSaved={reloadSessions}
         />
+      )}
+
+      {reconOpen && companyId && (
+        <ReconciliationModal onClose={() => setReconOpen(false)} onChanged={reloadSessions} />
       )}
     </>
   )

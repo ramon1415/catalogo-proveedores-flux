@@ -8,6 +8,8 @@ import type {
   CaptureSession,
   FileSlotState,
   PayrollSlot,
+  ReconQueueRow,
+  ReconSummary,
   SavePayload,
   SubmissionSummary,
 } from './types'
@@ -183,6 +185,73 @@ export async function getSubmissionSummary(paymentRequestId: string): Promise<Su
   const { data, error } = await supabase.rpc('get_payroll_submission_summary', { p_payment_request_id: paymentRequestId })
   if (error) throw error
   return data as SubmissionSummary
+}
+
+// ── Conciliación por canal (N4B) ────────────────────────────────────────────
+// Reutiliza el mismo backend que el vanilla nomina_reconciliacion.html: una
+// corrida = varios pagos, un comprobante por canal. Sólo Finanzas (RLS).
+export async function getReconciliationQueue(): Promise<ReconQueueRow[]> {
+  const { data, error } = await supabase.rpc('get_payroll_reconciliation_queue')
+  if (error) throw error
+  return Array.isArray(data) ? (data as ReconQueueRow[]) : []
+}
+
+export async function getReconciliationSummary(paymentRequestId: string): Promise<ReconSummary> {
+  const { data, error } = await supabase.rpc('get_payroll_reconciliation_summary', { p_payment_request_id: paymentRequestId })
+  if (error) throw error
+  return data as ReconSummary
+}
+
+async function sha256File(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest)).map((v) => v.toString(16).padStart(2, '0')).join('')
+}
+
+// Comprobante de UN canal: reserva → storage.upload → verificación en servidor
+// → conciliación. Devuelve el summary actualizado. El PDF y sus reglas
+// (tamaño, hash, verificación) las impone el backend; aquí sólo orquestamos.
+export async function reconcileChannelReceipt(params: {
+  paymentRequestId: string
+  channelId: string
+  file: File
+  amount: number
+  paymentDate: string
+  reference: string
+}): Promise<ReconSummary> {
+  const sha = await sha256File(params.file)
+  const reserved = await supabase.rpc('reserve_payroll_channel_receipt', {
+    p_payment_request_id: params.paymentRequestId,
+    p_payroll_channel_id: params.channelId,
+    p_mime_type: 'application/pdf',
+    p_size_bytes: params.file.size,
+    p_sha256: sha,
+    p_original_filename: params.file.name,
+  })
+  if (reserved.error) throw reserved.error
+  const res = reserved.data as { storage_bucket: string; storage_path: string; run_file_id: string }
+  const up = await supabase.storage.from(res.storage_bucket).upload(res.storage_path, params.file, {
+    contentType: 'application/pdf',
+    upsert: false,
+  })
+  if (up.error) throw up.error
+  const verified = await supabase.functions.invoke('payroll-receipt-verify', { body: { run_file_id: res.run_file_id } })
+  if (verified.error) await throwFunctionInvokeError(verified.error)
+  const reconciled = await supabase.rpc('reconcile_payroll_channel', {
+    p_payment_request_id: params.paymentRequestId,
+    p_payroll_channel_id: params.channelId,
+    p_receipt_file_id: res.run_file_id,
+    p_receipt_amount: params.amount,
+    p_payment_date: params.paymentDate,
+    p_reference_hint: params.reference,
+  })
+  if (reconciled.error) throw reconciled.error
+  return (reconciled.data as { summary: ReconSummary }).summary
+}
+
+export async function closePayrollAsPaid(paymentRequestId: string): Promise<void> {
+  const { error } = await supabase.rpc('close_payroll_as_paid', { p_payment_request_id: paymentRequestId })
+  if (error) throw error
 }
 
 // ── RPC 6: list_payment_request_approver_options(...) ──────────────────────
