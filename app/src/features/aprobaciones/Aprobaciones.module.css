@@ -114,3 +114,24 @@
   .viewDecide, .viewHistory { grid-template-columns: 1fr; }
   .refGrid { grid-template-columns: 1fr; }
 }
+@media (max-width: 760px) {
+  .phead { flex-direction: column; gap: 12px; margin-bottom: 12px; }
+  .phead > div { flex-wrap: wrap; max-width: 100%; }
+  .mainTab { padding: 8px; font-size: 12px; }
+  .tableCard { min-width: 0; flex-shrink: 0; }
+  .toolbar { padding: 12px; }
+  .searchBox { width: 100%; min-width: 0; }
+  .searchBox input { min-width: 0; width: 100%; }
+  .kanban { min-height: 0; max-height: none; overflow: visible; padding: 10px; }
+  .column { min-width: 0; }
+  .columnBody { overflow: visible; }
+  .card { min-width: 0; overflow-wrap: anywhere; }
+  .cardHead, .detailHead { flex-wrap: wrap; }
+  .cardAmount, .detailAmount { white-space: normal; overflow-wrap: anywhere; }
+  .cardActions > button { flex: 1 1 auto; justify-content: center; }
+  .dataRow { flex-direction: column; gap: 4px; }
+  .dataValue { text-align: left; overflow-wrap: anywhere; }
+  .refCell { min-width: 0; overflow-wrap: anywhere; }
+  .decisionBox { padding: 12px; }
+  .decisionActions > button { flex: 1 1 100%; }
+}

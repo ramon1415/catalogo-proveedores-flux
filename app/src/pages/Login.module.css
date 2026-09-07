@@ -2,9 +2,11 @@
    tiene tema claro), colores hardcodeados de la paleta de marca Flux. */
 .screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 28px;
+  padding: max(28px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   background:
     radial-gradient(circle at top left, rgba(207, 225, 203, .14), transparent 38%),
     radial-gradient(circle at bottom right, rgba(37, 63, 58, .85), transparent 60%),

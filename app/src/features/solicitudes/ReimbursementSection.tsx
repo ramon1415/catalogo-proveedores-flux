@@ -227,35 +227,47 @@ export function ReimbursementSection({
           </div>
           {items.map((item, index) => (
             <div key={item.key} className={s.itemsRow}>
-              <input
-                className={s.formControl}
-                type="text"
-                placeholder={`Gasto ${index + 1}`}
-                value={item.descripcion}
-                onChange={(e) => patchItem(item.key, { descripcion: e.target.value })}
-              />
-              <input
-                className={s.formControl}
-                type="number"
-                min="0.01"
-                step="0.01"
-                placeholder="0.00"
-                value={item.amount}
-                onChange={(e) => patchItem(item.key, { amount: e.target.value })}
-              />
-              <select
-                className={s.formControl}
-                value={item.budgetCategoryId}
-                disabled={categoryDisabled}
-                onChange={(e) => patchItem(item.key, { budgetCategoryId: e.target.value })}
-              >
-                <option value="">{categoryDisabled ? 'Selecciona empresa, CC y mes' : 'Seleccionar partida'}</option>
-                {categoryRows.map((row) => (
-                  <option key={row.budget_category_id} value={row.budget_category_id!}>
-                    {categoryLabel(row.budget_category_id!)}
-                  </option>
-                ))}
-              </select>
+              <label className={s.itemField}>
+                <span className={s.itemFieldLabel}>Descripción</span>
+                <input
+                  className={s.formControl}
+                  type="text"
+                  aria-label={`Descripción del gasto ${index + 1}`}
+                  placeholder={`Gasto ${index + 1}`}
+                  value={item.descripcion}
+                  onChange={(e) => patchItem(item.key, { descripcion: e.target.value })}
+                />
+              </label>
+              <label className={s.itemField}>
+                <span className={s.itemFieldLabel}>Monto</span>
+                <input
+                  className={s.formControl}
+                  type="number"
+                  aria-label={`Monto del gasto ${index + 1}`}
+                  min="0.01"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={item.amount}
+                  onChange={(e) => patchItem(item.key, { amount: e.target.value })}
+                />
+              </label>
+              <label className={s.itemField}>
+                <span className={s.itemFieldLabel}>Partida presupuestal *</span>
+                <select
+                  className={s.formControl}
+                  aria-label={`Partida del gasto ${index + 1}`}
+                  value={item.budgetCategoryId}
+                  disabled={categoryDisabled}
+                  onChange={(e) => patchItem(item.key, { budgetCategoryId: e.target.value })}
+                >
+                  <option value="">{categoryDisabled ? 'Selecciona empresa, CC y mes' : 'Seleccionar partida'}</option>
+                  {categoryRows.map((row) => (
+                    <option key={row.budget_category_id} value={row.budget_category_id!}>
+                      {categoryLabel(row.budget_category_id!)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {/* Desmarcar solo quita la exigencia de comprobante: el gasto
                   sigue cargando a su partida (atribución al área). */}
               <label className={s.checkboxCard}>
@@ -266,16 +278,18 @@ export function ReimbursementSection({
                 />
                 Sin comprobante fiscal (no deducible)
               </label>
-              <div className={s.itemsFile}>
+              <label className={s.itemsFile}>
+                <span className={s.itemFieldLabel}>Comprobante</span>
                 <input
                   type="file"
+                  aria-label={`Comprobante del gasto ${index + 1}`}
                   accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml"
                   onChange={(e) => onItemFile(item.key, e.target.files?.[0] ?? null)}
                 />
                 <span className={s.fileHint}>
                   {item.deducible ? item.fileHint : 'Sin comprobante fiscal: el adjunto es opcional.'}
                 </span>
-              </div>
+              </label>
               <button
                 type="button"
                 className={s.iconBtn}
