@@ -8,12 +8,21 @@
 
 -- 1) Vista con SECURITY INVOKER: respeta el RLS del usuario que la consulta,
 --    en vez de ejecutarse con los permisos del creador. (lint 0010)
+--    NOTA (acceso intencional): la tabla base `celebration_events` tiene RLS
+--    activo y CERO políticas (deny-all). Con SECURITY INVOKER, un usuario normal
+--    no verá filas — es el bloqueo esperado. Verificado en prod: base 0 filas,
+--    vista 0 filas, sin consumidores en la app (grep app/src). Si en el futuro
+--    se necesita exponerla, la vía correcta es una POLICY en `celebration_events`,
+--    no reabrir la vista como SECURITY DEFINER.
 alter view if exists public.celebration_events_with_dates set (security_invoker = on);
 
--- 2) Fijar search_path SOLO en las funciones que no lo tienen (proconfig null).
---    Se elige `pg_catalog, public` (pin no disruptivo): mitiga el secuestro de
---    search_path sin reescribir los cuerpos. En dev estas ya lo tienen fijado,
---    así que el bloque las salta. (lint 0011)
+-- 2) Fijar search_path SOLO en las funciones a las que les FALTA search_path.
+--    Se comprueba específicamente la ausencia de un `search_path=` en proconfig
+--    (no `proconfig IS NULL`, que se saltaría una función con OTRA config —p.ej.
+--    statement_timeout— pero sin search_path). Se elige `pg_catalog, public`
+--    (pin no disruptivo): mitiga el secuestro sin reescribir los cuerpos y
+--    PRESERVA cualquier config existente. En dev estas ya lo tienen, así que el
+--    bloque las salta; en prod las 10 lo reciben. (lint 0011)
 do $$
 declare
   r record;
@@ -23,7 +32,10 @@ begin
     from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
-      and p.proconfig is null
+      and not exists (
+        select 1 from unnest(coalesce(p.proconfig, array[]::text[])) cfg
+        where cfg like 'search_path=%'
+      )
       and p.proname in (
         'payment_request_approver_role_names', 'set_updated_at', 'update_updated_at_column',
         'flux_sysadmin_roles', 'flux_finance_roles', 'flux_approver_roles', 'flux_member_roles',
