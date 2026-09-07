@@ -24,6 +24,7 @@ import {
 import { classifyPayrollFile } from './physicalParsers'
 import {
   acknowledgeTokaVariance,
+  getCaptureFileUrl,
   getCaptureSessions,
   getSubmissionSummary,
   listApproverOptions,
@@ -93,6 +94,13 @@ function fileId(file: File, index: number): string {
 
 function moneyFromMinor(value: number | null | undefined): string {
   return Number.isSafeInteger(value) ? formatMoney(Number(value) / 100) : '—'
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (!bytes || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
 export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
@@ -207,6 +215,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
         uploaded: true,
         uploadable: false,
         status: file.parsing_status || 'server_verification_pending',
+        fileId: file.id,
         fileName: slotLabel(file.kind),
         recordCount: file.record_count,
         totalAmountMinor: file.total_amount_minor,
@@ -359,6 +368,30 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
     delete next[slot]
     setFiles(next)
     setChannels(channelsFromFiles(next))
+  }
+
+  // Descargar para verificar que el archivo subió bien. Si es de esta sesión, el
+  // File está en memoria (descarga directa). Si la sesión se reabrió, pedimos al
+  // servidor una URL firmada por file_id (bajo el gate de captura).
+  async function downloadFile(slot: PayrollSlot, state: FileSlotState) {
+    if (state.file) {
+      const url = URL.createObjectURL(state.file)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = state.fileName || state.file.name || `${slot}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      return
+    }
+    if (!state.fileId) return
+    try {
+      const url = await getCaptureFileUrl(state.fileId)
+      window.open(url, '_blank', 'noopener')
+    } catch {
+      showToast('Descarga no disponible', 'La descarga de archivos de una captura ya guardada se habilita al integrar el endpoint del servidor.', 'warning')
+    }
   }
 
   async function validatePendingFiles(): Promise<FileMap> {
@@ -611,19 +644,14 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   return (
     <Modal
       title="Captura de nómina"
-      subtitle="Arrastra el paquete, revisa el resumen y envíalo con una sola acción."
+      subtitle="Sube el paquete, revísalo y envía. Registra la corrida; no calcula sueldos ni ejecuta pagos."
       size="lg"
       onClose={onClose}
       actions={actions}
     >
       <div className={s.section}>
         <div className={s.introRow}>
-          <div>
-            <span className={s.devPill}>DEV · Captura simplificada</span>
-            <p className={s.sectionCopy}>
-              Flux valida archivos y registra la corrida; no calcula sueldos, no genera layouts y no ejecuta pagos.
-            </p>
-          </div>
+          <span className={s.devPill}>DEV · Captura simplificada</span>
           <span className={s.privatePill}>Privado · Finanzas</span>
         </div>
 
@@ -680,8 +708,13 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
             {(Object.entries(files) as Array<[PayrollSlot, FileSlotState]>).map(([slot, state]) => (
               <article key={slot} className={s.fileRow}>
                 <div>
-                  <strong>{state.fileName || slotLabel(slot)}</strong>
-                  <span>{slotLabel(slot)} · detectado por contenido</span>
+                  <strong>{slotLabel(slot)}</strong>
+                  {(() => {
+                    const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
+                    const size = formatBytes(state.sizeBytes)
+                    const meta = [distinctName, size].filter(Boolean).join(' · ')
+                    return meta ? <span>{meta}</span> : null
+                  })()}
                 </div>
                 <div className={s.fileAggregate}>
                   {state.recordCount != null && <span>{state.recordCount} registros</span>}
@@ -690,6 +723,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
                 </span>
+                {(state.file || state.fileId) && (
+                  <button type="button" className={s.iconBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
+                    Descargar
+                  </button>
+                )}
                 {!state.uploaded && !locked && (
                   <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
                     Quitar
@@ -730,27 +768,33 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
             </span>
           </div>
 
-          <div className={s.summaryMetrics}>
-            <div className={s.metric}>
-              <span>Total neto</span>
-              <strong>{summary ? formatMoney(summary.employee_net) : moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Empleados</span>
-              <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
-            </div>
-            <div className={s.metric}>
-              <span>Canales</span>
-              <strong>{channels.length || '—'}</strong>
-            </div>
-          </div>
+          {/* Estimación local antes de registrar. Cuando el servidor devuelve el
+              resumen autoritativo (sección de abajo), no lo repetimos aquí. */}
+          {!summary && (
+            <>
+              <div className={s.summaryMetrics}>
+                <div className={s.metric}>
+                  <span>Total neto</span>
+                  <strong>{moneyFromMinor(coverDiagnostic?.totalAmountMinor)}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Empleados</span>
+                  <strong>{coverDiagnostic?.recordCount ?? 'Servidor validará'}</strong>
+                </div>
+                <div className={s.metric}>
+                  <span>Canales</span>
+                  <strong>{channels.length || '—'}</strong>
+                </div>
+              </div>
 
-          {channels.length > 0 && (
-            <div className={s.channelList}>
-              {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
-              {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
-            </div>
+              {channels.length > 0 && (
+                <div className={s.channelList}>
+                  {channels.includes('banco') && <div className={s.channelRow}><span>BBVA mismo banco</span><strong>{moneyFromMinor(bankDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('spei') && <div className={s.channelRow}><span>SPEI interbancario</span><strong>{moneyFromMinor(speiDiagnostic?.totalAmountMinor)}</strong></div>}
+                  {channels.includes('vales') && <div className={s.channelRow}><span>TOKA / vales</span><strong>{moneyFromMinor(tokaDiagnostic?.totalAmountMinor)}</strong></div>}
+                </div>
+              )}
+            </>
           )}
 
           {(cashDifference !== null || vouchersDifference !== null || localVariance !== null) && (

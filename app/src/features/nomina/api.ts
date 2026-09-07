@@ -97,6 +97,19 @@ async function reserveFile(sessionId: string, expectedVersion: number, slot: Pay
   return data as Reservation
 }
 
+// Descarga de un archivo ya guardado: URL firmada emitida por el servidor bajo
+// el gate de captura (no exponemos la ruta de storage al cliente). El endpoint
+// `get_payroll_capture_file_url` es el único hook de backend pendiente para que
+// la descarga funcione también en sesiones reabiertas (el mismo día, el archivo
+// vive en memoria y se descarga sin ir al servidor).
+export async function getCaptureFileUrl(fileId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('get_payroll_capture_file_url', { p_file_id: fileId })
+  if (error) throw error
+  const url = typeof data === 'string' ? data : (data as { url?: string } | null)?.url
+  if (!url) throw new Error('payroll_capture_file_url_unavailable')
+  return url
+}
+
 // ── RPC 4: confirm_payroll_capture_file(p_file_id, p_sha256) ───────────────
 async function confirmFile(fileId: string, sha256: string): Promise<{ version: number }> {
   const { data, error } = await supabase.rpc('confirm_payroll_capture_file', { p_file_id: fileId, p_sha256: sha256 })
