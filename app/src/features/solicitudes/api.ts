@@ -350,7 +350,8 @@ export async function findRequestByInvoiceUuid(
     .from('payment_requests')
     .select('id,request_number,status')
     .eq('company_id', companyId)
-    .eq('invoice_uuid', uuid)
+    .ilike('invoice_uuid', uuid)
+    .not('status', 'in', '(rejected,cancelled)')
     .limit(1)
     .maybeSingle()
   if (error) return null

@@ -21,7 +21,7 @@ import {
 } from './logic'
 import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
-import { parseCfdiFile } from './cfdi'
+import { parseCfdiFile, resolveCfdiCompany, validateCfdiSelection, cfdiCurrencyPrefill, type CfdiBreakdown } from './cfdi'
 import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
 import { saveCfdiData, findRequestByInvoiceUuid } from './api'
 import { useAuth } from '../../lib/auth'
@@ -70,7 +70,7 @@ export function RequestModal({
   const dialogRef = useRef<HTMLDialogElement>(null)
   const cfdiParseVersion = useRef(0)
   const { showToast } = useToast()
-  const { memberships, group } = useAuth()
+  const { memberships, group, canManageProviders } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
   // "Visita/incidencia asociada" es concepto de socios (Operadora). Solo se muestra
   // para empresas con el módulo incidencias habilitado.
@@ -117,8 +117,14 @@ export function RequestModal({
   const [cfdiHint, setCfdiHint] = useState('')
   // E1 · Solicitud desde factura: aviso de duplicado por UUID y prefill del
   // alta rápida cuando el emisor del CFDI no está en el padrón.
-  const [dupWarning, setDupWarning] = useState<{ folio: string; status: string } | null>(null)
+  const [dupWarning, setDupWarning] = useState<{ id: string; folio: string; status: string; companyId: string; uuid: string } | null>(null)
   const [providerPrefill, setProviderPrefill] = useState<{ nombre: string; rfc: string } | null>(null)
+  const [cfdi, setCfdi] = useState<CfdiBreakdown | null>(null)
+  const [cfdiLoading, setCfdiLoading] = useState(false)
+  const currencyTouched = useRef(false)
+  const exchangeRateTouched = useRef(false)
+  const fiscalTouched = useRef({ amount: false, subtotal: false, tax: false, withholding: false, description: false })
+  const providerTouched = useRef(false)
   // FB-2: el CFDI completo parseado con el parser certificado del módulo
   // CONTPAQ; se persiste tras crear la solicitud para el feeder contable.
   const cfdiFull = useRef<CfdiParsed | null>(null)
@@ -175,6 +181,7 @@ export function RequestModal({
   useEffect(() => {
     const dlg = dialogRef.current
     if (dlg && !dlg.open) dlg.showModal()
+    return () => { ++cfdiParseVersion.current }
   }, [])
 
   useEffect(() => {
@@ -386,6 +393,37 @@ export function RequestModal({
     return () => { active = false }
   }, [companyId])
 
+  // Reacciona al resultado con la selección vigente, no la que había al
+  // empezar a leer el archivo. Una empresa ya elegida se conserva y valida.
+  const allowedCompanyIds = myCompanies.map((c) => c.id)
+  const cfdiCompany = cfdi ? resolveCfdiCompany(cfdi.rfcReceptor, companies, allowedCompanyIds) : null
+  const cfdiError = isReembolso ? '' : validateCfdiSelection(cfdi, companies, allowedCompanyIds, companyId, currency)
+  const currentDuplicate = !isReembolso && dupWarning?.companyId === companyId && dupWarning?.uuid === invoiceUuid ? dupWarning : null
+  const canQuickCreate = canManageProviders() && Boolean(companyId && myCompanies.some((c) => c.id === companyId))
+
+  useEffect(() => {
+    if (!isReembolso && !companyId && cfdiCompany?.company) onCompanyChange(cfdiCompany.company.id)
+  }, [cfdi, companyId, companies, myCompanies, isReembolso])
+
+  useEffect(() => {
+    if (!cfdi?.rfcEmisor || proveedorId || isReembolso) return
+    const match = proveedores.find((p) => (p.rfc ?? '').trim().toUpperCase() === cfdi.rfcEmisor)
+    if (match) onProviderSelect(match.id, proveedorLabel(match), false)
+    else setProviderPrefill({ nombre: cfdi.nombreEmisor ?? '', rfc: cfdi.rfcEmisor })
+    // Sólo un nuevo documento dispara la precarga; se conserva la elección manual.
+  }, [cfdi])
+
+  useEffect(() => {
+    setDupWarning(null)
+    if (isReembolso || !invoiceUuid || !companyId) return
+    let active = true
+    findRequestByInvoiceUuid(companyId, invoiceUuid).then((dup) => {
+      if (!active || !dup) return
+      setDupWarning({ id: dup.id, folio: dup.request_number ?? '—', status: dup.status ?? '', companyId, uuid: invoiceUuid })
+    }).catch(() => { /* El índice único sigue siendo el candado si falla el aviso. */ })
+    return () => { active = false }
+  }, [invoiceUuid, companyId, isReembolso])
+
   // ── Predicción de partida ────────────────────────────────────────────────
   // Al cambiar el proveedor (o la empresa activa) consulta el histórico
   // proveedor→partida. Solo en solicitud normal: el reembolso no usa la
@@ -446,8 +484,12 @@ const availablePredictionCandidates = useMemo(
   function onMonthChange(v: string) { setBudgetMonth(v); reloadBudgetCategories(companyId, costCenterId, v) }
 
   function onCurrencyChange(v: string) {
+    currencyTouched.current = true
     setCurrency(v)
     if (v !== 'USD') setExchangeRate('1')
+    else if (cfdi?.moneda === 'USD' && !exchangeRateTouched.current) {
+      setExchangeRate(cfdi.tipoCambio != null && cfdi.tipoCambio > 0 ? String(cfdi.tipoCambio) : '')
+    }
     else if (!exchangeRate || Number(exchangeRate) <= 0) setExchangeRate('1')
   }
 
@@ -458,7 +500,19 @@ const availablePredictionCandidates = useMemo(
     setInvoiceUuid('')
     setDupWarning(null)
     setProviderPrefill(null)
+    setCfdi(null)
+    setCfdiLoading(false)
     cfdiFull.current = null // el snapshot pertenece al adjunto vigente
+    // Al sustituir el documento se retira únicamente la precarga automática.
+    // Los importes y el concepto que la persona editó se conservan.
+    if (!fiscalTouched.current.amount) setAmount('')
+    if (!fiscalTouched.current.subtotal) setSubtotal('')
+    if (!fiscalTouched.current.tax) setTaxAmount('')
+    if (!fiscalTouched.current.withholding) setWithholding('')
+    if (!fiscalTouched.current.description) setDescription('')
+    if (!currencyTouched.current) setCurrency('MXN')
+    if (!exchangeRateTouched.current) setExchangeRate('1')
+    if (!providerTouched.current) { setProveedorId(''); setProviderSearch('') }
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
@@ -466,9 +520,17 @@ const availablePredictionCandidates = useMemo(
     // E1 · Solicitud desde factura: al subir el XML se precarga lo que trae el
     // CFDI. Solo rellena vacíos; nunca pisa lo que el usuario ya capturó.
     if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
-      parseCfdiFile(f).then((cfdi) => {
+      setCfdiLoading(true)
+      Promise.all([parseCfdiFile(f), f.text()]).then(([cfdi, xml]) => {
         if (parseVersion !== cfdiParseVersion.current) return
-        if (!cfdi) return
+        // Prefill y snapshot pertenecen a la misma lectura vigente.
+        try { cfdiFull.current = parseCfdiXml(xml) } catch { cfdiFull.current = null }
+        setCfdiLoading(false)
+        if (!cfdi) { setCfdiHint('No se pudo leer el CFDI. Revisa el documento y captura los datos manualmente.'); return }
+        setCfdi(cfdi)
+        const monetary = cfdiCurrencyPrefill(cfdi, currencyTouched.current, exchangeRateTouched.current)
+        if (monetary.currency !== undefined) setCurrency(monetary.currency)
+        if (monetary.exchangeRate !== undefined) setExchangeRate(monetary.exchangeRate)
         // Desglose fiscal.
         if (cfdi.subtotal != null) setSubtotal((prev) => prev || String(cfdi.subtotal))
         if (cfdi.traslados != null) setTaxAmount((prev) => prev || String(cfdi.traslados))
@@ -478,48 +540,17 @@ const availablePredictionCandidates = useMemo(
         // Concepto de la solicitud desde la descripción de los conceptos.
         if (cfdi.conceptos) setDescription((prev) => prev || cfdi.conceptos!)
 
-        // Empresa ← RFC del receptor. Solo entre las empresas del usuario; si el
-        // receptor es una empresa del grupo sin acceso, se avisa y no se fija.
-        let resolvedCompanyId = companyId
-        let accessNote = ''
-        if (cfdi.rfcReceptor) {
-          const match = companies.find((c) => (c.rfc ?? '').trim().toUpperCase() === cfdi.rfcReceptor)
-          if (match) {
-            if (myCompanies.some((c) => c.id === match.id)) {
-              if (!lockedCompany && !companyId) { onCompanyChange(match.id); resolvedCompanyId = match.id }
-            } else {
-              accessNote = ` La factura es a nombre de ${companyName(match)}, empresa donde no tienes acceso.`
-            }
-          }
-        }
-
-        // Proveedor ← RFC del emisor. Si no está en el padrón, se ofrece alta
-        // rápida prellenada con nombre y RFC del CFDI (providerPrefill).
-        if (cfdi.rfcEmisor && !proveedorId && !isReembolso) {
-          const match = proveedores.find((p) => (p.rfc ?? '').trim().toUpperCase() === cfdi.rfcEmisor)
-          if (match) onProviderSelect(match.id, proveedorLabel(match))
-          else setProviderPrefill({ nombre: cfdi.nombreEmisor ?? '', rfc: cfdi.rfcEmisor })
-        }
-
         const ref = [cfdi.serie, cfdi.folio].filter(Boolean).join('-')
         const fechaShort = cfdi.fecha ? cfdi.fecha.slice(0, 10) : ''
         setCfdiHint(
-          `Leído del CFDI${ref ? ` · folio ${ref}` : ''}${fechaShort ? ` · ${fechaShort}` : ''}. Verifica los datos antes de enviar.${accessNote}`,
+          `Leído del CFDI${ref ? ` · folio ${ref}` : ''}${fechaShort ? ` · ${fechaShort}` : ''}${cfdi.moneda ? ` · ${cfdi.moneda}` : ''}. Verifica los datos antes de enviar.`,
         )
-
-        // Aviso de duplicado por UUID en la empresa resuelta (el candado real
-        // es la unicidad en la base; esto solo adelanta el aviso).
-        if (cfdi.uuid && resolvedCompanyId) {
-          findRequestByInvoiceUuid(resolvedCompanyId, cfdi.uuid).then((dup) => {
-            if (parseVersion !== cfdiParseVersion.current) return
-            if (dup) setDupWarning({ folio: dup.request_number ?? '—', status: dup.status ?? '' })
-          })
-        }
+      }).catch(() => {
+        if (parseVersion !== cfdiParseVersion.current) return
+        setCfdiLoading(false)
+        setFile(null)
+        setFileHint('No se pudo leer el archivo. Vuelve a adjuntarlo antes de continuar.')
       })
-      // FB-2: parse completo con el parser certificado, para contabilidad.
-      // Independiente del prefill: si el XML no cumple el contrato fiscal
-      // (CfdiParseError) simplemente no se persiste snapshot.
-      f.text().then((xml) => { cfdiFull.current = parseCfdiXml(xml) }).catch(() => { cfdiFull.current = null })
     }
   }
 
@@ -539,7 +570,8 @@ const availablePredictionCandidates = useMemo(
     return ''
   }
 
-  function onProviderSelect(id: string, label: string) {
+  function onProviderSelect(id: string, label: string, manual = true) {
+    providerTouched.current = manual
     setProveedorId(id)
     setProviderSearch(label)
     // Nuevo proveedor: reabrimos la puerta a la auto-sugerencia de partida.
@@ -629,6 +661,14 @@ const availablePredictionCandidates = useMemo(
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (submitting) return
+    if (!isReembolso && cfdiLoading) {
+      showToast('Leyendo factura', 'Espera a que termine la lectura del XML.', 'warning')
+      return
+    }
+    if (cfdiError || currentDuplicate) {
+      showToast('Revisa la factura', cfdiError || `La factura ya está en la solicitud ${currentDuplicate!.folio}.`, 'warning')
+      return
+    }
 
     // Nómina usa el contrato de staging N2B dedicado; no se crea vía este RPC.
     if (normalizeRequestType(requestType) === 'nomina') {
@@ -666,6 +706,9 @@ const availablePredictionCandidates = useMemo(
       return
     }
 
+    // Se fija junto al payload: otra selección de archivo durante el RPC no
+    // puede cambiar la evidencia fiscal de la solicitud que ya se está creando.
+    const cfdiSnapshot = cfdiFull.current
     setSubmitting(true)
     try {
       const data = await createPaymentRequest(payload)
@@ -676,8 +719,8 @@ const availablePredictionCandidates = useMemo(
       const warning = await updateFase2Metadata(requestId, payload.request_type, payload.payment_method)
 
       // FB-2: snapshot del CFDI para el feeder contable (no bloqueante).
-      if (cfdiFull.current) {
-        const cfdiWarning = await saveCfdiData(requestId, cfdiFull.current)
+      if (cfdiSnapshot) {
+        const cfdiWarning = await saveCfdiData(requestId, cfdiSnapshot)
         if (cfdiWarning) showToast('CFDI no persistido', cfdiWarning, 'warning')
       }
 
@@ -768,9 +811,16 @@ const availablePredictionCandidates = useMemo(
   }
 
   function resetForAnother() {
+    ++cfdiParseVersion.current
+    cfdiFull.current = null
+    currencyTouched.current = false
+    exchangeRateTouched.current = false
+    fiscalTouched.current = { amount: false, subtotal: false, tax: false, withholding: false, description: false }
+    providerTouched.current = false
+    setCfdi(null); setCfdiLoading(false)
     setSuccess(null)
     setRequestType('provider_payment'); setPaymentMethod('transfer')
-    setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
+    setCompanyId(initialCompanyId); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
@@ -831,7 +881,7 @@ const availablePredictionCandidates = useMemo(
                           calculado para que nadie lo edite por separado. */}
                       <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
                         value={isReembolso ? (reembolsoTotals.total || '') : amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => { fiscalTouched.current.amount = true; setAmount(e.target.value) }}
                         readOnly={isReembolso} required />
                       {isReembolso && <span className={s.fieldHint}>Suma de los renglones del desglose de gastos.</span>}
                     </label>
@@ -842,7 +892,7 @@ const availablePredictionCandidates = useMemo(
                       </select>
                     </label>
                     <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
-                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => { exchangeRateTouched.current = true; setExchangeRate(e.target.value) }} required={isUsd} />
                     </label>
                     <div className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>
                       <div className={s.fieldHint} style={{ marginBottom: 4 }}>
@@ -851,13 +901,13 @@ const availablePredictionCandidates = useMemo(
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
                         <label>Subtotal
-                          <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={subtotal} onChange={(e) => { fiscalTouched.current.subtotal = true; setSubtotal(e.target.value) }} />
                         </label>
                         <label>IVA
-                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={taxAmount} onChange={(e) => { fiscalTouched.current.tax = true; setTaxAmount(e.target.value) }} />
                         </label>
                         <label>Retenciones
-                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={withholding} onChange={(e) => setWithholding(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={withholding} onChange={(e) => { fiscalTouched.current.withholding = true; setWithholding(e.target.value) }} />
                         </label>
                       </div>
                     </div>
@@ -868,7 +918,7 @@ const availablePredictionCandidates = useMemo(
                       </label>
                     )}
                     <label className={s.fullRow}>Descripcion *
-                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => setDescription(e.target.value)} required />
+                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => { fiscalTouched.current.description = true; setDescription(e.target.value) }} required />
                     </label>
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -879,10 +929,22 @@ const availablePredictionCandidates = useMemo(
                       <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
-                    {dupWarning && (
+                    {!isReembolso && cfdiLoading && <p className={`${s.fullRow} ${s.fieldHint}`} role="status">Leyendo factura…</p>}
+                    {cfdiError && (
+                      <div className={`${s.fullRow} ${s.fieldHint}`} role="alert" style={{ color: 'var(--ruby)' }}>
+                        {cfdiError}
+                        {cfdiCompany?.company && cfdiCompany.company.id !== companyId && !lockedCompany && (
+                          <button type="button" className={s.secondaryBtn} onClick={() => onCompanyChange(cfdiCompany.company!.id)}>
+                            Usar {companyName(cfdiCompany.company)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {currentDuplicate && (
                       <div className={`${s.fullRow} ${s.fieldHint}`} style={{ color: 'var(--ruby)', fontWeight: 600 }}>
-                        ⚠ Ya existe una solicitud con esta factura en la empresa: {dupWarning.folio}
-                        {dupWarning.status ? ` (${dupWarning.status})` : ''}. Revisa antes de crear otra.
+                        ⚠ Ya existe una solicitud con esta factura en la empresa: {currentDuplicate.folio}
+                        {currentDuplicate.status ? ` (${currentDuplicate.status})` : ''}.{' '}
+                        <a href={`/solicitudes?request_id=${encodeURIComponent(currentDuplicate.id)}`} target="_blank" rel="noopener noreferrer">Ver solicitud</a>
                       </div>
                     )}
                   </div>
@@ -914,15 +976,15 @@ const availablePredictionCandidates = useMemo(
                     <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
                     <div className={s.formGrid}>
                       <label className={s.fullRow}>Proveedor *
-                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} onPlus={() => setQuickOpen(true)} />
+                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
                       </label>
                       {providerPrefill && !proveedorId && (
                         <div className={`${s.fieldHint} ${s.fullRow}`}>
                           El emisor del CFDI no está en el padrón{providerPrefill.rfc ? ` (RFC ${providerPrefill.rfc})` : ''}.{' '}
-                          <button type="button" onClick={() => setQuickOpen(true)}
+                          {canQuickCreate ? <><button type="button" onClick={() => setQuickOpen(true)}
                             style={{ background: 'none', border: 0, padding: 0, color: 'var(--accent-text)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
                             Darlo de alta
-                          </button>{' '}con los datos de la factura.
+                          </button>{' '}con los datos de la factura.</> : 'Pide a Finanzas que lo registre para continuar.'}
                         </div>
                       )}
                     </div>
@@ -1118,13 +1180,13 @@ const availablePredictionCandidates = useMemo(
           ) : (
             <>
               <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-              <button type="submit" className={s.primaryBtn} disabled={submitting}>{submitting ? 'Creando solicitud...' : 'Crear solicitud'}</button>
+              <button type="submit" className={s.primaryBtn} disabled={submitting || (!isReembolso && cfdiLoading) || Boolean(cfdiError) || Boolean(currentDuplicate)}>{submitting ? 'Creando solicitud...' : 'Crear solicitud'}</button>
             </>
           )}
         </div>
       </form>
 
-      {quickOpen && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} prefill={providerPrefill} />}
+      {quickOpen && canQuickCreate && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} prefill={providerPrefill} />}
     </dialog>
   )
 }

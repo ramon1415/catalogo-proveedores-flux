@@ -18,6 +18,52 @@ export type CfdiBreakdown = {
   serie: string | null
   folio: string | null
   conceptos: string | null
+  moneda: string | null
+  tipoCambio: number | null
+}
+
+type CfdiCompany = { id: string; rfc?: string | null; name?: string | null; legal_name?: string | null }
+
+// Resuelve identidad; nunca concede acceso por el RFC del documento.
+export function resolveCfdiCompany(rfc: string | null, companies: CfdiCompany[], allowedIds: string[]) {
+  const normalized = (rfc ?? '').trim().toUpperCase()
+  if (!normalized) return { company: null, error: 'El CFDI no contiene el RFC del receptor. Revisa la factura.' }
+  const matches = companies.filter((c) => (c.rfc ?? '').trim().toUpperCase() === normalized)
+  if (matches.length !== 1) return {
+    company: null,
+    error: matches.length > 1
+      ? 'El RFC del receptor está registrado en varias empresas. Pide a Finanzas revisar el catálogo.'
+      : 'El RFC del receptor no corresponde a una empresa registrada. Revisa la factura o pide a Finanzas completar el RFC de la empresa.',
+  }
+  const company = matches[0]
+  if (!allowedIds.includes(company.id)) return { company: null, error: 'No tienes acceso a la empresa receptora de esta factura.' }
+  return { company, error: '' }
+}
+
+export function validateCfdiSelection(
+  cfdi: CfdiBreakdown | null, companies: CfdiCompany[], allowedIds: string[], companyId: string, currency: string,
+): string {
+  if (!cfdi) return '' // PDF, imagen o captura manual.
+  const resolved = resolveCfdiCompany(cfdi.rfcReceptor, companies, allowedIds)
+  if (resolved.error) return resolved.error
+  if (resolved.company!.id !== companyId) {
+    const name = resolved.company!.legal_name || resolved.company!.name || 'la empresa receptora'
+    return `La factura corresponde a ${name}. Selecciona esa empresa o adjunta la factura correcta.`
+  }
+  if (!cfdi.moneda || !['MXN', 'USD'].includes(cfdi.moneda)) {
+    return 'La moneda del CFDI no es compatible con esta solicitud. Se admiten MXN y USD.'
+  }
+  if (cfdi.moneda !== currency) return `La factura está en ${cfdi.moneda}. Selecciona esa moneda antes de continuar.`
+  return ''
+}
+
+export function cfdiCurrencyPrefill(cfdi: CfdiBreakdown, currencyTouched: boolean, exchangeRateTouched: boolean) {
+  if (!cfdi.moneda || !['MXN', 'USD'].includes(cfdi.moneda)) return {}
+  return {
+    currency: currencyTouched ? undefined : cfdi.moneda,
+    exchangeRate: exchangeRateTouched ? undefined : cfdi.moneda === 'MXN' ? '1'
+      : cfdi.tipoCambio != null && cfdi.tipoCambio > 0 ? String(cfdi.tipoCambio) : '',
+  }
 }
 
 export async function parseCfdiFile(file: File): Promise<CfdiBreakdown | null> {
@@ -59,6 +105,8 @@ export async function parseCfdiFile(file: File): Promise<CfdiBreakdown | null> {
     const fecha = comprobante.getAttribute('Fecha')?.trim() || null
     const serie = comprobante.getAttribute('Serie')?.trim() || null
     const folio = comprobante.getAttribute('Folio')?.trim() || null
+    const moneda = comprobante.getAttribute('Moneda')?.trim().toUpperCase() || null
+    const tipoCambio = num(comprobante.getAttribute('TipoCambio'))
 
     // Descripción de los conceptos del CFDI (nodo Conceptos/Concepto, no el de
     // nómina). Se juntan las descripciones únicas para proponer el concepto.
@@ -70,7 +118,7 @@ export async function parseCfdiFile(file: File): Promise<CfdiBreakdown | null> {
     const conceptos = descripciones.length ? descripciones.join('; ') : null
 
     if (subtotal == null && total == null) return null
-    return { subtotal, total, traslados, retenciones, uuid, rfcEmisor, nombreEmisor, rfcReceptor, fecha, serie, folio, conceptos }
+    return { subtotal, total, traslados, retenciones, uuid, rfcEmisor, nombreEmisor, rfcReceptor, fecha, serie, folio, conceptos, moneda, tipoCambio }
   } catch {
     return null
   }

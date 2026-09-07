@@ -7,10 +7,12 @@ on:
     paths:
       - 'app/**'
       - '.github/workflows/react-app-ci.yml'
+      - 'scripts/qa/solicitud-desde-factura.test.mjs'
   pull_request:
     paths:
       - 'app/**'
       - '.github/workflows/react-app-ci.yml'
+      - 'scripts/qa/solicitud-desde-factura.test.mjs'
   workflow_dispatch:
 
 permissions:
@@ -38,6 +40,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Solicitud desde factura — comportamiento y aislamiento
+        run: node --test ../scripts/qa/solicitud-desde-factura.test.mjs
 
       - name: Build
         run: npm run build
