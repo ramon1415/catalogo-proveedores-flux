@@ -13,7 +13,7 @@ type Kind = 'imss' | 'isn_cdmx'
 type Context = { can_capture: boolean; can_pay: boolean; company_rfc: string; kinds: {kind: Kind; category_name: string | null; centers: {id: string; name: string}[]}[] }
 type PendingDocument = { id: string; file: File; parsed: ObligationDocument }
 type SavedFile = { id: string; kind: string; status: string; parsed?: {amount?: string; paymentDate?: string; reference?: string; currency?: string} }
-type Obligation = { id: string; kind: Kind; company_id: string; status: string; version: number; files: SavedFile[];
+type Obligation = { id: string; kind: Kind; company_id: string; status: string; no_presupuestal?: boolean; version: number; files: SavedFile[];
   period_start: string | null; period_end: string | null; amount_minor: number | null; due_date: string | null; payment_reference: string | null;
   cost_center_id: string | null; budget_month: string | null; payment_date: string | null; bank_reference: string | null }
 const kinds: Record<string,string> = { imss: 'IMSS', isn_cdmx: 'ISN · CDMX', imss_sipare: 'Línea de captura IMSS', imss_sua: 'Cédula SUA', imss_ema: 'Propuesta EMA', receipt: 'Comprobante de pago' }
@@ -79,7 +79,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
  }
  function completed(title: string,detail: string) {setSuccess({title,detail});showToast(title,detail,'success')}
  async function create(kind: Kind) {
-  open({id:crypto.randomUUID(),company_id:companyId,kind,status:'draft',version:0,files:[],
+  open({id:crypto.randomUUID(),company_id:companyId,kind,status:'draft',no_presupuestal:true,version:0,files:[],
    period_start:null,period_end:null,amount_minor:null,due_date:null,payment_reference:null,
    cost_center_id:null,budget_month:null,payment_date:null,bank_reference:null})
  }
@@ -178,6 +178,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
   else completed('Solicitud actualizada',action==='confirm'?'Los montos quedaron confirmados. La solicitud está lista para pago.':'El cambio quedó guardado.')
  }
  const cfg=context?.kinds.find(k=>k.kind===modal?.kind)
+ const budgetRequired=modal?.no_presupuestal!==true
  const canEdit=!!context?.can_capture&&modal?.status==='draft'
  return <>
   <div className={s.phead}><div><h1>IMSS e ISN</h1><p>Registra los documentos y el pago de las obligaciones de {companyName}.</p></div>
@@ -192,7 +193,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
    </div></section>
   {modal&&<Modal title={review?`Confirmar montos de ${kinds[modal.kind]}`:`Solicitud ${kinds[modal.kind]}`} subtitle={`${companyName} · ${modal.version===0?'Sin guardar':states[modal.status]}`} size="lg" onClose={close} actions={<>
    <button className={s.secondaryBtn} disabled={busy} onClick={close}>Cerrar</button>
-   {review?<><button className={s.secondaryBtn} disabled={busy} onClick={()=>setReview(null)}>Volver a editar</button><button className={s.primaryBtn} disabled={busy} onClick={()=>execute(()=>transition('submit'))}>Confirmar y enviar a Finanzas</button></>:canEdit&&<><button className={s.secondaryBtn} disabled={busy} onClick={()=>execute(save)}>Guardar borrador</button><button className={s.primaryBtn} disabled={busy||!center||!month||!modal.amount_minor} onClick={()=>execute(prepareSubmit)}>Enviar a Finanzas</button></>}
+   {review?<><button className={s.secondaryBtn} disabled={busy} onClick={()=>setReview(null)}>Volver a editar</button><button className={s.primaryBtn} disabled={busy} onClick={()=>execute(()=>transition('submit'))}>Confirmar y enviar a Finanzas</button></>:canEdit&&<><button className={s.secondaryBtn} disabled={busy} onClick={()=>execute(save)}>Guardar borrador</button><button className={s.primaryBtn} disabled={busy||(budgetRequired&&(!center||!month))||!modal.amount_minor} onClick={()=>execute(prepareSubmit)}>Enviar a Finanzas</button></>}
    {context?.can_pay&&modal.status==='submitted'&&<button className={s.primaryBtn} disabled={busy} onClick={()=>execute(()=>transition('confirm'))}>Confirmar montos correctos</button>}
    {context?.can_pay&&modal.status==='approved'&&<button className={s.primaryBtn} disabled={busy||!amount||!date||!reference||!modal.files.some(f=>f.kind==='receipt'&&f.status==='verified')} onClick={()=>execute(()=>transition('pay'))}>Confirmar pago registrado</button>}
   </>}>
@@ -202,8 +203,8 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
     {review?<section className={s.reviewPanel} aria-label="Revisión antes del envío">
      <h3>Revisa los datos antes de enviar</h3><p>Confirma que el importe y el periodo coinciden con tus documentos.</p>
      <dl><div><dt>Empresa</dt><dd>{companyName}</dd></div><div><dt>Importe total</dt><dd>{formatMoney((review.amount_minor||0)/100)}</dd></div>
-     <div><dt>Periodo</dt><dd>{review.period_start} → {review.period_end}</dd></div><div><dt>Centro de costo</dt><dd>{cfg?.centers.find(c=>c.id===review.cost_center_id)?.name}</dd></div>
-     <div><dt>Mes presupuestal</dt><dd>{review.budget_month?.slice(0,7)}</dd></div></dl>
+     <div><dt>Periodo</dt><dd>{review.period_start} → {review.period_end}</dd></div>{budgetRequired&&<><div><dt>Centro de costo</dt><dd>{cfg?.centers.find(c=>c.id===review.cost_center_id)?.name}</dd></div>
+     <div><dt>Mes presupuestal</dt><dd>{review.budget_month?.slice(0,7)}</dd></div></>}</dl>
      <p>{context?.can_pay?'Al confirmar, la solicitud quedará lista para registrar su pago.':'Finanzas recibirá la solicitud para su revisión y pago.'}</p>
     </section>:<>
     {canEdit&&<label className={s.dropzone} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(!busy)void execute(()=>upload(e.dataTransfer.files))}}>
@@ -217,7 +218,8 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
     </section>}
     <div className={s.summaryMetrics}><div className={s.metric}><span>Importe total</span><strong>{modal.amount_minor?formatMoney(modal.amount_minor/100):'Pendiente'}</strong></div><div className={s.metric}><span>Periodo</span><strong>{modal.period_start||'Pendiente'} → {modal.period_end||'Pendiente'}</strong></div></div>
     {modal.due_date&&<p>Vencimiento del documento: {modal.due_date}</p>}
-    {canEdit&&<div className={s.receiptForm}>
+    {canEdit&&!budgetRequired&&<p>Esta solicitud no requiere partida, centro de costo ni presupuesto.</p>}
+    {canEdit&&budgetRequired&&<div className={s.receiptForm}>
      <p>{cfg?.category_name||'Partida pendiente de configurar'}. Esta obligación utiliza presupuesto.</p>
      {!cfg?.centers.length&&<div className={s.notice}>Finanzas debe configurar el centro y la partida de esta empresa antes del envío. Puedes guardar los documentos como borrador.</div>}
      <div className={s.grid}><label>Centro de costo<select value={center} disabled={busy} onChange={e=>setCenter(e.target.value)}><option value="">Selecciona un centro</option>{cfg?.centers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
@@ -230,7 +232,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
      <label>Referencia bancaria<input value={reference} maxLength={120} disabled={busy} onChange={e=>setReference(e.target.value)}/></label></div>
     </div>}
     {modal.status==='paid'&&<div className={s.paymentSuccess}><span className={s.successIcon} aria-hidden="true"><IcAprobaciones size={26}/></span><div><strong>Pago completado</strong><p>Pago registrado el {modal.payment_date}. El comprobante está disponible para descargar.</p></div></div>}
-    {(canEdit||(context?.can_pay&&['submitted','approved'].includes(modal.status)))&&<button className={s.secondaryBtn} disabled={busy} onClick={()=>{if(window.confirm('¿Cancelar esta solicitud? Se liberará su reserva presupuestal.'))void execute(()=>transition('cancel'))}}>Cancelar solicitud</button>}
+    {(canEdit||(context?.can_pay&&['submitted','approved'].includes(modal.status)))&&<button className={s.secondaryBtn} disabled={busy} onClick={()=>{if(window.confirm(budgetRequired?'¿Cancelar esta solicitud? Se liberará su reserva presupuestal.':'¿Cancelar esta solicitud?'))void execute(()=>transition('cancel'))}}>Cancelar solicitud</button>}
     </>}
    </div>
   </Modal>}
