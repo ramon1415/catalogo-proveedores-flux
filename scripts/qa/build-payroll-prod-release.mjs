@@ -125,7 +125,7 @@ create trigger validate_payment_request_approver_scope_update before update of a
 when (new.request_type::text <> 'nomina') execute function public.validate_payment_request_approver_scope();`);
 lines.push("select cron.schedule('payroll-notification-dispatcher','* * * * *','select private.wake_payroll_notifications();');");
 lines.push("notify pgrst, 'reload schema';",'commit;');
-const baseline = root+'supabase/migrations/20260908064156_payroll_prod_capture_and_notifications.sql';
+const baseline = root+'supabase/migrations/20260908075149_payroll_prod_capture_and_notifications.sql';
 writeFileSync(baseline,lines.join('\n\n')+'\n');
 const manifest={adaptations:['Company finance membership gates for payments, summaries and receipt uploads','Company finance RLS for raw payroll records','Treasury may acknowledge a TOKA funding variance captured by RH','No anonymous EXECUTE grants on payroll functions'],adapter_sha256:createHash('sha256').update(readFileSync(root+'scripts/qa/payroll-prod-company-role-adapter.sql')).digest('hex'),source_dev_sha:'4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7',prod_base_sha:'b998919341b1e337f0cc2a7b7d31b289b4944e7c',tables:tables.map(t=>t.name),functions:ordered.map(f=>({schema:f.schema,name:f.name,args:f.args,sha256:createHash('sha256').update(f.definition).digest('hex')})),preserved_existing_functions:['public.payroll_active_company_access'],baseline_sha256:createHash('sha256').update(readFileSync(baseline)).digest('hex')};
 writeFileSync(root+'docs/qa/payroll-prod-release-manifest.json',JSON.stringify(manifest,null,2)+'\n');
