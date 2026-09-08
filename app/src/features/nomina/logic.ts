@@ -390,6 +390,27 @@ export function slotLabel(value: PayrollSlot | string): string {
   )
 }
 
+export function fileRecordCountLabel(slot: PayrollSlot, count: number): string {
+  const labels: Record<PayrollSlot, [string, string]> = {
+    caratula: ['persona', 'personas'],
+    layout_mismo_banco: ['pago', 'pagos'],
+    layout_spei: ['transferencia', 'transferencias'],
+    layout_toka: ['transferencia', 'transferencias'],
+    cfdi_vales: ['beneficiario de vales', 'beneficiarios de vales'],
+  }
+  return `${count} ${labels[slot][count === 1 ? 0 : 1]}`
+}
+
+export function fileAmountLabel(slot: PayrollSlot): string {
+  return {
+    caratula: 'Neto de nómina',
+    layout_mismo_banco: 'Total BBVA',
+    layout_spei: 'Total SPEI',
+    layout_toka: 'Fondeo TOKA',
+    cfdi_vales: 'Importe de vales',
+  }[slot]
+}
+
 export function channelLabel(value: PayrollChannel | string): string {
   return (
     ({ banco: 'BBVA mismo banco', spei: 'SPEI', vales: 'TOKA / vales' } as Record<string, string>)[value] || value

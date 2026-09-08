@@ -78,6 +78,7 @@ before(async () => {
   `);
   await db.exec(read('../../supabase/migrations/20260908015701_payroll_pilot_notifications.sql'));
   await db.exec(read('../../supabase/migrations/20260908022737_payroll_notification_scoped_test.sql'));
+  await db.exec(read('../../supabase/migrations/20260908060513_payroll_capture_verified_file_totals.sql'));
   await db.exec(`insert into public.payroll_notification_settings(company_id,finance_recipient_profile_id,dispatch_enabled,app_origin)
     values ('${companyA}','${finance}',true,'https://flux.example.com');`);
 });
@@ -106,6 +107,111 @@ test('history retains expired materialized runs and scopes before the 50-row lim
     assert.equal(list.length,1);
     assert.equal(list[0].id,session);
     assert.equal(list[0].payment_request_status,'paid');
+  });
+});
+
+const fileSpecs = [
+  ['caratula', null, 3, 30000],
+  ['layout_mismo_banco', 'banco', 1, 10000],
+  ['layout_spei', 'spei', 1, 15000],
+  ['layout_toka', 'vales', 1, 5116],
+  ['cfdi_vales', 'vales', 1, 5000],
+];
+
+async function withFileEvidence(check, arrange = async () => {}) {
+  await db.exec('begin');
+  try {
+    const channelIds = { banco: id(201), spei: id(202), vales: id(203) };
+    for (const [channel, amount, benefit] of [['banco',100,null],['spei',150,null],['vales',51.16,50]]) {
+      await db.query(`insert into public.payroll_channels(id,payment_request_id,channel,amount,benefit_amount)
+        values ($1,$2,$3,$4,$5)`,[channelIds[channel],request,channel,amount,benefit]);
+    }
+    for (const [i, [kind, channel, count]] of fileSpecs.entries()) {
+      await db.query(`insert into public.payroll_capture_files(id,session_id,kind,channel,sha256,upload_state,is_current,record_count,total_amount_minor)
+        values ($1,$2,$3,$4,$5,'uploaded',true,$6,$7)`,
+        [id(210+i),session,kind,channel,'a'.repeat(64),kind==='layout_spei'?42:null,kind==='layout_spei'?999999:null]);
+      await db.query(`insert into public.payroll_run_files(id,payment_request_id,payroll_channel_id,kind,sha256,parsing_status,parsing_metadata,capture_file_id)
+        values ($1,$2,$3,$4,$5,'parsed',$6,$7)`,[id(220+i),request,channelIds[channel]||null,kind,'a'.repeat(64),
+        {evidence_class:'SERVER_VERIFIED',row_count:count,employee_name:'PRIVATE_PAYROLL_PERSON',rfc:'PRIVATE_RFC'},id(210+i)]);
+    }
+    for (const [i, amount] of [100,150,50].entries()) {
+      await db.query(`insert into public.payroll_run_lines(id,payment_request_id,source_file_id,net_amount,employee_name)
+        values ($1,$2,$3,$4,'PRIVATE_PAYROLL_PERSON')`,[id(230+i),request,id(220),amount]);
+    }
+    await arrange();
+    await db.query("select set_config('test.actor',$1,true)",[rh]);
+    await db.exec('set local role authenticated');
+    await check();
+  } finally { await db.exec('rollback'); }
+}
+
+test('saved paid captures return server counts and exact totals for all five files without exposing individual records', async () => {
+  await withFileEvidence(async () => {
+    const [capture] = await rpc('get_payroll_capture_sessions',session);
+    assert.equal(capture.payment_request_status,'paid');
+    assert.equal(capture.files.length,5);
+    for (const [kind,,count,amount] of fileSpecs) {
+      const file=capture.files.find(file=>file.kind===kind);
+      assert.equal(file.record_count,count,kind);
+      assert.equal(file.total_amount_minor,amount,kind);
+    }
+    // The invoice's benefit amount must not be replaced by TOKA funding + fees.
+    assert.equal(capture.files.find(file=>file.kind==='cfdi_vales').total_amount_minor,5000);
+    assert.equal(capture.files.find(file=>file.kind==='layout_toka').total_amount_minor,5116);
+    assert.doesNotMatch(JSON.stringify(capture), /PRIVATE_PAYROLL_PERSON|PRIVATE_RFC|employee_name|parsing_metadata/);
+    assert.deepEqual((await db.query('select * from public.payroll_run_lines')).rows,[]);
+    assert.deepEqual(await rpc('get_payroll_capture_sessions',id(999)),[]);
+    await db.exec('reset role');
+    const staging=await db.query('select kind,record_count,total_amount_minor from public.payroll_capture_files where session_id=$1',[session]);
+    for (const file of staging.rows) {
+      assert.equal(file.record_count,file.kind==='layout_spei'?42:null);
+      assert.equal(Number(file.total_amount_minor)||null,file.kind==='layout_spei'?999999:null);
+    }
+  });
+});
+
+test('staging metadata is preserved while incomplete saved captures never infer totals', async () => {
+  await withFileEvidence(async () => {
+    const [capture] = await rpc('get_payroll_capture_sessions',session);
+    for (const file of capture.files) {
+      assert.equal(file.record_count,file.kind==='layout_spei'?42:null);
+      assert.equal(file.total_amount_minor,file.kind==='layout_spei'?999999:null);
+    }
+  }, async () => {
+    await db.query(`update public.payroll_capture_sessions set capture_state='draft',materialized_payment_request_id=null,expires_at=now()+interval '1 day' where id=$1`,[session]);
+  });
+});
+
+test('verified aggregates require the same file, hash, kind and payroll request', async () => {
+  await withFileEvidence(async () => {
+    const [capture] = await rpc('get_payroll_capture_sessions',session);
+    assert.equal(capture.files.length,5);
+    for (const file of capture.files) {
+      assert.equal(file.record_count,null,file.kind);
+      assert.equal(file.total_amount_minor,null,file.kind);
+    }
+  }, async () => {
+    await db.query('update public.payroll_run_files set sha256=$1 where id=$2',['b'.repeat(64),id(220)]);
+    await db.query('update public.payroll_run_files set payment_request_id=$1 where id=$2',[id(999),id(221)]);
+    await db.query("update public.payroll_run_files set kind='cfdi_vales' where id=$1",[id(222)]);
+    await db.query("update public.payroll_run_files set parsing_metadata=jsonb_build_object('evidence_class','CLIENT_ATTESTED','row_count',1) where id=$1",[id(223)]);
+    await db.query('update public.payroll_run_files set capture_file_id=$1 where id=$2',[id(999),id(224)]);
+  });
+});
+
+test('malformed counts stay unavailable and a materialized request from another company cannot contribute data', async () => {
+  await withFileEvidence(async () => {
+    const [capture] = await rpc('get_payroll_capture_sessions',session);
+    assert.equal(capture.files.find(file=>file.kind==='layout_spei').record_count,null);
+    assert.equal(capture.files.find(file=>file.kind==='layout_spei').total_amount_minor,15000);
+    await db.exec('reset role');
+    await db.query('update public.payment_requests set company_id=$1 where id=$2',[companyB,request]);
+    await db.exec('set local role authenticated');
+    const [mismatched] = await rpc('get_payroll_capture_sessions',session);
+    assert.equal(mismatched.payment_request_status,null);
+    assert.ok(mismatched.files.every(file=>file.record_count===null && file.total_amount_minor===null));
+  }, async () => {
+    await db.query(`update public.payroll_run_files set parsing_metadata=jsonb_set(parsing_metadata,'{row_count}','"invalid"'::jsonb) where id=$1`,[id(222)]);
   });
 });
 

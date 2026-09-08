@@ -72,9 +72,34 @@ Ramón autorizó expresamente iniciar sesión y recibir los dos avisos de prueba
 - Pago: quien creó la captura. Si la creó Ara, llega a Ara; si la creó Yulma, llega a Yulma. No es un envío automático a todas las capturistas. Se envía un único correo con los comprobantes de todos los canales al cerrar.
 - Verificación de PROD: no existen aún payroll_notification_settings ni get_payroll_notification_document. La configuración productiva y habilitación forman parte de la liberación pendiente; no se aplicaron cambios en PROD.
 
+### Validación manual e integración a DEV
+
+Ramón confirmó que los dos pendientes de UX quedaron correctos: cancelar el selector sin cerrar el modal/ocultar Revalidar al pagar, y presentación de archivos/scroll interno. El PR #571 quedó fusionado en DEV, commit `205c78458cc0f9d4b6cb40f0688c3967f187d40c`, con Contract suite posterior al merge y Vercel aprobados. Esos dos pendientes quedan cerrados por la validación del usuario.
+
+### Conteos e importes al reabrir la captura
+
+La consulta original devolvía los metadatos de staging: por contrato, solo SPEI conserva ahí conteo e importe del navegador. Los cinco archivos ya estaban validados en el servidor, pero los otros cuatro aparecían sin datos al reabrir. No faltaban archivos ni registros.
+
+- Migración `20260908060513_payroll_capture_verified_file_totals.sql`, aplicada únicamente en DEV. El archivo se creó con Supabase CLI 2.117.0 y se alineó con la versión asignada por el historial nativo al aplicar la migración puntual.
+- Se conserva el RPC público y se actualiza su consulta interna: conteos de `payroll_run_files.parsing_metadata.row_count`, neto de las líneas de la carátula y montos de los canales. El CFDI muestra el importe de vales; fondeo TOKA muestra el fondeo completo, que incluye comisión/IVA.
+- La evidencia debe coincidir en archivo de captura, solicitud, empresa, tipo, hash y validación del servidor. Cuando falta evidencia, el valor queda nulo. La lectura de borradores conserva sus metadatos previos.
+- La UI etiqueta personas, pagos, transferencias y beneficiarios de vales, con singular/plural. El importe tiene una descripción según el tipo de archivo.
+- Build/TypeScript y 16 pruebas dirigidas aprobadas: 13 de PostgreSQL 17/permisos/ciclo y 3 del modal. Incluyen cinco regresiones nuevas para reapertura de los cinco archivos, exactitud de importes, conservación del staging, vínculos inválidos, aislamiento por empresa y datos incompletos.
+- Consulta al RPC en DEV con rol authenticated y el contexto del perfil autorizado de Ramón: cinco archivos, folio SOL-2026-0157 y estado paid. Resultados:
+
+| Archivo | Conteo | Importe MXN |
+| --- | ---: | ---: |
+| Carátula | 3 personas | 300.00 |
+| BBVA Nómina | 1 pago | 100.00 |
+| SPEI | 1 transferencia | 150.00 |
+| TOKA fondeo | 1 transferencia | 51.16 |
+| TOKA CFDI | 1 beneficiario de vales | 50.00 |
+
+Los datos de staging permanecen intactos, el estado sigue paid y la corrida conserva exactamente los dos eventos de aviso previos. La ACL interna permanece exclusiva de postgres/service_role; el wrapper público sigue disponible para authenticated. No hubo hallazgos nuevos respecto de la línea base de advisors. La verificación del arreglo combina el RPC real y el componente React; no constituye una nueva prueba visual en navegador.
+
 ## Pendiente para cerrar el piloto
 
-1. Retest manual de cancelar el selector y comprobar que Revalidar paquete no aparece al reabrir SOL-2026-0157; verificar la descarga de comprobantes desde la captura y la nueva presentación de archivos. Recorrer el listado completo en escritorio y móvil, comprobando que la cabecera permanece visible y se desplaza la lista. Cierre y ambos avisos ya verificados.
+1. Verificar la descarga de comprobantes desde la captura. Los dos ajustes de UX previos, el cierre y ambos avisos ya están verificados.
 2. Confirmar la apariencia del correo final dentro de Gmail. El mensaje recibido, el HTML y los tres adjuntos ya fueron verificados mediante la API de Gmail.
 3. Validar la experiencia de Ara/Yulma con su sesión. Los permisos por empresa y la prohibición de mutaciones de pago ya están cubiertos por pruebas de base de datos; la UAT realizada corresponde a Ramón con capacidad de Finanzas.
 4. Preparar y revisar la liberación de producción. En la revisión inicial, main estaba en #548 y PROD todavía no tenía las tablas/RPC/Edge de nómina; este PR a DEV no habilita por sí solo el uso en producción.
