@@ -56,9 +56,11 @@ type Props = {
   costCenters: CostCenter[]
   mappings: CompanyCostCenter[]
   isFinance: boolean
+  canCapture?: boolean
   activeCompanyId: string
   onClose: () => void
   onSaved: () => void
+  onUpdated?: () => void
 }
 
 type UnrecognizedFile = {
@@ -102,7 +104,7 @@ function formatBytes(bytes: number | null | undefined): string {
   return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
-export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
+export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, canCapture = isFinance, activeCompanyId, onClose, onSaved, onUpdated }: Props) {
   const { showToast } = useToast()
 
   const [companyId, setCompanyId] = useState(activeCompanyId)
@@ -418,7 +420,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   async function registerAndAdvance() {
     if (workflowBusy || locked) return
     const validation = validateMetadata({
-      isFinance,
+      isFinance: canCapture,
       companyId,
       sourceAccountId,
       costCenterId,
@@ -540,7 +542,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   }
 
   async function confirmAmounts() {
-    if (submitting || !summary || !materializedRequestId || summary.status !== 'draft') return
+    if (!isFinance || submitting || !summary || !materializedRequestId || summary.status !== 'draft') return
     if (needsReview) {
       showToast('Revisión TOKA pendiente', 'Reconoce primero la diferencia de fondeo TOKA.', 'warning')
       return
@@ -844,7 +846,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               {channelSummary.map((channel) => <div key={channel.channel} className={s.channelRow}><span>{channelLabel(channel.channel)}</span><strong>{formatMoney(channel.amount)}</strong></div>)}
             </div>
 
-            {needsReview && valesChannel && (
+            {isFinance && needsReview && valesChannel && (
               <div className={s.review}>
                 <strong>Revisión de fondeo TOKA requerida</strong>
                 <p>Fondeo real {formatMoney(valesChannel.amount)} vs esperado {formatMoney(valesChannel.expected_funding_amount)} · diferencia {formatMoney(variance)}.</p>
@@ -853,7 +855,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               </div>
             )}
 
-            {financeReviewReady && (
+            {isFinance && financeReviewReady && (
               <div className={s.approval}>
                 <div>
                   <strong>Revisión de Finanzas</strong>
@@ -875,8 +877,9 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
           </section>
         )}
 
-        {summary?.status === 'approved' && materializedRequestId && (
-          <ChannelOperations paymentRequestId={materializedRequestId} />
+        {(summary?.status === 'approved' || summary?.status === 'paid') && materializedRequestId && (
+          <ChannelOperations paymentRequestId={materializedRequestId} canPay={isFinance}
+            onChanged={async () => { await loadSubmissionSummary(materializedRequestId); (onUpdated || onSaved)() }} />
         )}
 
         <p className={s.piiNote}>

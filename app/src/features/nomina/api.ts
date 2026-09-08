@@ -13,6 +13,21 @@ import type {
 } from './types'
 
 // ── Lecturas de contexto contable / cuentas ────────────────────────────────
+export async function loadCaptureContext(companyId: string): Promise<{ accounts: BankAccount[]; costCenters: CostCenter[]; mappings: CompanyCostCenter[] }> {
+  const { data, error } = await supabase.rpc('get_payroll_capture_context', { p_company_id: companyId })
+  if (error) throw error
+  return data
+}
+
+export async function getReceiptFileUrl(fileId: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('payroll-capture-file-url', {
+    body: { p_file_id: fileId, file_type: 'receipt' },
+  })
+  if (error) await throwFunctionInvokeError(error)
+  if (!data?.url) throw new Error('PAYROLL_RECEIPT_FILE_URL_FAILED')
+  return data.url
+}
+
 // loadSourceAccounts() del vanilla: company_bank_accounts activas, tipo bank, MXN.
 export async function loadSourceAccounts(companyId: string): Promise<BankAccount[]> {
   if (!companyId) return []

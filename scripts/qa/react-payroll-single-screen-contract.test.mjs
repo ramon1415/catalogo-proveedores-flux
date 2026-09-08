@@ -80,12 +80,13 @@ test('finance confirmation is a separate server action after draft and TOKA revi
   const end = modal.indexOf('setSubmitting(false)', start)
   assert.ok(start >= 0 && end > start)
   const confirmation = modal.slice(start, end)
-  assert.match(confirmation, /if \(submitting \|\| !summary \|\| !materializedRequestId \|\| summary.status !== 'draft'\) return/)
+  assert.match(confirmation, /if \(!isFinance \|\| submitting \|\| !summary \|\| !materializedRequestId \|\| summary.status !== 'draft'\) return/)
   assert.match(confirmation, /if \(needsReview\)\s*\{[\s\S]*?return\s*\}/)
   assert.ok(confirmation.indexOf('if (needsReview)') < confirmation.indexOf('await confirmPayrollFinanceReview(materializedRequestId)'))
   assert.match(confirmation, /await confirmPayrollFinanceReview\(materializedRequestId\)\s+await loadSubmissionSummary\(materializedRequestId\)/)
   assert.match(api, /supabase.rpc\('confirm_payroll_finance_review',\s*\{\s*p_payment_request_id: paymentRequestId/)
-  assert.match(modal, /summary\?\.status === 'approved' && materializedRequestId &&/)
+  assert.match(modal, /\(summary\?\.status === 'approved' \|\| summary\?\.status === 'paid'\) && materializedRequestId &&/)
+  assert.match(modal, /canPay=\{isFinance\}/)
 })
 
 test('concurrency, duplicate and fallback edges stay fail-closed', () => {

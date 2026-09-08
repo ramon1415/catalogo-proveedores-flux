@@ -4,6 +4,8 @@ import { supabase } from '../../lib/supabase'
 import { BUCKET, channelLabel, formatMoney, friendlyError } from './logic'
 import type { PayrollChannel } from './types'
 import s from './Nomina.module.css'
+import { getReceiptFileUrl } from './api'
+import { receiptAmountMinor } from './receiptAmount'
 
 type ReconciliationChannel = {
   id: string
@@ -13,6 +15,7 @@ type ReconciliationChannel = {
   dispersion_status: 'pending' | 'dispersed' | 'failed'
   reconciliation_status: 'pending' | 'reconciled' | 'exception'
   receipt_verified: boolean
+  receipt_file_id: string | null
   receipt_payment_date: string | null
   reference_hint: string | null
 }
@@ -77,7 +80,7 @@ function stateClass(channel: ReconciliationChannel): string {
   return s.stateWarning
 }
 
-export function ChannelOperations({ paymentRequestId }: { paymentRequestId: string }) {
+export function ChannelOperations({ paymentRequestId, canPay = false, onChanged }: { paymentRequestId: string; canPay?: boolean; onChanged?: () => void | Promise<void> }) {
   const { showToast } = useToast()
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -86,6 +89,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
   const [dates, setDates] = useState<Record<string, string>>({})
   const [references, setReferences] = useState<Record<string, string>>({})
+  const [amounts, setAmounts] = useState<Record<string, string>>({})
 
   const channels = useMemo(() => summary?.channels || [], [summary])
 
@@ -116,7 +120,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }, [paymentRequestId])
 
   async function markDispersed(channel: ReconciliationChannel) {
-    if (busyChannelId || closing) return
+    if (!canPay || summary?.request_status !== 'approved' || busyChannelId || closing) return
     const confirmed = window.confirm(
       `Registrar ${channelLabel(channel.channel)} como dispersado por ${formatMoney(channel.amount)}?\n\nFlux NO ejecutará ningún pago. Sólo registra que la dispersión se realizó externamente.`,
     )
@@ -141,10 +145,16 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }
 
   async function uploadReceipt(channel: ReconciliationChannel) {
-    if (busyChannelId || closing) return
+    if (!canPay || summary?.request_status !== 'approved' || busyChannelId || closing) return
     const file = files[channel.id]
     const paymentDate = dates[channel.id] || ''
     const reference = (references[channel.id] || '').trim()
+    const amountMinor = receiptAmountMinor(amounts[channel.id] || '')
+
+    if (amountMinor === null || amountMinor !== Math.round(Number(channel.amount) * 100)) {
+      showToast('Revisa el importe', `Captura el importe que aparece en el comprobante. Debe coincidir con ${formatMoney(channel.amount)}.`, 'warning')
+      return
+    }
 
     if (!file) {
       showToast('Comprobante requerido', 'Selecciona el PDF del comprobante de este canal.', 'warning')
@@ -198,7 +208,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
         p_payment_request_id: paymentRequestId,
         p_payroll_channel_id: channel.id,
         p_receipt_file_id: reservation.run_file_id,
-        p_receipt_amount: channel.amount,
+        p_receipt_amount: amountMinor / 100,
         p_payment_date: paymentDate,
         p_reference_hint: reference,
       })
@@ -206,6 +216,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
 
       setFiles((current) => ({ ...current, [channel.id]: undefined }))
       setReferences((current) => ({ ...current, [channel.id]: '' }))
+      setAmounts((current) => ({ ...current, [channel.id]: '' }))
       await refresh(false)
       showToast('Comprobante conciliado', `${channelLabel(channel.channel)} quedó validado y conciliado.`, 'success')
     } catch (error) {
@@ -216,7 +227,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }
 
   async function closeAsPaid() {
-    if (closing || busyChannelId || !summary?.can_close_paid || summary.request_status === 'paid') return
+    if (!canPay || closing || busyChannelId || !summary?.can_close_paid || summary.request_status === 'paid') return
     const confirmed = window.confirm(
       'Los tres canales están conciliados. ¿Cerrar esta nómina como pagada?\n\nFlux no ejecutará ningún pago; sólo cerrará la corrida con los comprobantes ya validados.',
     )
@@ -229,11 +240,24 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       })
       if (error) throw error
       await refresh(false)
+      await onChanged?.()
       showToast('Nómina cerrada como pagada', 'Los tres comprobantes quedaron conciliados y la corrida quedó cerrada.', 'success')
     } catch (error) {
       showToast('No se pudo cerrar la nómina', friendlyError(error), 'error')
     } finally {
       setClosing(false)
+    }
+  }
+
+  async function downloadReceipt(fileId: string) {
+    try {
+      const url = await getReceiptFileUrl(fileId)
+      const link = document.createElement('a')
+      link.href = url
+      link.rel = 'noopener'
+      link.click()
+    } catch (error) {
+      showToast('No se pudo descargar el comprobante', friendlyError(error), 'error')
     }
   }
 
@@ -253,6 +277,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
         {channels.map((channel) => {
           const busy = busyChannelId === channel.id
           const canUpload = channel.dispersion_status === 'dispersed' && channel.reconciliation_status === 'pending'
+          const editable = canPay && summary.request_status === 'approved'
           return (
             <article key={channel.id} className={s.fileCard}>
               <div className={s.fileCardHead}>
@@ -264,10 +289,15 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
               </div>
 
               {channel.reconciliation_status === 'reconciled' ? (
+                <div>
                 <p>
                   Comprobante verificado{channel.receipt_payment_date ? ` · pago ${channel.receipt_payment_date}` : ''}
                   {channel.reference_hint ? ` · ref. ${channel.reference_hint}` : ''}.
                 </p>
+                {channel.receipt_file_id && <button type="button" className={s.secondaryBtn} onClick={() => void downloadReceipt(channel.receipt_file_id!)}>Descargar comprobante</button>}
+                </div>
+              ) : !editable ? (
+                <p>En espera de comprobación por Tesorería.</p>
               ) : channel.dispersion_status !== 'dispersed' ? (
                 <>
                   <p>Registra este estado sólo después de ejecutar la dispersión fuera de Flux.</p>
@@ -277,6 +307,11 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                 </>
               ) : canUpload ? (
                 <div className={s.grid}>
+                  <label>
+                    Importe del comprobante
+                    <input type="number" min="0.01" step="0.01" inputMode="decimal" value={amounts[channel.id] || ''}
+                      onChange={(event) => setAmounts((current) => ({ ...current, [channel.id]: event.target.value }))} disabled={busy || closing} />
+                  </label>
                   <label>
                     Fecha de pago
                     <input
@@ -321,7 +356,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
 
       {summary.request_status === 'paid' ? (
         <div className={s.inlineNotice}>Nómina pagada · los comprobantes de BBVA, SPEI y TOKA quedaron conciliados.</div>
-      ) : summary.can_close_paid ? (
+      ) : canPay && summary.can_close_paid ? (
         <div className={s.approval}>
           <div>
             <strong>Comprobación completa</strong>

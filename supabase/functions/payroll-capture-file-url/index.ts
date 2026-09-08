@@ -7,7 +7,7 @@ const CORS_HEADERS = {
 }
 const JSON_HEADERS = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
 
-type Input = { p_file_id?: string }
+type Input = { p_file_id?: string; file_type?: 'capture' | 'receipt' }
 type DownloadContext = {
   file_id: string
   storage_bucket: string
@@ -83,7 +83,8 @@ async function handler(req: Request): Promise<Response> {
 
     // Authorization happens with the caller JWT. The RPC returns the storage
     // context only to this server-side function; the browser never sees it.
-    const context = await rpc(base, serviceKey, token, 'get_payroll_capture_file_url', {
+    if (input.file_type && !['capture', 'receipt'].includes(input.file_type)) return response(400, { error: 'PAYROLL_FILE_TYPE_INVALID' })
+    const context = await rpc(base, serviceKey, token, input.file_type === 'receipt' ? 'get_payroll_receipt_file_url' : 'get_payroll_capture_file_url', {
       p_file_id: input.p_file_id,
     }) as DownloadContext
 
