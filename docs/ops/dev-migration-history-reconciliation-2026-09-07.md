@@ -1,5 +1,7 @@
 # DEV: conciliación del historial y diferencia real de ingresos recurrentes
 
+> Actualización vigente: ver «Conciliación de nombres tras las liberaciones del 8 de septiembre» al final. Los cortes anteriores se conservan como evidencia histórica; no son instrucciones de ejecución actuales.
+
 Estado actualizado 2026-09-08: **hardening puntual aplicado y verificado en DEV como 20260908000916**. La conciliación histórica y Supabase Preview siguen pendientes. El inventario del 7-sep se conserva como evidencia del diagnóstico previo.
 
 Base revisada: `523f72baf7e8a1bbf273b52d5359d0d4830e8c79`. Inventario DEV `scsirgbuqjcwoaxfacth` capturado en transacción de solo lectura el **2026-09-07 23:49:03 UTC**, PostgreSQL 17.6. [Inventario y hashes](../qa/migration-history-dev-inventory-2026-09-07.json). Este archivo conserva evidencia de versiones; no sustituye un respaldo restaurable.
@@ -127,3 +129,42 @@ La reconstrucción aislada del baseline y las siguientes cuatro migraciones pasa
 PROD (`ucantptjhwttexzmslvm`) conserva 118 versiones de una cadena histórica distinta; sólo tres números coinciden con la base activa de DEV. Requiere su propia reconciliación revisada. No aplicar el baseline DEV ni correr un push general a PROD. `main` sigue en `b998919341b1e337f0cc2a7b7d31b289b4944e7c`.
 
 La migración de seguridad #552 permanece canónica en `20260907171549`. No se consultaron datos de negocio de PROD en esta revisión. El único cambio de ambiente fue el hardening autorizado en DEV, documentado arriba. No se enviaron mensajes a Carlos y no se ejecutó ninguna limpieza de respaldos.
+
+## Conciliación de nombres tras las liberaciones del 8 de septiembre
+
+Base de este cambio: DEV `4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7`; PROD/main `a5391ea614f5946bbc4c04690123b98ac8d840f5`. Se volvió a consultar el historial real: 113 versiones DEV y 120 PROD.
+
+### Impacto de las entregas concurrentes
+
+- #568 ya está integrado. Su migración final restaura el flujo separado de nómina; el archivo `20260907173300` corresponde a la ejecución DEV `20260908001439`. Las tres migraciones puente de su borrador fueron retiradas del PR, aunque sus ejecuciones históricas siguen registradas. La recomendación anterior de renombrar esos tres archivos dentro de #568 queda superada; su recuperación histórica continúa pendiente.
+- DEV incorpora #570, #571, #572, #573 y #574. #562 se cerró sin merge, sustituido por #570. Se conservan íntegros estos desarrollos y las cuatro migraciones recientes con versión coincidente.
+- [#575](https://github.com/ramon1415/catalogo-proveedores-flux/pull/575), [#576](https://github.com/ramon1415/catalogo-proveedores-flux/pull/576) y [#577](https://github.com/ramon1415/catalogo-proveedores-flux/pull/577) liberaron nómina en PROD. Las versiones nativas `20260908075132` y `20260908075149` coinciden con main en nombre y MD5 del SQL registrado. Su generador usa un catálogo congelado, no los nombres históricos que se corrigen aquí. No trasladar a PROD los parches históricos de nómina de DEV ni importar a DEV las dos consolidaciones de PROD.
+- #561 (alta masiva de proveedores) sigue abierto en el corte revisado. No está incluido en este cambio. La liberación aislada de nómina no equivale a promover todo DEV ni a desplegar #569 en PROD.
+
+### Cambio de repositorio
+
+Se renombran **21 archivos** a las versiones ya registradas en DEV: 20 parejas históricas y la migración final de #568. Se preserva cada byte del SQL, incluidos comentarios y envolturas transaccionales. Doce pares también coinciden byte por byte con el SQL remoto; nueve difieren en comentarios, formato o envoltura. La comparación léxica se usa sólo como ayuda de revisión, no como prueba formal de equivalencia.
+
+Se actualizan las rutas que utiliza la suite y los enlaces/manifiesto del runbook existente. Los hashes del manifiesto Fersana se conservan; su SQL no cambia. No se crea un runner nuevo ni se modifica ningún workflow de aplicación. Las referencias fechadas de informes anteriores se mantienen como evidencia histórica.
+
+[Inventario, hashes y lista exacta de renombres](../qa/migration-version-alignment-2026-09-08.json).
+
+| Comparación DEV | Antes | Después de los renombres |
+|---|---:|---:|
+| Archivos locales | 106 | 106 |
+| Versiones registradas en DEV | 113 | 113 |
+| Números coincidentes | 80 | 101 |
+| Sólo en remoto | 33 | 12 |
+| Sólo en local | 26 | 5 |
+
+### Lo que todavía impide cerrar el historial
+
+- Tres parejas con diferencias reales de SQL: onboarding Fersana, ingreso recurrente histórico y roles por empresa. El hardening hacia adelante de ingresos de #569 ya se completó en DEV; no sustituye la conciliación documental de su origen.
+- Dos archivos de módulos sin versión registrada. No reejecutar seeds/guards antiguos sobre empresas y activaciones actuales. Cualquier reparación del ledger necesita la autorización explícita exigida por `supabase-cli-migrations.md`.
+- Cuatro fuentes ausentes (UUID y tres predecesoras de E2/E3), una ejecución duplicada de extraordinarios y tres puentes de nómina retirados del repositorio. Recuperar su historia sin restablecer un comportamiento obsoleto.
+- Registro histórico `20260906003626` de mantenimiento de respaldos. No importar su SQL destructivo a la cadena activa. La eventual reparación de metadatos requiere snapshot y autorización específica. La limpieza de respaldos permanece en 86bbw39a5.
+- Reconstrucción completa detenida en `047_precheck: public layout contract drifted`. Los renombres alteran el orden local para reflejar fechas reales, pero no se afirma una reconstrucción exitosa. No saltar el guard ni usar un push general para comprobarlo.
+
+**Supabase Preview permanece pendiente.** Este cambio sólo reduce el desajuste de nombres; no declara el historial conciliado ni autoriza una aplicación general a DEV/PROD. En esta etapa no se ejecutó SQL de escritura ni `migration repair`, ni se modificaron respaldos o datos de negocio.
+
+Validación de este cambio: TypeScript/Vite y artefacto estático correctos; **1115/1115 contratos offline**, 0 fallas y 0 omitidos. Manifiesto Fersana: 14/14 hashes correctos. Los 21 SQL conservan exactamente su SHA-256 previo. Los contratos reales de DEV estaban verdes en el commit base; no se presenta ese resultado anterior como ejecución de este nuevo commit.

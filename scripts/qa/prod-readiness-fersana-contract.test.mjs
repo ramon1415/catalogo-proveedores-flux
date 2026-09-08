@@ -21,7 +21,7 @@ test('runbook prepares backend and auth before exposing the React app', () => {
   assert.ok(migrations >= 0)
   assert.ok(auth > migrations)
   assert.ok(frontend > auth)
-  assert.match(readme, /20260831130000_budget_category_responsible\.sql/)
+  assert.match(readme, /20260831233032_budget_category_responsible\.sql/)
   assert.match(readme, /paso5b-fersana-responsables\.sql/)
   assert.match(readme, /paso1-preflight-prod\.sql/)
   assert.match(readme, /paso1-postcheck-prod\.sql/)

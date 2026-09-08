@@ -7,7 +7,7 @@ const migration = fs.readFileSync(
   'utf8',
 )
 const hardening = fs.readFileSync(
-  'supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql',
+  'supabase/migrations/20260831004957_fersana_company_access_advisor_hardening.sql',
   'utf8',
 )
 const scopedRoles = fs.readFileSync(
