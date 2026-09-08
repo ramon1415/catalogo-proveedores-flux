@@ -29,15 +29,23 @@ El flujo estándar documentado por [Supabase CLI](https://supabase.com/docs/refe
 supabase migration repair 20260901074848 20260901074849 --status applied --linked
 ```
 
-No se ejecutó el comando. Debe comprobarse previamente que el enlace identifica DEV, confirmar ambas ausencias, los hashes exactos, la configuración de módulos y la revisión del PR; tomar un snapshot actualizado si cambió el alcance. Nunca usar un enlace PROD. El CLI no estaba instalado en esta sesión; su instalación mediante npm no terminó porque la aprobación de red se canceló. Por ello no se afirma validado el transporte CLI ni su autenticación. No se sustituye silenciosamente este flujo por un runner o una escritura directa del ledger.
+No se ejecutó el comando. Debe comprobarse previamente que el enlace identifica DEV, confirmar ambas ausencias, los hashes exactos, la configuración de módulos y la revisión del PR; tomar un snapshot actualizado si cambió el alcance. Nunca usar un enlace PROD. Se localizó el CLI 2.113.0 ya disponible en caché y se verificó `migration repair --help`. Una consulta de sólo lectura (`projects list`) confirmó que carece de access token. No se han solicitado ni expuesto credenciales. El conector Supabase sí está autenticado; su sesión no se comparte automáticamente con el CLI.
 
 La reparación registra metadatos; no ejecuta los cuerpos SQL. Después se verifican las dos nuevas versiones, conservación de todas las filas previas, configuración de módulos y contratos reales DEV. Sólo entonces integrar el renombre preparado. Si hace falta revertir exclusivamente estas adiciones, confirmar primero que no fueron usadas por otro despliegue y retirar sólo esas dos nuevas marcas mediante reparación autorizada; no revertir tablas o activaciones.
+
+## Alternativa concreta que requiere autorización expresa
+
+Para evitar pedir credenciales por chat, se preparó una única transacción de metadatos para ejecutar mediante el conector autenticado, exclusivamente en el proyecto DEV. **Esto sería una excepción al medio CLI del runbook y no está autorizada por un «continúa» genérico.** Se requiere aprobar expresamente tanto las dos versiones como el uso del conector en lugar de CLI. No se añade un runner de despliegue ni un workflow.
+
+El archivo `metadata-repair.sql` del paquete de aprobación tiene SHA-256 `8a7c226320b662f0de3f7d063241666566cc291cd9b3b80e6382e571762afd3d`. Su transacción comprueba que ambos destinos estén ausentes; inserta sólo version/name/statements de las dos fuentes PROD ya verificadas; exige exactamente dos filas y confirma. Los cuerpos históricos quedan almacenados como texto en statements: no se ejecutan. Si cualquiera existe, aborta sin sobrescribirla. No copia created_by/idempotency_key/rollback de PROD ni modifica filas existentes. Su ejecución real sobre el esquema de ledger aislado pasa 117→119; retirar esas dos adiciones de la base aislada restaura el estado original 117. Es una prueba de la transacción exacta preparada, no del transporte remoto.
+
+La captura de origen se conserva en el paquete; antes de ejecutar se revalidan las dos ausencias, fuentes, entorno y configuración. No se importará el SQL de limpieza histórica. La autorización de esta alternativa no autoriza `db push`, nuevas migraciones, cambios de PROD ni futuras reparaciones.
 
 ## Snapshot y verificación
 
 El paquete `Flux_Conciliacion_Modulos_PROD_Referencia_2026-09-08.zip` conserva columnas del ledger, inventarios completos versión/nombre de DEV y PROD, filas completas seleccionadas de Fersana/mantenimiento DEV y los tres orígenes PROD, módulos/releases/configuraciones y el plan exacto. Es un snapshot del alcance de metadatos, no un backup integral de las bases ni de todos los cuerpos de migraciones.
 
-La prueba PGlite 0.3.16 restaura las filas completas seleccionadas, modela únicamente las dos adiciones de metadatos (117 → 119) y su reversión (119 → 117), y verifica igualdad con el estado original. No ejecuta SQL de negocio, no accede a bases remotas y no sustituye una prueba del CLI. Los dos destinos estaban ausentes en el snapshot.
+La prueba PGlite 0.3.16 restaura las filas completas seleccionadas, modela únicamente las dos adiciones de metadatos (117 → 119) y su reversión (119 → 117), y verifica igualdad con el estado original. Ejecuta la transacción exacta de metadatos preparada contra una base aislada, sin ejecutar SQL de negocio ni acceder a bases remotas; no sustituye una prueba del transporte CLI/conector. Los dos destinos estaban ausentes en el snapshot.
 
 Validación local del repo: 14/14 contratos Fersana y 14/14 hashes del manifiesto correctos. [Evidencia](../qa/module-history-prod-reference-2026-09-08.json).
 

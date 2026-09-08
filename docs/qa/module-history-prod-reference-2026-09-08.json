@@ -196,5 +196,14 @@
     "restored_versions": 117,
     "selected_full_rows_restored": 2,
     "scope": "Isolated metadata restoration and two-addition/reversal model only. No business SQL executed, no remote database accessed, no claim of full ledger backup or actual CLI execution."
+  },
+  "metadata_alternative": {
+    "status": "REQUIRES_EXPLICIT_AUTHORIZATION_INCLUDING_CLI_EXCEPTION",
+    "method": "single metadata transaction through authenticated Supabase connector, DEV only",
+    "sql_sha256": "8a7c226320b662f0de3f7d063241666566cc291cd9b3b80e6382e571762afd3d",
+    "cli_version": "2.113.0",
+    "cli_help": "verified",
+    "cli_authentication": "projects list failed: access token not provided",
+    "sql_exact_local_execution": "PASS; 117 to 119 and isolated reversal to original 117"
   }
 }
