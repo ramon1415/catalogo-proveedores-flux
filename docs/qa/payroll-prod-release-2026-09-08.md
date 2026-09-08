@@ -21,11 +21,11 @@ Las funciones genéricas de solicitudes permanecen intactas. Solamente se limita
 
 ## Orden de salida
 
-1. Verificar respaldo de PROD y estado de las dos migraciones.
-2. Aplicar las dos migraciones mediante la herramienta nativa de Supabase, conservando su historial.
-3. Desplegar `payroll-materialize`, `payroll-capture-file-url`, `payroll-receipt-verify` y `payroll-notification-dispatcher`.
-4. Verificar configuración de envío sin reclamar eventos ni mandar correos de prueba a usuarios finales.
-5. Integrar esta interfaz a `main` y verificar Vercel/runtime de PROD.
+1. Integrar la interfaz a `main` manteniendo Nómina deshabilitada en ambas empresas; verificar Vercel/runtime de PROD.
+2. Verificar respaldo con el workflow protegido desde `main` y revisar el estado de las dos migraciones. No aplicar DDL si falta el respaldo.
+3. Aplicar las dos migraciones mediante la herramienta nativa de Supabase, conservando su historial.
+4. Desplegar `payroll-materialize`, `payroll-capture-file-url`, `payroll-receipt-verify` y `payroll-notification-dispatcher`.
+5. Verificar configuración de envío sin reclamar eventos ni mandar correos de prueba a usuarios finales.
 6. Habilitar el módulo y la captura en las empresas autorizadas; configurar Tesorería con los perfiles activos de PROD.
 7. Verificar capturas, cierre pagado y notificaciones; registrar el resultado de despliegue.
 
@@ -33,4 +33,4 @@ Las funciones genéricas de solicitudes permanecen intactas. Solamente se limita
 
 `npm run qa:setup && npm run test:payroll` ejecuta las pruebas de interfaz, lectura de PDF, entrega de avisos y una prueba aislada de PostgreSQL contra el esquema de PROD. La prueba de base verifica instalación, roles por empresa y el ciclo hasta pagado con dos eventos, sin presupuesto ni aprobaciones semanales.
 
-Estado inicial: preparación. Las migraciones, servicios y habilitación de PROD aún no se han aplicado. La autorización del usuario ya está recibida.
+Estado inicial: preparación. Las migraciones, servicios y habilitación de PROD aún no se han aplicado. La autorización del usuario ya está recibida. Build, preview de Vercel y 28 pruebas locales/CI correctos. La consulta protegida del respaldo se ejecuta desde `main`; nunca recibe credenciales el código del PR.

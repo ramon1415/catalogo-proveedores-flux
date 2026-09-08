@@ -42,9 +42,10 @@ jobs:
           git diff --exit-code -- supabase/migrations docs/qa/payroll-prod-release-manifest.json
 
   backup-readiness:
-    # No checkout or PR-provided script receives production credentials.
-    # Existing Environment restrictions and approval gates remain in effect.
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'release/payroll-prod'
+    # Production credentials are available only to the integrated main workflow.
+    # Keep the existing Environment branch restrictions and approval gates.
+    # The payroll module stays disabled until this check and backend deployment finish.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: supabase-production
