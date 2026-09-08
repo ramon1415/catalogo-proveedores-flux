@@ -49,7 +49,7 @@ export default function NominaPage() {
   async function reloadSessions(showNewestPending = false) {
     if (!companyId) {
       setSessions([])
-      return
+      return []
     }
     const visible = (await getCaptureSessions(null)).filter((session) => session.company_id === companyId)
     setSessions(visible)
@@ -59,6 +59,7 @@ export default function NominaPage() {
       )
       if (pending) await openAmountConfirmation(pending)
     }
+    return visible
   }
 
   async function confirmAmounts(): Promise<void> {
@@ -66,8 +67,12 @@ export default function NominaPage() {
     setConfirmationBusy(true)
     try {
       await confirmPayrollFinanceReview(amountConfirmation.payment_request_id)
+      const confirmedRequestId = amountConfirmation.payment_request_id
       setAmountConfirmation(null)
-      await reloadSessions(false)
+      const confirmed = (await reloadSessions(false)).find(
+        (session) => session.company_id === companyId && session.materialized_payment_request_id === confirmedRequestId,
+      )
+      if (confirmed) setModal((current) => current && current === modal ? { session: confirmed } : current)
       showToast(
         'Montos confirmados',
         'La corrida quedó lista para el flujo propio de pago de Nómina. No entra al corte semanal y Flux no ejecutó ningún pago.',

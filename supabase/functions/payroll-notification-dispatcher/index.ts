@@ -4,7 +4,7 @@ type Runtime = { env: (name: string) => string | undefined; fetch: typeof fetch 
 type Attachment = { channel: string; file_id: string; bucket: string; path: string; mime_type: string; size_bytes: number; sha256: string }
 type Document = {
   event_id: string; event_type: 'payroll.registered' | 'payroll.paid'; request_id: string;
-  folio: string; recipient_email: string; company: string; period_start: string; period_end: string;
+  folio: string; recipient_email: string; test_recipient_email?: string | null; company: string; period_start: string; period_end: string;
   amount: number; currency: string; url: string;
   channels: { channel: string; amount: number }[]; attachments: Attachment[];
 }
@@ -72,6 +72,12 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
   const secret=runtime.env('NOTIFICATION_DISPATCHER_SECRET')?.trim()
   if(!secret || req.headers.get('x-notification-dispatcher-secret')!==secret) return json({error:'UNAUTHORIZED'},401)
   const mode=runtime.env('NOTIFICATION_SEND_MODE') || 'disabled'
+  // Authenticated, non-sending preflight. Operators can verify the effective
+  // recipient/mode without claiming an event or exposing credential values.
+  const body = await req.json().catch(() => ({}))
+  if(body?.dry_run === true) return json({dry_run:true,sent:0,mode,
+    test_recipient:mode==='test_only' ? runtime.env('NOTIFICATION_TEST_EMAIL')?.trim() || null : null,
+    configured:['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','RESEND_API_KEY','NOTIFICATION_FROM_EMAIL'].every(name=>!!runtime.env(name)?.trim())})
   if(mode==='disabled') return json({disabled:true,sent:0})
   if(!['test_only','real'].includes(mode)) return json({error:'PAYROLL_NOTIFICATION_MODE_INVALID'},409)
   try {
@@ -88,10 +94,12 @@ export async function handleRequest(req: Request, runtime: Runtime): Promise<Res
       try {
         const doc=await rpc(runtime,base,key,'get_payroll_notification_document',{p_event_id:eventId,p_worker_id:worker}) as Document
         validateDocument(doc,eventId)
+        if(doc.test_recipient_email && (mode!=='test_only' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(doc.test_recipient_email)))
+          throw new Error('PAYROLL_NOTIFICATION_TEST_MODE_REQUIRED')
         const attachments=await prepareAttachments(runtime,base,key,doc)
         const rendered=renderPayrollEmail(doc,mode,attachments.length>0)
         const response=await runtime.fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${resend}`,'Content-Type':'application/json','Idempotency-Key':`notification/${eventId}`},
-          body:JSON.stringify({from,to:[mode==='test_only'?testEmail:doc.recipient_email],...rendered,...(attachments.length?{attachments}:{})})})
+          body:JSON.stringify({from,to:[mode==='test_only'?(doc.test_recipient_email || testEmail):doc.recipient_email],...rendered,...(attachments.length?{attachments}:{})})})
         if(!response.ok) throw new Error(`PAYROLL_NOTIFICATION_SEND_FAILED_${response.status}`)
         const sent=await response.json()
         if(typeof sent.id!=='string' || !sent.id) throw new Error('PAYROLL_NOTIFICATION_SEND_RESULT_INVALID')

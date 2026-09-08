@@ -77,6 +77,7 @@ before(async () => {
     update public.profiles set email='finance@example.com' where id='${finance}';
   `);
   await db.exec(read('../../supabase/migrations/20260908015701_payroll_pilot_notifications.sql'));
+  await db.exec(read('../../supabase/migrations/20260908022737_payroll_notification_scoped_test.sql'));
   await db.exec(`insert into public.payroll_notification_settings(company_id,finance_recipient_profile_id,dispatch_enabled,app_origin)
     values ('${companyA}','${finance}',true,'https://flux.example.com');`);
 });
@@ -169,5 +170,29 @@ test('paid event is blocked without all channel evidence', async () => {
   await db.exec('begin');
   try {
     await assert.rejects(db.query("select private.enqueue_payroll_lifecycle($1,'payroll.paid')",[request]),/PAYROLL_EVENT_PAID_EVIDENCE_REQUIRED/);
+  } finally { await db.exec('rollback'); }
+});
+
+test('scoped QA claims only its run; expiration stops delivery and recipient access is rechecked', async () => {
+  await db.exec('begin');
+  try {
+    for (const n of [210,220]) {
+      await db.query("insert into public.payment_requests(id,company_id,request_type,status) values ($1,$2,'nomina','draft')",[id(n),companyA]);
+      await db.query("insert into public.payroll_capture_sessions(id,company_id,created_by,capture_state,materialized_payment_request_id) values ($1,$2,$3,'materialized',$4)",[id(n+1),companyA,rh,id(n)]);
+      await db.query("select private.enqueue_payroll_lifecycle($1,'payroll.registered')",[id(n)]);
+    }
+    await db.query("update public.payroll_notification_settings set test_capture_session_id=$1,test_recipient_profile_id=$2,test_expires_at=now()-interval '1 minute' where company_id=$3",[id(211),rh,companyA]);
+    await db.exec('set local role service_role');
+    assert.deepEqual((await db.query("select public.claim_payroll_notifications('qa') result")).rows[0].result,[]);
+    await db.query("update public.payroll_notification_settings set test_expires_at=now()+interval '1 hour' where company_id=$1",[companyA]);
+    const claimed=(await db.query("select public.claim_payroll_notifications('qa') result")).rows[0].result;
+    assert.equal(claimed.length,1);
+    const doc=(await db.query("select public.get_payroll_notification_document($1,'qa') result",[claimed[0]])).rows[0].result;
+    assert.equal(doc.request_id,id(210));
+    assert.equal(doc.test_recipient_email,'rh@example.com');
+    await db.exec('reset role');
+    await db.query('update public.profiles set active=false where id=$1',[rh]);
+    await db.exec('set local role service_role');
+    await assert.rejects(db.query("select public.get_payroll_notification_document($1,'qa')",[claimed[0]]),/PAYROLL_NOTIFICATION_TEST_RECIPIENT_REQUIRED/);
   } finally { await db.exec('rollback'); }
 });

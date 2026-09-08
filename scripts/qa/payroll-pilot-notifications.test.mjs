@@ -15,6 +15,15 @@ test('unauthorized and disabled calls perform no fetches',async()=>{
   assert.equal((await disabled.json()).sent,0);
 });
 
+test('authenticated dry run verifies delivery configuration without claiming or sending',async()=>{
+  const makeRequest=authorized=>new Request('https://worker.example.com',{method:'POST',
+    headers:authorized?{'x-notification-dispatcher-secret':'test-secret'}:{},body:JSON.stringify({dry_run:true,to:'override@example.com'})});
+  const runtime={env:n=>env[n],fetch:()=>{throw Error('dry run must never reach the network')}};
+  assert.equal((await handleRequest(makeRequest(false),runtime)).status,401);
+  const result=await handleRequest(makeRequest(true),runtime);
+  assert.deepEqual(await result.json(),{dry_run:true,sent:0,mode:'test_only',test_recipient:'qa@example.com',configured:true});
+});
+
 test('one mail contains all three verified receipts and DEV stays on the test recipient',async()=>{
   const deliveries=[];
   const runtime={env:n=>env[n],fetch:async(url,init)=>{
@@ -61,4 +70,20 @@ test('registered template requests finance review; large paid packages retain th
   const paid=renderPayrollEmail(doc,'real',false);
   assert.match(paid.text,/Descarga los comprobantes de cada canal en Flux/);
   assert.ok(paid.text.includes(doc.url));
+});
+
+for(const mode of ['test_only','real']) test(`scoped test recipient is server-authored and blocked in real mode (${mode})`,async()=>{
+  const deliveries=[];
+  const runtime={env:n=>n==='NOTIFICATION_SEND_MODE'?mode:env[n],fetch:async(url,init)=>{
+    if(url.endsWith('/claim_payroll_notifications')) return Response.json([doc.event_id]);
+    if(url.endsWith('/get_payroll_notification_document')) return Response.json({...doc,test_recipient_email:'scoped-qa@example.com'});
+    if(url.includes('/storage/v1/object/')) return new Response(bytes);
+    if(url==='https://api.resend.com/emails'){deliveries.push(JSON.parse(init.body));return Response.json({id:'provider-id'});}
+    if(url.endsWith('/mark_notification_processed_for_dispatcher') || url.endsWith('/mark_notification_failed_for_dispatcher')) return Response.json({});
+    throw Error('unexpected request');
+  }};
+  const req=new Request('https://worker.example.com',{method:'POST',headers:{'x-notification-dispatcher-secret':'test-secret'},body:JSON.stringify({to:'caller@example.com'})});
+  const result=await (await handleRequest(req,runtime)).json();
+  assert.equal(result.sent,mode==='test_only'?1:0);
+  assert.deepEqual(deliveries.map(d=>d.to),mode==='test_only'?[['scoped-qa@example.com']]:[]);
 });

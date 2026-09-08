@@ -480,6 +480,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
         })
       }
 
+      // Keep server file identifiers available even when validation rejects the
+      // package, so the uploaded originals can still be downloaded for review.
+      const uploadedSession = (await getCaptureSessions(currentId)).find((item) => item.id === currentId)
+      if (uploadedSession) hydrate(uploadedSession, false)
+
       setProgressText('Validando paquete en servidor…')
       const result = await materializeCapture(currentId, version)
       const list = await getCaptureSessions(currentId)
