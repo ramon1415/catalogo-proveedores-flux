@@ -1,3 +1,4 @@
+import { InstallFluxButton } from '../../features/install/InstallFluxButton'
 import { Suspense } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import s from './AppShell.module.css'
@@ -21,6 +22,7 @@ export function AppShell() {
       <div className={s.content}>
         <div className={s.topbar}>
           <div className={s.kick}>{kicker}</div>
+          <InstallFluxButton />
           <button className={s.iconbtn} title="Tema claro / oscuro" onClick={toggleTheme}><IcTheme /></button>
         </div>
         <div className={s.page}>
