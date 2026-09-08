@@ -1,7 +1,7 @@
 import {obligationSchemaSQL} from './fixtures/payroll-obligations-schema.mjs';
 import assert from 'node:assert/strict';
 import {before,after,test} from 'node:test';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 const id=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const [company,other,rh,finance,outsider,category,center,budgetVersion]=[1,2,3,4,5,6,7,8].map(id);
@@ -152,3 +152,42 @@ test('event insertion wakes only obligation notifications for an enabled company
  await assert.rejects(db.query("update payment_requests set amount_requested=$2 where id=$1",[request,available+1]),/presupuesto cambió/);
  await db.query("insert into payment_requests(company_id,cost_center_id,budget_category_id,budget_month,amount_requested,status) values($1,$2,$3,'2026-07-01',999999,'submitted')",[other,center,category]);
  });
+
+test('non-budget release preserves history and allows both obligations without assignments or available balance',async()=>{
+ const beforeBudget=(await as(rh,()=>db.query('select * from budget_availability'))).rows;
+ const historical=(await db.query("select id,status,version from payroll_obligations where status<>'draft' order by id")).rows;
+ const migration=process.env.OBLIGATION_NON_BUDGET_SQL||new URL('../../supabase/migrations/'+readdirSync(new URL('../../supabase/migrations/',import.meta.url)).find(n=>n.endsWith('_payroll_obligations_non_budget.sql')),import.meta.url);
+ await db.exec(readFileSync(migration,'utf8'));
+ assert.deepEqual((await as(rh,()=>db.query('select * from budget_availability'))).rows,beforeBudget);
+ assert.deepEqual((await db.query("select id,status,version from payroll_obligations where status<>'draft' order by id")).rows,historical);
+ assert.equal((await db.query("select count(*) n from payroll_obligations where status<>'draft' and no_presupuestal")).rows[0].n,0);
+ assert.equal((await db.query("select count(*) n from payroll_obligations where status='draft' and not no_presupuestal")).rows[0].n,0);
+ await db.query('delete from company_cost_center_budget_categories');
+ await db.query('update budget_lines set amount=0');
+ await db.query("insert into payroll_obligation_settings(company_id,kind,enabled) values($1,'isn_cdmx',true) on conflict(company_id,kind) do update set enabled=true",[company]);
+ await db.query('update payroll_obligation_settings set budget_category_id=null');
+ const budget=(await as(rh,()=>db.query('select * from budget_availability'))).rows;
+ for(const [i,kind] of ['imss','isn_cdmx'].entries()){
+  const obligation=id(800+i);await as(rh,()=>call('save_payroll_obligation',[obligation,company,kind]));
+  let o=await snapshot(obligation);assert.equal(o.no_presupuestal,true);assert.equal(o.cost_center_id,null);assert.equal(o.budget_category_id,null);
+  await assert.rejects(as(outsider,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,10000])),/ACCESS_DENIED/);
+  await assert.rejects(as(rh,()=>call('transition_payroll_obligation',[obligation,o.version,'submit'])),/DOCUMENTS_INCONSISTENT/);
+  const primary=kind==='imss'?'imss_sipare':'isn_cdmx';
+  await upload(obligation,primary,rh,String(i+1),{...parsed,kind:primary,paymentReference:'NONBUDGET-'+kind});
+  o=await snapshot(obligation);
+  await assert.rejects(as(rh,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,999])),/REVIEW_REQUIRED/);
+  assert.equal(await as(rh,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,10000])),'submitted');
+  o=await snapshot(obligation);assert.equal(o.budget_result.status,'no_presupuestal');
+  await assert.rejects(as(rh,()=>call('transition_payroll_obligation',[obligation,o.version,'confirm'])),/ACCESS_DENIED/);
+  await as(finance,()=>call('transition_payroll_obligation',[obligation,o.version,'confirm']));
+  o=await snapshot(obligation);
+  await assert.rejects(as(finance,()=>call('transition_payroll_obligation',[obligation,o.version,'pay',10000,'2026-07-15','NONBUDGET-PAY'])),/RECEIPT_REQUIRED/);
+  await upload(obligation,'receipt',finance,String(i+3),{amount:'100.00',paymentDate:'2026-07-15',reference:'NONBUDGET-PAY',currency:'MXN'});
+  o=await snapshot(obligation);
+  await as(finance,()=>call('transition_payroll_obligation',[obligation,o.version,'pay',10000,'2026-07-15','NONBUDGET-PAY']));
+  assert.equal(await as(finance,()=>call('transition_payroll_obligation',[obligation,o.version,'pay',10000,'2026-07-15','NONBUDGET-PAY'])),'paid');
+  assert.equal((await db.query("select count(*) n from notification_events where source_table='payroll_obligations' and source_id=$1",[obligation])).rows[0].n,2);
+  assert.deepEqual((await as(rh,()=>db.query('select * from budget_availability'))).rows,budget);
+ }
+ await assert.rejects(as(rh,()=>db.query('select * from payroll_obligations')),/permission denied/);
+});
