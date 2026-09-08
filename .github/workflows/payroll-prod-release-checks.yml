@@ -14,6 +14,7 @@ on:
     paths:
       - 'app/src/features/nomina/**'
       - 'supabase/migrations/*payroll_prod*.sql'
+      - '.github/workflows/payroll-prod-release-checks.yml'
 
 permissions:
   contents: read
@@ -56,33 +57,62 @@ jobs:
           PROD_REF: ${{ vars.SUPABASE_PROJECT_REF_PROD }}
         shell: python
         run: |
-          import json, os, urllib.request, datetime
+          import json, os, subprocess, datetime
           ref = 'ucantptjhwttexzmslvm'
           if os.environ['PROD_REF'] != ref:
               raise SystemExit('PROD_PROJECT_IDENTITY_MISMATCH')
           token = os.environ.get('SUPABASE_ACCESS_TOKEN')
-          if not token:
+          if not token or any(char in token for char in '\r\n'):
               raise SystemExit('PROD_BACKUP_ACCESS_UNAVAILABLE')
+          probes = []
           def read(path):
-              request = urllib.request.Request('https://api.supabase.com/v1/projects/' + ref + path,
-                  headers={'Authorization': 'Bearer ' + token})
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return json.load(response)
+              # Use the same HTTP client as the existing production release workflows.
+              # Credentials stay on stdin, never in argv, logs, or artifacts.
+              result = subprocess.run(
+                  ['curl', '-q', '--config', '-', '--silent', '--show-error',
+                   '--max-time', '30', '--write-out', '\n%{http_code}',
+                   '--url', 'https://api.supabase.com/v1/projects/' + ref + path],
+                  input='header = ' + json.dumps('Authorization: Bearer ' + token) + '\n',
+                  text=True, capture_output=True, timeout=35)
+              body, _, status = result.stdout.rpartition('\n')
+              probe = {'resource': 'backups' if path else 'project', 'http_status': status,
+                       'transport_exit_code': result.returncode}
+              try:
+                  payload = json.loads(body)
+              except ValueError:
+                  payload = None
+              if result.returncode or status != '200' or not isinstance(payload, dict):
+                  # Only classifications are logged; never raw error text or response headers.
+                  normalized = body.lower()
+                  probe.update({'json_response': isinstance(payload, dict),
+                      'authorization_error': any(term in normalized for term in
+                          ('permission', 'forbidden', 'unauthorized', 'invalid token')),
+                      'security_challenge': any(term in normalized for term in
+                          ('cloudflare', 'verify you are human', 'challenge-platform'))})
+                  probes.append(probe)
+                  return None
+              probes.append(probe)
+              return payload
           project = read('')
           payload = read('/database/backups')
-          rows = payload.get('backups', [])
+          # Both reads are independent: a project-info 403 must not hide the backup response.
+          rows = (payload or {}).get('backups', [])
           good = [row for row in rows if str(row.get('status', '')).lower() in ('completed', 'success')]
           def timestamp(row):
               return row.get('inserted_at') or row.get('created_at') or row.get('started_at') or ''
           good.sort(key=timestamp, reverse=True)
           latest = good[0] if good else None
-          pitr = bool(payload.get('pitr_enabled', False))
-          evidence = {'project_ref': project.get('id') or project.get('ref'), 'pitr_enabled': pitr,
+          pitr = bool((payload or {}).get('pitr_enabled', False))
+          project_ref = (project or {}).get('id') or (project or {}).get('ref')
+          evidence = {'project_ref': ref, 'project_identity_verified': project_ref == ref, 'pitr_enabled': pitr,
+              'probes': probes,
               'latest_backup_status': latest.get('status') if latest else None,
               'latest_backup_at': timestamp(latest) if latest else None,
               'checked_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'mutations': 0}
           print(json.dumps(evidence))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('```json\n' + json.dumps(evidence, indent=2) + '\n```\n')
-          if evidence['project_ref'] != ref or not (pitr or good):
+          if project is None or payload is None:
+              raise SystemExit('PROD_BACKUP_ACCESS_UNAVAILABLE')
+          if not evidence['project_identity_verified'] or not (pitr or good):
               raise SystemExit('PROD_BACKUP_UNAVAILABLE')
