@@ -1,0 +1,409 @@
+{
+  "project_ref": "scsirgbuqjcwoaxfacth",
+  "authorized_version": "20260907234427",
+  "recorded_version": "20260908000916",
+  "authorized_sql_sha256": "5a4882e14525e8b8a5999cc9a013ad1c6bd1a7ed97902ba3ff3e379bece01240",
+  "recorded_sql_exact_match": true,
+  "snapshot": {
+    "captured_at": "2026-09-08T00:05:24.257894+00:00",
+    "archive_sha256": "b29bdd3295c93de20f27bd5894d520bcbded7e79d80578b1de1974478433cc17",
+    "recovery_probe": "PASS; isolated schema/function/ACL restore, not a full-project restore"
+  },
+  "runtime": {
+    "captured_at": "2026-09-08T00:10:11.303997+00:00",
+    "foreign_keys": [
+      {
+        "definition": "FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE",
+        "name": "tenant_income_entries_company_id_fkey",
+        "validated": true
+      },
+      {
+        "definition": "FOREIGN KEY (company_id, template_id) REFERENCES recurring_income_templates(company_id, id) ON DELETE SET NULL (template_id)",
+        "name": "tenant_income_entries_company_template_fk",
+        "validated": true
+      },
+      {
+        "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id)",
+        "name": "tenant_income_entries_created_by_fkey",
+        "validated": true
+      }
+    ],
+    "generator": {
+      "anon_execute": false,
+      "authenticated_execute": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definition_md5": "a71c956bd474a5f32bba263c5a529d28",
+      "explicit_session_guard": true,
+      "service_role_execute": true
+    },
+    "read_only": "on",
+    "table_rows": {
+      "cross_company_links": 0,
+      "recurring_income_templates": 0,
+      "tenant_income_entries": 0
+    },
+    "tables": [
+      {
+        "anon_crud_or_truncate": false,
+        "authenticated_truncate": false,
+        "rls_enabled": true,
+        "service_role_truncate": false,
+        "table": "recurring_income_templates"
+      },
+      {
+        "anon_crud_or_truncate": false,
+        "authenticated_truncate": false,
+        "rls_enabled": true,
+        "service_role_truncate": false,
+        "table": "tenant_income_entries"
+      }
+    ]
+  },
+  "ledger_comparison": {
+    "added": [
+      {
+        "name": "tenant_recurring_income_runtime_hardening",
+        "version": "20260908000916"
+      }
+    ],
+    "after_count": 108,
+    "before_count": 107,
+    "comparison_method": "Canonical JSON object keys; array order preserved",
+    "old_rows_changed": 0,
+    "table_inventory_unchanged": true
+  },
+  "indexes": [
+    {
+      "definition": "CREATE UNIQUE INDEX recurring_income_templates_company_id_id_uidx ON public.recurring_income_templates USING btree (company_id, id)",
+      "name": "recurring_income_templates_company_id_id_uidx",
+      "ready": true,
+      "unique": true,
+      "valid": true
+    },
+    {
+      "definition": "CREATE INDEX tenant_income_entries_company_template_idx ON public.tenant_income_entries USING btree (company_id, template_id)",
+      "name": "tenant_income_entries_company_template_idx",
+      "ready": true,
+      "unique": false,
+      "valid": true
+    }
+  ],
+  "table_grants": [
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "DELETE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "INSERT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "SELECT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "UPDATE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "DELETE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "INSERT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "SELECT",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "UPDATE",
+      "table": "recurring_income_templates"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "DELETE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "INSERT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "SELECT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "authenticated",
+      "privilege": "UPDATE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "DELETE",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "INSERT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "SELECT",
+      "table": "tenant_income_entries"
+    },
+    {
+      "grantable": false,
+      "grantee": "service_role",
+      "privilege": "UPDATE",
+      "table": "tenant_income_entries"
+    }
+  ],
+  "security_advisors": {
+    "added": [],
+    "after": 242,
+    "before": 242,
+    "removed": [],
+    "target_after": [
+      {
+        "cache_key": "authenticated_security_definer_function_executable_public_generate_recurring_income_p_company_id uuid, p_period text",
+        "categories": [
+          "SECURITY"
+        ],
+        "description": "Detects `SECURITY DEFINER` functions that are callable by signed-in users. Revoke `EXECUTE`, switch the function to `SECURITY INVOKER`, or move it out of your exposed API schema if signed-in users should not call it.",
+        "detail": "Function `public.generate_recurring_income(p_company_id uuid, p_period text)` can be executed by the `authenticated` role as a `SECURITY DEFINER` function via `/rest/v1/rpc/generate_recurring_income`. Revoke `EXECUTE` or switch it to `SECURITY INVOKER` if that is not intentional.",
+        "facing": "EXTERNAL",
+        "level": "WARN",
+        "metadata": {
+          "arguments": "p_company_id uuid, p_period text",
+          "language": "plpgsql",
+          "name": "generate_recurring_income",
+          "schema": "public",
+          "security_definer": true
+        },
+        "name": "authenticated_security_definer_function_executable",
+        "observed_at": "2026-09-08T00:10:09.673Z",
+        "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable",
+        "title": "Signed-In Users Can Execute SECURITY DEFINER Function"
+      }
+    ]
+  },
+  "performance_advisors": {
+    "added": [
+      {
+        "cache_key": "unused_index_public_tenant_income_entries_tenant_income_entries_company_template_idx",
+        "categories": [
+          "PERFORMANCE"
+        ],
+        "description": "Detects if an index has never been used and may be a candidate for removal.",
+        "detail": "Index \\`tenant_income_entries_company_template_idx\\` on table \\`public.tenant_income_entries\\` has not been used",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+          "name": "tenant_income_entries",
+          "schema": "public",
+          "type": "table"
+        },
+        "name": "unused_index",
+        "observed_at": "2026-09-08T00:10:09.715Z",
+        "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index",
+        "title": "Unused Index"
+      }
+    ],
+    "after": 330,
+    "before": 329,
+    "removed": [],
+    "target_after": [
+      {
+        "cache_key": "unindexed_foreign_keys_public_recurring_income_templates_recurring_income_templates_created_by_fkey",
+        "categories": [
+          "PERFORMANCE"
+        ],
+        "description": "Identifies foreign key constraints without a covering index, which can impact database performance.",
+        "detail": "Table \\`public.recurring_income_templates\\` has a foreign key \\`recurring_income_templates_created_by_fkey\\` without a covering index. This can lead to suboptimal query performance.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+          "fkey_columns": [
+            10
+          ],
+          "fkey_name": "recurring_income_templates_created_by_fkey",
+          "name": "recurring_income_templates",
+          "schema": "public",
+          "type": "table"
+        },
+        "name": "unindexed_foreign_keys",
+        "observed_at": "2026-09-08T00:10:09.715Z",
+        "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys",
+        "title": "Unindexed foreign keys"
+      },
+      {
+        "cache_key": "unindexed_foreign_keys_public_tenant_income_entries_tenant_income_entries_created_by_fkey",
+        "categories": [
+          "PERFORMANCE"
+        ],
+        "description": "Identifies foreign key constraints without a covering index, which can impact database performance.",
+        "detail": "Table \\`public.tenant_income_entries\\` has a foreign key \\`tenant_income_entries_created_by_fkey\\` without a covering index. This can lead to suboptimal query performance.",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+          "fkey_columns": [
+            13
+          ],
+          "fkey_name": "tenant_income_entries_created_by_fkey",
+          "name": "tenant_income_entries",
+          "schema": "public",
+          "type": "table"
+        },
+        "name": "unindexed_foreign_keys",
+        "observed_at": "2026-09-08T00:10:09.715Z",
+        "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys",
+        "title": "Unindexed foreign keys"
+      },
+      {
+        "cache_key": "unused_index_public_tenant_income_entries_tenant_income_entries_company_template_idx",
+        "categories": [
+          "PERFORMANCE"
+        ],
+        "description": "Detects if an index has never been used and may be a candidate for removal.",
+        "detail": "Index \\`tenant_income_entries_company_template_idx\\` on table \\`public.tenant_income_entries\\` has not been used",
+        "facing": "EXTERNAL",
+        "level": "INFO",
+        "metadata": {
+          "name": "tenant_income_entries",
+          "schema": "public",
+          "type": "table"
+        },
+        "name": "unused_index",
+        "observed_at": "2026-09-08T00:10:09.715Z",
+        "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index",
+        "title": "Unused Index"
+      }
+    ]
+  }
+}
