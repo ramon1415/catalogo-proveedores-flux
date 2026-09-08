@@ -148,9 +148,9 @@ export default function NominaPage() {
 
   return (
     <>
-      <div className={s.fileActions} role="group" aria-label="Tipo de solicitud de nómina">
-        <button className={section==='payroll'?s.primaryBtn:s.secondaryBtn} onClick={()=>setSection('payroll')}>Sueldos</button>
-        <button className={section==='obligations'?s.primaryBtn:s.secondaryBtn} onClick={()=>setSection('obligations')}>IMSS / ISN</button>
+      <div className={s.moduleTabs} role="group" aria-label="Tipo de solicitud de nómina">
+        <button className={s.moduleTab} aria-pressed={section==='payroll'} onClick={()=>setSection('payroll')}>Sueldos</button>
+        <button className={s.moduleTab} aria-pressed={section==='obligations'} onClick={()=>setSection('obligations')}>IMSS / ISN</button>
       </div>
       {section==='obligations'&&companyId ? <ObligationsPanel key={companyId} companyId={companyId} companyName={companyName||'Empresa activa'}/> : <>
       <div className={s.phead}>

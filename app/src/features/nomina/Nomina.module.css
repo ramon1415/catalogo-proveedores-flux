@@ -961,3 +961,38 @@
     text-align: left;
   }
 }
+
+/* Navigation remains visually separate from create actions in both rails. */
+.moduleTabs { display:flex; gap:24px; flex-shrink:0; border-bottom:1px solid var(--border-strong); }
+.moduleTab { border:0; border-bottom:3px solid transparent; border-radius:0; background:transparent; color:var(--text-3); padding:12px 4px; font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
+.moduleTab[aria-pressed="true"] { color:var(--accent-text); border-bottom-color:var(--accent); }
+.moduleTab:hover { color:var(--text-1); }
+.moduleTab:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.uploadedDocuments { margin:4px 0 16px; }
+.uploadedHeading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 12px; }
+.uploadedHeading h3 { margin:0; font-size:13px; color:var(--text-1); }
+.uploadedHeading > span { font-size:11px; color:var(--text-2); }
+.uploadedFiles { display:grid; gap:10px; }
+.uploadedFile { display:grid; grid-template-columns:40px minmax(0,1fr) auto; align-items:center; gap:12px; padding:14px; border:1px solid var(--border-strong); border-radius:12px; background:var(--bg-input); box-shadow:0 2px 5px rgba(0,0,0,.06); }
+.uploadedFile .fileIcon { width:36px; height:40px; background:var(--accent-dim); border-color:transparent; }
+.uploadedFile .fileInfo span { color:var(--text-2); font-size:11px; }
+.uploadedFile .secondaryBtn { gap:7px; background:var(--bg-card); }
+.successFeedback,.paymentSuccess { display:flex; align-items:center; gap:13px; padding:16px 18px; border:1px solid color-mix(in srgb,var(--emerald) 35%,transparent); border-radius:12px; background:var(--emerald-dim); color:var(--text-1); }
+.successFeedback { margin:0 0 18px; }
+.successFeedback strong,.paymentSuccess strong { display:block; font-size:14px; margin:0 0 4px; }
+.successFeedback p,.paymentSuccess p { margin:0; font-size:12px; line-height:1.5; color:var(--text-2); }
+.successIcon { display:grid; place-items:center; flex-shrink:0; width:38px; height:38px; border-radius:50%; background:var(--emerald-dim); color:var(--emerald); }
+.reviewPanel { padding:18px; border:1px solid var(--border-strong); border-radius:12px; background:var(--bg-input); }
+.reviewPanel h3 { margin:0 0 8px; color:var(--text-1); font-size:16px; }
+.reviewPanel p { color:var(--text-2); font-size:13px; line-height:1.5; }
+.reviewPanel dl { margin:20px 0; }
+.reviewPanel dl > div { display:grid; grid-template-columns:minmax(130px,1fr) 2fr; gap:14px; padding:12px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.reviewPanel dt { color:var(--text-2); }
+.reviewPanel dd { margin:0; font-weight:650; color:var(--text-1); overflow-wrap:anywhere; }
+@media(max-width:600px) {
+ .uploadedFile { grid-template-columns:36px minmax(0,1fr); padding:12px; }
+ .uploadedFile .secondaryBtn { grid-column:2; justify-self:start; }
+ .uploadedFile .fileInfo strong,.uploadedFile .fileInfo span { white-space:normal; }
+ .reviewPanel dl > div { grid-template-columns:1fr; gap:5px; }
+ .successFeedback,.paymentSuccess { align-items:flex-start; padding:14px; }
+}

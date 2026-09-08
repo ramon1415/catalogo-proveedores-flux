@@ -1,5 +1,5 @@
 type Runtime = { env: (name: string) => string | undefined; fetch: typeof fetch }
-type Document = {event_id:string;event_type:string;id:string;kind:'imss'|'isn_cdmx';folio:string;company:string;
+type Document = {event_id:string;event_type:string;id:string;kind:'imss'|'isn_cdmx';folio:string;company:string;status?:string;
  recipient_email:string;test_recipient_email:string|null;period_start:string;period_end:string;amount_minor:number;url:string}
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})
 const escape=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
@@ -7,7 +7,7 @@ const email=/^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export function renderObligationEmail(doc:Document,testOnly:boolean){
  const kind=doc.kind==='imss'?'IMSS':'ISN';const paid=doc.event_type==='payroll.obligation.paid'
  const heading=paid?`Pago de ${kind} registrado`:`Nueva solicitud de ${kind} por revisar`
- const intro=paid?'Finanzas registró el pago y guardó su comprobante. Puedes consultarlo en Flux.':'Se registró una obligación. Revisa el documento y confirma el monto para continuar con el pago.'
+ const intro=paid?'Finanzas registró el pago y guardó su comprobante. Puedes consultarlo en Flux.':doc.status==='approved'?'Los montos quedaron confirmados. Consulta los documentos para continuar con el pago.':'Se registró una obligación. Revisa el documento y confirma el monto para continuar con el pago.'
  const subject=`${testOnly?'[DEV TEST] ':''}${heading} · ${doc.folio}`
  const rows=[['Folio',doc.folio],['Empresa',doc.company],['Periodo',`${doc.period_start} al ${doc.period_end}`],['Importe',`MXN ${(doc.amount_minor/100).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})}`]]
  const action=paid?'Ver comprobante en Flux':'Revisar solicitud'
