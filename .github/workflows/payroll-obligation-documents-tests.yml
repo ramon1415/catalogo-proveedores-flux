@@ -1,0 +1,24 @@
+name: Payroll obligation document tests
+on:
+  pull_request:
+    paths:
+      - app/src/features/nomina/obligationDocuments.ts
+      - scripts/qa/payroll-obligation-documents.test.mjs
+      - .github/workflows/payroll-obligation-documents-tests.yml
+  push:
+    branches: [dev, main]
+    paths:
+      - app/src/features/nomina/obligationDocuments.ts
+      - scripts/qa/payroll-obligation-documents.test.mjs
+      - .github/workflows/payroll-obligation-documents-tests.yml
+permissions:
+  contents: read
+jobs:
+  aggregate-readers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test scripts/qa/payroll-obligation-documents.test.mjs

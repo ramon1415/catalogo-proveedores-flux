@@ -1,6 +1,7 @@
 # IMSS dentro de Nómina; ISN como siguiente entrega
 
-Fecha: 2026-09-08. Estado: **definición técnica; todavía no implementado**.
+Fecha: 2026-09-08. Estado: **lector de documentos implementado y probado;
+flujo de captura/pago todavía no integrado ni desplegado**.
 
 Ramón autorizó continuar con IMSS y después ISN. Este documento concreta esa
 entrega a partir de la tarea [86bbw5mff](https://app.clickup.com/t/86bbw5mff)
@@ -156,9 +157,10 @@ activación de la nómina de sueldos.
 
 ## Orden de implementación y datos pendientes
 
-1. Recibir una muestra anonimizada del documento IMSS que cargan y un
-   comprobante del pago correspondiente, identificando a qué empresa aplican.
-   Conservar estructura y etiquetas para definir la lectura automática.
+1. Muestras de documentos recibidas y analizadas: línea SIPARE, cédula SUA,
+   propuesta EMA y línea ISN CDMX. Falta el comprobante bancario de pago y
+   confirmar si la empresa de las muestras es solo una referencia de formato
+   o también debe incorporarse al alcance operativo.
 2. Concretar la asignación de Soporte Fersana si también usará el flujo, y la
    autorización presupuestal aplicable. Operadora tiene asignación en DEV;
    falta validar el alcance y el circuito con la operación real.
@@ -166,10 +168,66 @@ activación de la nómina de sueldos.
    captura/lectura, pago, correos y prueba E2E con evidencia.
 4. Pasar a DEV para revisión del equipo. Preparar un release IMSS acotado
    cuando cierre la prueba; este documento no despliega cambios en PROD.
-5. Definir ISN con empresa, entidad federativa, documento/declaración que
-   reciben, periodo, referencia de pago, responsable y ejemplo de comprobante.
+5. Para ISN ya hay una muestra de CDMX con periodo, referencia y vigencia.
+   Confirmar empresas/entidades realmente operadas, responsable y comprobante.
    Reutilizar infraestructura validada, sin asumir que ISN usa el formato IMSS
    ni introducir tasas o calendarios por inferencia.
 
 La tarea amplia en ClickUp incluye el feed contable y la separación estricta
 RH/Finanzas de todo Nómina. No marcarla completa al terminar solo IMSS.
+
+## Resultado de la revisión de muestras y primera implementación
+
+Los cuatro PDF aportados por Ramón son de una razón social distinta de los
+nombres de las dos empresas del piloto de sueldos. Tres contienen el mismo
+RFC corporativo normalizado; la cédula SUA contiene otro RFC, también después
+de quitar guiones. El registro patronal, periodo y total de los tres soportes
+IMSS coinciden. Esa coincidencia no autoriza a corregir el RFC por mayoría ni
+a asociar los archivos automáticamente a Fersana u Operadora.
+
+No se copian a Git los PDF, textos originales, RFC reales, líneas de captura,
+importes reales ni datos de empleados. Las pruebas versionadas son sintéticas.
+
+| Formato recibido | Datos leídos y comportamiento |
+| --- | --- |
+| Línea IMSS/SIPARE | RFC, registro patronal, periodo mensual, total final, fecha límite y línea de captura. Es la referencia monetaria principal. |
+| Cédula SUA, dos páginas | RFC, registro patronal, periodo y total de la segunda página. La fecha de proceso no se usa como vencimiento ni fecha de pago. |
+| Propuesta EMA, dos páginas | RFC, registro patronal, periodo, total y fecha límite. Su pie menciona SUA, pero eso no cambia su clasificación. |
+| Línea ISN CDMX | RFC, periodo, total final impreso, línea de captura y vigencia. El talón repite total/referencia; no duplica la obligación. La cadena larga del código de barras no sustituye la línea de captura. |
+
+Ninguno de los cuatro archivos contiene recibo bancario o certificación de
+pago realizado. Las fechas límite impresas no acreditan una fecha de pago.
+La cédula y EMA contienen datos de empleados: el lector devuelve únicamente
+una lista explícita de campos corporativos y agregados, sin filas de personas,
+texto original ni CURP/NSS/salarios individuales.
+
+### Código y validación
+
+- `app/src/features/nomina/obligationDocuments.ts`: clasificador por contenido,
+  lectura de agregados y consistencia del paquete IMSS. No usa el nombre del
+  archivo, no suma los soportes y exige RFC explícito de la empresa para dar
+  una validación de consistencia positiva. Esto no sustituye autorización,
+  presupuesto, validación de bytes ni conciliación bancaria en servidor.
+- `scripts/qa/payroll-obligation-documents.test.mjs`: ocho pruebas con
+  documentos sintéticos: formatos, discrepancia de RFC, duplicados, empresa,
+  diferencias de importe/periodo/registro patronal, fechas ambiguas y total
+  impreso de ISN. Incluye las filas intercaladas observadas con PDF.js.
+- Workflow específico en `.github/workflows/payroll-obligation-documents-tests.yml`.
+- Lectura local de todas las páginas de las cuatro muestras mediante Poppler
+  y PDF.js 3.11.174, con la agrupación geométrica usada por `extractPdfLines`.
+  Comparación contra revisión visual; los originales permanecen fuera de Git.
+- El lector aún no se invoca desde la pantalla ni desde un servicio. No hay
+  migración, cambio de roles, envío de correos ni despliegue con esta entrega.
+
+### Lo que falta para el siguiente paso
+
+1. Confirmar si la razón social de las muestras es solo ejemplo de formato o
+   una empresa adicional que debe operar en Flux. No crear ni mapear empresas
+   por semejanza de nombre.
+2. Aclarar el RFC diferente en la cédula SUA antes de aceptar ese paquete real;
+   la implementación puede continuar con casos sintéticos consistentes.
+3. Obtener al menos un comprobante bancario de pago IMSS/ISN para diseñar y
+   probar su lectura. Las líneas de captura ya recibidas cubren la etapa de
+   solicitud, no la evidencia de pago.
+4. Resolver asignación/autorización presupuestal por empresa, persistencia
+   privada y acciones del flujo; después integrar UI, notificaciones y E2E.
