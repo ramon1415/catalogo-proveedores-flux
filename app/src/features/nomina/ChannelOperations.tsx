@@ -4,6 +4,9 @@ import { supabase } from '../../lib/supabase'
 import { BUCKET, channelLabel, formatMoney, friendlyError } from './logic'
 import type { PayrollChannel } from './types'
 import s from './Nomina.module.css'
+import { receiptAmountMinor } from './receiptAmount'
+import { isReceiptDate } from './receiptFields'
+import { emptyReceiptDraft, useReceiptAutofill } from './useReceiptAutofill'
 
 type ReconciliationChannel = {
   id: string
@@ -36,12 +39,6 @@ type ReceiptReservation = {
   mime_type: string
   size_bytes: number
   sha256: string
-}
-
-function localIsoDate(): string {
-  const now = new Date()
-  const shifted = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-  return shifted.toISOString().slice(0, 10)
 }
 
 async function sha256Hex(file: File): Promise<string> {
@@ -83,9 +80,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   const [loading, setLoading] = useState(true)
   const [busyChannelId, setBusyChannelId] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
-  const [files, setFiles] = useState<Record<string, File | undefined>>({})
-  const [dates, setDates] = useState<Record<string, string>>({})
-  const [references, setReferences] = useState<Record<string, string>>({})
+  const { drafts, selectReceipt, updateReceipt, clearReceipt } = useReceiptAutofill(paymentRequestId)
 
   const channels = useMemo(() => summary?.channels || [], [summary])
 
@@ -98,11 +93,6 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       if (error) throw error
       const next = data as ReconciliationSummary
       setSummary(next)
-      setDates((current) => {
-        const copy = { ...current }
-        for (const channel of next.channels || []) if (!copy[channel.id]) copy[channel.id] = localIsoDate()
-        return copy
-      })
     } catch (error) {
       if (showError) showToast('No se pudo cargar la dispersión', friendlyError(error), 'error')
     } finally {
@@ -142,9 +132,21 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
 
   async function uploadReceipt(channel: ReconciliationChannel) {
     if (busyChannelId || closing) return
-    const file = files[channel.id]
-    const paymentDate = dates[channel.id] || ''
-    const reference = (references[channel.id] || '').trim()
+    const draft = drafts[channel.id] || emptyReceiptDraft()
+    if (draft.reading || draft.invalid) return
+    const file = draft.file
+    const paymentDate = draft.paymentDate
+    const reference = draft.reference.trim()
+    const amountMinor = receiptAmountMinor(draft.amount)
+
+    if (draft.currency && draft.currency !== channel.currency) {
+      showToast('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.', 'warning')
+      return
+    }
+    if (amountMinor === null || amountMinor !== Math.round(Number(channel.amount) * 100)) {
+      showToast('Revisa el importe', `El importe del comprobante debe coincidir con ${formatMoney(channel.amount)}.`, 'warning')
+      return
+    }
 
     if (!file) {
       showToast('Comprobante requerido', 'Selecciona el PDF del comprobante de este canal.', 'warning')
@@ -154,7 +156,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       showToast('PDF no válido', 'El comprobante debe ser un PDF de hasta 10 MB.', 'warning')
       return
     }
-    if (!paymentDate) {
+    if (!isReceiptDate(paymentDate)) {
       showToast('Fecha requerida', 'Indica la fecha del pago.', 'warning')
       return
     }
@@ -198,14 +200,13 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
         p_payment_request_id: paymentRequestId,
         p_payroll_channel_id: channel.id,
         p_receipt_file_id: reservation.run_file_id,
-        p_receipt_amount: channel.amount,
+        p_receipt_amount: amountMinor / 100,
         p_payment_date: paymentDate,
         p_reference_hint: reference,
       })
       if (reconcileError) throw reconcileError
 
-      setFiles((current) => ({ ...current, [channel.id]: undefined }))
-      setReferences((current) => ({ ...current, [channel.id]: '' }))
+      clearReceipt(channel.id)
       await refresh(false)
       showToast('Comprobante conciliado', `${channelLabel(channel.channel)} quedó validado y conciliado.`, 'success')
     } catch (error) {
@@ -252,6 +253,9 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       <div className={s.fileGrid}>
         {channels.map((channel) => {
           const busy = busyChannelId === channel.id
+          const draft = drafts[channel.id] || emptyReceiptDraft()
+          const currencyMismatch = Boolean(draft.currency && draft.currency !== channel.currency)
+          const amountMismatch = Boolean(draft.amount && receiptAmountMinor(draft.amount) !== Math.round(Number(channel.amount) * 100))
           const canUpload = channel.dispersion_status === 'dispersed' && channel.reconciliation_status === 'pending'
           return (
             <article key={channel.id} className={s.fileCard}>
@@ -277,37 +281,47 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                 </>
               ) : canUpload ? (
                 <div className={s.grid}>
-                  <label>
-                    Fecha de pago
-                    <input
-                      type="date"
-                      value={dates[channel.id] || ''}
-                      onChange={(event) => setDates((current) => ({ ...current, [channel.id]: event.target.value }))}
-                      disabled={busy || closing}
-                    />
-                  </label>
-                  <label>
-                    Referencia
-                    <input
-                      value={references[channel.id] || ''}
-                      maxLength={120}
-                      placeholder="Referencia bancaria / TOKA"
-                      onChange={(event) => setReferences((current) => ({ ...current, [channel.id]: event.target.value }))}
-                      disabled={busy || closing}
-                    />
-                  </label>
                   <label className={s.fullRow}>
                     Comprobante PDF
                     <input
                       type="file"
                       accept="application/pdf,.pdf"
-                      onChange={(event) => setFiles((current) => ({ ...current, [channel.id]: event.target.files?.[0] }))}
+                      onChange={(event) => void selectReceipt(channel.id, event.target.files?.[0])}
                       disabled={busy || closing}
                     />
                   </label>
+                  <p className={s.fullRow} role="status" aria-live="polite">
+                    {draft.notice || 'Adjunta el PDF para completar importe, fecha y referencia automáticamente.'}
+                  </p>
+                  <label>
+                    Importe del comprobante
+                    <input type="number" min="0.01" step="0.01" inputMode="decimal" value={draft.amount}
+                      onChange={(event) => updateReceipt(channel.id, 'amount', event.target.value)} disabled={busy || closing || draft.reading} />
+                  </label>
+                  <label>
+                    Fecha de pago
+                    <input
+                      type="date"
+                      value={draft.paymentDate}
+                      onChange={(event) => updateReceipt(channel.id, 'paymentDate', event.target.value)}
+                      disabled={busy || closing || draft.reading}
+                    />
+                  </label>
+                  <label>
+                    Referencia
+                    <input
+                      value={draft.reference}
+                      maxLength={120}
+                      placeholder="Referencia bancaria / TOKA"
+                      onChange={(event) => updateReceipt(channel.id, 'reference', event.target.value)}
+                      disabled={busy || closing || draft.reading}
+                    />
+                  </label>
+                  {amountMismatch && <p className={s.fullRow} role="alert">El importe no coincide con {formatMoney(channel.amount)}. Revisa el comprobante.</p>}
+                  {currencyMismatch && <p className={s.fullRow} role="alert">La moneda del PDF no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
                   <div className={s.fullRow}>
-                    <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing}>
-                      {busy ? 'Validando comprobante…' : 'Subir y conciliar comprobante'}
+                    <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing || draft.reading || !draft.file || draft.invalid || currencyMismatch}>
+                      {draft.reading ? 'Leyendo comprobante…' : busy ? 'Validando comprobante…' : 'Subir y conciliar comprobante'}
                     </button>
                   </div>
                 </div>
