@@ -1,6 +1,6 @@
 # DEV: conciliación del historial y diferencia real de ingresos recurrentes
 
-Estado: diagnóstico completo de versiones; corrección puntual preparada; **DEV no modificado y Supabase Preview todavía pendiente**.
+Estado actualizado 2026-09-08: **hardening puntual aplicado y verificado en DEV como 20260908000916**. La conciliación histórica y Supabase Preview siguen pendientes. El inventario del 7-sep se conserva como evidencia del diagnóstico previo.
 
 Base revisada: `523f72baf7e8a1bbf273b52d5359d0d4830e8c79`. Inventario DEV `scsirgbuqjcwoaxfacth` capturado en transacción de solo lectura el **2026-09-07 23:49:03 UTC**, PostgreSQL 17.6. [Inventario y hashes](../qa/migration-history-dev-inventory-2026-09-07.json). Este archivo conserva evidencia de versiones; no sustituye un respaldo restaurable.
 
@@ -37,7 +37,7 @@ Validación local: TypeScript, Vite y artifact estático correctos; suite con ar
 | Nómina del PR #568, aún fuera de DEV en Git | 3 | Coordinar los nombres antes de integrar su SQL; no copiar la lógica de un PR pendiente como si estuviera revisada. |
 | **Total registrado en DEV** | **107** | **100 archivos en la base del repo; 32 versiones remotas sin archivo con el mismo número, 25 archivos locales sin ese número remoto.** |
 
-La nueva migración de este PR no se incluye en esos 100 archivos históricos y **no está aplicada**.
+La nueva migración de este PR no se incluye en esos 100 archivos históricos. Fue autorizada como `20260907234427` y quedó registrada en DEV como **`20260908000916`**; el archivo ahora usa la versión efectiva, con exactamente el mismo contenido. DEV pasó de 107 a 108 registros.
 
 ### Mapa de los 23 nombres con fechas distintas
 
@@ -99,7 +99,19 @@ Se contrastaron 98 pares de textos, incluyendo una ejecución duplicada y excluy
 - Los textos de dispatcher/graph reviews contienen diferencias de formato, comentarios o metadatos que la comparación conservadora señala para revisión. No se infiere una regresión de negocio ni se reemplazan funciones vigentes por versiones antiguas.
 - El baseline tiene statements divididos por la CLI; no se auditó su equivalencia semántica en este corte.
 
-## Secuencia de aplicación y cierre
+## Ejecución autorizada del hardening — 8 de septiembre
+
+Ramón autorizó aplicar únicamente el hardening preparado en DEV, con snapshot previo y advisors/check de privilegios posteriores. Se ejecutó una vez y se registró como **20260908000916**. SHA-256 del SQL antes/después: `5a4882e14525e8b8a5999cc9a013ad1c6bd1a7ed97902ba3ff3e379bece01240`.
+
+- Snapshot capturado a las 00:05:24 UTC; ZIP SHA-256 `b29bdd3295c93de20f27bd5894d520bcbded7e79d80578b1de1974478433cc17`, guardado antes de aplicar. Contiene datos/esquema/ACL de los dos objetos, función y ledger completo; no es un backup de todo Supabase. Reconstrucción, aplicación y restauración aislada del catálogo previo: PASS.
+- Post-check a las 00:10:11 UTC: FK compuesta validada, ambos índices válidos y listos, RLS conservado, anon sin privilegios de tabla ni EXECUTE, auth/service con sólo CRUD y sin TRUNCATE. Generador con sesión explícita y `search_path=public,pg_temp`.
+- Las dos tablas siguen con 0 filas. Inventario de 186 tablas idéntico; no se creó/eliminó ninguna tabla. Las 107 filas anteriores del ledger son idénticas al snapshot al comparar JSON por contenido; sólo se añadió esta migración con SQL exacto.
+- Advisors: seguridad 242 → 242, sin entradas nuevas o retiradas. El aviso existente de [RPC SECURITY DEFINER accesible por usuarios autenticados](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable) sigue siendo intencional: el RPC exige sesión y membresía.
+- Rendimiento 329 → 330: sólo se añade [índice nuevo aún sin uso](https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index), nivel INFO, sobre `tenant_income_entries_company_template_idx`. Se conserva para dar soporte a la FK; ambas tablas están vacías. Los dos avisos previos de FK `created_by` sin índice permanecen fuera de este alcance.
+- Se añadieron tres contratos al catálogo real de DEV para detectar una regresión futura de permisos, FK/índices o guard del generador. Catálogo capturado a las 00:12:34 UTC: **111 contratos pasan, 0 fallas, 0 omitidos**. Los ocho casos aislados también pasan después del renombre.
+- [Evidencia de ejecución y comparación](../qa/pr569-dev-execution-2026-09-08.json). No se ejecutó migration repair ni otra migración. No se modificó PROD ni se tocó ningún respaldo.
+
+## Secuencia de aplicación y cierre (plan histórico; pasos 1 y 2 completados)
 
 1. **Aplicar sólo el hardening nuevo, cuando Ramón autorice DEV.** Snapshot recuperable previo de las dos tablas, definición/config/ACL de la función y ledger. Repetir los conteos y revisar el hash del archivo. Aplicación selectiva: no lanzar `db push --linked` sobre toda la cadena mientras existan los desajustes. Si el mecanismo de aplicación genera otro número, renombrar inmediatamente el archivo a ese número efectivo antes del merge, como se hizo en #552; no crear una segunda ejecución para arreglar el nombre.
 2. Ejecutar [pre/post de sólo lectura](../../scripts/qa/recurring-income-runtime-readonly.sql), advisors de seguridad/rendimiento y comparación de privilegios. Esperado: FK compuesta validada, `anon` sin CRUD/TRUNCATE/EXECUTE, auth/service con CRUD y sin TRUNCATE, generador con sesión explícita y search_path fijo, conteos sin cambio. Sólo entonces registrar el cierre del hardening.
@@ -114,4 +126,4 @@ La reconstrucción aislada del baseline y las siguientes cuatro migraciones pasa
 
 PROD (`ucantptjhwttexzmslvm`) conserva 118 versiones de una cadena histórica distinta; sólo tres números coinciden con la base activa de DEV. Requiere su propia reconciliación revisada. No aplicar el baseline DEV ni correr un push general a PROD. `main` sigue en `b998919341b1e337f0cc2a7b7d31b289b4944e7c`.
 
-La migración de seguridad #552 permanece canónica en `20260907171549`. No se consultaron datos de negocio de PROD en esta revisión, no se modificó ningún ambiente, no se enviaron mensajes a Carlos y no se ejecutó ninguna limpieza de respaldos.
+La migración de seguridad #552 permanece canónica en `20260907171549`. No se consultaron datos de negocio de PROD en esta revisión. El único cambio de ambiente fue el hardening autorizado en DEV, documentado arriba. No se enviaron mensajes a Carlos y no se ejecutó ninguna limpieza de respaldos.

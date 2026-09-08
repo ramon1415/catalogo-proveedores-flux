@@ -13,7 +13,7 @@ SELECT jsonb_build_object(
    'service_execute', has_function_privilege('service_role',p.oid,'EXECUTE'),
    'public_execute', EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
  ) ORDER BY n.nspname,p.proname,p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
- WHERE n.nspname IN ('public','private') AND p.prokind='f' AND p.proname ~ '(provider_intake|provider_match|payment_reconciliation|payment_receipt|payment_operation_evidence|payment_document_extraction|extraordinary|materialize_closed_batch|create_payable_snapshot|financial_outbox|mark_payment_request_material|complete_payment_request_layout|provider_payment|save_provider_catalog|guard_payment_request_execution|company_director_for_future_batches|approval_batch|approve_entire_batch|decide_approval_batch_items|list_director_approval_batches|claim_notification_events|notification_receipt_linked|notification_payment_outcome)'),
+ WHERE n.nspname IN ('public','private') AND p.prokind='f' AND p.proname ~ '(provider_intake|provider_match|payment_reconciliation|payment_receipt|payment_operation_evidence|payment_document_extraction|extraordinary|materialize_closed_batch|create_payable_snapshot|financial_outbox|mark_payment_request_material|complete_payment_request_layout|provider_payment|save_provider_catalog|guard_payment_request_execution|company_director_for_future_batches|approval_batch|approve_entire_batch|decide_approval_batch_items|list_director_approval_batches|claim_notification_events|notification_receipt_linked|notification_payment_outcome|generate_recurring_income)'),
  'recovery_jobs', (SELECT jsonb_agg(jsonb_build_object('jobname',jobname,'schedule',schedule,'active',active,'command',command)) FROM cron.job WHERE command='select public.notification_payment_outcome_recovery_wakeup_internal();'),
  'financial_catch_all_count', (SELECT count(*) FROM public.approval_rules rule JOIN public.roles role ON role.id=rule.role_id WHERE lower(btrim(role.name))=ANY(ARRAY['administracion','finance','finanzas','tesoreria','treasury']) AND rule.active AND rule.company_id IS NULL AND rule.cost_center_id IS NULL AND coalesce(rule.amount_min,0)=0 AND rule.amount_max IS NULL),
  'tables', (SELECT jsonb_agg(jsonb_build_object('name',c.relname,'rls',c.relrowsecurity,
@@ -21,7 +21,11 @@ SELECT jsonb_build_object(
    'authenticated_select',has_table_privilege('authenticated',c.oid,'SELECT'),
    'authenticated_insert',has_table_privilege('authenticated',c.oid,'INSERT'),
    'authenticated_update',has_table_privilege('authenticated',c.oid,'UPDATE'),
-   'authenticated_delete',has_table_privilege('authenticated',c.oid,'DELETE')
+   'authenticated_delete',has_table_privilege('authenticated',c.oid,'DELETE'),
+   'anon_write_or_broad',has_table_privilege('anon',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES'),
+   'authenticated_broad',has_table_privilege('authenticated',c.oid,'TRUNCATE,TRIGGER,REFERENCES'),
+   'service_crud',has_table_privilege('service_role',c.oid,'SELECT') AND has_table_privilege('service_role',c.oid,'INSERT') AND has_table_privilege('service_role',c.oid,'UPDATE') AND has_table_privilege('service_role',c.oid,'DELETE'),
+   'service_broad',has_table_privilege('service_role',c.oid,'TRUNCATE,TRIGGER,REFERENCES')
  ) ORDER BY c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind IN ('r','p')),
  'constraints',(SELECT jsonb_agg(jsonb_build_object('schema',n.nspname,'table',c.relname,'name',k.conname,'type',k.contype,'validated',k.convalidated,'definition',pg_get_constraintdef(k.oid)) ORDER BY c.relname,k.conname) FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'),
  'indexes',(SELECT jsonb_agg(jsonb_build_object('table',c.relname,'name',ic.relname,'unique',i.indisunique,'valid',i.indisvalid,'definition',pg_get_indexdef(i.indexrelid)) ORDER BY c.relname,ic.relname) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_class ic ON ic.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'),
