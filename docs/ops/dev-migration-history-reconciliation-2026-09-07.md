@@ -1,6 +1,6 @@
 # DEV: conciliación del historial y diferencia real de ingresos recurrentes
 
-> Actualización vigente: ver «Conciliación de nombres tras las liberaciones del 8 de septiembre» al final. Los cortes anteriores se conservan como evidencia histórica; no son instrucciones de ejecución actuales.
+> Actualización vigente: ver las secciones de conciliación y recuperación del 8 de septiembre al final. Los cortes anteriores se conservan como evidencia histórica; no son instrucciones de ejecución actuales.
 
 Estado actualizado 2026-09-08: **hardening puntual aplicado y verificado en DEV como 20260908000916**. La conciliación histórica y Supabase Preview siguen pendientes. El inventario del 7-sep se conserva como evidencia del diagnóstico previo.
 
@@ -168,3 +168,44 @@ Se actualizan las rutas que utiliza la suite y los enlaces/manifiesto del runboo
 **Supabase Preview permanece pendiente.** Este cambio sólo reduce el desajuste de nombres; no declara el historial conciliado ni autoriza una aplicación general a DEV/PROD. En esta etapa no se ejecutó SQL de escritura ni `migration repair`, ni se modificaron respaldos o datos de negocio.
 
 Validación de este cambio: TypeScript/Vite y artefacto estático correctos; **1115/1115 contratos offline**, 0 fallas y 0 omitidos. Manifiesto Fersana: 14/14 hashes correctos. Los 21 SQL conservan exactamente su SHA-256 previo. Los contratos reales de DEV estaban verdes en el commit base; no se presenta ese resultado anterior como ejecución de este nuevo commit.
+
+## Recuperación de cinco fuentes históricas — 8 de septiembre
+
+Siguiente paso después de #579, basado en DEV `8a1a42e94f8c243726c0e91edfdbc8132155f6cd`. Se volvió a consultar GitHub: no había merges posteriores; main permanece en `a5391ea`. El historial DEV conserva 113 entradas.
+
+Se recuperan cinco archivos completos desde `supabase_migrations.schema_migrations.statements`, conservando sus bytes y sus números originales. Cada entrada tiene un statement; no se reformateó ni añadió un salto final al SQL. Son fuentes que DEV ya ejecutó, no migraciones nuevas para aplicar al ambiente activo.
+
+| Versión recuperada | Fuente | Revisión |
+|---|---|---|
+| 20260901171427 | invoice_uuid_anti_duplicado | Índice único por empresa/UUID sin distinguir mayúsculas; evolución del RPC de 17 a 18 argumentos, previa a reembolso y bandera de partida. |
+| 20260903023224 | fix_extraordinary_execution_context_recursion | Segunda ejecución registrada, idéntica byte a byte a 20260902041542. Se conserva como hecho histórico, sin borrar ninguna fila del ledger. |
+| 20260903035514 | partida_predictions | Predecesora de 20260903213133; sólo cambian comentarios/formato. |
+| 20260903040733 | partida_unsure_flag | Predecesora de 20260903213224; sólo cambian comentarios/formato. |
+| 20260903041629 | confirm_provider_account_rpc | Predecesora de 20260903213236; sólo cambia el salto final. |
+
+La versión UUID falta en la secuencia local anterior: la migración fiscal crea una firma de 17 argumentos; UUID la sustituye por la de 18; reembolso por la de 20 y partida por la de 21. Recuperarla permite que ese tramo aislado termine con un solo RPC, como sucede en DEV. No basta ejecutar únicamente la última definición para demostrar una reconstrucción sin overloads.
+
+### Verificación acotada
+
+- [Inventario y evidencia de sólo lectura](../qa/migration-source-recovery-2026-09-08.json): cinco SHA-256 exactos, relación con pares ya presentes, catálogo y permisos actuales.
+- Catálogo DEV capturado a las 16:45:54 UTC, read_only=on: una sola firma de `create_payment_request`, 21 argumentos; índice UUID único/válido; índice de predicción válido; bandera `partida_unsure` boolean no nula con default false; política de lectura por membresía.
+- `confirm_provider_account`: anon sin EXECUTE, authenticated/service_role con EXECUTE; se conserva su gate de empresa. El helper `get_payment_request_execution_context_pre_037` no es ejecutable por anon/authenticated y sí por service_role en el catálogo actual. No se modifican estos privilegios.
+- `create_payment_request` mantiene EXECUTE para anon en el catálogo previo; su guard de sesión es el control de entrada. Esta recuperación no modifica ese permiso ni se presenta como hardening adicional.
+- Seis pruebas PGlite ejecutan los archivos completos del tramo fiscal → UUID → reembolso → E2/E3, además de las dos ejecuciones de extraordinarios. Verifican firma única, UUID por empresa/estado, preservación de definición/ACL en el duplicado, contratos/ACL/política tras las sucesoras, aislamiento de lectura y rechazo de escritura en predicciones, y confirmación de cuenta con conservación de `contpaq_provider_id`.
+- Tablas dependientes y helpers de autorización son fixtures explícitos. Estas pruebas no son una reconstrucción completa ni UAT de Supabase con sesiones reales; tampoco afirman que se ejecutó un pago o una solicitud completa.
+
+| Inventario DEV | Tras #579 | Tras recuperar fuentes |
+|---|---:|---:|
+| Archivos locales | 106 | 111 |
+| Versiones registradas | 113 | 113 |
+| Números coincidentes | 101 | 106 |
+| Sólo remoto | 12 | 7 |
+| Sólo local | 5 | 5 |
+
+Quedan siete entradas sólo remotas: las tres parejas con SQL diferente (onboarding Fersana, ingresos recurrentes y roles), tres puentes de nómina retirados del PR #568 y el mantenimiento histórico de respaldos. Los cinco archivos sólo locales son las tres contrapartes con SQL diferente y los dos módulos sin versión registrada. No se recupera el SQL de borrado de respaldos ni se decide una reparación del ledger dentro de este cambio.
+
+**El frente 06 sigue abierto.** Falta conciliar esas entradas, revisar el guard de reconstrucción 047 y recuperar Supabase Preview. No ejecutar un push general ni promover esta cadena DEV a PROD. Cualquier `migration repair` requiere el snapshot y la autorización específica de `supabase-cli-migrations.md`.
+
+Validación del cambio de recuperación: TypeScript/Vite y artefacto estático correctos; **1121/1121 contratos offline** (incluidos los seis casos nuevos), 0 fallas y 0 omitidos. Los cinco archivos recuperados coinciden byte a byte con su SQL registrado. No se afirma que Supabase Preview esté resuelto.
+
+Nota de formato: la fuente registrada del duplicado de extraordinarios termina con una línea vacía adicional, igual que su primera ejecución ya versionada. Se conserva intencionalmente para mantener el hash exacto; no se reformatea SQL histórico.
