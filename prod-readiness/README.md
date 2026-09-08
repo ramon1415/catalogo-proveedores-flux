@@ -54,7 +54,7 @@ chat ni editarlo en Supabase Studio.
    para el único `company_id` incumbente validado por el preflight; no usa
    nombre ni UUID hardcodeado.
 4. `20260827100000_platform_module_nomina.sql`
-5. `20260831003419_fersana_company_access_onboarding.sql` +
+5. `20260831004813_fersana_company_access_onboarding.sql` +
    `20260831004957_fersana_company_access_advisor_hardening.sql` — DDL y RPC
    atómicos; la liga `fersana` se crea después, dentro del seed.
 6. `20260831194350_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
