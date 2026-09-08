@@ -1,0 +1,1115 @@
+{
+  "dev_base_sha": "40bb75610485f5c248832fbd7e34d2547970e522",
+  "scope": "Recover three recorded payroll sources and align two previously hardened version names. No database writes or ledger repair.",
+  "exact_recovered_sources": [
+    {
+      "version": "20260907232403",
+      "name": "payroll_confirmation_weekly_cut_bridge",
+      "path": "supabase/migrations/20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+      "sha256": "5500496864a504c457c1830bb314dd0b221e4de5ce4c7e96e3e6aef1d632cc3e",
+      "bytes": 28182
+    },
+    {
+      "version": "20260907232743",
+      "name": "payroll_direct_finance_confirmation_snapshot",
+      "path": "supabase/migrations/20260907232743_payroll_direct_finance_confirmation_snapshot.sql",
+      "sha256": "bb8049375551c0483a14f878a2e83234d726a30f1c8d3cd2caad758b3b14d8dc",
+      "bytes": 704
+    },
+    {
+      "version": "20260907233050",
+      "name": "payroll_weekly_cut_submit_bridge",
+      "path": "supabase/migrations/20260907233050_payroll_weekly_cut_submit_bridge.sql",
+      "sha256": "ec998d273073e3f0b5404ba473922fec63132e7fe0199803a7b7adf34f7a5f88",
+      "bytes": 5130
+    }
+  ],
+  "aligned_stronger_repo_variants": [
+    {
+      "old_version": "20260831120000",
+      "new_version": "20260831194350",
+      "old_path": "supabase/migrations/20260831120000_tenant_recurring_income.sql",
+      "new_path": "supabase/migrations/20260831194350_tenant_recurring_income.sql",
+      "repo_sha256_unchanged": "b184b44374d55a844a97d66b5a93ff1fd2f6f2a1975fc8eb3101d753869e18d7",
+      "historical_sql_identical_to_remote": false,
+      "decision": "Preserve stronger repository variant; documented forward migration already establishes the intended runtime safeguards. This is not a claim of historical byte equivalence.",
+      "forward_source": "20260908000916_tenant_recurring_income_runtime_hardening.sql",
+      "forward_function": "generate_recurring_income",
+      "forward_body_lexically_equal_to_live": true
+    },
+    {
+      "old_version": "20260901055111",
+      "new_version": "20260901065625",
+      "old_path": "supabase/migrations/20260901055111_company_scoped_roles_foundation.sql",
+      "new_path": "supabase/migrations/20260901065625_company_scoped_roles_foundation.sql",
+      "repo_sha256_unchanged": "98d01d41df78ea8cfa20d343b484e1b97a019515eb69bf3dc6c41d5daa77aac0",
+      "historical_sql_identical_to_remote": false,
+      "decision": "Preserve stronger repository variant; documented forward migration already establishes the intended runtime safeguards. This is not a claim of historical byte equivalence.",
+      "forward_source": "20260901071929_company_scoped_power_override_hardening.sql",
+      "forward_function": "profile_has_company_role",
+      "forward_body_lexically_equal_to_live": true
+    }
+  ],
+  "current_function_source_matrix": [
+    {
+      "name": "add_request_to_approval_batch",
+      "last_source": "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+      "source_history": [
+        "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "approval_batch_request_base_eligible",
+      "last_source": "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+      "source_history": [
+        "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": false,
+      "service_execute": true
+    },
+    {
+      "name": "approval_batch_request_has_any_execution_record",
+      "last_source": "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+      "source_history": [
+        "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": false,
+      "service_execute": true
+    },
+    {
+      "name": "confirm_payroll_finance_review",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260907225200_payroll_nonbudget_finance_confirm.sql",
+        "20260907225213_payroll_finance_confirm_trigger_safe.sql",
+        "20260907233050_payroll_weekly_cut_submit_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "get_payroll_capture_sessions_unscoped_internal",
+      "last_source": "20260908060513_payroll_capture_verified_file_totals.sql",
+      "source_history": [
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql",
+        "20260908015626_payroll_capture_access_and_history.sql",
+        "20260908060513_payroll_capture_verified_file_totals.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=\"\""
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": false,
+      "service_execute": true
+    },
+    {
+      "name": "get_payroll_dispersion_summary",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260820153819_payroll_n4a_manual_dispersion.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "get_payroll_submission_summary",
+      "last_source": "20260908015626_payroll_capture_access_and_history.sql",
+      "source_history": [
+        "20260820022528_payroll_n3g_real_capture_ui_contract.sql",
+        "20260820164338_payroll_n5a_budget_gate.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql",
+        "20260908015626_payroll_capture_access_and_history.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "list_batch_eligible_requests",
+      "last_source": "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+      "source_history": [
+        "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "payroll_ready_for_dispersion",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": true,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "payroll_uses_weekly_cut_flow",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": true,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "payroll_weekly_cut_eligibility",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": true,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "record_payroll_channel_dispersion",
+      "last_source": "20260908001439_payroll_separate_payment_flow_restore.sql",
+      "source_history": [
+        "20260820153819_payroll_n4a_manual_dispersion.sql",
+        "20260907232403_payroll_confirmation_weekly_cut_bridge.sql",
+        "20260908001439_payroll_separate_payment_flow_restore.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    },
+    {
+      "name": "submit_approval_batch",
+      "last_source": "20260907233050_payroll_weekly_cut_submit_bridge.sql",
+      "source_history": [
+        "20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql",
+        "20260907233050_payroll_weekly_cut_submit_bridge.sql"
+      ],
+      "body_lexically_equal_to_dev": true,
+      "config": [
+        "search_path=public, pg_temp"
+      ],
+      "definer": true,
+      "anon_execute": false,
+      "auth_execute": true,
+      "service_execute": true
+    }
+  ],
+  "live_before": {
+    "versions": [
+      {
+        "name": "flux_dev_authoritative_brownfield_baseline_v2",
+        "version": "20260811035345"
+      },
+      {
+        "name": "043_provider_intake_payment_draft",
+        "version": "20260811035346"
+      },
+      {
+        "name": "044_provider_intake_payment_conversion",
+        "version": "20260811215129"
+      },
+      {
+        "name": "045_provider_intake_ramon_uat_product_improvements",
+        "version": "20260811230137"
+      },
+      {
+        "name": "046_provider_aware_intake_links",
+        "version": "20260812001555"
+      },
+      {
+        "name": "047_fix_dev_layout_candidate_recursion",
+        "version": "20260812210013"
+      },
+      {
+        "name": "048_allow_sysadmin_provider_intake_links",
+        "version": "20260813005145"
+      },
+      {
+        "name": "049_snapshot_bbva_cie_convenio_number",
+        "version": "20260813011425"
+      },
+      {
+        "name": "payroll_n0_foundation_contract",
+        "version": "20260814170907"
+      },
+      {
+        "name": "fix_payroll_request_total_trigger",
+        "version": "20260814183429"
+      },
+      {
+        "name": "payroll_n2b_capture_sessions",
+        "version": "20260817162934"
+      },
+      {
+        "name": "payment_request_approver_email_c1",
+        "version": "20260817211825"
+      },
+      {
+        "name": "payroll_n3a_server_materialization",
+        "version": "20260818110000"
+      },
+      {
+        "name": "payroll_n3b_individual_approval",
+        "version": "20260819213907"
+      },
+      {
+        "name": "payroll_n3b_approval_write_hardening",
+        "version": "20260819213919"
+      },
+      {
+        "name": "payroll_n3b_post_decision_freeze",
+        "version": "20260819214917"
+      },
+      {
+        "name": "payroll_n3f_real_formats_toka_funding",
+        "version": "20260820002513"
+      },
+      {
+        "name": "payroll_n3f_server_verification_staging",
+        "version": "20260820004857"
+      },
+      {
+        "name": "payroll_n3g_real_capture_ui_contract",
+        "version": "20260820022528"
+      },
+      {
+        "name": "payroll_n4a_manual_dispersion",
+        "version": "20260820153819"
+      },
+      {
+        "name": "payroll_n4b_channel_receipt_reconciliation",
+        "version": "20260820160925"
+      },
+      {
+        "name": "payroll_n4b_storage_helper_execute",
+        "version": "20260820161058"
+      },
+      {
+        "name": "payroll_n5a_budget_gate",
+        "version": "20260820164338"
+      },
+      {
+        "name": "payroll_rc1_provision_contpaq_feed",
+        "version": "20260821173000"
+      },
+      {
+        "name": "approval_batch_submitted_email_pdf_dev",
+        "version": "20260824204217"
+      },
+      {
+        "name": "historical_actuals_sysadmin_rls",
+        "version": "20260824212048"
+      },
+      {
+        "name": "contpaq_mapper_schema_tree",
+        "version": "20260824213154"
+      },
+      {
+        "name": "contpaq_mapper_audit_hardening",
+        "version": "20260824214309"
+      },
+      {
+        "name": "contpaq_mapper_trigger_scope_hardening",
+        "version": "20260824215209"
+      },
+      {
+        "name": "approval_batch_submitted_system_pdf_fields_dev",
+        "version": "20260824224716"
+      },
+      {
+        "name": "contpaq_mapper_evidence_contract",
+        "version": "20260824232512"
+      },
+      {
+        "name": "contpaq_account_detail_tree_consistency",
+        "version": "20260824233806"
+      },
+      {
+        "name": "contpaq_mapper_trigger_access_gate",
+        "version": "20260824234723"
+      },
+      {
+        "name": "contpaq_mapping_evidence_server_managed",
+        "version": "20260824235349"
+      },
+      {
+        "name": "contpaq_mapping_evidence_semantics",
+        "version": "20260825001711"
+      },
+      {
+        "name": "approval_batch_decision_submitter_email_pdf",
+        "version": "20260825031856"
+      },
+      {
+        "name": "approval_batch_decision_wakeup_dev",
+        "version": "20260825032422"
+      },
+      {
+        "name": "contpaq_mapper_legacy_review_unblock",
+        "version": "20260825222013"
+      },
+      {
+        "name": "contpaq_mapper_edge_review_deprecation",
+        "version": "20260825222120"
+      },
+      {
+        "name": "contpaq_mapper_graph_reviews",
+        "version": "20260825222155"
+      },
+      {
+        "name": "historical_actuals_strict_sysadmin_r2",
+        "version": "20260825223546"
+      },
+      {
+        "name": "payment_request_cfdi_facts",
+        "version": "20260826160401"
+      },
+      {
+        "name": "payment_request_cfdi_facts_created_by_idx",
+        "version": "20260826160958"
+      },
+      {
+        "name": "approval_batch_quick_approve_dev",
+        "version": "20260826201712"
+      },
+      {
+        "name": "approval_batch_quick_service_role_claims_hotfix",
+        "version": "20260826214616"
+      },
+      {
+        "name": "platform_module_registry",
+        "version": "20260826223239"
+      },
+      {
+        "name": "platform_module_registry_advisor_hardening",
+        "version": "20260826223357"
+      },
+      {
+        "name": "payment_batch_bbva_padded_source_account_hotfix",
+        "version": "20260827203337"
+      },
+      {
+        "name": "payroll_active_company_scope",
+        "version": "20260827231155"
+      },
+      {
+        "name": "payroll_service_role_claim_compat",
+        "version": "20260827232110"
+      },
+      {
+        "name": "approval_batch_promotes_payment_request",
+        "version": "20260830231333"
+      },
+      {
+        "name": "fersana_company_access_onboarding",
+        "version": "20260831004813"
+      },
+      {
+        "name": "fersana_company_access_advisor_hardening",
+        "version": "20260831004957"
+      },
+      {
+        "name": "operator_own_payment_requests",
+        "version": "20260831033553"
+      },
+      {
+        "name": "tenant_recurring_income",
+        "version": "20260831194350"
+      },
+      {
+        "name": "notification_payment_outcome_dispatch_recovery_dev",
+        "version": "20260831195803"
+      },
+      {
+        "name": "notification_payment_outcome_authorized_retry_dev",
+        "version": "20260831201434"
+      },
+      {
+        "name": "notification_dev_dynamic_business_recipients",
+        "version": "20260831211229"
+      },
+      {
+        "name": "budget_category_responsible",
+        "version": "20260831233032"
+      },
+      {
+        "name": "company_scoped_roles_foundation",
+        "version": "20260901065625"
+      },
+      {
+        "name": "company_scoped_rls_rpc_cutover",
+        "version": "20260901071915"
+      },
+      {
+        "name": "company_scoped_rpc_cutover",
+        "version": "20260901071923"
+      },
+      {
+        "name": "company_scoped_power_override_hardening",
+        "version": "20260901071929"
+      },
+      {
+        "name": "company_budget_category_assignment_uniqueness",
+        "version": "20260901091337"
+      },
+      {
+        "name": "budget_views_security_invoker_hardening",
+        "version": "20260901091340"
+      },
+      {
+        "name": "desglose_fiscal_subtotal_budget",
+        "version": "20260901102134"
+      },
+      {
+        "name": "invoice_uuid_anti_duplicado",
+        "version": "20260901171427"
+      },
+      {
+        "name": "fb_integracion_contable",
+        "version": "20260901232529"
+      },
+      {
+        "name": "contpaq_accounts_relax_detail_check",
+        "version": "20260901235805"
+      },
+      {
+        "name": "fix_extraordinary_execution_context_recursion",
+        "version": "20260902041542"
+      },
+      {
+        "name": "fb_integracion_tanda2_mapeos",
+        "version": "20260902045510"
+      },
+      {
+        "name": "historical_actuals_finance_read",
+        "version": "20260902164031"
+      },
+      {
+        "name": "historical_actuals_flujo",
+        "version": "20260902164425"
+      },
+      {
+        "name": "fb_integracion_forward_fix_tenant_integrity",
+        "version": "20260902200000"
+      },
+      {
+        "name": "accounting_exports_reversal_covering_index",
+        "version": "20260902201500"
+      },
+      {
+        "name": "reembolsos_beneficiario_empleado",
+        "version": "20260902210503"
+      },
+      {
+        "name": "reimbursement_items_partida_obligatoria",
+        "version": "20260902211421"
+      },
+      {
+        "name": "reembolsos_servidor_create_request",
+        "version": "20260902212059"
+      },
+      {
+        "name": "reembolsos_servidor_layout_missing_fields",
+        "version": "20260902212126"
+      },
+      {
+        "name": "reembolsos_layout_candidates_destino_empleado",
+        "version": "20260902212214"
+      },
+      {
+        "name": "proyectos_catalogo",
+        "version": "20260902212626"
+      },
+      {
+        "name": "historical_actuals_company_roles",
+        "version": "20260902230410"
+      },
+      {
+        "name": "reimbursements_projects_tenant_hardening",
+        "version": "20260902230422"
+      },
+      {
+        "name": "internal_layout_helpers_private",
+        "version": "20260902230843"
+      },
+      {
+        "name": "budget_category_shared_access",
+        "version": "20260903015237"
+      },
+      {
+        "name": "fix_extraordinary_execution_context_recursion",
+        "version": "20260903023224"
+      },
+      {
+        "name": "partida_predictions",
+        "version": "20260903035514"
+      },
+      {
+        "name": "partida_unsure_flag",
+        "version": "20260903040733"
+      },
+      {
+        "name": "fonacot_no_presupuestal",
+        "version": "20260903041213"
+      },
+      {
+        "name": "confirm_provider_account_rpc",
+        "version": "20260903041629"
+      },
+      {
+        "name": "fonacot_fersana_mapping",
+        "version": "20260903051555"
+      },
+      {
+        "name": "payment_request_exception_quick_approve_dev",
+        "version": "20260903154601"
+      },
+      {
+        "name": "yanin_match_lis_fersana_budget_access",
+        "version": "20260903162602"
+      },
+      {
+        "name": "partida_predictions_v2_170000",
+        "version": "20260903213133"
+      },
+      {
+        "name": "partida_unsure_flag_v2_170100",
+        "version": "20260903213224"
+      },
+      {
+        "name": "confirm_provider_account_rpc_v2_170200",
+        "version": "20260903213236"
+      },
+      {
+        "name": "payment_request_exception_quick_service_role_guard",
+        "version": "20260903234917"
+      },
+      {
+        "name": "drop_backup_tables",
+        "version": "20260906003626"
+      },
+      {
+        "name": "security_hardening_advisors",
+        "version": "20260907171549"
+      },
+      {
+        "name": "payroll_provision_pending_does_not_block_dev",
+        "version": "20260907173216"
+      },
+      {
+        "name": "payroll_folio_en_materializacion",
+        "version": "20260907184613"
+      },
+      {
+        "name": "payroll_capture_file_download_context_dev",
+        "version": "20260907221608"
+      },
+      {
+        "name": "payroll_nonbudget_finance_confirm",
+        "version": "20260907225200"
+      },
+      {
+        "name": "payroll_finance_confirm_trigger_safe",
+        "version": "20260907225213"
+      },
+      {
+        "name": "payroll_confirmation_weekly_cut_bridge",
+        "version": "20260907232403"
+      },
+      {
+        "name": "payroll_direct_finance_confirmation_snapshot",
+        "version": "20260907232743"
+      },
+      {
+        "name": "payroll_weekly_cut_submit_bridge",
+        "version": "20260907233050"
+      },
+      {
+        "name": "tenant_recurring_income_runtime_hardening",
+        "version": "20260908000916"
+      },
+      {
+        "name": "payroll_separate_payment_flow_restore",
+        "version": "20260908001439"
+      },
+      {
+        "name": "payroll_capture_access_and_history",
+        "version": "20260908015626"
+      },
+      {
+        "name": "payroll_pilot_notifications",
+        "version": "20260908015701"
+      },
+      {
+        "name": "payroll_notification_scoped_test",
+        "version": "20260908022737"
+      },
+      {
+        "name": "payroll_capture_verified_file_totals",
+        "version": "20260908060513"
+      }
+    ],
+    "functions": [
+      {
+        "name": "add_request_to_approval_batch",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_batch_id uuid, p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "08412f1b54f882318dc61d08e27873aa22c504117339abb8702b99edba6035a0",
+        "definition_sha256": "9284ccea0ec7f19c8f63cb5bc85ac415e683527b8c014d69619d036263f8e652"
+      },
+      {
+        "name": "approval_batch_request_base_eligible",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": false,
+        "service_execute": true,
+        "body_sha256": "eb661dbc839f82897485313ae79270f651a751011fd93d09a1005d929fdc43b0",
+        "definition_sha256": "8264f94c2a7adb2c92dab176ec64af6f13e4f162c09bf33191b1556b123bc823"
+      },
+      {
+        "name": "approval_batch_request_eligibility",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid, p_exclude_batch_id uuid",
+        "anon_execute": false,
+        "auth_execute": false,
+        "service_execute": true,
+        "body_sha256": "d40526a01e837a4023957ec28c8ebced4ccfafe7b972a8165b81a2fb38dfbd81",
+        "definition_sha256": "b6ec2a2ee07e150554a64d379f0e9b0f596ac7e7dcd0fb1f7efc731778f679cc"
+      },
+      {
+        "name": "approval_batch_request_has_any_execution_record",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": false,
+        "service_execute": true,
+        "body_sha256": "979ab1944a3a40d98eae77dafe5be51fb55f64607c4e568771460081f47ac179",
+        "definition_sha256": "5ee25f902aa12bcddaf78f9e255472d9907832c4135940808ee1c0f389e5ee30"
+      },
+      {
+        "name": "confirm_payroll_finance_review",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "5cf59802b15c9c9f77732633a3b1881bd10387a014b25ba948ebcc49a7458a6b",
+        "definition_sha256": "2726b9373951deb8bddd8faceb0997a7486288e536d559f80278e29fdf05751a"
+      },
+      {
+        "name": "get_payroll_capture_sessions_unscoped_internal",
+        "config": [
+          "search_path=\"\""
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_session_id uuid",
+        "anon_execute": false,
+        "auth_execute": false,
+        "service_execute": true,
+        "body_sha256": "13138265b4ebfb28d6247a1af352ee02c2887b73bd0bcad761dee317c0520883",
+        "definition_sha256": "970fc4bab49bd5c8d5de8765efbd61cfe7c8b89aa13c44d46114d71752758ccd"
+      },
+      {
+        "name": "get_payroll_dispersion_summary",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "0dff208b2fc3b4414f92c8bffed76df8aacf6d7273dd0e72d498e6c0e4ade2aa",
+        "definition_sha256": "90b0805dab41e09ff7962ab7fcdfdddeb872e6498ff101ee17fb80cfea73c5e0"
+      },
+      {
+        "name": "get_payroll_submission_summary",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "5cfedc291cb692b41c1b388330ab6d9c0d0ec0dda70e050ef6d99316845784cc",
+        "definition_sha256": "bc3b6a6d1355fdbaec33f452228f2e5655b08469f76e3276b67d4c921edef1af"
+      },
+      {
+        "name": "list_batch_eligible_requests",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_company_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "68570d3500297374bfad342002723e97351979926af0222194fae4d325159d55",
+        "definition_sha256": "a5212ad20b269b2f1c84f08047692db82b9e62b3ee1252a1d18a96c20c8754ee"
+      },
+      {
+        "name": "payroll_ready_for_dispersion",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": true,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "cab3aa68775fa354b8e8eb3534bedd734b60c63d678e087f7c19ec7c92ef2377",
+        "definition_sha256": "1d16747cad639b361b0dbf51ee8e9a07d1d8c04757c0753d586dbeb8b2201e74"
+      },
+      {
+        "name": "payroll_uses_weekly_cut_flow",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid",
+        "anon_execute": true,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "6cc8c0580d2ee70a665370904afbb6f54a852ed803bc3cc0107ae51da3cef1ef",
+        "definition_sha256": "e30b5a5b7b43e420580f52621f8269e15f1cf2a0f377c4df55e6772ff734868b"
+      },
+      {
+        "name": "payroll_weekly_cut_eligibility",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid, p_exclude_batch_id uuid",
+        "anon_execute": true,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "ebc089170bb2bc77d9d74e6a5f039774f8b479c573813ac3bf6066d238ae75da",
+        "definition_sha256": "e250e2bcb204195b222a4ce3d6dbfa64b4d6aa8c2771c03e7573f06395499db1"
+      },
+      {
+        "name": "record_payroll_channel_dispersion",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_payment_request_id uuid, p_payroll_channel_id uuid, p_action text, p_failure_note text",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "701d32f22b23f6a9063f365a0a817dc33a2e373d3c9e7c8cff32b060a455e3fa",
+        "definition_sha256": "55a6537c0ea155ed1b9064ea6a340d19ad96ee3eb497caa32e3c61393f427277"
+      },
+      {
+        "name": "reject_company_access_request",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_request_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "91a945d7ab1f1903b7211a082845a43f3ed0c6f8c0de6a3ed46ff8f8b0edf8b8",
+        "definition_sha256": "75fd370c15c1449ff1533fe41626b6c00b83c967d3c1ab3f7b31c68075a67efc"
+      },
+      {
+        "name": "request_company_access",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_code text",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "283c8b25e3e5e895480fd709e5d05fbeed78e215e2e150b069fc0577bfdf26f3",
+        "definition_sha256": "c43ee415e1667556bdcf8a632b8f5bfab397ced9153d63356b26e9b412d9815f"
+      },
+      {
+        "name": "submit_approval_batch",
+        "config": [
+          "search_path=public, pg_temp"
+        ],
+        "schema": "public",
+        "definer": true,
+        "identity": "p_batch_id uuid",
+        "anon_execute": false,
+        "auth_execute": true,
+        "service_execute": true,
+        "body_sha256": "373fb0de51d02ac1ead107bc8bce4704f9c18fe2955ef0a80c8710e89b81ead0",
+        "definition_sha256": "f6cd3e8c0dec339926b597218859b1d87bdbe796d946f92ef2e647d2f9b08cd5"
+      }
+    ],
+    "read_only": "on",
+    "captured_at": "2026-09-08T17:01:57.282389+00:00",
+    "snapshot_constraint": "CHECK ((((request_type)::text <> 'nomina'::text) OR ((status)::text = 'draft'::text) OR ((approver_id IS NOT NULL) AND (approver_selection_source = ANY (ARRAY['assigned'::text, 'approval_rules'::text])) AND (submitted_at IS NOT NULL)) OR ((no_presupuestal IS TRUE) AND ((status)::text = ANY (ARRAY['approved'::text, 'finance_validation'::text, 'scheduled'::text, 'paid'::text])) AND (approver_id IS NULL) AND (approver_assignment_id IS NULL) AND (approver_selection_source IS NULL) AND (submitted_at IS NULL) AND (approved_by IS NOT NULL) AND (approved_at IS NOT NULL))))"
+  },
+  "resolved_differences_live": {
+    "indexes": [
+      {
+        "name": "recurring_income_templates_pkey",
+        "valid": true,
+        "definition": "CREATE UNIQUE INDEX recurring_income_templates_pkey ON public.recurring_income_templates USING btree (id)"
+      },
+      {
+        "name": "recurring_income_templates_company_idx",
+        "valid": true,
+        "definition": "CREATE INDEX recurring_income_templates_company_idx ON public.recurring_income_templates USING btree (company_id)"
+      },
+      {
+        "name": "recurring_income_templates_company_id_id_uidx",
+        "valid": true,
+        "definition": "CREATE UNIQUE INDEX recurring_income_templates_company_id_id_uidx ON public.recurring_income_templates USING btree (company_id, id)"
+      },
+      {
+        "name": "tenant_income_entries_pkey",
+        "valid": true,
+        "definition": "CREATE UNIQUE INDEX tenant_income_entries_pkey ON public.tenant_income_entries USING btree (id)"
+      },
+      {
+        "name": "tenant_income_entries_company_period_idx",
+        "valid": true,
+        "definition": "CREATE INDEX tenant_income_entries_company_period_idx ON public.tenant_income_entries USING btree (company_id, period)"
+      },
+      {
+        "name": "tenant_income_entries_recurring_unique",
+        "valid": true,
+        "definition": "CREATE UNIQUE INDEX tenant_income_entries_recurring_unique ON public.tenant_income_entries USING btree (template_id, period) WHERE ((template_id IS NOT NULL) AND (period IS NOT NULL))"
+      },
+      {
+        "name": "tenant_income_entries_company_template_idx",
+        "valid": true,
+        "definition": "CREATE INDEX tenant_income_entries_company_template_idx ON public.tenant_income_entries USING btree (company_id, template_id)"
+      }
+    ],
+    "functions": [
+      {
+        "name": "profile_has_company_role",
+        "schema": "private",
+        "body_sha256": "bdf982b07db9b185f437327a0a870c311693521057a31410f134a9e1a87f6db4",
+        "definition_sha256": "7eedddc3696b72be4e304902a2711447ad67d5fcc68bdb285edbabe51ed369a4"
+      },
+      {
+        "name": "request_company_access",
+        "schema": "public",
+        "body_sha256": "283c8b25e3e5e895480fd709e5d05fbeed78e215e2e150b069fc0577bfdf26f3",
+        "definition_sha256": "c43ee415e1667556bdcf8a632b8f5bfab397ced9153d63356b26e9b412d9815f"
+      },
+      {
+        "name": "reject_company_access_request",
+        "schema": "public",
+        "body_sha256": "91a945d7ab1f1903b7211a082845a43f3ed0c6f8c0de6a3ed46ff8f8b0edf8b8",
+        "definition_sha256": "75fd370c15c1449ff1533fe41626b6c00b83c967d3c1ab3f7b31c68075a67efc"
+      },
+      {
+        "name": "generate_recurring_income",
+        "schema": "public",
+        "body_sha256": "b06d6dcab83924ceaa62db254ab77bdbf429900cd180c19a84c6a6b67c639c23",
+        "definition_sha256": "11a1456eaadee13ba261d3307bdef225e0f9d1d56918fbf926cbeb1deede1b93"
+      }
+    ],
+    "captured_at": "2026-09-08T17:05:27.729146+00:00",
+    "constraints": [
+      {
+        "name": "recurring_income_templates_amount_check",
+        "valid": true,
+        "definition": "CHECK ((amount >= (0)::numeric))"
+      },
+      {
+        "name": "recurring_income_templates_cadence_check",
+        "valid": true,
+        "definition": "CHECK ((cadence = 'monthly'::text))"
+      },
+      {
+        "name": "recurring_income_templates_company_id_fkey",
+        "valid": true,
+        "definition": "FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "recurring_income_templates_created_by_fkey",
+        "valid": true,
+        "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id)"
+      },
+      {
+        "name": "recurring_income_templates_pkey",
+        "valid": true,
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "tenant_income_entries_amount_check",
+        "valid": true,
+        "definition": "CHECK ((amount >= (0)::numeric))"
+      },
+      {
+        "name": "tenant_income_entries_company_id_fkey",
+        "valid": true,
+        "definition": "FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "tenant_income_entries_company_template_fk",
+        "valid": true,
+        "definition": "FOREIGN KEY (company_id, template_id) REFERENCES recurring_income_templates(company_id, id) ON DELETE SET NULL (template_id)"
+      },
+      {
+        "name": "tenant_income_entries_created_by_fkey",
+        "valid": true,
+        "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id)"
+      },
+      {
+        "name": "tenant_income_entries_pkey",
+        "valid": true,
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "tenant_income_entries_source_check",
+        "valid": true,
+        "definition": "CHECK ((source = ANY (ARRAY['manual'::text, 'recurring'::text])))"
+      },
+      {
+        "name": "tenant_income_entries_status_check",
+        "valid": true,
+        "definition": "CHECK ((status = ANY (ARRAY['pendiente'::text, 'cobrado'::text, 'cancelado'::text])))"
+      }
+    ]
+  },
+  "before": {
+    "files": 111,
+    "ledger": 113,
+    "common": 106,
+    "remote_only": 7,
+    "local_only": 5
+  },
+  "after": {
+    "files": 114,
+    "ledger": 113,
+    "common": 111,
+    "remote_only": 2,
+    "local_only": 3
+  },
+  "remaining_remote_only": [
+    {
+      "name": "fersana_company_access_onboarding",
+      "version": "20260831004813"
+    },
+    {
+      "name": "drop_backup_tables",
+      "version": "20260906003626"
+    }
+  ],
+  "remaining_local_only": [
+    "20260827090000_platform_module_incidencias.sql",
+    "20260827100000_platform_module_nomina.sql",
+    "20260831003419_fersana_company_access_onboarding.sql"
+  ],
+  "isolated_test_scope": "Seven PGlite cases execute complete bridge/restore sources and the actual baseline ordinary-cut eligibility function. Dependency tables, authorization helpers and budget/materialization outcomes are fixtures. Not full replay or hosted UAT."
+}
