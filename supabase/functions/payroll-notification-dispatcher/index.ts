@@ -11,7 +11,7 @@ type Document = {
 const labels: Record<string, string> = { banco: 'BBVA', spei: 'SPEI', vales: 'TOKA' }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})
 const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
-const money = (value: number, currency: string) => new Intl.NumberFormat('es-MX',{style:'currency',currency}).format(value)
+const money = (value: number, currency: string) => `${currency} ${Number(value).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 function required(runtime: Runtime, name: string): string {
   const value = runtime.env(name)?.trim()
   if (!value) throw new Error('PAYROLL_NOTIFICATION_CONFIGURATION_REQUIRED')
@@ -20,12 +20,66 @@ function required(runtime: Runtime, name: string): string {
 export function renderPayrollEmail(doc: Document, mode: string, attached: boolean) {
   const paid = doc.event_type === 'payroll.paid'
   const subject = `${mode === 'test_only' ? '[DEV TEST] ' : ''}Nómina ${paid ? 'pagada' : 'registrada'} · ${doc.folio}`
+  const heading = paid ? 'Nómina pagada' : 'Nueva nómina por revisar'
   const intro = paid ? 'Tesorería completó el pago de la nómina y registró los comprobantes de todos los canales.' : 'Se registró una corrida de nómina. Revisa los montos en Flux para continuar con el pago.'
-  const rows = [['Empresa',doc.company],['Periodo',`${doc.period_start} al ${doc.period_end}`],['Folio',doc.folio],
+  const rows = [['Folio',doc.folio],['Empresa',doc.company],['Periodo',`${doc.period_start} al ${doc.period_end}`],
     ...doc.channels.map(c => [labels[c.channel] || c.channel,money(c.amount,doc.currency)]),['Total',money(doc.amount,doc.currency)]]
   const proof = paid ? (attached ? 'Se adjuntan los comprobantes de los canales.' : 'Descarga los comprobantes de cada canal en Flux.') : ''
-  return { subject, text: [intro,...rows.map(([k,v])=>`${k}: ${v}`),proof,`Abrir en Flux: ${doc.url}`].filter(Boolean).join('\n'),
-    html:`<!doctype html><html lang="es"><body style="background:#eef1e9;font-family:Arial,sans-serif;color:#16322d;padding:24px"><table role="presentation" style="max-width:560px;width:100%;margin:auto;background:white;border-radius:12px;padding:24px"><tr><td><h1>Flux</h1><h2>${escape(subject)}</h2><p>${escape(intro)}</p><table style="width:100%">${rows.map(([k,v])=>`<tr><td style="padding:6px">${escape(k)}</td><td style="padding:6px;text-align:right">${escape(v)}</td></tr>`).join('')}</table><p>${escape(proof)}</p><p><a href="${escape(doc.url)}">Abrir nómina en Flux</a></p><p style="font-size:12px">Información privada · Acceso con tu cuenta de Flux.</p></td></tr></table></body></html>` }
+  const action = paid ? 'Ver nómina y comprobantes' : 'Revisar nómina'
+  const privacy = 'Información privada · Acceso con tu cuenta de Flux.'
+  const testNotice = mode === 'test_only' ? 'Modo DEV TEST: este correo fue redirigido al destinatario de prueba.' : ''
+  // Match the established payment-request email in notification-dispatcher.
+  // Tables, inline styles and bgcolor keep the layout usable in email clients.
+  const htmlRows = rows.map(([label, value]) => `
+      <tr>
+        <td style="width:42%;padding:10px 12px 10px 0;border-bottom:1px solid #e8ece7;color:#68716d;font-size:14px;line-height:1.35;vertical-align:top;">${escape(label)}</td>
+        <td style="padding:10px 0;border-bottom:1px solid #e8ece7;color:#1f2926;font-size:14px;line-height:1.35;vertical-align:top;overflow-wrap:anywhere;"><strong>${escape(value)}</strong></td>
+      </tr>`).join('')
+  const testBanner = testNotice
+    ? `<div style="margin-top:20px;padding:12px 14px;border-left:4px solid #d97706;background:#fff7ed;color:#7c2d12;font-size:13px;line-height:1.4;">${escape(testNotice)}</div>`
+    : ''
+  return {
+    subject,
+    text: [heading, intro, ...rows.map(([k,v])=>`${k}: ${v}`), proof, `${action}: ${doc.url}`, privacy, testNotice].filter(Boolean).join('\n'),
+    html: `<!doctype html>
+<html lang="es">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  <body style="margin:0;padding:0;background:#eef1e9;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escape(subject)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef1e9" style="width:100%;margin:0;padding:0;border-top:8px solid #16322d;background:#eef1e9;">
+      <tr>
+        <td align="center" style="padding:24px 12px 18px;">
+          <div style="width:100%;max-width:560px;margin:0 auto;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border:1px solid #d8ddd5;border-radius:14px;border-collapse:separate;overflow:hidden;background:#ffffff;">
+            <tr>
+              <td bgcolor="#16322d" style="padding:20px 28px;border-radius:13px 13px 0 0;background:#16322d;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:700;line-height:1.15;text-align:left;">Flux</td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px 30px;font-family:Arial,Helvetica,sans-serif;color:#1f2926;text-align:left;">
+                <h1 style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.2;color:#16322d;">${escape(heading)}</h1>
+                <p style="margin:0 0 18px;font-size:14px;line-height:1.5;color:#1f2926;">${escape(intro)}</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">${htmlRows}</table>
+                ${proof ? `<p style="margin:18px 0 0;font-size:14px;line-height:1.5;">${escape(proof)}</p>` : ''}
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:22px;">
+                  <tr>
+                    <td bgcolor="#16322d" style="border-radius:6px;">
+                      <a href="${escape(doc.url)}" style="display:inline-block;padding:11px 18px;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:22px;text-decoration:none;">${escape(action)}</a>
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:18px 0 0;font-size:12px;line-height:1.5;color:#68716d;">${escape(privacy)}</p>
+                ${testBanner}
+              </td>
+            </tr>
+          </table>
+          </div>
+          <div style="padding:14px 8px 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.4;color:#7b837f;text-align:center;">Flux &middot; Powered by Quantta</div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
+  }
 }
 async function rpc(runtime: Runtime, base: string, key: string, name: string, body: unknown): Promise<any> {
   const result = await runtime.fetch(`${base}/rest/v1/rpc/${name}`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(body)})

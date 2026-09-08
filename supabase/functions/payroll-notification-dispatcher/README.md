@@ -34,3 +34,17 @@ Review the project reference and recipient/mode before activating delivery.
 Never smoke-test by closing a real unpaid payroll. Use local mocked transports
 or an explicitly authorized test run and recipient. See the payroll pilot QA
 record for deployment versions, checks and remaining authenticated UAT.
+
+## Email appearance
+
+`renderPayrollEmail` follows the established payment-request notification:
+dark green Flux header, serif heading, white 560 px card on the light background,
+label/value rows with separators, and a green action button. Registered and paid
+events use the same layout. Values remain escaped; only company, period, folio
+and channel totals appear. The footer is company-neutral because payroll serves
+both companies. The DEV subject prefix and test-recipient banner remain visible.
+
+The authenticated payroll deep link, recipients, idempotency and verified PDF
+attachments are unchanged. Rendering the template never sends an email. Validate
+with `node --test scripts/qa/payroll-pilot-notifications.test.mjs` and inspect the
+rendered HTML at desktop and mobile widths before deploying this function.
