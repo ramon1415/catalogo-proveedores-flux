@@ -1,0 +1,33 @@
+name: PWA private pilot
+on:
+  pull_request:
+    paths:
+      - 'api/pwa.js'
+      - 'app/src/features/install/**'
+      - 'app/src/main.tsx'
+      - 'app/src/components/ui/AppShell.tsx'
+      - 'app/public/pwa/**'
+      - 'scripts/qa/pwa-*.test.mjs'
+      - '.github/workflows/pwa-prod-pilot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'api/pwa.js'
+      - 'app/src/features/install/**'
+      - 'scripts/qa/pwa-*.test.mjs'
+      - '.github/workflows/pwa-prod-pilot.yml'
+permissions:
+  contents: read
+jobs:
+  private-installation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: node --test scripts/qa/pwa-*.test.mjs
+      - run: npm --prefix app run build
+      - run: node scripts/build-vercel-static.mjs
