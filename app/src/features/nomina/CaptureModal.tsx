@@ -139,6 +139,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const conceptIsAutomatic = useRef(true)
 
   const locked = materializedRequestId !== null
+  const canRevalidate = locked && isFinance && isDevSupabaseProject && summary !== null && summary.status !== 'paid'
 
   const companyAccounts = useMemo(() => accountsForCompany(accounts, companyId), [accounts, companyId])
   const companyCostCenters = useMemo(
@@ -513,7 +514,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   }
 
   async function revalidate() {
-    if (revalidating || !locked || !sessionId || sessionVersion === null || !isFinance || !isDevSupabaseProject) return
+    if (revalidating || !canRevalidate || !sessionId || sessionVersion === null) return
     setRevalidating(true)
     try {
       const result = await revalidateMaterializedCapture(sessionId, sessionVersion)
@@ -597,7 +598,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       <button type="button" className={s.secondaryBtn} onClick={onClose}>
         Cerrar
       </button>
-      {locked && isFinance && isDevSupabaseProject && (
+      {canRevalidate && (
         <button type="button" className={s.secondaryBtn} onClick={revalidate} disabled={revalidating}>
           {revalidating ? 'Revalidando paquete…' : 'Revalidar paquete en servidor'}
         </button>
@@ -877,7 +878,9 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                   : 'Lista para confirmación de Finanzas. Sin presupuesto y sin aprobador.'
                 : summary.status === 'approved'
                   ? 'Corrida confirmada por Finanzas · lista para dispersión y comprobantes.'
-                  : `Estado de solicitud: ${summary.status}`}
+                  : summary.status === 'paid'
+                    ? 'Nómina pagada · comprobantes disponibles para consulta.'
+                    : `Estado de solicitud: ${summary.status}`}
             </p>
           </section>
         )}

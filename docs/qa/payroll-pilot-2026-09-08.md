@@ -17,10 +17,10 @@ Proyecto DEV: `scsirgbuqjcwoaxfacth`. Producción no se modifica en este cambio.
 ## Instalación y verificaciones
 
 - Migraciones instaladas en DEV: `20260908015626_payroll_capture_access_and_history.sql` y `20260908015701_payroll_pilot_notifications.sql`. Los archivos usan los mismos identificadores que el historial del servidor.
-- Edge en DEV: payroll-receipt-verify v35 (JWT); payroll-capture-file-url v2 (JWT); payroll-notification-dispatcher v3 (autenticación propia mediante el secreto del dispatcher).
+- Edge en DEV: payroll-receipt-verify v35 (JWT); payroll-capture-file-url v2 (JWT); payroll-notification-dispatcher v4 (autenticación propia y diseño de correo habitual de Flux).
 - El dispatcher general certificado permanece en v83, sin cambios. El nuevo worker de nómina usa la cola y las funciones existentes de auditoría, éxito y reintento.
 - RLS y privilegios verificados después de aplicar: anónimos sin acceso; capturistas sin acceso directo a grants ni al worker; materialización y documentos de correo reservados al servicio.
-- Grants y destinataria de Tesorería configurados en DEV mediante coincidencia única de perfiles y membresías existentes. No hubo backfill. La entrega se habilitó únicamente para la corrida de QA y volvió a desactivarse después del primer aviso.
+- Grants y destinataria de Tesorería configurados en DEV mediante coincidencia única de perfiles y membresías existentes. No hubo backfill. La entrega se habilitó únicamente para la corrida de QA y volvió a desactivarse después de cada aviso autorizado.
 - Suite completa local actualizada: 1,096 pruebas aprobadas (un chequeo opcional de artefacto reservado a CI). Incluye 20 pruebas nuevas de PostgreSQL 17 en memoria, permisos, historial, CORS, importes y notificaciones con transporte simulado.
 - Build y TypeScript de la aplicación verificados. Las pruebas locales no equivalen a UAT autenticado contra PostgREST/Storage.
 
@@ -33,7 +33,7 @@ Ramón autorizó expresamente iniciar sesión y recibir los dos avisos de prueba
 - Corrida `SOL-2026-0157`, captura `4cb0d528-a376-4039-bc02-b1432e2feda4`, solicitud `cfd6db66-063d-4411-b191-42dc9af07371`.
 - Concepto: `QA FLUX 20260908 UAT-2 - NOMINA SINTETICA - NO PAGAR`. Tres personas sintéticas; ningún sueldo real ni transferencia ejecutada.
 - Los cinco archivos se identificaron automáticamente. Periodo: 01 al 15 de septiembre de 2026. Neto $300.00; BBVA $100.00, SPEI $150.00, TOKA $51.16; salida total $301.16.
-- Materialización y confirmación de montos completadas desde la UI. Estado actual: approved, con tres canales aún pendientes.
+- Materialización y confirmación de montos completadas desde la UI. Ramón continuó la prueba, confirmó la precarga automática, concilió los tres comprobantes y cerró la corrida. Estado verificado en DEV: paid; BBVA, SPEI y TOKA dispersados y conciliados, con comprobante asociado.
 - Carátula descargada desde el servidor: 4,315 bytes; SHA-256 `725eba7fe6f2ae5b56bf9e4eced0f775af8e1e97a9db282ef395d85489d8e1d9`, idéntico al archivo cargado.
 - El primer paquete sintético omitía las columnas Sueldo/Sueldo Vacaciones que ya exige el parser de Buk. El servidor rechazó materializarlo; quedó una captura QA sin folio (`b1a7143d-410b-45eb-ab46-9cdedeb9d515`), sin aviso. Se completó el fixture y se registró la corrida anterior. No se debilitó la validación para aceptar el fixture incompleto.
 - Se corrigieron dos problemas observados: conservar los IDs de los originales para descarga aun si falla la validación y refrescar la captura abierta después de confirmar montos en el diálogo de Finanzas. Build/TypeScript y suite completa aprobados; falta revalidar estos dos cambios en navegador.
@@ -44,12 +44,29 @@ Ramón autorizó expresamente iniciar sesión y recibir los dos avisos de prueba
 - El diagnóstico autenticado sin envío confirmó que el modo global es test_only y que el destinatario global era distinto del autorizado. No se modificó esa configuración compartida.
 - Se configuró exclusivamente la captura de SOL-2026-0157 y el perfil activo de Ramón. La configuración caduca; al caducar detiene los claims sin regresar al envío normal. El worker rechaza una corrida de QA en modo real. El cliente no puede elegir destinatarios ni cambiar el modo.
 - Aviso registrado: evento `575aa6eb-6247-4c08-8b8b-ea12a5f1935c`, respuesta HTTP 200 del worker, `sent:1`; procesado a las 02:39:53 UTC del 08/09/2026. El proveedor aceptó el envío a la cuenta autorizada; esto no equivale a confirmar lectura o llegada a bandeja de entrada.
-- Entrega nuevamente desactivada en ambas empresas al terminar esta prueba parcial. La corrida no se marcó como pagada y no se emitió payroll.paid.
+- Al terminar el primer aviso se desactivó la entrega. Por ello, y por la caducidad de la ventana QA, el evento final generado por el cierre manual de Ramón quedó pending con cero intentos; el dominio preview no era la causa.
+- Aviso final: evento `90b92a3d-c41c-4f11-a1fc-66fef8a3386a`, generado a las 04:41:51 UTC. Se renovó únicamente la ventana de esa captura y el perfil activo `ramon@quantta.mx`, tras confirmar modo test_only mediante preflight autenticado sin envío.
+- Procesado una sola vez a las 05:00:05 UTC: intento 1, proveedor `87c971af-a3de-482d-859e-346976f823e3`. El despertar HTTP de 2 segundos agotó su espera, pero el registro del envío confirmó sent; no se reenvió.
+- Gmail de Quantta confirma recepción a las 05:00:08 UTC: mensaje `1a07f634fba064b9`, INBOX, asunto `[DEV TEST] Nómina pagada · SOL-2026-0157`. Se leyó el MIME y se verificaron los tres adjuntos BBVA/SPEI/TOKA, el HTML con encabezado verde y el botón hacia la captura correcta. La representación visual en Gmail no se comprobó desde el navegador automatizado.
+- Entrega nuevamente desactivada en ambas empresas. Cero eventos de nómina pendientes para esta corrida. Los dos avisos autorizados quedaron completos.
+
+### Observaciones finales de Ramón
+
+- La selección del PDF ya precarga importe, fecha y referencia, confirmado por Ramón.
+- Cancelar el selector de archivos hacía llegar su evento cancel al modal compartido y cerraba la captura. Ahora el modal solo responde a su propio cancel; se conservan Escape y el botón Cerrar. También cubre volver a elegir el mismo archivo.
+- Revalidar paquete espera el estado del servidor y se oculta cuando es paid, tanto después del cierre como al reabrir. El estado visible se presenta como Nómina pagada.
+- Build/TypeScript y 15 pruebas dirigidas aprobadas: dos regresiones de modal/cierre, once de precarga y dos de notificaciones visuales en diálogos. El selector nativo sigue pendiente de retest manual porque el navegador compartido no responde.
+
+### Destinatarios para la liberación
+
+- Registro: responsable de Tesorería por empresa; en DEV ambas empresas tienen a Yanin Navarrete (`ynavarrete@soportef.com`).
+- Pago: quien creó la captura. Si la creó Ara, llega a Ara; si la creó Yulma, llega a Yulma. No es un envío automático a todas las capturistas. Se envía un único correo con los comprobantes de todos los canales al cerrar.
+- Verificación de PROD: no existen aún payroll_notification_settings ni get_payroll_notification_document. La configuración productiva y habilitación forman parte de la liberación pendiente; no se aplicaron cambios en PROD.
 
 ## Pendiente para cerrar el piloto
 
-1. Continuar SOL-2026-0157: dispersión simulada, tres comprobantes sintéticos y cierre. El navegador quedó bloqueado al abrir el window.confirm de BBVA; las acciones de control y recuperación reportaron timeout. El canal continúa pendiente en la base. Requiere resolver esa confirmación en el navegador compartido para continuar la UAT.
-2. Enviar el aviso final autorizado a Ramón con los tres comprobantes y verificar Pagada al reabrir, junto con las descargas restantes. La autorización para ambos avisos ya está recibida; no debe pedirse otra vez.
+1. Retest manual de cancelar el selector y comprobar que Revalidar paquete no aparece al reabrir SOL-2026-0157; verificar la descarga de comprobantes desde la captura. Cierre y ambos avisos ya verificados.
+2. Confirmar la apariencia del correo final dentro de Gmail. El mensaje recibido, el HTML y los tres adjuntos ya fueron verificados mediante la API de Gmail.
 3. Validar la experiencia de Ara/Yulma con su sesión. Los permisos por empresa y la prohibición de mutaciones de pago ya están cubiertos por pruebas de base de datos; la UAT realizada corresponde a Ramón con capacidad de Finanzas.
 4. Preparar y revisar la liberación de producción. En la revisión inicial, main estaba en #548 y PROD todavía no tenía las tablas/RPC/Edge de nómina; este PR a DEV no habilita por sí solo el uso en producción.
 
