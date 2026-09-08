@@ -50,10 +50,10 @@ chat ni editarlo en Supabase Studio.
 1. `20260826223239_platform_module_registry.sql` — crea `modules`,
    `module_releases` y `company_modules`.
 2. `20260826223357_platform_module_registry_advisor_hardening.sql`
-3. `20260827090000_platform_module_incidencias.sql` — fija Incidencias en ON
+3. `20260901074848_platform_module_incidencias.sql` — fija Incidencias en ON
    para el único `company_id` incumbente validado por el preflight; no usa
    nombre ni UUID hardcodeado.
-4. `20260827100000_platform_module_nomina.sql`
+4. `20260901074849_platform_module_nomina.sql`
 5. `20260831004813_fersana_company_access_onboarding.sql` +
    `20260831004957_fersana_company_access_advisor_hardening.sql` — DDL y RPC
    atómicos; la liga `fersana` se crea después, dentro del seed.
