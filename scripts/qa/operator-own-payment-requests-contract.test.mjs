@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const migrationUrl = new URL(
-  '../../supabase/migrations/20260831033300_operator_own_payment_requests.sql',
+  '../../supabase/migrations/20260831033553_operator_own_payment_requests.sql',
   import.meta.url,
 )
 const pageUrl = new URL('../../app/src/features/solicitudes/SolicitudesPage.tsx', import.meta.url)
