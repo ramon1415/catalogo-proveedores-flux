@@ -50,8 +50,8 @@ before(async()=>{
   await install('private.enforce_payment_request_tenant_references');await install('private.enforce_reimbursement_actor_scope');
   for(const t of catalog.triggers)await exec(t.definition);
   await exec(`insert into companies(id,name,active) values('${companyA}','Soporte Fersana',true),('${companyB}','Operadora Tlacatecpan',true);`);
-  await exec(read('../../supabase/migrations/20260908064015_payroll_prod_request_type.sql'));
-  await exec(read('../../supabase/migrations/20260908064156_payroll_prod_capture_and_notifications.sql'));
+  await exec(read('../../supabase/migrations/20260908075132_payroll_prod_request_type.sql'));
+  await exec(read('../../supabase/migrations/20260908075149_payroll_prod_capture_and_notifications.sql'));
   await exec(`insert into profiles(id,auth_user_id,full_name,email,active) values('${rh}','${rh}','Synthetic RH','rh@example.test',true),('${finance}','${finance}','Synthetic Finance','finance@example.test',true),('${outsider}','${outsider}','Synthetic other','other@example.test',true);
     insert into profile_company_memberships(profile_id,company_id,active,role_key) values('${rh}','${companyA}',true,'operator'),('${finance}','${companyA}',true,'finance'),('${finance}','${companyB}',true,'operator'),('${outsider}','${companyA}',true,'operator');
     insert into payroll_capture_grants(profile_id,company_id) values('${rh}','${companyA}');
