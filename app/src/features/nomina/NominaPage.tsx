@@ -12,6 +12,7 @@ import {
   loadCaptureContext,
 } from './api'
 import { CaptureModal } from './CaptureModal'
+import { ObligationsPanel } from './ObligationsPanel'
 import type { BankAccount, Company, CompanyCostCenter, CostCenter, CaptureSession, SubmissionSummary } from './types'
 import s from './Nomina.module.css'
 
@@ -35,6 +36,7 @@ export default function NominaPage() {
   const [modal, setModal] = useState<{ session: CaptureSession | null } | null>(null)
   const [amountConfirmation, setAmountConfirmation] = useState<SubmissionSummary | null>(null)
   const [confirmationBusy, setConfirmationBusy] = useState(false)
+  const [section, setSection] = useState<'payroll'|'obligations'>(()=>new URLSearchParams(window.location.search).has('obligation')?'obligations':'payroll')
 
   async function openAmountConfirmation(session: CaptureSession): Promise<void> {
     if (!isFinance || !session.materialized_payment_request_id || !session.finance_confirmation_pending) return
@@ -146,6 +148,11 @@ export default function NominaPage() {
 
   return (
     <>
+      <div className={s.fileActions} role="group" aria-label="Tipo de solicitud de nómina">
+        <button className={section==='payroll'?s.primaryBtn:s.secondaryBtn} onClick={()=>setSection('payroll')}>Sueldos</button>
+        <button className={section==='obligations'?s.primaryBtn:s.secondaryBtn} onClick={()=>setSection('obligations')}>IMSS / ISN</button>
+      </div>
+      {section==='obligations'&&companyId ? <ObligationsPanel key={companyId} companyId={companyId} companyName={companyName||'Empresa activa'}/> : <>
       <div className={s.phead}>
         <div>
           <h1>Capturas de nómina</h1>
@@ -272,6 +279,7 @@ export default function NominaPage() {
           </div>
         </Modal>
       )}
+      </>}
     </>
   )
 }

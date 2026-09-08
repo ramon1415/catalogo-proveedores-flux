@@ -1,0 +1,36 @@
+name: Payroll obligations
+on:
+  pull_request:
+    paths:
+      - 'app/src/features/nomina/**'
+      - 'supabase/functions/payroll-obligations/**'
+      - 'supabase/functions/payroll-obligation-notifications/**'
+      - 'supabase/migrations/*payroll_obligations*'
+      - 'scripts/qa/payroll-*.test.mjs'
+      - package.json
+      - package-lock.json
+      - .github/workflows/payroll-obligation-documents-tests.yml
+  push:
+    branches: [dev, main]
+    paths:
+      - 'app/src/features/nomina/**'
+      - 'supabase/functions/payroll-obligations/**'
+      - 'supabase/functions/payroll-obligation-notifications/**'
+      - 'supabase/migrations/*payroll_obligations*'
+      - 'scripts/qa/payroll-*.test.mjs'
+      - package.json
+      - package-lock.json
+      - .github/workflows/payroll-obligation-documents-tests.yml
+permissions:
+  contents: read
+jobs:
+  private-obligations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: node --test scripts/qa/payroll-obligation-documents.test.mjs scripts/qa/payroll-obligation-services.test.mjs scripts/qa/payroll-obligations-flow.test.mjs scripts/qa/payroll-obligations-ui.test.mjs scripts/qa/payroll-receipt-autofill.test.mjs scripts/qa/payroll-modal-uat.test.mjs scripts/qa/payroll-pilot-notifications.test.mjs
