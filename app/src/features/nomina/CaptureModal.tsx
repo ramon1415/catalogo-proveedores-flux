@@ -13,6 +13,8 @@ import {
   costCenterLabel,
   costCentersForCompany,
   defaultPayrollConcept,
+  fileAmountLabel,
+  fileRecordCountLabel,
   formatMoney,
   friendlyError,
   inferPayrollPeriodFromFileNames,
@@ -686,8 +688,8 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                   </div>
                 </div>
                 <div className={s.fileAggregate}>
-                  {state.recordCount != null && <span>{state.recordCount} registros</span>}
-                  {state.totalAmountMinor != null && <strong>{moneyFromMinor(state.totalAmountMinor)}</strong>}
+                  {state.recordCount != null && <span>{fileRecordCountLabel(slot, state.recordCount)}</span>}
+                  {state.totalAmountMinor != null && <strong title={fileAmountLabel(slot)}>{moneyFromMinor(state.totalAmountMinor)}</strong>}
                 </div>
                 <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
