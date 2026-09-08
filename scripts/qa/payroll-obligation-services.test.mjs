@@ -52,3 +52,8 @@ test('real mode cannot silently deliver a company configured for QA; unauthorize
  assert.equal((await notify(new Request('https://worker',{method:'POST',body:'{"dry_run":true}'}),runtime)).status,401);
  assert.match(renderObligationEmail({...doc,event_type:'payroll.obligation.registered',kind:'isn_cdmx'},true).subject,/ISN/);
 });
+
+test('a Finance-reviewed submission email directs Treasury to payment without repeating confirmation',()=>{
+ const email=renderObligationEmail({...doc,event_type:'payroll.obligation.registered',status:'approved'},true);
+ assert.match(email.html,/Los montos quedaron confirmados/);assert.doesNotMatch(email.html,/confirma el monto para continuar/);
+});

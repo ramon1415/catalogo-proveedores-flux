@@ -116,3 +116,29 @@ históricos de solicitudes normales usen el mismo bloqueo.
 
 El rol RH global, la bandeja transversal de comprobaciones y el feed contable
 siguen como entregas independientes.
+
+
+## Ajustes de UAT - 8 de septiembre de 2026
+
+- Carga y guardado de borrador anuncian éxito dentro del modal y por toast,
+  únicamente después de completar la operación. Cancelar el selector vacío
+  no inicia una carga ni descarta la confirmación anterior.
+- Antes de enviar aparece un resumen para confirmar montos. El nuevo RPC
+  `submit_reviewed_payroll_obligation` valida versión e importe y registra la
+  revisión. Si quien captura tiene capacidad de Finanzas, envío y confirmación
+  ocurren en una sola transacción; no aparece otra confirmación después.
+  Captura sin capacidad de pago conserva el paso de revisión por Finanzas.
+- Documentos con fondo contrastado, iconos PDF/descarga y sección titulada.
+  Pago completado usa una tarjeta de éxito verde con icono de confirmación.
+  Navegación Sueldos / IMSS-ISN subrayada; acciones de crear llevan +.
+- Los dos correos ISN reportados como faltantes estaban en INBOX, sin leer:
+  solicitud 18:14:01 UTC y pago 18:15:02 UTC. La espera correspondía al cron
+  de un minuto. No se reenvían correos ya entregados.
+- La migración `20260908182623_payroll_obligations_review_feedback.sql` activa
+  el worker al insertar cada evento propio; pg_net inicia después del commit.
+  Conserva el cron como recuperación y la misma idempotencia y cuenta de QA.
+- Worker de notificaciones v2 en DEV: el correo reconoce si Finanzas ya
+  confirmó los montos, para no pedir una confirmación duplicada.
+- Suite dirigida ampliada a 52 pruebas: orden de revisión/envío en ambos tipos,
+  permisos, monto/versión, idempotencia, mensajes de éxito/error y trigger
+  limitado a eventos de obligaciones en empresas habilitadas.

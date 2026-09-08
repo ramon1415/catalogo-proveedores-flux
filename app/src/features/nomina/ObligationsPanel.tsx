@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { Modal } from '../../components/ui/Modal'
+import { IcPlus, IcFile, IcDownload, IcAprobaciones } from '../../components/ui/icons'
 import { useToast } from '../../components/ui/Toast'
 import { extractPdfLines } from '../../lib/pdfText'
 import { parseObligationDocument } from './obligationDocuments'
@@ -23,6 +24,7 @@ const errors: Record<string,string> = {
  OBLIGATION_BUDGET_ASSIGNMENT_REQUIRED: 'Falta configurar la partida y el centro de costo para esta obligación.',
  OBLIGATION_BUDGET_LINE_REQUIRED: 'No existe presupuesto activo para el centro, partida y mes seleccionados.',
  OBLIGATION_BUDGET_UNAVAILABLE: 'El presupuesto disponible no alcanza para enviar esta obligación.',
+ OBLIGATION_REVIEW_REQUIRED: 'Los montos cambiaron. Revisa la solicitud antes de enviarla.',
  OBLIGATION_STALE_VERSION: 'La solicitud cambió. Se actualizará para que revises su última versión.',
  OBLIGATION_DUPLICATE_DOCUMENT: 'Este documento ya está registrado en otra obligación de la empresa.',
  OBLIGATION_PAYMENT_FORM_IS_NOT_RECEIPT: 'Selecciona el comprobante bancario del pago realizado. Una línea de captura no acredita el pago.',
@@ -44,7 +46,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
  const {showToast}=useToast();const [context,setContext]=useState<Context|null>(null);const [records,setRecords]=useState<Obligation[]>([])
  const [loading,setLoading]=useState(true);const [modal,setModal]=useState<Obligation|null>(null);const [busy,setBusy]=useState(false)
  const [center,setCenter]=useState('');const [month,setMonth]=useState('');const [amount,setAmount]=useState('');const [date,setDate]=useState('');const [reference,setReference]=useState('')
- const [notice,setNotice]=useState(''); const scope=useRef(companyId);scope.current=companyId
+ const [notice,setNotice]=useState(''); const [success,setSuccess]=useState<{title:string;detail:string}|null>(null);const [review,setReview]=useState<Obligation|null>(null); const scope=useRef(companyId);scope.current=companyId
  async function refresh(id?: string) {
   const company=companyId;const rows=await rpc<Obligation[]>('get_payroll_obligations',{p_company_id:company,p_id:null})
   if(scope.current!==company)return
@@ -52,7 +54,7 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
   if(id){const current=rows.find(r=>r.id===id);if(current)setModal(current)}
  }
  useEffect(()=>{
-  let cancelled=false;setContext(null);setRecords([]);setModal(null);setNotice('');setLoading(true)
+  let cancelled=false;setContext(null);setRecords([]);setModal(null);setNotice('');setSuccess(null);setReview(null);setLoading(true)
   void rpc<Context>('get_payroll_obligation_context',{p_company_id:companyId}).then(async data=>{
    if(cancelled)return;setContext(data)
    if(data.can_capture||data.can_pay){await refresh()
@@ -63,22 +65,23 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
   return()=>{cancelled=true}
  },[companyId])
  function open(o: Obligation) {
-  setModal(o);setCenter(o.cost_center_id||'');setMonth(o.budget_month?.slice(0,7)||'');setNotice('')
+  setReview(null);setSuccess(null);setModal(o);setCenter(o.cost_center_id||'');setMonth(o.budget_month?.slice(0,7)||'');setNotice('')
   const receipt=o.files.find(f=>f.kind==='receipt'&&f.status==='verified')?.parsed
   setAmount(receipt?.amount||'');setDate(receipt?.paymentDate||o.payment_date||'');setReference(receipt?.reference||o.bank_reference||'')
  }
  async function execute(action: ()=>Promise<void>) {
-  if(busy)return;setBusy(true);setNotice('')
-  try{await action()}catch(error){const text=message(error);setNotice(text);showToast('Revisa la solicitud',text,'warning');if(modal)await refresh(modal.id).catch(()=>{})}
+  if(busy)return;setBusy(true);setNotice('');setSuccess(null)
+  try{await action()}catch(error){const text=message(error);setReview(null);setNotice(text);showToast('Revisa la solicitud',text,'warning');if(modal)await refresh(modal.id).catch(()=>{})}
   finally{setBusy(false)}
  }
+ function completed(title: string,detail: string) {setSuccess({title,detail});showToast(title,detail,'success')}
  async function create(kind: Kind) {
   const id=crypto.randomUUID()
   await rpc('save_payroll_obligation',{p_id:id,p_company_id:companyId,p_kind:kind})
   const rows=await rpc<Obligation[]>('get_payroll_obligations',{p_company_id:companyId,p_id:id});if(scope.current!==companyId)return
   await refresh();if(rows[0])open(rows[0])
  }
- async function upload(files: FileList|null,receipt=false) {
+ async function upload(files: FileList|File[]|null,receipt=false) {
   if(!modal||!files?.length)return
   const id=modal.id;let current=modal
   for(const file of Array.from(files)) {
@@ -98,27 +101,40 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
    if(receipt){setAmount(verified.parsed?.amount||'');setDate(verified.parsed?.paymentDate||'');setReference(verified.parsed?.reference||'')}
   }
   await refresh(id)
+  completed(receipt?'Comprobante cargado':'Carga completada',receipt?'El comprobante quedó guardado. Revisa los datos del pago.':`${files.length} ${files.length===1?'archivo guardado':'archivos guardados'} correctamente.`)
  }
  async function save() {
   if(!modal)return
   await rpc('save_payroll_obligation',{p_id:modal.id,p_company_id:companyId,p_kind:modal.kind,p_version:modal.version,p_cost_center_id:center||null,p_budget_month:month?`${month}-01`:null})
   await refresh(modal.id)
+  completed('Borrador guardado','Tus documentos y datos quedaron guardados. Puedes continuar después.')
+ }
+ async function prepareSubmit() {
+  if(!modal)return
+  await rpc('save_payroll_obligation',{p_id:modal.id,p_company_id:companyId,p_kind:modal.kind,p_version:modal.version,p_cost_center_id:center||null,p_budget_month:month?`${month}-01`:null})
+  const current=(await rpc<Obligation[]>('get_payroll_obligations',{p_company_id:companyId,p_id:modal.id}))[0]
+  if(scope.current!==companyId)return
+  setModal(current);setReview(current);await refresh()
  }
  async function transition(action: string) {
   if(!modal)return
-  let current=modal
+  const current=action==='submit'?review:modal
+  if(!current)return
   if(action==='submit'){
-   await rpc('save_payroll_obligation',{p_id:modal.id,p_company_id:companyId,p_kind:modal.kind,p_version:modal.version,p_cost_center_id:center||null,p_budget_month:month?`${month}-01`:null})
-   current=(await rpc<Obligation[]>('get_payroll_obligations',{p_company_id:companyId,p_id:modal.id}))[0]
+   await rpc('submit_reviewed_payroll_obligation',{p_id:current.id,p_version:current.version,p_reviewed_amount_minor:current.amount_minor})
+  }else{
+   await rpc('transition_payroll_obligation',{p_id:current.id,p_version:current.version,p_action:action,p_amount_minor:action==='pay'?receiptAmountMinor(amount):null,p_payment_date:action==='pay'?date||null:null,p_reference:action==='pay'?reference||null:null})
   }
-  await rpc('transition_payroll_obligation',{p_id:current.id,p_version:current.version,p_action:action,p_amount_minor:action==='pay'?receiptAmountMinor(amount):null,p_payment_date:action==='pay'?date||null:null,p_reference:action==='pay'?reference||null:null})
-  await refresh(current.id);showToast('Solicitud actualizada',action==='pay'?'El pago quedó registrado.':'El cambio quedó guardado.','success')
+  setReview(null);await refresh(current.id)
+  if(action==='submit')completed('Solicitud enviada a Finanzas','Los montos quedaron confirmados y se programó el aviso por correo.')
+  else if(action==='pay')completed('Pago registrado','El comprobante quedó guardado y se programó el aviso de pago.')
+  else completed('Solicitud actualizada',action==='confirm'?'Los montos quedaron confirmados. La solicitud está lista para pago.':'El cambio quedó guardado.')
  }
  const cfg=context?.kinds.find(k=>k.kind===modal?.kind)
  const canEdit=!!context?.can_capture&&modal?.status==='draft'
  return <>
   <div className={s.phead}><div><h1>IMSS e ISN</h1><p>Registra los documentos y el pago de las obligaciones de {companyName}.</p></div>
-   <div className={s.fileActions}>{context?.can_capture&&context.kinds.map(k=><button key={k.kind} className={s.primaryBtn} disabled={busy} onClick={()=>void execute(()=>create(k.kind))}>Nueva solicitud {kinds[k.kind]}</button>)}</div>
+   <div className={s.fileActions}>{context?.can_capture&&context.kinds.map(k=><button key={k.kind} className={s.primaryBtn} disabled={busy} onClick={()=>void execute(()=>create(k.kind))}><span aria-hidden="true"><IcPlus size={16}/></span>Nueva solicitud {kinds[k.kind]}</button>)}</div>
   </div>
   <section className={s.board}><div className={s.boardHead}><div><h2 id="obligation-list-title">Solicitudes IMSS / ISN</h2><p>{records.length} solicitudes · Acceso privado</p></div></div>
    <div className={s.boardList} role="region" aria-labelledby="obligation-list-title" tabIndex={0}>
@@ -127,20 +143,30 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
     {records.map(o=><article key={o.id} className={s.boardItem}><div className={s.boardItemInfo}><strong>{kinds[o.kind]} · {o.period_start?.slice(0,7)||'Nueva captura'}</strong><span>{o.amount_minor?formatMoney(o.amount_minor/100):'Importe pendiente de documento'}</span></div>
      <span className={`${s.state} ${o.status==='paid'?s.stateSuccess:s.stateNeutral}`}>{states[o.status]}</span><button className={s.secondaryBtn} onClick={()=>open(o)}>Abrir</button></article>)}
    </div></section>
-  {modal&&<Modal title={`Solicitud ${kinds[modal.kind]}`} subtitle={`${companyName} · ${states[modal.status]}`} size="lg" onClose={()=>{if(!busy)setModal(null)}} actions={<>
+  {modal&&<Modal title={review?`Confirmar montos de ${kinds[modal.kind]}`:`Solicitud ${kinds[modal.kind]}`} subtitle={`${companyName} · ${states[modal.status]}`} size="lg" onClose={()=>{if(!busy)setModal(null)}} actions={<>
    <button className={s.secondaryBtn} disabled={busy} onClick={()=>setModal(null)}>Cerrar</button>
-   {canEdit&&<><button className={s.secondaryBtn} disabled={busy} onClick={()=>void execute(save)}>Guardar borrador</button><button className={s.primaryBtn} disabled={busy||!center||!month||!modal.amount_minor} onClick={()=>void execute(()=>transition('submit'))}>Enviar a Finanzas</button></>}
+   {review?<><button className={s.secondaryBtn} disabled={busy} onClick={()=>setReview(null)}>Volver a editar</button><button className={s.primaryBtn} disabled={busy} onClick={()=>void execute(()=>transition('submit'))}>Confirmar y enviar a Finanzas</button></>:canEdit&&<><button className={s.secondaryBtn} disabled={busy} onClick={()=>void execute(save)}>Guardar borrador</button><button className={s.primaryBtn} disabled={busy||!center||!month||!modal.amount_minor} onClick={()=>void execute(prepareSubmit)}>Enviar a Finanzas</button></>}
    {context?.can_pay&&modal.status==='submitted'&&<button className={s.primaryBtn} disabled={busy} onClick={()=>void execute(()=>transition('confirm'))}>Confirmar montos correctos</button>}
    {context?.can_pay&&modal.status==='approved'&&<button className={s.primaryBtn} disabled={busy||!amount||!date||!reference||!modal.files.some(f=>f.kind==='receipt'&&f.status==='verified')} onClick={()=>void execute(()=>transition('pay'))}>Confirmar pago registrado</button>}
   </>}>
    <div className={s.section}>
     {notice&&<div className={s.notice} role="alert">{notice}</div>}
+    {success&&modal.status!=='paid'&&<div className={s.successFeedback} role="status"><span className={s.successIcon} aria-hidden="true"><IcAprobaciones size={22}/></span><div><strong>{success.title}</strong><p>{success.detail}</p></div></div>}
+    {review?<section className={s.reviewPanel} aria-label="Revisión antes del envío">
+     <h3>Revisa los datos antes de enviar</h3><p>Confirma que el importe y el periodo coinciden con tus documentos.</p>
+     <dl><div><dt>Empresa</dt><dd>{companyName}</dd></div><div><dt>Importe total</dt><dd>{formatMoney((review.amount_minor||0)/100)}</dd></div>
+     <div><dt>Periodo</dt><dd>{review.period_start} → {review.period_end}</dd></div><div><dt>Centro de costo</dt><dd>{cfg?.centers.find(c=>c.id===review.cost_center_id)?.name}</dd></div>
+     <div><dt>Mes presupuestal</dt><dd>{review.budget_month?.slice(0,7)}</dd></div></dl>
+     <p>{context?.can_pay?'Al confirmar, la solicitud quedará lista para registrar su pago.':'Finanzas recibirá la solicitud para su revisión y pago.'}</p>
+    </section>:<>
     {canEdit&&<label className={s.dropzone} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(!busy)void execute(()=>upload(e.dataTransfer.files))}}>
      <strong>Arrastra aquí los documentos {kinds[modal.kind]}</strong><span>{modal.kind==='imss'?'Línea SIPARE y, si los tienes, cédula SUA y propuesta EMA.':'Línea de captura ISN de CDMX.'} PDF, hasta 10 MB por archivo.</span>
-     <input type="file" accept="application/pdf,.pdf" multiple disabled={busy} onChange={e=>{const files=e.target.files;void execute(()=>upload(files));e.target.value=''}} />
+     <input type="file" accept="application/pdf,.pdf" multiple disabled={busy} onChange={async e=>{const files=Array.from(e.target.files||[]);e.target.value='';if(files.length)await execute(()=>upload(files))}} />
     </label>}
-    <div className={s.fileRows}>{modal.files.map(f=><div key={f.id} className={s.fileRow}><div className={s.fileInfo}><strong>{kinds[f.kind]}</strong><span>{f.status==='verified'?'Guardado':'Carga pendiente; vuelve a seleccionar el archivo'}</span></div>
-     {f.status==='verified'&&<button className={s.secondaryBtn} disabled={busy} onClick={()=>void execute(async()=>{const data=await fileAction(f.id,'download');window.open(data.url,'_blank','noopener,noreferrer')})}>Descargar</button>}</div>)}</div>
+    {modal.files.length>0&&<section className={s.uploadedDocuments} aria-label="Documentos cargados"><div className={s.uploadedHeading}><h3>Documentos cargados</h3><span>{modal.files.filter(f=>f.status==='verified').length} guardados</span></div>
+     <div className={s.uploadedFiles}>{modal.files.map(f=><div key={f.id} className={s.uploadedFile}><span className={s.fileIcon}><IcFile size={20}/></span><div className={s.fileInfo}><strong>{kinds[f.kind]}</strong><span>PDF · {f.status==='verified'?'Guardado correctamente':'Carga pendiente; vuelve a seleccionar el archivo'}</span></div>
+     {f.status==='verified'&&<button className={s.secondaryBtn} disabled={busy} onClick={()=>void execute(async()=>{const data=await fileAction(f.id,'download');window.open(data.url,'_blank','noopener,noreferrer')})}><IcDownload size={16}/>Descargar</button>}</div>)}</div>
+    </section>}
     <div className={s.summaryMetrics}><div className={s.metric}><span>Importe total</span><strong>{modal.amount_minor?formatMoney(modal.amount_minor/100):'Pendiente'}</strong></div><div className={s.metric}><span>Periodo</span><strong>{modal.period_start||'Pendiente'} → {modal.period_end||'Pendiente'}</strong></div></div>
     {modal.due_date&&<p>Vencimiento del documento: {modal.due_date}</p>}
     {canEdit&&<div className={s.receiptForm}>
@@ -150,13 +176,14 @@ export function ObligationsPanel({companyId,companyName}: {companyId: string; co
      <label>Mes presupuestal<input type="month" value={month} disabled={busy} onChange={e=>setMonth(e.target.value)}/></label></div>
     </div>}
     {context?.can_pay&&modal.status==='approved'&&<div className={s.receiptForm}><h3>Registrar el pago realizado</h3><p>Sube el comprobante bancario y revisa los datos leídos. Completa los que no se hayan identificado.</p>
-     <label className={s.fullRow}>Comprobante PDF<input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={e=>{const files=e.target.files;void execute(()=>upload(files,true));e.target.value=''}}/></label>
+     <label className={s.fullRow}>Comprobante PDF<input type="file" accept="application/pdf,.pdf" disabled={busy} onChange={async e=>{const files=Array.from(e.target.files||[]);e.target.value='';if(files.length)await execute(()=>upload(files,true))}}/></label>
      <div className={s.grid}><label>Importe pagado<input inputMode="decimal" value={amount} disabled={busy} onChange={e=>setAmount(e.target.value)}/></label>
      <label>Fecha de pago<input type="date" value={date} disabled={busy} onChange={e=>setDate(e.target.value)}/></label>
      <label>Referencia bancaria<input value={reference} maxLength={120} disabled={busy} onChange={e=>setReference(e.target.value)}/></label></div>
     </div>}
-    {modal.status==='paid'&&<div className={`${s.inlineNotice} ${s.stateSuccess}`}>Pago registrado el {modal.payment_date}. El comprobante está disponible para descargar.</div>}
+    {modal.status==='paid'&&<div className={s.paymentSuccess}><span className={s.successIcon} aria-hidden="true"><IcAprobaciones size={26}/></span><div><strong>Pago completado</strong><p>Pago registrado el {modal.payment_date}. El comprobante está disponible para descargar.</p></div></div>}
     {(canEdit||(context?.can_pay&&['submitted','approved'].includes(modal.status)))&&<button className={s.secondaryBtn} disabled={busy} onClick={()=>{if(window.confirm('¿Cancelar esta solicitud? Se liberará su reserva presupuestal.'))void execute(()=>transition('cancel'))}}>Cancelar solicitud</button>}
+    </>}
    </div>
   </Modal>}
  </>

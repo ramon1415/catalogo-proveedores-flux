@@ -54,6 +54,7 @@ before(async()=>{
  `);
  await db.exec(read('../../supabase/migrations/20260908172940_payroll_obligations_imss_isn.sql'));
  await db.exec(read('../../supabase/migrations/20260908173408_payroll_obligations_app_origin.sql'));
+ await db.exec(read('../../supabase/migrations/20260908182623_payroll_obligations_review_feedback.sql'));
  await db.query('insert into payroll_obligation_settings(company_id,kind,enabled,budget_category_id) values($1,$2,true,$3)',[company,'imss',category]);
 });
 after(async()=>{await db?.close();});
@@ -144,4 +145,36 @@ test('ISN uses its printed total, completes payment and never counts the source 
  assert.equal((await snapshot(obligation)).status,'paid');
  const budget=await as(outsider,()=>db.query('select available,executed from budget_availability'));assert.equal(Number(budget.rows[0].available),140);assert.equal(Number(budget.rows[0].executed),110);
  const events=await db.query('select event_type from notification_events where source_id=$1',[obligation]);assert.equal(events.rows.length,2);
+});
+
+test('pre-send review is atomic, rejects changed amounts and preserves capture/payment permissions',async()=>{
+ const obligation=id(70);await as(rh,()=>call('save_payroll_obligation',[obligation,company,'imss',null,center,'2026-07-01']));
+ await upload(obligation,'imss_sipare',rh,'7',{...parsed,amountMinor:100,paymentReference:'QA-REVIEW-RH'});
+ let o=await snapshot(obligation);
+ await assert.rejects(as(rh,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,999])),/REVIEW_REQUIRED/);
+ await assert.rejects(as(outsider,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,100])),/ACCESS_DENIED/);
+ await assert.rejects(as(null,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,100]),'anon'),/permission denied/);
+ assert.equal(await as(rh,()=>call('submit_reviewed_payroll_obligation',[obligation,o.version,100])),'submitted');
+ assert.equal((await snapshot(obligation)).confirmed_by,null,'RH review never impersonates Finance');
+ await db.query('insert into payroll_capture_grants values($1,$2,true)',[finance,company]);
+ const second=id(71);await as(finance,()=>call('save_payroll_obligation',[second,company,'imss',null,center,'2026-07-01']));
+ await upload(second,'imss_sipare',finance,'8',{...parsed,amountMinor:100,paymentReference:'QA-REVIEW-FINANCE'});
+ o=await snapshot(second);
+ assert.equal(await as(finance,()=>call('submit_reviewed_payroll_obligation',[second,o.version,100])),'approved');
+ assert.equal(await as(finance,()=>call('submit_reviewed_payroll_obligation',[second,o.version,100])),'approved');
+ assert.equal((await snapshot(second)).confirmed_by,finance);
+ assert.equal(Number((await db.query('select count(*) n from notification_events where source_id=$1',[second])).rows[0].n),1);
+ const audit=(await db.query('select action from payroll_obligation_audit where obligation_id=$1 order by id',[second])).rows.map(r=>r.action);
+ assert.ok(audit.indexOf('reviewed_amounts_before_submission')<audit.indexOf('submitted'));
+ await db.query('delete from payroll_capture_grants where profile_id=$1',[finance]);
+});
+test('event insertion wakes only obligation notifications for an enabled company',async()=>{
+ await db.exec('create table test_obligation_wakes(id int); create or replace function private.wake_payroll_obligation_notifications() returns bigint language plpgsql as $$begin insert into public.test_obligation_wakes values(1);return 1;end;$$;');
+ await db.query('update payroll_obligation_settings set dispatch_enabled=true where company_id=$1 and kind=$2',[company,'imss']);
+ await db.query("insert into notification_events(event_type,source_table,source_id,status) values('payroll.obligation.registered','payroll_obligations',$1,'pending')",[id(71)]);
+ assert.equal((await db.query('select count(*) n from test_obligation_wakes')).rows[0].n,1);
+ await db.query("insert into notification_events(event_type,source_table,source_id,status) values('payment_request.created','payment_requests',$1,'pending')",[id(71)]);
+ await db.query('update payroll_obligation_settings set dispatch_enabled=false');
+ await db.query("insert into notification_events(event_type,source_table,source_id,status) values('payroll.obligation.paid','payroll_obligations',$1,'pending')",[id(71)]);
+ assert.equal((await db.query('select count(*) n from test_obligation_wakes')).rows[0].n,1);
 });
