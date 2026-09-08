@@ -14,6 +14,8 @@ import {
   costCentersForCompany,
   defaultPayrollConcept,
   fileAmountLabel,
+  fileValidationMessage,
+  validateFilesSourceAccount,
   fileRecordCountLabel,
   formatMoney,
   friendlyError,
@@ -119,7 +121,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const [concept, setConcept] = useState('')
   const [notes, setNotes] = useState('')
   const [channels, setChannels] = useState<PayrollChannel[]>([])
-  const [files, setFiles] = useState<FileMap>({})
+  const [selectedFiles, setFiles] = useState<FileMap>({})
   const [unrecognized, setUnrecognized] = useState<UnrecognizedFile[]>([])
 
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -151,6 +153,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   )
   const selectedAccount = useMemo(() => accounts.find((account) => account.id === sourceAccountId), [accounts, sourceAccountId])
   const sourceCandidates = useMemo(() => sourceAccountCandidates(selectedAccount), [selectedAccount])
+  const files = useMemo(() => validateFilesSourceAccount(selectedFiles, sourceCandidates), [selectedFiles, sourceCandidates])
   const required = useMemo(() => requiredSlots(channels), [channels])
   const missing = useMemo(
     () => required.filter((slot) => !files[slot]?.uploaded && !files[slot]?.uploadable),
@@ -685,6 +688,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                       const meta = [distinctName, size].filter(Boolean).join(' · ')
                       return meta ? <span title={meta}>{meta}</span> : null
                     })()}
+                    {fileValidationMessage(state) && <p className={s.fileIssue} role="alert">{fileValidationMessage(state)}</p>}
                   </div>
                 </div>
                 <div className={s.fileAggregate}>
@@ -695,6 +699,12 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
                 </span>
                 <div className={s.fileActions}>
+                  {state.issueCodes?.includes('PAYROLL_SOURCE_ACCOUNT_MISMATCH') && (
+                    <button type="button" className={s.secondaryBtn} onClick={() => {
+                      setDetailsOpen(true)
+                      requestAnimationFrame(() => document.getElementById('payroll-source-account')?.focus())
+                    }}>Revisar cuenta origen</button>
+                  )}
                   {(state.file || state.fileId) && (
                     <button type="button" className={s.secondaryBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
                       <IcDownload size={15} /> Descargar
@@ -803,7 +813,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               </label>
               <label>
                 Cuenta origen *
-                <select value={sourceAccountId} onChange={(event) => handleSourceAccountChange(event.target.value)} disabled={locked}>
+                <select id="payroll-source-account" value={sourceAccountId} onChange={(event) => handleSourceAccountChange(event.target.value)} disabled={locked}>
                   <option value="">Seleccionar cuenta origen</option>
                   {companyAccounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
                 </select>

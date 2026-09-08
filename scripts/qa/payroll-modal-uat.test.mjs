@@ -72,7 +72,7 @@ test('revalidation waits for server state and disappears immediately after the p
     './ChannelOperations': { ChannelOperations: props => React.createElement('channel-operations', props) },
     './logic': {
       ALL_SLOTS: [], SLOT_CONFIG: {}, accountsForCompany: () => [], costCentersForCompany: () => [],
-      sourceAccountCandidates: () => [], requiredSlots: () => [], defaultPayrollConcept: () => 'Nómina de prueba',
+      validateFilesSourceAccount: payrollLogic.validateFilesSourceAccount, fileValidationMessage: payrollLogic.fileValidationMessage, sourceAccountCandidates: () => [], requiredSlots: () => [], defaultPayrollConcept: () => 'Nómina de prueba',
       formatMoney: value => `$${value}`, channelLabel: String, friendlyError: String,
     },
   })
