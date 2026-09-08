@@ -2,7 +2,7 @@
 // requeridos, validación de metadata, inspección local de archivos, mapas de
 // estado/error y formateadores. Portado 1:1 desde payroll_capture.js.
 
-import { summarizePayrollSpeiForCapture, parsePayrollSpeiTxt } from './speiParser'
+import { parsePayrollSpeiTxt } from './speiParser'
 import type {
   BankAccount,
   CompanyCostCenter,
@@ -290,45 +290,60 @@ export async function inspectFile(
     issueCodes: [],
   }
 
-  if (slot === 'layout_spei') {
-    const parsedWithoutAccount = parsePayrollSpeiTxt(buffer)
-    const summary = sourceCandidates.length
-      ? summarizePayrollSpeiForCapture(buffer, sourceCandidates)
-      : {
-          parserVersion: parsedWithoutAccount.parserVersion,
-          contractVersion: parsedWithoutAccount.contractVersion,
-          valid: parsedWithoutAccount.issues.length === 0 && parsedWithoutAccount.records.length > 0,
-          recordCount: parsedWithoutAccount.issues.length === 0 ? parsedWithoutAccount.records.length : 0,
-          totalAmountMinor:
-            parsedWithoutAccount.issues.length === 0
-              ? parsedWithoutAccount.records.reduce((sum, record) => sum + record.amountMinor, 0)
-              : null,
-          currency: 'MXN',
-          issues: parsedWithoutAccount.issues,
-        }
-    if (!summary.valid) {
-      return { ...base, status: 'parser_error', uploadable: false, parserSummary: summary, issueCodes: ['PARSER_ERROR'] }
-    }
-    return {
-      ...base,
-      status: 'parsed',
-      parserSummary: summary,
-      recordCount: summary.recordCount,
-      totalAmountMinor: summary.totalAmountMinor,
-    }
-  }
-  if (slot === 'layout_toka') {
+  if (slot === 'layout_spei' || slot === 'layout_toka') {
     const parsed = parsePayrollSpeiTxt(buffer)
-    const allowed = new Set(sourceCandidates.map(normalizeAccount18))
-    if (
-      parsed.issues.length ||
-      parsed.records.length !== 1 ||
-      (allowed.size > 0 && parsed.records.some((record) => !allowed.has(record.sourceAccount)))
-    ) {
+    if (parsed.issues.length || !parsed.records.length || (slot === 'layout_toka' && parsed.records.length !== 1)) {
       return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
     }
+    const totalAmountMinor = parsed.records.reduce((sum, record) => sum + record.amountMinor, 0)
+    if (!Number.isSafeInteger(totalAmountMinor)) {
+      return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
+    }
+    const physical: FileSlotState = {
+      ...base,
+      status: slot === 'layout_spei' ? 'parsed' : 'server_verification_pending',
+      recordCount: parsed.records.length,
+      totalAmountMinor,
+      encodedSourceAccounts: Array.from(new Set(parsed.records.map((record) => record.sourceAccount))),
+      ...(slot === 'layout_spei' ? { parserSummary: {
+        parserVersion: parsed.parserVersion, contractVersion: parsed.contractVersion,
+        valid: true, recordCount: parsed.records.length, totalAmountMinor, currency: 'MXN', issues: [],
+      } } : {}),
+    }
+    return validateFileSourceAccount(slot, physical, sourceCandidates)
   }
   return base
+}
+
+// Physical parsing is cached with the file; account validation always follows
+// the current selection. Uploaded files remain under the server's authority.
+export function validateFileSourceAccount(slot: PayrollSlot, state: FileSlotState, candidates: string[]): FileSlotState {
+  if (state.uploaded || !state.encodedSourceAccounts?.length || !['layout_spei', 'layout_toka'].includes(slot)) return state
+  const code = 'PAYROLL_SOURCE_ACCOUNT_MISMATCH'
+  const allowed = new Set(candidates.map(normalizeAccount18).filter(Boolean))
+  const mismatch = allowed.size > 0 && state.encodedSourceAccounts.some((account) => !allowed.has(account))
+  const issueCodes = (state.issueCodes || []).filter((issue) => issue !== code)
+  if (mismatch) issueCodes.push(code)
+  const issues = (state.parserSummary?.issues || []).filter((issue) => issue.code !== code)
+  if (mismatch) issues.push({ code, severity: 'blocking', source: 'source_account' })
+  return {
+    ...state, issueCodes, uploadable: issueCodes.length === 0,
+    status: issueCodes.length ? 'parser_error' : slot === 'layout_spei' ? 'parsed' : 'server_verification_pending',
+    ...(state.parserSummary ? { parserSummary: { ...state.parserSummary, valid: issues.length === 0, issues } } : {}),
+  }
+}
+
+export function validateFilesSourceAccount(files: FileMap, candidates: string[]): FileMap {
+  return Object.fromEntries(Object.entries(files).map(([slot, state]) =>
+    [slot, validateFileSourceAccount(slot as PayrollSlot, state, candidates)]))
+}
+
+export function fileValidationMessage(state: FileSlotState): string {
+  if (state.issueCodes?.includes('PAYROLL_SOURCE_ACCOUNT_MISMATCH')) {
+    return 'La cuenta origen de este archivo no coincide con la seleccionada. Revisa la cuenta y la empresa de la captura.'
+  }
+  return state.status === 'parser_error' || state.status === 'failed'
+    ? 'El archivo no pasó la validación. Revisa su formato o vuelve a seleccionarlo.' : ''
 }
 
 // Estado de un slot cuando falla el parseo antes de inspeccionar (catch del bind).

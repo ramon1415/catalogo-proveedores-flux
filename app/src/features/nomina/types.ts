@@ -115,6 +115,7 @@ export type FileSlotState = {
   mimeType?: string
   sizeBytes?: number
   sha256?: string
+  encodedSourceAccounts?: string[]
   parserSummary?: SpeiParserSummary
   localDiagnostic?: LocalFileDiagnostic
   recordCount?: number | null
