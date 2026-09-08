@@ -1,0 +1,200 @@
+{
+  "status": "PREPARED_NOT_APPLIED",
+  "dev_base": "37c9645360898cc56cb32d06f8af9aac2d2bfdf3",
+  "main_reference": "a5391ea614f5946bbc4c04690123b98ac8d840f5",
+  "dev_captured_at": "2026-09-08T18:59:52.260043+00:00",
+  "prod_captured_at": "2026-09-08T18:59:51.151087+00:00",
+  "plan": {
+    "status": "PREPARED_NOT_AUTHORIZED_NOT_EXECUTED",
+    "dev_project": "scsirgbuqjcwoaxfacth",
+    "prod_project_readonly": "ucantptjhwttexzmslvm",
+    "actions": [
+      {
+        "version": "20260901074848",
+        "name": "platform_module_incidencias",
+        "status": "applied",
+        "target": "DEV only",
+        "expected_absent": true,
+        "source": "PROD ledger, exact repository SQL",
+        "path": "supabase/migrations/20260901074848_platform_module_incidencias.sql",
+        "sha256": "541c9040ab7d2bb8b952e0ac567621cf88c1f1c481e413f1d62351aa945793ec"
+      },
+      {
+        "version": "20260901074849",
+        "name": "platform_module_nomina",
+        "status": "applied",
+        "target": "DEV only",
+        "expected_absent": true,
+        "source": "PROD ledger, exact repository SQL",
+        "path": "supabase/migrations/20260901074849_platform_module_nomina.sql",
+        "sha256": "e2741f8211be4db9178cd035c23a86fc22449d2a1c9e5e584962a77ff800cb50"
+      }
+    ],
+    "expected_dev_versions_before": 117,
+    "expected_dev_versions_after": 119,
+    "never_run_sql_bodies": true,
+    "excluded_versions": [
+      "20260906003626",
+      "20260831004813",
+      "20260901074850",
+      "20260908184710"
+    ],
+    "note": "Revalidate current head, target project, both absences, source hashes and module config before execution. Scope is two additions only, no reverted action."
+  },
+  "source_files": [
+    {
+      "path": "supabase/migrations/20260901074848_platform_module_incidencias.sql",
+      "repo_sha256": "541c9040ab7d2bb8b952e0ac567621cf88c1f1c481e413f1d62351aa945793ec",
+      "prod_sql_sha256": "541c9040ab7d2bb8b952e0ac567621cf88c1f1c481e413f1d62351aa945793ec",
+      "exact_bytes": true
+    },
+    {
+      "path": "supabase/migrations/20260901074849_platform_module_nomina.sql",
+      "repo_sha256": "e2741f8211be4db9178cd035c23a86fc22449d2a1c9e5e584962a77ff800cb50",
+      "prod_sql_sha256": "e2741f8211be4db9178cd035c23a86fc22449d2a1c9e5e584962a77ff800cb50",
+      "exact_bytes": true
+    }
+  ],
+  "current_configuration": {
+    "dev": [
+      {
+        "company": "MEJ05 039 QA 0283876625",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "MEJ05 039 QA 0283876625",
+        "module": "nomina",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Test - Demo Operadora",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Test - Demo Operadora",
+        "module": "nomina",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "MEJ05 039 OTHER QA 0283876625",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "MEJ05 039 OTHER QA 0283876625",
+        "module": "nomina",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Soporte Fersana",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Soporte Fersana",
+        "module": "nomina",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Operadora Tlacatecpan",
+        "module": "incidencias",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Operadora Tlacatecpan",
+        "module": "nomina",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "QA Layout Cliente 20260723-115118-cc9c9c",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "QA Layout Cliente 20260723-115118-cc9c9c",
+        "module": "nomina",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      }
+    ],
+    "prod": [
+      {
+        "company": "Operadora Tlacatecpan",
+        "module": "incidencias",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Operadora Tlacatecpan",
+        "module": "nomina",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Soporte Fersana",
+        "module": "incidencias",
+        "enabled": false,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      },
+      {
+        "company": "Soporte Fersana",
+        "module": "nomina",
+        "enabled": true,
+        "version": 1,
+        "hold": false,
+        "channel": "stable"
+      }
+    ]
+  },
+  "restore_validation": {
+    "status": "PASS",
+    "original_versions": 117,
+    "simulated_versions": 119,
+    "restored_versions": 117,
+    "selected_full_rows_restored": 2,
+    "scope": "Isolated metadata restoration and two-addition/reversal model only. No business SQL executed, no remote database accessed, no claim of full ledger backup or actual CLI execution."
+  }
+}
