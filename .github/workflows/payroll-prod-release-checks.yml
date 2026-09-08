@@ -96,21 +96,15 @@ jobs:
           project = read('')
           payload = read('/database/backups')
           # Both reads are independent: a project-info 403 must not hide the backup response.
-          if project is None or payload is None:
-              evidence = {'project_ref': ref, 'probes': probes, 'mutations': 0,
-                  'checked_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}
-              print(json.dumps(evidence))
-              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-                  summary.write('```json\n' + json.dumps(evidence, indent=2) + '\n```\n')
-              raise SystemExit('PROD_BACKUP_ACCESS_UNAVAILABLE')
-          rows = payload.get('backups', [])
+          rows = (payload or {}).get('backups', [])
           good = [row for row in rows if str(row.get('status', '')).lower() in ('completed', 'success')]
           def timestamp(row):
               return row.get('inserted_at') or row.get('created_at') or row.get('started_at') or ''
           good.sort(key=timestamp, reverse=True)
           latest = good[0] if good else None
-          pitr = bool(payload.get('pitr_enabled', False))
-          evidence = {'project_ref': project.get('id') or project.get('ref'), 'pitr_enabled': pitr,
+          pitr = bool((payload or {}).get('pitr_enabled', False))
+          project_ref = (project or {}).get('id') or (project or {}).get('ref')
+          evidence = {'project_ref': ref, 'project_identity_verified': project_ref == ref, 'pitr_enabled': pitr,
               'probes': probes,
               'latest_backup_status': latest.get('status') if latest else None,
               'latest_backup_at': timestamp(latest) if latest else None,
@@ -118,5 +112,7 @@ jobs:
           print(json.dumps(evidence))
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('```json\n' + json.dumps(evidence, indent=2) + '\n```\n')
-          if evidence['project_ref'] != ref or not (pitr or good):
+          if project is None or payload is None:
+              raise SystemExit('PROD_BACKUP_ACCESS_UNAVAILABLE')
+          if not evidence['project_identity_verified'] or not (pitr or good):
               raise SystemExit('PROD_BACKUP_UNAVAILABLE')
