@@ -4,7 +4,7 @@ import test from "node:test"
 
 const migration = readFileSync(
   new URL(
-    "../../supabase/migrations/20260902030000_fix_extraordinary_execution_context_recursion.sql",
+    "../../supabase/migrations/20260902041542_fix_extraordinary_execution_context_recursion.sql",
     import.meta.url,
   ),
   "utf8",

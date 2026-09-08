@@ -5,8 +5,8 @@ empresa. No autoriza aplicar SQL, modificar PROD ni asignar identidades.
 
 ## Dependencia
 
-La migración `20260901062149_company_scoped_rls_rpc_cutover.sql` depende de
-`20260901055111_company_scoped_roles_foundation.sql`. Por eso el PR de corte se
+La migración `20260901071915_company_scoped_rls_rpc_cutover.sql` depende de
+`20260901065625_company_scoped_roles_foundation.sql`. Por eso el PR de corte se
 mantiene apilado sobre la rama del PR #475 hasta que la fundación sea aprobada.
 
 ## Ola 1 preparada

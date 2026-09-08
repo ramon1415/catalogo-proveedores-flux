@@ -1,5 +1,7 @@
 # DEV: conciliación del historial y diferencia real de ingresos recurrentes
 
+> Actualización vigente: ver las secciones de conciliación y recuperación del 8 de septiembre al final. Los cortes anteriores se conservan como evidencia histórica; no son instrucciones de ejecución actuales.
+
 Estado actualizado 2026-09-08: **hardening puntual aplicado y verificado en DEV como 20260908000916**. La conciliación histórica y Supabase Preview siguen pendientes. El inventario del 7-sep se conserva como evidencia del diagnóstico previo.
 
 Base revisada: `523f72baf7e8a1bbf273b52d5359d0d4830e8c79`. Inventario DEV `scsirgbuqjcwoaxfacth` capturado en transacción de solo lectura el **2026-09-07 23:49:03 UTC**, PostgreSQL 17.6. [Inventario y hashes](../qa/migration-history-dev-inventory-2026-09-07.json). Este archivo conserva evidencia de versiones; no sustituye un respaldo restaurable.
@@ -127,3 +129,127 @@ La reconstrucción aislada del baseline y las siguientes cuatro migraciones pasa
 PROD (`ucantptjhwttexzmslvm`) conserva 118 versiones de una cadena histórica distinta; sólo tres números coinciden con la base activa de DEV. Requiere su propia reconciliación revisada. No aplicar el baseline DEV ni correr un push general a PROD. `main` sigue en `b998919341b1e337f0cc2a7b7d31b289b4944e7c`.
 
 La migración de seguridad #552 permanece canónica en `20260907171549`. No se consultaron datos de negocio de PROD en esta revisión. El único cambio de ambiente fue el hardening autorizado en DEV, documentado arriba. No se enviaron mensajes a Carlos y no se ejecutó ninguna limpieza de respaldos.
+
+## Conciliación de nombres tras las liberaciones del 8 de septiembre
+
+Base de este cambio: DEV `4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7`; PROD/main `a5391ea614f5946bbc4c04690123b98ac8d840f5`. Se volvió a consultar el historial real: 113 versiones DEV y 120 PROD.
+
+### Impacto de las entregas concurrentes
+
+- #568 ya está integrado. Su migración final restaura el flujo separado de nómina; el archivo `20260907173300` corresponde a la ejecución DEV `20260908001439`. Las tres migraciones puente de su borrador fueron retiradas del PR, aunque sus ejecuciones históricas siguen registradas. La recomendación anterior de renombrar esos tres archivos dentro de #568 queda superada; su recuperación histórica continúa pendiente.
+- DEV incorpora #570, #571, #572, #573 y #574. #562 se cerró sin merge, sustituido por #570. Se conservan íntegros estos desarrollos y las cuatro migraciones recientes con versión coincidente.
+- [#575](https://github.com/ramon1415/catalogo-proveedores-flux/pull/575), [#576](https://github.com/ramon1415/catalogo-proveedores-flux/pull/576) y [#577](https://github.com/ramon1415/catalogo-proveedores-flux/pull/577) liberaron nómina en PROD. Las versiones nativas `20260908075132` y `20260908075149` coinciden con main en nombre y MD5 del SQL registrado. Su generador usa un catálogo congelado, no los nombres históricos que se corrigen aquí. No trasladar a PROD los parches históricos de nómina de DEV ni importar a DEV las dos consolidaciones de PROD.
+- #561 (alta masiva de proveedores) sigue abierto en el corte revisado. No está incluido en este cambio. La liberación aislada de nómina no equivale a promover todo DEV ni a desplegar #569 en PROD.
+
+### Cambio de repositorio
+
+Se renombran **21 archivos** a las versiones ya registradas en DEV: 20 parejas históricas y la migración final de #568. Se preserva cada byte del SQL, incluidos comentarios y envolturas transaccionales. Doce pares también coinciden byte por byte con el SQL remoto; nueve difieren en comentarios, formato o envoltura. La comparación léxica se usa sólo como ayuda de revisión, no como prueba formal de equivalencia.
+
+Se actualizan las rutas que utiliza la suite y los enlaces/manifiesto del runbook existente. Los hashes del manifiesto Fersana se conservan; su SQL no cambia. No se crea un runner nuevo ni se modifica ningún workflow de aplicación. Las referencias fechadas de informes anteriores se mantienen como evidencia histórica.
+
+[Inventario, hashes y lista exacta de renombres](../qa/migration-version-alignment-2026-09-08.json).
+
+| Comparación DEV | Antes | Después de los renombres |
+|---|---:|---:|
+| Archivos locales | 106 | 106 |
+| Versiones registradas en DEV | 113 | 113 |
+| Números coincidentes | 80 | 101 |
+| Sólo en remoto | 33 | 12 |
+| Sólo en local | 26 | 5 |
+
+### Lo que todavía impide cerrar el historial
+
+- Tres parejas con diferencias reales de SQL: onboarding Fersana, ingreso recurrente histórico y roles por empresa. El hardening hacia adelante de ingresos de #569 ya se completó en DEV; no sustituye la conciliación documental de su origen.
+- Dos archivos de módulos sin versión registrada. No reejecutar seeds/guards antiguos sobre empresas y activaciones actuales. Cualquier reparación del ledger necesita la autorización explícita exigida por `supabase-cli-migrations.md`.
+- Cuatro fuentes ausentes (UUID y tres predecesoras de E2/E3), una ejecución duplicada de extraordinarios y tres puentes de nómina retirados del repositorio. Recuperar su historia sin restablecer un comportamiento obsoleto.
+- Registro histórico `20260906003626` de mantenimiento de respaldos. No importar su SQL destructivo a la cadena activa. La eventual reparación de metadatos requiere snapshot y autorización específica. La limpieza de respaldos permanece en 86bbw39a5.
+- Reconstrucción completa detenida en `047_precheck: public layout contract drifted`. Los renombres alteran el orden local para reflejar fechas reales, pero no se afirma una reconstrucción exitosa. No saltar el guard ni usar un push general para comprobarlo.
+
+**Supabase Preview permanece pendiente.** Este cambio sólo reduce el desajuste de nombres; no declara el historial conciliado ni autoriza una aplicación general a DEV/PROD. En esta etapa no se ejecutó SQL de escritura ni `migration repair`, ni se modificaron respaldos o datos de negocio.
+
+Validación de este cambio: TypeScript/Vite y artefacto estático correctos; **1115/1115 contratos offline**, 0 fallas y 0 omitidos. Manifiesto Fersana: 14/14 hashes correctos. Los 21 SQL conservan exactamente su SHA-256 previo. Los contratos reales de DEV estaban verdes en el commit base; no se presenta ese resultado anterior como ejecución de este nuevo commit.
+
+## Recuperación de cinco fuentes históricas — 8 de septiembre
+
+Siguiente paso después de #579, basado en DEV `8a1a42e94f8c243726c0e91edfdbc8132155f6cd`. Se volvió a consultar GitHub: no había merges posteriores; main permanece en `a5391ea`. El historial DEV conserva 113 entradas.
+
+Se recuperan cinco archivos completos desde `supabase_migrations.schema_migrations.statements`, conservando sus bytes y sus números originales. Cada entrada tiene un statement; no se reformateó ni añadió un salto final al SQL. Son fuentes que DEV ya ejecutó, no migraciones nuevas para aplicar al ambiente activo.
+
+| Versión recuperada | Fuente | Revisión |
+|---|---|---|
+| 20260901171427 | invoice_uuid_anti_duplicado | Índice único por empresa/UUID sin distinguir mayúsculas; evolución del RPC de 17 a 18 argumentos, previa a reembolso y bandera de partida. |
+| 20260903023224 | fix_extraordinary_execution_context_recursion | Segunda ejecución registrada, idéntica byte a byte a 20260902041542. Se conserva como hecho histórico, sin borrar ninguna fila del ledger. |
+| 20260903035514 | partida_predictions | Predecesora de 20260903213133; sólo cambian comentarios/formato. |
+| 20260903040733 | partida_unsure_flag | Predecesora de 20260903213224; sólo cambian comentarios/formato. |
+| 20260903041629 | confirm_provider_account_rpc | Predecesora de 20260903213236; sólo cambia el salto final. |
+
+La versión UUID falta en la secuencia local anterior: la migración fiscal crea una firma de 17 argumentos; UUID la sustituye por la de 18; reembolso por la de 20 y partida por la de 21. Recuperarla permite que ese tramo aislado termine con un solo RPC, como sucede en DEV. No basta ejecutar únicamente la última definición para demostrar una reconstrucción sin overloads.
+
+### Verificación acotada
+
+- [Inventario y evidencia de sólo lectura](../qa/migration-source-recovery-2026-09-08.json): cinco SHA-256 exactos, relación con pares ya presentes, catálogo y permisos actuales.
+- Catálogo DEV capturado a las 16:45:54 UTC, read_only=on: una sola firma de `create_payment_request`, 21 argumentos; índice UUID único/válido; índice de predicción válido; bandera `partida_unsure` boolean no nula con default false; política de lectura por membresía.
+- `confirm_provider_account`: anon sin EXECUTE, authenticated/service_role con EXECUTE; se conserva su gate de empresa. El helper `get_payment_request_execution_context_pre_037` no es ejecutable por anon/authenticated y sí por service_role en el catálogo actual. No se modifican estos privilegios.
+- `create_payment_request` mantiene EXECUTE para anon en el catálogo previo; su guard de sesión es el control de entrada. Esta recuperación no modifica ese permiso ni se presenta como hardening adicional.
+- Seis pruebas PGlite ejecutan los archivos completos del tramo fiscal → UUID → reembolso → E2/E3, además de las dos ejecuciones de extraordinarios. Verifican firma única, UUID por empresa/estado, preservación de definición/ACL en el duplicado, contratos/ACL/política tras las sucesoras, aislamiento de lectura y rechazo de escritura en predicciones, y confirmación de cuenta con conservación de `contpaq_provider_id`.
+- Tablas dependientes y helpers de autorización son fixtures explícitos. Estas pruebas no son una reconstrucción completa ni UAT de Supabase con sesiones reales; tampoco afirman que se ejecutó un pago o una solicitud completa.
+
+| Inventario DEV | Tras #579 | Tras recuperar fuentes |
+|---|---:|---:|
+| Archivos locales | 106 | 111 |
+| Versiones registradas | 113 | 113 |
+| Números coincidentes | 101 | 106 |
+| Sólo remoto | 12 | 7 |
+| Sólo local | 5 | 5 |
+
+Quedan siete entradas sólo remotas: las tres parejas con SQL diferente (onboarding Fersana, ingresos recurrentes y roles), tres puentes de nómina retirados del PR #568 y el mantenimiento histórico de respaldos. Los cinco archivos sólo locales son las tres contrapartes con SQL diferente y los dos módulos sin versión registrada. No se recupera el SQL de borrado de respaldos ni se decide una reparación del ledger dentro de este cambio.
+
+**El frente 06 sigue abierto.** Falta conciliar esas entradas, revisar el guard de reconstrucción 047 y recuperar Supabase Preview. No ejecutar un push general ni promover esta cadena DEV a PROD. Cualquier `migration repair` requiere el snapshot y la autorización específica de `supabase-cli-migrations.md`.
+
+Validación del cambio de recuperación: TypeScript/Vite y artefacto estático correctos; **1121/1121 contratos offline** (incluidos los seis casos nuevos), 0 fallas y 0 omitidos. Los cinco archivos recuperados coinciden byte a byte con su SQL registrado. No se afirma que Supabase Preview esté resuelto.
+
+Nota de formato: la fuente registrada del duplicado de extraordinarios termina con una línea vacía adicional, igual que su primera ejecución ya versionada. Se conserva intencionalmente para mantener el hash exacto; no se reformatea SQL histórico.
+
+## Tramo de nómina y dos diferencias ya endurecidas — 8 de septiembre
+
+Base: DEV `40bb756` (#580); sin merges posteriores al comenzar. #578 evolucionó de documentación a lectura de documentos IMSS/ISN y sigue abierto; no se integra dentro de este cambio.
+
+### Tres fuentes de nómina recuperadas
+
+Se recuperan, byte a byte desde DEV, `20260907232403_payroll_confirmation_weekly_cut_bridge`, `20260907232743_payroll_direct_finance_confirmation_snapshot` y `20260907233050_payroll_weekly_cut_submit_bridge`. Las tres ya están registradas. No se aplican a DEV y no se crea una nueva versión para volver a ejecutarlas.
+
+No son tres archivos totalmente obsoletos. Cinco funciones vigentes aún tienen su última definición en esos puentes: `add_request_to_approval_batch`, `approval_batch_request_base_eligible`, `approval_batch_request_has_any_execution_record`, `list_batch_eligible_requests` y `submit_approval_batch`. La restricción de snapshot también sigue vigente.
+
+La migración posterior `20260908001439_payroll_separate_payment_flow_restore` desactiva el paso de nómina por cortes y conserva la confirmación de Finanzas. Los cambios de acceso `20260908015626` y totales `20260908060513` definen después dos lecturas. La matriz de las 13 funciones afectadas ubica su última fuente y contrasta su cuerpo con DEV: 13/13 coincidencias léxicas. Es una comparación de fuentes, no prueba formal de equivalencia semántica.
+
+Siete casos PGlite ejecutan los tres puentes completos y la restauración posterior: transición de semanal a separado; confirmación que habilita pago sin crear un ítem de corte; rechazo al agregar nómina a corte; rechazo al enviar un corte que ya contuviera nómina; solicitud ordinaria que se agrega/envía correctamente; restricción que impide nómina aprobada sin confirmación; y diferencia de fondeo TOKA que exige reconocimiento. Se reutiliza el esquema de pruebas del piloto y la función real de elegibilidad ordinaria del baseline; dependencias de membresía, presupuesto y materialización son fixtures. No se afirma replay completo ni UAT real.
+
+### Dos nombres alineados conservando la variante más restrictiva del repo
+
+| Archivo anterior | Versión DEV alineada | Por qué puede alinearse |
+|---|---|---|
+| 20260831120000_tenant_recurring_income | 20260831194350 | #569 / 20260908000916 ya estableció en DEV FK por empresa, índices, CRUD limitado, sesión explícita y search_path fijo. Se revalidaron función y constraints. |
+| 20260901055111_company_scoped_roles_foundation | 20260901065625 | 20260901071929 ya restringe el override global a rol sysadmin y correos aprobados. Su función coincide con la actual. |
+
+**Estos dos SQL no son idénticos a sus ejecuciones históricas remotas.** Se conserva cada byte de la variante más restrictiva del repositorio, se corrige sólo el número y se documenta la corrección posterior que lleva al estado vigente. No se importan versiones antiguas con controles más débiles. Los drops condicionales de triggers/policies de ingresos se mantienen para idempotencia. Esta decisión alinea el identificador sin afirmar una identidad histórica inexistente ni sustituir el ledger. Las referencias ejecutables y el manifiesto se actualizan conservando sus hashes.
+
+[Fuentes, hashes, matriz y catálogo vigente](../qa/payroll-history-reconciliation-2026-09-08.json). Catálogos de sólo lectura capturados a las 17:01:57 y 17:05:27 UTC.
+
+| Inventario | Tras #580 | Este cambio |
+|---|---:|---:|
+| Archivos locales | 111 | 114 |
+| Versiones DEV | 113 | 113 |
+| Números coincidentes | 106 | 111 |
+| Sólo remoto | 7 | 2 |
+| Sólo local | 5 | 3 |
+
+### Pendiente concreto
+
+1. Onboarding Fersana: remoto `20260831004813`, local `20260831003419`. La fuente remota inicial contiene el seed de Fersana y omite guards explícitos de auth.uid(). Las funciones actuales `request_company_access` y `reject_company_access_request` conservan comprobaciones de perfil/rol, pero no el guard explícito de sesión del repo. No se deduce una vulnerabilidad sólo de esa diferencia. Preparar una corrección hacia adelante que preserve la reapertura de solicitudes y la lógica actual, con pruebas de sesión/roles; no reinstalar funciones antiguas ni repetir el seed.
+2. Módulos `20260827090000` y `20260827100000`: el estado aplicado debe revalidarse antes de proponer reparación de metadatos. No reejecutar guards/seeds sobre las empresas y activaciones actuales.
+3. Histórico de respaldos `20260906003626`: mantener fuera el SQL destructivo. Cualquier retiro de su registro activo exige snapshot completo de esa fila y autorización específica; no es limpieza de respaldos ni reversión de lo que ocurrió.
+4. Resolver `047_precheck: public layout contract drifted`, completar la conciliación y verificar Supabase Preview. No ejecutar un push general ni eludir guards. `migration repair` sigue sujeto a autorización explícita conforme a `supabase-cli-migrations.md`.
+
+Este cambio no escribe en bases DEV/PROD, no repara el ledger y no toca respaldos. El frente 06 permanece abierto.
+
+Validación de este tramo: TypeScript/Vite y artefacto estático correctos; **1128/1128 contratos offline**, 0 fallas y 0 omitidos; 14/14 hashes del manifiesto Fersana correctos. Los tres SQL recuperados son exactos y los dos SQL renombrados conservan sus bytes.

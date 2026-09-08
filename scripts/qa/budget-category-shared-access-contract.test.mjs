@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const migration = fs.readFileSync(
-  'supabase/migrations/20260903014009_budget_category_shared_access.sql',
+  'supabase/migrations/20260903015237_budget_category_shared_access.sql',
   'utf8',
 )
 const api = fs.readFileSync('app/src/features/solicitudes/api.ts', 'utf8')

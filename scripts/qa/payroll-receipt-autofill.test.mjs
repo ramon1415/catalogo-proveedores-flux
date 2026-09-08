@@ -31,7 +31,7 @@ function load(path, imports = {}, globals = {}) {
 }
 
 const amounts = load(feature + 'receiptAmount.ts')
-const fields = load(feature + 'receiptFields.ts', { './receiptAmount': amounts })
+const fields = load(feature + 'receiptFields.ts', { './receiptAmount.ts': amounts })
 // Resolve the same vendored worker from disk in Node, instead of the browser URL.
 const pdfReader = load('app/src/lib/pdfText.ts', {}, { window: { pdfjsLib: {
   GlobalWorkerOptions: { workerSrc: '' },

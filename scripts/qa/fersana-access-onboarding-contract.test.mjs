@@ -7,11 +7,11 @@ const migration = fs.readFileSync(
   'utf8',
 )
 const hardening = fs.readFileSync(
-  'supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql',
+  'supabase/migrations/20260831004957_fersana_company_access_advisor_hardening.sql',
   'utf8',
 )
 const scopedRoles = fs.readFileSync(
-  'supabase/migrations/20260901055111_company_scoped_roles_foundation.sql',
+  'supabase/migrations/20260901065625_company_scoped_roles_foundation.sql',
   'utf8',
 )
 const productionSeed = fs.readFileSync('prod-readiness/paso5-fersana-seed.sql', 'utf8')
