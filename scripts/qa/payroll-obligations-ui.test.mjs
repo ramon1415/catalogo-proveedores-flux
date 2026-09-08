@@ -27,23 +27,23 @@ function load(path, imports) {
 
 const text = node => typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join('') : node?.props ? text(node.props.children) : '';
 async function mount(status,canCapture,canPay,options={}) {
- const calls=[],toasts=[];const row={id:'obligation',company_id:'company',kind:options.kind||'imss',status,version:1,cost_center_id:options.budget?'center':null,budget_month:'2026-07-01',files:[{id:'receipt',kind:status==='draft'?'imss_sipare':'receipt',status:'verified',parsed:{amount:'10.00',paymentDate:'2026-07-15',reference:'QA'}}],amount_minor:1000,period_start:'2026-07-01',period_end:'2026-07-31',payment_date:status==='paid'?'2026-07-15':null};
+ let saved=!options.fresh;const calls=[],toasts=[];const row={id:'obligation',company_id:'company',kind:options.kind||'imss',status,version:1,cost_center_id:options.budget?'center':null,budget_month:'2026-07-01',files:[{id:'receipt',kind:status==='draft'?'imss_sipare':'receipt',status:'verified',parsed:{amount:'10.00',paymentDate:'2026-07-15',reference:'QA'}}],amount_minor:1000,period_start:'2026-07-01',period_end:'2026-07-31',payment_date:status==='paid'?'2026-07-15':null};
  const {ObligationsPanel}=load('app/src/features/nomina/ObligationsPanel.tsx',{
  '../../lib/supabase':{supabase:{rpc:async(name,params)=>{
   calls.push(name);
   if(name==='get_payroll_obligation_context')return {data:{can_capture:canCapture,can_pay:canPay,company_rfc:'AAA010101AAA',kinds:[{kind:row.kind,category_name:'IMSS',centers:options.budget?[{id:'center',name:'Centro QA'}]:[]}]},error:null};
-  if(name==='save_payroll_obligation'){row.version++;return {data:row.id,error:null}}
+  if(name==='save_payroll_obligation'){saved=true;row.id=params.p_id;row.cost_center_id=params.p_cost_center_id||null;row.budget_month=params.p_budget_month||null;row.version++;return {data:row.id,error:null}}
   if(name==='submit_reviewed_payroll_obligation'){assert.equal(params.p_reviewed_amount_minor,1000);assert.equal(params.p_version,row.version);row.status=canPay?'approved':'submitted';row.version++;return {data:row.status,error:null}}
   if(name==='reserve_payroll_obligation_file')return {data:{file_id:'file',bucket:'payroll-obligations',path:'reserved.pdf'},error:null};
-  return {data:[{...row}],error:null};
- },storage:{from:()=>({upload:async()=>({error:options.uploadError?new Error('OBLIGATION_DOCUMENT_INVALID'):null})})},functions:{invoke:async()=>({data:{parsed:{}},error:null})}}},
+  return {data:saved?[{...row}]:[],error:null};
+ },storage:{from:()=>({upload:async()=>{calls.push('storage_upload');return {error:options.uploadError?new Error('OBLIGATION_DOCUMENT_INVALID'):null}}})},functions:{invoke:async()=>({data:{parsed:{}},error:null})}}},
  '../../components/ui/Modal':{Modal:props=>React.createElement('dialog',null,props.children,props.actions)},
  '../../components/ui/icons':load('app/src/components/ui/icons.tsx',{}),
- '../../components/ui/Toast':{useToast:()=>({showToast(...args){toasts.push(args)}})},'../../lib/pdfText':{extractPdfLines:async()=>[]},'./obligationDocuments':{parseObligationDocument:()=>({kind:'imss_sipare',taxpayerRfc:'AAA010101AAA',issues:[]})},'./receiptAmount':{},'./logic':{formatMoney:v=>`$${v}`},'./Nomina.module.css':{},
+ '../../components/ui/Toast':{useToast:()=>({showToast(...args){toasts.push(args)}})},'../../lib/pdfText':{extractPdfLines:async()=>[]},'./obligationDocuments':{parseObligationDocument:()=>({kind:row.kind==='imss'?'imss_sipare':'isn_cdmx',taxpayerRfc:'AAA010101AAA',issues:[],amountMinor:1000,periodStart:'2026-07-01',periodEnd:'2026-07-31'})},'./receiptAmount':{},'./logic':{formatMoney:v=>`$${v}`},'./Nomina.module.css':{},
  });
  globalThis.window={location:{search:''}};
  let renderer;await act(async()=>{renderer=create(React.createElement(ObligationsPanel,{companyId:'company',companyName:'QA'}))});
- await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Abrir').props.onClick());
+ await act(async()=>renderer.root.findAllByType('button').find(b=>options.fresh?text(b).startsWith('Nueva solicitud'):text(b)==='Abrir').props.onClick());
  return {renderer,calls,toasts,buttons:()=>renderer.root.findAllByType('button').map(text)};
 }
 test('paid obligations are read-only and retain download access',async()=>{
@@ -106,3 +106,56 @@ test('IMSS and ISN review occurs before send; Finance captures do not ask for co
   }finally{act(()=>renderer.unmount())}
  }
 });
+
+
+for(const kind of ['imss','isn_cdmx']){
+ test(`${kind}: opening, canceling selector, and closing never persists a draft`,async()=>{
+  const {renderer,calls}=await mount('draft',true,true,{fresh:true,kind,budget:true});
+  try{
+   const before=[...calls];
+   const input=renderer.root.findAllByType('input').find(i=>i.props.type==='file');
+   await act(async()=>input.props.onChange({target:{files:[],value:''}}));
+   assert.deepEqual(calls,before);
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Cerrar').props.onClick());
+   assert.equal(renderer.root.findAllByType('dialog').length,0);
+   assert.ok(!calls.includes('save_payroll_obligation'));
+   assert.ok(!calls.includes('storage_upload'));
+   assert.equal(renderer.root.findAllByType('article').length,0);
+  }finally{act(()=>renderer.unmount())}
+ });
+ test(`${kind}: local documents and review remain unsaved until the explicit action`,async()=>{
+  const {renderer,calls,toasts}=await mount('draft',true,true,{fresh:true,kind,budget:true});
+  try{
+   const input=renderer.root.findAllByType('input').find(i=>i.props.type==='file');
+   await act(async()=>input.props.onChange({target:{files:[new File(['x'.repeat(100)],'source.pdf')],value:''}}));
+   assert.ok(toasts.some(t=>t[0]==='Archivos listos'));
+   assert.match(text(renderer.root.findByType('dialog')),/Listo para guardar/);
+   await act(async()=>renderer.root.findByType('select').props.onChange({target:{value:'center'}}));
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Enviar a Finanzas').props.onClick());
+   assert.ok(renderer.root.findByProps({'aria-label':'Revisión antes del envío'}));
+   assert.ok(!calls.includes('save_payroll_obligation'));
+   assert.ok(!calls.includes('reserve_payroll_obligation_file'));
+   assert.ok(!calls.includes('storage_upload'));
+   assert.equal(renderer.root.findAllByType('article').length,0);
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Volver a editar').props.onClick());
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Guardar borrador').props.onClick());
+   assert.ok(calls.includes('save_payroll_obligation'));
+   assert.equal(calls.filter(c=>c==='storage_upload').length,1);
+   assert.equal(renderer.root.findAllByType('article').length,1);
+   assert.ok(toasts.some(t=>t[0]==='Borrador guardado'));
+   assert.ok(!calls.includes('submit_reviewed_payroll_obligation'));
+  }finally{act(()=>renderer.unmount())}
+ });
+ test(`${kind}: explicit confirmation persists the files and sends once`,async()=>{
+  const {renderer,calls}=await mount('draft',true,true,{fresh:true,kind,budget:true});
+  try{
+   await act(async()=>renderer.root.findAllByType('input').find(i=>i.props.type==='file').props.onChange({target:{files:[new File(['x'.repeat(100)],'source.pdf')],value:''}}));
+   await act(async()=>renderer.root.findByType('select').props.onChange({target:{value:'center'}}));
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Enviar a Finanzas').props.onClick());
+   await act(async()=>renderer.root.findAllByType('button').find(b=>text(b)==='Confirmar y enviar a Finanzas').props.onClick());
+   assert.equal(calls.filter(c=>c==='storage_upload').length,1);
+   assert.equal(calls.filter(c=>c==='submit_reviewed_payroll_obligation').length,1);
+   assert.equal(renderer.root.findAllByType('article').length,1);
+  }finally{act(()=>renderer.unmount())}
+ });
+}
