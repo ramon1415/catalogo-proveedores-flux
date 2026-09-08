@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
+import { IcDownload, IcFile } from '../../components/ui/icons'
 import { isDevSupabaseProject } from '../../lib/supabase'
 import {
   ALL_SLOTS,
@@ -56,9 +57,11 @@ type Props = {
   costCenters: CostCenter[]
   mappings: CompanyCostCenter[]
   isFinance: boolean
+  canCapture?: boolean
   activeCompanyId: string
   onClose: () => void
   onSaved: () => void
+  onUpdated?: () => void
 }
 
 type UnrecognizedFile = {
@@ -102,7 +105,7 @@ function formatBytes(bytes: number | null | undefined): string {
   return kb < 1024 ? `${Math.round(kb)} KB` : `${(kb / 1024).toFixed(1)} MB`
 }
 
-export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, activeCompanyId, onClose, onSaved }: Props) {
+export function CaptureModal({ session, companies, accounts, costCenters, mappings, isFinance, canCapture = isFinance, activeCompanyId, onClose, onSaved, onUpdated }: Props) {
   const { showToast } = useToast()
 
   const [companyId, setCompanyId] = useState(activeCompanyId)
@@ -137,6 +140,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   const conceptIsAutomatic = useRef(true)
 
   const locked = materializedRequestId !== null
+  const canRevalidate = locked && isFinance && isDevSupabaseProject && summary !== null && summary.status !== 'paid'
 
   const companyAccounts = useMemo(() => accountsForCompany(accounts, companyId), [accounts, companyId])
   const companyCostCenters = useMemo(
@@ -418,7 +422,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   async function registerAndAdvance() {
     if (workflowBusy || locked) return
     const validation = validateMetadata({
-      isFinance,
+      isFinance: canCapture,
       companyId,
       sourceAccountId,
       costCenterId,
@@ -478,6 +482,11 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
         })
       }
 
+      // Keep server file identifiers available even when validation rejects the
+      // package, so the uploaded originals can still be downloaded for review.
+      const uploadedSession = (await getCaptureSessions(currentId)).find((item) => item.id === currentId)
+      if (uploadedSession) hydrate(uploadedSession, false)
+
       setProgressText('Validando paquete en servidor…')
       const result = await materializeCapture(currentId, version)
       const list = await getCaptureSessions(currentId)
@@ -506,7 +515,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   }
 
   async function revalidate() {
-    if (revalidating || !locked || !sessionId || sessionVersion === null || !isFinance || !isDevSupabaseProject) return
+    if (revalidating || !canRevalidate || !sessionId || sessionVersion === null) return
     setRevalidating(true)
     try {
       const result = await revalidateMaterializedCapture(sessionId, sessionVersion)
@@ -540,7 +549,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   }
 
   async function confirmAmounts() {
-    if (submitting || !summary || !materializedRequestId || summary.status !== 'draft') return
+    if (!isFinance || submitting || !summary || !materializedRequestId || summary.status !== 'draft') return
     if (needsReview) {
       showToast('Revisión TOKA pendiente', 'Reconoce primero la diferencia de fondeo TOKA.', 'warning')
       return
@@ -590,7 +599,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
       <button type="button" className={s.secondaryBtn} onClick={onClose}>
         Cerrar
       </button>
-      {locked && isFinance && isDevSupabaseProject && (
+      {canRevalidate && (
         <button type="button" className={s.secondaryBtn} onClick={revalidate} disabled={revalidating}>
           {revalidating ? 'Revalidando paquete…' : 'Revalidar paquete en servidor'}
         </button>
@@ -664,14 +673,17 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
           <div className={s.fileRows}>
             {(Object.entries(files) as Array<[PayrollSlot, FileSlotState]>).map(([slot, state]) => (
               <article key={slot} className={s.fileRow}>
-                <div>
-                  <strong>{slotLabel(slot)}</strong>
-                  {(() => {
-                    const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
-                    const size = formatBytes(state.sizeBytes)
-                    const meta = [distinctName, size].filter(Boolean).join(' · ')
-                    return meta ? <span>{meta}</span> : null
-                  })()}
+                <div className={s.fileIdentity}>
+                  <span className={s.fileIcon}><IcFile size={18} /></span>
+                  <div className={s.fileInfo}>
+                    <strong>{slotLabel(slot)}</strong>
+                    {(() => {
+                      const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
+                      const size = formatBytes(state.sizeBytes)
+                      const meta = [distinctName, size].filter(Boolean).join(' · ')
+                      return meta ? <span title={meta}>{meta}</span> : null
+                    })()}
+                  </div>
                 </div>
                 <div className={s.fileAggregate}>
                   {state.recordCount != null && <span>{state.recordCount} registros</span>}
@@ -680,22 +692,24 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
                 </span>
-                {(state.file || state.fileId) && (
-                  <button type="button" className={s.iconBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
-                    Descargar
-                  </button>
-                )}
-                {!state.uploaded && !locked && (
-                  <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
-                    Quitar
-                  </button>
-                )}
+                <div className={s.fileActions}>
+                  {(state.file || state.fileId) && (
+                    <button type="button" className={s.secondaryBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
+                      <IcDownload size={15} /> Descargar
+                    </button>
+                  )}
+                  {!state.uploaded && !locked && (
+                    <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
+                      Quitar
+                    </button>
+                  )}
+                </div>
               </article>
             ))}
 
             {unrecognized.map((entry) => (
               <article key={entry.id} className={`${s.fileRow} ${s.fileRowDanger}`}>
-                <div>
+                <div className={s.fileInfo}>
                   <strong>{entry.file.name}</strong>
                   <span>{entry.message} — elige el tipo manualmente</span>
                 </div>
@@ -844,7 +858,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               {channelSummary.map((channel) => <div key={channel.channel} className={s.channelRow}><span>{channelLabel(channel.channel)}</span><strong>{formatMoney(channel.amount)}</strong></div>)}
             </div>
 
-            {needsReview && valesChannel && (
+            {isFinance && needsReview && valesChannel && (
               <div className={s.review}>
                 <strong>Revisión de fondeo TOKA requerida</strong>
                 <p>Fondeo real {formatMoney(valesChannel.amount)} vs esperado {formatMoney(valesChannel.expected_funding_amount)} · diferencia {formatMoney(variance)}.</p>
@@ -853,7 +867,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
               </div>
             )}
 
-            {financeReviewReady && (
+            {isFinance && financeReviewReady && (
               <div className={s.approval}>
                 <div>
                   <strong>Revisión de Finanzas</strong>
@@ -870,13 +884,16 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                   : 'Lista para confirmación de Finanzas. Sin presupuesto y sin aprobador.'
                 : summary.status === 'approved'
                   ? 'Corrida confirmada por Finanzas · lista para dispersión y comprobantes.'
-                  : `Estado de solicitud: ${summary.status}`}
+                  : summary.status === 'paid'
+                    ? 'Nómina pagada · comprobantes disponibles para consulta.'
+                    : `Estado de solicitud: ${summary.status}`}
             </p>
           </section>
         )}
 
-        {summary?.status === 'approved' && materializedRequestId && (
-          <ChannelOperations paymentRequestId={materializedRequestId} />
+        {(summary?.status === 'approved' || summary?.status === 'paid') && materializedRequestId && (
+          <ChannelOperations paymentRequestId={materializedRequestId} canPay={isFinance}
+            onChanged={async () => { await loadSubmissionSummary(materializedRequestId); (onUpdated || onSaved)() }} />
         )}
 
         <p className={s.piiNote}>

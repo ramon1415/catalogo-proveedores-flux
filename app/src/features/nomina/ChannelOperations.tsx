@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
+import { IcAprobaciones, IcDownload, IcFile } from '../../components/ui/icons'
 import { supabase } from '../../lib/supabase'
 import { BUCKET, channelLabel, formatMoney, friendlyError } from './logic'
 import type { PayrollChannel } from './types'
 import s from './Nomina.module.css'
+import { getReceiptFileUrl } from './api'
 import { receiptAmountMinor } from './receiptAmount'
 import { isReceiptDate } from './receiptFields'
 import { emptyReceiptDraft, useReceiptAutofill } from './useReceiptAutofill'
@@ -16,6 +18,7 @@ type ReconciliationChannel = {
   dispersion_status: 'pending' | 'dispersed' | 'failed'
   reconciliation_status: 'pending' | 'reconciled' | 'exception'
   receipt_verified: boolean
+  receipt_file_id: string | null
   receipt_payment_date: string | null
   reference_hint: string | null
 }
@@ -74,7 +77,7 @@ function stateClass(channel: ReconciliationChannel): string {
   return s.stateWarning
 }
 
-export function ChannelOperations({ paymentRequestId }: { paymentRequestId: string }) {
+export function ChannelOperations({ paymentRequestId, canPay = false, onChanged }: { paymentRequestId: string; canPay?: boolean; onChanged?: () => void | Promise<void> }) {
   const { showToast } = useToast()
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -106,7 +109,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }, [paymentRequestId])
 
   async function markDispersed(channel: ReconciliationChannel) {
-    if (busyChannelId || closing) return
+    if (!canPay || summary?.request_status !== 'approved' || busyChannelId || closing) return
     const confirmed = window.confirm(
       `Registrar ${channelLabel(channel.channel)} como dispersado por ${formatMoney(channel.amount)}?\n\nFlux NO ejecutará ningún pago. Sólo registra que la dispersión se realizó externamente.`,
     )
@@ -131,7 +134,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }
 
   async function uploadReceipt(channel: ReconciliationChannel) {
-    if (busyChannelId || closing) return
+    if (!canPay || summary?.request_status !== 'approved' || busyChannelId || closing) return
     const draft = drafts[channel.id] || emptyReceiptDraft()
     if (draft.reading || draft.invalid) return
     const file = draft.file
@@ -217,7 +220,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }
 
   async function closeAsPaid() {
-    if (closing || busyChannelId || !summary?.can_close_paid || summary.request_status === 'paid') return
+    if (!canPay || closing || busyChannelId || !summary?.can_close_paid || summary.request_status === 'paid') return
     const confirmed = window.confirm(
       'Los tres canales están conciliados. ¿Cerrar esta nómina como pagada?\n\nFlux no ejecutará ningún pago; sólo cerrará la corrida con los comprobantes ya validados.',
     )
@@ -230,11 +233,24 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       })
       if (error) throw error
       await refresh(false)
+      await onChanged?.()
       showToast('Nómina cerrada como pagada', 'Los tres comprobantes quedaron conciliados y la corrida quedó cerrada.', 'success')
     } catch (error) {
       showToast('No se pudo cerrar la nómina', friendlyError(error), 'error')
     } finally {
       setClosing(false)
+    }
+  }
+
+  async function downloadReceipt(fileId: string) {
+    try {
+      const url = await getReceiptFileUrl(fileId)
+      const link = document.createElement('a')
+      link.href = url
+      link.rel = 'noopener'
+      link.click()
+    } catch (error) {
+      showToast('No se pudo descargar el comprobante', friendlyError(error), 'error')
     }
   }
 
@@ -244,43 +260,69 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   if (!summary) return null
 
   return (
-    <section className={s.review}>
-      <strong>Dispersión y comprobantes por canal</strong>
-      <p>
-        Flux no ejecuta pagos. Finanzas registra aquí la dispersión hecha en el banco/TOKA y adjunta el comprobante PDF de cada canal.
-      </p>
+    <section className={s.receiptsPanel}>
+      <div className={s.receiptsHeading}>
+        <div>
+          <h3>Dispersión y comprobantes por canal</h3>
+          <p>Tesorería registra el pago realizado en el banco o en TOKA y adjunta el PDF de cada canal.</p>
+        </div>
+        <span className={s.privatePill}>{channels.filter((channel) => channel.reconciliation_status === 'reconciled').length} de {channels.length} conciliados</span>
+      </div>
 
-      <div className={s.fileGrid}>
+      <div className={s.receiptList}>
         {channels.map((channel) => {
           const busy = busyChannelId === channel.id
           const draft = drafts[channel.id] || emptyReceiptDraft()
           const currencyMismatch = Boolean(draft.currency && draft.currency !== channel.currency)
           const amountMismatch = Boolean(draft.amount && receiptAmountMinor(draft.amount) !== Math.round(Number(channel.amount) * 100))
           const canUpload = channel.dispersion_status === 'dispersed' && channel.reconciliation_status === 'pending'
+          const editable = canPay && summary.request_status === 'approved'
           return (
-            <article key={channel.id} className={s.fileCard}>
-              <div className={s.fileCardHead}>
-                <div>
-                  <strong>{channelLabel(channel.channel)}</strong>
-                  <span>{formatMoney(channel.amount)}</span>
+            <article key={channel.id} className={s.receiptCard}>
+              <div className={s.receiptCardHead}>
+                <div className={s.fileIdentity}>
+                  <span className={s.fileIcon}><IcFile size={18} /></span>
+                  <div className={s.fileInfo}>
+                    <strong>{channelLabel(channel.channel)}</strong>
+                    <span>{channel.reconciliation_status === 'reconciled' ? 'PDF · Comprobante verificado' : 'Comprobante PDF pendiente'}</span>
+                  </div>
+                </div>
+                <div className={s.receiptAmount}>
+                  <strong>{formatMoney(channel.amount)}</strong>
+                  <span>{channel.currency}</span>
                 </div>
                 <span className={`${s.state} ${stateClass(channel)}`}>{dispersionLabel(channel)}</span>
               </div>
 
               {channel.reconciliation_status === 'reconciled' ? (
-                <p>
-                  Comprobante verificado{channel.receipt_payment_date ? ` · pago ${channel.receipt_payment_date}` : ''}
-                  {channel.reference_hint ? ` · ref. ${channel.reference_hint}` : ''}.
-                </p>
+                <div className={s.receiptBody}>
+                  <dl className={s.receiptDetails}>
+                    <div>
+                      <dt>Fecha de pago</dt>
+                      <dd>{channel.receipt_payment_date?.split('-').reverse().join('/') || 'Sin fecha'}</dd>
+                    </div>
+                    <div>
+                      <dt>Referencia</dt>
+                      <dd>{channel.reference_hint || 'Sin referencia'}</dd>
+                    </div>
+                  </dl>
+                  {channel.receipt_file_id && (
+                    <button type="button" className={s.secondaryBtn} aria-label={`Descargar comprobante ${channelLabel(channel.channel)}`} onClick={() => void downloadReceipt(channel.receipt_file_id!)}>
+                      <IcDownload size={15} /> Descargar PDF
+                    </button>
+                  )}
+                </div>
+              ) : !editable ? (
+                <p>En espera de comprobación por Tesorería.</p>
               ) : channel.dispersion_status !== 'dispersed' ? (
-                <>
+                <div className={s.receiptBody}>
                   <p>Registra este estado sólo después de ejecutar la dispersión fuera de Flux.</p>
                   <button type="button" className={s.secondaryBtn} onClick={() => void markDispersed(channel)} disabled={busy || closing}>
                     {busy ? 'Registrando…' : channel.dispersion_status === 'failed' ? 'Registrar reintento dispersado' : 'Registrar como dispersado'}
                   </button>
-                </>
+                </div>
               ) : canUpload ? (
-                <div className={s.grid}>
+                <div className={`${s.grid} ${s.receiptForm}`}>
                   <label className={s.fullRow}>
                     Comprobante PDF
                     <input
@@ -290,7 +332,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       disabled={busy || closing}
                     />
                   </label>
-                  <p className={s.fullRow} role="status" aria-live="polite">
+                  <p className={s.formNotice} role="status" aria-live="polite">
                     {draft.notice || 'Adjunta el PDF para completar importe, fecha y referencia automáticamente.'}
                   </p>
                   <label>
@@ -307,7 +349,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       disabled={busy || closing || draft.reading}
                     />
                   </label>
-                  <label>
+                  <label className={s.fullRow}>
                     Referencia
                     <input
                       value={draft.reference}
@@ -317,8 +359,8 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       disabled={busy || closing || draft.reading}
                     />
                   </label>
-                  {amountMismatch && <p className={s.fullRow} role="alert">El importe no coincide con {formatMoney(channel.amount)}. Revisa el comprobante.</p>}
-                  {currencyMismatch && <p className={s.fullRow} role="alert">La moneda del PDF no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
+                  {amountMismatch && <p className={s.formNotice} role="alert">El importe no coincide con {formatMoney(channel.amount)}. Revisa el comprobante.</p>}
+                  {currencyMismatch && <p className={s.formNotice} role="alert">La moneda del PDF no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
                   <div className={s.fullRow}>
                     <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing || draft.reading || !draft.file || draft.invalid || currencyMismatch}>
                       {draft.reading ? 'Leyendo comprobante…' : busy ? 'Validando comprobante…' : 'Subir y conciliar comprobante'}
@@ -334,9 +376,12 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
       </div>
 
       {summary.request_status === 'paid' ? (
-        <div className={s.inlineNotice}>Nómina pagada · los comprobantes de BBVA, SPEI y TOKA quedaron conciliados.</div>
-      ) : summary.can_close_paid ? (
-        <div className={s.approval}>
+        <div className={s.receiptSuccess} role="status">
+          <span aria-hidden="true"><IcAprobaciones size={18} /></span>
+          Nómina pagada · los comprobantes de BBVA, SPEI y TOKA quedaron conciliados.
+        </div>
+      ) : canPay && summary.can_close_paid ? (
+        <div className={`${s.approval} ${s.receiptFooter}`}>
           <div>
             <strong>Comprobación completa</strong>
             <p>Los tres canales están conciliados. Cierra la corrida para registrarla como pagada.</p>
@@ -346,7 +391,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
           </button>
         </div>
       ) : summary.all_reconciled ? (
-        <div className={s.inlineNotice}>Los comprobantes de todos los canales quedaron conciliados.</div>
+        <div className={s.receiptSuccess}>Los comprobantes de todos los canales quedaron conciliados.</div>
       ) : null}
     </section>
   )

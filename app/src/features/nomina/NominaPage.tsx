@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
 import { IcPlus } from '../../components/ui/icons'
-import { captureStateLabel, channelLabel, formatMoney, friendlyError, hasFinanceRole } from './logic'
+import { captureStateLabel, channelLabel, formatMoney, friendlyError } from './logic'
+import { usePayrollAccess } from './usePayrollAccess'
 import {
   confirmPayrollFinanceReview,
   getCaptureSessions,
   getSubmissionSummary,
-  loadAccountingScope,
-  loadSourceAccounts,
+  loadCaptureContext,
 } from './api'
 import { CaptureModal } from './CaptureModal'
 import type { BankAccount, Company, CompanyCostCenter, CostCenter, CaptureSession, SubmissionSummary } from './types'
@@ -20,10 +19,9 @@ import s from './Nomina.module.css'
 // no genera layouts bancarios y no ejecuta pagos. La corrida se valida,
 // Finanzas confirma los montos y después continúa por su flujo propio de pago.
 export default function NominaPage() {
-  const { roles } = useAuth()
   const { companyId, companyName } = useCompany()
   const { showToast } = useToast()
-  const isFinance = useMemo(() => hasFinanceRole(roles), [roles])
+  const { can_capture: canCapture, can_pay: isFinance, loading: accessLoading } = usePayrollAccess()
   const companies = useMemo<Company[]>(
     () => (companyId ? [{ id: companyId, name: companyName || 'Empresa activa' }] : []),
     [companyId, companyName],
@@ -39,7 +37,7 @@ export default function NominaPage() {
   const [confirmationBusy, setConfirmationBusy] = useState(false)
 
   async function openAmountConfirmation(session: CaptureSession): Promise<void> {
-    if (!session.materialized_payment_request_id || !session.finance_confirmation_pending) return
+    if (!isFinance || !session.materialized_payment_request_id || !session.finance_confirmation_pending) return
     try {
       const summary = await getSubmissionSummary(session.materialized_payment_request_id)
       if (summary.finance_confirmation_pending ?? summary.status === 'draft') setAmountConfirmation(summary)
@@ -51,7 +49,7 @@ export default function NominaPage() {
   async function reloadSessions(showNewestPending = false) {
     if (!companyId) {
       setSessions([])
-      return
+      return []
     }
     const visible = (await getCaptureSessions(null)).filter((session) => session.company_id === companyId)
     setSessions(visible)
@@ -61,15 +59,20 @@ export default function NominaPage() {
       )
       if (pending) await openAmountConfirmation(pending)
     }
+    return visible
   }
 
   async function confirmAmounts(): Promise<void> {
-    if (!amountConfirmation || confirmationBusy) return
+    if (!isFinance || !amountConfirmation || confirmationBusy) return
     setConfirmationBusy(true)
     try {
       await confirmPayrollFinanceReview(amountConfirmation.payment_request_id)
+      const confirmedRequestId = amountConfirmation.payment_request_id
       setAmountConfirmation(null)
-      await reloadSessions(false)
+      const confirmed = (await reloadSessions(false)).find(
+        (session) => session.company_id === companyId && session.materialized_payment_request_id === confirmedRequestId,
+      )
+      if (confirmed) setModal((current) => current && current === modal ? { session: confirmed } : current)
       showToast(
         'Montos confirmados',
         'La corrida quedó lista para el flujo propio de pago de Nómina. No entra al corte semanal y Flux no ejecutó ningún pago.',
@@ -89,28 +92,31 @@ export default function NominaPage() {
     setAccounts([])
     setCostCenters([])
     setMappings([])
-    if (!isFinance || !companyId) {
+    if (!canCapture || !companyId) {
       setStatus('ready')
       return
     }
     let cancelled = false
     ;(async () => {
       setStatus('loading')
-      const [accountsRes, scopeRes, sessionsRes] = await Promise.allSettled([
-        loadSourceAccounts(companyId),
-        loadAccountingScope(companyId),
+      const [contextRes, sessionsRes] = await Promise.allSettled([
+        loadCaptureContext(companyId),
         getCaptureSessions(null),
       ])
       if (cancelled) return
-      if (accountsRes.status === 'fulfilled') setAccounts(accountsRes.value)
-      if (scopeRes.status === 'fulfilled') {
-        setCostCenters(scopeRes.value.costCenters)
-        setMappings(scopeRes.value.mappings)
+      if (contextRes.status === 'fulfilled') {
+        setAccounts(contextRes.value.accounts)
+        setCostCenters(contextRes.value.costCenters)
+        setMappings(contextRes.value.mappings)
       }
       if (sessionsRes.status === 'fulfilled') {
-        setSessions(sessionsRes.value.filter((session) => session.company_id === companyId))
+        const visible = sessionsRes.value.filter((session) => session.company_id === companyId)
+        setSessions(visible)
+        const requested = new URLSearchParams(window.location.search).get('capture')
+        const linked = requested && visible.find((session) => session.id === requested)
+        if (linked) setModal({ session: linked })
       }
-      if ([accountsRes, scopeRes, sessionsRes].some((r) => r.status === 'rejected')) {
+      if ([contextRes, sessionsRes].some((r) => r.status === 'rejected')) {
         showToast('Nómina parcialmente disponible', 'Algunos datos de contexto no se pudieron cargar.', 'warning')
       }
       setStatus('ready')
@@ -119,20 +125,20 @@ export default function NominaPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFinance, companyId])
+  }, [canCapture, companyId])
 
-  if (!isFinance) {
+  if (accessLoading) return <div className={s.notice}>Cargando acceso a Nómina…</div>
+  if (!canCapture) {
     return (
       <>
         <div className={s.phead}>
           <div>
-            <span className={s.eyebrow}>Nómina · Finance only</span>
+            <span className={s.eyebrow}>Nómina · Acceso privado</span>
             <h1>Captura de nómina</h1>
           </div>
         </div>
         <div className={s.notice}>
-          La captura de nómina es exclusiva de Finanzas (roles finance, finanzas, treasury, tesorería o administración).
-          Solicita acceso al equipo correspondiente.
+          Necesitas acceso a Nómina en la empresa activa. Solicítalo al administrador.
         </div>
       </>
     )
@@ -142,10 +148,9 @@ export default function NominaPage() {
     <>
       <div className={s.phead}>
         <div>
-          <span className={s.devPill}>Nómina N3G</span>
           <h1>Capturas de nómina</h1>
-          <p className="muted">
-            Paquetes privados de {companyName || 'la empresa activa'}. Flux valida los archivos y sus totales; Finanzas confirma los montos y la corrida continúa por su flujo propio de pago. No usa presupuesto ni corte semanal.
+          <p>
+            Registra los archivos de Buk y consulta el avance de cada nómina.
           </p>
         </div>
         <button className={s.primaryBtn} disabled={!companyId} onClick={() => setModal({ session: null })}>
@@ -156,14 +161,13 @@ export default function NominaPage() {
       <section className={s.board}>
         <div className={s.boardHead}>
           <div>
-            <span className={s.devPill}>Nómina N3G</span>
-            <h2>Capturas de nómina</h2>
-            <p>Paquetes privados de {companyName || 'la empresa activa'} y su estado dentro del flujo de Nómina.</p>
+            <h2 id="payroll-list-title">Solicitudes de nómina</h2>
+            <p>{companyName || 'Empresa activa'} · {sessions.length} {sessions.length === 1 ? 'captura' : 'capturas'}</p>
           </div>
-          <span className={s.privatePill}>Finance only</span>
+          <span className={s.privatePill}>Acceso privado</span>
         </div>
 
-        <div className={s.boardList}>
+        <div className={s.boardList} role="region" aria-labelledby="payroll-list-title" tabIndex={0}>
           {status === 'loading' && <div className={s.boardEmpty}>Cargando capturas…</div>}
           {status === 'error' && <div className={s.boardEmpty}>Las capturas no están disponibles.</div>}
           {status === 'ready' && sessions.length === 0 && <div className={s.boardEmpty}>Aún no hay capturas de nómina.</div>}
@@ -172,14 +176,14 @@ export default function NominaPage() {
               const pendingConfirmation = session.finance_confirmation_pending === true
               const readyForPayment = session.payment_ready === true || session.payment_request_status === 'approved'
               const materialized = session.capture_state === 'materialized'
-              const label = pendingConfirmation
+              const label = session.payment_request_status === 'paid' ? 'Pagada' : pendingConfirmation
                 ? 'Pendiente de confirmar montos'
                 : readyForPayment
                   ? 'Lista para pago de nómina'
                   : captureStateLabel(session.capture_state)
               return (
                 <article key={session.id} className={s.boardItem}>
-                  <div>
+                  <div className={s.boardItemInfo}>
                     <strong>{session.concept}</strong>
                     <span>
                       {session.period_start} → {session.period_end}
@@ -212,9 +216,11 @@ export default function NominaPage() {
           costCenters={costCenters}
           mappings={mappings}
           isFinance={isFinance}
+          canCapture={canCapture}
           activeCompanyId={companyId}
           onClose={() => setModal(null)}
           onSaved={() => reloadSessions(true)}
+          onUpdated={() => reloadSessions(false)}
         />
       )}
 

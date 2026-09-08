@@ -10,8 +10,8 @@ const migration = read('supabase/migrations/20260827225332_payroll_active_compan
 
 assert.match(page, /useCompany\(\)/)
 assert.match(page, /session\.company_id === companyId/)
-assert.match(page, /loadSourceAccounts\(companyId\)/)
-assert.match(page, /loadAccountingScope\(companyId\)/)
+assert.match(page, /loadCaptureContext\(companyId\)/)
+assert.match(page, /usePayrollAccess\(\)/)
 assert.doesNotMatch(page, /loadCompanies/)
 
 assert.match(modal, /activeCompanyId: string/)

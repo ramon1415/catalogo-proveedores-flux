@@ -349,7 +349,7 @@ export function validateMetadata(input: {
   concept: string
   channels: PayrollChannel[]
 }): string {
-  if (!input.isFinance) return 'La Nómina es exclusiva de Finanzas.'
+  if (!input.isFinance) return 'Necesitas acceso a Nómina en la empresa activa.'
   if (!input.companyId) return 'Selecciona empresa.'
   if (!input.sourceAccountId) return 'Selecciona cuenta origen.'
   if (!input.costCenterId) return 'Selecciona centro de costo.'

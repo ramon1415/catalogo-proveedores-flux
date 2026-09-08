@@ -185,6 +185,7 @@ async function componentHarness(t, pdfLines) {
   const autofill = load(feature + 'useReceiptAutofill.ts', { '../../lib/pdfText': { extractPdfLines: async () => pdfLines }, './receiptFields': fields })
   const { ChannelOperations } = load(feature + 'ChannelOperations.tsx', {
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
+    '../../components/ui/icons': load('app/src/components/ui/icons.tsx'),
     '../../lib/supabase': { supabase },
     './logic': { BUCKET: 'private-test', channelLabel: () => 'BBVA', formatMoney: (value) => `$${value}`, friendlyError: String },
     './Nomina.module.css': {}, './receiptAmount': amounts, './receiptFields': fields, './useReceiptAutofill': autofill,

@@ -27,7 +27,18 @@ export function Modal({
     onClose()
   }
   return (
-    <dialog ref={ref} className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`} onCancel={(event) => { event.preventDefault(); close() }} onClose={onClose}>
+    <dialog
+      ref={ref}
+      className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`}
+      onCancel={(event) => {
+        // File pickers emit a bubbling cancel event when dismissed or when the
+        // same file is selected again. Only this dialog's own cancel closes it.
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        close()
+      }}
+      onClose={onClose}
+    >
       <div className={s.content}>
         <div className={s.head}>
           <div>

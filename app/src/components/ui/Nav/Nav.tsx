@@ -9,16 +9,18 @@ import { IcUser, IcLogout } from '../icons'
 import { CompanySwitcher } from './CompanySwitcher'
 import { NAV_SECTIONS } from './navModel'
 import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
+import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
 
 export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobile?: boolean; open?: boolean; onClose?: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { profile, session, group, signOut } = useAuth()
   const { isEnabled } = useModules()
+  const payrollAccess = usePayrollAccess()
   const sections = NAV_SECTIONS
     .map((section) => ({
       ...section,
       items: section.items.filter(
-        (item) => item.groups.includes(group) && (!item.moduleKey || isEnabled(item.moduleKey)),
+        (item) => (item.moduleKey === 'nomina' ? payrollAccess.can_capture : item.groups.includes(group)) && (!item.moduleKey || isEnabled(item.moduleKey)),
       ),
     }))
     .filter((section) => section.items.length > 0)
