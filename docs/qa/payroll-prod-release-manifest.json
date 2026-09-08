@@ -1,0 +1,424 @@
+{
+  "adaptations": [
+    "Company finance membership gates for payments, summaries and receipt uploads",
+    "Company finance RLS for raw payroll records",
+    "Treasury may acknowledge a TOKA funding variance captured by RH",
+    "No anonymous EXECUTE grants on payroll functions"
+  ],
+  "adapter_sha256": "86e12eff629b34d42da3910493f2f2f4e7af680ada7e91a722391d3c30420505",
+  "source_dev_sha": "4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7",
+  "prod_base_sha": "b998919341b1e337f0cc2a7b7d31b289b4944e7c",
+  "tables": [
+    "payroll_capture_files",
+    "payroll_capture_grants",
+    "payroll_capture_sessions",
+    "payroll_channels",
+    "payroll_notification_settings",
+    "payroll_provision_entries",
+    "payroll_provision_settings",
+    "payroll_run_files",
+    "payroll_run_lines"
+  ],
+  "functions": [
+    {
+      "schema": "public",
+      "name": "payroll_request_has_valid_materialization",
+      "args": "p_payment_request_id uuid",
+      "sha256": "a3a7e77c884609cb9ef29706b9c41c845875f704c01f79049f76acb69ca768e5"
+    },
+    {
+      "schema": "private",
+      "name": "payroll_profile_can_capture",
+      "args": "p_profile_id uuid, p_company_id uuid",
+      "sha256": "790167267e9ddc95bc7f7201beb3c38754ec0d2e56e8624c6b3d4d6f1439f450"
+    },
+    {
+      "schema": "private",
+      "name": "enqueue_payroll_lifecycle",
+      "args": "p_request_id uuid, p_event_type text",
+      "sha256": "f453ce8ba0b8c9225ff51e0e1760804ecba3fddbf6778cb87bbc7eccd9e494dd"
+    },
+    {
+      "schema": "private",
+      "name": "payroll_paid_notification",
+      "args": "",
+      "sha256": "44863f125bf39ae6c5149316811c78dfa1bab623f8c5b890f4d16e32b44a31df"
+    },
+    {
+      "schema": "private",
+      "name": "payroll_registered_notification",
+      "args": "",
+      "sha256": "520a2eecc92914a85456851a551dcadb23bfcda5238e9f2abe564ae0fe4e95d8"
+    },
+    {
+      "schema": "private",
+      "name": "wake_payroll_notifications",
+      "args": "",
+      "sha256": "474be2cf06e086555145d0d91b1f588755f93f905ea478dd6d9f3a8a8c63c291"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_has_finance_pii_access",
+      "args": "",
+      "sha256": "615bc67181ae87b33c4664acacafc5aa4c0ca211805ba3f84a5402e1eceac4bf"
+    },
+    {
+      "schema": "public",
+      "name": "acknowledge_payroll_toka_funding_variance",
+      "args": "p_payment_request_id uuid, p_note text",
+      "sha256": "ebbe853c68d9d9e67ede82e28e3ce910cea2c7cff117950073174bd34216fa9d"
+    },
+    {
+      "schema": "public",
+      "name": "claim_payroll_notifications",
+      "args": "p_worker_id text",
+      "sha256": "b7e427a1b67b3f85c374bb07def12137b66ff1576247fc79c67bdc824b51e912"
+    },
+    {
+      "schema": "public",
+      "name": "close_payroll_as_paid",
+      "args": "p_payment_request_id uuid",
+      "sha256": "67ac9a5367900f06ef26807e18b83761bdb1c06b68eed9b151c6974c488ea23c"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_company_access",
+      "args": "p_company_id uuid",
+      "sha256": "cae53e3730b2243d75413b76ebcfedf9787370964bb4f4979ce19bffddb79c4e"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_has_capture_access",
+      "args": "",
+      "sha256": "9a00016b44441404497b8ef78e8ecd340a89e53ae6affec46ccc51ba38ad7c4a"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_refresh_state",
+      "args": "p_session_id uuid",
+      "sha256": "1c6e38e71e508ce1816eb57895ddc8593fe9800f72644f53e7315c811d00624c"
+    },
+    {
+      "schema": "public",
+      "name": "confirm_payroll_capture_file_unscoped_internal",
+      "args": "p_file_id uuid, p_sha256 text",
+      "sha256": "ad3660b1bb269ede047925aed89c108087f633361bbe2af37cfeb9ae683fb094"
+    },
+    {
+      "schema": "public",
+      "name": "confirm_payroll_capture_file",
+      "args": "p_file_id uuid, p_sha256 text",
+      "sha256": "777df157c893fc8cd860bcdca416b6487cbc2f5004ae6ce477b505f85b7baab7"
+    },
+    {
+      "schema": "public",
+      "name": "confirm_payroll_channel_receipt_internal",
+      "args": "p_run_file_id uuid, p_sha256 text, p_size_bytes bigint, p_mime_type text",
+      "sha256": "253a117b93ab2276cef552f05bb11d6ca9dbafa05b4aac9070fb837c62901671"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_ready_for_dispersion",
+      "args": "p_payment_request_id uuid",
+      "sha256": "1d16747cad639b361b0dbf51ee8e9a07d1d8c04757c0753d586dbeb8b2201e74"
+    },
+    {
+      "schema": "public",
+      "name": "confirm_payroll_finance_review",
+      "args": "p_payment_request_id uuid",
+      "sha256": "2726b9373951deb8bddd8faceb0997a7486288e536d559f80278e29fdf05751a"
+    },
+    {
+      "schema": "public",
+      "name": "enqueue_payroll_submission_notification",
+      "args": "",
+      "sha256": "b219522b73b392f49904243e441f86e677bdc6e3755d954b27fafc121567c1b8"
+    },
+    {
+      "schema": "public",
+      "name": "get_my_payroll_access",
+      "args": "p_company_id uuid",
+      "sha256": "1492fe7c264db8f58627840d3efd46379ed5868557c8510b480e264b4bd329b5"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_capture_context",
+      "args": "p_company_id uuid",
+      "sha256": "d6bc36bdd6207a1f695607e38a80f0a6d5e32075aa15e313521107be5c0e0e23"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_capture_file_url",
+      "args": "p_file_id uuid",
+      "sha256": "ded7c00ab4ca1805e7d80b1f9378940dbe81e487cd9f8784f33a96411210c00a"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_capture_sessions_unscoped_internal",
+      "args": "p_session_id uuid",
+      "sha256": "970fc4bab49bd5c8d5de8765efbd61cfe7c8b89aa13c44d46114d71752758ccd"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_capture_sessions",
+      "args": "p_session_id uuid",
+      "sha256": "d06746182595b83b59b46a64011499b4b0da83a4d30ccf3294a8f5a1ca0bd767"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_can_read_summary",
+      "args": "p_payment_request_id uuid",
+      "sha256": "f04fb83cb39342ae3990302882f37f5f3b756f92324f9a3cd5f9410f85ebd061"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_dispersion_summary",
+      "args": "p_payment_request_id uuid",
+      "sha256": "90b0805dab41e09ff7962ab7fcdfdddeb872e6498ff101ee17fb80cfea73c5e0"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_materialization_context_internal",
+      "args": "p_capture_session_id uuid, p_expected_version integer",
+      "sha256": "292d511c20c20060a943b4da0c744ec3d5f9d87459eb794a1020d7999bc80e49"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_notification_document",
+      "args": "p_event_id uuid, p_worker_id text",
+      "sha256": "5d2148c2236d800046ea8fc9d08b007b9a7751d61761277ca7f0e440699310a1"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_receipt_file_url",
+      "args": "p_file_id uuid",
+      "sha256": "16100e4b07995db063beb16d6c314b83a9563168fb1412be40dd3ae542a97aef"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_receipt_verification_context",
+      "args": "p_run_file_id uuid",
+      "sha256": "f2f4e639c5b3b1a9f03d6232228db59eb017fea3026c5230879a9d91cb1d534c"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_reconciliation_summary",
+      "args": "p_payment_request_id uuid",
+      "sha256": "82799fe87fd68a947d077b6c6b8d7356041e181ace801d3a4953ee6d4b913f65"
+    },
+    {
+      "schema": "public",
+      "name": "get_payroll_submission_summary",
+      "args": "p_payment_request_id uuid",
+      "sha256": "bc3b6a6d1355fdbaec33f452228f2e5655b08469f76e3276b67d4c921edef1af"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_approval_insert",
+      "args": "",
+      "sha256": "303702ed26e867a3dd3b074f44919a04df309e738f6a491076b0b2429d98cf92"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_budget_snapshot_immutable",
+      "args": "",
+      "sha256": "41aa211c679e38069447e304fd1ec568b2fd32fb02ba7904c7910da065407963"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_channel_financial_snapshot",
+      "args": "",
+      "sha256": "171be0e0e5aeaf142970d171f5450b4657af6d04e617319d379f1efafca0757a"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_materialized_request_immutable",
+      "args": "",
+      "sha256": "b732aa230c83a5139d7576dba3b6ed4ce3108a8d69c13b07f752521e271ce33b"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_request_status_transition",
+      "args": "",
+      "sha256": "c97b2b17f2d98d6118a9019f9592775327b99fe7e29a5e21a1281a59c9c8c986"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_submitted_at_immutable",
+      "args": "",
+      "sha256": "265676a7575b25a35f190b775ad53687c3f1253d6c22d14d721a25a5a419e79b"
+    },
+    {
+      "schema": "public",
+      "name": "guard_payroll_toka_variance_before_submit",
+      "args": "",
+      "sha256": "0dccb070a0de6045c02fd6a6f6172dbb2c327663324601f055e771796aaa12f4"
+    },
+    {
+      "schema": "public",
+      "name": "post_payroll_provision_internal",
+      "args": "p_payment_request_id uuid, p_base_amount_minor bigint, p_server_aguinaldo_factor numeric, p_server_vacation_premium_factor numeric, p_policy_version text",
+      "sha256": "95e6b1a24bc95b269a5581ee1f67fb02512fa103c2b2b1b1ec2846185bb02d2d"
+    },
+    {
+      "schema": "public",
+      "name": "materialize_payroll_capture_internal",
+      "args": "p_capture_session_id uuid, p_expected_version integer, p_idempotency_key_hash text, p_server_result jsonb",
+      "sha256": "8cd99a0a7cbf4d901558e4d9965e2db72d2113cb4f64339fc41a84aafd8774cf"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_channels_valid",
+      "args": "p_channels text[]",
+      "sha256": "3863a3015a3afd549d50a6127136680d1d1346a091d9dc336f72d57a492949dc"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_storage_insert_allowed_unscoped_internal",
+      "args": "p_name text",
+      "sha256": "859cffd3221a58cac304e88061c862041d2a80d5c51af461c7845edf9359600c"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_storage_insert_allowed",
+      "args": "p_name text",
+      "sha256": "31a7d3768d9593b6ee1b5a0080a168a44a0b7c151a56a5028b146e6ef3c7617f"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_storage_select_allowed_unscoped_internal",
+      "args": "p_name text",
+      "sha256": "11af4dc6e5f94c95f316d0fdd09bf26da21f2eddfaa7a6ab74b5f49c079e5342"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_capture_storage_select_allowed",
+      "args": "p_name text",
+      "sha256": "867175e757ae7a0ca1590b3ce98ff270544db6911403dae38fdf6aa70e67605d"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_enforce_request_total",
+      "args": "",
+      "sha256": "dba6e7c95b970716946e95ef0216839fe6bbe4bd6e0af565f460c5540de4aa6e"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_force_non_budget_context",
+      "args": "",
+      "sha256": "c29b28e674acb3d227844ac82cba8fd6f672cf32522eb058d39a3e84fc3a5fc7"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_redacted_audit",
+      "args": "",
+      "sha256": "00348e275e3351bbf8da276edf47ad8ee3ce344dd4b66c185c08d0e2b6ab0714"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_reject_normal_layout_line",
+      "args": "",
+      "sha256": "792aa14e5d451ce089e42a564060a19ed2033687d72f50d19d3b17046f4672ba"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_run_file_storage_insert_allowed",
+      "args": "p_name text",
+      "sha256": "9d076c1c58da0c618e05fd1217e428a5d22c7eebf156b9dea7a8c3e7cf4dddd4"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_storage_company_access",
+      "args": "p_name text",
+      "sha256": "ac3530103fbe282b7863643f4f082fcf1ce65bd68ac69fb00232cbb8790f87a6"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_validate_channel_parent",
+      "args": "",
+      "sha256": "787cf12f6e61f2d23ec6d18b8a78d249b3e862f8db455b30bd65b0021d49300b"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_validate_file_parent",
+      "args": "",
+      "sha256": "fd0365c9323e0588439c6229fb304e9eae6cad555e539b4ebcba0c4dd2ed09da"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_validate_line_parent",
+      "args": "",
+      "sha256": "4f91f0f5996d83de57f49b2d5e19215e86f7906a693db3b56607402f0f56ebd0"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_validate_materialized_capture_file",
+      "args": "",
+      "sha256": "c481df6a62f2dab45ad59f3c0d157de5d9e6f96528666ec1b2933514d827da69"
+    },
+    {
+      "schema": "public",
+      "name": "payroll_validate_request_contract",
+      "args": "",
+      "sha256": "1d576bf457a44a95351206a2daa6e7b1661b393a423d5a0f1bb762f24d4958b0"
+    },
+    {
+      "schema": "public",
+      "name": "reconcile_payroll_channel",
+      "args": "p_payment_request_id uuid, p_payroll_channel_id uuid, p_receipt_file_id uuid, p_receipt_amount numeric, p_payment_date date, p_reference_hint text",
+      "sha256": "d355b7f3ce17c7a6785c1315f0a51407215c65571dd9c014f5f71053ffaf3d83"
+    },
+    {
+      "schema": "public",
+      "name": "record_payroll_channel_dispersion",
+      "args": "p_payment_request_id uuid, p_payroll_channel_id uuid, p_action text, p_failure_note text",
+      "sha256": "55a6537c0ea155ed1b9064ea6a340d19ad96ee3eb497caa32e3c61393f427277"
+    },
+    {
+      "schema": "public",
+      "name": "reserve_payroll_capture_file_unscoped_internal",
+      "args": "p_session_id uuid, p_expected_version integer, p_kind text, p_extension text, p_mime_type text, p_size_bytes bigint, p_sha256 text, p_parser_version text, p_parser_contract text, p_record_count integer, p_total_amount_minor bigint",
+      "sha256": "6551cb55910771375b1927854c98a21cf165987c27a87682a5bdd8e5dc193724"
+    },
+    {
+      "schema": "public",
+      "name": "reserve_payroll_capture_file",
+      "args": "p_session_id uuid, p_expected_version integer, p_kind text, p_extension text, p_mime_type text, p_size_bytes bigint, p_sha256 text, p_parser_version text, p_parser_contract text, p_record_count integer, p_total_amount_minor bigint",
+      "sha256": "ec8e4591677f7f1e3f0f06e3be34f46e2bf05c4a065403b0dcc2525533d8bbd9"
+    },
+    {
+      "schema": "public",
+      "name": "reserve_payroll_channel_receipt",
+      "args": "p_payment_request_id uuid, p_payroll_channel_id uuid, p_mime_type text, p_size_bytes bigint, p_sha256 text, p_original_filename text",
+      "sha256": "5f6209f7b9cb97208e5a757e105cbff73fba172d777ef147d2c42f3d45cf98fe"
+    },
+    {
+      "schema": "public",
+      "name": "save_payroll_capture_session_unscoped_internal",
+      "args": "p_session_id uuid, p_expected_version integer, p_company_id uuid, p_company_bank_account_id uuid, p_payroll_subtype text, p_period_start date, p_period_end date, p_concept text, p_notes text, p_expected_channels text[]",
+      "sha256": "d427d0d82650834881b9aa275df76d19b66f8bbc107bf53486f6e0233507bad0"
+    },
+    {
+      "schema": "public",
+      "name": "save_payroll_capture_session",
+      "args": "p_session_id uuid, p_expected_version integer, p_company_id uuid, p_company_bank_account_id uuid, p_payroll_subtype text, p_period_start date, p_period_end date, p_concept text, p_notes text, p_expected_channels text[]",
+      "sha256": "407049d82560df66ed7d4734c24b13f1fc4cc8a9923a4b01cdd800157b3cd1cf"
+    },
+    {
+      "schema": "public",
+      "name": "save_payroll_capture_session_n3g",
+      "args": "p_session_id uuid, p_expected_version integer, p_company_id uuid, p_company_bank_account_id uuid, p_cost_center_id uuid, p_payroll_subtype text, p_period_start date, p_period_end date, p_concept text, p_notes text, p_expected_channels text[]",
+      "sha256": "f8fedb1b8d70af2172ff770500ebd5db44b71ebfb5fac2f404789ed88c0d875b"
+    },
+    {
+      "schema": "public",
+      "name": "validate_payroll_submit_transition",
+      "args": "",
+      "sha256": "96a4a6f3d588edaf7541c5d2248a60315887ccdb6c975283163f66dbe665d9b3"
+    }
+  ],
+  "preserved_existing_functions": [
+    "public.payroll_active_company_access"
+  ],
+  "baseline_sha256": "9922a43a9236b7fd01e0ed07ca67d9002314108a7bb33c59301ff38c684b15e2"
+}

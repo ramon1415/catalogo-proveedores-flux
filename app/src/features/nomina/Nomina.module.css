@@ -3,15 +3,26 @@
 
 .phead {
   display: flex;
+  flex-shrink: 0;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
-  margin-bottom: 18px;
   flex-wrap: wrap;
+}
+.phead > div {
+  flex: 1 1 260px;
+  min-width: 0;
 }
 .phead h1 {
   margin: 0 0 4px;
-  font-size: 24px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+.phead p {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .eyebrow {
   display: inline-block;
@@ -45,6 +56,7 @@
   text-transform: uppercase;
   border: 1px solid var(--border);
   color: var(--text-3);
+  flex-shrink: 0;
 }
 
 .primaryBtn {
@@ -56,9 +68,10 @@
   border: 0;
   border-radius: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 700;
   font-family: inherit;
+  font-size: 12.5px;
   cursor: pointer;
 }
 .primaryBtn:disabled {
@@ -76,7 +89,21 @@
   background: transparent;
   color: var(--text-2);
   font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  justify-content: center;
   cursor: pointer;
+}
+.secondaryBtn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--border-strong);
+}
+.primaryBtn:focus-visible,
+.secondaryBtn:focus-visible,
+.iconBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .secondaryBtn:disabled {
   opacity: 0.5;
@@ -85,6 +112,11 @@
 
 /* Tablero de capturas */
 .board {
+  /* Mismo reparto de altura que Solicitudes: cabecera fija y lista desplazable. */
+  flex: 1 1 0;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 15px;
   background: var(--bg-card);
@@ -92,6 +124,7 @@
 }
 .boardHead {
   display: flex;
+  flex-shrink: 0;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
@@ -99,8 +132,9 @@
   border-bottom: 1px solid var(--border);
 }
 .boardHead h2 {
-  margin: 4px 0 2px;
-  font-size: 18px;
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .boardHead p {
   margin: 0;
@@ -108,12 +142,28 @@
   font-size: 11.5px;
 }
 .boardList {
-  display: grid;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-3) transparent;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   padding: 14px;
 }
+.boardList::-webkit-scrollbar { width: 8px; height: 8px; }
+.boardList::-webkit-scrollbar-track { background: transparent; }
+.boardList::-webkit-scrollbar-thumb { background: var(--text-3); border: 2px solid var(--bg-card); border-radius: 999px; }
+.boardList:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .boardItem {
   display: grid;
+  flex-shrink: 0;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
@@ -121,12 +171,16 @@
   border-radius: 12px;
   padding: 12px 14px;
 }
-.boardItem strong {
+.boardItemInfo {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.boardItemInfo strong {
   display: block;
   font-size: 13px;
   color: var(--text-1);
 }
-.boardItem span {
+.boardItemInfo span {
   display: block;
   color: var(--text-3);
   font-size: 11px;
@@ -148,6 +202,8 @@
   font-weight: 800;
   text-transform: uppercase;
   border: 1px solid var(--border);
+  width: fit-content;
+  align-self: center;
 }
 .stateSuccess {
   background: var(--emerald-dim);
@@ -179,6 +235,279 @@
   color: var(--text-3);
   font-size: 12px;
   line-height: 1.5;
+}
+.introRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.dropzone {
+  position: relative;
+  min-height: 150px;
+  padding: 24px;
+  border: 2px dashed var(--border);
+  border-radius: 15px;
+  background: var(--bg-input);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+.dropzone:hover,
+.dropzoneActive {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.dropzoneActive {
+  transform: scale(1.005);
+}
+.dropzone strong {
+  color: var(--text-1);
+  font-size: 15px;
+}
+.dropzone span {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.dropzone .dropzoneAction {
+  margin-top: 7px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 750;
+}
+.dropzone input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.inlineNotice {
+  padding: 9px 11px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 9px;
+  background: var(--amber-dim);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.detectedPanel,
+.receiptsPanel,
+.onePageSummary {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+.panelHeading,
+.summaryTop {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.panelHeading strong,
+.summaryTop strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 13px;
+  margin-top: 3px;
+}
+.channelChips {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.channelChips span {
+  padding: 4px 8px;
+  border: 1px solid rgba(18, 183, 106, 0.28);
+  border-radius: 999px;
+  background: var(--emerald-dim);
+  color: var(--emerald);
+  font-size: 9.5px;
+  font-weight: 750;
+}
+.fileRows {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+}
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, auto) auto auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+.fileRowDanger {
+  border-color: rgba(224, 62, 82, 0.32);
+  background: var(--ruby-dim);
+}
+.fileIdentity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fileIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--accent-text);
+}
+.fileInfo {
+  min-width: 0;
+}
+.fileInfo strong,
+.fileInfo span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileInfo strong {
+  color: var(--text-1);
+  font-size: 12px;
+}
+.fileInfo span {
+  color: var(--text-3);
+  font-size: 10px;
+  margin-top: 4px;
+}
+.fileRow select {
+  height: 34px;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-1);
+  padding: 0 8px;
+}
+.fileAggregate {
+  text-align: right;
+}
+.fileAggregate span,
+.fileAggregate strong {
+  display: block;
+  font-size: 10px;
+}
+.fileAggregate span {
+  color: var(--text-3);
+}
+.fileAggregate strong {
+  color: var(--text-1);
+  margin-top: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.fileActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fileActions .secondaryBtn {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.iconBtn {
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 7px;
+}
+.iconBtn:hover {
+  color: var(--ruby);
+}
+.summaryMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  padding: 12px 14px 0;
+}
+.onePageSummary .channelList,
+.onePageSummary .issues,
+.onePageSummary .localChecks {
+  margin: 11px 14px 0;
+}
+.localChecks {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.checkPass,
+.checkWarning {
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+}
+.checkPass {
+  color: var(--emerald);
+  background: var(--emerald-dim);
+  border-color: rgba(18, 183, 106, 0.28);
+}
+.checkWarning {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.details {
+  margin: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.details summary {
+  padding: 11px 12px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  background: var(--bg-input);
+}
+.details .grid {
+  padding: 12px;
+}
+.primaryAction {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 7px;
+}
+.primaryAction small {
+  color: var(--text-3);
+  font-size: 9.5px;
+  text-align: center;
+}
+.primaryWide {
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
 }
 .grid {
   display: grid;
@@ -249,51 +578,143 @@
   font-size: 13px;
 }
 
-/* Cards de archivos */
-.fileGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.fileCard {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 13px;
-  display: grid;
-  gap: 8px;
-}
-.fileCardDisabled {
-  opacity: 0.55;
-}
-.fileCardHead {
+/* Comprobantes: filas del mismo estilo que los archivos de la captura. */
+.receiptsHeading {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  align-items: center;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
 }
-.fileCardHead strong {
-  font-size: 12.5px;
+.receiptsHeading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--text-1);
 }
-.fileCardHead span {
+.receiptsHeading p,
+.receiptFooter p {
+  margin: 5px 0 0;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.receiptList {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.receiptCard {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-card);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.receiptCardHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+}
+.receiptAmount {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.receiptAmount strong {
+  font-size: 15px;
+  color: var(--text-1);
+}
+.receiptAmount span {
   font-size: 9.5px;
-  font-weight: 800;
-  text-transform: uppercase;
   color: var(--text-3);
 }
-.fileCard p {
+.receiptCard p {
   margin: 0;
   color: var(--text-3);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
-.fileStatus {
-  display: grid;
-  gap: 3px;
+.receiptBody {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
-.fileStatus small {
+.receiptBody > button {
+  flex-shrink: 0;
+}
+.receiptDetails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  min-width: 0;
+}
+.receiptDetails dt {
   color: var(--text-3);
   font-size: 10px;
+}
+.receiptDetails dd {
+  margin: 3px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.receiptForm {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.receiptForm input[type="file"] {
+  height: auto;
+  padding: 6px;
+  font-size: 12px;
+  width: 100%;
+}
+.receiptForm input::file-selector-button {
+  margin-right: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.formNotice {
+  grid-column: 1 / -1;
+}
+.formNotice[role="alert"] {
+  color: var(--amber);
+}
+.receiptSuccess {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 12px 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(18, 183, 106, 0.28);
+  border-radius: 9px;
+  background: var(--emerald-dim);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.receiptSuccess > span {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--emerald);
+}
+.receiptFooter {
+  padding: 0 14px 14px;
+  font-size: 12px;
 }
 
 .validationPanel {
@@ -492,14 +913,51 @@
 
 @media (max-width: 720px) {
   .grid,
-  .fileGrid,
-  .metrics {
+  .metrics,
+  .summaryMetrics {
     grid-template-columns: 1fr;
   }
   .approval {
     grid-template-columns: 1fr;
   }
   .boardItem {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .boardItemInfo {
+    grid-column: 1 / -1;
+  }
+  .introRow,
+  .panelHeading,
+  .summaryTop,
+  .receiptsHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .fileRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fileRow > .fileIdentity,
+  .fileRow > .fileInfo,
+  .fileRow > select,
+  .fileActions,
+  .receiptCardHead > .fileIdentity {
+    grid-column: 1 / -1;
+  }
+  .fileInfo strong,
+  .fileInfo span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .receiptCardHead {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+  .receiptBody {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .fileAggregate,
+  .receiptAmount {
+    text-align: left;
   }
 }

@@ -7,6 +7,7 @@ import type {
   BankAccount,
   CompanyCostCenter,
   CostCenter,
+  FileMap,
   FileSlotState,
   PayrollChannel,
   PayrollSlot,
@@ -71,6 +72,107 @@ export function slotsForChannel(channel: PayrollChannel): PayrollSlot[] {
   if (channel === 'vales') return ['layout_toka', 'cfdi_vales']
   if (channel === 'banco') return ['layout_mismo_banco']
   return ['layout_spei']
+}
+
+export function channelsFromFiles(files: FileMap): PayrollChannel[] {
+  const channels: PayrollChannel[] = []
+  if (files.layout_mismo_banco) channels.push('banco')
+  if (files.layout_spei) channels.push('spei')
+  if (files.layout_toka || files.cfdi_vales) channels.push('vales')
+  return channels
+}
+
+export type InferredPayrollPeriod = {
+  periodNumber: number
+  year: number
+  periodStart: string
+  periodEnd: string
+  source: 'date_range' | 'period_number'
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match = value.match(/^(20\d{2})-(\d{2})-(\d{2})$/)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+// Los parsers físicos certificados todavía no exponen el periodo. El paquete
+// real sí lo codifica en nombres como fwdnom16_2026 o Qna 16_2026. Esta
+// inferencia exige una sola coincidencia y nunca reemplaza al servidor.
+export function inferPayrollPeriodFromFileNames(fileNames: string[]): InferredPayrollPeriod | null {
+  const names = (fileNames || []).map((name) => String(name || ''))
+  const explicitRanges = new Map<string, { start: string; end: string }>()
+  const periods = new Set<number>()
+  const years = new Set<number>()
+
+  for (const name of names) {
+    const range = name.match(/(20\d{2})[-_.](\d{2})[-_.](\d{2})\D+(20\d{2})[-_.](\d{2})[-_.](\d{2})/)
+    if (range) {
+      const start = `${range[1]}-${range[2]}-${range[3]}`
+      const end = `${range[4]}-${range[5]}-${range[6]}`
+      explicitRanges.set(`${start}/${end}`, { start, end })
+    }
+
+    const patterns = [
+      /fwdnom\s*0?(\d{1,2})[_-](20\d{2})/i,
+      /(?:qna|quincena|periodo|n[oó]mina)\s*[-_ ]*0?(\d{1,2})(?:\s*(?:de|\/|_|-)\s*(20\d{2}))?/i,
+    ]
+    for (const pattern of patterns) {
+      const match = name.match(pattern)
+      if (!match) continue
+      const period = Number(match[1])
+      if (period >= 1 && period <= 24) periods.add(period)
+      if (match[2]) years.add(Number(match[2]))
+      break
+    }
+    for (const match of name.matchAll(/(?:^|\D)(20\d{2})(?=\D|$)/g)) years.add(Number(match[1]))
+  }
+
+  if (explicitRanges.size === 1) {
+    const [{ start, end }] = Array.from(explicitRanges.values())
+    const startDate = new Date(`${start}T00:00:00Z`)
+    const endDate = new Date(`${end}T00:00:00Z`)
+    if (isValidIsoDate(start) && isValidIsoDate(end) && start <= end) {
+      const month = startDate.getUTCMonth() + 1
+      const half = startDate.getUTCDate() <= 15 ? 1 : 2
+      return {
+        periodNumber: (month - 1) * 2 + half,
+        year: startDate.getUTCFullYear(),
+        periodStart: start,
+        periodEnd: end,
+        source: 'date_range',
+      }
+    }
+  }
+
+  if (periods.size !== 1 || years.size !== 1) return null
+  const periodNumber = Array.from(periods)[0]
+  const year = Array.from(years)[0]
+  const month = Math.ceil(periodNumber / 2)
+  const secondHalf = periodNumber % 2 === 0
+  const startDay = secondHalf ? 16 : 1
+  const endDay = secondHalf ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 15
+  return {
+    periodNumber,
+    year,
+    periodStart: isoDate(year, month, startDay),
+    periodEnd: isoDate(year, month, endDay),
+    source: 'period_number',
+  }
+}
+
+export function defaultPayrollConcept(subtype: PayrollSubtype, periodStart: string, periodEnd: string): string {
+  if (!periodStart || !periodEnd) return ''
+  const label = subtype === 'extraordinaria' ? 'extraordinaria' : 'ordinaria'
+  return `Nómina ${label} ${periodStart} al ${periodEnd}`
 }
 
 // ── Cuentas origen / centros de costo ──────────────────────────────────────
@@ -156,7 +258,13 @@ export async function inspectFile(
 ): Promise<FileSlotState> {
   const config = SLOT_CONFIG[slot]
   const extension = String(file.name || '').split('.').pop()!.toLowerCase()
-  const mimeType = file.type || config?.mimes?.[0] || ''
+  // Algunos navegadores y selectores administrados entregan archivos locales
+  // con MIME vacío, genérico o no estándar. Si el MIME observado no pertenece
+  // al contrato del slot, usamos el canónico: la extensión y la firma física
+  // siguen siendo obligatorias, y el servidor vuelve a validar los bytes antes
+  // de materializar la corrida.
+  const observedMime = String(file.type || '').toLowerCase()
+  const mimeType = config?.mimes.includes(observedMime) ? observedMime : config?.mimes?.[0] || ''
   if (!config || extension !== config.extension || !config.mimes.includes(mimeType) || file.size < 1 || file.size > MAX_BYTES) {
     throw new Error('PAYROLL_FILE_METADATA_INVALID')
   }
@@ -174,6 +282,7 @@ export async function inspectFile(
     uploaded: false,
     status: 'server_verification_pending',
     file,
+    fileName: file.name,
     extension,
     mimeType,
     sizeBytes: file.size,
@@ -182,7 +291,21 @@ export async function inspectFile(
   }
 
   if (slot === 'layout_spei') {
-    const summary = summarizePayrollSpeiForCapture(buffer, sourceCandidates)
+    const parsedWithoutAccount = parsePayrollSpeiTxt(buffer)
+    const summary = sourceCandidates.length
+      ? summarizePayrollSpeiForCapture(buffer, sourceCandidates)
+      : {
+          parserVersion: parsedWithoutAccount.parserVersion,
+          contractVersion: parsedWithoutAccount.contractVersion,
+          valid: parsedWithoutAccount.issues.length === 0 && parsedWithoutAccount.records.length > 0,
+          recordCount: parsedWithoutAccount.issues.length === 0 ? parsedWithoutAccount.records.length : 0,
+          totalAmountMinor:
+            parsedWithoutAccount.issues.length === 0
+              ? parsedWithoutAccount.records.reduce((sum, record) => sum + record.amountMinor, 0)
+              : null,
+          currency: 'MXN',
+          issues: parsedWithoutAccount.issues,
+        }
     if (!summary.valid) {
       return { ...base, status: 'parser_error', uploadable: false, parserSummary: summary, issueCodes: ['PARSER_ERROR'] }
     }
@@ -200,8 +323,7 @@ export async function inspectFile(
     if (
       parsed.issues.length ||
       parsed.records.length !== 1 ||
-      !allowed.size ||
-      parsed.records.some((record) => !allowed.has(record.sourceAccount))
+      (allowed.size > 0 && parsed.records.some((record) => !allowed.has(record.sourceAccount)))
     ) {
       return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
     }
@@ -227,7 +349,7 @@ export function validateMetadata(input: {
   concept: string
   channels: PayrollChannel[]
 }): string {
-  if (!input.isFinance) return 'La Nómina es exclusiva de Finanzas.'
+  if (!input.isFinance) return 'Necesitas acceso a Nómina en la empresa activa.'
   if (!input.companyId) return 'Selecciona empresa.'
   if (!input.sourceAccountId) return 'Selecciona cuenta origen.'
   if (!input.costCenterId) return 'Selecciona centro de costo.'
@@ -266,6 +388,27 @@ export function slotLabel(value: PayrollSlot | string): string {
       } as Record<string, string>
     )[value] || value || 'Captura'
   )
+}
+
+export function fileRecordCountLabel(slot: PayrollSlot, count: number): string {
+  const labels: Record<PayrollSlot, [string, string]> = {
+    caratula: ['persona', 'personas'],
+    layout_mismo_banco: ['pago', 'pagos'],
+    layout_spei: ['transferencia', 'transferencias'],
+    layout_toka: ['transferencia', 'transferencias'],
+    cfdi_vales: ['beneficiario de vales', 'beneficiarios de vales'],
+  }
+  return `${count} ${labels[slot][count === 1 ? 0 : 1]}`
+}
+
+export function fileAmountLabel(slot: PayrollSlot): string {
+  return {
+    caratula: 'Neto de nómina',
+    layout_mismo_banco: 'Total BBVA',
+    layout_spei: 'Total SPEI',
+    layout_toka: 'Fondeo TOKA',
+    cfdi_vales: 'Importe de vales',
+  }[slot]
 }
 
 export function channelLabel(value: PayrollChannel | string): string {
@@ -339,10 +482,20 @@ const ERROR_MAP: Record<string, string> = {
   PAYROLL_SERVER_PACKAGE_VALIDATION_FAILED: 'Los archivos no conciliaron entre sí en la verificación del servidor.',
   PAYROLL_SOURCE_ACCOUNT_MISMATCH: 'La cuenta origen codificada en los layouts no coincide con la cuenta seleccionada.',
   PAYROLL_REQUIRED_FILES_MISSING: 'Faltan archivos obligatorios del paquete.',
+  PAYROLL_FILE_PHYSICAL_CONTRACT_MISMATCH: 'Ese archivo no coincide con el formato físico del tipo seleccionado.',
+  PAYROLL_FILE_PATH_MISMATCH: 'El archivo guardado no pertenece a esta corrida.',
+  PAYROLL_STORAGE_OBJECT_MISSING: 'No se encontró el archivo privado guardado. Vuelve a cargarlo en una captura nueva.',
+  PAYROLL_FILE_SIZE_MISMATCH: 'El tamaño del archivo guardado no coincide con la evidencia registrada.',
+  PAYROLL_FILE_MIME_MISMATCH: 'El tipo físico del archivo guardado no coincide con el formato esperado.',
+  PAYROLL_FILE_HASH_MISMATCH: 'La huella SHA-256 del archivo guardado no coincide.',
+  PAYROLL_PROVISION_BASE_SERVER_PARSE_FAILED: 'La base de provisión de la carátula no pudo validarse en el servidor.',
   PAYROLL_COVER_SHEET_SERVER_PARSE_FAILED: 'La carátula no coincide con el contrato físico certificado.',
   PAYROLL_SAME_BANK_SERVER_PARSE_FAILED: 'El archivo BBVA mismo banco no coincide con Nómina 108.',
   PAYROLL_TOKA_CFDI_SERVER_PARSE_FAILED: 'El CFDI TOKA no coincide con el contrato certificado.',
   PAYROLL_TOKA_FUNDING_SERVER_PARSE_FAILED: 'El TXT de fondeo TOKA no coincide con el contrato certificado.',
+  PAYROLL_NON_BUDGET_CONTEXT_REQUIRED: 'Esta corrida no tiene el nuevo contexto no presupuestal. Crea una captura nueva para usar el flujo actual.',
+  PAYROLL_APPROVAL_FLOW_DISABLED: 'La Nómina ya no usa aprobación. Revisa los montos y confirma la corrida desde Finanzas.',
+  PAYROLL_FINANCE_CONFIRM_RPC_REQUIRED: 'La confirmación debe realizarse desde la acción de revisión de Finanzas.',
 }
 
 export function friendlyError(error: unknown): string {

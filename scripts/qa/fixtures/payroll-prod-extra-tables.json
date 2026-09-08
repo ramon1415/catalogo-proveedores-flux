@@ -1,0 +1,606 @@
+[
+  {
+    "name": "approval_rules",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "name": "role_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "cost_center_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "amount_min",
+        "type": "numeric",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "name": "amount_max",
+        "type": "numeric",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "approval_level",
+        "type": "integer",
+        "default": "1",
+        "not_null": true
+      },
+      {
+        "name": "can_approve",
+        "type": "boolean",
+        "default": "true",
+        "not_null": true
+      },
+      {
+        "name": "can_reject",
+        "type": "boolean",
+        "default": "true",
+        "not_null": true
+      },
+      {
+        "name": "can_request_changes",
+        "type": "boolean",
+        "default": "true",
+        "not_null": true
+      },
+      {
+        "name": "can_approve_exception",
+        "type": "boolean",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "name": "can_request_budget_adjustment",
+        "type": "boolean",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "name": "active",
+        "type": "boolean",
+        "default": "true",
+        "not_null": true
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      }
+    ],
+    "constraints": [
+      {
+        "name": "approval_rules_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (id)"
+      }
+    ]
+  },
+  {
+    "name": "payment_layout_lines",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "name": "layout_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "payment_request_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "proveedor_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "company_bank_account_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "source_account_number",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "company_name",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "destination_type",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "destination_value",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "beneficiary_name",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "amount",
+        "type": "numeric",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "payment_reference",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "payment_concept",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "request_number",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "default": "'included'::text",
+        "not_null": true
+      },
+      {
+        "name": "bank_rejection_reason",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "convenio_number",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      }
+    ],
+    "constraints": [
+      {
+        "name": "payment_layout_lines_amount_check",
+        "type": "c",
+        "definition": "CHECK ((amount > (0)::numeric))"
+      },
+      {
+        "name": "payment_layout_lines_convenio_snapshot_chk",
+        "type": "c",
+        "definition": "CHECK (((convenio_number IS NULL) OR ((lower(btrim(destination_type)) = 'convenio'::text) AND (convenio_number ~ '^[0-9]+$'::text))))"
+      },
+      {
+        "name": "payment_layout_lines_destination_type_check",
+        "type": "c",
+        "definition": "CHECK ((destination_type = ANY (ARRAY['clabe'::text, 'cuenta'::text, 'convenio'::text])))"
+      },
+      {
+        "name": "payment_layout_lines_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "payment_layout_lines_status_check",
+        "type": "c",
+        "definition": "CHECK ((status = ANY (ARRAY['included'::text, 'paid'::text, 'bank_rejected'::text])))"
+      }
+    ]
+  },
+  {
+    "name": "payment_request_extraordinary_authorizations",
+    "columns": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "name": "payment_request_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "category",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "reason",
+        "type": "text",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "status",
+        "type": "text",
+        "default": "'active'::text",
+        "not_null": true
+      },
+      {
+        "name": "authorized_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "authorized_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "revoked_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "revoked_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "revoke_reason",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamp with time zone",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "name": "legacy_previous_status",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "legacy_classified_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "legacy_classified_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "legacy_classification_reason",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "name": "external_director_profile_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_type",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_storage_bucket",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_storage_path",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_sha256",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_mime_type",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_size_bytes",
+        "type": "bigint",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_verified_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_match_attested_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "evidence_match_attested_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "external_authorized_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "valid_until",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratification_due_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "idempotency_key",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "consumed_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "consumed_layout_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "consumed_layout_line_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratified_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratified_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratification_note",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "disputed_by",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "disputed_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "dispute_reason",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "authorization_medium",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "authorization_reference",
+        "type": "text",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "director_absence_confirmed",
+        "type": "boolean",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "name": "cannot_wait_confirmed",
+        "type": "boolean",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "name": "ratification_cut_count",
+        "type": "integer",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "name": "ratification_first_cut_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratification_last_cut_id",
+        "type": "uuid",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "name": "ratification_overdue_at",
+        "type": "timestamp with time zone",
+        "default": null,
+        "not_null": false
+      }
+    ],
+    "constraints": [
+      {
+        "name": "payment_request_extraordinary_authorizations_file_check",
+        "type": "c",
+        "definition": "CHECK ((((evidence_mime_type IS NULL) AND (evidence_size_bytes IS NULL)) OR ((evidence_mime_type = ANY (ARRAY['application/pdf'::text, 'image/jpeg'::text, 'image/png'::text, 'image/webp'::text])) AND ((evidence_size_bytes >= 1) AND (evidence_size_bytes <= 5242880)))))"
+      },
+      {
+        "name": "payment_request_extraordinary_authorizations_hash_check",
+        "type": "c",
+        "definition": "CHECK (((evidence_sha256 IS NULL) OR (evidence_sha256 ~ '^[0-9a-f]{64}$'::text)))"
+      },
+      {
+        "name": "payment_request_extraordinary_authorizations_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "payment_request_extraordinary_category_check",
+        "type": "c",
+        "definition": "CHECK ((category = ANY (ARRAY['operational_emergency'::text, 'urgent_reimbursement'::text, 'urgent_termination'::text, 'critical_service'::text, 'other'::text])))"
+      },
+      {
+        "name": "payment_request_extraordinary_cut_count_check",
+        "type": "c",
+        "definition": "CHECK (((ratification_cut_count >= 0) AND (ratification_cut_count <= 2147483647)))"
+      },
+      {
+        "name": "payment_request_extraordinary_evidence_type_check",
+        "type": "c",
+        "definition": "CHECK (((evidence_type IS NULL) OR (evidence_type = ANY (ARRAY['whatsapp_export'::text, 'email'::text, 'signed_document'::text, 'other'::text]))))"
+      },
+      {
+        "name": "payment_request_extraordinary_legacy_class_check",
+        "type": "c",
+        "definition": "CHECK ((((status = ANY (ARRAY['legacy_consumed_unverified'::text, 'legacy_quarantined'::text])) AND (legacy_previous_status = 'active'::text) AND (legacy_classified_at IS NOT NULL) AND (NULLIF(btrim(legacy_classification_reason), ''::text) IS NOT NULL)) OR ((status <> ALL (ARRAY['legacy_consumed_unverified'::text, 'legacy_quarantined'::text])) AND (legacy_previous_status IS NULL) AND (legacy_classified_at IS NULL) AND (legacy_classified_by IS NULL) AND (legacy_classification_reason IS NULL))))"
+      },
+      {
+        "name": "payment_request_extraordinary_lifecycle_check",
+        "type": "c",
+        "definition": "CHECK (((status = ANY (ARRAY['legacy_consumed_unverified'::text, 'legacy_quarantined'::text, 'revoked'::text])) OR ((company_id IS NOT NULL) AND (external_director_profile_id IS NOT NULL) AND (external_authorized_at IS NOT NULL) AND (valid_until > external_authorized_at) AND (ratification_due_at > valid_until) AND (idempotency_key IS NOT NULL) AND ((char_length(idempotency_key) >= 8) AND (char_length(idempotency_key) <= 200)) AND (evidence_storage_bucket = 'extraordinary-authorizations'::text) AND (evidence_storage_path IS NOT NULL) AND (((evidence_type IS NULL) AND (evidence_sha256 IS NULL) AND (evidence_mime_type IS NULL) AND (evidence_size_bytes IS NULL) AND (evidence_verified_at IS NULL) AND (evidence_match_attested_by IS NULL) AND (evidence_match_attested_at IS NULL)) OR ((evidence_type IS NOT NULL) AND (evidence_sha256 IS NOT NULL) AND (evidence_mime_type IS NOT NULL) AND (evidence_size_bytes IS NOT NULL) AND (evidence_verified_at IS NOT NULL) AND (evidence_match_attested_by IS NOT NULL) AND (evidence_match_attested_at IS NOT NULL))) AND ((status <> ALL (ARRAY['consumed_pending_ratification'::text, 'ratified'::text, 'disputed'::text])) OR ((consumed_at IS NOT NULL) AND (consumed_layout_id IS NOT NULL) AND (consumed_layout_line_id IS NOT NULL))) AND ((status <> 'ratified'::text) OR ((ratified_by IS NOT NULL) AND (ratified_at IS NOT NULL))) AND ((status <> 'disputed'::text) OR ((disputed_by IS NOT NULL) AND (disputed_at IS NOT NULL) AND (NULLIF(btrim(dispute_reason), ''::text) IS NOT NULL))))))"
+      },
+      {
+        "name": "payment_request_extraordinary_reason_check",
+        "type": "c",
+        "definition": "CHECK ((char_length(btrim(reason)) >= 20))"
+      },
+      {
+        "name": "payment_request_extraordinary_revoke_check",
+        "type": "c",
+        "definition": "CHECK ((((status = 'revoked'::text) AND (revoked_by IS NOT NULL) AND (revoked_at IS NOT NULL) AND (NULLIF(btrim(revoke_reason), ''::text) IS NOT NULL)) OR ((status <> 'revoked'::text) AND (revoked_by IS NULL) AND (revoked_at IS NULL) AND (revoke_reason IS NULL))))"
+      },
+      {
+        "name": "payment_request_extraordinary_status_check",
+        "type": "c",
+        "definition": "CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'consumed_pending_ratification'::text, 'ratified'::text, 'revoked'::text, 'expired'::text, 'disputed'::text, 'materially_invalidated'::text, 'legacy_consumed_unverified'::text, 'legacy_quarantined'::text])))"
+      }
+    ]
+  }
+]

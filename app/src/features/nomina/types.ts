@@ -2,8 +2,6 @@
 // payroll_capture.js + el contrato de las migraciones supabase/*payroll*.
 // (Generar db.types.ts con `supabase gen types` reemplazará estos tipos manuales.)
 
-// Slots del paquete físico. Coinciden con SLOT_CONFIG del vanilla y con el
-// `p_kind` que acepta reserve_payroll_capture_file.
 export type PayrollSlot =
   | 'caratula'
   | 'layout_mismo_banco'
@@ -11,13 +9,9 @@ export type PayrollSlot =
   | 'layout_toka'
   | 'cfdi_vales'
 
-// Canales de dispersión declarados en la corrida. Coinciden con
-// [data-payroll-channel] del vanilla y con expected_channels[] del backend.
 export type PayrollChannel = 'banco' | 'spei' | 'vales'
-
 export type PayrollSubtype = 'ordinaria' | 'extraordinaria'
 
-// Fila de company_bank_accounts (cuenta origen de Tesorería).
 export type BankAccount = {
   id: string
   company_id: string
@@ -31,28 +25,10 @@ export type BankAccount = {
   active: boolean | null
 }
 
-// Fila de cost_centers.
-export type CostCenter = {
-  id: string
-  name: string | null
-  code: string | null
-  active: boolean | null
-}
+export type CostCenter = { id: string; name: string | null; code: string | null; active: boolean | null }
+export type CompanyCostCenter = { company_id: string; cost_center_id: string; active: boolean | null }
+export type Company = { id: string; name: string | null }
 
-// Fila de company_cost_centers (mapeo empresa ↔ centro de costo).
-export type CompanyCostCenter = {
-  company_id: string
-  cost_center_id: string
-  active: boolean | null
-}
-
-export type Company = {
-  id: string
-  name: string | null
-}
-
-// Archivo persistido dentro de una sesión (session.files de
-// get_payroll_capture_sessions).
 export type CaptureFile = {
   id: string
   kind: PayrollSlot
@@ -68,7 +44,6 @@ export type CaptureFile = {
   uploaded_at: string | null
 }
 
-// Sesión de captura devuelta por get_payroll_capture_sessions.
 export type CaptureSession = {
   id: string
   company_id: string
@@ -90,10 +65,14 @@ export type CaptureSession = {
   materialized_payment_request_id: string | null
   materialized_at: string | null
   server_verification_summary: unknown
+  payment_request_number?: string | null
+  payment_request_status?: string | null
+  finance_confirmation_pending?: boolean
+  payment_ready?: boolean
+  payment_flow_state?: string | null
   files: CaptureFile[]
 }
 
-// Resultado de summarizePayrollSpeiForCapture (parser certificado del SPEI).
 export type SpeiParserSummary = {
   parserVersion: string
   contractVersion: string
@@ -112,19 +91,32 @@ export type SpeiIssue = {
   field?: string
 }
 
-// Estado local de un slot en la UI antes/después de subir (equivalente a
-// state.files[slot] del vanilla).
+export type LocalFileDiagnostic = {
+  contractVersion: string
+  recordCount: number | null
+  totalAmountMinor: number | null
+  cashAmountMinor?: number | null
+  vouchersAmountMinor?: number | null
+  benefitAmountMinor?: number | null
+  feeAmountMinor?: number | null
+  taxAmountMinor?: number | null
+  expectedFundingAmountMinor?: number | null
+}
+
 export type FileSlotState = {
   present: boolean
   uploadable: boolean
   uploaded: boolean
   status: string
   file?: File
+  fileId?: string
+  fileName?: string
   extension?: string
   mimeType?: string
   sizeBytes?: number
   sha256?: string
   parserSummary?: SpeiParserSummary
+  localDiagnostic?: LocalFileDiagnostic
   recordCount?: number | null
   totalAmountMinor?: number | null
   issueCodes: string[]
@@ -132,7 +124,6 @@ export type FileSlotState = {
 
 export type FileMap = Partial<Record<PayrollSlot, FileSlotState>>
 
-// Canal dentro del resumen de submission (payroll_channels).
 export type SummaryChannel = {
   channel: PayrollChannel
   amount: number | null
@@ -145,9 +136,9 @@ export type SummaryChannel = {
   funding_variance_acknowledged_at: string | null
 }
 
-// Retorno de get_payroll_submission_summary (con extensiones de N5A budget gate).
 export type SubmissionSummary = {
   payment_request_id: string
+  request_number?: string | null
   status: string
   company_id: string
   cost_center_id: string | null
@@ -170,10 +161,12 @@ export type SubmissionSummary = {
   budget_shortfall: number | null
   budget_checked_at: string | null
   budget_ready: boolean
+  finance_confirmation_pending?: boolean
+  payment_ready?: boolean
+  payment_flow_state?: string | null
   channels: SummaryChannel[]
 }
 
-// Candidato de list_payment_request_approver_options (idéntico a solicitudes).
 export type ApproverCandidate = {
   profile_id: string
   assignment_id?: string | null
@@ -184,7 +177,6 @@ export type ApproverCandidate = {
   eligible_roles?: string[] | null
 }
 
-// Payload para save_payroll_capture_session_n3g.
 export type SavePayload = {
   sessionId: string | null
   expectedVersion: number | null
