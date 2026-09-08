@@ -1,0 +1,59 @@
+name: Payroll obligations
+on:
+  pull_request:
+    paths:
+      - 'app/src/features/nomina/**'
+      - 'supabase/functions/payroll-obligations/**'
+      - 'supabase/functions/payroll-obligation-notifications/**'
+      - 'supabase/migrations/*payroll_obligations*'
+      - 'scripts/qa/payroll-*.test.mjs'
+      - package.json
+      - package-lock.json
+      - .github/workflows/payroll-obligation-documents-tests.yml
+  push:
+    branches: [dev, main]
+    paths:
+      - 'app/src/features/nomina/**'
+      - 'supabase/functions/payroll-obligations/**'
+      - 'supabase/functions/payroll-obligation-notifications/**'
+      - 'supabase/migrations/*payroll_obligations*'
+      - 'scripts/qa/payroll-*.test.mjs'
+      - package.json
+      - package-lock.json
+      - .github/workflows/payroll-obligation-documents-tests.yml
+permissions:
+  contents: read
+jobs:
+  shared-budget-concurrency:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: local-qa-only
+          POSTGRES_DB: obligation_concurrency
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: local-qa-only
+      PGDATABASE: obligation_concurrency
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/qa/payroll-obligations-concurrency.mjs
+  private-obligations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: node --test scripts/qa/payroll-obligation-documents.test.mjs scripts/qa/payroll-obligation-services.test.mjs scripts/qa/payroll-obligations-flow.test.mjs scripts/qa/payroll-obligations-ui.test.mjs scripts/qa/payroll-receipt-autofill.test.mjs scripts/qa/payroll-modal-uat.test.mjs scripts/qa/payroll-pilot-notifications.test.mjs

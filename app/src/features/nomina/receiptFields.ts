@@ -1,4 +1,4 @@
-import { receiptAmountMinor } from './receiptAmount'
+import { receiptAmountMinor } from './receiptAmount.ts'
 
 export type ReceiptFields = { amount: string; paymentDate: string; reference: string; currency: string | null }
 
