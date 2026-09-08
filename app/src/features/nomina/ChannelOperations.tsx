@@ -82,6 +82,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   const [summary, setSummary] = useState<ReconciliationSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyChannelId, setBusyChannelId] = useState<string | null>(null)
+  const [closing, setClosing] = useState(false)
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
   const [dates, setDates] = useState<Record<string, string>>({})
   const [references, setReferences] = useState<Record<string, string>>({})
@@ -115,7 +116,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }, [paymentRequestId])
 
   async function markDispersed(channel: ReconciliationChannel) {
-    if (busyChannelId) return
+    if (busyChannelId || closing) return
     const confirmed = window.confirm(
       `Registrar ${channelLabel(channel.channel)} como dispersado por ${formatMoney(channel.amount)}?\n\nFlux NO ejecutará ningún pago. Sólo registra que la dispersión se realizó externamente.`,
     )
@@ -140,7 +141,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
   }
 
   async function uploadReceipt(channel: ReconciliationChannel) {
-    if (busyChannelId) return
+    if (busyChannelId || closing) return
     const file = files[channel.id]
     const paymentDate = dates[channel.id] || ''
     const reference = (references[channel.id] || '').trim()
@@ -214,6 +215,28 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
     }
   }
 
+  async function closeAsPaid() {
+    if (closing || busyChannelId || !summary?.can_close_paid || summary.request_status === 'paid') return
+    const confirmed = window.confirm(
+      'Los tres canales están conciliados. ¿Cerrar esta nómina como pagada?\n\nFlux no ejecutará ningún pago; sólo cerrará la corrida con los comprobantes ya validados.',
+    )
+    if (!confirmed) return
+
+    setClosing(true)
+    try {
+      const { error } = await supabase.rpc('close_payroll_as_paid', {
+        p_payment_request_id: paymentRequestId,
+      })
+      if (error) throw error
+      await refresh(false)
+      showToast('Nómina cerrada como pagada', 'Los tres comprobantes quedaron conciliados y la corrida quedó cerrada.', 'success')
+    } catch (error) {
+      showToast('No se pudo cerrar la nómina', friendlyError(error), 'error')
+    } finally {
+      setClosing(false)
+    }
+  }
+
   if (loading && !summary) {
     return <div className={s.inlineNotice}>Cargando dispersión y comprobantes por canal…</div>
   }
@@ -248,7 +271,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
               ) : channel.dispersion_status !== 'dispersed' ? (
                 <>
                   <p>Registra este estado sólo después de ejecutar la dispersión fuera de Flux.</p>
-                  <button type="button" className={s.secondaryBtn} onClick={() => void markDispersed(channel)} disabled={busy}>
+                  <button type="button" className={s.secondaryBtn} onClick={() => void markDispersed(channel)} disabled={busy || closing}>
                     {busy ? 'Registrando…' : channel.dispersion_status === 'failed' ? 'Registrar reintento dispersado' : 'Registrar como dispersado'}
                   </button>
                 </>
@@ -260,7 +283,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       type="date"
                       value={dates[channel.id] || ''}
                       onChange={(event) => setDates((current) => ({ ...current, [channel.id]: event.target.value }))}
-                      disabled={busy}
+                      disabled={busy || closing}
                     />
                   </label>
                   <label>
@@ -270,7 +293,7 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       maxLength={120}
                       placeholder="Referencia bancaria / TOKA"
                       onChange={(event) => setReferences((current) => ({ ...current, [channel.id]: event.target.value }))}
-                      disabled={busy}
+                      disabled={busy || closing}
                     />
                   </label>
                   <label className={s.fullRow}>
@@ -279,11 +302,11 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
                       type="file"
                       accept="application/pdf,.pdf"
                       onChange={(event) => setFiles((current) => ({ ...current, [channel.id]: event.target.files?.[0] }))}
-                      disabled={busy}
+                      disabled={busy || closing}
                     />
                   </label>
                   <div className={s.fullRow}>
-                    <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy}>
+                    <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing}>
                       {busy ? 'Validando comprobante…' : 'Subir y conciliar comprobante'}
                     </button>
                   </div>
@@ -296,7 +319,21 @@ export function ChannelOperations({ paymentRequestId }: { paymentRequestId: stri
         })}
       </div>
 
-      {summary.all_reconciled && <div className={s.inlineNotice}>Los comprobantes de todos los canales quedaron conciliados.</div>}
+      {summary.request_status === 'paid' ? (
+        <div className={s.inlineNotice}>Nómina pagada · los comprobantes de BBVA, SPEI y TOKA quedaron conciliados.</div>
+      ) : summary.can_close_paid ? (
+        <div className={s.approval}>
+          <div>
+            <strong>Comprobación completa</strong>
+            <p>Los tres canales están conciliados. Cierra la corrida para registrarla como pagada.</p>
+          </div>
+          <button type="button" className={s.primaryBtn} onClick={() => void closeAsPaid()} disabled={closing || Boolean(busyChannelId)}>
+            {closing ? 'Cerrando…' : 'Cerrar nómina como pagada'}
+          </button>
+        </div>
+      ) : summary.all_reconciled ? (
+        <div className={s.inlineNotice}>Los comprobantes de todos los canales quedaron conciliados.</div>
+      ) : null}
     </section>
   )
 }
