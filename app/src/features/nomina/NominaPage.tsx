@@ -148,10 +148,9 @@ export default function NominaPage() {
     <>
       <div className={s.phead}>
         <div>
-          <span className={s.devPill}>Nómina N3G</span>
           <h1>Capturas de nómina</h1>
-          <p className="muted">
-            Paquetes privados de {companyName || 'la empresa activa'}. Flux valida los archivos y sus totales; Finanzas confirma los montos y la corrida continúa por su flujo propio de pago. No usa presupuesto ni corte semanal.
+          <p>
+            Registra los archivos de Buk y consulta el avance de cada nómina.
           </p>
         </div>
         <button className={s.primaryBtn} disabled={!companyId} onClick={() => setModal({ session: null })}>
@@ -162,14 +161,13 @@ export default function NominaPage() {
       <section className={s.board}>
         <div className={s.boardHead}>
           <div>
-            <span className={s.devPill}>Nómina N3G</span>
-            <h2>Capturas de nómina</h2>
-            <p>Paquetes privados de {companyName || 'la empresa activa'} y su estado dentro del flujo de Nómina.</p>
+            <h2 id="payroll-list-title">Solicitudes de nómina</h2>
+            <p>{companyName || 'Empresa activa'} · {sessions.length} {sessions.length === 1 ? 'captura' : 'capturas'}</p>
           </div>
           <span className={s.privatePill}>Acceso privado</span>
         </div>
 
-        <div className={s.boardList}>
+        <div className={s.boardList} role="region" aria-labelledby="payroll-list-title" tabIndex={0}>
           {status === 'loading' && <div className={s.boardEmpty}>Cargando capturas…</div>}
           {status === 'error' && <div className={s.boardEmpty}>Las capturas no están disponibles.</div>}
           {status === 'ready' && sessions.length === 0 && <div className={s.boardEmpty}>Aún no hay capturas de nómina.</div>}
@@ -185,7 +183,7 @@ export default function NominaPage() {
                   : captureStateLabel(session.capture_state)
               return (
                 <article key={session.id} className={s.boardItem}>
-                  <div>
+                  <div className={s.boardItemInfo}>
                     <strong>{session.concept}</strong>
                     <span>
                       {session.period_start} → {session.period_end}

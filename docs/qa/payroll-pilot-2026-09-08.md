@@ -57,6 +57,15 @@ Ramón autorizó expresamente iniciar sesión y recibir los dos avisos de prueba
 - Revalidar paquete espera el estado del servidor y se oculta cuando es paid, tanto después del cierre como al reabrir. El estado visible se presenta como Nómina pagada.
 - Build/TypeScript y 15 pruebas dirigidas aprobadas: dos regresiones de modal/cierre, once de precarga y dos de notificaciones visuales en diálogos. El selector nativo sigue pendiente de retest manual porque el navegador compartido no responde.
 
+### Presentación de archivos y scroll interno
+
+- El listado de Nómina ocupa el espacio disponible con el mismo reparto flexible que Solicitudes de pago. La cabecera permanece fija y el scroll pertenece a la lista; también admite desplazamiento con teclado. El panel conserva una altura mínima en ventanas muy bajas.
+- Se eliminan los títulos duplicados y el identificador técnico N3G del encabezado del listado. Se muestran la empresa, el número de capturas y el acceso privado.
+- Originales y comprobantes comparten filas con icono de archivo, datos legibles y botones de descarga. Descargar y Quitar quedan agrupados para evitar una quinta columna desalineada; los nombres completos se pueden consultar y se ajustan en móvil.
+- Cada comprobante separa canal, importe/moneda, estado, fecha y referencia. El panel usa los colores normales de Flux y la confirmación de pago es verde; el ámbar se reserva para advertencias. Las barras internas del modal y del listado respetan el tema activo.
+- Build/TypeScript y 24 pruebas dirigidas aprobadas: modal/cierre, precarga del PDF, contrato de captura y notificaciones de diálogo. Los dos harness de componentes cargan los iconos compartidos reales; sus aserciones funcionales se conservan.
+- El navegador compartido volvió a agotar la conexión al listar las pestañas. No se da por verificado visualmente el scroll, el selector nativo ni el diseño nuevo en el navegador; requieren retest manual en el preview publicado. No se generaron nuevas corridas ni avisos durante este ajuste.
+
 ### Destinatarios para la liberación
 
 - Registro: responsable de Tesorería por empresa; en DEV ambas empresas tienen a Yanin Navarrete (`ynavarrete@soportef.com`).
@@ -65,7 +74,7 @@ Ramón autorizó expresamente iniciar sesión y recibir los dos avisos de prueba
 
 ## Pendiente para cerrar el piloto
 
-1. Retest manual de cancelar el selector y comprobar que Revalidar paquete no aparece al reabrir SOL-2026-0157; verificar la descarga de comprobantes desde la captura. Cierre y ambos avisos ya verificados.
+1. Retest manual de cancelar el selector y comprobar que Revalidar paquete no aparece al reabrir SOL-2026-0157; verificar la descarga de comprobantes desde la captura y la nueva presentación de archivos. Recorrer el listado completo en escritorio y móvil, comprobando que la cabecera permanece visible y se desplaza la lista. Cierre y ambos avisos ya verificados.
 2. Confirmar la apariencia del correo final dentro de Gmail. El mensaje recibido, el HTML y los tres adjuntos ya fueron verificados mediante la API de Gmail.
 3. Validar la experiencia de Ara/Yulma con su sesión. Los permisos por empresa y la prohibición de mutaciones de pago ya están cubiertos por pruebas de base de datos; la UAT realizada corresponde a Ramón con capacidad de Finanzas.
 4. Preparar y revisar la liberación de producción. En la revisión inicial, main estaba en #548 y PROD todavía no tenía las tablas/RPC/Edge de nómina; este PR a DEV no habilita por sí solo el uso en producción.

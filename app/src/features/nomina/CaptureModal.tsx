@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
+import { IcDownload, IcFile } from '../../components/ui/icons'
 import { isDevSupabaseProject } from '../../lib/supabase'
 import {
   ALL_SLOTS,
@@ -672,14 +673,17 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
           <div className={s.fileRows}>
             {(Object.entries(files) as Array<[PayrollSlot, FileSlotState]>).map(([slot, state]) => (
               <article key={slot} className={s.fileRow}>
-                <div>
-                  <strong>{slotLabel(slot)}</strong>
-                  {(() => {
-                    const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
-                    const size = formatBytes(state.sizeBytes)
-                    const meta = [distinctName, size].filter(Boolean).join(' · ')
-                    return meta ? <span>{meta}</span> : null
-                  })()}
+                <div className={s.fileIdentity}>
+                  <span className={s.fileIcon}><IcFile size={18} /></span>
+                  <div className={s.fileInfo}>
+                    <strong>{slotLabel(slot)}</strong>
+                    {(() => {
+                      const distinctName = state.fileName && state.fileName !== slotLabel(slot) ? state.fileName : ''
+                      const size = formatBytes(state.sizeBytes)
+                      const meta = [distinctName, size].filter(Boolean).join(' · ')
+                      return meta ? <span title={meta}>{meta}</span> : null
+                    })()}
+                  </div>
                 </div>
                 <div className={s.fileAggregate}>
                   {state.recordCount != null && <span>{state.recordCount} registros</span>}
@@ -688,22 +692,24 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
                 <span className={`${s.state} ${state.status === 'parser_error' ? s.stateDanger : state.uploaded ? s.stateSuccess : s.stateWarning}`}>
                   {state.status === 'parser_error' ? 'Revisar' : state.uploaded ? 'Guardado' : 'Listo'}
                 </span>
-                {(state.file || state.fileId) && (
-                  <button type="button" className={s.iconBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
-                    Descargar
-                  </button>
-                )}
-                {!state.uploaded && !locked && (
-                  <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
-                    Quitar
-                  </button>
-                )}
+                <div className={s.fileActions}>
+                  {(state.file || state.fileId) && (
+                    <button type="button" className={s.secondaryBtn} onClick={() => void downloadFile(slot, state)} aria-label={`Descargar ${slotLabel(slot)}`}>
+                      <IcDownload size={15} /> Descargar
+                    </button>
+                  )}
+                  {!state.uploaded && !locked && (
+                    <button type="button" className={s.iconBtn} onClick={() => removeFile(slot)} aria-label={`Quitar ${slotLabel(slot)}`}>
+                      Quitar
+                    </button>
+                  )}
+                </div>
               </article>
             ))}
 
             {unrecognized.map((entry) => (
               <article key={entry.id} className={`${s.fileRow} ${s.fileRowDanger}`}>
-                <div>
+                <div className={s.fileInfo}>
                   <strong>{entry.file.name}</strong>
                   <span>{entry.message} — elige el tipo manualmente</span>
                 </div>

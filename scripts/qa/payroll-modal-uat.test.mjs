@@ -65,6 +65,7 @@ test('revalidation waits for server state and disappears immediately after the p
   const { CaptureModal } = load('app/src/features/nomina/CaptureModal.tsx', {
     '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.children, props.actions) },
     '../../components/ui/Toast': { useToast: () => ({ showToast() {} }) },
+    '../../components/ui/icons': load('app/src/components/ui/icons.tsx', {}),
     '../../lib/supabase': { isDevSupabaseProject: true },
     './api': api, './physicalParsers': {}, './Nomina.module.css': {},
     './ChannelOperations': { ChannelOperations: props => React.createElement('channel-operations', props) },
