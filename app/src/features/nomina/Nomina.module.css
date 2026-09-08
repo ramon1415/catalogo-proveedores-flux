@@ -3,6 +3,7 @@
 
 .phead {
   display: flex;
+  flex-shrink: 0;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
@@ -85,6 +86,8 @@
 
 /* Tablero de capturas */
 .board {
+  /* La página controla el scroll; comprimir este panel recorta las capturas. */
+  flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: 15px;
   background: var(--bg-card);
