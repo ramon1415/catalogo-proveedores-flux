@@ -12,7 +12,7 @@ const id=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const [company,,rh,,,category,center]=[1,2,3,4,5,6,7].map(id);
 const context=`set test.profile='${rh}';set request.jwt.claim.role='authenticated';`;
 sql(obligationSchemaSQL);
-for(const name of ['20260908172940_payroll_obligations_imss_isn','20260908173408_payroll_obligations_app_origin','20260908182623_payroll_obligations_review_feedback','20260908184710_payroll_obligations_shared_budget_guard'])sql(readFileSync(new URL(`../../supabase/migrations/${name}.sql`,import.meta.url),'utf8'));
+for(const name of ['20260908190908_payroll_obligations_imss_isn','20260908190912_payroll_obligations_app_origin','20260908190917_payroll_obligations_review_feedback','20260908190923_payroll_obligations_shared_budget_guard'])sql(readFileSync(new URL(`../../supabase/migrations/${name}.sql`,import.meta.url),'utf8'));
 sql(`insert into payroll_obligation_settings(company_id,kind,enabled,budget_category_id) values('${company}','imss',true,'${category}');`);
 const normal=`insert into payment_requests(company_id,cost_center_id,budget_category_id,budget_month,amount_requested,status) values('${company}','${center}','${category}','2026-07-01',600,'submitted');`;
 function prepare(n){

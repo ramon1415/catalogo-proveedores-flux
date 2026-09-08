@@ -14,10 +14,10 @@ const call=async(name,args=[])=> (await db.query(`select public.${name}(${args.m
 const read=path=>readFileSync(new URL(path,import.meta.url),'utf8');
 before(async()=>{
  db=new PGlite();await db.exec(obligationSchemaSQL);
- await db.exec(read('../../supabase/migrations/20260908172940_payroll_obligations_imss_isn.sql'));
- await db.exec(read('../../supabase/migrations/20260908173408_payroll_obligations_app_origin.sql'));
- await db.exec(read('../../supabase/migrations/20260908182623_payroll_obligations_review_feedback.sql'));
- await db.exec(read('../../supabase/migrations/20260908184710_payroll_obligations_shared_budget_guard.sql'));
+ await db.exec(read('../../supabase/migrations/20260908190908_payroll_obligations_imss_isn.sql'));
+ await db.exec(read('../../supabase/migrations/20260908190912_payroll_obligations_app_origin.sql'));
+ await db.exec(read('../../supabase/migrations/20260908190917_payroll_obligations_review_feedback.sql'));
+ await db.exec(read('../../supabase/migrations/20260908190923_payroll_obligations_shared_budget_guard.sql'));
  await db.query('insert into payroll_obligation_settings(company_id,kind,enabled,budget_category_id) values($1,$2,true,$3)',[company,'imss',category]);
 });
 after(async()=>{await db?.close();});
