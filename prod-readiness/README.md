@@ -57,7 +57,7 @@ chat ni editarlo en Supabase Studio.
 5. `20260831003419_fersana_company_access_onboarding.sql` +
    `20260831004957_fersana_company_access_advisor_hardening.sql` — DDL y RPC
    atómicos; la liga `fersana` se crea después, dentro del seed.
-6. `20260831120000_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
+6. `20260831194350_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
    `generate_recurring_income`), con FK compuesta que impide ligar un template
    de otra empresa.
 7. `20260831233032_budget_category_responsible.sql` — agrega `responsible_email` e índice para scoping de partidas.

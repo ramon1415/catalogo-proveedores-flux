@@ -11,7 +11,7 @@ const postcheck = readFileSync('prod-readiness/paso1-postcheck-prod.sql', 'utf8'
 const rollback = readFileSync('prod-readiness/ROLLBACK.md', 'utf8')
 const incidencias = readFileSync('supabase/migrations/20260827090000_platform_module_incidencias.sql', 'utf8')
 const onboarding = readFileSync('supabase/migrations/20260831003419_fersana_company_access_onboarding.sql', 'utf8')
-const recurringIncome = readFileSync('supabase/migrations/20260831120000_tenant_recurring_income.sql', 'utf8')
+const recurringIncome = readFileSync('supabase/migrations/20260831194350_tenant_recurring_income.sql', 'utf8')
 
 test('runbook prepares backend and auth before exposing the React app', () => {
   const migrations = readme.indexOf('| **1** | Migraciones aditivas')

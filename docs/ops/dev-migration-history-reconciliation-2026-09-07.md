@@ -209,3 +209,47 @@ Quedan siete entradas sólo remotas: las tres parejas con SQL diferente (onboard
 Validación del cambio de recuperación: TypeScript/Vite y artefacto estático correctos; **1121/1121 contratos offline** (incluidos los seis casos nuevos), 0 fallas y 0 omitidos. Los cinco archivos recuperados coinciden byte a byte con su SQL registrado. No se afirma que Supabase Preview esté resuelto.
 
 Nota de formato: la fuente registrada del duplicado de extraordinarios termina con una línea vacía adicional, igual que su primera ejecución ya versionada. Se conserva intencionalmente para mantener el hash exacto; no se reformatea SQL histórico.
+
+## Tramo de nómina y dos diferencias ya endurecidas — 8 de septiembre
+
+Base: DEV `40bb756` (#580); sin merges posteriores al comenzar. #578 evolucionó de documentación a lectura de documentos IMSS/ISN y sigue abierto; no se integra dentro de este cambio.
+
+### Tres fuentes de nómina recuperadas
+
+Se recuperan, byte a byte desde DEV, `20260907232403_payroll_confirmation_weekly_cut_bridge`, `20260907232743_payroll_direct_finance_confirmation_snapshot` y `20260907233050_payroll_weekly_cut_submit_bridge`. Las tres ya están registradas. No se aplican a DEV y no se crea una nueva versión para volver a ejecutarlas.
+
+No son tres archivos totalmente obsoletos. Cinco funciones vigentes aún tienen su última definición en esos puentes: `add_request_to_approval_batch`, `approval_batch_request_base_eligible`, `approval_batch_request_has_any_execution_record`, `list_batch_eligible_requests` y `submit_approval_batch`. La restricción de snapshot también sigue vigente.
+
+La migración posterior `20260908001439_payroll_separate_payment_flow_restore` desactiva el paso de nómina por cortes y conserva la confirmación de Finanzas. Los cambios de acceso `20260908015626` y totales `20260908060513` definen después dos lecturas. La matriz de las 13 funciones afectadas ubica su última fuente y contrasta su cuerpo con DEV: 13/13 coincidencias léxicas. Es una comparación de fuentes, no prueba formal de equivalencia semántica.
+
+Siete casos PGlite ejecutan los tres puentes completos y la restauración posterior: transición de semanal a separado; confirmación que habilita pago sin crear un ítem de corte; rechazo al agregar nómina a corte; rechazo al enviar un corte que ya contuviera nómina; solicitud ordinaria que se agrega/envía correctamente; restricción que impide nómina aprobada sin confirmación; y diferencia de fondeo TOKA que exige reconocimiento. Se reutiliza el esquema de pruebas del piloto y la función real de elegibilidad ordinaria del baseline; dependencias de membresía, presupuesto y materialización son fixtures. No se afirma replay completo ni UAT real.
+
+### Dos nombres alineados conservando la variante más restrictiva del repo
+
+| Archivo anterior | Versión DEV alineada | Por qué puede alinearse |
+|---|---|---|
+| 20260831120000_tenant_recurring_income | 20260831194350 | #569 / 20260908000916 ya estableció en DEV FK por empresa, índices, CRUD limitado, sesión explícita y search_path fijo. Se revalidaron función y constraints. |
+| 20260901055111_company_scoped_roles_foundation | 20260901065625 | 20260901071929 ya restringe el override global a rol sysadmin y correos aprobados. Su función coincide con la actual. |
+
+**Estos dos SQL no son idénticos a sus ejecuciones históricas remotas.** Se conserva cada byte de la variante más restrictiva del repositorio, se corrige sólo el número y se documenta la corrección posterior que lleva al estado vigente. No se importan versiones antiguas con controles más débiles. Los drops condicionales de triggers/policies de ingresos se mantienen para idempotencia. Esta decisión alinea el identificador sin afirmar una identidad histórica inexistente ni sustituir el ledger. Las referencias ejecutables y el manifiesto se actualizan conservando sus hashes.
+
+[Fuentes, hashes, matriz y catálogo vigente](../qa/payroll-history-reconciliation-2026-09-08.json). Catálogos de sólo lectura capturados a las 17:01:57 y 17:05:27 UTC.
+
+| Inventario | Tras #580 | Este cambio |
+|---|---:|---:|
+| Archivos locales | 111 | 114 |
+| Versiones DEV | 113 | 113 |
+| Números coincidentes | 106 | 111 |
+| Sólo remoto | 7 | 2 |
+| Sólo local | 5 | 3 |
+
+### Pendiente concreto
+
+1. Onboarding Fersana: remoto `20260831004813`, local `20260831003419`. La fuente remota inicial contiene el seed de Fersana y omite guards explícitos de auth.uid(). Las funciones actuales `request_company_access` y `reject_company_access_request` conservan comprobaciones de perfil/rol, pero no el guard explícito de sesión del repo. No se deduce una vulnerabilidad sólo de esa diferencia. Preparar una corrección hacia adelante que preserve la reapertura de solicitudes y la lógica actual, con pruebas de sesión/roles; no reinstalar funciones antiguas ni repetir el seed.
+2. Módulos `20260827090000` y `20260827100000`: el estado aplicado debe revalidarse antes de proponer reparación de metadatos. No reejecutar guards/seeds sobre las empresas y activaciones actuales.
+3. Histórico de respaldos `20260906003626`: mantener fuera el SQL destructivo. Cualquier retiro de su registro activo exige snapshot completo de esa fila y autorización específica; no es limpieza de respaldos ni reversión de lo que ocurrió.
+4. Resolver `047_precheck: public layout contract drifted`, completar la conciliación y verificar Supabase Preview. No ejecutar un push general ni eludir guards. `migration repair` sigue sujeto a autorización explícita conforme a `supabase-cli-migrations.md`.
+
+Este cambio no escribe en bases DEV/PROD, no repara el ledger y no toca respaldos. El frente 06 permanece abierto.
+
+Validación de este tramo: TypeScript/Vite y artefacto estático correctos; **1128/1128 contratos offline**, 0 fallas y 0 omitidos; 14/14 hashes del manifiesto Fersana correctos. Los tres SQL recuperados son exactos y los dos SQL renombrados conservan sus bytes.

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const migration = readFileSync('supabase/migrations/20260901055111_company_scoped_roles_foundation.sql', 'utf8')
+const migration = readFileSync('supabase/migrations/20260901065625_company_scoped_roles_foundation.sql', 'utf8')
 const hardening = readFileSync('supabase/migrations/20260901071929_company_scoped_power_override_hardening.sql', 'utf8')
 const auth = readFileSync('app/src/lib/auth.tsx', 'utf8')
 const platformPower = readFileSync('app/src/lib/platformPower.ts', 'utf8')
