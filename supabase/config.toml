@@ -6,10 +6,3 @@ verify_jwt = false
 
 [functions.payment-request-exception-quick-approve]
 verify_jwt = false
-
-[functions.payroll-obligations]
-verify_jwt = true
-
-[functions.payroll-obligation-notifications]
-# Authenticates the dispatcher secret before claims or delivery.
-verify_jwt = false

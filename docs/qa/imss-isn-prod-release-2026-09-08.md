@@ -25,6 +25,6 @@ En DEV, los dos RPCs de inserción normal y envío de obligación también se pr
 
 ## Operación
 
-Aplicar únicamente las cuatro migraciones de obligaciones incluidas, en orden, registrar las versiones nativas efectivamente asignadas y desplegar los dos servicios propios. Activar por empresa después de comprobar respaldo, pruebas y permisos. No reparar el ledger histórico de DEV/PROD ni aplicar migraciones ajenas.
+Aplicar únicamente las cuatro migraciones de obligaciones incluidas, en orden, registrar las versiones nativas efectivamente asignadas y desplegar los dos servicios propios. La declaración de autenticación se aplica por servicio en su despliegue (archivos: JWT; worker: secreto propio); se preserva config.toml productivo. Activar por empresa después de comprobar respaldo, pruebas y permisos. No reparar el ledger histórico de DEV/PROD ni aplicar migraciones ajenas.
 
 Estado de despliegue y comprobaciones productivas: pendiente al preparar este PR.
