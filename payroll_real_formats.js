@@ -223,12 +223,21 @@
       const cells = parseCells(sheet, shared);
       const requiredHeaders = ['RFC','CURP','Nombre completo','Banco','Cuenta banco','CLABE','Vales De Despensa','Neto a pagar',selected.cashHeader];
       const headerMap = {};
+      // Fersana periodo 17 renames the two net columns without changing
+      // their meaning. Keep aliases scoped to that sheet and reject ambiguity.
+      const aliases = selected.contractVersion === FERSANA_COVER_CONTRACT_VERSION
+        ? { 'Neto con vales': 'Neto a pagar', 'Neto sin vales': selected.cashHeader } : {};
+      let ambiguousHeaders = false;
       cells.forEach(function (value, ref) {
-        if (!ref.endsWith('5')) return;
-        const label = String(value || '').trim();
-        if (requiredHeaders.includes(label) || label === selected.retroHeader || label === selected.pensionHeader) headerMap[label] = columnNumber(ref);
+        if (!/^[A-Z]+5$/.test(ref)) return;
+        const rawLabel = String(value || '').trim();
+        const label = Object.prototype.hasOwnProperty.call(aliases, rawLabel) ? aliases[rawLabel] : rawLabel;
+        if (requiredHeaders.includes(label) || label === selected.retroHeader || label === selected.pensionHeader) {
+          if (headerMap[label]) ambiguousHeaders = true;
+          headerMap[label] = columnNumber(ref);
+        }
       });
-      if (requiredHeaders.some(function (h) { return !headerMap[h]; })) {
+      if (ambiguousHeaders || requiredHeaders.some(function (h) { return !headerMap[h]; })) {
         return { contractVersion: selected.contractVersion, valid: false, people: [], issues: [issue(ISSUE.COVER_CONTRACT_MISMATCH, 'caratula', 5, 'headers')] };
       }
       function value(row, header) { return header && headerMap[header] ? cells.get(columnLetters(headerMap[header]) + row) : undefined; }
@@ -241,7 +250,7 @@
         const bankName = String(value(row, 'Banco') || '').trim(); const account = normalizeAccount(value(row, 'Cuenta banco'));
         const clabe = normalizeAccount(value(row, 'CLABE'));
         const regularVouchers = spreadsheetMinor(value(row, 'Vales De Despensa'));
-        const retroVouchers = selected.retroHeader ? spreadsheetMinor(value(row, selected.retroHeader)) : 0;
+        const retroVouchers = selected.retroHeader && headerMap[selected.retroHeader] ? spreadsheetMinor(value(row, selected.retroHeader)) : 0;
         const pension = selected.pensionHeader ? spreadsheetMinor(value(row, selected.pensionHeader)) : 0;
         const net = spreadsheetMinor(value(row, 'Neto a pagar')); const cash = spreadsheetMinor(value(row, selected.cashHeader));
         if (!employeeName || (!rfc && !curp) || [regularVouchers, retroVouchers, pension, net, cash].some(function (x) { return x === null; })) {
