@@ -71,7 +71,7 @@ Los destinos son las versiones que DEV ya registró. Los nombres locales y su co
 | 20260907164000 | 20260907225200 | payroll_nonbudget_finance_confirm — comentarios |
 | 20260907164100 | 20260907225213 | payroll_finance_confirm_trigger_safe — salto de línea |
 
-El SQL del onboarding aplicado originalmente omite cuatro guards de sesión del repo e incluye un seed de Fersana que el repo difiere a otra etapa. DEV tiene mejoras posteriores en `request_company_access`, `approve_company_access_request` y `list_company_access_requests`; no debe reponerse la función antigua completa. La diferencia restante de guards debe tratarse sobre las definiciones vigentes, sin perder el comportamiento de reapertura de solicitudes.
+El SQL del onboarding aplicado originalmente omite cuatro guards de sesión del repo e incluye un seed de Fersana que el repo difiere a otra etapa. DEV tiene mejoras posteriores en `request_company_access`, `approve_company_access_request` y `list_company_access_requests`; no debe reponerse la función antigua completa. La revisión posterior del 8 de septiembre, documentada al final, cerró la diferencia de sesión sin necesitar otra migración: los helpers vigentes ya exigen un perfil activo vinculado a auth.uid().
 
 ### Entradas sin pareja y módulos sin versión registrada
 
@@ -245,7 +245,7 @@ Siete casos PGlite ejecutan los tres puentes completos y la restauración poster
 
 ### Pendiente concreto
 
-1. Onboarding Fersana: remoto `20260831004813`, local `20260831003419`. La fuente remota inicial contiene el seed de Fersana y omite guards explícitos de auth.uid(). Las funciones actuales `request_company_access` y `reject_company_access_request` conservan comprobaciones de perfil/rol, pero no el guard explícito de sesión del repo. No se deduce una vulnerabilidad sólo de esa diferencia. Preparar una corrección hacia adelante que preserve la reapertura de solicitudes y la lógica actual, con pruebas de sesión/roles; no reinstalar funciones antiguas ni repetir el seed.
+1. Onboarding Fersana: remoto `20260831004813`, local `20260831003419`. La fuente remota inicial contiene el seed de Fersana y omite guards explícitos de auth.uid(). Las funciones actuales `request_company_access` y `reject_company_access_request` conservan comprobaciones de perfil/rol, pero no el guard explícito de sesión del repo. No se deduce una vulnerabilidad sólo de esa diferencia. **Actualización posterior:** la auditoría de sesión del 8 de septiembre descartó la necesidad de esa corrección para las dos funciones revisadas. Véase el cierre al final; se conserva la lógica vigente y no se repite el seed.
 2. Módulos `20260827090000` y `20260827100000`: el estado aplicado debe revalidarse antes de proponer reparación de metadatos. No reejecutar guards/seeds sobre las empresas y activaciones actuales.
 3. Histórico de respaldos `20260906003626`: mantener fuera el SQL destructivo. Cualquier retiro de su registro activo exige snapshot completo de esa fila y autorización específica; no es limpieza de respaldos ni reversión de lo que ocurrió.
 4. Resolver `047_precheck: public layout contract drifted`, completar la conciliación y verificar Supabase Preview. No ejecutar un push general ni eludir guards. `migration repair` sigue sujeto a autorización explícita conforme a `supabase-cli-migrations.md`.
@@ -253,3 +253,38 @@ Siete casos PGlite ejecutan los tres puentes completos y la restauración poster
 Este cambio no escribe en bases DEV/PROD, no repara el ledger y no toca respaldos. El frente 06 permanece abierto.
 
 Validación de este tramo: TypeScript/Vite y artefacto estático correctos; **1128/1128 contratos offline**, 0 fallas y 0 omitidos; 14/14 hashes del manifiesto Fersana correctos. Los tres SQL recuperados son exactos y los dos SQL renombrados conservan sus bytes.
+
+## Cierre del nombre histórico de Fersana y revisión de sesión — 8 de septiembre
+
+Base: DEV `ab71a32` (#583), que ya incorpora #578 y #582 de IMSS/ISN y su primera ronda de UAT. Este ajuste conserva esos desarrollos. La captura de DEV contiene 117 versiones; los inventarios anteriores son fotografías históricas, no el estado actual.
+
+Se renombra `20260831003419_fersana_company_access_onboarding.sql` a **`20260831004813_fersana_company_access_onboarding.sql`**, la versión ya registrada en DEV. Su SHA-256 permanece `f2697747ecbf09a5b8e8db82b68f0af1dafa6840972a4bec8956be7f7c3828b8`. Se actualizan las dos suites que leen el archivo y la ruta del runbook/manifiesto; no cambia ningún SQL ni hash del manifiesto.
+
+**Alinear el número no significa que las fuentes históricas sean idénticas.** El SQL registrado originalmente en DEV omite cuatro comprobaciones explícitas de auth.uid(), carece del BEGIN/COMMIT exterior e incluye un bloque que busca una sola empresa por nombre/legal_name y crea el enlace Fersana. Se conserva la variante del repo: controles explícitos y seed separado en `prod-readiness/paso5-fersana-seed.sql`. No se importa ni ejecuta el seed histórico, ni se reinstalan funciones anteriores sobre las mejoras posteriores de reapertura de solicitudes.
+
+### La revisión de accesos se cierra sin otra migración
+
+Esta conclusión sustituye la propuesta anterior de preparar un guard adicional. La auditoría de sólo lectura del 8 de septiembre a las 18:24 UTC verificó definiciones y privilegios en DEV y PROD:
+
+- `request_company_access(text)` y `reject_company_access_request(uuid)` no conceden EXECUTE a anon; authenticated y service_role sí tienen ese privilegio.
+- En ambos ambientes `current_profile_id()` exige un perfil activo con `auth_user_id = auth.uid()`, sin alternativa por correo. Un UID nulo no resuelve un perfil. DEV ya rechaza solicitud/rechazo sin ese perfil; rechazar además exige el rol administrador.
+- PROD ya contiene las comprobaciones explícitas de auth.uid(). No se propone retirarlas ni cambiar accesos que funcionan.
+- La solicitud crea/reabre una petición pendiente sin conceder membresía. Se conserva ese comportamiento y la revisión administrativa.
+
+Las definiciones reales capturadas, ejecutadas sobre tablas fixture en PGlite 0.3.16, pasan **28/28 casos, 14 por ambiente**: permisos anon, sesión ausente, perfil inactivo/no vinculado, JWT sólo con correo, reapertura idempotente, separación operador/administrador, rechazo y membresía/enlace activos. El detalle y hash del paquete reproducible están en [la evidencia](../qa/fersana-history-alignment-2026-09-08.json). Es una prueba aislada de las funciones revisadas, no UAT de navegador, ejecución de RPC remotas, replay completo ni certificación de toda la seguridad.
+
+### Inventario tras el renombre sobre esta base
+
+| Elemento | Cantidad |
+|---|---:|
+| Archivos locales | 117 |
+| Versiones registradas en DEV | 117 |
+| Versiones coincidentes | 115 |
+| Sólo local | 2 |
+| Sólo remoto | 2 |
+
+Las dos versiones locales son los módulos `20260827090000` y `20260827100000`: requieren comprobar su estado actual y preparar una decisión de metadatos con autorización específica. Una remota es el mantenimiento histórico `20260906003626_drop_backup_tables`, cuyo SQL destructivo sigue fuera del directorio activo. La otra, `20260908184710_payroll_obligations_shared_budget_guard`, pertenece al desarrollo concurrente de IMSS/ISN y aún no aparece en esta base; debe conciliarse con su PR de origen, sin duplicarla desde este trabajo.
+
+El renombre Fersana queda resuelto en el repositorio. El frente 06 permanece abierto por las entradas anteriores, `047_precheck: public layout contract drifted` y Supabase Preview. Este cambio no ejecuta SQL, `db push` ni `migration repair` en ningún ambiente. La reparación del ledger continúa sujeta a snapshot y autorización explícita según `supabase-cli-migrations.md`.
+
+Validación local del renombre: **14/14 contratos Fersana**, 0 fallas; **14/14 hashes** del manifiesto correctos; `git diff --check` sin errores. No se agregan pruebas que sólo repitan el renombre; se utilizan los contratos existentes.

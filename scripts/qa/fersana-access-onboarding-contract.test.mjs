@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const migration = fs.readFileSync(
-  'supabase/migrations/20260831003419_fersana_company_access_onboarding.sql',
+  'supabase/migrations/20260831004813_fersana_company_access_onboarding.sql',
   'utf8',
 )
 const hardening = fs.readFileSync(
