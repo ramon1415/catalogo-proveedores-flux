@@ -1,0 +1,14 @@
+{
+  "name": "flux-qa-harness",
+  "private": true,
+  "description": "Dependencias para verificar el flujo de N\u00f3mina antes de publicar. La app vive en app/.",
+  "scripts": {
+    "qa:setup": "npm ci && npm --prefix app ci",
+    "test:payroll": "node --test scripts/qa/payroll-prod-release.test.mjs scripts/qa/payroll-modal-uat.test.mjs scripts/qa/payroll-pilot-receipt.test.mjs scripts/qa/payroll-pilot-notifications.test.mjs scripts/qa/payroll-receipt-autofill.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.16",
+    "jspdf": "2.5.2",
+    "jspdf-autotable": "3.8.4"
+  }
+}

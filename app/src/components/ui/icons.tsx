@@ -58,3 +58,9 @@ export const IcSearch = ({ size }: P) => (
 export const IcPlus = ({ size }: P) => (
   <svg {...svg(size)} strokeWidth={2.1}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
 )
+export const IcFile = ({ size }: P) => (
+  <svg {...svg(size)} aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6M8 13h8M8 17h5" /></svg>
+)
+export const IcDownload = ({ size }: P) => (
+  <svg {...svg(size)} aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>
+)

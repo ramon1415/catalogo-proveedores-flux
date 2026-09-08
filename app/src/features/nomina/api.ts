@@ -13,6 +13,21 @@ import type {
 } from './types'
 
 // ── Lecturas de contexto contable / cuentas ────────────────────────────────
+export async function loadCaptureContext(companyId: string): Promise<{ accounts: BankAccount[]; costCenters: CostCenter[]; mappings: CompanyCostCenter[] }> {
+  const { data, error } = await supabase.rpc('get_payroll_capture_context', { p_company_id: companyId })
+  if (error) throw error
+  return data
+}
+
+export async function getReceiptFileUrl(fileId: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('payroll-capture-file-url', {
+    body: { p_file_id: fileId, file_type: 'receipt' },
+  })
+  if (error) await throwFunctionInvokeError(error)
+  if (!data?.url) throw new Error('PAYROLL_RECEIPT_FILE_URL_FAILED')
+  return data.url
+}
+
 // loadSourceAccounts() del vanilla: company_bank_accounts activas, tipo bank, MXN.
 export async function loadSourceAccounts(companyId: string): Promise<BankAccount[]> {
   if (!companyId) return []
@@ -97,6 +112,18 @@ async function reserveFile(sessionId: string, expectedVersion: number, slot: Pay
   return data as Reservation
 }
 
+// Descarga de un archivo ya guardado: el Edge valida el JWT, aplica el gate
+// de captura vía get_payroll_capture_file_url y firma una URL de Storage por
+// sólo 120 segundos. El navegador nunca recibe storage_bucket/storage_path.
+export async function getCaptureFileUrl(fileId: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('payroll-capture-file-url', {
+    body: { p_file_id: fileId },
+  })
+  if (error) await throwFunctionInvokeError(error)
+  const url = (data as { url?: string } | null)?.url
+  if (!url) throw new Error('PAYROLL_CAPTURE_FILE_URL_UNAVAILABLE')
+  return url
+}
 // ── RPC 4: confirm_payroll_capture_file(p_file_id, p_sha256) ───────────────
 async function confirmFile(fileId: string, sha256: string): Promise<{ version: number }> {
   const { data, error } = await supabase.rpc('confirm_payroll_capture_file', { p_file_id: fileId, p_sha256: sha256 })
@@ -143,12 +170,26 @@ export type RevalidateResult = {
   validated_at: string
 }
 
+async function throwFunctionInvokeError(error: unknown): Promise<never> {
+  const context = (error as { context?: Response | null })?.context
+  if (context && typeof context.clone === 'function') {
+    try {
+      const payload = (await context.clone().json()) as { error?: unknown }
+      const code = typeof payload?.error === 'string' ? payload.error.trim() : ''
+      if (code) throw new Error(code)
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.startsWith('PAYROLL_')) throw cause
+    }
+  }
+  throw error
+}
+
 export async function materializeCapture(sessionId: string, expectedVersion: number): Promise<MaterializeResult> {
   const idempotencyKey = `payroll-n3g:${sessionId}:v${expectedVersion}`
   const { data, error } = await supabase.functions.invoke('payroll-materialize', {
     body: { capture_session_id: sessionId, expected_version: expectedVersion, idempotency_key: idempotencyKey },
   })
-  if (error) throw error
+  if (error) await throwFunctionInvokeError(error)
   if (!data || !['materialized', 'already_materialized'].includes((data as MaterializeResult).status)) {
     throw new Error('PAYROLL_MATERIALIZATION_FAILED')
   }
@@ -159,7 +200,7 @@ export async function revalidateMaterializedCapture(sessionId: string, expectedV
   const { data, error } = await supabase.functions.invoke('payroll-materialize', {
     body: { capture_session_id: sessionId, expected_version: expectedVersion, mode: 'validate_only' },
   })
-  if (error) throw error
+  if (error) await throwFunctionInvokeError(error)
   if (!data || (data as RevalidateResult).status !== 'validated') throw new Error('PAYROLL_DEV_REVALIDATION_FAILED')
   return data as RevalidateResult
 }
@@ -194,6 +235,15 @@ export async function acknowledgeTokaVariance(paymentRequestId: string, note: st
     p_note: note,
   })
   if (error) throw error
+}
+
+// Confirmación explícita de Finanzas para Nómina no presupuestal.
+export async function confirmPayrollFinanceReview(paymentRequestId: string): Promise<{ status: string; payment_request_id: string; request_number?: string }> {
+  const { data, error } = await supabase.rpc('confirm_payroll_finance_review', {
+    p_payment_request_id: paymentRequestId,
+  })
+  if (error) throw error
+  return data as { status: string; payment_request_id: string; request_number?: string }
 }
 
 // ── RPC 8: submit_payroll_for_approval(p_payment_request_id, p_approver_id, p_approver_assignment_id)

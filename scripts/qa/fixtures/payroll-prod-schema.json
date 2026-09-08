@@ -1,0 +1,2371 @@
+{
+  "enums": [
+    {
+      "name": "autorizacion_enum",
+      "labels": [
+        "Autorizado",
+        "Rechazado"
+      ]
+    },
+    {
+      "name": "booking_source_type",
+      "labels": [
+        "celebration",
+        "production"
+      ]
+    },
+    {
+      "name": "booking_status",
+      "labels": [
+        "interested_date",
+        "promised_date",
+        "blocked_date",
+        "cancelled"
+      ]
+    },
+    {
+      "name": "booking_type",
+      "labels": [
+        "rent",
+        "mounting",
+        "dismounting"
+      ]
+    },
+    {
+      "name": "celebration_concept_type",
+      "labels": [
+        "venue_rent",
+        "mounting",
+        "dismounting",
+        "extra_hour_event",
+        "extra_hour_power",
+        "deposit",
+        "audio_lighting",
+        "other"
+      ]
+    },
+    {
+      "name": "celebration_lead_status",
+      "labels": [
+        "new",
+        "assigned",
+        "converted",
+        "lost"
+      ]
+    },
+    {
+      "name": "celebration_status",
+      "labels": [
+        "quoted",
+        "promised",
+        "blocked",
+        "cancelled"
+      ]
+    },
+    {
+      "name": "client_type",
+      "labels": [
+        "person",
+        "company"
+      ]
+    },
+    {
+      "name": "company_account_type",
+      "labels": [
+        "bank",
+        "cash",
+        "card_processor",
+        "other"
+      ]
+    },
+    {
+      "name": "document_file_type",
+      "labels": [
+        "invoice_pdf",
+        "invoice_xml",
+        "quote",
+        "contract",
+        "payment_receipt",
+        "bank_proof",
+        "other"
+      ]
+    },
+    {
+      "name": "estado_ticket_enum",
+      "labels": [
+        "Abierto",
+        "En proceso",
+        "Cerrado"
+      ]
+    },
+    {
+      "name": "event_usage_type",
+      "labels": [
+        "reception",
+        "cocktail",
+        "after_party",
+        "ceremony",
+        "general"
+      ]
+    },
+    {
+      "name": "income_payment_method",
+      "labels": [
+        "transfer_mxn",
+        "transfer_usd",
+        "cash",
+        "card",
+        "other"
+      ]
+    },
+    {
+      "name": "income_payment_type",
+      "labels": [
+        "anticipo",
+        "abono",
+        "finiquito",
+        "deposito_garantia",
+        "other"
+      ]
+    },
+    {
+      "name": "metodo_pago_enum",
+      "labels": [
+        "Transferencia bancaria",
+        "Efectivo",
+        "Tarjeta en plataforma",
+        "DepÃ³sito a cuenta",
+        "Otro",
+        "Cheque"
+      ]
+    },
+    {
+      "name": "moneda_enum",
+      "labels": [
+        "MXN",
+        "USD",
+        "EUR"
+      ]
+    },
+    {
+      "name": "payer_type",
+      "labels": [
+        "client",
+        "parent",
+        "company",
+        "planner",
+        "other"
+      ]
+    },
+    {
+      "name": "payment_flow",
+      "labels": [
+        "client_pays_company",
+        "client_pays_provider_directly",
+        "company_pays_provider"
+      ]
+    },
+    {
+      "name": "payment_request_status",
+      "labels": [
+        "draft",
+        "submitted",
+        "pending_approval",
+        "approved",
+        "rejected",
+        "changes_requested",
+        "finance_validation",
+        "scheduled",
+        "paid",
+        "cancelled"
+      ]
+    },
+    {
+      "name": "payment_request_type",
+      "labels": [
+        "provider_payment",
+        "reimbursement",
+        "deposit_refund",
+        "other",
+        "cash",
+        "check",
+        "online_purchase"
+      ]
+    },
+    {
+      "name": "production_status",
+      "labels": [
+        "prospect",
+        "confirmed",
+        "planning",
+        "executing",
+        "closed",
+        "cancelled"
+      ]
+    },
+    {
+      "name": "profit_model",
+      "labels": [
+        "price_minus_cost",
+        "commission",
+        "pass_through",
+        "mixed"
+      ]
+    },
+    {
+      "name": "provider_type",
+      "labels": [
+        "company",
+        "person",
+        "employee"
+      ]
+    },
+    {
+      "name": "sales_invoice_status",
+      "labels": [
+        "draft",
+        "issued",
+        "cancelled",
+        "paid"
+      ]
+    },
+    {
+      "name": "venue_connection_type",
+      "labels": [
+        "internal_door",
+        "same_property",
+        "nearby"
+      ]
+    },
+    {
+      "name": "venue_type",
+      "labels": [
+        "owned",
+        "external"
+      ]
+    },
+    {
+      "name": "vertical_enum",
+      "labels": [
+        "Celebraciones",
+        "Hospitalidad",
+        "Comunidad"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "name": "activity_log",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "entity_type",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "entity_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "action",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "old_values",
+          "type": "jsonb",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "new_values",
+          "type": "jsonb",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "performed_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "performed_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "activity_log_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "approval_batch_items",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "batch_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "payment_request_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "finance_reviewed_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "finance_reviewed_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "director_status",
+          "type": "text",
+          "default": "'pending'::text",
+          "not_null": true
+        },
+        {
+          "name": "director_reject_reason",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "rebatch_status",
+          "type": "text",
+          "default": "'not_applicable'::text",
+          "not_null": true
+        },
+        {
+          "name": "rebatch_released_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "rebatch_released_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "rebatch_release_note",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "decided_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "removed_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "removed_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "previous_item_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "review_sequence",
+          "type": "integer",
+          "default": "1",
+          "not_null": true
+        },
+        {
+          "name": "resubmitted_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "resubmitted_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "resubmission_note",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "finance_release_status",
+          "type": "text",
+          "default": "'pending'::text",
+          "not_null": true
+        },
+        {
+          "name": "finance_release_reason",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "finance_released_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "finance_released_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "approval_batch_items_decision_check",
+          "type": "c",
+          "definition": "CHECK ((((director_status = 'pending'::text) AND (decided_by IS NULL) AND (decided_at IS NULL) AND (director_reject_reason IS NULL)) OR ((director_status = 'approved'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (director_reject_reason IS NULL)) OR ((director_status = 'rejected'::text) AND (decided_by IS NOT NULL) AND (decided_at IS NOT NULL) AND (NULLIF(btrim(director_reject_reason), ''::text) IS NOT NULL))))"
+        },
+        {
+          "name": "approval_batch_items_finance_release_lifecycle_check",
+          "type": "c",
+          "definition": "CHECK ((((finance_release_status = 'pending'::text) AND (finance_release_reason IS NULL) AND (finance_released_by IS NULL) AND (finance_released_at IS NULL)) OR ((finance_release_status = 'released'::text) AND (director_status = 'approved'::text) AND (finance_release_reason IS NULL) AND (finance_released_by IS NOT NULL) AND (finance_released_at IS NOT NULL)) OR ((finance_release_status = 'blocked'::text) AND (NULLIF(btrim(finance_release_reason), ''::text) IS NOT NULL) AND (finance_released_by IS NOT NULL) AND (finance_released_at IS NOT NULL))))"
+        },
+        {
+          "name": "approval_batch_items_finance_release_status_check",
+          "type": "c",
+          "definition": "CHECK ((finance_release_status = ANY (ARRAY['pending'::text, 'released'::text, 'blocked'::text])))"
+        },
+        {
+          "name": "approval_batch_items_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "approval_batch_items_rebatch_check",
+          "type": "c",
+          "definition": "CHECK ((((director_status <> 'rejected'::text) AND (rebatch_status = 'not_applicable'::text) AND (rebatch_released_by IS NULL) AND (rebatch_released_at IS NULL) AND (rebatch_release_note IS NULL)) OR ((director_status = 'rejected'::text) AND (rebatch_status = 'blocked'::text) AND (rebatch_released_by IS NULL) AND (rebatch_released_at IS NULL) AND (rebatch_release_note IS NULL)) OR ((director_status = 'rejected'::text) AND (rebatch_status = 'released'::text) AND (rebatch_released_by IS NOT NULL) AND (rebatch_released_at IS NOT NULL) AND (NULLIF(btrim(rebatch_release_note), ''::text) IS NOT NULL))))"
+        },
+        {
+          "name": "approval_batch_items_rebatch_status_check",
+          "type": "c",
+          "definition": "CHECK ((rebatch_status = ANY (ARRAY['not_applicable'::text, 'blocked'::text, 'released'::text])))"
+        },
+        {
+          "name": "approval_batch_items_removal_check",
+          "type": "c",
+          "definition": "CHECK ((((removed_at IS NULL) AND (removed_by IS NULL)) OR ((removed_at IS NOT NULL) AND (removed_by IS NOT NULL) AND (director_status = 'pending'::text))))"
+        },
+        {
+          "name": "approval_batch_items_review_sequence_check",
+          "type": "c",
+          "definition": "CHECK (((review_sequence >= 1) AND (previous_item_id IS DISTINCT FROM id)))"
+        },
+        {
+          "name": "approval_batch_items_status_check",
+          "type": "c",
+          "definition": "CHECK ((director_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])))"
+        }
+      ]
+    },
+    {
+      "name": "approver_assignments",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "requester_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "approver_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "approver_assignments_company_requester_approver_key",
+          "type": "u",
+          "definition": "UNIQUE (company_id, requester_id, approver_id)"
+        },
+        {
+          "name": "approver_assignments_distinct_profiles_check",
+          "type": "c",
+          "definition": "CHECK ((requester_id <> approver_id))"
+        },
+        {
+          "name": "approver_assignments_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "budget_categories",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "code",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_type",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "no_presupuestal",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "budget_categories_budget_type_check",
+          "type": "c",
+          "definition": "CHECK ((budget_type = ANY (ARRAY['fixed'::text, 'variable'::text, 'project'::text, 'extraordinary'::text])))"
+        },
+        {
+          "name": "budget_categories_code_key",
+          "type": "u",
+          "definition": "UNIQUE (code)"
+        },
+        {
+          "name": "budget_categories_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "budget_lines",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "budget_version_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "cost_center_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "budget_category_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "budget_month",
+          "type": "date",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "amount",
+          "type": "numeric",
+          "default": "0",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "budget_lines_budget_month_check",
+          "type": "c",
+          "definition": "CHECK (((date_trunc('month'::text, (budget_month)::timestamp with time zone))::date = budget_month))"
+        },
+        {
+          "name": "budget_lines_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "budget_versions",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "version_type",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "year",
+          "type": "integer",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "locked",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "loaded_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "activated_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "budget_versions_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "budget_versions_version_type_check",
+          "type": "c",
+          "definition": "CHECK ((version_type = ANY (ARRAY['original'::text, 'forecast'::text])))"
+        }
+      ]
+    },
+    {
+      "name": "companies",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "legal_name",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "rfc",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "companies_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "company_bank_accounts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "bank_name",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "currency",
+          "type": "text",
+          "default": "'MXN'::text",
+          "not_null": true
+        },
+        {
+          "name": "account_type",
+          "type": "company_account_type",
+          "default": "'bank'::company_account_type",
+          "not_null": true
+        },
+        {
+          "name": "last4",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "account_number",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "clabe",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "company_bank_accounts_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "company_cost_center_budget_categories",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "cost_center_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "budget_category_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "responsible_email",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "company_cost_center_budget_categories_company_cost_category_key",
+          "type": "u",
+          "definition": "UNIQUE (company_id, cost_center_id, budget_category_id)"
+        },
+        {
+          "name": "company_cost_center_budget_categories_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "company_cost_centers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "cost_center_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "company_cost_centers_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "company_directors",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "director_profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "company_directors_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "cost_centers",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "code",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "area",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "cost_centers_code_key",
+          "type": "u",
+          "definition": "UNIQUE (code)"
+        },
+        {
+          "name": "cost_centers_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "notification_delivery_attempts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "notification_event_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "attempt_number",
+          "type": "integer",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "provider_message_id",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "error_message",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "n8n_execution_id",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "worker_id",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "notification_delivery_attempts_attempt_number_check",
+          "type": "c",
+          "definition": "CHECK ((attempt_number > 0))"
+        },
+        {
+          "name": "notification_delivery_attempts_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "notification_delivery_attempts_status_check",
+          "type": "c",
+          "definition": "CHECK ((status = ANY (ARRAY['processing'::text, 'sent'::text, 'failed'::text, 'dead_letter'::text])))"
+        }
+      ]
+    },
+    {
+      "name": "notification_events",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "event_type",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "source_table",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "source_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "source_folio",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "recipient_type",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "recipient_profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "recipient_email",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "recipient_role",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "channel",
+          "type": "text",
+          "default": "'email'::text",
+          "not_null": true
+        },
+        {
+          "name": "priority",
+          "type": "text",
+          "default": "'normal'::text",
+          "not_null": true
+        },
+        {
+          "name": "subject",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "payload",
+          "type": "jsonb",
+          "default": "'{}'::jsonb",
+          "not_null": true
+        },
+        {
+          "name": "idempotency_key",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": "'pending'::text",
+          "not_null": true
+        },
+        {
+          "name": "attempt_count",
+          "type": "integer",
+          "default": "0",
+          "not_null": true
+        },
+        {
+          "name": "max_attempts",
+          "type": "integer",
+          "default": "5",
+          "not_null": true
+        },
+        {
+          "name": "locked_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "locked_by",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "last_error",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "notification_events_attempt_count_check",
+          "type": "c",
+          "definition": "CHECK ((attempt_count >= 0))"
+        },
+        {
+          "name": "notification_events_channel_check",
+          "type": "c",
+          "definition": "CHECK ((channel = 'email'::text))"
+        },
+        {
+          "name": "notification_events_idempotency_key_key",
+          "type": "u",
+          "definition": "UNIQUE (idempotency_key)"
+        },
+        {
+          "name": "notification_events_max_attempts_check",
+          "type": "c",
+          "definition": "CHECK ((max_attempts > 0))"
+        },
+        {
+          "name": "notification_events_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "notification_events_priority_check",
+          "type": "c",
+          "definition": "CHECK ((priority = ANY (ARRAY['low'::text, 'normal'::text, 'high'::text, 'critical'::text])))"
+        },
+        {
+          "name": "notification_events_recipient_type_check",
+          "type": "c",
+          "definition": "CHECK ((recipient_type = ANY (ARRAY['usuario_solicitante'::text, 'usuario_beneficiario'::text, 'administrador_sistema'::text, 'proveedor'::text])))"
+        },
+        {
+          "name": "notification_events_status_check",
+          "type": "c",
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'sent'::text, 'failed'::text, 'dead_letter'::text, 'cancelled'::text, 'no_recipient'::text])))"
+        }
+      ]
+    },
+    {
+      "name": "payment_request_approvals",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "payment_request_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "actor_profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "role_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "action",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "from_status",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "to_status",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "comments",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approval_level",
+          "type": "integer",
+          "default": "1",
+          "not_null": true
+        },
+        {
+          "name": "budget_decision_snapshot",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_block_reason_snapshot",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_result_snapshot",
+          "type": "jsonb",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "payment_request_approvals_action_check",
+          "type": "c",
+          "definition": "CHECK ((action = ANY (ARRAY['approved'::text, 'rejected'::text, 'changes_requested'::text, 'exception_approved'::text, 'exception_rejected'::text, 'amount_change_requested'::text, 'category_change_requested'::text, 'budget_adjustment_requested'::text])))"
+        },
+        {
+          "name": "payment_request_approvals_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "payment_requests",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "provider_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "provider_bank_account_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "celebration_event_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "production_event_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "cost_center_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "request_type",
+          "type": "payment_request_type",
+          "default": "'provider_payment'::payment_request_type",
+          "not_null": true
+        },
+        {
+          "name": "requested_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approved_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "validated_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "paid_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "amount_requested",
+          "type": "numeric",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "currency",
+          "type": "text",
+          "default": "'MXN'::text",
+          "not_null": true
+        },
+        {
+          "name": "exchange_rate",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "requires_invoice",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "invoice_received",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "company_bank_account_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "status",
+          "type": "payment_request_status",
+          "default": "'draft'::payment_request_status",
+          "not_null": true
+        },
+        {
+          "name": "due_date",
+          "type": "date",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "scheduled_payment_date",
+          "type": "date",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "concept",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "notes",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "proveedor_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_category_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_month",
+          "type": "date",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_decision",
+          "type": "text",
+          "default": "'not_checked'::text",
+          "not_null": true
+        },
+        {
+          "name": "budget_block_reason",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_available_before",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_available_after",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_shortfall",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_checked_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "is_extraordinary_adjustment",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "request_number",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "budget_result",
+          "type": "jsonb",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "exception_status",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "exception_action",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "exception_reason",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "exception_approved_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "exception_approved_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "requires_budget_adjustment",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "operational_comments",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "payment_reference",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "payment_concept",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "scheduled_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "scheduled_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "invoice_storage_path",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "payment_method",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approver_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approver_assignment_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approver_selection_source",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "approval_material_updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "extraordinary_state",
+          "type": "text",
+          "default": "'normal'::text",
+          "not_null": true
+        },
+        {
+          "name": "extraordinary_requested_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "extraordinary_requested_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "extraordinary_intent_cancelled_by",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "extraordinary_intent_cancelled_at",
+          "type": "timestamp with time zone",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "subtotal_amount",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "tax_amount",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "withholding_amount",
+          "type": "numeric",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "invoice_uuid",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "beneficiary_profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "no_presupuestal",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        },
+        {
+          "name": "partida_unsure",
+          "type": "boolean",
+          "default": "false",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "payment_requests_amount_requested_check",
+          "type": "c",
+          "definition": "CHECK ((amount_requested > (0)::numeric))"
+        },
+        {
+          "name": "payment_requests_approver_selection_source_check",
+          "type": "c",
+          "definition": "CHECK (((approver_selection_source IS NULL) OR (approver_selection_source = ANY (ARRAY['assigned'::text, 'approval_rules'::text]))))"
+        },
+        {
+          "name": "payment_requests_budget_decision_check",
+          "type": "c",
+          "definition": "CHECK ((budget_decision = ANY (ARRAY['not_checked'::text, 'aprobable'::text, 'bloqueado'::text])))"
+        },
+        {
+          "name": "payment_requests_budget_month_check",
+          "type": "c",
+          "definition": "CHECK (((budget_month IS NULL) OR ((date_trunc('month'::text, (budget_month)::timestamp with time zone))::date = budget_month)))"
+        },
+        {
+          "name": "payment_requests_exception_status_check",
+          "type": "c",
+          "definition": "CHECK (((exception_status IS NULL) OR (exception_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'changes_requested'::text]))))"
+        },
+        {
+          "name": "payment_requests_extraordinary_state_check",
+          "type": "c",
+          "definition": "CHECK ((extraordinary_state = ANY (ARRAY['normal'::text, 'extraordinary_requested'::text, 'extraordinary_draft'::text, 'extraordinary_active'::text, 'consumed_pending_ratification'::text, 'ratified'::text, 'disputed'::text, 'revoked'::text, 'expired'::text, 'materially_invalidated'::text])))"
+        },
+        {
+          "name": "payment_requests_payment_method_check",
+          "type": "c",
+          "definition": "CHECK (((payment_method IS NULL) OR (payment_method = ANY (ARRAY['transfer'::text, 'cash'::text, 'check'::text, 'other'::text]))))"
+        },
+        {
+          "name": "payment_requests_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "payment_requests_request_number_key",
+          "type": "u",
+          "definition": "UNIQUE (request_number)"
+        }
+      ]
+    },
+    {
+      "name": "profile_company_memberships",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "company_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "role_key",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "profile_company_memberships_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "profile_company_memberships_profile_company_key",
+          "type": "u",
+          "definition": "UNIQUE (profile_id, company_id)"
+        },
+        {
+          "name": "profile_company_memberships_role_key_check",
+          "type": "c",
+          "definition": "CHECK (((role_key IS NULL) OR (role_key = ANY (ARRAY['operator'::text, 'finance'::text, 'director'::text, 'sysadmin'::text]))))"
+        }
+      ]
+    },
+    {
+      "name": "profiles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "auth_user_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "full_name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "email",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "true",
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "profiles_auth_user_id_key",
+          "type": "u",
+          "definition": "UNIQUE (auth_user_id)"
+        },
+        {
+          "name": "profiles_email_key",
+          "type": "u",
+          "definition": "UNIQUE (email)"
+        },
+        {
+          "name": "profiles_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "roles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "default": null,
+          "not_null": false
+        }
+      ],
+      "constraints": [
+        {
+          "name": "roles_name_key",
+          "type": "u",
+          "definition": "UNIQUE (name)"
+        },
+        {
+          "name": "roles_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    },
+    {
+      "name": "user_roles",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "default": "gen_random_uuid()",
+          "not_null": true
+        },
+        {
+          "name": "profile_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "role_id",
+          "type": "uuid",
+          "default": null,
+          "not_null": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "default": "now()",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "name": "user_roles_pkey",
+          "type": "p",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ]
+    }
+  ],
+  "triggers": [
+    {
+      "hash": "9babf579b8684eb1db432be3599aef29",
+      "name": "guard_extraordinary_request_paid",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER guard_extraordinary_request_paid BEFORE UPDATE OF status ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION extraordinary_guard_request_paid()"
+    },
+    {
+      "hash": "3b8b12c6cb948e5f5342de144763da6f",
+      "name": "invalidate_extraordinary_on_material_change",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER invalidate_extraordinary_on_material_change AFTER UPDATE ON public.payment_requests FOR EACH ROW WHEN ((old.approval_material_updated_at IS DISTINCT FROM new.approval_material_updated_at)) EXECUTE FUNCTION extraordinary_invalidate_material_change()"
+    },
+    {
+      "hash": "58ef2406f3237024c23ce5c19a3aac36",
+      "name": "mark_payment_request_material_change",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER mark_payment_request_material_change BEFORE INSERT OR UPDATE ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION mark_payment_request_material_change()"
+    },
+    {
+      "hash": "995c373c7b96dee78458f8d0b93d294d",
+      "name": "payment_request_created_notification_event",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER payment_request_created_notification_event AFTER INSERT ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION enqueue_payment_request_created_notification()"
+    },
+    {
+      "hash": "f8db40825100cabd11cbb90064b8f039",
+      "name": "payment_requests_tenant_references_guard",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER payment_requests_tenant_references_guard BEFORE INSERT OR UPDATE OF company_id, beneficiary_profile_id ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION private.enforce_payment_request_tenant_references()"
+    },
+    {
+      "hash": "a7411cd15c898c1469fa58041d15b686",
+      "name": "reimbursement_actor_scope_guard",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER reimbursement_actor_scope_guard BEFORE INSERT OR UPDATE ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION private.enforce_reimbursement_actor_scope()"
+    },
+    {
+      "hash": "50e3136031a2121c5554aebf432c19f0",
+      "name": "set_payment_requests_updated_at",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER set_payment_requests_updated_at BEFORE UPDATE ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
+    },
+    {
+      "hash": "d2c6b72bdd58356bcc797087f5eafbee",
+      "name": "validate_payment_request_approver_scope_insert",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER validate_payment_request_approver_scope_insert BEFORE INSERT ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION validate_payment_request_approver_scope()"
+    },
+    {
+      "hash": "5ab03b7e7d9bc728f1496fdd6eb8bab2",
+      "name": "validate_payment_request_approver_scope_update",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER validate_payment_request_approver_scope_update BEFORE UPDATE OF approver_id, approver_assignment_id, approver_selection_source, company_id, requested_by, cost_center_id, amount_requested ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION validate_payment_request_approver_scope()"
+    },
+    {
+      "hash": "10e993fa586132f05a189782d8af2c04",
+      "name": "zz_payment_request_no_presupuestal_snapshot",
+      "table": "payment_requests",
+      "definition": "CREATE TRIGGER zz_payment_request_no_presupuestal_snapshot BEFORE INSERT OR UPDATE OF budget_category_id, no_presupuestal ON public.payment_requests FOR EACH ROW EXECUTE FUNCTION set_payment_request_no_presupuestal_snapshot()"
+    }
+  ],
+  "functions": [
+    {
+      "args": "p_company_id uuid, p_roles text[]",
+      "name": "current_profile_has_company_role",
+      "schema": "private",
+      "definition": "CREATE OR REPLACE FUNCTION private.current_profile_has_company_role(p_company_id uuid, p_roles text[])\n RETURNS boolean\n LANGUAGE sql\n STABLE\n SET search_path TO ''\nAS $function$\n  select p_company_id is not null\n    and public.current_profile_id() is not null\n    and private.profile_has_company_role(\n      public.current_profile_id(),\n      p_company_id,\n      p_roles\n    );\n$function$\n"
+    },
+    {
+      "args": "p_company_id uuid",
+      "name": "payroll_active_company_access",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.payroll_active_company_access(p_company_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select coalesce((select auth.jwt() ->> 'role'), '') = 'service_role'\n    or private.current_profile_has_company_role(\n      p_company_id,\n      array['finance']::text[]\n    );\n$function$\n"
+    },
+    {
+      "args": "",
+      "name": "payment_request_approver_role_names",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.payment_request_approver_role_names()\n RETURNS text[]\n LANGUAGE sql\n IMMUTABLE\n SET search_path TO 'pg_catalog', 'public'\nAS $function$\n  select array['finance','finanzas','director','direccion','approver_2','aprobador_2']::text[];\n$function$\n"
+    },
+    {
+      "args": "p_profile_id uuid, p_company_id uuid",
+      "name": "has_active_company_membership",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.has_active_company_membership(p_profile_id uuid, p_company_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1\n    from public.profile_company_memberships pcm\n    join public.profiles p on p.id = pcm.profile_id\n    join public.companies c on c.id = pcm.company_id\n    where pcm.profile_id = p_profile_id\n      and pcm.company_id = p_company_id\n      and pcm.active\n      and coalesce(p.active, true)\n      and coalesce(c.active, true)\n  );\n$function$\n"
+    },
+    {
+      "args": "p_profile_id uuid, p_company_id uuid",
+      "name": "is_payment_request_approver_for_company",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.is_payment_request_approver_for_company(p_profile_id uuid, p_company_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select cardinality(\n    private.profile_company_approver_roles(p_profile_id, p_company_id)\n  ) > 0;\n$function$\n"
+    },
+    {
+      "args": "p_profile_id uuid, p_company_id uuid, p_cost_center_id uuid, p_amount numeric, p_action text",
+      "name": "payment_request_rule_allows",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.payment_request_rule_allows(p_profile_id uuid, p_company_id uuid, p_cost_center_id uuid, p_amount numeric, p_action text DEFAULT 'approved'::text)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select public.is_payment_request_approver_for_company(p_profile_id, p_company_id)\n    and exists (\n      select 1\n      from public.approval_rules ar\n      join public.roles rule_role on rule_role.id = ar.role_id\n      where ar.active\n        and lower(trim(rule_role.name)) = any (\n          private.profile_company_approver_roles(p_profile_id, p_company_id)\n        )\n        and (ar.company_id is null or ar.company_id = p_company_id)\n        and (ar.cost_center_id is null or ar.cost_center_id = p_cost_center_id)\n        and coalesce(p_amount, 0) >= ar.amount_min\n        and (ar.amount_max is null or coalesce(p_amount, 0) <= ar.amount_max)\n        and case p_action\n          when 'approved' then ar.can_approve\n          when 'exception_approved' then ar.can_approve and ar.can_approve_exception\n          when 'rejected' then ar.can_reject\n          when 'exception_rejected' then ar.can_reject\n          when 'changes_requested' then ar.can_request_changes\n          when 'amount_change_requested' then ar.can_request_changes\n          when 'category_change_requested' then ar.can_request_changes\n          when 'budget_adjustment_requested' then ar.can_request_budget_adjustment\n          else false\n        end\n    );\n$function$\n"
+    },
+    {
+      "args": "p_requester_id uuid, p_company_id uuid",
+      "name": "payment_request_has_active_approver_pool",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.payment_request_has_active_approver_pool(p_requester_id uuid, p_company_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select exists (\n    select 1\n    from public.approver_assignments aa\n    where aa.requester_id = p_requester_id\n      and aa.company_id = p_company_id\n      and aa.active\n  );\n$function$\n"
+    },
+    {
+      "args": "",
+      "name": "validate_payment_request_approver_scope",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.validate_payment_request_approver_scope()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_assignment public.approver_assignments%rowtype;\n  v_assignment_changed boolean;\n  v_legacy_assignment_snapshot boolean := false;\nbegin\n  if new.approver_id is null then\n    if tg_op = 'INSERT' then\n      raise exception 'payment_request_approver_required';\n    end if;\n    if old.approver_id is not null\n       or new.company_id is distinct from old.company_id\n       or new.requested_by is distinct from old.requested_by then\n      raise exception 'payment_request_approver_required';\n    end if;\n    return new;\n  end if;\n\n  if new.requested_by is null then\n    raise exception 'payment_request_requester_required';\n  end if;\n  if new.requested_by = new.approver_id then\n    raise exception 'requester_cannot_be_own_approver';\n  end if;\n  if tg_op = 'UPDATE' and (\n    new.approver_id is distinct from old.approver_id\n    or new.approver_assignment_id is distinct from old.approver_assignment_id\n    or new.approver_selection_source is distinct from old.approver_selection_source\n  ) then\n    raise exception 'payment_request_approver_selection_immutable';\n  end if;\n  v_assignment_changed := tg_op = 'INSERT';\n  if tg_op = 'UPDATE' then\n    v_assignment_changed := new.approver_assignment_id is distinct from old.approver_assignment_id;\n  end if;\n\n  if new.approver_assignment_id is not null then\n    if new.approver_selection_source is distinct from 'assigned' then\n      raise exception 'approver_assignment_source_mismatch';\n    end if;\n    select * into v_assignment\n    from public.approver_assignments aa\n    where aa.id = new.approver_assignment_id;\n\n    if not found\n       or v_assignment.company_id <> new.company_id\n       or v_assignment.requester_id <> new.requested_by\n       or v_assignment.approver_id <> new.approver_id then\n      raise exception 'approver_assignment_snapshot_mismatch';\n    end if;\n    if v_assignment_changed and not v_assignment.active then\n      raise exception 'approver_assignment_not_active';\n    end if;\n    if v_assignment_changed then\n      if not public.has_active_company_membership(new.requested_by, new.company_id) then\n        raise exception 'requester_company_membership_required';\n      end if;\n      if not public.is_payment_request_approver_for_company(new.approver_id, new.company_id) then\n        raise exception 'approver_not_eligible_for_company';\n      end if;\n    end if;\n  else\n    if new.approver_selection_source = 'assigned' then\n      raise exception 'approver_assignment_id_required';\n    end if;\n    if tg_op = 'INSERT' and new.approver_selection_source is distinct from 'approval_rules' then\n      raise exception 'approver_selection_source_required';\n    end if;\n    if new.approver_selection_source = 'approval_rules'\n       and public.payment_request_has_active_approver_pool(new.requested_by, new.company_id) then\n      raise exception 'approver_must_come_from_configured_pool';\n    end if;\n\n    -- Migration 018 stored only approver_id. If the same assignment already\n    -- existed when the request was created, preserve that historical snapshot\n    -- when other editable request fields change.\n    if tg_op = 'UPDATE'\n       and new.approver_selection_source is null\n       and new.company_id is not distinct from old.company_id\n       and new.requested_by is not distinct from old.requested_by then\n      select exists (\n        select 1\n        from public.approver_assignments aa\n        where aa.company_id = new.company_id\n          and aa.requester_id = new.requested_by\n          and aa.approver_id = new.approver_id\n          and aa.created_at <= old.created_at\n      ) into v_legacy_assignment_snapshot;\n    end if;\n\n    if not v_legacy_assignment_snapshot then\n      if not public.has_active_company_membership(new.requested_by, new.company_id) then\n        raise exception 'requester_company_membership_required';\n      end if;\n      if not public.is_payment_request_approver_for_company(new.approver_id, new.company_id) then\n        raise exception 'approver_not_eligible_for_company';\n      end if;\n      if not public.payment_request_rule_allows(\n        new.approver_id,\n        new.company_id,\n        new.cost_center_id,\n        new.amount_requested,\n        'approved'\n      ) then\n        raise exception 'approver_not_allowed_by_approval_rules';\n      end if;\n    end if;\n  end if;\n\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "args": "",
+      "name": "current_profile_id",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.current_profile_id()\n RETURNS uuid\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\n\r\n  select p.id\r\n\r\n  from public.profiles p\r\n\r\n  where p.auth_user_id = auth.uid()\r\n\r\n    and coalesce(p.active, true) = true\r\n\r\n  limit 1;\r\n\r\n$function$\n"
+    },
+    {
+      "args": "p_year integer",
+      "name": "generate_payment_request_number",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.generate_payment_request_number(p_year integer DEFAULT (EXTRACT(year FROM now()))::integer)\n RETURNS text\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'public'\nAS $function$\r\n\r\ndeclare\r\n\r\n  v_next bigint;\r\n\r\nbegin\r\n\r\n  v_next := nextval('public.payment_request_number_seq');\r\n\r\n\r\n\r\n  return 'SOL-' || p_year::text || '-' || lpad(v_next::text, 4, '0');\r\n\r\nend;\r\n\r\n$function$\n"
+    },
+    {
+      "args": "p_payment_request_id uuid, p_extra jsonb",
+      "name": "notification_payment_request_payload_with_extra",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.notification_payment_request_payload_with_extra(p_payment_request_id uuid, p_extra jsonb DEFAULT '{}'::jsonb)\n RETURNS jsonb\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select public.notification_payment_request_payload(p_payment_request_id)\n    || jsonb_strip_nulls(coalesce(p_extra, '{}'::jsonb));\n$function$\n"
+    },
+    {
+      "args": "",
+      "name": "set_payment_request_no_presupuestal_snapshot",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.set_payment_request_no_presupuestal_snapshot()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_no_presupuestal boolean;\nbegin\n  if tg_op = 'UPDATE'\n     and new.budget_category_id is not distinct from old.budget_category_id then\n    if new.no_presupuestal is distinct from old.no_presupuestal then\n      raise exception 'no_presupuestal_snapshot_immutable';\n    end if;\n    return new;\n  end if;\n\n  select coalesce(category.no_presupuestal, false)\n    into v_no_presupuestal\n  from public.budget_categories category\n  where category.id = new.budget_category_id;\n\n  new.no_presupuestal := coalesce(v_no_presupuestal, false);\n  if new.no_presupuestal then\n    new.budget_decision := 'aprobable';\n    new.budget_block_reason := 'no_presupuestal';\n    new.budget_available_before := null;\n    new.budget_available_after := null;\n    new.budget_shortfall := 0;\n    new.budget_checked_at := now();\n    new.budget_result := jsonb_build_object(\n      'status', 'aprobable',\n      'motivo', 'no_presupuestal',\n      'disponible_actual', null,\n      'disponible_despues', null,\n      'faltante', 0,\n      'no_presupuestal', true\n    );\n  end if;\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "args": "p_limit integer, p_worker_id text, p_event_types text[], p_created_at_from timestamp with time zone",
+      "name": "claim_notification_events_for_dispatcher_v2",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.claim_notification_events_for_dispatcher_v2(p_limit integer DEFAULT 5, p_worker_id text DEFAULT 'edge-notification-dispatcher'::text, p_event_types text[] DEFAULT NULL::text[], p_created_at_from timestamp with time zone DEFAULT NULL::timestamp with time zone)\n RETURNS TABLE(id uuid, event_type text, source_table text, source_id uuid, source_folio text, recipient_type text, recipient_profile_id uuid, recipient_email text, channel text, priority text, subject text, payload jsonb, attempt_count integer)\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_limit integer := least(greatest(coalesce(p_limit, 5), 1), 5);\n  v_worker_id text := left(\n    coalesce(nullif(btrim(p_worker_id), ''), 'edge-notification-dispatcher'),\n    120\n  );\n  v_event_types text[];\n  v_allowed_event_types constant text[] := array[\n    'payment_request.created',\n    'payment_request.approved',\n    'payment_request.rejected',\n    'payment_request.changes_requested',\n    'payment_request.exception_approved',\n    'payment_request.exception_rejected',\n    'approval_batch.submitted',\n    'approval_batch.approved',\n    'approval_batch.partially_approved',\n    'approval_batch.item_rejected',\n    'payment_request.extraordinary_authorized',\n    'approval_batch.item_rebatched',\n    'payment_receipt.linked'\n  ]::text[];\nbegin\n  select array_agg(\n           distinct btrim(requested.event_type)\n           order by btrim(requested.event_type)\n         )\n    into v_event_types\n  from unnest(coalesce(p_event_types, array[]::text[])) as requested(event_type)\n  where nullif(btrim(coalesce(requested.event_type, '')), '') is not null;\n\n  if coalesce(cardinality(v_event_types), 0) = 0 then\n    raise exception 'notification_dispatcher_event_types_required';\n  end if;\n  if p_created_at_from is null then\n    raise exception 'notification_dispatcher_cutoff_required';\n  end if;\n  if exists (\n    select 1\n    from unnest(v_event_types) as requested(event_type)\n    where not requested.event_type = any(v_allowed_event_types)\n  ) then\n    raise exception 'notification_dispatcher_event_type_not_allowed';\n  end if;\n\n  return query\n  with candidate as (\n    select event.id\n    from public.notification_events event\n    where event.event_type = any(v_event_types)\n      and event.status in ('pending', 'failed')\n      and event.created_at >= p_created_at_from\n      and coalesce(event.next_attempt_at, now()) <= now()\n      and event.attempt_count < event.max_attempts\n      and nullif(btrim(coalesce(event.recipient_email, '')), '') is not null\n      and coalesce(event.channel, 'email') = 'email'\n    order by\n      case event.priority\n        when 'critical' then 1\n        when 'high' then 2\n        when 'normal' then 3\n        when 'low' then 4\n        else 5\n      end,\n      event.created_at,\n      event.id\n    for update skip locked\n    limit v_limit\n  ),\n  claimed as (\n    update public.notification_events event\n       set status = 'processing',\n           locked_at = now(),\n           locked_by = v_worker_id,\n           last_attempt_at = now(),\n           updated_at = now()\n      from candidate\n     where event.id = candidate.id\n     returning\n       event.id,\n       event.event_type,\n       event.source_table,\n       event.source_id,\n       event.source_folio,\n       event.recipient_type,\n       event.recipient_profile_id,\n       event.recipient_email,\n       event.channel,\n       event.priority,\n       event.subject,\n       event.payload,\n       event.attempt_count\n  )\n  select\n    claimed.id,\n    claimed.event_type,\n    claimed.source_table,\n    claimed.source_id,\n    claimed.source_folio,\n    claimed.recipient_type,\n    claimed.recipient_profile_id,\n    claimed.recipient_email,\n    claimed.channel,\n    claimed.priority,\n    claimed.subject,\n    claimed.payload,\n    claimed.attempt_count\n  from claimed\n  order by\n    case claimed.priority\n      when 'critical' then 1\n      when 'high' then 2\n      when 'normal' then 3\n      when 'low' then 4\n      else 5\n    end,\n    claimed.id;\nend;\n$function$\n"
+    },
+    {
+      "args": "",
+      "name": "enqueue_payment_request_created_notification",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.enqueue_payment_request_created_notification()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\ndeclare\n  v_profile public.profiles%rowtype;\n  v_role_name text;\n  v_status text := 'pending';\n  v_last_error text;\n  v_payload jsonb;\nbegin\n  if new.approver_id is null then\n    v_status := 'dead_letter';\n    v_last_error := 'missing_approver_profile_id';\n  else\n    select * into v_profile\n    from public.profiles\n    where id = new.approver_id and coalesce(active, true);\n\n    if not found then\n      v_status := 'dead_letter';\n      v_last_error := 'approver_profile_not_found';\n    elsif not public.is_payment_request_approver_for_company(new.approver_id, new.company_id) then\n      v_status := 'dead_letter';\n      v_last_error := 'approver_not_eligible_for_company';\n    elsif nullif(btrim(coalesce(v_profile.email, '')), '') is null then\n      v_status := 'no_recipient';\n      v_last_error := 'recipient_email_missing';\n    end if;\n  end if;\n\n  select lower(trim(r.name)) into v_role_name\n  from public.user_roles ur\n  join public.roles r on r.id = ur.role_id\n  where ur.profile_id = new.approver_id\n    and lower(trim(r.name)) = any (public.payment_request_approver_role_names())\n  order by lower(trim(r.name))\n  limit 1;\n\n  v_payload := public.notification_payment_request_payload_with_extra(\n    new.id,\n    jsonb_build_object(\n      'approver', coalesce(nullif(btrim(v_profile.full_name), ''), v_profile.email),\n      'approver_profile_id', new.approver_id\n    )\n  );\n\n  insert into public.notification_events (\n    event_type, source_table, source_id, source_folio, recipient_type,\n    recipient_profile_id, recipient_email, recipient_role, channel, priority,\n    subject, payload, idempotency_key, status, last_error, next_attempt_at\n  ) values (\n    'payment_request.created', 'payment_requests', new.id, new.request_number,\n    'administrador_sistema',\n    case when v_profile.id is not null then v_profile.id else null end,\n    case when v_status = 'pending' then nullif(btrim(v_profile.email), '') else null end,\n    v_role_name, 'email', 'normal',\n    'Nueva solicitud de pago: ' || coalesce(new.request_number, new.id::text),\n    v_payload,\n    'payment_request.created:' || new.id::text || ':approver',\n    v_status, v_last_error,\n    case when v_status = 'pending' then now() else null end\n  )\n  on conflict (idempotency_key) do nothing;\n\n  return new;\nexception\n  when others then\n    insert into public.notification_events (\n      event_type, source_table, source_id, source_folio, recipient_type,\n      channel, priority, subject, payload, idempotency_key, status, last_error\n    ) values (\n      'payment_request.created', 'payment_requests', new.id, new.request_number,\n      'administrador_sistema', 'email', 'normal',\n      'Nueva solicitud de pago: ' || coalesce(new.request_number, new.id::text),\n      jsonb_build_object('folio', new.request_number, 'path', '/solicitudes.html'),\n      'payment_request.created:' || new.id::text || ':enqueue-error',\n      'dead_letter', 'created_notification_enqueue_failed'\n    )\n    on conflict (idempotency_key) do nothing;\n    return new;\nend;\n$function$\n"
+    },
+    {
+      "args": "p_roles text[]",
+      "name": "current_user_has_role",
+      "schema": "public",
+      "definition": "CREATE OR REPLACE FUNCTION public.current_user_has_role(p_roles text[])\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\r\n\r\n  select exists (\r\n\r\n    select 1\r\n\r\n    from public.user_roles ur\r\n\r\n    join public.roles r on r.id = ur.role_id\r\n\r\n    where ur.profile_id = public.current_profile_id()\r\n\r\n      and lower(\r\n\r\n        coalesce(\r\n\r\n          to_jsonb(r)->>'name',\r\n\r\n          to_jsonb(r)->>'nombre',\r\n\r\n          to_jsonb(r)->>'role_name'\r\n\r\n        )\r\n\r\n      ) = any (\r\n\r\n        select lower(x)\r\n\r\n        from unnest(p_roles) as x\r\n\r\n      )\r\n\r\n  );\r\n\r\n$function$\n"
+    },
+    {
+      "args": "p_profile_id uuid, p_company_id uuid, p_roles text[]",
+      "name": "profile_has_company_role",
+      "schema": "private",
+      "definition": "CREATE OR REPLACE FUNCTION private.profile_has_company_role(p_profile_id uuid, p_company_id uuid, p_roles text[])\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select\n    exists (\n      select 1\n      from public.user_roles ur\n      join public.roles r on r.id = ur.role_id\n      join public.profiles p on p.id = ur.profile_id\n      where ur.profile_id = p_profile_id\n        and private.canonical_company_role(r.name) = 'sysadmin'\n        and lower(btrim(coalesce(p.email, ''))) in (\n          'carlos@quantta.mx',\n          'ramon@quantta.mx'\n        )\n    )\n    or exists (\n      select 1\n      from public.profile_company_memberships pcm\n      where pcm.profile_id = p_profile_id\n        and pcm.company_id = p_company_id\n        and pcm.active\n        and pcm.role_key is not null\n        and pcm.role_key = any (\n          select private.canonical_company_role(requested_role)\n          from unnest(coalesce(p_roles, array[]::text[])) requested_role\n        )\n    );\n$function$\n"
+    }
+  ]
+}
