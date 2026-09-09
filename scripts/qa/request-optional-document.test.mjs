@@ -64,6 +64,7 @@ async function mount(companyId, options = {}) {
   }
   const imports = {
     './api': api, './logic': logic, '../../lib/format': format,
+    '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
     './ProviderCombo': { ProviderCombo }, './QuickProviderModal': { QuickProviderModal: () => null },
     './ReimbursementSection': { ReimbursementSection: () => null, emptyReimbursementItem: () => ({ amount: '', descripcion: '', budgetCategoryId: '', deducible: false }) },
@@ -103,6 +104,7 @@ async function mount(companyId, options = {}) {
 for (const company of companies) {
   test(`${company.name}: crear sin adjunto conserva empresa y envía una sola solicitud`, async () => {
     const h = await mount(company.id)
+    assert.equal(text(h.view.root.findByProps({ 'data-company-context': true })), company.name)
     assert.ok(!h.view.root.findByProps({ type: 'file' }).props.required)
     await h.submit()
     assert.deepEqual(h.calls.map(c => c[0]), ['create'])

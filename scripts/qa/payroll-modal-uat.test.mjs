@@ -64,7 +64,8 @@ test('revalidation waits for server state and disappears immediately after the p
     revalidateMaterializedCapture: async () => { revalidations++; return { file_count: 5, employee_record_count: 3, channels: ['banco', 'spei', 'vales'] } },
   }
   const { CaptureModal } = load('app/src/features/nomina/CaptureModal.tsx', {
-    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.children, props.actions) },
+    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.headerContext, props.children, props.actions) },
+    '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast() {} }) },
     '../../components/ui/icons': load('app/src/components/ui/icons.tsx', {}),
     '../../lib/supabase': { isDevSupabaseProject: true },
@@ -108,7 +109,8 @@ test('revalidation waits for server state and disappears immediately after the p
 
 test('reopening a paid capture keeps the server totals for all five files and uses the correct count labels', async () => {
   const { CaptureModal } = load('app/src/features/nomina/CaptureModal.tsx', {
-    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.children, props.actions) },
+    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.headerContext, props.children, props.actions) },
+    '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast() {} }) },
     '../../components/ui/icons': load('app/src/components/ui/icons.tsx', {}),
     '../../lib/supabase': { isDevSupabaseProject: true },

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useToast } from '../../components/ui/Toast'
 import { IcDownload, IcFile } from '../../components/ui/icons'
 import { isDevSupabaseProject } from '../../lib/supabase'
@@ -615,6 +616,7 @@ export function CaptureModal({ session, companies, accounts, costCenters, mappin
   return (
     <Modal
       title="Captura de nómina"
+      headerContext={<CompanyCaptureContext name={companies.find(company => company.id === companyId)?.name} />}
       subtitle="Sube el paquete, revisa los montos y confirma la corrida. Nómina no consume presupuesto y Flux no ejecuta pagos."
       size="lg"
       onClose={onClose}
