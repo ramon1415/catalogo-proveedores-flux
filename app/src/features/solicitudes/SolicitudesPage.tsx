@@ -239,7 +239,7 @@ export default function SolicitudesPage() {
             <IcSearch size={16} />
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por folio, proveedor o descripcion..." aria-label="Buscar solicitudes" />
           </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
+          <select aria-label="Filtrar por estatus" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
             <option value="todos">Estatus: Todos</option>
             <option value="activas">Activas</option>
             <option value="submitted">Enviada</option>
@@ -251,7 +251,7 @@ export default function SolicitudesPage() {
             <option value="rejected">Rechazada</option>
             <option value="cancelled">Cancelada</option>
           </select>
-          <select value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as BudgetDecisionFilter)}>
+          <select aria-label="Filtrar por presupuesto" value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as BudgetDecisionFilter)}>
             <option value="todos">Presupuesto: Todos</option>
             <option value="aprobable">Aprobable</option>
             <option value="excepciones">Excepciones</option>
@@ -268,7 +268,7 @@ export default function SolicitudesPage() {
         {status === 'error' && <div className={`${s.messageBox} ${s.error}`}>{errorMsg}</div>}
 
         <div className={s.tableWrap}>
-          <table className={s.table}>
+          <table className={s.table} aria-label="Solicitudes de pago">
             <thead>
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
             </thead>
@@ -295,7 +295,7 @@ export default function SolicitudesPage() {
                 const extra = extraBadges.get(r.id)
                 return (
                   <tr key={r.id} className={highlightedId === r.id ? s.highlightRow : undefined}>
-                    <td>
+                    <td data-label="Folio">
                       <span className={s.cellMain}>{r.request_number || 'Sin folio'}{r.is_extraordinary_adjustment && <> <Badge variant="accent">Extraordinario</Badge></>}{extra && <> <Badge variant="warning">{extra.status === 'draft' ? 'Evidencia pendiente' : 'Extraordinario'}</Badge></>}</span>
                       <span className={s.cellSub}>{formatDate(r.submitted_at || r.created_at)}</span>
                       {meta && (
@@ -305,17 +305,17 @@ export default function SolicitudesPage() {
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Proveedor">
                       <span className={s.cellMain}>{proveedorAlias(proveedor)}</span>
                       <span className={s.cellSub}>{companyName(company)} · {costCenterName(center)}</span>
                     </td>
-                    <td>
+                    <td data-label="Partida">
                       <span className={s.cellMain}>{category?.code || 'Sin partida'}</span>
                       <span className={s.cellSub}>{category?.name || ''} · {formatMonth(r.budget_month)}</span>
                     </td>
-                    <td><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
-                    <td><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
-                    <td><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
+                    <td data-label="Monto"><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
+                    <td data-label="Estatus"><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
+                    <td data-label="Acciones"><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
                   </tr>
                 )
               })}
