@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Provider, ProviderPayload, DestinationType } from './types'
 import {
@@ -287,6 +288,7 @@ export function ProviderModal({
           <div>
             <h2>{title}</h2>
             <p className="muted">Completa los datos principales del proveedor.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

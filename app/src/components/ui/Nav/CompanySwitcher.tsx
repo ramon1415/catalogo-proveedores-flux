@@ -56,7 +56,7 @@ export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
       </button>
 
       {open && (
-        <Modal title="Cambiar empresa" subtitle="Elige la empresa activa" onClose={() => setOpen(false)}>
+        <Modal headerContext={null} title="Cambiar empresa" subtitle="Elige la empresa activa" onClose={() => setOpen(false)}>
           <div className={s.companyList}>
             {memberships.map((m) => {
               const active = m.company_id === companyId

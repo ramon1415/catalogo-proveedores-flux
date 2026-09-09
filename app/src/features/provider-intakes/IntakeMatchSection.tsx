@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -305,6 +306,7 @@ export function IntakeMatchSection({ intake, onChanged }: { intake: IntakeDetail
                     ? 'La solicitud quedará sin proveedor maestro. El historial se conservará.'
                     : 'Revisa los datos declarados y maestros campo por campo.'}
                 </p>
+            <CompanyCaptureContext name={intake.company_name} />
               </div>
               <button className="small-btn" disabled={saving} onClick={() => setDialog(null)}>Cerrar</button>
             </div>

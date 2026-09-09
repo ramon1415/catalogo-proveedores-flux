@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -89,7 +90,7 @@ export function IncidentModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext company={companies.find(company => company.id === companyId)} />}
         title="Nueva incidencia"
         subtitle="Registra un cargo recuperable a socio o externo."
         size="lg"

@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import type { BudgetCategory } from './types'
@@ -52,6 +53,7 @@ export function GrupoModal({
           <div>
             <h2>Cambiar agrupación</h2>
             <p>{`${category.name} — hoy en "${current}"`}</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
