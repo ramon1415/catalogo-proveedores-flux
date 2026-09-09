@@ -265,3 +265,154 @@ test('server date rejection remains inline with its authoritative creation date'
   assert.equal(h.field('Fecha de pago').props.value, '2026-09-08')
   assert.equal(h.field('Referencia').props.value, 'REF-001')
 })
+
+const groupLines = (total = '1234.56 MXN', folio = '000123') => [
+  'BBVA', 'Comprobante de Grupos', 'Estado Completada',
+  'Fecha y hora de consulta 9 de septiembre de 2026, 12:00:00 h',
+  'Datos de la operación', `Folio de grupo ${folio}`,
+  'Fecha de creación 8 de septiembre de 2026',
+  'Fecha programada de pago 10 de septiembre de 2026',
+  'Totales por divisa en cuentas origen', `9 registros en pesos mexicanos ${total}`,
+  'Datos de confirmación', 'Fecha y hora 8 de septiembre de 2026, 18:00:00 h',
+  'Folio de autorización QA-AUTH-001',
+]
+
+test('BBVA group totals use the labelled aggregate, scheduled payment date and group folio', () => {
+  assert.deepEqual(fields.parseReceiptFields(groupLines()), {
+    amount: '1234.56', paymentDate: '2026-09-10', reference: '000123', currency: 'MXN',
+  })
+  assert.equal(fields.parseReceiptFields(groupLines().flatMap((line) => line.startsWith('9 registros') ? ['9 registros en pesos mexicanos', '1234.56 MXN'] : [line])).amount, '1234.56')
+  assert.equal(fields.parseReceiptFields([...groupLines(), 'Fecha de aplicación 11/09/2026']).paymentDate, '2026-09-11')
+  assert.equal(fields.parseReceiptFields([...groupLines(), 'Saldo: 9000.00 MXN', 'Importe: 20.00 MXN']).amount, '1234.56')
+})
+
+test('unreadable or conflicting group totals cannot fall back to another amount', () => {
+  for (const value of ['[ilegible] MXN', '1234.56 [ilegible]', '1234.56 10.00 MXN', '1O34.56 MXN', '']) {
+    assert.equal(fields.parseReceiptFields([...groupLines(value), 'Importe: 1234.56 MXN']).amount, '', value)
+  }
+  assert.equal(fields.parseReceiptFields([...groupLines(), ...groupLines('2000.00 MXN', '000124')]).amount, '')
+  assert.equal(fields.parseReceiptFields(groupLines().filter((line) => !line.startsWith('9 registros'))).amount, '')
+  assert.equal(fields.parseReceiptFields(['Fecha de pago: 10/09/2026 [ilegible]']).paymentDate, '')
+  assert.equal(fields.parseReceiptFields(['Referencia: QA-[ilegible]']).reference, '')
+})
+
+const blocksFor = (rows) => [{ paragraphs: [{ lines: rows.map((text, index) => ({ words: text.split(' ').map((text, i) => ({
+  text, confidence: 95, bbox: { x0: i * 100, x1: i * 100 + 80, y0: index * 30, y1: index * 30 + 20 },
+})) })) }] }]
+
+function ocrHarness({ pages, recognize, render } = {}) {
+  const calls = { created: 0, terminated: 0, destroyed: 0, renders: 0, cancelled: 0, canvases: [], options: null }
+  const worker = {
+    setParameters: async (value) => { calls.parameters = value },
+    recognize: recognize || (async () => ({ data: { blocks: blocksFor(groupLines()) } })),
+    terminate: async () => { calls.terminated += 1 },
+  }
+  const page = {
+    getTextContent: async () => ({ items: [] }),
+    getOperatorList: async () => ({ fnArray: [], argsArray: [] }),
+    getViewport: ({ scale }) => ({ width: 595 * scale, height: 842 * scale }),
+    render: () => { calls.renders += 1; return { promise: render || Promise.resolve(), cancel: () => { calls.cancelled += 1 } } },
+  }
+  const documentPages = pages ? pages.map((overrides) => ({ ...page, ...overrides })) : [page]
+  const reader = load('app/src/lib/pdfText.ts', { 'tesseract.js': {
+    PSM: { AUTO: '3' }, createWorker: async (language, mode, options) => {
+      assert.equal(language, 'spa'); assert.equal(mode, 1)
+      calls.created += 1; calls.options = options; return worker
+    },
+  } }, { window: { pdfjsLib: {
+    GlobalWorkerOptions: {}, OPS: { paintImageXObject: 1, paintInlineImageXObject: 2 },
+    getDocument: () => ({ promise: Promise.resolve({ numPages: documentPages.length, getPage: async (n) => documentPages[n - 1], destroy: async () => { calls.destroyed += 1 } }) }),
+  } }, document: { createElement: (name) => {
+    assert.equal(name, 'canvas')
+    const canvas = { width: 0, height: 0, getContext: () => ({}) }
+    calls.canvases.push(canvas); return canvas
+  } } })
+  return { reader, calls, file: new File(['%PDF-1.7\n' + ' '.repeat(200)], 'scan.pdf', { type: 'application/pdf' }) }
+}
+
+test('image PDF OCR is opt-in, same-origin, bounded and releases worker and canvas', async () => {
+  const h = ocrHarness()
+  assert.deepEqual(await h.reader.extractPdfLines(h.file), [''])
+  assert.equal(h.calls.created, 0)
+  const progress = []
+  const result = await h.reader.extractPdfLines(h.file, 20, { ocr: true, onOcrProgress: (...args) => progress.push(args) })
+  assert.deepEqual(fields.parseReceiptFields(result), fields.parseReceiptFields(groupLines()))
+  assert.deepEqual(progress, [[1, 1]])
+  assert.equal(h.calls.created, 1); assert.equal(h.calls.terminated, 1)
+  assert.equal(h.calls.destroyed, 2)
+  assert.equal(h.calls.options.workerBlobURL, false)
+  assert.equal(h.calls.options.cacheMethod, 'none')
+  for (const key of ['workerPath', 'corePath', 'langPath']) assert.match(h.calls.options[key], /^\/ocr\/tesseract-6\.0\.1-spa-1\.0\.0/)
+  assert.ok(h.calls.canvases.every((canvas) => canvas.width === 0 && canvas.height === 0))
+})
+
+test('readable native PDFs do not start OCR; mixed text/image pages still read the image', async () => {
+  const native = { getTextContent: async () => ({ items: [...lines(), 'Documento de prueba sintético suficientemente largo para el lector.'].map((str) => ({ str })) }) }
+  const h = ocrHarness({ pages: [native] })
+  assert.equal(fields.parseReceiptFields(await h.reader.extractPdfLines(h.file, 20, { ocr: true })).amount, '100.00')
+  assert.equal(h.calls.created, 0)
+  const mixed = ocrHarness({ pages: [{ ...native, getOperatorList: async () => ({ fnArray: [1], argsArray: [['image', 1200, 960]] }) }] })
+  assert.equal(fields.parseReceiptFields(await mixed.reader.extractPdfLines(mixed.file, 20, { ocr: true })).amount, '1234.56')
+  assert.equal(mixed.calls.created, 1)
+})
+
+test('all image pages are read and a conflicting second total stays unresolved', async () => {
+  let index = 0
+  const h = ocrHarness({ pages: [{}, {}], recognize: async () => ({ data: { blocks: blocksFor(groupLines(index++ ? '2000.00 MXN' : '1234.56 MXN')) } }) })
+  const result = await h.reader.extractPdfLines(h.file, 20, { ocr: true })
+  assert.equal(fields.parseReceiptFields(result).amount, '')
+  assert.equal(h.calls.renders, 2); assert.equal(h.calls.created, 1); assert.equal(h.calls.terminated, 1)
+})
+
+test('cancelling image recognition or rendering releases its resources and returns no partial facts', async () => {
+  for (const stage of ['recognize', 'render']) {
+    const pending = deferred()
+    const h = ocrHarness(stage === 'recognize' ? { recognize: () => pending.promise } : { render: pending.promise })
+    const controller = new AbortController()
+    const read = h.reader.extractPdfLines(h.file, 20, { ocr: true, signal: controller.signal })
+    await new Promise((resolve) => setImmediate(resolve))
+    controller.abort(new Error('receipt_read_cancelled'))
+    await assert.rejects(read, /receipt_read_cancelled/)
+    assert.equal(h.calls.terminated, 1); assert.equal(h.calls.destroyed, 1); assert.equal(h.calls.cancelled, 1)
+    assert.ok(h.calls.canvases.every((canvas) => canvas.width === 0 && canvas.height === 0))
+    pending.resolve({ data: { blocks: blocksFor(groupLines()) } })
+  }
+})
+
+test('OCR rebuilds columns into rows and preserves unreadable digits as unresolved tokens', () => {
+  const blocks = blocksFor(['Importe:', 'Fecha de pago:', 'Referencia:'])
+  blocks[0].paragraphs.push({ lines: [{ words: [
+    { text: '100.00', confidence: 95, bbox: { x0: 700, x1: 800, y0: 0, y1: 20 } },
+    { text: '10/09/2026', confidence: 95, bbox: { x0: 700, x1: 800, y0: 30, y1: 50 } },
+    { text: 'ABC-001', confidence: 20, bbox: { x0: 700, x1: 800, y0: 60, y1: 80 } },
+  ] }] })
+  assert.deepEqual(pdfReader.ocrWordsToLines(blocks), ['Importe: 100.00', 'Fecha de pago: 10/09/2026', 'Referencia: [ilegible]'])
+  assert.equal(fields.parseReceiptFields(pdfReader.ocrWordsToLines(blocks)).reference, '')
+})
+
+test('autofill enables OCR, shows progress and aborts obsolete receipt work', async (t) => {
+  const pending = deferred(), options = []
+  const h = await hookHarness(t, (f, max, opts) => {
+    assert.equal(max, 20); assert.equal(opts.ocr, true); options.push(opts)
+    opts.onOcrProgress(1, 2)
+    return f.name === 'pending.pdf' ? pending.promise : Promise.resolve(groupLines())
+  })
+  let first
+  await act(async () => { first = h.current.selectReceipt('bbva', file('pending.pdf')) })
+  assert.match(h.current.drafts.bbva.notice, /Leyendo imagen del PDF, página 1 de 2/)
+  await act(async () => { await h.current.selectReceipt('bbva', file('next.pdf')) })
+  assert.equal(options[0].signal.aborted, true)
+  assert.match(h.current.drafts.bbva.notice, /Datos leídos de la imagen/)
+  assert.equal(h.current.drafts.bbva.file.name, 'next.pdf')
+  await act(async () => { pending.resolve(lines()); await first })
+  assert.equal(h.current.drafts.bbva.amount, '1234.56')
+})
+
+test('missing OCR amount reports a reading problem, not an incorrect amount, and blocks upload', async (t) => {
+  const h = await componentHarness(t, ['Fecha de pago: 10/09/2026', 'Referencia: QA-001'])
+  await h.upload(); await h.submit()
+  assert.equal(h.toasts.at(-1)[0], 'Importe pendiente de lectura')
+  assert.match(h.alerts().join(' '), /No se pudo identificar un importe válido/)
+  assert.doesNotMatch(h.alerts().join(' '), /debe coincidir/)
+  assert.equal(h.calls.some((call) => call.name === 'reserve_payroll_channel_receipt'), false)
+})

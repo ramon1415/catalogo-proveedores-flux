@@ -36,6 +36,7 @@ function choose(lines: string[], groups: RegExp[][], parse: (value: string) => s
 }
 
 function amount(value: string): string | null {
+  if (value.includes('[ilegible]')) return null
   const clean = normalize(value).replace(/^(?:MXN|MXP|USD|EUR|M\.N\.)\s*/i, '').replace(/^\$\s*/, '')
   const match = clean.match(/^(\d[\d.,]*)(?=\s|$)/)
   if (!match) return null
@@ -70,6 +71,7 @@ export function receiptDateError(value: string, requestCreatedDate?: string): st
 }
 
 function paymentDate(value: string): string | null {
+  if (value.includes('[ilegible]')) return null
   const text = normalize(value).toLowerCase()
   let year: string, month: string, day: string
   const iso = text.match(/^(20\d{2})[/-](\d{1,2})[/-](\d{1,2})(?=\s|$|t)/)
@@ -89,8 +91,34 @@ function reference(value: string): string | null {
   return text
 }
 
+// BBVA's group receipt labels the aggregate by currency, not "Importe".
+// Only read rows inside that totals section; never pick a balance or add
+// employee payments. An unreadable/conflicting section stays unresolved.
+function groupTotal(lines: string[]): string | null {
+  if (!lines.some((line) => /comprobante de grupos/i.test(normalize(line)))) return null
+  const totals: Array<string | null> = []
+  let sectionFound = false
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^totales por divisa en cuentas origen\s*:?$/i.test(normalize(lines[i]))) continue
+    sectionFound = true
+    let found = false
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = normalize(lines[j])
+      if (/^(?:datos de |comprobante de grupos|totales por divisa|BBVA Mexico)/i.test(line)) break
+      const row = line.match(/^\d+\s+registros?\s+en\s+pesos\s+mexicanos\s*:?\s*(.*)$/i)
+      if (!row) continue
+      found = true
+      totals.push(amount(row[1] || normalize(lines[j + 1] || '')))
+    }
+    if (!found) totals.push(null)
+  }
+  if (!sectionFound) return null
+  const unique = [...new Set(totals)]
+  return unique.length === 1 && unique[0] !== null ? unique[0] : ''
+}
+
 export function parseReceiptFields(lines: string[]): ReceiptFields {
-  const parsedAmount = choose(lines, [
+  const parsedAmount = groupTotal(lines) ?? choose(lines, [
     [/\b(?:importe|monto)\s+total(?:\s+(?:pagado|transferido|dispersado))?\b\s*/i, /\btotal\s+(?:pagado|transferido|dispersado)\b\s*/i],
     [/\b(?:importe|monto|cantidad)(?:\s+(?:pagado|transferido|de\s+(?:la\s+)?(?:operacion|transferencia|prueba)|del\s+pago))?\b\s*/i],
     [/^total\b\s*/i],
@@ -98,12 +126,15 @@ export function parseReceiptFields(lines: string[]): ReceiptFields {
   const date = choose(lines, [
     [/\bfecha(?:\s+y\s+hora)?\s+(?:de\s+)?(?:pago|aplicacion)\b\s*/i],
     [/\bfecha(?:\s+y\s+hora)?\s+(?:de\s+)?(?:operacion|transferencia|liquidacion)\b\s*/i],
+    [/\bfecha\s+programada\s+de\s+pago\b\s*/i],
     [/^fecha(?:\s+y\s+hora)?\s*(?=[:=]|\d)/i],
   ], paymentDate)
   const ref = choose(lines, [
     [/\bclave\s+de\s+rastreo\b\s*/i],
     [/\bfolio\s+unico\b\s*/i],
     [/\breferencia(?:\s+(?:numerica|bancaria|de\s+pago))?\b\s*/i],
+    [/\bfolio\s+de\s+grupo\b\s*/i],
+    [/\bfolio\s+de\s+autorizacion\b\s*/i],
     [/\b(?:folio(?:\s+de\s+internet)?|numero\s+de\s+operacion|autorizacion)\b\s*/i],
   ], reference)
   const currencyCodes = [...new Set(lines.flatMap((line) => normalize(line).match(/\b(?:MXN|MXP|USD|EUR)\b/gi) || []).map((code) => code.toUpperCase().replace('MXP', 'MXN')))]

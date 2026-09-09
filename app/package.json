@@ -4,6 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "predev": "node ../scripts/prepare-payroll-ocr.mjs",
+    "prebuild": "node ../scripts/prepare-payroll-ocr.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
@@ -11,18 +13,21 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "@tesseract.js-data/spa": "1.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.0.0",
     "xlsx": "0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.16",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "typescript": "^5.5.4",
-    "vite": "^5.4.6",
     "react-test-renderer": "18.3.1",
-    "@electric-sql/pglite": "0.3.16"
+    "typescript": "^5.5.4",
+    "vite": "^5.4.6"
   }
 }

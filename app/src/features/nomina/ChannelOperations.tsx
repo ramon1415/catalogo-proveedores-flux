@@ -154,7 +154,11 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
       rejectReceipt('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.')
       return
     }
-    if (amountMinor === null || amountMinor !== Math.round(Number(channel.amount) * 100)) {
+    if (amountMinor === null) {
+      rejectReceipt('Importe pendiente de lectura', 'No se pudo identificar un importe válido. Revisa el PDF y completa el importe del comprobante antes de conciliar.')
+      return
+    }
+    if (amountMinor !== Math.round(Number(channel.amount) * 100)) {
       rejectReceipt('Revisa el importe', `El importe del comprobante debe coincidir con ${formatMoney(channel.amount)}.`)
       return
     }
