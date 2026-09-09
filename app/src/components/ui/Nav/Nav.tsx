@@ -6,7 +6,6 @@ import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useModules } from '../../../lib/moduleAccess'
 import { IcUser, IcLogout } from '../icons'
-import { CompanySwitcher } from './CompanySwitcher'
 import { NAV_SECTIONS } from './navModel'
 import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
 
@@ -29,7 +28,6 @@ export function Nav() {
         <img className={s.iso} src={isotipo} alt="Flux" />
         <img className={s.full} src={logoFull} alt="Flux" />
       </div>
-      <CompanySwitcher />
 
       <nav className={s.nav}>
         {sections.map((sec) => (
