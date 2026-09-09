@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useRef, useEffect, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { quickCreateProvider } from './api'
@@ -64,6 +65,7 @@ export function QuickProviderModal({ onClose, onCreated }: { onClose: () => void
           <div>
             <h2>Proveedor rapido</h2>
             <p>Alta minima para continuar la solicitud sin salir de la pantalla.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

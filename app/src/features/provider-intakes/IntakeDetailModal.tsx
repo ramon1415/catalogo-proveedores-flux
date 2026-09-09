@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -117,6 +118,7 @@ export function IntakeDetailModal({ intakeId, onClose, onChanged }: { intakeId: 
           <div>
             <h2>{intake?.public_folio ?? 'Solicitud'}</h2>
             {intake && <p className="muted">{intake.company_name ?? 'Empresa'} · recibida {formatDateTime(intake.created_at)}</p>}
+            <CompanyCaptureContext name={intake?.company_name} />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {intake && <Badge variant={INTAKE_STATUS[intake.status]?.variant ?? 'neutral'}>{INTAKE_STATUS[intake.status]?.label ?? intake.status}</Badge>}
