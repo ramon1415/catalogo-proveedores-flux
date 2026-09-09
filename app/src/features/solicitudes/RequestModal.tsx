@@ -4,7 +4,7 @@ import { ProviderCombo } from './ProviderCombo'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions,
-  createPaymentRequestWithDocument, createReimbursementRequestWithDocuments,
+  createPaymentRequest, createPaymentRequestWithDocument, createReimbursementRequestWithDocuments,
   updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, fetchPartidaPrediction,
 } from './api'
@@ -565,13 +565,6 @@ export function RequestModal({
     const fiscalValidation = isReembolso ? '' : validateFiscalBreakdown()
     if (fiscalValidation) { showToast('Desglose fiscal', fiscalValidation, 'warning'); return }
 
-    // Documento obligatorio en toda solicitud (política global). En reembolso
-    // los comprobantes van por renglón, ya validados arriba.
-    if (!isReembolso && !file) {
-      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
-      return
-    }
-
     setSubmitting(true)
     const stagedDocumentPaths: string[] = []
     try {
@@ -602,14 +595,16 @@ export function RequestModal({
         // El RPC ya enlazó todos los paths en la misma transacción que la
         // solicitud y sus renglones; desde aquí dejan de ser temporales.
         stagedDocumentPaths.length = 0
-      } else {
-        if (!file || !profile?.id) throw new Error('request_document_required')
+      } else if (file) {
+        if (!profile?.id) throw new Error('requester_profile_required')
         const stagedDocumentPath = await uploadReceipt(file, `solicitudes/drafts/${profile.id}`)
         stagedDocumentPaths.push(stagedDocumentPath)
         data = await createPaymentRequestWithDocument(payload, stagedDocumentPath)
         // Desde aquí el archivo ya quedó enlazado dentro de la misma transacción
         // que creó la solicitud; no debe eliminarse aunque falle un paso posterior.
         stagedDocumentPaths.length = 0
+      } else {
+        data = await createPaymentRequest(payload)
       }
       const result = normalizeRpcResult<any>(data)
       const requestId = result.payment_request_id || result.id || null
@@ -764,8 +759,8 @@ export function RequestModal({
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante *
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
                   </div>

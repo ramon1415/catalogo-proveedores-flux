@@ -87,13 +87,15 @@ jobs:
           npm --prefix app run typecheck
           npm --prefix app run build
 
-      - name: Guard current PROD reimbursement and mandatory-document paths
+      - name: Guard reimbursement and optional supporting-document paths
         shell: bash
         run: |
           set -euo pipefail
           grep -Fq 'createReimbursementRequestWithDocuments' app/src/features/solicitudes/RequestModal.tsx
           grep -Fq 'createPaymentRequestWithDocument(payload, stagedDocumentPath)' app/src/features/solicitudes/RequestModal.tsx
-          ! grep -Fq 'data = await createPaymentRequest(payload)' app/src/features/solicitudes/RequestModal.tsx
+          grep -Fq '} else if (file) {' app/src/features/solicitudes/RequestModal.tsx
+          grep -Fq 'data = await createPaymentRequest(payload)' app/src/features/solicitudes/RequestModal.tsx
+          node --test scripts/qa/request-optional-document.test.mjs
           test "$(grep -c 'p_partida_unsure: payload.partida_unsure' app/src/features/solicitudes/api.ts)" -eq 2
           grep -Fq 'partida_unsure: isReembolso ? false : partidaUnsure' app/src/features/solicitudes/RequestModal.tsx
 
