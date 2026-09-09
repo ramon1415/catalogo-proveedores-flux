@@ -29,7 +29,10 @@
 .companyLauncher:disabled { cursor: default; }
 .companyIcon { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: var(--accent-dim); color: var(--accent-text); display: grid; place-items: center; }
 .companyIcon svg { width: 16px; height: 16px; display: block; }
-
+/* Punto de color por empresa. Oculto donde ya está el ícono coloreado (rail
+   expandido/colapsado); solo se muestra en modo compacto (topbar), donde el
+   ícono se esconde y el punto es la marca de color. */
+.companyDot { display: none; width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--company-accent, var(--accent)); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .18); }
 .companyGlyph { width: 18px; height: 18px; display: block; }
 .companyName { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .companyCaret { flex-shrink: 0; color: var(--text-3); }
@@ -83,10 +86,11 @@
 .logout svg { width: 15px; height: 15px; }
 .install { flex-shrink: 0; padding: 4px 8px; }
 .install:has(button) { border-top: 1px solid var(--border); }
-.companyCompact { border: 0; padding: 4px 10px; gap: 7px; min-height: 44px; border-radius: 10px; background: var(--company-accent, #c8c5b1); color: #172d29; }
-.companyCompact .companyIcon { display: grid; width: 22px; height: 22px; border-radius: 0; }
+.companyCompact { border: 0; padding: 0; gap: 7px; min-height: 44px; }
+.companyCompact .companyIcon { display: none; }
+.companyCompact .companyDot { display: block; }
 .companyCompact .txt { opacity: 1; }
-.companyCompact .companyName { font-size: 13px; color: #172d29; }
+.companyCompact .companyName { font-size: 13px; }
 .closeMenu { margin-left: auto; width: 44px; height: 44px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: var(--text-2); cursor: pointer; font: inherit; }
 .rail.drawer, .rail.drawer:modal { margin: 0; width: min(320px, calc(100vw - 36px)); max-width: none; height: 100vh; height: 100dvh; max-height: none; border: 0; border-right: 1px solid var(--border); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); color: var(--text-1); transition: none; }
 .drawer:not([open]) { display: none; }
@@ -99,7 +103,5 @@
 .item:focus-visible, .companyLauncher:focus-visible, .closeMenu:focus-visible, .logout:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .rail, .txt, .sec { transition: none; } }
 
-/* Preserve the brand-colored company label on hover and in both themes. */
-.companyCompact:hover:not(:disabled) { background: var(--company-accent, #c8c5b1); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .3); }
-.companyCompact .companyCaret { color: #172d29; }
-.companyCompact:focus-visible { outline-color: #172d29; }
+/* Keep the company marker distinct on the light surface. */
+:global(:root[data-theme="light"]) .companyDot { background: color-mix(in srgb, var(--company-accent, var(--accent)) 72%, #172d29); }
