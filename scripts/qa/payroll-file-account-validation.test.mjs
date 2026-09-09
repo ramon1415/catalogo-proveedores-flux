@@ -62,7 +62,8 @@ const text = node => typeof node === 'string' ? node : Array.isArray(node) ? nod
 test('the real modal clears stale red files after account correction and blocks them again for a different account', async () => {
   let renderer
   const { CaptureModal } = load('app/src/features/nomina/CaptureModal.tsx', {
-    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.children, props.actions) },
+    '../../components/ui/Modal': { Modal: props => React.createElement('section', null, props.headerContext, props.children, props.actions) },
+    '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast() {} }) },
     '../../components/ui/icons': load('app/src/components/ui/icons.tsx', {}),
     '../../lib/supabase': { isDevSupabaseProject: false },
@@ -77,6 +78,7 @@ test('the real modal clears stale red files after account correction and blocks 
     costCenters: [], mappings: [], isFinance: true, activeCompanyId:'company', onClose(){}, onSaved(){} }
   try {
     await act(async () => { renderer = create(React.createElement(CaptureModal,props)) })
+    assert.equal(text(renderer.root.findByProps({ 'data-company-context': true })), 'Empresa de prueba')
     const details = renderer.root.findAllByType('button').find(n=>text(n).includes('Datos de la corrida'))
     if(details) await act(async()=>details.props.onClick())
     const account = () => renderer.root.findByProps({id:'payroll-source-account'})
