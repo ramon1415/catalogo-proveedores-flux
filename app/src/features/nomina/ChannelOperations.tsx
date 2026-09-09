@@ -7,7 +7,7 @@ import type { PayrollChannel } from './types'
 import s from './Nomina.module.css'
 import { getReceiptFileUrl } from './api'
 import { receiptAmountMinor } from './receiptAmount'
-import { isReceiptDate } from './receiptFields'
+import { receiptDateError } from './receiptFields'
 import { emptyReceiptDraft, useReceiptAutofill } from './useReceiptAutofill'
 
 type ReconciliationChannel = {
@@ -27,6 +27,7 @@ type ReconciliationSummary = {
   payment_request_id: string
   request_number: string | null
   request_status: string
+  request_created_date?: string
   amount_requested: number
   currency: string
   all_dispersed: boolean
@@ -83,6 +84,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
   const [loading, setLoading] = useState(true)
   const [busyChannelId, setBusyChannelId] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
+  const [receiptErrors, setReceiptErrors] = useState<Record<string, string>>({})
   const { drafts, selectReceipt, updateReceipt, clearReceipt } = useReceiptAutofill(paymentRequestId)
 
   const channels = useMemo(() => summary?.channels || [], [summary])
@@ -104,6 +106,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
   }
 
   useEffect(() => {
+    setReceiptErrors({})
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentRequestId])
@@ -141,30 +144,36 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
     const paymentDate = draft.paymentDate
     const reference = draft.reference.trim()
     const amountMinor = receiptAmountMinor(draft.amount)
+    const rejectReceipt = (title: string, reason: string) => {
+      setReceiptErrors((current) => ({ ...current, [channel.id]: reason }))
+      showToast(title, reason, 'warning')
+    }
+    setReceiptErrors((current) => ({ ...current, [channel.id]: '' }))
 
     if (draft.currency && draft.currency !== channel.currency) {
-      showToast('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.', 'warning')
+      rejectReceipt('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.')
       return
     }
     if (amountMinor === null || amountMinor !== Math.round(Number(channel.amount) * 100)) {
-      showToast('Revisa el importe', `El importe del comprobante debe coincidir con ${formatMoney(channel.amount)}.`, 'warning')
+      rejectReceipt('Revisa el importe', `El importe del comprobante debe coincidir con ${formatMoney(channel.amount)}.`)
       return
     }
 
     if (!file) {
-      showToast('Comprobante requerido', 'Selecciona el PDF del comprobante de este canal.', 'warning')
+      rejectReceipt('Comprobante requerido', 'Selecciona el PDF del comprobante de este canal.')
       return
     }
     if (!file.name.toLowerCase().endsWith('.pdf') || file.size < 100 || file.size > 10 * 1024 * 1024) {
-      showToast('PDF no válido', 'El comprobante debe ser un PDF de hasta 10 MB.', 'warning')
+      rejectReceipt('PDF no válido', 'El comprobante debe ser un PDF de hasta 10 MB.')
       return
     }
-    if (!isReceiptDate(paymentDate)) {
-      showToast('Fecha requerida', 'Indica la fecha del pago.', 'warning')
+    const dateError = receiptDateError(paymentDate, summary?.request_created_date)
+    if (dateError) {
+      rejectReceipt('Revisa la fecha de pago', dateError)
       return
     }
     if (reference.length < 3 || reference.length > 120) {
-      showToast('Referencia requerida', 'Captura una referencia de 3 a 120 caracteres.', 'warning')
+      rejectReceipt('Referencia requerida', 'Captura una referencia de 3 a 120 caracteres.')
       return
     }
 
@@ -213,7 +222,9 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
       await refresh(false)
       showToast('Comprobante conciliado', `${channelLabel(channel.channel)} quedó validado y conciliado.`, 'success')
     } catch (error) {
-      showToast('No se pudo registrar el comprobante', friendlyError(error), 'error')
+      const reason = friendlyError(error)
+      setReceiptErrors((current) => ({ ...current, [channel.id]: reason }))
+      showToast('No se pudo registrar el comprobante', reason, 'error')
     } finally {
       setBusyChannelId(null)
     }
@@ -328,7 +339,10 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                     <input
                       type="file"
                       accept="application/pdf,.pdf"
-                      onChange={(event) => void selectReceipt(channel.id, event.target.files?.[0])}
+                      onChange={(event) => {
+                        setReceiptErrors((current) => ({ ...current, [channel.id]: '' }))
+                        void selectReceipt(channel.id, event.target.files?.[0])
+                      }}
                       disabled={busy || closing}
                     />
                   </label>
@@ -344,11 +358,17 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                     Fecha de pago
                     <input
                       type="date"
+                      min={summary.request_created_date}
                       value={draft.paymentDate}
                       onChange={(event) => updateReceipt(channel.id, 'paymentDate', event.target.value)}
                       disabled={busy || closing || draft.reading}
                     />
                   </label>
+                  {summary.request_created_date && (
+                    <p className={`${s.formNotice} ${s.fullRow}`}>
+                      Fecha de pago desde el {summary.request_created_date.split('-').reverse().join('/')} (creación de la solicitud). Se aceptan fechas posteriores.
+                    </p>
+                  )}
                   <label className={s.fullRow}>
                     Referencia
                     <input
@@ -361,6 +381,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                   </label>
                   {amountMismatch && <p className={s.formNotice} role="alert">El importe no coincide con {formatMoney(channel.amount)}. Revisa el comprobante.</p>}
                   {currencyMismatch && <p className={s.formNotice} role="alert">La moneda del PDF no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
+                  {receiptErrors[channel.id] && <p className={`${s.formNotice} ${s.fullRow}`} role="alert">{receiptErrors[channel.id]}</p>}
                   <div className={s.fullRow}>
                     <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing || draft.reading || !draft.file || draft.invalid || currencyMismatch}>
                       {draft.reading ? 'Leyendo comprobante…' : busy ? 'Validando comprobante…' : 'Subir y conciliar comprobante'}

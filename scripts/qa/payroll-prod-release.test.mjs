@@ -52,6 +52,10 @@ before(async()=>{
   await exec(`insert into companies(id,name,active) values('${companyA}','Soporte Fersana',true),('${companyB}','Operadora Tlacatecpan',true);`);
   await exec(read('../../supabase/migrations/20260908075132_payroll_prod_request_type.sql'));
   await exec(read('../../supabase/migrations/20260908075149_payroll_prod_capture_and_notifications.sql'));
+  const beforeAcl = (await db.query("select n.nspname,p.proname,p.proacl::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where (n.nspname='private' and p.proname='reconcile_payroll_channel') or (n.nspname='public' and p.proname='get_payroll_reconciliation_summary') order by 1,2")).rows;
+  await exec(read('../../supabase/migrations/20260909181505_payroll_receipt_date_from_request_creation.sql'));
+  await exec(read('../../supabase/migrations/20260909181505_payroll_receipt_date_from_request_creation.sql'));
+  assert.deepEqual((await db.query("select n.nspname,p.proname,p.proacl::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where (n.nspname='private' and p.proname='reconcile_payroll_channel') or (n.nspname='public' and p.proname='get_payroll_reconciliation_summary') order by 1,2")).rows,beforeAcl);
   await exec(`insert into profiles(id,auth_user_id,full_name,email,active) values('${rh}','${rh}','Synthetic RH','rh@example.test',true),('${finance}','${finance}','Synthetic Finance','finance@example.test',true),('${outsider}','${outsider}','Synthetic other','other@example.test',true);
     insert into profile_company_memberships(profile_id,company_id,active,role_key) values('${rh}','${companyA}',true,'operator'),('${finance}','${companyA}',true,'finance'),('${finance}','${companyB}',true,'operator'),('${outsider}','${companyA}',true,'operator');
     insert into payroll_capture_grants(profile_id,company_id) values('${rh}','${companyA}');
@@ -120,6 +124,9 @@ test('RH capture → server materialization → Treasury review → three receip
     assert.equal(materialized.status,'materialized');assert.equal(materialized.provision_status,'pending_configuration');
     const request=materialized.payment_request_id;
     assert.equal((await rpc('materialize_payroll_capture_internal',[session,stored.version,'b'.repeat(64),normalized])).status,'already_materialized');
+    await actor('', 'owner');
+    // UTC September 8 is still September 7 in CDMX: creation date is a business day, not UTC.
+    await db.query("update payment_requests set created_at='2026-09-08T03:00:00Z' where id=$1",[request]);
     await actor(rh);
     const [history]=await rpc('get_payroll_capture_sessions',[session]);
     assert.equal(history.files.length,5);assert.doesNotMatch(JSON.stringify(history),/PRIVATE SYNTHETIC PERSON/);
@@ -129,6 +136,9 @@ test('RH capture → server materialization → Treasury review → three receip
     assert.equal((await rpc('confirm_payroll_finance_review',[request])).status,'confirmed');
     await denied(()=>rpc('close_payroll_as_paid',[request]),/PAYROLL_PAID_RECONCILIATION_REQUIRED/);
     const channels=(await db.query('select * from payroll_channels where payment_request_id=$1 order by channel',[request])).rows;
+    assert.equal((await rpc('get_payroll_reconciliation_summary',[request])).request_created_date,'2026-09-07');
+    await exec("set local timezone='Asia/Tokyo'");
+    assert.equal((await rpc('get_payroll_reconciliation_summary',[request])).request_created_date,'2026-09-07');
     for(const channel of channels){
       await rpc('record_payroll_channel_dispersion',[request,channel.id,'dispersed',null]);
       const receipt=await rpc('reserve_payroll_channel_receipt',[request,channel.id,'application/pdf',200,'c'.repeat(64),'Synthetic_receipt.pdf']);
@@ -140,6 +150,19 @@ test('RH capture → server materialization → Treasury review → three receip
       await actor('', 'service_role');
       await rpc('confirm_payroll_channel_receipt_internal',[receipt.run_file_id,'c'.repeat(64),200,'application/pdf']);
       await actor(finance);
+      const reconcile = (date,amount=Number(channel.amount),ref='DATE-TEST') => rpc('reconcile_payroll_channel',[request,channel.id,receipt.run_file_id,amount,date,ref]);
+      await denied(()=>reconcile('2026-09-06'),/PAYROLL_RECONCILIATION_PAYMENT_DATE_BEFORE_REQUEST/);
+      await denied(()=>reconcile(null),/PAYROLL_RECONCILIATION_PAYMENT_DATE_INVALID/);
+      await denied(()=>reconcile('infinity'),/PAYROLL_RECONCILIATION_PAYMENT_DATE_INVALID/);
+      await denied(()=>reconcile('-infinity'),/PAYROLL_RECONCILIATION_PAYMENT_DATE_INVALID/);
+      await denied(()=>reconcile('2026-09-07',Number(channel.amount)+0.01),/PAYROLL_RECONCILIATION_AMOUNT_MISMATCH/);
+      await denied(()=>reconcile('2026-09-07',Number(channel.amount),'x'),/PAYROLL_RECONCILIATION_REFERENCE_REQUIRED/);
+      for(const date of ['2026-09-07','2026-09-08','2099-12-31','2100-01-01']) {
+        await exec('savepoint date_case');
+        assert.equal((await reconcile(date)).result,'reconciled');
+        assert.equal((await reconcile(date)).result,'already_reconciled');
+        await exec('rollback to savepoint date_case; release savepoint date_case');
+      }
       await rpc('reconcile_payroll_channel',[request,channel.id,receipt.run_file_id,Number(channel.amount),'2026-09-08','SYNTHETIC-'+channel.channel]);
     }
     // A finance role in a different company must not unlock this request.

@@ -56,9 +56,17 @@ const months: Record<string, number> = {
 }
 
 export function isReceiptDate(value: string): boolean {
-  if (!/^20\d{2}-\d{2}-\d{2}$/.test(value)) return false
+  if (!/^[1-9]\d{3}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T00:00:00Z`)
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+export function receiptDateError(value: string, requestCreatedDate?: string): string | null {
+  if (!isReceiptDate(value)) return 'Indica una fecha de pago válida.'
+  if (requestCreatedDate && value < requestCreatedDate) {
+    return `La fecha de pago no puede ser anterior al ${requestCreatedDate.split('-').reverse().join('/')}, fecha de creación de la solicitud.`
+  }
+  return null
 }
 
 function paymentDate(value: string): string | null {

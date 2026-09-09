@@ -484,6 +484,34 @@ export const FILE_CARDS: Array<{ slot: PayrollSlot; title: string; badge: string
 
 // Mapa de errores del backend → copy amable (friendlyError del vanilla).
 const ERROR_MAP: Record<string, string> = {
+  PAYROLL_RECONCILIATION_PAYMENT_DATE_BEFORE_REQUEST: 'La fecha de pago no puede ser anterior a la fecha de creación de la solicitud.',
+  PAYROLL_RECONCILIATION_PAYMENT_DATE_INVALID: 'Indica una fecha de pago válida.',
+  PAYROLL_RECONCILIATION_AMOUNT_MISMATCH: 'El importe del comprobante no coincide con el monto del canal. Revisa el importe antes de continuar.',
+  PAYROLL_RECONCILIATION_REFERENCE_REQUIRED: 'Captura una referencia de pago de 3 a 120 caracteres.',
+  PAYROLL_RECONCILIATION_VERIFIED_RECEIPT_REQUIRED: 'El archivo aún no pasó la verificación. Vuelve a subir el comprobante PDF.',
+  PAYROLL_RECONCILIATION_REQUIRES_DISPERSED_CHANNEL: 'Registra primero este canal como dispersado después de realizar el pago.',
+  PAYROLL_RECONCILIATION_REQUIRES_APPROVED_REQUEST: 'La nómina todavía no está lista para pago. Finanzas debe confirmar los montos.',
+  PAYROLL_RECONCILIATION_ALREADY_FINAL: 'Este canal ya tiene un comprobante conciliado. Actualiza la solicitud para consultar su estado.',
+  PAYROLL_RECONCILIATION_STATUS_INVALID: 'El canal ya no está pendiente de conciliación. Actualiza la solicitud.',
+  PAYROLL_RECONCILIATION_COMPANY_MEMBERSHIP_REQUIRED: 'No tienes acceso a la empresa de esta nómina.',
+  PAYROLL_FINANCE_COMPANY_REQUIRED: 'Necesitas permisos de Finanzas en la empresa de esta nómina.',
+  PAYROLL_FINANCE_REQUIRED: 'Necesitas permisos de Finanzas para registrar el comprobante.',
+  PAYROLL_RECEIPT_PDF_INVALID: 'El archivo no tiene un formato PDF válido. Selecciona el comprobante original.',
+  PAYROLL_RECEIPT_PDF_REQUIRED: 'Selecciona un comprobante en formato PDF.',
+  PAYROLL_RECEIPT_SIZE_INVALID: 'El comprobante debe ser un PDF de hasta 10 MB y no estar vacío.',
+  PAYROLL_RECEIPT_SIZE_MISMATCH: 'El archivo guardado está incompleto o tiene un tamaño distinto. Vuelve a subirlo.',
+  PAYROLL_RECEIPT_HASH_MISMATCH: 'El archivo guardado no coincide con el seleccionado. Vuelve a subirlo.',
+  PAYROLL_RECEIPT_MIME_MISMATCH: 'El archivo guardado no tiene el tipo PDF esperado.',
+  PAYROLL_RECEIPT_STORAGE_OBJECT_MISSING: 'No se encontró el comprobante guardado. Vuelve a subirlo.',
+  PAYROLL_RECEIPT_SCOPE_MISMATCH: 'El comprobante no corresponde a esta solicitud o canal.',
+  PAYROLL_RECEIPT_REQUIRES_DISPERSED_CHANNEL: 'Registra primero este canal como dispersado después de realizar el pago.',
+  PAYROLL_RECEIPT_REQUIRES_APPROVED_REQUEST: 'La nómina todavía no está lista para pago. Finanzas debe confirmar los montos.',
+  PAYROLL_RECEIPT_RECONCILIATION_ALREADY_STARTED: 'Este canal ya tiene una conciliación iniciada. Actualiza la solicitud.',
+  PAYROLL_RECEIPT_COMPANY_MEMBERSHIP_REQUIRED: 'No tienes acceso a la empresa de esta nómina.',
+  PAYROLL_RECEIPT_CHANNEL_NOT_READY: 'El canal debe estar dispersado y pendiente de conciliación para aceptar el comprobante.',
+  PAYROLL_RECEIPT_REQUEST_NOT_READY: 'La nómina todavía no está lista para registrar comprobantes.',
+  PAYROLL_RECEIPT_ALREADY_VERIFIED: 'Este comprobante ya fue verificado. Actualiza la solicitud para consultar su estado.',
+  PAYROLL_AUTH_REQUIRED: 'Tu sesión no está disponible. Vuelve a iniciar sesión para cargar el comprobante.',
   payroll_capture_finance_required: 'La captura de nómina es exclusiva de Finanzas.',
   payroll_capture_metadata_invalid: 'La metadata de la corrida no es válida.',
   payroll_capture_source_account_invalid: 'La cuenta origen no pertenece a la empresa o está inactiva.',
@@ -515,6 +543,11 @@ const ERROR_MAP: Record<string, string> = {
 
 export function friendlyError(error: unknown): string {
   const message = String((error as { message?: string })?.message || error || 'Error inesperado.')
+  if (message.includes('PAYROLL_RECONCILIATION_PAYMENT_DATE_BEFORE_REQUEST')) {
+    const details = String((error as { details?: string })?.details || '')
+    const date = details.match(/\b\d{2}\/\d{2}\/\d{4}\b/)?.[0]
+    if (date) return `La fecha de pago no puede ser anterior al ${date}, fecha de creación de la solicitud.`
+  }
   const key = Object.keys(ERROR_MAP).find((k) => message.includes(k))
   return key ? ERROR_MAP[key] : message
 }
