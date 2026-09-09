@@ -1,0 +1,21 @@
+name: Solicitudes mobile UI
+on:
+  pull_request:
+    paths:
+      - 'app/src/features/solicitudes/SolicitudesPage.tsx'
+      - 'app/src/features/solicitudes/Solicitudes.module.css'
+      - 'app/src/components/ui/AppShell*'
+      - 'scripts/qa/solicitudes-mobile.test.mjs'
+      - '.github/workflows/solicitudes-mobile.yml'
+permissions:
+  contents: read
+jobs:
+  mobile-requests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix app ci
+      - run: node --test scripts/qa/solicitudes-mobile.test.mjs scripts/qa/company-context.test.mjs scripts/qa/solicitudes-scroll-contract.test.mjs

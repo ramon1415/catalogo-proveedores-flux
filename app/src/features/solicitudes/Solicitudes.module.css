@@ -265,19 +265,8 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 @media (max-width: 900px) { .statsGrid { grid-template-columns: repeat(2, 1fr); } .toolbar { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 1000px) { .itemsHead { display: none; } .itemFieldLabel { display: block; } .itemsRow { grid-template-columns: 1fr 1fr; } .itemsFile { grid-column: 1 / -1; } }
 @media (max-width: 760px) { .formGrid { grid-template-columns: 1fr; } .extraSummary { grid-template-columns: 1fr 1fr; } .refGrid, .detailGrid { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .statsGrid { grid-template-columns: 1fr; } .toolbar { grid-template-columns: 1fr; } }
-
 @media (max-width: 760px) {
-  .phead { flex-direction: column; gap: 12px; margin-bottom: 12px; }
-  .phead > div { max-width: 100%; flex-wrap: wrap; }
-  .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
-  .kpi { padding: 12px; min-width: 0; }
   .kpiValue { font-size: 20px; overflow-wrap: anywhere; }
-  .tableCard { min-width: 0; flex: 0 0 auto; min-height: 320px; }
-  .tableWrap { flex: 0 1 auto; max-height: 60dvh; overscroll-behavior-x: contain; }
-  .toolbar { padding: 12px; }
-  .searchBox input { width: 100%; }
-  .filterSummary { flex-wrap: wrap; }
   .dialog.wide, .dialog.detail, .dialog.narrow, .dialog { max-width: calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .modal { max-height: calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .modalHead, .modalActions { flex-shrink: 0; padding: 12px 14px; }
@@ -304,4 +293,35 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
   .itemsTotals { justify-items: start; text-align: left; }
   .notice { flex-wrap: wrap; }
   .decisionActions > button { flex: 1 1 100%; }
+}
+
+/* On phones the filters can exceed the desktop card's 240px minimum and
+   squeeze its flexing table to zero. Let the page own vertical scrolling and
+   keep the same request rows/actions readable without horizontal navigation. */
+@media (max-width: 760px) {
+  .phead { flex-direction: row; flex-wrap: wrap; margin-bottom: 0; }
+  .phead > div { flex: 1 1 100%; min-width: 0; }
+  .phead .primaryBtn { min-height: 44px; }
+  .statsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 0; }
+  .kpi { min-width: 0; padding: 10px; }
+  .kpi:last-child { grid-column: 1 / -1; }
+  .kpiLabel, .kpiValue { overflow-wrap: anywhere; }
+  .tableCard { flex: 0 0 auto; min-height: 0; }
+  .toolbar { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .searchBox, .searchBox input, .toolbar select { min-width: 0; width: 100%; }
+  .searchBox input, .toolbar select { min-height: 44px; }
+  .filterSummary { flex-wrap: wrap; padding: 10px 12px; }
+  .filterPill { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .filterSummary .smallBtn { min-height: 44px; }
+  .tableWrap { flex: 0 0 auto; min-height: 240px; max-height: none; overflow: visible; overscroll-behavior: auto; scrollbar-gutter: auto; }
+  .table { min-width: 0; table-layout: fixed; }
+  .table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .table tbody { display: block; }
+  .table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); padding: 12px; border-bottom: 1px solid var(--border); }
+  .table tbody tr:last-child { border-bottom: 0; }
+  .table tbody td { min-width: 0; padding: 6px 0; border: 0; overflow-wrap: anywhere; }
+  .table tbody td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; color: var(--text-3); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+  .table tbody tr.highlightRow { box-shadow: inset 3px 0 0 var(--accent); }
+  .table tbody tr.highlightRow td:first-child { box-shadow: none; }
+  .rowActions .smallBtn { min-height: 44px; justify-content: center; width: 100%; }
 }
