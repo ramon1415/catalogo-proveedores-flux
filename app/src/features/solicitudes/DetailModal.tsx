@@ -380,7 +380,7 @@ export function DetailModal({
 
           <div className={s.dataSection}>
             <DataRow label="Estatus" value={<Badge variant={statusBadge(request.status).variant}>{statusBadge(request.status).label}</Badge>} />
-            <DataRow label="Validación presupuestal" value={<Badge variant={budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').variant}>{budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').label}</Badge>} />
+            <DataRow label="Validación presupuestal" value={(() => { const b = budgetDecisionBadge(request.budget_decision, request.budget_block_reason || ''); return <Badge variant={b.variant} title={b.title}>{b.label}</Badge> })()} />
             <DataRow label="Descripción" value={request.description || 'Sin descripción'} muted />
             {request.notes && <DataRow label="Notas" value={request.notes} muted />}
             {!isReembolso && (
