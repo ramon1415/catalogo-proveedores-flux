@@ -221,7 +221,7 @@ export function EditModal({
                 <label className={s.fullRow}>Notas
                   <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                 </label>
-                <label className={s.fullRow}>Factura / comprobante
+                <label className={s.fullRow}>Factura / comprobante (opcional)
                   <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                   <span className={s.fileHint}>{fileHint}</span>
                 </label>
