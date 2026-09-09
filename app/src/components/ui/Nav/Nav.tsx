@@ -6,7 +6,6 @@ import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useModules } from '../../../lib/moduleAccess'
 import { IcUser, IcLogout } from '../icons'
-import { CompanySwitcher } from './CompanySwitcher'
 import { NAV_SECTIONS } from './navModel'
 import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
 import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
@@ -39,7 +38,6 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
         <img className={s.full} src={logoFull} alt="Flux" />
         {mobile && <button type="button" className={s.closeMenu} onClick={onClose} aria-label="Cerrar menú">✕</button>}
       </div>
-      <CompanySwitcher />
 
       <nav className={s.nav} aria-label="Secciones de Flux">
         {sections.map((sec) => (

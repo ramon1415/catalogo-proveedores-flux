@@ -45,12 +45,12 @@ export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
         aria-label={canSwitch ? `Empresa activa: ${current}. Cambiar` : `Empresa: ${current}`}
         style={{ '--company-accent': color } as React.CSSProperties}
       >
-        {/* Punto de color por empresa: pista pre-atentiva de orientación. En el
-            rail expandido acompaña al ícono; en modo compacto (topbar) es la
-            única marca de color, por eso va siempre. Color por variable para que
-            el tema claro lo oscurezca igual que la franja del topbar. */}
+        {/* Marca de color de la empresa: punto en modo compacto (topbar), y un
+            cuadro de color en el rail expandido/colapsado. El isotipo de Flux NO
+            va aquí — ya está el logo de marca arriba del rail; repetirlo confunde.
+            El isotipo se conserva solo en el modal de cambio de empresa. */}
         <span className={s.companyDot} aria-hidden="true" />
-        <span className={s.companyIcon} style={{ background: color }}><img className={s.companyGlyph} src={fluxMark} alt="" aria-hidden="true" /></span>
+        <span className={s.companyIcon} style={{ background: color }} aria-hidden="true" />
         <span className={`${s.companyName} ${s.txt}`}>{current}</span>
         {canSwitch && <span className={`${s.companyCaret} ${s.txt}`}><IcSwap /></span>}
       </button>
