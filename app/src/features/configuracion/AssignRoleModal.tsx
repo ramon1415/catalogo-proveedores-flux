@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { assignRole } from './api'
@@ -75,6 +76,7 @@ export function AssignRoleModal({
           <div>
             <h2>Asignar rol</h2>
             <p>{subtitle}</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

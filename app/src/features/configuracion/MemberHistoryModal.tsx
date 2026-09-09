@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { Badge } from '../../components/ui/Badge'
@@ -68,6 +69,7 @@ export function MemberHistoryModal({
           <div>
             <h2>{member.full_name || 'Historial'}</h2>
             <p>Cuotas, pagos, incidencias y facturas vinculadas al socio.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
