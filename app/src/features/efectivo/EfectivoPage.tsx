@@ -40,6 +40,12 @@ export default function EfectivoPage() {
   const [reviewFor, setReviewFor] = useState<{ recId: string; action: ReviewAction } | null>(null)
   const [blockResults, setBlockResults] = useState<Record<string, CashBlockResult | 'loading'>>({})
 
+  function companyForReconciliation(id: string): string | null {
+    const fundId = data?.reconciliations.find(rec => rec.id === id)?.cash_fund_id
+    const company = data?.cashFunds.find(fund => fund.id === fundId)?.company_id
+    return company ? lookups?.companyName(company) || null : null
+  }
+
   const currentProfile = (profile as ProfileLite | null) ?? null
   const canReview = canReviewRoles(roles)
 
@@ -271,7 +277,7 @@ export default function EfectivoPage() {
       )}
 
       {ticketFor && data && (
-        <TicketModal
+        <TicketModal companyName={companyForReconciliation(ticketFor)}
           reconciliationId={ticketFor}
           providers={data.proveedores}
           budgetCategories={data.budgetCategories}
@@ -281,7 +287,7 @@ export default function EfectivoPage() {
       )}
 
       {submitFor && submitCtx && (
-        <SubmitModal
+        <SubmitModal companyName={companyForReconciliation(submitFor)}
           reconciliationId={submitFor}
           assignedAmount={submitCtx.assigned}
           totalTickets={submitCtx.tickets}
@@ -291,7 +297,7 @@ export default function EfectivoPage() {
       )}
 
       {reviewFor && ensureProfileGuard(currentProfile) && (
-        <ReviewModal
+        <ReviewModal companyName={companyForReconciliation(reviewFor.recId)}
           reconciliationId={reviewFor.recId}
           action={reviewFor.action}
           reviewerProfileId={currentProfile!.id}

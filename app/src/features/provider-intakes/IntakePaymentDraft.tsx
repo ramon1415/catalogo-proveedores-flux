@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -293,6 +294,7 @@ function PaymentDraftModal({ context: initialContext, onClose, onReload, onConve
           <div>
             <h2 style={{ fontSize: '1.1rem' }}>Preparación de solicitud de pago</h2>
             <p className="muted">{context.intake.public_folio || ''} · {context.intake.company_name || ''} · {completed}/11 campos completos</p>
+            <CompanyCaptureContext name={context.intake.company_name} />
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Badge variant={(PAYMENT_DRAFT_STATE[derived || ''] || PAYMENT_DRAFT_STATE.NOT_STARTED).variant}>

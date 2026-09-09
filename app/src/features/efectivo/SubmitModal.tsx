@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -8,11 +9,13 @@ import s from './Efectivo.module.css'
 
 export function SubmitModal({
   reconciliationId,
+  companyName,
   assignedAmount,
   totalTickets,
   onClose,
   onSubmitted,
 }: {
+  companyName: string | null
   reconciliationId: string
   assignedAmount: number
   totalTickets: number
@@ -39,7 +42,7 @@ export function SubmitModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={companyName} />}
         title="Enviar comprobación"
         subtitle="Revisa los totales antes de enviarla a revisión."
         onClose={onClose}

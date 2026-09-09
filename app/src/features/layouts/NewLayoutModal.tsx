@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Modal } from '../../components/ui/Modal'
@@ -219,7 +220,7 @@ export function NewLayoutModal({
   return (
     <>
       <form onSubmit={onSubmit}>
-        <Modal
+        <Modal headerContext={<CompanyCaptureContext company={companies.find(company => company.id === companyId)} />}
           title="Nuevo layout de pago"
           subtitle="Revisa que cada pago este liberado antes de crear el archivo."
           size="lg"

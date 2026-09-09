@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef, useState } from 'react'
 import type { Member, MemberPayload } from './types'
 import { friendlyError } from './logic'
@@ -103,6 +104,7 @@ export function MemberModal({
           <div>
             <h2>{isEdit ? 'Editar socio' : 'Nuevo socio'}</h2>
             <p>El factor define la proporcion con la que participa en cuotas de mantenimiento.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

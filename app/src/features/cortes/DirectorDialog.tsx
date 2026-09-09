@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 // Diálogo "Directores activos para futuros cortes" (espejo de directorDialog,
 // syncDirectorForm, syncDirectorCandidateStatus, addDirector y removeDirector).
 import { useEffect, useMemo, useState } from 'react'
@@ -130,7 +131,7 @@ export function DirectorDialog({
   }
 
   return (
-    <Modal
+    <Modal headerContext={<CompanyCaptureContext company={companies.find(company => company.id === companyId)} />}
       title="Directores activos para futuros cortes"
       subtitle="Cada corte conserva un solo Director responsable."
       onClose={onClose}

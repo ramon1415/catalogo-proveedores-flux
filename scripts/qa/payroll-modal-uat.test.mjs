@@ -26,7 +26,7 @@ function load(path, imports) {
 }
 
 test('canceling the file picker or reselecting its file preserves the dialog; its own Escape and close button still close it', () => {
-  const { Modal } = load('app/src/components/ui/Modal.tsx', { './Modal.module.css': {} })
+  const { Modal } = load('app/src/components/ui/Modal.tsx', { './Modal.module.css': {}, './CompanyCaptureContext': { ActiveCompanyCaptureContext: () => null } })
   let closed = 0, nativeCloses = 0, renderer
   const dialog = { open: false, showModal() { this.open = true }, close() { this.open = false; nativeCloses++ } }
   act(() => { renderer = create(React.createElement(Modal, { title: 'Nómina', onClose: () => closed++ },

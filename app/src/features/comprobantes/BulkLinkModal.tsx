@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { findReceiptCandidates, linkReceiptToRequest, getLinkPreview } from './api'
@@ -94,6 +95,7 @@ export function BulkLinkModal({ operations, onClose, onLinked }: {
           <div>
             <h2 style={{ fontSize: '1.05rem' }}>Vincular coincidencias exactas</h2>
             <p className="muted">Solo se vinculan matches únicos; los ambiguos permanecen manuales.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button className="small-btn" disabled={busy} onClick={onClose}>Cerrar</button>
         </div>

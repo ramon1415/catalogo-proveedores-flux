@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -286,6 +287,7 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
             <span className={s.modalEyebrow}>Conciliación bancaria</span>
             <h2 id="operation-modal-title">Comprobante · página {operation.source_page || operation.page_number || '—'}</h2>
             <p className="muted">Referencia: {operation.bank_unique_folio || operation.bank_reference || 'sin referencia bancaria'}</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button className={s.closeButton} aria-label="Cerrar revisión" title="Cerrar" disabled={busy} onClick={onClose}>×</button>
         </div>
@@ -491,7 +493,7 @@ export function OperationModal({ operation: initialOperation, detail, capabiliti
           <div className={s.overlay} onClick={() => !busy && setConfirmOpen(false)} style={{ zIndex: 70 }}>
             <div className={s.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
               <div className={s.modalHead}>
-                <h2 style={{ fontSize: '1.05rem' }}>Confirmar vinculación</h2>
+                <div><h2 style={{ fontSize: '1.05rem' }}>Confirmar vinculación</h2><ActiveCompanyCaptureContext /></div>
                 <button className="small-btn" disabled={busy} onClick={() => setConfirmOpen(false)}>Cerrar</button>
               </div>
               <div className={s.modalBody}>
@@ -616,7 +618,7 @@ function CorrectionDialog({ operation, extractionId, busy, setBusy, onClose, onD
     <div className={s.overlay} onClick={() => !busy && onClose()} style={{ zIndex: 70 }}>
       <div className={s.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <div className={s.modalHead}>
-          <h2 style={{ fontSize: '1.05rem' }}>Corregir extracción</h2>
+          <div><h2 style={{ fontSize: '1.05rem' }}>Corregir extracción</h2><ActiveCompanyCaptureContext /></div>
           <button className="small-btn" disabled={busy} onClick={onClose}>Cerrar</button>
         </div>
         <div className={s.modalBody}>

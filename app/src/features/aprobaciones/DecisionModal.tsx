@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { Badge } from '../../components/ui/Badge'
@@ -110,7 +111,7 @@ export function DecisionModal({
   const showOperationSection = Boolean(layoutLine || fund || request.is_extraordinary_adjustment)
 
   return (
-    <Modal
+    <Modal headerContext={<CompanyCaptureContext company={company} />}
       title={request.request_number || 'Solicitud'}
       size="lg"
       onClose={onClose}

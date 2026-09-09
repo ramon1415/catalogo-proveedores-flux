@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { uploadBatchWorkflow } from './workflows'
@@ -67,6 +68,7 @@ export function UploadBatchModal({ context, defaultCompanyId, onClose, onUploade
           <div>
             <h2 style={{ fontSize: '1.1rem' }}>Nuevo batch de comprobantes</h2>
             <p className="muted">Solo PDF. El límite y bucket los autoriza el servidor.</p>
+            <CompanyCaptureContext company={companies.find(company => company.id === companyId)} />
           </div>
           <button className="small-btn" disabled={busy} onClick={onClose}>Cerrar</button>
         </div>

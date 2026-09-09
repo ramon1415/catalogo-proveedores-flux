@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
@@ -334,7 +335,7 @@ export default function ComprobantesPage() {
         <div className={s.overlay} onClick={() => setDuplicate(null)}>
           <div className={s.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className={s.modalHead}>
-              <h2 style={{ fontSize: '1.05rem' }}>Lote ya cargado</h2>
+              <div><h2 style={{ fontSize: '1.05rem' }}>Lote ya cargado</h2><ActiveCompanyCaptureContext /></div>
               <button className="small-btn" onClick={() => setDuplicate(null)}>Cerrar</button>
             </div>
             <div className={s.modalBody}>
