@@ -24,9 +24,6 @@ const BRAND_TINTS: Array<[RegExp, string]> = [
   [/systems/i, '#ddcee9'],    // lavanda
 ]
 
-// Verde oscuro de marca: color del glifo/logo sobre cualquiera de los tintes.
-export const COMPANY_INK = '#172d29'
-
 export function companyColor(name: string | null | undefined): string {
   const n = (name ?? '').trim()
   if (!n) return 'hsl(70 10% 78%)'

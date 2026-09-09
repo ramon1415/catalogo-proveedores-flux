@@ -33,7 +33,7 @@
    expandido/colapsado); solo se muestra en modo compacto (topbar), donde el
    ícono se esconde y el punto es la marca de color. */
 .companyDot { display: none; width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--company-accent, var(--accent)); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .18); }
-:global([data-theme="light"]) .companyDot { background: color-mix(in srgb, var(--company-accent, var(--accent)) 72%, #12211c); }
+.companyGlyph { width: 18px; height: 18px; display: block; }
 .companyName { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .companyCaret { flex-shrink: 0; color: var(--text-3); }
 .companyCaret svg { width: 15px; height: 15px; display: block; }

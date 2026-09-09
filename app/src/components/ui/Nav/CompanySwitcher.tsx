@@ -1,18 +1,10 @@
 import { useState } from 'react'
 import { useAuth } from '../../../lib/auth'
-import { useCompany, companyColor, COMPANY_INK } from '../../../lib/company'
+import { useCompany, companyColor } from '../../../lib/company'
 import { Modal } from '../Modal'
+import fluxMark from '../../../assets/favicon-512.png'
 import s from './Nav.module.css'
 
-// Ícono de empresa (edificio) — inline para no depender del set global.
-function IcBuilding() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 21h18M6 21V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v16M14 21V9h3a1 1 0 0 1 1 1v11" />
-      <path d="M9 8h2M9 12h2M9 16h2" />
-    </svg>
-  )
-}
 function IcSwap() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
@@ -58,7 +50,7 @@ export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
             única marca de color, por eso va siempre. Color por variable para que
             el tema claro lo oscurezca igual que la franja del topbar. */}
         <span className={s.companyDot} aria-hidden="true" />
-        <span className={s.companyIcon} style={{ background: color, color: COMPANY_INK }}><IcBuilding /></span>
+        <span className={s.companyIcon} style={{ background: color }}><img className={s.companyGlyph} src={fluxMark} alt="" aria-hidden="true" /></span>
         <span className={`${s.companyName} ${s.txt}`}>{current}</span>
         {canSwitch && <span className={`${s.companyCaret} ${s.txt}`}><IcSwap /></span>}
       </button>
@@ -75,7 +67,7 @@ export function CompanySwitcher({ compact = false }: { compact?: boolean }) {
                   className={`${s.companyOption} ${active ? s.companyOptionActive : ''}`}
                   onClick={() => { setCompany(m.company_id); setOpen(false) }}
                 >
-                  <span className={s.companyOptionIcon} style={{ background: companyColor(m.company_name), color: COMPANY_INK }}><IcBuilding /></span>
+                  <span className={s.companyOptionIcon} style={{ background: companyColor(m.company_name) }}><img className={s.companyGlyph} src={fluxMark} alt="" aria-hidden="true" /></span>
                   <span className={s.companyOptionName}>{m.company_name}</span>
                   {active && <span className={s.companyOptionCheck}><IcCheck /></span>}
                 </button>

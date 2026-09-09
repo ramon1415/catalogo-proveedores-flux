@@ -1,8 +1,5 @@
 .content { margin-left: var(--rail-w, 66px); height: 100vh; height: 100dvh; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .topbar { height: var(--topbar-h, 56px); border-bottom: 1px solid var(--border); background: var(--bg-surface); display: flex; align-items: center; justify-content: flex-start; gap: 14px; padding: 0 24px; flex-shrink: 0; box-shadow: inset 0 3px 0 0 var(--company-accent, transparent); }
-/* En tema claro el tinte pastel se pierde sobre el fondo claro: se mezcla hacia
-   el verde de marca para darle punch, sin salir del registro de color. */
-:global([data-theme="light"]) .topbar { box-shadow: inset 0 3px 0 0 color-mix(in srgb, var(--company-accent, transparent) 72%, #12211c); }
 .kick { font-size: 11px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--text-3); }
 .iconbtn { width: 34px; height: 34px; flex-shrink: 0; border-radius: 9px; border: 1px solid var(--border); background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
 .iconbtn:hover { background: var(--bg-hover); color: var(--text-1); }
