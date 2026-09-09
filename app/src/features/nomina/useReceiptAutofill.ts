@@ -41,9 +41,13 @@ export function useReceiptAutofill(scopeKey: string) {
       if (requests.current.get(channelId) !== request) return
       const fields = parseReceiptFields(lines)
       const missing = [!fields.amount && 'importe', !fields.paymentDate && 'fecha de pago', !fields.reference && 'referencia'].filter(Boolean)
-      const notice = missing.length
-        ? `No se pudo leer: ${missing.join(', ')}. Revisa el PDF y completa los datos faltantes.`
-        : 'Datos leídos del PDF. Revísalos antes de conciliar.'
+      // Si no se pudo leer el importe, casi siempre es una captura de pantalla
+      // (sin capa de texto). Se orienta a subir el PDF original del banco.
+      const notice = !fields.amount
+        ? 'No pudimos leer el comprobante. Si es una captura de pantalla, sube el PDF original del banco; si ya es el original, completa los datos a mano.'
+        : missing.length
+          ? `No se pudo leer: ${missing.join(', ')}. Revisa el PDF y completa los datos faltantes.`
+          : 'Datos leídos del PDF. Revísalos antes de conciliar.'
       setDraft(channelId, { ...fields, file, reading: false, invalid: false, notice })
     } catch (error) {
       if (requests.current.get(channelId) === request) setDraft(channelId, {

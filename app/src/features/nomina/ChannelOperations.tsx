@@ -146,8 +146,16 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
       showToast('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.', 'warning')
       return
     }
-    if (amountMinor === null || amountMinor !== Math.round(Number(channel.amount) * 100)) {
-      showToast('Revisa el importe', `El importe del comprobante debe coincidir con ${formatMoney(channel.amount)}.`, 'warning')
+    // Distinguir "no pudimos LEER el documento" de "el importe NO coincide": son
+    // problemas distintos y el mensaje anterior los confundía (un comprobante con
+    // el monto correcto pero ilegible —p.ej. un screenshot sin capa de texto—
+    // salía como "el importe debe coincidir", desorientando a quien lo sube).
+    if (amountMinor === null) {
+      showToast('No reconocimos el comprobante', 'No pudimos leer el importe del documento. Si subiste una captura de pantalla, sube mejor el PDF original del banco; si ya es el PDF original, revisa que el archivo esté completo.', 'warning')
+      return
+    }
+    if (amountMinor !== Math.round(Number(channel.amount) * 100)) {
+      showToast('El importe no coincide', `El comprobante indica un importe distinto al esperado para este canal (${formatMoney(channel.amount)}). Verifica que sea el comprobante correcto.`, 'warning')
       return
     }
 
