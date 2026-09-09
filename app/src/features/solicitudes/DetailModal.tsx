@@ -389,8 +389,8 @@ export function DetailModal({
                 value={request.invoice_storage_path
                   ? <button type="button" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver documento adjunto</button>
                   : canEdit
-                  ? <button type="button" className={s.invoiceLink} onClick={onEdit}>Documento faltante · adjuntar ahora</button>
-                  : <span>Documento no disponible</span>}
+                  ? <button type="button" className={s.invoiceLink} onClick={onEdit}>Adjuntar documento (opcional)</button>
+                  : <span>Sin documento adjunto</span>}
               />
             )}
           </div>

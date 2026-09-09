@@ -25,10 +25,11 @@ test('current PROD atomic reimbursement/document paths remain present', () => {
   assert.match(request, /createReimbursementRequestWithDocuments/)
   assert.match(request, /stagedDocumentPaths/)
   assert.match(request, /createPaymentRequestWithDocument\(payload, stagedDocumentPath\)/)
-  assert.doesNotMatch(request, /data = await createPaymentRequest\(payload\)/)
+  assert.match(request, /else if \(file\)/)
+  assert.match(request, /data = await createPaymentRequest\(payload\)/)
 })
 
-test('API forwards partita_unsure through direct and mandatory-document RPCs', () => {
+test('API forwards partida_unsure through direct and attached-document RPCs', () => {
   assert.equal((api.match(/p_partida_unsure: payload\.partida_unsure/g) || []).length, 2)
   assert.match(api, /from\('partida_predictions'\)/)
   assert.match(types, /partida_unsure: boolean/)
