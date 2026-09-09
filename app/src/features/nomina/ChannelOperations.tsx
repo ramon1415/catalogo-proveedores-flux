@@ -9,6 +9,7 @@ import { getReceiptFileUrl } from './api'
 import { receiptAmountMinor } from './receiptAmount'
 import { receiptDateError } from './receiptFields'
 import { emptyReceiptDraft, useReceiptAutofill } from './useReceiptAutofill'
+import { RECEIPT_ACCEPT } from './receiptUpload'
 
 type ReconciliationChannel = {
   id: string
@@ -151,11 +152,11 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
     setReceiptErrors((current) => ({ ...current, [channel.id]: '' }))
 
     if (draft.currency && draft.currency !== channel.currency) {
-      rejectReceipt('Revisa la moneda', 'La moneda del PDF no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.')
+      rejectReceipt('Revisa la moneda', 'La moneda del comprobante no coincide con la del canal o contiene varias monedas. Selecciona el comprobante correcto.')
       return
     }
     if (amountMinor === null) {
-      rejectReceipt('Importe pendiente de lectura', 'No se pudo identificar un importe válido. Revisa el PDF y completa el importe del comprobante antes de conciliar.')
+      rejectReceipt('Importe pendiente de lectura', 'No se pudo identificar un importe válido. Revisa el comprobante y completa el importe antes de conciliar.')
       return
     }
     if (amountMinor !== Math.round(Number(channel.amount) * 100)) {
@@ -164,7 +165,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
     }
 
     if (!file) {
-      rejectReceipt('Comprobante requerido', 'Selecciona el PDF del comprobante de este canal.')
+      rejectReceipt('Comprobante requerido', 'Selecciona el comprobante PDF, JPG o PNG de este canal.')
       return
     }
     if (!file.name.toLowerCase().endsWith('.pdf') || file.size < 100 || file.size > 10 * 1024 * 1024) {
@@ -279,7 +280,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
       <div className={s.receiptsHeading}>
         <div>
           <h3>Dispersión y comprobantes por canal</h3>
-          <p>Tesorería registra el pago realizado en el banco o en TOKA y adjunta el PDF de cada canal.</p>
+          <p>Tesorería registra el pago realizado en el banco o en TOKA y adjunta el comprobante PDF, JPG o PNG de cada canal.</p>
         </div>
         <span className={s.privatePill}>{channels.filter((channel) => channel.reconciliation_status === 'reconciled').length} de {channels.length} conciliados</span>
       </div>
@@ -299,7 +300,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                   <span className={s.fileIcon}><IcFile size={18} /></span>
                   <div className={s.fileInfo}>
                     <strong>{channelLabel(channel.channel)}</strong>
-                    <span>{channel.reconciliation_status === 'reconciled' ? 'PDF · Comprobante verificado' : 'Comprobante PDF pendiente'}</span>
+                    <span>{channel.reconciliation_status === 'reconciled' ? 'PDF · Comprobante verificado' : 'Comprobante pendiente'}</span>
                   </div>
                 </div>
                 <div className={s.receiptAmount}>
@@ -339,10 +340,10 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
               ) : canUpload ? (
                 <div className={`${s.grid} ${s.receiptForm}`}>
                   <label className={s.fullRow}>
-                    Comprobante PDF
+                    Comprobante PDF, JPG o PNG
                     <input
                       type="file"
-                      accept="application/pdf,.pdf"
+                      accept={RECEIPT_ACCEPT}
                       onChange={(event) => {
                         setReceiptErrors((current) => ({ ...current, [channel.id]: '' }))
                         void selectReceipt(channel.id, event.target.files?.[0])
@@ -351,7 +352,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                     />
                   </label>
                   <p className={s.formNotice} role="status" aria-live="polite">
-                    {draft.notice || 'Adjunta el PDF para completar importe, fecha y referencia automáticamente.'}
+                    {draft.notice || 'Adjunta PDF, JPG o PNG (hasta 10 MB). Las imágenes se guardan automáticamente como PDF; revisa los datos antes de conciliar.'}
                   </p>
                   <label>
                     Importe del comprobante
@@ -384,7 +385,7 @@ export function ChannelOperations({ paymentRequestId, canPay = false, onChanged 
                     />
                   </label>
                   {amountMismatch && <p className={s.formNotice} role="alert">El importe no coincide con {formatMoney(channel.amount)}. Revisa el comprobante.</p>}
-                  {currencyMismatch && <p className={s.formNotice} role="alert">La moneda del PDF no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
+                  {currencyMismatch && <p className={s.formNotice} role="alert">La moneda del comprobante no coincide con {channel.currency} o contiene varias monedas. Selecciona el comprobante correcto.</p>}
                   {receiptErrors[channel.id] && <p className={`${s.formNotice} ${s.fullRow}`} role="alert">{receiptErrors[channel.id]}</p>}
                   <div className={s.fullRow}>
                     <button type="button" className={s.primaryBtn} onClick={() => void uploadReceipt(channel)} disabled={busy || closing || draft.reading || !draft.file || draft.invalid || currencyMismatch}>

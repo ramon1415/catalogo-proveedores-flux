@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import ts from '../../app/node_modules/typescript/lib/typescript.js';
+import { syntheticPng, syntheticJpeg } from './fixtures/payroll-image-fixture.mjs';
 import { handleRequest, renderPayrollEmail } from '../../supabase/functions/payroll-notification-dispatcher/index.ts';
 const uuid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const bytes=new TextEncoder().encode('%PDF-1.4\n'+'x'.repeat(100)+'\n%%EOF');
@@ -86,4 +90,33 @@ for(const mode of ['test_only','real']) test(`scoped test recipient is server-au
   const result=await (await handleRequest(req,runtime)).json();
   assert.equal(result.sent,mode==='test_only'?1:0);
   assert.deepEqual(deliveries.map(d=>d.to),mode==='test_only'?[['scoped-qa@example.com']]:[]);
+});
+
+test('closing email preserves the exact PDF generated from each JPG/PNG image',async()=>{
+  const require=createRequire(import.meta.url),client={exports:{}};
+  const source=readFileSync(new URL('../../app/src/features/nomina/receiptUpload.ts',import.meta.url),'utf8');
+  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+  new Function('exports','window',compiled)(client.exports,{PDFLib:require('../../pdf-lib-1.17.1.min.js')});
+  const converted=[];
+  for(const [name,input]of [['image.jpg',syntheticJpeg],['image.png',syntheticPng()]]){
+    const prepared=await client.exports.prepareReceiptPdf(new File([input],name));
+    converted.push(new Uint8Array(await prepared.file.arrayBuffer()));
+  }
+  const payload=structuredClone(doc),files=[...converted,bytes],deliveries=[];
+  for(let i=0;i<files.length;i++){
+    payload.attachments[i].size_bytes=files[i].length;
+    payload.attachments[i].sha256=Buffer.from(await crypto.subtle.digest('SHA-256',files[i])).toString('hex');
+  }
+  const runtime={env:n=>env[n],fetch:async(url,init)=>{
+    if(url.endsWith('/claim_payroll_notifications'))return Response.json([payload.event_id]);
+    if(url.endsWith('/get_payroll_notification_document'))return Response.json(payload);
+    if(url.includes('/storage/v1/object/'))return new Response(files[payload.attachments.findIndex(a=>url.endsWith(a.path))]);
+    if(url==='https://api.resend.com/emails'){deliveries.push(JSON.parse(init.body));return Response.json({id:'test-only'});}
+    if(url.endsWith('/mark_notification_processed_for_dispatcher'))return Response.json({status:'sent'});
+    throw Error('unexpected request');
+  }};
+  assert.equal((await(await handleRequest(request(),runtime)).json()).sent,1);
+  assert.equal(deliveries.length,1);
+  for(let i=0;i<files.length;i++)assert.deepEqual(Buffer.from(deliveries[0].attachments[i].content,'base64'),Buffer.from(files[i]));
+  assert.deepEqual(deliveries[0].attachments.map(a=>a.filename),['Comprobante_BBVA.pdf','Comprobante_SPEI.pdf','Comprobante_TOKA.pdf']);
 });
