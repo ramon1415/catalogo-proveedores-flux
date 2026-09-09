@@ -63,7 +63,7 @@ export function isTerminalStatus(status: string | null): boolean {
 }
 
 // ── Badges (label + variante del componente Badge) ─────────────────────────
-type BadgeDesc = { label: string; variant: BadgeVariant }
+type BadgeDesc = { label: string; variant: BadgeVariant; title?: string }
 
 // React Badge no tiene variante "violet"; se mapea a "accent" (ver MIGRATION_NOTES).
 export function statusBadge(status: string | null): BadgeDesc {
@@ -80,12 +80,49 @@ export function statusBadge(status: string | null): BadgeDesc {
   return map[status ?? ''] ?? { label: status || 'Sin estatus', variant: 'neutral' }
 }
 
+// Motivos de bloqueo presupuestal (enum de la BD) → texto legible. La validación
+// puede devolver: sin_disponible, sin_match_presupuesto, budget_validation_data_missing,
+// monto_invalido, no_presupuestal. Cualquier otro se humaniza (guiones bajos → espacios).
+// Motivos de bloqueo presupuestal (enum de la BD) → tag corto y legible. La
+// validación puede devolver: sin_disponible, sin_match_presupuesto,
+// budget_validation_data_missing, monto_invalido, no_presupuestal. Cualquier
+// otro se humaniza (guiones bajos → espacios) para nunca mostrar código.
+const BUDGET_BLOCK_REASON_LABELS: Record<string, string> = {
+  sin_disponible: 'Sin presupuesto',
+  sin_match_presupuesto: 'Sin partida',
+  budget_validation_data_missing: 'Faltan datos',
+  monto_invalido: 'Monto inválido',
+  no_presupuestal: 'No presupuestal',
+}
+
+// Explicación de una línea para el hover del tag (title nativo).
+const BUDGET_BLOCK_REASON_TOOLTIPS: Record<string, string> = {
+  sin_disponible: 'La partida no tiene disponible suficiente para este monto.',
+  sin_match_presupuesto: 'No hay línea de presupuesto para esta empresa, centro, partida y mes.',
+  budget_validation_data_missing: 'Falta empresa, centro, partida o mes en la solicitud.',
+  monto_invalido: 'El monto de la solicitud no es válido.',
+  no_presupuestal: 'Partida no presupuestal: no consume presupuesto.',
+}
+
+export function budgetBlockReasonLabel(reason: string | null | undefined): string {
+  const key = (reason ?? '').trim()
+  if (!key) return ''
+  return BUDGET_BLOCK_REASON_LABELS[key] ?? key.replace(/_/g, ' ')
+}
+
+export function budgetBlockReasonTooltip(reason: string | null | undefined): string {
+  const key = (reason ?? '').trim()
+  return BUDGET_BLOCK_REASON_TOOLTIPS[key] ?? 'Requiere autorización por excepción presupuestal.'
+}
+
 export function budgetDecisionBadge(decision: string | null, reason = ''): BadgeDesc {
   if (decision === 'aprobable' && reason === 'no_presupuestal') {
-    return { label: 'No presupuestal', variant: 'success' }
+    return { label: 'No presupuestal', variant: 'success', title: BUDGET_BLOCK_REASON_TOOLTIPS.no_presupuestal }
   }
-  if (decision === 'aprobable') return { label: 'Aprobable', variant: 'success' }
-  if (decision === 'bloqueado') return { label: reason ? `Excepción: ${reason}` : 'Excepción', variant: 'accent' }
+  if (decision === 'aprobable') return { label: 'Aprobable', variant: 'success', title: 'Hay presupuesto disponible para este monto.' }
+  if (decision === 'bloqueado') {
+    return { label: budgetBlockReasonLabel(reason) || 'Excepción', variant: 'accent', title: budgetBlockReasonTooltip(reason) }
+  }
   return { label: decision ? decision : 'Sin validar', variant: 'neutral' }
 }
 

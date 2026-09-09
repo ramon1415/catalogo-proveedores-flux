@@ -102,6 +102,3 @@
 .drawer .uinfo b { overflow: hidden; text-overflow: ellipsis; }
 .item:focus-visible, .companyLauncher:focus-visible, .closeMenu:focus-visible, .logout:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .rail, .txt, .sec { transition: none; } }
-
-/* Keep the company marker distinct on the light surface. */
-:global(:root[data-theme="light"]) .companyDot { background: color-mix(in srgb, var(--company-accent, var(--accent)) 72%, #172d29); }

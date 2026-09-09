@@ -314,7 +314,7 @@ export default function SolicitudesPage() {
                       <span className={s.cellSub}>{category?.name || ''} · {formatMonth(r.budget_month)}</span>
                     </td>
                     <td><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
-                    <td><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant}>{db.label}</Badge></td>
+                    <td><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
                     <td><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
                   </tr>
                 )

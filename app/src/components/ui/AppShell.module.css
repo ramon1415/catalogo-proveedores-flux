@@ -9,12 +9,10 @@
 /* Desktop: empresa empujada a la derecha, pegada al botón de tema. */
 .company { min-width: 0; margin-left: auto; max-width: 260px; }
 @media (max-width: 760px), (hover: none) and (pointer: coarse) {
-  .topbar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto auto; gap: 0 10px; padding: calc(6px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); }
+  .topbar { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-rows: auto auto; column-gap: 10px; padding: calc(6px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left)); }
   .topbar > .iconbtn { grid-row: 1 / 3; width: 44px; height: 44px; }
   .topbar > .iconbtn:last-child { grid-column: 3; }
   .kick { grid-column: 2; grid-row: 1; font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .company { grid-column: 2; grid-row: 2; margin-left: 0; max-width: none; }
   .page { gap: 14px; padding: 16px max(12px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
 }
-
-:global(:root[data-theme="light"]) .topbar { box-shadow: inset 0 3px 0 0 color-mix(in srgb, var(--company-accent, transparent) 72%, #172d29); }
