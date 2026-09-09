@@ -53,8 +53,8 @@ before(async()=>{
   await exec(read('../../supabase/migrations/20260908075132_payroll_prod_request_type.sql'));
   await exec(read('../../supabase/migrations/20260908075149_payroll_prod_capture_and_notifications.sql'));
   const beforeAcl = (await db.query("select n.nspname,p.proname,p.proacl::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where (n.nspname='private' and p.proname='reconcile_payroll_channel') or (n.nspname='public' and p.proname='get_payroll_reconciliation_summary') order by 1,2")).rows;
-  await exec(read('../../supabase/migrations/20260909175755_payroll_receipt_date_from_request_creation.sql'));
-  await exec(read('../../supabase/migrations/20260909175755_payroll_receipt_date_from_request_creation.sql'));
+  await exec(read('../../supabase/migrations/20260909181505_payroll_receipt_date_from_request_creation.sql'));
+  await exec(read('../../supabase/migrations/20260909181505_payroll_receipt_date_from_request_creation.sql'));
   assert.deepEqual((await db.query("select n.nspname,p.proname,p.proacl::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where (n.nspname='private' and p.proname='reconcile_payroll_channel') or (n.nspname='public' and p.proname='get_payroll_reconciliation_summary') order by 1,2")).rows,beforeAcl);
   await exec(`insert into profiles(id,auth_user_id,full_name,email,active) values('${rh}','${rh}','Synthetic RH','rh@example.test',true),('${finance}','${finance}','Synthetic Finance','finance@example.test',true),('${outsider}','${outsider}','Synthetic other','other@example.test',true);
     insert into profile_company_memberships(profile_id,company_id,active,role_key) values('${rh}','${companyA}',true,'operator'),('${finance}','${companyA}',true,'finance'),('${finance}','${companyB}',true,'operator'),('${outsider}','${companyA}',true,'operator');
