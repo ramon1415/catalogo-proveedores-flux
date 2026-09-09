@@ -32,6 +32,7 @@ function load(path, imports = {}, globals = {}) {
 
 const amounts = load(feature + 'receiptAmount.ts')
 const fields = load(feature + 'receiptFields.ts', { './receiptAmount.ts': amounts })
+const friendly = load(feature + 'logic.ts', { './speiParser': {} })
 // Resolve the same vendored worker from disk in Node, instead of the browser URL.
 const pdfReader = load('app/src/lib/pdfText.ts', {}, { window: { pdfjsLib: {
   GlobalWorkerOptions: { workerSrc: '' },
@@ -167,9 +168,9 @@ test('removal and invalid replacement clear old facts; unreadable receipts allow
 
 const nodeText = (node) => typeof node === 'string' ? node : Array.isArray(node) ? node.map(nodeText).join('') : node?.props ? nodeText(node.props.children) : ''
 
-async function componentHarness(t, pdfLines) {
+async function componentHarness(t, pdfLines, serverError = null) {
   const calls = [], toasts = []
-  const summary = { payment_request_id: 'run-a', request_status: 'approved', can_close_paid: false, channels: [
+  const summary = { payment_request_id: 'run-a', request_status: 'approved', request_created_date: '2026-09-07', can_close_paid: false, channels: [
     { id: 'bbva', channel: 'same_bank', amount: 100, currency: 'MXN', dispersion_status: 'dispersed', reconciliation_status: 'pending' },
   ] }
   const supabase = {
@@ -177,6 +178,7 @@ async function componentHarness(t, pdfLines) {
       calls.push({ name, args })
       if (name === 'get_payroll_reconciliation_summary') return { data: summary }
       if (name === 'reserve_payroll_channel_receipt') return { data: { run_file_id: 'receipt-1', storage_bucket: 'private-test', storage_path: 'private/receipt.pdf' } }
+      if (name === 'reconcile_payroll_channel' && serverError) return { error: serverError }
       return { data: null }
     },
     storage: { from: () => ({ upload: async () => { calls.push({ name: 'upload' }); return {} } }) },
@@ -187,7 +189,7 @@ async function componentHarness(t, pdfLines) {
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
     '../../components/ui/icons': load('app/src/components/ui/icons.tsx'),
     '../../lib/supabase': { supabase },
-    './logic': { BUCKET: 'private-test', channelLabel: () => 'BBVA', formatMoney: (value) => `$${value}`, friendlyError: String },
+    './logic': { BUCKET: 'private-test', channelLabel: () => 'BBVA', formatMoney: (value) => `$${value}`, friendlyError: friendly.friendlyError },
     './Nomina.module.css': {}, './receiptAmount': amounts, './receiptFields': fields, './useReceiptAutofill': autofill,
     './api': { getReceiptFileUrl: async () => 'unused' },
   })
@@ -195,7 +197,7 @@ async function componentHarness(t, pdfLines) {
   await act(async () => { renderer = create(React.createElement(ChannelOperations, { paymentRequestId: 'run-a', canPay: true })) })
   t.after(() => act(() => renderer.unmount()))
   const field = (label) => renderer.root.findAllByType('label').find((node) => nodeText(node).startsWith(label)).findByType('input')
-  return { calls, toasts, field,
+  return { calls, toasts, field, alerts: () => renderer.root.findAllByProps({ role: 'alert' }).map(nodeText),
     upload: () => act(async () => { await field('Comprobante PDF').props.onChange({ target: { files: [file()] } }) }),
     submit: () => act(async () => {
       renderer.root.findAllByType('button').find((node) => nodeText(node).includes('Subir y conciliar')).props.onClick()
@@ -228,4 +230,38 @@ test('amount and currency mismatches block mutation instead of replacing PDF fac
     assert.equal(h.calls.some((call) => call.name === 'reserve_payroll_channel_receipt'), false)
     assert.match(h.toasts.at(-1)[0], /Revisa/)
   }
+})
+
+test('dates before creation stay visible with a reason and never reserve or upload a receipt', async (t) => {
+  const h = await componentHarness(t, lines('100.00', 'REF-OLD', '06/09/2026'))
+  await h.upload()
+  await h.submit()
+  assert.equal(h.field('Fecha de pago').props.min, '2026-09-07')
+  assert.equal(h.field('Fecha de pago').props.max, undefined)
+  assert.equal(h.field('Fecha de pago').props.value, '2026-09-06')
+  assert.equal(h.calls.some((call) => call.name === 'reserve_payroll_channel_receipt'), false)
+  assert.match(h.alerts().join(' '), /no puede ser anterior al 07\/09\/2026/)
+})
+
+test('same creation day and distant future are accepted without a today-based cap', async (t) => {
+  for (const date of ['2026-09-07', '2026-09-08', '2099-12-31']) {
+    const h = await componentHarness(t, lines('100.00', 'REF-DATE', date))
+    await h.upload()
+    await h.submit()
+    assert.equal(h.calls.find((call) => call.name === 'reconcile_payroll_channel').args.p_payment_date, date)
+  }
+  assert.match(fields.receiptDateError('2026-02-30', '2026-01-01'), /válida/)
+  assert.equal(fields.receiptDateError('2100-01-01', '2026-09-07'), null)
+})
+
+test('server date rejection remains inline with its authoritative creation date', async (t) => {
+  const h = await componentHarness(t, lines(), {
+    message: 'PAYROLL_RECONCILIATION_PAYMENT_DATE_BEFORE_REQUEST',
+    details: 'La fecha de pago no puede ser anterior al 09/09/2026, fecha de creación de la solicitud.',
+  })
+  await h.upload()
+  await h.submit()
+  assert.match(h.alerts().join(' '), /no puede ser anterior al 09\/09\/2026/)
+  assert.equal(h.field('Fecha de pago').props.value, '2026-09-08')
+  assert.equal(h.field('Referencia').props.value, 'REF-001')
 })

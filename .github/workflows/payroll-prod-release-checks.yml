@@ -8,12 +8,14 @@ on:
       - 'supabase/**/payroll*'
       - 'supabase/migrations/*payroll_prod*.sql'
       - 'scripts/qa/payroll-prod*'
+      - 'supabase/migrations/*payroll_receipt_date*.sql'
       - '.github/workflows/payroll-prod-release-checks.yml'
   push:
     branches: [main]
     paths:
       - 'app/src/features/nomina/**'
       - 'supabase/migrations/*payroll_prod*.sql'
+      - 'supabase/migrations/*payroll_receipt_date*.sql'
       - '.github/workflows/payroll-prod-release-checks.yml'
 
 permissions:
