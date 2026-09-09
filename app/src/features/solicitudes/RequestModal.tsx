@@ -699,13 +699,6 @@ const availablePredictionCandidates = useMemo(
     const fiscalValidation = isReembolso ? '' : validateFiscalBreakdown()
     if (fiscalValidation) { showToast('Desglose fiscal', fiscalValidation, 'warning'); return }
 
-    // Documento obligatorio en toda solicitud (política global). En reembolso
-    // los comprobantes van por renglón, ya validados arriba.
-    if (!isReembolso && !file) {
-      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
-      return
-    }
-
     // Se fija junto al payload: otra selección de archivo durante el RPC no
     // puede cambiar la evidencia fiscal de la solicitud que ya se está creando.
     const cfdiSnapshot = cfdiFull.current
@@ -925,8 +918,8 @@ const availablePredictionCandidates = useMemo(
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante *
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
                     {!isReembolso && cfdiLoading && <p className={`${s.fullRow} ${s.fieldHint}`} role="status">Leyendo factura…</p>}

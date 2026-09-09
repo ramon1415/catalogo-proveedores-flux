@@ -50,12 +50,12 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
 const text = (node) => typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join('') : node?.props ? text(node.props.children) : ''
 
 async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = true, duplicate, allowCreation = false, creation } = {}) {
-  const calls = { creates: [], snapshots: [], toasts: [], lookups: [] }
+  const calls = { creates: [], snapshots: [], toasts: [], lookups: [], uploads: [] }
   const api = {
     loadActiveProjects: async () => [], fetchPartidaPrediction: async () => null,
     findRequestByInvoiceUuid: async (company, uuid) => { calls.lookups.push([company, uuid]); return duplicate ? duplicate(company, uuid) : null },
     createPaymentRequest: async (payload) => { calls.creates.push(payload); return creation || { id: 'created', request_number: 'QA-1' } },
-    updateFase2Metadata: async () => '', uploadReceipt: async () => 'qa/receipt.xml', linkInvoicePath: async () => {},
+    updateFase2Metadata: async () => '', uploadReceipt: async (file) => { calls.uploads.push(file); return 'qa/receipt.xml' }, linkInvoicePath: async () => {},
     saveCfdiData: async (id, snapshot) => { calls.snapshots.push(snapshot); return '' },
   }
   const ProviderCombo = () => null
@@ -87,6 +87,19 @@ async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = tr
     button: () => renderer.root.findAllByType('button').find((n) => n.props.type === 'submit'),
     alerts: () => renderer.root.findAllByProps({ role: 'alert' }).map((n) => text(n.props.children)).join(' '),
   }
+}
+
+for (const activeCompany of ['a', 'b']) {
+  test(`permite crear sin adjunto en empresa ${activeCompany}`, async (t) => {
+    const h = await mount(t, { activeCompany, allowCreation: true })
+    assert.notEqual(h.field('Factura / comprobante').props.required, true)
+    await h.submit()
+    assert.equal(h.calls.creates.length, 1)
+    assert.equal(h.calls.creates[0].company_id, activeCompany)
+    assert.equal(h.calls.uploads.length, 0)
+    assert.equal(h.calls.snapshots.length, 0)
+    assert.equal(h.calls.toasts.at(-1)[0], 'Solicitud creada')
+  })
 }
 
 test('RFC normalizado: empresa única, desconocida, sin acceso y ambigua', () => {
