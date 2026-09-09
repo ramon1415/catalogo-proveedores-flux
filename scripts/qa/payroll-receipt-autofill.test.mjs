@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { inflateSync } from 'node:zlib'
+import { pngChunk, syntheticPng, syntheticJpeg, withExifOrientation } from './fixtures/payroll-image-fixture.mjs'
 
 const root = resolve(new URL('../..', import.meta.url).pathname)
 const require = createRequire(resolve(root, 'app/package.json'))
@@ -31,6 +33,7 @@ function load(path, imports = {}, globals = {}) {
 }
 
 const amounts = load(feature + 'receiptAmount.ts')
+const receiptUpload = load(feature + 'receiptUpload.ts', {}, { window: { PDFLib: require(resolve(root, 'pdf-lib-1.17.1.min.js')) } })
 const fields = load(feature + 'receiptFields.ts', { './receiptAmount.ts': amounts })
 const friendly = load(feature + 'logic.ts', { './speiParser': {} })
 // Resolve the same vendored worker from disk in Node, instead of the browser URL.
@@ -112,7 +115,7 @@ test('invalid PDFs and receipts over the page limit cannot produce partial sugge
 })
 
 async function hookHarness(t, reader) {
-  const { useReceiptAutofill } = load(feature + 'useReceiptAutofill.ts', { '../../lib/pdfText': { extractPdfLines: reader }, './receiptFields': fields })
+  const { useReceiptAutofill } = load(feature + 'useReceiptAutofill.ts', { '../../lib/pdfText': { extractPdfLines: reader }, './receiptFields': fields, './receiptUpload': receiptUpload })
   let result, renderer
   function Harness({ scope }) { result = useReceiptAutofill(scope); return null }
   await act(async () => { renderer = create(React.createElement(Harness, { scope: 'run-a' })) })
@@ -181,16 +184,16 @@ async function componentHarness(t, pdfLines, serverError = null) {
       if (name === 'reconcile_payroll_channel' && serverError) return { error: serverError }
       return { data: null }
     },
-    storage: { from: () => ({ upload: async () => { calls.push({ name: 'upload' }); return {} } }) },
+    storage: { from: () => ({ upload: async (path, file, options) => { calls.push({ name: 'upload', path, file, options }); return {} } }) },
     functions: { invoke: async () => { calls.push({ name: 'verify' }); return { data: { status: 'verified' } } } },
   }
-  const autofill = load(feature + 'useReceiptAutofill.ts', { '../../lib/pdfText': { extractPdfLines: async () => pdfLines }, './receiptFields': fields })
+  const autofill = load(feature + 'useReceiptAutofill.ts', { '../../lib/pdfText': { extractPdfLines: async () => pdfLines }, './receiptFields': fields, './receiptUpload': receiptUpload })
   const { ChannelOperations } = load(feature + 'ChannelOperations.tsx', {
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
     '../../components/ui/icons': load('app/src/components/ui/icons.tsx'),
     '../../lib/supabase': { supabase },
     './logic': { BUCKET: 'private-test', channelLabel: () => 'BBVA', formatMoney: (value) => `$${value}`, friendlyError: friendly.friendlyError },
-    './Nomina.module.css': {}, './receiptAmount': amounts, './receiptFields': fields, './useReceiptAutofill': autofill,
+    './Nomina.module.css': {}, './receiptAmount': amounts, './receiptFields': fields, './useReceiptAutofill': autofill, './receiptUpload': receiptUpload,
     './api': { getReceiptFileUrl: async () => 'unused' },
   })
   let renderer
@@ -198,7 +201,7 @@ async function componentHarness(t, pdfLines, serverError = null) {
   t.after(() => act(() => renderer.unmount()))
   const field = (label) => renderer.root.findAllByType('label').find((node) => nodeText(node).startsWith(label)).findByType('input')
   return { calls, toasts, field, alerts: () => renderer.root.findAllByProps({ role: 'alert' }).map(nodeText),
-    upload: () => act(async () => { await field('Comprobante PDF').props.onChange({ target: { files: [file()] } }) }),
+    upload: (selected = file()) => act(async () => { await field('Comprobante PDF').props.onChange({ target: { files: [selected] } }) }),
     submit: () => act(async () => {
       renderer.root.findAllByType('button').find((node) => nodeText(node).includes('Subir y conciliar')).props.onClick()
       for (let attempt = 0; attempt < 500 && !toasts.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 1))
@@ -415,4 +418,109 @@ test('missing OCR amount reports a reading problem, not an incorrect amount, and
   assert.match(h.alerts().join(' '), /No se pudo identificar un importe válido/)
   assert.doesNotMatch(h.alerts().join(' '), /debe coincidir/)
   assert.equal(h.calls.some((call) => call.name === 'reserve_payroll_channel_receipt'), false)
+})
+
+test('JPG, JPEG and PNG become single-page PDFs while existing PDF bytes remain untouched', async () => {
+  const original=file()
+  assert.equal((await receiptUpload.prepareReceiptPdf(original)).file,original)
+  for(const [name,bytes] of [['test.JPG',syntheticJpeg],['test.jpeg',syntheticJpeg],['test.png',syntheticPng()]]){
+    const source=new File([bytes],name)
+    const prepared=await receiptUpload.prepareReceiptPdf(source)
+    assert.equal(prepared.converted,true);assert.equal(prepared.file.name,'test.pdf');assert.equal(prepared.file.type,'application/pdf')
+    const result=new Uint8Array(await prepared.file.arrayBuffer())
+    assert.equal(new TextDecoder().decode(result.slice(0,5)),'%PDF-')
+    assert.match(new TextDecoder().decode(result.slice(-4096)),/%%EOF/)
+    const document=await require(resolve(root,'pdf-lib-1.17.1.min.js')).PDFDocument.load(result)
+    assert.equal(document.getPageCount(),1)
+    const image=document.context.enumerateIndirectObjects().map(([,obj])=>obj).find(obj=>obj.dict?.get(require(resolve(root,'pdf-lib-1.17.1.min.js')).PDFName.of('Subtype'))?.toString()==='/Image')
+    assert.ok(image,'image must actually be embedded')
+    if(name!== 'test.png')assert.deepEqual(Buffer.from(image.getContents()),bytes,'JPEG bytes must not be re-encoded')
+    else {
+      const pixels=Buffer.from(Array.from({length:8},(_,y)=>Array.from({length:16},(_,x)=>[(x*17+y*29)%256,(x*31+y*13)%256,(x*53+y*11)%256])).flat(2))
+      assert.deepEqual(inflateSync(image.getContents()),pixels,'PNG pixels must remain lossless')
+    }
+    assert.deepEqual(Buffer.from(await source.arrayBuffer()),bytes,'original selection remains unchanged')
+  }
+})
+
+test('EXIF orientation is preserved with all eight transforms and no cropping', async () => {
+  for(let orientation=1;orientation<=8;orientation++){
+    const bytes=withExifOrientation(syntheticJpeg,orientation)
+    const info=receiptUpload.receiptImageInfo(bytes)
+    assert.deepEqual(info,{format:'jpeg',width:8,height:4,orientation})
+    const matrix=receiptUpload.receiptImageMatrix(orientation,8,4)
+    const [a,b,c,d,e,f]=matrix
+    const points=[[0,0],[8,0],[0,4],[8,4]].map(([x,y])=>[a*x+c*y+e,b*x+d*y+f])
+    assert.equal(Math.min(...points.map(p=>p[0])),0);assert.equal(Math.min(...points.map(p=>p[1])),0)
+    assert.equal(Math.max(...points.map(p=>p[0])),orientation>=5?4:8)
+    assert.equal(Math.max(...points.map(p=>p[1])),orientation>=5?8:4)
+    const prepared=await receiptUpload.prepareReceiptPdf(new File([bytes],'phone.jpg'))
+    const pdf=await require(resolve(root,'pdf-lib-1.17.1.min.js')).PDFDocument.load(await prepared.file.arrayBuffer())
+    assert.deepEqual(pdf.getPage(0).getSize(),{width:orientation>=5?2:4,height:orientation>=5?4:2})
+  }
+})
+
+test('invalid, renamed, oversized and animated images are rejected before they can become receipts', async () => {
+  for(const name of ['test.svg','test.gif','test.heic'])assert.match(receiptUpload.receiptSelectionError(new File([syntheticJpeg],name)),/PDF, JPG o PNG/)
+  assert.match(receiptUpload.receiptSelectionError(new File([new Uint8Array(10*1024*1024+1)],'big.png')),/10 MB/)
+  for(const source of [new File(['not an image'.repeat(20)],'fake.jpg'),new File([syntheticPng()],'renamed.jpg'),new File([syntheticJpeg.subarray(0,-2)],'truncated.jpeg')]){
+    await assert.rejects(receiptUpload.prepareReceiptPdf(source),/receipt_image_invalid/)
+  }
+  const huge=syntheticPng();huge.writeUInt32BE(12001,16)
+  await assert.rejects(receiptUpload.prepareReceiptPdf(new File([huge],'huge.png')),/receipt_image_dimensions/)
+  const png=syntheticPng(),animated=Buffer.concat([png.subarray(0,33),pngChunk('acTL',Buffer.alloc(8)),png.subarray(33)])
+  await assert.rejects(receiptUpload.prepareReceiptPdf(new File([animated],'animated.png')),/receipt_image_animated/)
+  const controller=new AbortController();controller.abort()
+  await assert.rejects(receiptUpload.prepareReceiptPdf(new File([syntheticJpeg],'cancelled.jpg'),controller.signal),/abort/i)
+})
+
+test('image selection prepares the PDF before OCR and only explicit submission uploads it', async (t) => {
+  for(const [name,bytes] of [['receipt.jpg',syntheticJpeg],['receipt.png',syntheticPng()]]){
+    const h=await componentHarness(t,lines('100.00','IMAGE-REFERENCE','10/09/2026'))
+    assert.match(h.field('Comprobante PDF').props.accept,/image\/jpeg/)
+    assert.match(h.field('Comprobante PDF').props.accept,/image\/png/)
+    await h.upload(new File([bytes],name))
+    assert.equal(h.calls.some(call=>call.name==='upload'),false)
+    assert.equal(h.field('Importe del comprobante').props.value,'100.00')
+    await h.submit()
+    const uploaded=h.calls.find(call=>call.name==='upload')
+    assert.equal(uploaded.file.name,'receipt.pdf');assert.equal(uploaded.file.type,'application/pdf')
+    assert.equal(uploaded.options.contentType,'application/pdf');assert.equal(uploaded.options.upsert,false)
+    const reservation=h.calls.find(call=>call.name==='reserve_payroll_channel_receipt')
+    assert.equal(reservation.args.p_mime_type,'application/pdf');assert.equal(reservation.args.p_original_filename,'receipt.pdf')
+    const pdfBytes=new Uint8Array(await uploaded.file.arrayBuffer())
+    const hash=Buffer.from(await crypto.subtle.digest('SHA-256',pdfBytes)).toString('hex')
+    assert.equal(reservation.args.p_sha256,hash);assert.equal(reservation.args.p_size_bytes,pdfBytes.length)
+    assert.ok(h.calls.some(call=>call.name==='verify'))
+    assert.equal(h.calls.find(call=>call.name==='reconcile_payroll_channel').args.p_receipt_amount,100)
+  }
+})
+
+test('image conversion failures cannot keep a stale PDF and OCR failures retain only the prepared PDF for review', async(t)=>{
+  const h=await hookHarness(t,()=>Promise.reject(new Error('ocr_failed')))
+  await act(async()=>{await h.current.selectReceipt('bbva',new File([syntheticPng()],'valid.png'))})
+  assert.equal(h.current.drafts.bbva.file.name,'valid.pdf');assert.equal(h.current.drafts.bbva.invalid,false)
+  assert.match(h.current.drafts.bbva.notice,/Imagen convertida a PDF/)
+  assert.equal(h.current.drafts.bbva.amount,'')
+  await act(async()=>{await h.current.selectReceipt('bbva',new File(['bad image'.repeat(20)],'broken.png'))})
+  assert.equal(h.current.drafts.bbva.file,undefined);assert.equal(h.current.drafts.bbva.invalid,true)
+  assert.match(h.current.drafts.bbva.notice,/no es un JPG o PNG válido/)
+})
+
+test('image receipts preserve amount/date/currency rejection and abort an obsolete conversion', async(t)=>{
+  for(const facts of [lines('100.01'),lines('100.00','OLD-DATE','06/09/2026'),lines().map(line=>line.replace('MXN','USD'))]){
+    const h=await componentHarness(t,facts)
+    await h.upload(new File([syntheticPng()],'receipt.png'));await h.submit()
+    assert.equal(h.calls.some(call=>call.name==='reserve_payroll_channel_receipt'),false)
+    assert.ok(h.alerts().length)
+  }
+  const bytes=deferred(),seen=[]
+  const h=await hookHarness(t,async(f)=>{seen.push(f.name);return lines()})
+  const previous=new File([syntheticJpeg],'obsolete.jpg')
+  Object.defineProperty(previous,'arrayBuffer',{value:()=>bytes.promise})
+  let pending
+  await act(async()=>{pending=h.current.selectReceipt('bbva',previous)})
+  await act(async()=>{await h.current.selectReceipt('bbva',file('current.pdf'))})
+  await act(async()=>{bytes.resolve(syntheticJpeg.buffer.slice(syntheticJpeg.byteOffset,syntheticJpeg.byteOffset+syntheticJpeg.byteLength));await pending})
+  assert.deepEqual(seen,['current.pdf']);assert.equal(h.current.drafts.bbva.file.name,'current.pdf')
 })
