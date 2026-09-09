@@ -53,9 +53,25 @@ jobs:
             exit 1
           fi
 
-          test "$(printf '%s\n' "${changed[@]}" | grep -cE '^supabase/migrations/[0-9]+_partida_predictions_prod\.sql$')" -eq 1
-          test "$(printf '%s\n' "${changed[@]}" | grep -cE '^supabase/migrations/[0-9]+_partida_unsure_prod\.sql$')" -eq 1
-          test "$(printf '%s\n' "${changed[@]}" | grep -cE '^supabase/migrations/[0-9]+_partida_predictions_seed_prod\.sql$')" -eq 1
+          # Maintenance UI PRs reuse the migrations already released in main.
+          # Always require the complete tracked contract; retain the original
+          # three-migration diff requirement when any of those migrations changes.
+          suffixes=(partida_predictions_prod partida_unsure_prod partida_predictions_seed_prod)
+          migration_changed=false
+          for suffix in "${suffixes[@]}"; do
+            pattern="^supabase/migrations/[0-9]+_${suffix}\.sql$"
+            mapfile -t tracked < <(git ls-files supabase/migrations | grep -E "$pattern" || true)
+            test "${#tracked[@]}" -eq 1
+            if printf '%s\n' "${changed[@]}" | grep -Eq "$pattern"; then
+              migration_changed=true
+            fi
+          done
+          if [ "$migration_changed" = true ]; then
+            for suffix in "${suffixes[@]}"; do
+              pattern="^supabase/migrations/[0-9]+_${suffix}\.sql$"
+              test "$(printf '%s\n' "${changed[@]}" | grep -cE "$pattern")" -eq 1
+            done
+          fi
 
       - name: Run focused executable contract
         shell: bash
