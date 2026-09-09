@@ -23,6 +23,7 @@ import { numberValue } from '../../lib/format'
 import { parseCfdiFile } from './cfdi'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
@@ -675,6 +676,7 @@ export function RequestModal({
               : (isReembolso
                   ? 'Captura cada gasto; el monto total se calculara automaticamente.'
                   : 'Completa los datos operativos y financieros para validar presupuesto al guardar.')}</p>
+            <CompanyCaptureContext name={company ? companyName(company) : null} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

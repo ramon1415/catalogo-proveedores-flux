@@ -5,6 +5,7 @@ import s from './Modal.module.css'
 export function Modal({
   title,
   subtitle,
+  headerContext,
   children,
   actions,
   onClose,
@@ -12,6 +13,7 @@ export function Modal({
 }: {
   title: ReactNode
   subtitle?: ReactNode
+  headerContext?: ReactNode
   children: ReactNode
   actions?: ReactNode
   onClose: () => void
@@ -44,6 +46,7 @@ export function Modal({
           <div>
             <h2>{title}</h2>
             {subtitle != null && <p className="muted">{subtitle}</p>}
+            {headerContext}
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={close}>✕</button>
         </div>
