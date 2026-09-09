@@ -26,6 +26,7 @@ import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
 import { saveCfdiData, findRequestByInvoiceUuid } from './api'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
@@ -835,6 +836,7 @@ const availablePredictionCandidates = useMemo(
           <div>
             <h2>{success ? 'Solicitud creada correctamente' : 'Nueva solicitud de pago'}</h2>
             <p>{success ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.' : 'Completa los datos operativos y financieros para validar presupuesto al guardar.'}</p>
+            <CompanyCaptureContext name={company ? companyName(company) : null} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

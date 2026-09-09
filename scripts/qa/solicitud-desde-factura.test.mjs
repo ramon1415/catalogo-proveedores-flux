@@ -68,6 +68,7 @@ async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = tr
     '../../lib/auth': { useAuth: () => ({ memberships: allowed.map((company_id) => ({ company_id })), group: manage ? 'sysadmin' : 'operation', canManageProviders: () => manage }) },
     '../../lib/company': { useCompany: () => ({ companyId: activeCompany }) },
     '../../lib/moduleAccess': { useModules: () => ({ isEnabled: () => false }) },
+    '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => calls.toasts.push(args) }) },
     './ProviderCombo': { ProviderCombo }, './QuickProviderModal': { QuickProviderModal },
     './ReimbursementSection': { ReimbursementSection: () => null, emptyReimbursementItem: () => ({ amount: '', descripcion: '', deducible: false }) },
@@ -144,8 +145,10 @@ test('conserva empresa seleccionada y ofrece corregirla; un cambio posterior tam
   assert.equal(h.button().props.disabled, true)
   await act(async () => { h.renderer.root.findAllByType('button').find((n) => text(n.props.children) === 'Usar Empresa B').props.onClick() })
   assert.equal(h.field('Empresa').props.value, 'b')
+  assert.equal(text(h.renderer.root.findByProps({ 'data-company-context': true }).props.children), 'Empresa B')
   assert.equal(h.alerts(), '')
   await h.change('Empresa', 'a')
+  assert.equal(text(h.renderer.root.findByProps({ 'data-company-context': true }).props.children), 'Empresa A')
   await h.submit()
   assert.equal(h.calls.creates.length, 0)
   assert.equal(h.calls.toasts.at(-1)[0], 'Revisa la factura')
