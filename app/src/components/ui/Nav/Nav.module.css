@@ -80,17 +80,17 @@
 .logout:hover { color: var(--ruby, #e03e52); border-color: rgba(224, 62, 82, .4); }
 .logout svg { width: 15px; height: 15px; }
 
-.companyDot { display: none; width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--company-accent, var(--accent)); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .18); }
 .companyGlyph { width: 18px; height: 18px; display: block; }
-.companyCompact { border: 0; padding: 0; gap: 7px; min-height: 44px; }
-.companyCompact .companyIcon { display: none; }
-.companyCompact .companyDot { display: block; }
+.companyCompact { border: 0; padding: 4px 10px; gap: 7px; min-height: 44px; border-radius: 10px; background: var(--company-accent, #c8c5b1); color: #172d29; }
+.companyCompact .companyIcon { display: grid; width: 22px; height: 22px; border-radius: 0; }
 .companyCompact .txt { opacity: 1; }
-.companyCompact .companyName { font-size: 13px; }
+.companyCompact .companyName { font-size: 13px; color: #172d29; }
 .install { flex-shrink: 0; padding: 4px 8px; }
 .install:empty { display: none; }
 .install:has(button) { border-top: 1px solid var(--border); }
 .companyLauncher:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Keep the company marker distinct on the light surface. */
-:global(:root[data-theme="light"]) .companyDot { background: color-mix(in srgb, var(--company-accent, var(--accent)) 72%, #172d29); }
+/* Preserve the brand-colored company label on hover and in both themes. */
+.companyCompact:hover:not(:disabled) { background: var(--company-accent, #c8c5b1); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .3); }
+.companyCompact .companyCaret { color: #172d29; }
+.companyCompact:focus-visible { outline-color: #172d29; }
