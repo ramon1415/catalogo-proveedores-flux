@@ -1,4 +1,4 @@
-.button { display: flex; align-items: center; gap: 8px; width: auto; min-height: 40px; border: 0; border-radius: 8px; padding: 8px 11px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; border: 0; border-radius: 8px; padding: 8px 11px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
 .button svg { width: 18px; height: 18px; flex-shrink: 0; }
 .button:hover { background: var(--bg-hover); color: var(--text-1); }
 .button:disabled { opacity: .6; cursor: wait; }
@@ -24,5 +24,3 @@
   .body { padding: 16px; }
   .actions { padding: 12px 16px; }
 }
-
-@media (max-width: 480px) { .button span { display: none; } .button { min-width: 40px; justify-content: center; } }

@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
 import s from './Nav.module.css'
 import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
@@ -53,6 +54,7 @@ export function Nav() {
         ))}
       </nav>
 
+      <div className={s.install}><InstallFluxButton labelClassName={s.txt} /></div>
       <div className={s.foot}>
         <div className={s.uicon}><IcUser /></div>
         <div className={`${s.uinfo} ${s.txt}`}>

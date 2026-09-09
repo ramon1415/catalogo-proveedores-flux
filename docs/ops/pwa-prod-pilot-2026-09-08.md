@@ -9,7 +9,7 @@ Authorized by Ramón on 2026-09-08 for these existing active accounts only:
 | denise@quantta.mx | b014d1fb-903b-433c-ab51-0e8f5b5d91e1 |
 | cesar@quantta.mx | 6f925d1c-1358-41bf-9d5c-06671cb8404a |
 
-Sign in at https://flux.quantta.mx and select **Instalar Flux** in the top bar (download icon on narrow screens). Supported native prompts are used once; otherwise instructions explain the browser's installation menu, including Safari on iOS.
+Sign in at https://flux.quantta.mx and select **Instalar Flux** near the bottom of the side menu (download icon when the menu is collapsed). Supported native prompts are used once; otherwise instructions explain the browser's installation menu, including Safari on iOS.
 
 The server checks the production deployment, canonical hostname, production Supabase project, verified Auth user and matching active profile. No additional environment variables, migration, user role changes or DEV release are needed. Existing FLUX_SUPABASE_URL and FLUX_SUPABASE_ANON_KEY are used with the caller's JWT; no service role.
 

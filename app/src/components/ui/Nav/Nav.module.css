@@ -4,17 +4,17 @@
   display: flex; flex-direction: column; overflow: hidden;
   transition: width .18s cubic-bezier(.23, 1, .32, 1);
 }
-.rail:hover { width: 240px; box-shadow: 10px 0 40px rgba(0, 0, 0, .4); }
+.rail:is(:hover, :focus-within) { width: 240px; box-shadow: 10px 0 40px rgba(0, 0, 0, .4); }
 .txt { opacity: 0; transition: opacity .12s; white-space: nowrap; }
-.rail:hover .txt { opacity: 1; }
+.rail:is(:hover, :focus-within) .txt { opacity: 1; }
 
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 16px; min-height: 60px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .iso { width: 30px; height: 30px; flex-shrink: 0; filter: brightness(0) invert(1); opacity: .9; }
 .full { height: 20px; width: auto; display: none; filter: brightness(0) invert(1); opacity: .9; }
 :global(:root[data-theme="light"]) .iso,
 :global(:root[data-theme="light"]) .full { filter: none; opacity: 1; }
-.rail:hover .iso { display: none; }
-.rail:hover .full { display: block; }
+.rail:is(:hover, :focus-within) .iso { display: none; }
+.rail:is(:hover, :focus-within) .full { display: block; }
 .ctx { font-size: 11px; color: var(--text-3); border-left: 1px solid var(--border-strong); padding-left: 11px; line-height: 1.25; }
 .ctx b { display: block; color: var(--text-2); font-weight: 600; font-size: 11.5px; }
 
@@ -32,8 +32,8 @@
 .companyName { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .companyCaret { flex-shrink: 0; color: var(--text-3); }
 .companyCaret svg { width: 15px; height: 15px; display: block; }
-.rail:not(:hover) .companyLauncher { justify-content: center; padding: 8px; }
-.rail:not(:hover) .companyName, .rail:not(:hover) .companyCaret { display: none; }
+.rail:not(:hover):not(:focus-within) .companyLauncher { justify-content: center; padding: 8px; }
+.rail:not(:hover):not(:focus-within) .companyName, .rail:not(:hover):not(:focus-within) .companyCaret { display: none; }
 
 /* Modal de cambio de empresa */
 .companyList { display: flex; flex-direction: column; gap: 8px; }
@@ -54,13 +54,13 @@
   flex: 1; min-height: 0; padding: 9px 8px; display: flex; flex-direction: column; gap: 1px;
   overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
 }
-.rail:hover .nav { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.rail:is(:hover, :focus-within) .nav { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 .nav::-webkit-scrollbar { width: 5px; }
 .nav::-webkit-scrollbar-track { background: transparent; }
 .nav::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
-.rail:hover .nav::-webkit-scrollbar-thumb { background: var(--border-strong); }
+.rail:is(:hover, :focus-within) .nav::-webkit-scrollbar-thumb { background: var(--border-strong); }
 .sec { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; color: var(--text-3); padding: 0 10px; height: 0; overflow: hidden; transition: .12s; }
-.rail:hover .sec { height: auto; padding: 13px 10px 5px; }
+.rail:is(:hover, :focus-within) .sec { height: auto; padding: 13px 10px 5px; }
 
 .item { display: flex; align-items: center; gap: 12px; padding: 8px 11px; border-radius: 8px; color: var(--text-2); text-decoration: none; font-size: 13px; font-weight: 450; white-space: nowrap; border: 0; background: none; cursor: pointer; font-family: inherit; text-align: left; }
 .item svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--text-2); }
@@ -70,7 +70,7 @@
 .item.active svg { color: var(--accent); }
 
 .foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 8px; background: var(--bg-surface); }
-.rail:not(:hover) .foot { flex-direction: column; padding: 9px 8px; }
+.rail:not(:hover):not(:focus-within) .foot { flex-direction: column; padding: 9px 8px; }
 .uicon { width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; background: var(--bg-hover); border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-2); }
 .uicon svg { width: 16px; height: 16px; }
 .uinfo { flex: 1; min-width: 0; overflow: hidden; }
@@ -79,3 +79,18 @@
 .logout { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-3); cursor: pointer; display: grid; place-items: center; }
 .logout:hover { color: var(--ruby, #e03e52); border-color: rgba(224, 62, 82, .4); }
 .logout svg { width: 15px; height: 15px; }
+
+.companyDot { display: none; width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--company-accent, var(--accent)); box-shadow: inset 0 0 0 1px rgba(23, 45, 41, .18); }
+.companyGlyph { width: 18px; height: 18px; display: block; }
+.companyCompact { border: 0; padding: 0; gap: 7px; min-height: 44px; }
+.companyCompact .companyIcon { display: none; }
+.companyCompact .companyDot { display: block; }
+.companyCompact .txt { opacity: 1; }
+.companyCompact .companyName { font-size: 13px; }
+.install { flex-shrink: 0; padding: 4px 8px; }
+.install:empty { display: none; }
+.install:has(button) { border-top: 1px solid var(--border); }
+.companyLauncher:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Keep the company marker distinct on the light surface. */
+:global(:root[data-theme="light"]) .companyDot { background: color-mix(in srgb, var(--company-accent, var(--accent)) 72%, #172d29); }

@@ -1,5 +1,6 @@
-import { InstallFluxButton } from '../../features/install/InstallFluxButton'
-import { Suspense } from 'react'
+import { Suspense, type CSSProperties } from 'react'
+import { CompanySwitcher } from './Nav/CompanySwitcher'
+import { useCompany, companyColor } from '../../lib/company'
 import { Outlet, useLocation } from 'react-router-dom'
 import s from './AppShell.module.css'
 import { Nav } from './Nav/Nav'
@@ -8,6 +9,7 @@ import { itemForPath } from './Nav/navModel'
 
 export function AppShell() {
   const { pathname } = useLocation()
+  const { companyName } = useCompany()
   const item = itemForPath(pathname)
   const kicker = item ? `${item.label}` : 'Plataforma'
 
@@ -20,9 +22,9 @@ export function AppShell() {
     <>
       <Nav />
       <div className={s.content}>
-        <div className={s.topbar}>
+        <div className={s.topbar} style={{ '--company-accent': companyColor(companyName) } as CSSProperties}>
           <div className={s.kick}>{kicker}</div>
-          <InstallFluxButton />
+          <div className={s.company}><CompanySwitcher compact /></div>
           <button className={s.iconbtn} title="Tema claro / oscuro" onClick={toggleTheme}><IcTheme /></button>
         </div>
         <div className={s.page}>
