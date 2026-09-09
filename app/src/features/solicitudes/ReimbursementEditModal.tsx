@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import {
@@ -247,6 +248,7 @@ export function ReimbursementEditModal({
           <div>
             <h2>Editar reembolso</h2>
             <p>{request.request_number || 'Sin folio'} · sólo solicitudes abiertas</p>
+            <CompanyCaptureContext company={company} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

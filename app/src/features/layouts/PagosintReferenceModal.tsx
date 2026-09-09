@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -78,7 +79,7 @@ export function PagosintReferenceModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={line.company_name} />}
         title={`Completar referencia ${line.request_number || ''}`.trim()}
         subtitle="Completa los datos faltantes de la linea para generar el archivo interbancario."
         onClose={onClose}

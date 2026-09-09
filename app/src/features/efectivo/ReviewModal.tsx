@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -8,11 +9,13 @@ import s from './Efectivo.module.css'
 
 export function ReviewModal({
   reconciliationId,
+  companyName,
   action,
   reviewerProfileId,
   onClose,
   onReviewed,
 }: {
+  companyName: string | null
   reconciliationId: string
   action: ReviewAction
   reviewerProfileId: string
@@ -43,7 +46,7 @@ export function ReviewModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={companyName} />}
         title={reviewActionTitle(action)}
         subtitle={action === 'approved' ? 'El comentario es opcional para aprobar.' : 'Captura un comentario para informar al responsable.'}
         onClose={onClose}

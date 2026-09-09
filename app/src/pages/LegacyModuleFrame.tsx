@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCompany } from '../lib/company'
+import { LegacyCompanyModalContexts } from './LegacyCompanyModalContexts'
 import s from './LegacyModuleFrame.module.css'
 
 const EMBED_STYLES = `
@@ -20,9 +21,10 @@ interface LegacyModuleFrameProps {
 }
 
 export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps) {
-  const { companyId } = useCompany()
+  const { companyId, companyName } = useCompany()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
+  const [frameDocument, setFrameDocument] = useState<Document | null>(null)
   const frameSrc = companyId
     ? `${src}${src.includes('?') ? '&' : '?'}company_id=${encodeURIComponent(companyId)}`
     : src
@@ -40,11 +42,13 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
     }
 
     doc.documentElement.dataset.theme = document.documentElement.dataset.theme ?? 'dark'
+    setFrameDocument(doc)
     setReady(true)
   }
 
   useEffect(() => {
     setReady(false)
+    setFrameDocument(null)
   }, [frameSrc])
 
   return (
@@ -56,6 +60,7 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
         title={title}
         onLoad={prepareEmbeddedShell}
       />
+      <LegacyCompanyModalContexts doc={frameDocument} companyName={companyName} />
     </section>
   )
 }

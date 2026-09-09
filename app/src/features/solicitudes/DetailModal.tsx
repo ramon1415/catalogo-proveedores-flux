@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
@@ -333,6 +334,7 @@ export function DetailModal({
           <div>
             <h2>{request.request_number || 'Detalle de solicitud'}</h2>
             <p>{`${isReembolso ? 'Reembolso' : proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`}</p>
+            <CompanyCaptureContext company={company} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

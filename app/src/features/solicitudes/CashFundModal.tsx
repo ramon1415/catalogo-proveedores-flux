@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { createCashFund, verifyCashBlock } from './api'
@@ -77,6 +78,7 @@ export function CashFundModal({
           <div>
             <h2>{method === 'check' ? 'Registrar entrega de cheque' : 'Registrar entrega de efectivo'}</h2>
             <p>Crea el fondo para que el responsable pueda comprobarlo.</p>
+            <CompanyCaptureContext name={request.companyName} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

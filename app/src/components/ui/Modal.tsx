@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import s from './Modal.module.css'
+import { ActiveCompanyCaptureContext } from './CompanyCaptureContext'
 
 export function Modal({
   title,
@@ -46,7 +47,7 @@ export function Modal({
           <div>
             <h2>{title}</h2>
             {subtitle != null && <p className="muted">{subtitle}</p>}
-            {headerContext}
+            {headerContext === undefined ? <ActiveCompanyCaptureContext /> : headerContext}
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={close}>✕</button>
         </div>
