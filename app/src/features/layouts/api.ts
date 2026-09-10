@@ -3,7 +3,7 @@ import type {
   PaymentLayout, PaymentLayoutLine, LayoutCompany, CompanyBankAccount,
   EligibilityPreview, PreviewParams, CreateLayoutResult, FinanceBatch, NotIncludedItem,
 } from './types'
-import { exclusionReasons } from './logic'
+import { exclusionReasons, applyCieReferencePreflight, ciePreviewProviderIds, withCiePreviewConvenios } from './logic'
 
 // ── SELECTs de tablas ──────────────────────────────────────────────────────
 export async function loadLayouts(): Promise<PaymentLayout[]> {
@@ -51,7 +51,25 @@ export async function fetchLayoutLines(layoutId: string) {
 export async function previewEligibility(params: PreviewParams): Promise<EligibilityPreview> {
   const { data, error } = await supabase.rpc('preview_payment_layout_eligibility', params as any)
   if (error) throw error
-  return (data || {}) as EligibilityPreview
+  let preview = (data || {}) as EligibilityPreview
+  const providerIds = ciePreviewProviderIds(preview)
+  if (providerIds.length) {
+    const { data: providers, error: providerError } = await supabase.from('proveedores').select('id,convenio_number').in('id', providerIds)
+    if (providerError) throw providerError
+    preview = withCiePreviewConvenios(preview, providers || [])
+  }
+  return applyCieReferencePreflight(preview)
+}
+
+export async function updateCieReference(params: {
+  p_line_id: string
+  p_payment_reference: string
+  p_expected_reference: string | null
+  p_bank_rejection_confirmed: boolean
+}) {
+  const { data, error } = await supabase.rpc('update_payment_layout_line_cie_reference', params as any)
+  if (error) throw error
+  return data
 }
 
 export async function createLayout(params: {

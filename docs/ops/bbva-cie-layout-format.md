@@ -1,6 +1,6 @@
 # BBVA Convenio/CIE — contrato recuperado de macros
 
-Estado: `CIE_SERIALIZER_MATCHES_RECOVERED_VBA_CONTRACT`.
+Estado: `CIE_FIELD_LAYOUT_MATCHES_RECOVERED_VBA_CONTRACT_WITH_REFERENCE_VALIDATION`.
 
 No existe un TXT golden generado con input conocido, por lo que este documento no declara paridad byte-for-byte con una salida real de la macro ni aceptación bancaria. La implementación reproduce el contrato recuperado de dos proyectos VBA independientes.
 
@@ -45,7 +45,7 @@ Longitud útil: 121 bytes ASCII. Longitud física por registro: 123 bytes incluy
 | 38–55 | 18 | Cuenta cargo | `payment_layout_lines.source_account_number` | ceros a izquierda | 9 o 10 dígitos de entrada; se admite snapshot ya normalizado de 18 que represente esa salida |
 | 56–71 | 16 | Importe | `payment_layout_lines.amount` | ceros a izquierda | `0000000000000.00`; mayor a cero |
 | 72–101 | 30 | Motivo | mismo `payment_concept` | espacios a derecha | duplicación comprobada del concepto |
-| 102–121 | 20 | Referencia CIE | `payment_layout_lines.payment_reference` | espacios a derecha | mayúsculas + `RemoveTrash`; truncado |
+| 102–121 | 20 | Referencia CIE | `payment_layout_lines.payment_reference` | espacios a derecha solo para referencias cortas permitidas por su convenio | identificador exacto ASCII, sin recortar ni sustituir caracteres; CFE `0578869`: 20 caracteres sin espacios |
 | 122–123 | 2 | Terminador | serializer | no aplica | CRLF, también en el último registro |
 
 No hay moneda, header, trailer, delimitadores ni tipo de registro en el archivo dedicado `Pagos CIE`.
@@ -58,7 +58,7 @@ No hay moneda, header, trailer, delimitadores ni tipo de registro en el archivo 
 - `ñÑ` → `nN`;
 - punto y `!#$%&/()='?¿¡` → espacios.
 
-VBA no contiene una lista general de caracteres permitidos para concepto o referencia. Flux aplica una guarda adicional fail-closed: después del mapeo, el contenido debe quedar en ASCII imprimible y no puede incluir `|`. Esto evita depender de la code page de Windows y garantiza que la serialización UTF-8 del navegador produzca exactamente un byte por carácter, sin BOM. La guarda es de portabilidad interna, no una regla bancaria atribuida a BBVA.
+VBA no contiene una lista general de caracteres permitidos para concepto o referencia. Flux exige ASCII imprimible y excluye `|`. Para conceptos aplica el mapeo anterior; para referencias conserva el identificador capturado, sin convertir mayúsculas, sustituir signos o truncar. Esto evita depender de la code page de Windows y garantiza un byte por carácter, sin BOM. La guarda ASCII es de portabilidad interna, no una regla bancaria atribuida a BBVA.
 
 ## Encoding físico
 
@@ -81,7 +81,7 @@ La migration `049` agrega `payment_layout_lines.convenio_number` y lo captura de
 ## Routing y aislamiento
 
 - `cuenta` → `PAGOSBBV`;
-- `clabe` → `PAGOSINT`;
+- `clabe` externa → `PAGOSINT`; `clabe` BBVA `012` → `PAGOSMIX`;
 - `convenio` → `CIE`.
 
 Cada rail se descarga en un archivo separado. CIE no cae en PAGOSBBV/PAGOSINT y los rails existentes no caen en CIE.
@@ -93,5 +93,18 @@ Flux usa `PAGOSCIE_FLUX_<FOLIO>_<YYYYMMDD>.txt` como convención operativa propi
 - La hoja `Cie` corresponde al catálogo/alta de convenios y queda fuera de scope.
 - `Pagos Mixtos` y su prefijo `CIL` se usaron solo como cross-check y quedan fuera de scope.
 - No se modifican nómina, TOKA, servicios recurrentes ni doc-extract.
-- El convenio actual debe cumplir 6/7 dígitos antes de UAT; la configuración observada en DEV no cumple esa validación.
+- El convenio debe cumplir 6/7 dígitos antes de generar un archivo.
 - Para declarar `CIE_SERIALIZER_BYTE_PARITY_WITH_BBVA_MACRO` se necesita un TXT golden generado por la macro con inputs sintéticos conocidos.
+
+## Corrección de referencias CIE — 2026-09-10
+
+BBVA aceptó la importación de un archivo y rechazó después dos pagos CFE con `EIE8011: LA LINEA DE CAPTURA DEBE SER DE 20 CARACTERES`. La referencia enviada tenía cinco caracteres. Completar físicamente el campo con espacios no satisface la validación del convenio.
+
+- CFE `0578869` (también entrada canónica de seis dígitos `578869`) requiere los 20 caracteres reales del recibo, sin espacios. No se inventan referencias ni se agregan ceros.
+- Otros convenios mantienen referencias de 1 a 20 caracteres ASCII. La regla de 20 caracteres efectivos no se generaliza a convenios sin evidencia de ese requisito.
+- React y la interfaz anterior validan captura, vista previa y descarga. La vista previa consulta únicamente el convenio canónico de los proveedores porque el RPC oculta el destino bancario; la exportación siempre usa el snapshot de la línea.
+- El servidor valida las nuevas líneas y los cambios de referencia. Una línea antigua inválida permanece visible para su corrección, sin modificar importes, cuentas, convenio ni estado del pago.
+- En un layout existente: **Ver líneas → Corregir referencia CIE → copiar la línea del recibo → guardar → volver a descargar CIE**. Si el layout ya se registró como subido, se exige confirmar que el banco rechazó ese pago y no lo ejecutó. Se corrige la solicitud existente; no se crea otra.
+- La RPC de corrección comprueba sesión, permiso sobre la empresa, referencia original y estado pendiente. Bloquea pagos cerrados, cancelados o con comprobante; registra el cambio en auditoría privada. La validación aplica igual a Operadora y Fersana.
+
+Verificación reproducible: `scripts/qa/bbva-cie-reference-validation.test.mjs` cubre ambas interfaces y empresas, referencia exacta, rechazo previo a descarga, bytes, otros convenios y exclusión de pagos cerrados. `scripts/qa/cie-reference-server-regression.sql` ejecuta controles de acceso, concurrencia, auditoría y pagos cerrados en una transacción que termina en `ROLLBACK`. La ejecución bancaria requiere las referencias reales y una nueva validación en BBVA; estas pruebas no ejecutan pagos.

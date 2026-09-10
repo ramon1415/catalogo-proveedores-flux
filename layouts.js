@@ -34,6 +34,7 @@ const BBVA_INTERBANK_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-
 const BBVA_CIE_CONCEPT_LENGTH = 30
 const BBVA_CIE_CONVENIO_LENGTH = 7
 const BBVA_CIE_REFERENCE_LENGTH = 20
+const BBVA_CFE_CONVENIO = "0578869"
 const BBVA_CIE_LINE_LENGTH = BBVA_CIE_CONCEPT_LENGTH + BBVA_CIE_CONVENIO_LENGTH + CXC_ACCOUNT_LENGTH + CXC_AMOUNT_LENGTH + BBVA_CIE_CONCEPT_LENGTH + BBVA_CIE_REFERENCE_LENGTH
 const BBVA_CIE_LINE_PATTERN = /^[\x20-\x7e]{30}\d{7}\d{18}\d{13}\.\d{2}[\x20-\x7e]{30}[\x20-\x7e]{20}$/
 const BBVA_CIE_TRASH_CHARACTERS = "áéíóúÁÉÍÓÚ.ñÑ!#$%&/()='?¿¡"
@@ -549,7 +550,15 @@ async function reviewLayoutEligibility() {
     const { data, error } = await supabaseClient.rpc("preview_payment_layout_eligibility", params)
     if (error) throw error
     if (requestId !== activeLayoutPreviewRequestId || paramsKey !== layoutPreviewParamsKey()) return
-    layoutEligibilityPreview = data || {}
+    let preview = data || {}
+    const providerIds = ciePreviewProviderIds(preview)
+    if (providerIds.length) {
+      const { data: providers, error: providerError } = await supabaseClient.from('proveedores').select('id,convenio_number').in('id', providerIds)
+      if (providerError) throw providerError
+      preview = withCiePreviewConvenios(preview, providers || [])
+    }
+    if (requestId !== activeLayoutPreviewRequestId || paramsKey !== layoutPreviewParamsKey()) return
+    layoutEligibilityPreview = applyCieReferencePreflight(preview)
     layoutEligibilityPreviewParamsKey = paramsKey
     renderLayoutEligibilityPreview()
   } catch (error) {
@@ -871,6 +880,13 @@ function openLayoutCompletionDialog(requestId) {
   dom.layoutCompletionBankAccount.innerHTML = `<option value="">${accounts.length ? "Selecciona cuenta origen" : "No hay cuentas origen activas con numero"}</option>${accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(layoutAccountLabel(account))}</option>`).join("")}`
   dom.layoutCompletionBankAccount.value = accounts.some((account) => account.id === request.company_bank_account_id) ? request.company_bank_account_id : ""
   configureLayoutReferenceInput(request.destination_type)
+  if (request.destination_type === "convenio") {
+    dom.layoutCompletionReference.removeAttribute("maxlength")
+    dom.layoutCompletionReference.placeholder = "Copia la referencia completa del recibo"
+    dom.layoutCompletionReferenceHint.textContent = isCfeCieConvenio(previewCieConvenio(request))
+      ? "CFE: línea de captura de 20 caracteres exactos del recibo, sin espacios. No uses una fecha ni el número de servicio."
+      : "Copia la referencia del recibo, hasta 20 caracteres. No se recorta ni se completa con ceros."
+  }
   dom.layoutCompletionReference.value = request.payment_reference || ""
   dom.layoutCompletionConcept.value = request.payment_concept || ""
   dom.layoutCompletionDate.value = request.scheduled_payment_date || ""
@@ -903,6 +919,10 @@ async function submitLayoutCompletion(event) {
   event.preventDefault()
   if (!activeLayoutCompletionRequest || layoutCompletionSubmitting) return
   const reference = cleanText(dom.layoutCompletionReference.value)
+  if (activeLayoutCompletionRequest.destination_type === "convenio") {
+    const cieError = cieReferenceError(reference, previewCieConvenio(activeLayoutCompletionRequest))
+    if (cieError) { showToast("Revisa la referencia CIE", cieError, "warning"); dom.layoutCompletionReference.focus(); return }
+  }
   const referenceIssue = layoutReferenceIssue(reference, activeLayoutCompletionRequest.destination_type)
   if (referenceIssue) {
     showToast("Referencia invalida", layoutReferenceIssueLabel(referenceIssue, activeLayoutCompletionRequest.destination_type), "warning")
@@ -1447,6 +1467,9 @@ function renderFormatSummaryRow(item, key) {
 function renderLineActions(line) {
   if (line.status !== "included") return `<span style="color:var(--text-3);font-size:11px">-</span>`
   const actions = []
+  if (line.destination_type === "convenio") {
+    actions.push(`<button class="small-btn warning" type="button" onclick="openCieReferenceModal('${line.id}')">Corregir referencia CIE</button>`)
+  }
   if (lineNeedsPagosintReferenceCompletion(line)) {
     actions.push(`<button class="small-btn warning" type="button" onclick="openPagosintReferenceModal('${line.id}')" style="white-space:nowrap">Completar referencia</button>`)
   }
@@ -1456,6 +1479,10 @@ function renderLineActions(line) {
 
 function renderLineReferenceCell(line) {
   const value = escapeHtml(line.payment_reference || "")
+  if (line.status === "included" && line.destination_type === "convenio") {
+    const issue = cieReferenceError(line.payment_reference, line.convenio_number)
+    return `${value || "Sin referencia"}${issue ? `<small style="display:block;max-width:260px">${escapeHtml(issue)}</small>` : ""}`
+  }
   if (!lineNeedsPagosintCompletion(line)) return value || `<span style="color:var(--text-3);font-size:11px">-</span>`
   const badgeLabel = lineNeedsPagosintReferenceCompletion(line) ? "Referencia pendiente" : "Datos PAGOSINT incompletos"
   return [
@@ -1638,6 +1665,58 @@ async function submitConfirmPayment(event) {
 
 // Completar datos PAGOSINT
 
+function openCieReferenceModal(lineId) {
+  if (!ensureActorProfile()) return
+  const line = activeLayoutLines.find(item => item.id === lineId)
+  const layout = layouts.find(item => item.id === line?.layout_id)
+  if (!line || line.status !== "included" || line.destination_type !== "convenio" || !layout || ["confirmed", "cancelled"].includes(layout.status)) return
+  const dialog = document.createElement("dialog")
+  dialog.className = "narrow"
+  dialog.innerHTML = `<form class="modal-content"><div class="modal-header"><div><small data-company></small><h2>Corregir referencia CIE</h2><p data-request></p></div></div><div class="modal-scroll"><div class="form-grid"><label class="full-row">Línea de captura / referencia del recibo<input data-reference type="text" autocomplete="off" spellcheck="false" required><span class="field-hint" data-hint></span><span class="field-hint">Copia el dato del recibo. No uses una fecha ni el número de servicio; no agregues ceros.</span></label><label class="full-row" data-confirm-label><input data-confirm type="checkbox" style="width:auto"> Confirmo que el banco rechazó este pago y no lo ejecutó.</label><p class="full-row" role="alert" data-error></p></div></div><div class="modal-actions"><button type="button" class="secondary-btn" data-cancel>Cancelar</button><button type="submit" class="primary-btn" data-save>Guardar referencia</button></div></form>`
+  dialog.querySelector("[data-company]").textContent = line.company_name || ""
+  dialog.querySelector("[data-request]").textContent = `${line.request_number || ""} · Convenio ${line.convenio_number || ""}`
+  const input = dialog.querySelector("[data-reference]")
+  const confirmation = dialog.querySelector("[data-confirm]")
+  const errorNode = dialog.querySelector("[data-error]")
+  const save = dialog.querySelector("[data-save]")
+  const cancel = dialog.querySelector("[data-cancel]")
+  const uploaded = layout.status === "uploaded"
+  dialog.querySelector("[data-confirm-label]").hidden = !uploaded
+  input.value = line.payment_reference || ""
+  let saving = false
+  const validate = () => {
+    const issue = cieReferenceError(input.value, line.convenio_number)
+    errorNode.textContent = issue || ""
+    dialog.querySelector("[data-hint]").textContent = `${input.value.trim().length} / 20 caracteres. ${isCfeCieConvenio(line.convenio_number) ? "CFE exige exactamente 20, sin espacios." : "Hasta 20, según el convenio."}`
+    save.disabled = saving || Boolean(issue) || (uploaded && !confirmation.checked)
+  }
+  const close = () => { if (!saving) { dialog.close(); dialog.remove() } }
+  cancel.onclick = close
+  dialog.addEventListener("cancel", event => { event.preventDefault(); close() })
+  input.oninput = validate
+  confirmation.onchange = validate
+  dialog.querySelector("form").onsubmit = async event => {
+    event.preventDefault()
+    if (saving || cieReferenceError(input.value, line.convenio_number) || (uploaded && !confirmation.checked)) return
+    saving = true; cancel.disabled = true; input.disabled = true; confirmation.disabled = true; validate()
+    try {
+      const reference = input.value.trim()
+      const { error } = await supabaseClient.rpc("update_payment_layout_line_cie_reference", { p_line_id: line.id, p_payment_reference: reference, p_expected_reference: line.payment_reference, p_bank_rejection_confirmed: confirmation.checked })
+      if (error) throw error
+      await refreshLayoutLines(line.layout_id)
+      if (activeLayoutLines.find(item => item.id === line.id)?.payment_reference !== reference) throw new Error("La referencia no se confirmó al recargar. Revisa la línea antes de descargar.")
+      await loadLayouts()
+      showToast("Referencia CIE guardada", "Vuelve a descargar el archivo CIE de este layout.", "success")
+      saving = false; close()
+    } catch (error) {
+      errorNode.textContent = cieReferenceSaveError(error)
+      showToast("No se pudo guardar", cieReferenceSaveError(error), "danger")
+    } finally { saving = false; cancel.disabled = false; input.disabled = false; confirmation.disabled = false; save.disabled = false }
+  }
+  document.body.appendChild(dialog)
+  validate(); dialog.showModal(); input.focus()
+}
+
 function openPagosintReferenceModal(lineId) {
   if (!ensureActorProfile()) return
   const line = activeLayoutLines.find((item) => item.id === lineId)
@@ -1785,6 +1864,7 @@ window.generateLayoutExcel = downloadLayoutCxc
 window.markLayoutUploaded = markLayoutUploaded
 window.openConfirmPaymentModal = openConfirmPaymentModal
 window.openPagosintReferenceModal = openPagosintReferenceModal
+window.openCieReferenceModal = openCieReferenceModal
 window.focusFirstPagosintReferenceLine = focusFirstPagosintReferenceLine
 window.openRejectLineModal = openRejectLineModal
 
@@ -1992,7 +2072,7 @@ function collectBbvaCieLineIssues(line) {
     () => formatBbvaCieConvenio(line.convenio_number),
     () => formatBbvaCieAmount(line.amount),
     () => formatBbvaCieText(line.payment_concept, BBVA_CIE_CONCEPT_LENGTH, "concepto CIE"),
-    () => formatBbvaCieText(line.payment_reference, BBVA_CIE_REFERENCE_LENGTH, "referencia CIE"),
+    () => formatBbvaCieReference(line.payment_reference, line.convenio_number),
   ]
 
   checks.forEach((check) => {
@@ -2202,7 +2282,7 @@ function serializeBbvaCieLine(line) {
     formatBbvaCieSourceAccount(line.source_account_number),
     formatBbvaCieAmount(line.amount),
     concept,
-    formatBbvaCieText(line.payment_reference, BBVA_CIE_REFERENCE_LENGTH, "referencia CIE"),
+    formatBbvaCieReference(line.payment_reference, line.convenio_number),
   ].join("")
 
   if (row.length !== BBVA_CIE_LINE_LENGTH) {
@@ -2211,6 +2291,78 @@ function serializeBbvaCieLine(line) {
   if (row.includes("|")) throw new Error("registro CIE contiene caracter | no permitido")
   if (!BBVA_CIE_LINE_PATTERN.test(row)) throw new Error("cie_line_invalid_characters")
   return row
+}
+
+function isCfeCieConvenio(value) {
+    const convenio = String(value ?? '').trim();
+    return /^\d{6,7}$/.test(convenio) && convenio.padStart(7, '0') === BBVA_CFE_CONVENIO;
+}
+function cieReferenceError(value, convenio) {
+    const reference = String(value ?? '').trim();
+    if (!reference)
+        return 'La referencia CIE es obligatoria. Copia la línea de captura del recibo.';
+    if (reference.length > BBVA_CIE_REFERENCE_LENGTH)
+        return 'La referencia CIE excede 20 caracteres. Revisa el recibo; no se recorta automáticamente.';
+    if (!/^[\x20-\x7e]+$/.test(reference))
+        return 'La referencia CIE debe usar caracteres ASCII portables, sin acentos ni saltos de línea.';
+    if (reference.includes('|'))
+        return 'La referencia CIE contiene el caracter | no permitido.';
+    if (isCfeCieConvenio(convenio) && (reference.length !== 20 || /\s/.test(reference))) {
+        return 'CFE requiere la línea de captura de 20 caracteres del recibo, sin espacios. No uses una fecha, el número de servicio ni ceros de relleno.';
+    }
+    return null;
+}
+function formatBbvaCieReference(value, convenio) {
+    const error = cieReferenceError(value, convenio);
+    if (error)
+        throw new Error(error);
+    return String(value).trim().padEnd(BBVA_CIE_REFERENCE_LENGTH, ' ');
+}
+function cieReferenceSaveError(error) {
+    const raw = String(error?.message || error || '');
+    const messages = {
+        cie_reference_required: 'Copia la línea de captura o referencia CIE del recibo.',
+        cie_reference_too_long: 'La referencia CIE excede 20 caracteres; no se recorta automáticamente.',
+        cie_reference_invalid: 'La referencia CIE contiene caracteres no permitidos. Copia el dato exacto del recibo.',
+        cie_reference_cfe_requires_20_characters: 'CFE requiere la línea de captura de 20 caracteres del recibo, sin espacios.',
+        cie_reference_bank_rejection_confirmation_required: 'Confirma que el banco rechazó este pago y no lo ejecutó.',
+        cie_reference_line_locked: 'Este pago ya fue cerrado o tiene comprobante. Su referencia no se puede modificar.',
+        cie_reference_changed: 'La referencia cambió mientras la revisabas. Cierra y vuelve a abrir el layout.',
+        cie_reference_not_authorized: 'Tu usuario no tiene acceso para corregir pagos de esta empresa.',
+        cie_reference_line_not_found: 'No se encontró la línea CIE. Actualiza el layout.',
+        not_authenticated: 'Inicia sesión nuevamente para guardar la referencia.',
+    };
+    return messages[raw] || raw || 'No se pudo guardar la referencia CIE.';
+}
+function previewCieConvenio(row) {
+    return String(row.convenio_number || '').trim() || /^CONVENIO\s+(\d{6,7})$/i.exec(String(row.destination_value ?? '').trim())?.[1] || '';
+}
+function ciePreviewProviderIds(preview) {
+    return [...new Set(Object.values(preview).flatMap((rows) => (Array.isArray(rows) ? rows : [])
+            .filter((row) => normalizeDestinationType(row.destination_type) === 'convenio' && row.proveedor_id)
+            .map((row) => row.proveedor_id)))];
+}
+function withCiePreviewConvenios(preview, providers) {
+    const convenios = new Map(providers.map((provider) => [provider.id, provider.convenio_number]));
+    return Object.fromEntries(Object.entries(preview).map(([key, rows]) => [key, Array.isArray(rows) ? rows.map((row) => normalizeDestinationType(row.destination_type) === 'convenio' && row.proveedor_id
+            ? { ...row, convenio_number: convenios.get(row.proveedor_id) ?? null }
+            : row) : rows]));
+}
+function applyCieReferencePreflight(preview) {
+    const result = { ...preview, invalid_data: [...(preview.invalid_data || [])] };
+    for (const key of ['ready_regular', 'ready_extraordinary', 'legacy_eligible']) {
+        result[key] = (preview[key] || []).filter((row) => {
+            if (normalizeDestinationType(row.destination_type) !== 'convenio')
+                return true;
+            const convenio = previewCieConvenio(row);
+            const missing = !/^\d{6,7}$/.test(convenio) ? 'convenio_number' : cieReferenceError(row.payment_reference, convenio) ? 'payment_reference_invalid' : null;
+            if (!missing)
+                return true;
+            result.invalid_data.push({ ...row, classification: 'invalid_data', missing_fields: [...new Set([...(row.missing_fields || []), missing])] });
+            return false;
+        });
+    }
+    return result;
 }
 
 function formatBbvaCieConvenio(value) {
@@ -2394,6 +2546,8 @@ function validateBbvaCieFields(line, lineNumber, errors) {
   if (!/^\d{13}\.\d{2}$/.test(fields.amount)) errors.push(`Layout CIE invalido: importe de linea ${lineNumber} debe cumplir 0000000000000.00.`)
   if (fields.reason !== fields.concept) errors.push(`Layout CIE invalido: concepto duplicado de linea ${lineNumber} no coincide.`)
   if (!/^[\x20-\x7e]{20}$/.test(fields.reference)) errors.push(`Layout CIE invalido: referencia de linea ${lineNumber} no cumple 20 posiciones ASCII.`)
+  const referenceError = cieReferenceError(fields.reference, fields.convenio)
+  if (referenceError) errors.push(`Layout CIE invalido: linea ${lineNumber}. ${referenceError}`)
 }
 
 function parseBbvaCieLine(line) {
@@ -2689,6 +2843,7 @@ function showToast(title, desc, variant = "success") {
 }
 
 function friendlyRpcError(error) {
+  if (String(error?.message || error || "").startsWith("cie_reference_")) return cieReferenceSaveError(error)
   const message = error?.message || String(error || "Error desconocido")
   const known = {
     layout_not_found: "No se encontro el layout.",
