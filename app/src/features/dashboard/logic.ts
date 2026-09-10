@@ -5,6 +5,8 @@ import { ROLE_GROUPS } from '../../lib/roles'
 import type {
   DashboardPayload, DashboardState, Kpis, BudgetRow, YtdRow, IncomeMemberRow,
   ClosureChecklist, HistoricalActual, HistMapeo,
+  BudgetAvailabilityRow, BudgetCategoryMeta, BudgetAggregate, BudgetPartida, BudgetTotals,
+  PaymentRequestRow, RequestsAggregate, RequestStage, RequestStatusLine, TaxesAggregate,
 } from './types'
 
 // ── Formateadores es-MX (idénticos a dashboard.js) ──────────────────────────
@@ -300,6 +302,169 @@ export function demoChartSeries(count: number): YearlySeries {
     cobrado.push(Math.round(baseEsperado * cobroPct[i % 12]))
   }
   return { presupuesto, ejecutado, esperado, cobrado }
+}
+
+// ── Presupuesto: disponible vs usado, por partida ────────────────────────────
+// Umbral de alerta "cerca del límite" (% usado).
+export const BUDGET_WARN_PCT = 90
+
+export const BUDGET_ALL_PERIOD = 'all'
+
+// Etiqueta de mes a partir de 'YYYY-MM-DD' (día 01). En es-MX, capitalizada.
+export function budgetMonthLabel(iso: string): string {
+  const [y, m] = iso.split('-')
+  const d = new Date(Number(y), Number(m) - 1, 1)
+  const s = d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+// % usado seguro para ordenar/mostrar: Infinity cuando hay uso sin presupuesto.
+function budgetPctUsed(budgeted: number, used: number): number {
+  if (budgeted > 0) return (used / budgeted) * 100
+  return used > 0 ? Infinity : 0
+}
+
+// Agrega la vista por partida dentro del periodo elegido ('all' = todo el año, o
+// un 'YYYY-MM-DD'). Suma todos los centros de costo. Ordena por % usado desc.
+// Omite partidas sin presupuesto NI uso; las que tienen uso sin presupuesto sí se
+// listan (aparecen como sobregiradas). Los totales se calculan sobre TODAS las
+// filas del periodo (incluidas las omitidas), para que el resumen no pierda monto.
+export function aggregateBudget(
+  rows: BudgetAvailabilityRow[],
+  categories: Map<string, BudgetCategoryMeta>,
+  period: string,
+): BudgetAggregate {
+  const months = [...new Set(rows.map((r) => r.budget_month).filter((m): m is string => !!m))].sort()
+  const scoped = period === BUDGET_ALL_PERIOD ? rows : rows.filter((r) => r.budget_month === period)
+
+  type Acc = { budgeted: number; committed: number; executed: number }
+  const byCat = new Map<string, Acc>()
+  const totals: BudgetTotals = { budgeted: 0, committed: 0, executed: 0, used: 0, available: 0, pctUsed: 0 }
+
+  for (const r of scoped) {
+    const id = r.budget_category_id || '__sin_partida__'
+    const acc = byCat.get(id) || { budgeted: 0, committed: 0, executed: 0 }
+    acc.budgeted += num(r.budgeted)
+    acc.committed += num(r.committed)
+    acc.executed += num(r.executed)
+    byCat.set(id, acc)
+    totals.budgeted += num(r.budgeted)
+    totals.committed += num(r.committed)
+    totals.executed += num(r.executed)
+  }
+  totals.used = r2(totals.committed + totals.executed)
+  totals.budgeted = r2(totals.budgeted)
+  totals.committed = r2(totals.committed)
+  totals.executed = r2(totals.executed)
+  totals.available = r2(totals.budgeted - totals.used)
+  totals.pctUsed = totals.budgeted > 0 ? (totals.used / totals.budgeted) * 100 : 0
+
+  let omittedCount = 0
+  const partidas: BudgetPartida[] = []
+  for (const [id, acc] of byCat) {
+    const budgeted = r2(acc.budgeted)
+    const committed = r2(acc.committed)
+    const executed = r2(acc.executed)
+    const used = r2(committed + executed)
+    if (budgeted <= 0 && used <= 0) { omittedCount++; continue }
+    const available = r2(budgeted - used)
+    const pctUsed = budgetPctUsed(budgeted, used)
+    const cat = categories.get(id)
+    partidas.push({
+      categoryId: id,
+      name: cat?.name || 'Sin partida',
+      group: cat?.category || 'Sin grupo',
+      budgeted, committed, executed, used, available, pctUsed,
+      over: available < 0,
+      warn: available >= 0 && Number.isFinite(pctUsed) && pctUsed >= BUDGET_WARN_PCT,
+    })
+  }
+  // % usado desc (Infinity = sobregiro sin presupuesto primero); desempate por uso.
+  partidas.sort((a, b) => (b.pctUsed - a.pctUsed) || (b.used - a.used))
+
+  return { partidas, totals, omittedCount, months }
+}
+
+// ── Solicitudes (payment_requests) ───────────────────────────────────────────
+// Etiquetas por status (es-MX). Alineadas con solicitudes/aprobaciones.
+export const REQUEST_STATUS_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  submitted: 'Enviada',
+  finance_validation: 'Validación financiera',
+  changes_requested: 'Cambios solicitados',
+  approved: 'Aprobada',
+  scheduled: 'Programada',
+  paid: 'Pagada',
+  rejected: 'Rechazada',
+  cancelled: 'Cancelada',
+}
+
+// Etapas del embudo. "en curso" agrupa todo lo que sigue en trámite.
+const FUNNEL_STAGES: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'en_curso', label: 'En curso', statuses: ['draft', 'submitted', 'changes_requested', 'finance_validation'] },
+  { key: 'aprobadas', label: 'Aprobadas', statuses: ['approved'] },
+  { key: 'programadas', label: 'Programadas', statuses: ['scheduled'] },
+  { key: 'pagadas', label: 'Pagadas', statuses: ['paid'] },
+]
+
+// Filtra por periodo del presupuesto: 'all' = todo el año cargado, o un
+// 'YYYY-MM-DD' concreto (comparado contra budget_month).
+function scopeRequests(rows: PaymentRequestRow[], period: string): PaymentRequestRow[] {
+  return period === BUDGET_ALL_PERIOD ? rows : rows.filter((r) => r.budget_month === period)
+}
+
+// Agrega payment_requests por etapa del embudo, alertas y desglose por status.
+// Monto: amount_requested para todas las etapas (incluidas las pagadas: el
+// esquema no tiene columna paid_amount/monto pagado real, así que se declara el
+// uso de amount_requested como aproximación del pagado).
+export function aggregateRequests(rows: PaymentRequestRow[], period: string): RequestsAggregate {
+  const months = [...new Set(rows.map((r) => r.budget_month).filter((m): m is string => !!m))].sort()
+  const scoped = scopeRequests(rows, period)
+
+  const byStatusMap = new Map<string, { count: number; amount: number }>()
+  for (const r of scoped) {
+    const st = r.status || 'sin_estatus'
+    const acc = byStatusMap.get(st) || { count: 0, amount: 0 }
+    acc.count += 1
+    acc.amount += num(r.amount_requested)
+    byStatusMap.set(st, acc)
+  }
+  const pick = (st: string) => byStatusMap.get(st) || { count: 0, amount: 0 }
+
+  const funnel: RequestStage[] = FUNNEL_STAGES.map((stage) => {
+    let count = 0, amount = 0
+    for (const st of stage.statuses) { const a = pick(st); count += a.count; amount += r2(a.amount) }
+    return { key: stage.key, label: stage.label, count, amount: r2(amount) }
+  })
+
+  const rejected = { count: pick('rejected').count, amount: r2(pick('rejected').amount) }
+  const cr = pick('changes_requested')
+  const fv = pick('finance_validation')
+  const changesRequested = { count: cr.count, amount: r2(cr.amount) }
+  const inReview = { count: cr.count + fv.count, amount: r2(cr.amount + fv.amount) }
+
+  const byStatus: RequestStatusLine[] = [...byStatusMap.entries()]
+    .map(([status, a]) => ({ status, label: REQUEST_STATUS_LABELS[status] || status, count: a.count, amount: r2(a.amount) }))
+    .sort((a, b) => b.amount - a.amount || b.count - a.count)
+
+  return { total: scoped.length, funnel, rejected, changesRequested, inReview, byStatus, months }
+}
+
+// ── Impuestos (desglose fiscal de payment_requests) ──────────────────────────
+// IVA = suma tax_amount (acreditable). Retenciones = suma withholding_amount
+// (IVA/ISR por enterar al SAT). Caveat: no todas las solicitudes traen desglose,
+// por eso se reporta N (con desglose) de M (total del periodo).
+export function aggregateTaxes(rows: PaymentRequestRow[], period: string): TaxesAggregate {
+  const scoped = scopeRequests(rows, period)
+  let iva = 0, retenciones = 0, withDetail = 0
+  for (const r of scoped) {
+    const hasIva = r.tax_amount !== null && r.tax_amount !== undefined
+    const hasRet = r.withholding_amount !== null && r.withholding_amount !== undefined
+    if (hasIva) iva += num(r.tax_amount)
+    if (hasRet) retenciones += num(r.withholding_amount)
+    if (hasIva || hasRet) withDetail += 1
+  }
+  return { iva: r2(iva), retenciones: r2(retenciones), withDetail, total: scoped.length }
 }
 
 // ── Histórico ────────────────────────────────────────────────────────────────

@@ -5,19 +5,25 @@ import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
-import { TableSkeletonRows } from '../../components/ui/Skeleton'
+import { TableSkeletonRows, Skeleton } from '../../components/ui/Skeleton'
 import {
   fetchDashboardPayload, fetchHistoricalPeriods, fetchHistoricalYear, fetchHistoricalAll, loadHistMapeo,
+  fetchBudgetAvailability, fetchPaymentRequests,
 } from './api'
 import {
   toDashboardState, currentPeriodKey, fmtDateTime, friendlyError, canViewDashboard,
-  computeKpis, computeClosure, filterMembers, filterExpenses, hasBudget, computeYtdTotals,
+  computeKpis, computeClosure, filterMembers,
   filterIncome, computeIncomeTotals, incomeStatusBadge, closureStatusBadge,
   money, whole, pct, num, uniqueSorted, normKey,
-  buildYearMonths, aggregateYearly, hasChartData, demoChartSeries,
+  buildYearMonths, aggregateYearly, hasChartData,
   aggregateHistYear, aggregateHistAll, histKpisTotals, buildHistMatrix, fmtCell, fmtMoney0, yearColor,
+  aggregateBudget, budgetMonthLabel, BUDGET_ALL_PERIOD,
+  aggregateRequests, aggregateTaxes,
 } from './logic'
-import type { DashboardState, SectionTab, HistMapeo } from './types'
+import type {
+  DashboardState, SectionTab, HistMapeo, BudgetAvailabilityRow, BudgetCategoryMeta, BudgetPartida,
+  PaymentRequestRow, RequestsAggregate, TaxesAggregate, RequestStage,
+} from './types'
 import type { HistMatrix } from './logic'
 import type { Serie } from './charts'
 import { ComboChart } from './charts'
@@ -32,8 +38,16 @@ const C = {
   esperado: 'rgba(16,185,129,.45)', cobrado: 'rgba(16,185,129,.9)',
 }
 
-type ChartModel = { labels: string[]; series: Serie[]; subtitle: string }
+type ChartModel = { labels: string[]; series: Serie[]; subtitle: string; empty?: boolean }
+type AlertTone = 'danger' | 'warning' | 'info'
+type AlertItem = { tone: AlertTone; value: string; label: string; target: string }
 type LegendItem = { color: string; label: string; dashed?: boolean; light?: boolean; note?: boolean }
+
+// Enfoca/scrollea a una sección por id (alertas accionables). No-op si no existe.
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 type Cell = { text: string; right?: boolean; color?: string; bold?: boolean; capitalize?: boolean }
 type HistTableModel = { title: string; head: Cell[]; rows: Cell[][]; foot: Cell[] | null }
 type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: number }
@@ -64,12 +78,8 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState('')
 
   // Filtros / tabs
-  const [activeTab, setActiveTab] = useState<SectionTab>('expenses')
+  const [activeTab, setActiveTab] = useState<SectionTab>('income')
   const [memberSearch, setMemberSearch] = useState('')
-  const [expSearch, setExpSearch] = useState('')
-  const [expCompany, setExpCompany] = useState('todos')
-  const [expCenter, setExpCenter] = useState('todos')
-  const [expCategory, setExpCategory] = useState('todos')
   const [incSearch, setIncSearch] = useState('')
   const [incStatus, setIncStatus] = useState('todos')
   const [incLineage, setIncLineage] = useState('todos')
@@ -92,9 +102,17 @@ export default function DashboardPage() {
   const [showHistory, setShowHistory] = useState(false)
   const [showExport, setShowExport] = useState(false)
 
-  useEffect(() => {
-    setExpCompany(companyName ? normKey(companyName) : '__sin_empresa_activa__')
-  }, [companyId, companyName])
+  // Presupuesto (disponible vs usado por partida) — vista budget_availability.
+  const [budgetData, setBudgetData] = useState<{ rows: BudgetAvailabilityRow[]; categories: Map<string, BudgetCategoryMeta> } | null>(null)
+  const [budgetLoading, setBudgetLoading] = useState(false)
+  const [budgetError, setBudgetError] = useState(false)
+  const [budgetPeriod, setBudgetPeriod] = useState<string>(BUDGET_ALL_PERIOD)
+
+  // Solicitudes / Impuestos (payment_requests) — comparten el selector de periodo
+  // del presupuesto (budgetPeriod).
+  const [reqData, setReqData] = useState<PaymentRequestRow[] | null>(null)
+  const [reqLoading, setReqLoading] = useState(false)
+  const [reqError, setReqError] = useState(false)
 
   // En modo anual la vista histórica está activa desde el primer paint (equivalente
   // a la clase `anual-boot` del vanilla, que oculta lo operativo sin flash).
@@ -126,19 +144,19 @@ export default function DashboardPage() {
     try {
       const results = await Promise.all(months.map((m) => fetchDashboardPayload(m)))
       const agg = aggregateYearly(results)
-      const real = hasChartData(agg)
-      const series = real ? agg : demoChartSeries(labels.length)
-      const subtitle = real
-        ? `Enero – ${labels[labels.length - 1]} ${year}`
-        : `Enero – ${labels[labels.length - 1]} ${year} · datos de ejemplo`
+      // Sin datos reales del periodo => empty state honesto (nunca serie de ejemplo).
+      if (!hasChartData(agg)) {
+        setOpChart({ labels: [], series: [], subtitle: 'Sin datos del periodo', empty: true })
+        return
+      }
       setOpChart({
         labels,
-        subtitle,
+        subtitle: `Enero – ${labels[labels.length - 1]} ${year}`,
         series: [
-          { kind: 'bar', label: 'Presupuesto', data: series.presupuesto, color: C.presupBorder, fill: C.presupFill, axis: 'y' },
-          { kind: 'bar', label: 'Ejecutado', data: series.ejecutado, color: C.ejecBorder, fill: C.ejecFill, axis: 'y' },
-          { kind: 'line', label: 'Esperado', data: series.esperado, color: C.esperado, dashed: true, axis: 'y2' },
-          { kind: 'line', label: 'Cobrado', data: series.cobrado, color: C.cobrado, axis: 'y2' },
+          { kind: 'bar', label: 'Presupuesto', data: agg.presupuesto, color: C.presupBorder, fill: C.presupFill, axis: 'y' },
+          { kind: 'bar', label: 'Ejecutado', data: agg.ejecutado, color: C.ejecBorder, fill: C.ejecFill, axis: 'y' },
+          { kind: 'line', label: 'Esperado', data: agg.esperado, color: C.esperado, dashed: true, axis: 'y2' },
+          { kind: 'line', label: 'Cobrado', data: agg.cobrado, color: C.cobrado, axis: 'y2' },
         ],
       })
     } catch {
@@ -290,6 +308,47 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canView, anualMode])
 
+  // Carga de presupuesto (año en curso de la empresa activa). Solo vista operativa.
+  useEffect(() => {
+    if (!canView || anualMode || !companyId) { setBudgetData(null); return }
+    let cancelled = false
+    setBudgetLoading(true)
+    setBudgetError(false)
+    setBudgetPeriod(BUDGET_ALL_PERIOD)
+    ;(async () => {
+      try {
+        const data = await fetchBudgetAvailability(companyId, new Date().getFullYear())
+        if (!cancelled) setBudgetData(data)
+      } catch (err) {
+        if (!cancelled) { setBudgetError(true); showToast('Error al cargar presupuesto', friendlyError(err), 'error') }
+      } finally {
+        if (!cancelled) setBudgetLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView, anualMode, companyId])
+
+  // Carga de solicitudes (año en curso de la empresa activa). Solo vista operativa.
+  useEffect(() => {
+    if (!canView || anualMode || !companyId) { setReqData(null); return }
+    let cancelled = false
+    setReqLoading(true)
+    setReqError(false)
+    ;(async () => {
+      try {
+        const data = await fetchPaymentRequests(companyId, new Date().getFullYear())
+        if (!cancelled) setReqData(data)
+      } catch (err) {
+        if (!cancelled) { setReqError(true); showToast('Error al cargar solicitudes', friendlyError(err), 'error') }
+      } finally {
+        if (!cancelled) setReqLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView, anualMode, companyId])
+
   function onPeriodChange(v: string) {
     setPeriodKey(v)
     void loadDashboard(v || currentPeriodKey())
@@ -326,30 +385,72 @@ export default function DashboardPage() {
     [ds, companyId],
   )
   const scopedCompanyLabel = scopedBudget[0]?.company || companyName
-  const scopedYtd = useMemo(
-    () => (ds && scopedCompanyLabel ? ds.ytd.filter((row) => normKey(row.company) === normKey(scopedCompanyLabel)) : []),
-    [ds, scopedCompanyLabel],
-  )
   const kpis = useMemo(() => (ds ? computeKpis(ds.kpis, scopedBudget, ds.closureChecklist) : null), [ds, scopedBudget])
   const closure = useMemo(() => (ds ? computeClosure(ds.kpis, ds.closureChecklist) : null), [ds])
   const members = useMemo(() => (ds ? filterMembers(ds.incomeMembers, memberSearch) : []), [ds, memberSearch])
 
-  const expenseCompanies = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.company)), [scopedBudget])
-  const expenseCenters = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.cost_center)), [scopedBudget])
-  const expenseCategories = useMemo(() => uniqueSorted(scopedBudget.map((r) => r.budget_category)), [scopedBudget])
-  const expenses = useMemo(
-    () => filterExpenses(scopedBudget, { search: expSearch, company: expCompany, costCenter: expCenter, category: expCategory }),
-    [scopedBudget, expSearch, expCompany, expCenter, expCategory],
-  )
-  const showBudgetNote = ds ? !hasBudget(scopedBudget) : false
+  // Modelo de socios (cuotas/estirpe): se oculta cuando la empresa activa no tiene
+  // socios/cuotas, en vez de mostrar tablas vacías.
+  const hasMembers = !!ds && ds.incomeMembers.length > 0
 
-  const ytdTotals = useMemo(() => (ds ? computeYtdTotals(scopedYtd) : null), [ds, scopedYtd])
   const incomeLineages = useMemo(() => (ds ? uniqueSorted(ds.incomeMembers.map((r) => r.lineage)) : []), [ds])
   const income = useMemo(
     () => (ds ? filterIncome(ds.incomeMembers, { search: incSearch, status: incStatus, lineage: incLineage }) : []),
     [ds, incSearch, incStatus, incLineage],
   )
   const incomeTotals = useMemo(() => computeIncomeTotals(income), [income])
+
+  const budgetAgg = useMemo(
+    () => (budgetData ? aggregateBudget(budgetData.rows, budgetData.categories, budgetPeriod) : null),
+    [budgetData, budgetPeriod],
+  )
+  const periodLabel = budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${new Date().getFullYear()}` : budgetMonthLabel(budgetPeriod)
+
+  // Tabs visibles: "Ingresos" (modelo de socios) solo si la empresa tiene cuotas.
+  const visibleTabs = useMemo<[SectionTab, string][]>(() => {
+    const t: [SectionTab, string][] = []
+    if (hasMembers) t.push(['income', 'Ingresos'])
+    t.push(['cash', 'Efectivo'], ['incidents', 'Incidencias'])
+    return t
+  }, [hasMembers])
+
+  // Si la pestaña activa deja de existir (p.ej. sin socios), cae a la primera.
+  useEffect(() => {
+    if (!visibleTabs.some(([t]) => t === activeTab)) setActiveTab(visibleTabs[0][0])
+  }, [visibleTabs, activeTab])
+  const requestsAgg: RequestsAggregate | null = useMemo(
+    () => (reqData ? aggregateRequests(reqData, budgetPeriod) : null),
+    [reqData, budgetPeriod],
+  )
+  const taxesAgg: TaxesAggregate | null = useMemo(
+    () => (reqData ? aggregateTaxes(reqData, budgetPeriod) : null),
+    [reqData, budgetPeriod],
+  )
+
+  // ── Fila de alertas / estado del mes (accionables) ──────────────────────────
+  const overspentCount = budgetAgg ? budgetAgg.partidas.filter((p) => p.over).length : 0
+  const closurePending = !!closure && closure.status !== 'closed'
+  const alerts = useMemo<AlertItem[]>(() => {
+    const out: AlertItem[] = []
+    if (overspentCount > 0) out.push({
+      tone: 'danger', value: whole(overspentCount),
+      label: `partida${overspentCount === 1 ? '' : 's'} sobregirada${overspentCount === 1 ? '' : 's'}`, target: 'sec-budget',
+    })
+    if (requestsAgg && requestsAgg.rejected.count > 0) out.push({
+      tone: 'danger', value: whole(requestsAgg.rejected.count), label: 'solicitudes rechazadas', target: 'sec-requests',
+    })
+    if (requestsAgg && requestsAgg.inReview.count > 0) out.push({
+      tone: 'warning', value: whole(requestsAgg.inReview.count), label: 'solicitudes en revisión', target: 'sec-requests',
+    })
+    if (taxesAgg && taxesAgg.retenciones > 0) out.push({
+      tone: 'warning', value: money(taxesAgg.retenciones), label: 'retenciones por enterar', target: 'sec-taxes',
+    })
+    if (closurePending) out.push({
+      tone: 'info', value: '1', label: 'cierre pendiente', target: 'sec-closure',
+    })
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overspentCount, requestsAgg, taxesAgg, closurePending])
 
   const cash = ds?.kpis.efectivo || {}
   const checks = ds?.closureChecklist?.checks || {}
@@ -476,6 +577,30 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── Alertas / estado del mes (operativo) — lo primero tras los KPIs ── */}
+      {!inHistView && (
+        <div className={s.alertsRow}>
+          {alerts.length === 0 ? (
+            <div className={`${s.alertCard} ${s.ok}`}>
+              <span className={s.alertValue}>✓</span>
+              <span className={s.alertLabel}>Todo en orden este periodo</span>
+            </div>
+          ) : (
+            alerts.map((a, i) => (
+              <button
+                key={i}
+                type="button"
+                className={`${s.alertCard} ${s[a.tone]}`}
+                onClick={() => scrollToSection(a.target)}
+              >
+                <span className={s.alertValue}>{a.value}</span>
+                <span className={s.alertLabel}>{a.label}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {/* Gráfica principal */}
       <div className={s.chartCard}>
         <div className={s.panelHeader}>
@@ -504,6 +629,8 @@ export default function DashboardPage() {
               leftTitle={inHistView ? undefined : 'Gastos'}
               rightTitle={inHistView ? undefined : 'Ingresos'}
             />
+          ) : !inHistView && opChart.empty ? (
+            <div className={s.chartEmpty}>Sin datos del periodo</div>
           ) : null}
         </div>
       </div>
@@ -551,9 +678,9 @@ export default function DashboardPage() {
       {/* ── Vista operativa ── */}
       {!inHistView && (
         <>
-          <div className={s.dashGrid}>
-            {memberCard(false)}
-            <div className={`${s.chartCard} ${s.closureCard}`}>
+          <div className={s.dashGrid} style={hasMembers ? undefined : { gridTemplateColumns: '1fr' }}>
+            {hasMembers && memberCard(false)}
+            <div id="sec-closure" className={`${s.chartCard} ${s.closureCard}`}>
               <div className={s.panelHeader}>
                 <div>
                   <h2>Checklist de cierre</h2>
@@ -585,82 +712,208 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* ── Presupuesto: disponible vs usado, por partida ── */}
+          <section id="sec-budget" className={s.tableCard}>
+            <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
+              <div>
+                <h2>Presupuesto — disponible vs usado por partida</h2>
+                <div className={s.panelSub}>
+                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${new Date().getFullYear()}` : budgetMonthLabel(budgetPeriod)}
+                </div>
+              </div>
+              <div className={s.budgetLegend}>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--emerald)' }} />Ejecutado</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--amber)' }} />Comprometido</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--border)' }} />Disponible</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Sobregirado</div>
+              </div>
+              <label className={s.periodField}>
+                <span>Periodo</span>
+                <select className={s.budgetSelect} value={budgetPeriod} onChange={(e) => setBudgetPeriod(e.target.value)} disabled={!budgetAgg || budgetLoading}>
+                  <option value={BUDGET_ALL_PERIOD}>Año completo</option>
+                  {budgetAgg?.months.map((m) => <option key={m} value={m}>{budgetMonthLabel(m)}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {budgetAgg && !budgetLoading && !budgetError && (budgetAgg.partidas.length > 0 || budgetAgg.totals.budgeted > 0) && (
+              <div className={s.miniGrid}>
+                {([
+                  ['Presupuestado', money(budgetAgg.totals.budgeted)],
+                  ['Usado', money(budgetAgg.totals.used)],
+                  ['Disponible', money(budgetAgg.totals.available)],
+                  ['% usado', pct(budgetAgg.totals.pctUsed)],
+                ] as [string, string][]).map(([l, v]) => (
+                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
+                ))}
+              </div>
+            )}
+
+            {budgetLoading && (
+              <div className={s.budgetList}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className={s.budgetRow}>
+                    <div className={s.budgetRowHead}><Skeleton width="40%" /><Skeleton width={48} /></div>
+                    <Skeleton width="100%" height={10} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!budgetLoading && budgetError && <div className={s.tableMsg}>No se pudo cargar el presupuesto.</div>}
+            {!budgetLoading && !budgetError && budgetAgg && budgetAgg.partidas.length === 0 && (
+              <div className={s.tableMsg}>Sin presupuesto cargado para esta empresa o periodo.</div>
+            )}
+
+            {!budgetLoading && !budgetError && budgetAgg && budgetAgg.partidas.length > 0 && (
+              <>
+                <div className={s.budgetList}>
+                  {budgetAgg.partidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
+                </div>
+                {budgetAgg.omittedCount > 0 && (
+                  <div className={s.budgetOmitNote}>
+                    {budgetAgg.omittedCount} partida{budgetAgg.omittedCount === 1 ? '' : 's'} sin presupuesto ni uso omitida{budgetAgg.omittedCount === 1 ? '' : 's'} del desglose.
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          {/* ── Solicitudes: cómo van vs pagadas ── */}
+          <section id="sec-requests" className={s.tableCard}>
+            <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
+              <div>
+                <h2>Solicitudes — cómo van vs pagadas</h2>
+                <div className={s.panelSub}>
+                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {periodLabel} · por periodo presupuestal (budget_month)
+                </div>
+              </div>
+            </div>
+
+            {reqLoading && (
+              <div className={s.budgetList}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className={s.budgetRow}><div className={s.budgetRowHead}><Skeleton width="30%" /><Skeleton width={60} /></div></div>
+                ))}
+              </div>
+            )}
+            {!reqLoading && reqError && <div className={s.tableMsg}>No se pudieron cargar las solicitudes.</div>}
+            {!reqLoading && !reqError && requestsAgg && requestsAgg.total === 0 && (
+              <div className={s.tableMsg}>Sin solicitudes para esta empresa o periodo.</div>
+            )}
+
+            {!reqLoading && !reqError && requestsAgg && requestsAgg.total > 0 && (
+              <>
+                {/* Embudo por etapa: conteo + monto */}
+                <div className={s.funnelRow}>
+                  {requestsAgg.funnel.map((st: RequestStage, i) => (
+                    <div key={st.key} className={`${s.funnelStage} ${st.key === 'pagadas' ? s.paid : ''}`}>
+                      <span className={s.funnelLabel}>{st.label}</span>
+                      <strong className={s.funnelCount}>{whole(st.count)}</strong>
+                      <span className={s.funnelAmount}>{money(st.amount)}</span>
+                      {i < requestsAgg.funnel.length - 1 && <span className={s.funnelArrow} aria-hidden>→</span>}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Alertas resaltadas */}
+                {(requestsAgg.rejected.count > 0 || requestsAgg.changesRequested.count > 0) && (
+                  <div className={s.reqAlerts}>
+                    {requestsAgg.rejected.count > 0 && (
+                      <div className={`${s.reqAlert} ${s.danger}`}>
+                        <span>Rechazadas</span>
+                        <strong>{whole(requestsAgg.rejected.count)} · {money(requestsAgg.rejected.amount)}</strong>
+                      </div>
+                    )}
+                    {requestsAgg.changesRequested.count > 0 && (
+                      <div className={`${s.reqAlert} ${s.warning}`}>
+                        <span>Cambios solicitados</span>
+                        <strong>{whole(requestsAgg.changesRequested.count)} · {money(requestsAgg.changesRequested.amount)}</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Desglose por status */}
+                <div className={s.tableWrap}>
+                  <table className={s.table}>
+                    <thead><tr><th>Estatus</th><th className={s.right}>Solicitudes</th><th className={s.right}>Monto</th></tr></thead>
+                    <tbody>
+                      {requestsAgg.byStatus.map((r) => (
+                        <tr key={r.status}>
+                          <td><span className={s.cellMain}>{r.label}</span></td>
+                          <td className={s.right}>{whole(r.count)}</td>
+                          <td className={s.right}>{money(r.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td style={{ fontWeight: 800 }}>Total</td>
+                        <td className={s.right} style={{ fontWeight: 800 }}>{whole(requestsAgg.total)}</td>
+                        <td className={s.right} style={{ fontWeight: 800 }}>{money(requestsAgg.byStatus.reduce((a, r) => a + r.amount, 0))}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                <div className={s.budgetOmitNote}>
+                  Monto = importe solicitado (amount_requested). El esquema no registra un monto pagado real, así que las pagadas también usan el solicitado.
+                </div>
+              </>
+            )}
+          </section>
+
+          {/* ── Impuestos: desglose fiscal ── */}
+          <section id="sec-taxes" className={s.tableCard}>
+            <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
+              <div>
+                <h2>Impuestos — desglose fiscal</h2>
+                <div className={s.panelSub}>
+                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {periodLabel}
+                </div>
+              </div>
+            </div>
+
+            {reqLoading && (
+              <div className={s.miniGrid}>
+                {Array.from({ length: 2 }).map((_, i) => <div key={i} className={s.miniCard}><Skeleton width="60%" /><Skeleton width="40%" height={16} /></div>)}
+              </div>
+            )}
+            {!reqLoading && reqError && <div className={s.tableMsg}>No se pudo cargar el desglose fiscal.</div>}
+            {!reqLoading && !reqError && taxesAgg && taxesAgg.withDetail === 0 && (
+              <div className={s.tableMsg}>
+                Ninguna de las {whole(taxesAgg.total)} solicitud{taxesAgg.total === 1 ? '' : 'es'} del periodo trae desglose fiscal (IVA / retenciones).
+              </div>
+            )}
+            {!reqLoading && !reqError && taxesAgg && taxesAgg.withDetail > 0 && (
+              <>
+                <div className={s.miniGrid} style={{ gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
+                  <div className={`${s.miniCard} ${s.taxIva}`}>
+                    <span>IVA acreditable</span>
+                    <strong>{money(taxesAgg.iva)}</strong>
+                    <span className={s.taxHint}>Suma de tax_amount</span>
+                  </div>
+                  <div className={`${s.miniCard} ${s.taxRet}`}>
+                    <span>Retenciones por enterar</span>
+                    <strong>{money(taxesAgg.retenciones)}</strong>
+                    <span className={s.taxHint}>IVA/ISR retenido · withholding_amount</span>
+                  </div>
+                </div>
+                <div className={s.budgetOmitNote}>
+                  {whole(taxesAgg.withDetail)} de {whole(taxesAgg.total)} solicitud{taxesAgg.total === 1 ? '' : 'es'} con desglose fiscal en el periodo. El resto no captura IVA ni retenciones.
+                </div>
+              </>
+            )}
+          </section>
+
           <div className={s.tabsBlock}>
             <div className={s.sectionTabs}>
-              {([['expenses', 'Gastos del mes'], ['ytd', 'YTD'], ['income', 'Ingresos'], ['cash', 'Efectivo'], ['incidents', 'Incidencias']] as [SectionTab, string][]).map(([tab, label]) => (
+              {visibleTabs.map(([tab, label]) => (
                 <button key={tab} type="button" className={`${s.sectionTab} ${activeTab === tab ? s.active : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>
               ))}
             </div>
           </div>
 
-          {activeTab === 'expenses' && (
-            <section className={s.tableCard}>
-              <div className={s.toolbar} style={{ gridTemplateColumns: 'minmax(200px,1fr) 160px 160px 160px' }}>
-                <input type="search" placeholder="Buscar empresa, centro o partida..." value={expSearch} onChange={(e) => setExpSearch(e.target.value)} />
-                <select value={expCompany} disabled aria-label="Empresa activa">{expenseCompanies.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}{expenseCompanies.length === 0 && <option value="__sin_empresa_activa__">Sin datos de empresa</option>}</select>
-                <select value={expCenter} onChange={(e) => setExpCenter(e.target.value)}><option value="todos">Centro: Todos</option>{expenseCenters.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
-                <select value={expCategory} onChange={(e) => setExpCategory(e.target.value)}><option value="todos">Partida: Todas</option>{expenseCategories.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
-              </div>
-              {showBudgetNote && <div className={s.budgetNote}>El presupuesto base esta pendiente de conexion al modelo presupuestal final.</div>}
-              <div className={s.tableWrap}>
-                <table className={s.table} style={{ minWidth: 980 }}>
-                  <thead><tr><th>Empresa</th><th>Centro</th><th>Partida</th><th>Codigo</th><th>Presupuesto</th><th>Comprometido</th><th>Ejecutado</th><th>Disponible</th><th>Var. $</th><th>Var. %</th></tr></thead>
-                  <tbody>
-                    {!ds && <TableSkeletonRows cols={10} rows={4} />}
-                    {ds && expenses.length === 0 && <tr><td colSpan={10} className={s.tableMsg}>Sin datos para este filtro.</td></tr>}
-                    {ds && expenses.map((r, i) => (
-                      <tr key={i}>
-                        <td><span className={s.cellMain}>{r.company || 'Sin empresa'}</span></td>
-                        <td>{r.cost_center || 'Sin centro'}</td>
-                        <td>{r.budget_category || 'Sin partida'}</td>
-                        <td style={{ color: 'var(--text-3)' }}>{r.category_code || '-'}</td>
-                        <td>{money(r.budget_amount)}</td>
-                        <td>{money(r.committed_amount)}</td>
-                        <td>{money(r.executed_amount)}</td>
-                        <td>{money(r.available_amount)}</td>
-                        <td style={{ color: num(r.variance_amount) < 0 ? 'var(--ruby)' : 'inherit' }}>{money(r.variance_amount)}</td>
-                        <td>{pct(r.variance_pct)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
-          {activeTab === 'ytd' && (
-            <section className={s.tableCard}>
-              <div className={s.miniGrid}>
-                {ytdTotals && [['Presupuesto YTD', money(ytdTotals.budget)], ['Comprometido YTD', money(ytdTotals.committed)], ['Ejecutado YTD', money(ytdTotals.executed)], ['Disponible YTD', money(ytdTotals.available)]].map(([l, v]) => (
-                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                ))}
-              </div>
-              <div className={s.tableWrap}>
-                <table className={s.table} style={{ minWidth: 900 }}>
-                  <thead><tr><th>Empresa</th><th>Centro</th><th>Partida</th><th>Presupuesto YTD</th><th>Comprometido</th><th>Ejecutado</th><th>Disponible</th><th>Var. $</th><th>Var. %</th></tr></thead>
-                  <tbody>
-                    {!ds && <TableSkeletonRows cols={9} rows={4} />}
-                    {ds && scopedYtd.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin datos acumulados para la empresa activa.</td></tr>}
-                    {ds && scopedYtd.map((r, i) => (
-                      <tr key={i}>
-                        <td>{r.company || 'Sin empresa'}</td>
-                        <td>{r.cost_center || 'Sin centro'}</td>
-                        <td>{r.budget_category || 'Sin partida'}</td>
-                        <td>{money(r.ytd_budget)}</td>
-                        <td>{money(r.ytd_committed)}</td>
-                        <td>{money(r.ytd_executed)}</td>
-                        <td>{money(r.ytd_available)}</td>
-                        <td>{money(r.ytd_variance_amount)}</td>
-                        <td>{pct(r.ytd_variance_pct)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
-          {activeTab === 'income' && (
+          {activeTab === 'income' && hasMembers && (
             <section className={s.tableCard}>
               <div className={s.miniGrid}>
                 {[['Total esperado', money(incomeTotals.expected)], ['Total cobrado', money(incomeTotals.paid)], ['Total pendiente', money(incomeTotals.pending)], ['Socios con saldo', whole(incomeTotals.members)]].map(([l, v]) => (
@@ -842,4 +1095,40 @@ function HistCuentasPanel({ matrix, openGroups, onToggle }: { matrix: HistMatrix
 // Agrupa filas de grupo + sub-partidas sin envoltura DOM extra.
 function FragmentGroup({ children }: { open: boolean; children: ReactNode }) {
   return <>{children}</>
+}
+
+// ── Fila de partida: barra usado (ejecutado+comprometido) vs disponible ─────────
+function BudgetPartidaRow({ p }: { p: BudgetPartida }) {
+  // Escala: 100% = presupuestado; si está sobregirado, el usado (mayor) llena la
+  // barra. base = max(presupuestado, usado) para no perder proporción al sobregirar.
+  const base = Math.max(p.budgeted, p.used, 1)
+  const exW = (p.executed / base) * 100
+  const comW = (p.committed / base) * 100
+  const availW = p.available > 0 ? (p.available / base) * 100 : 0
+  const rowCls = `${s.budgetRow} ${p.over ? s.alert : p.warn ? s.warn : ''}`
+  const pctCls = `${s.budgetPct} ${p.over ? s.alert : p.warn ? s.warn : ''}`
+  const pctText = Number.isFinite(p.pctUsed) ? pct(p.pctUsed) : 'sin presup.'
+  return (
+    <div className={rowCls}>
+      <div className={s.budgetRowHead}>
+        <div>
+          <span className={s.budgetPartida}>{p.name}</span>
+          {p.group && p.group !== 'Sin grupo' && <span className={s.budgetGroup}>{p.group}</span>}
+        </div>
+        <span className={pctCls}>{p.over ? 'Sobregirado · ' : ''}{pctText}</span>
+      </div>
+      <div className={s.budgetBar} role="img" aria-label={`Usado ${pctText} de ${money(p.budgeted)}`}>
+        <div className={`${s.budgetSeg} ${s.executed}`} style={{ width: `${exW}%` }} />
+        <div className={`${s.budgetSeg} ${s.committed}`} style={{ width: `${comW}%` }} />
+        {availW > 0 && <div className={s.budgetSeg} style={{ width: `${availW}%` }} />}
+      </div>
+      <div className={s.budgetFigures}>
+        <span>Presupuestado<strong>{money(p.budgeted)}</strong></span>
+        <span>Ejecutado<strong>{money(p.executed)}</strong></span>
+        <span>Comprometido<strong>{money(p.committed)}</strong></span>
+        <span>Usado<strong>{money(p.used)}</strong></span>
+        <span>Disponible<strong className={p.over ? s.alert : undefined}>{money(p.available)}</strong></span>
+      </div>
+    </div>
+  )
 }

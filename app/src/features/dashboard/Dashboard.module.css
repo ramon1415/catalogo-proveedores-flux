@@ -172,6 +172,82 @@
 .nowrap { white-space: nowrap; }
 .capitalize { text-transform: capitalize; }
 
+/* ── Sección Presupuesto (disponible vs usado por partida) ─────────────────── */
+/* Colores semánticos: ejecutado (verde), comprometido (ámbar), disponible
+   (neutro), sobregirado (rojo). Todos vía tokens theme-aware de .dash. */
+.budgetSelect {
+  min-height: 32px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
+  color: var(--text-1); padding: 0 10px; font: inherit; font-size: 12.5px; font-weight: 700; outline: none;
+}
+.budgetOmitNote { padding: 8px 16px 0; font-size: 11px; color: var(--text-3); }
+.budgetList { display: grid; gap: 8px; padding: 12px 14px; }
+.budgetRow { border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.012); padding: 11px 13px; }
+.budgetRow.alert { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 7%, transparent); }
+.budgetRow.warn { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.budgetRowHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.budgetPartida { font-size: 12.5px; font-weight: 700; color: var(--text-1); }
+.budgetGroup { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-3); margin-left: 8px; }
+.budgetPct { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
+.budgetPct.alert { color: var(--ruby); }
+.budgetPct.warn { color: var(--amber); }
+.budgetBar { height: 10px; border-radius: 6px; overflow: hidden; background: var(--border); display: flex; }
+.budgetSeg { height: 100%; }
+.budgetSeg.executed { background: var(--emerald); }
+.budgetSeg.committed { background: var(--amber); }
+.budgetFigures { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 11.5px; }
+.budgetFigures span { color: var(--text-3); }
+.budgetFigures strong { color: var(--text-1); font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 5px; }
+.budgetFigures strong.alert { color: var(--ruby); }
+.budgetLegend { display: flex; flex-wrap: wrap; gap: 14px; }
+.budgetLegend .chartLegendItem { font-size: 11px; color: var(--text-3); }
+
+/* ── Fila de alertas / estado del mes ──────────────────────────────────────── */
+.alertsRow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.alertCard {
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-radius: 11px;
+  border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; font: inherit; text-align: left;
+}
+.alertCard:hover { background: var(--bg-hover); }
+.alertCard.danger { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 8%, transparent); }
+.alertCard.warning { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.alertCard.info { border-color: color-mix(in srgb, var(--violet) 40%, var(--border)); background: color-mix(in srgb, var(--violet) 8%, transparent); }
+.alertCard.ok { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 8%, transparent); cursor: default; }
+.alertValue { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.alertCard.danger .alertValue { color: var(--ruby); }
+.alertCard.warning .alertValue { color: var(--amber); }
+.alertCard.info .alertValue { color: var(--violet); }
+.alertCard.ok .alertValue { color: var(--emerald); }
+.alertLabel { font-size: 12px; color: var(--text-2); }
+
+/* Empty state de la gráfica operativa (sin serie demo) */
+.chartEmpty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 13px; }
+
+/* ── Solicitudes: embudo + alertas ─────────────────────────────────────────── */
+.funnelRow { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+.funnelStage {
+  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 11px;
+  background: rgba(255,255,255,.012); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px;
+}
+.funnelStage.paid { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 7%, transparent); }
+.funnelLabel { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.funnelCount { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.funnelStage.paid .funnelCount { color: var(--emerald); }
+.funnelAmount { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.funnelArrow { position: absolute; right: -10px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--text-3); font-size: 13px; }
+.reqAlerts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 12px; }
+.reqAlert { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); min-width: 160px; }
+.reqAlert span { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.reqAlert strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.reqAlert.danger { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 8%, transparent); }
+.reqAlert.danger strong { color: var(--ruby); }
+.reqAlert.warning { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.reqAlert.warning strong { color: var(--amber); }
+
+/* ── Impuestos ─────────────────────────────────────────────────────────────── */
+.taxIva { border-color: color-mix(in srgb, var(--emerald) 35%, var(--border)); }
+.taxRet { border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); }
+.taxHint { display: block; margin-top: 4px; font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-3); }
+
 /* Access denied */
 .gate { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 40px; text-align: center; color: var(--text-3); }
 .gate h2 { color: var(--text-1); font-size: 16px; margin-bottom: 8px; }
