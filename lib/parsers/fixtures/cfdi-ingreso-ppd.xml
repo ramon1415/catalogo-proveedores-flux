@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd"
+  Version="4.0" Serie="F" Folio="390122" Fecha="2026-06-03T09:00:00"
+  FormaPago="99" MetodoPago="PPD" Moneda="MXN"
+  SubTotal="53785.35" Total="62391.01" TipoDeComprobante="I"
+  Exportacion="01" LugarExpedicion="80000"
+  Sello="SELLOFAKE==" NoCertificado="30001000000400002434" Certificado="CERTFAKE==">
+  <cfdi:Emisor Rfc="CGS851125HB9" Nombre="COPPEL SA DE CV" RegimenFiscal="601"/>
+  <cfdi:Receptor Rfc="OPT150312QV1" Nombre="OPERADORA DE PERSONAL TECNICO" DomicilioFiscalReceptor="06600" RegimenFiscalReceptor="601" UsoCFDI="G03"/>
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="52141500" Cantidad="1" ClaveUnidad="H87" Descripcion="Equipamiento" ValorUnitario="53785.35" Importe="53785.35" ObjetoImp="02">
+      <cfdi:Impuestos>
+        <cfdi:Traslados>
+          <cfdi:Traslado Base="53785.35" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="8605.66"/>
+        </cfdi:Traslados>
+      </cfdi:Impuestos>
+    </cfdi:Concepto>
+  </cfdi:Conceptos>
+  <cfdi:Impuestos TotalImpuestosTrasladados="8605.66">
+    <cfdi:Traslados>
+      <cfdi:Traslado Base="53785.35" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="8605.66"/>
+    </cfdi:Traslados>
+  </cfdi:Impuestos>
+  <cfdi:Complemento>
+    <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+      Version="1.1" UUID="DDDD6666-EEEE-7777-FFFF-888899990000"
+      FechaTimbrado="2026-06-03T09:01:12" RfcProvCertif="SAT970701NN3"
+      SelloCFD="SELLOFAKE==" NoCertificadoSAT="30001000000400002495" SelloSAT="SELLOSATFAKE=="/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>

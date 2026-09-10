@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd"
+  Version="4.0" Serie="A" Folio="1234" Fecha="2026-06-15T10:23:41"
+  FormaPago="03" MetodoPago="PUE" Moneda="MXN"
+  SubTotal="10000.00" Total="9533.33" TipoDeComprobante="I"
+  Exportacion="01" LugarExpedicion="06600"
+  Sello="SELLOFAKE==" NoCertificado="30001000000400002434" Certificado="CERTFAKE==">
+  <cfdi:Emisor Rfc="GAMC850101AB1" Nombre="CARLOS GARCIA MENDEZ" RegimenFiscal="612"/>
+  <cfdi:Receptor Rfc="OPT150312QV1" Nombre="OPERADORA DE PERSONAL TECNICO" DomicilioFiscalReceptor="06600" RegimenFiscalReceptor="601" UsoCFDI="G03"/>
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="80101500" Cantidad="1" ClaveUnidad="E48" Descripcion="Servicios profesionales junio 2026" ValorUnitario="10000.00" Importe="10000.00" ObjetoImp="02">
+      <cfdi:Impuestos>
+        <cfdi:Traslados>
+          <cfdi:Traslado Base="10000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="1600.00"/>
+        </cfdi:Traslados>
+        <cfdi:Retenciones>
+          <cfdi:Retencion Base="10000.00" Impuesto="001" TipoFactor="Tasa" TasaOCuota="0.100000" Importe="1000.00"/>
+          <cfdi:Retencion Base="10000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.106667" Importe="1066.67"/>
+        </cfdi:Retenciones>
+      </cfdi:Impuestos>
+    </cfdi:Concepto>
+  </cfdi:Conceptos>
+  <cfdi:Impuestos TotalImpuestosRetenidos="2066.67" TotalImpuestosTrasladados="1600.00">
+    <cfdi:Retenciones>
+      <cfdi:Retencion Impuesto="001" Importe="1000.00"/>
+      <cfdi:Retencion Impuesto="002" Importe="1066.67"/>
+    </cfdi:Retenciones>
+    <cfdi:Traslados>
+      <cfdi:Traslado Base="10000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="1600.00"/>
+    </cfdi:Traslados>
+  </cfdi:Impuestos>
+  <cfdi:Complemento>
+    <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+      xsi:schemaLocation="http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd"
+      Version="1.1" UUID="AAAA1111-BBBB-2222-CCCC-333344445555"
+      FechaTimbrado="2026-06-15T10:24:02" RfcProvCertif="SAT970701NN3"
+      SelloCFD="SELLOFAKE==" NoCertificadoSAT="30001000000400002495" SelloSAT="SELLOSATFAKE=="/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>

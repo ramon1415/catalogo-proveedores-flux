@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>FB-2 browser contract</title>
+</head>
+<body data-status="pending">pending</body>
+<script type="module">
+import { parseCfdiXml, CfdiParseError } from '../../lib/parsers/cfdiBrowser.js'
+import { validateCfdiAgainstRequest } from '../../lib/contpaq/cfdiValidation.js'
+
+const body = document.body
+const checks = []
+
+function assert(condition, name) {
+  if (!condition) throw new Error(`assert_failed:${name}`)
+  checks.push(name)
+}
+
+function expectTypedError(fn, name, messagePattern = null) {
+  try {
+    fn()
+  } catch (error) {
+    assert(error instanceof CfdiParseError, `${name}:typed`)
+    if (messagePattern) assert(messagePattern.test(error.message), `${name}:message`)
+    return
+  }
+  throw new Error(`expected_error:${name}`)
+}
+
+try {
+  const fixtures = [
+    '../../lib/parsers/fixtures/cfdi-ingreso-ppd.xml',
+    '../../lib/parsers/fixtures/cfdi-ingreso-pue-retenciones.xml',
+    '../../lib/parsers/fixtures/cfdi-pago20.xml',
+  ]
+
+  for (const path of fixtures) {
+    const response = await fetch(path)
+    assert(response.ok, `${path}:fetch`)
+    const parsed = parseCfdiXml(await response.text())
+    assert(parsed.version === '4.0', `${path}:version`)
+    assert(Boolean(parsed.emisor?.rfc), `${path}:emisor_rfc`)
+    assert(Boolean(parsed.receptor?.rfc), `${path}:receptor_rfc`)
+    assert(Number.isFinite(parsed.comprobante?.total), `${path}:total`)
+
+    if (path.endsWith('cfdi-pago20.xml')) {
+      assert(parsed.comprobante.tipoDeComprobante === 'P', 'rep:tipo')
+      assert(parsed.comprobante.total === 0, 'rep:raw_total_zero')
+      assert(parsed.comprobante.moneda === 'XXX', 'rep:raw_currency_xxx')
+      assert(parsed.pagosTotales?.montoTotalPagos === 62391.01, 'rep:monto_total_pagos')
+      assert(parsed.pagos?.[0]?.monedaP === 'MXN', 'rep:moneda_p')
+      assert(parsed.pagos?.[0]?.montoP === 62391.01, 'rep:monto_p')
+
+      const validation = validateCfdiAgainstRequest(parsed, {
+        companyRfc: parsed.receptor.rfc,
+        providerRfc: parsed.emisor.rfc,
+        currency: 'MXN',
+        amountRequested: 62391.01,
+      })
+      assert(validation.status === 'parsed', 'rep:validation_parsed')
+      assert(validation.comparison?.currency === 'MXN', 'rep:effective_currency')
+      assert(validation.comparison?.total === 62391.01, 'rep:effective_total')
+      assert(!validation.reviewReasons.includes('currency_mismatch'), 'rep:no_currency_mismatch')
+      assert(!validation.reviewReasons.includes('total_mismatch'), 'rep:no_total_mismatch')
+    }
+  }
+
+  expectTypedError(() => parseCfdiXml(''), 'empty')
+  expectTypedError(() => parseCfdiXml('<root/>'), 'not_cfdi')
+  expectTypedError(
+    () => parseCfdiXml('<!DOCTYPE foo [<!ENTITY x "boom">]><root>&x;</root>'),
+    'doctype',
+    /DOCTYPE rechazado/,
+  )
+  expectTypedError(
+    () => parseCfdiXml('<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/3" Version="3.3" Fecha="2026-08-25T10:00:00" TipoDeComprobante="I"><cfdi:Emisor Rfc="AAA010101AAA"/><cfdi:Receptor Rfc="BBB010101BBB"/></cfdi:Comprobante>'),
+    'unsupported_33',
+    /Versión de CFDI no soportada/,
+  )
+  expectTypedError(() => parseCfdiXml('<cfdi:Comprobante>'), 'malformed')
+
+  body.dataset.status = 'pass'
+  body.textContent = JSON.stringify({ status: 'pass', checks: checks.length })
+} catch (error) {
+  body.dataset.status = 'fail'
+  body.textContent = JSON.stringify({ status: 'fail', error: error?.message || String(error), checks })
+  console.error(error)
+}
+</script>
+</html>
