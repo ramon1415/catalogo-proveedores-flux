@@ -65,6 +65,29 @@ chat ni editarlo en Supabase Studio.
 Cada archivo debe cerrar con `COMMIT`. Después: `get_advisors(security)` en
 prod y verificación de RLS.
 
+### Corte company-scoped descubierto durante ejecución
+
+Después de la fundación `company_scoped_roles_foundation`, PROD confirmó que
+no tiene la tabla opcional de preview CFDI, las cuatro tablas operativas de
+Nómina ni dos RPC de escritura CONTPAQ que sólo existen en DEV. La ola original
+abortó transaccionalmente antes de cambiar policies.
+
+Para PROD se generan variantes reproducibles mediante
+`scripts/qa/build-prod-company-cutover-compat.mjs`:
+
+1. `generated/company_scoped_rls_rpc_cutover_prod.sql` — corta todas las tablas
+   productivas y exige que las cinco tablas fuera de alcance continúen ausentes.
+2. `generated/company_scoped_rpc_cutover_prod.sql` — corta todos los RPC
+   productivos, omite únicamente las dos firmas CONTPAQ ausentes y reescribe
+   con conteo exacto dos RPC de compatibilidad que DEV ya no conserva.
+3. `generated/company_scoped_historical_actuals_prod.sql` — reemplaza las dos
+   policies globales heredadas de históricos por lectura de miembros y escritura
+   de Finanzas en la empresa exacta; aborta si existe una fila sin `company_id`.
+
+Ambas variantes deben pasar juntas en una transacción de ensayo terminada en
+`ROLLBACK` antes de aplicarse. Nómina y CFDI/CONTPAQ no se habilitan ni se crean
+como parte de esta compatibilidad.
+
 **Nómina:** sólo se registra el módulo y permanece OFF para todas las empresas.
 No aplicar ninguna migración operativa N0–N5 ni desplegar funciones de Nómina.
 
