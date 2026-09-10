@@ -124,4 +124,85 @@ export type HistoricalActual = {
 export type HistMapeoEntry = { partida: string; grupo: string }
 export type HistMapeo = Map<string, HistMapeoEntry>
 
-export type SectionTab = 'expenses' | 'ytd' | 'income' | 'cash' | 'incidents'
+export type SectionTab = 'income' | 'cash' | 'incidents'
+
+// ── Sección "Presupuesto" (vista public.budget_availability) ────────────────────
+// Fila cruda de la vista. Semántica: usado = committed + executed = budgeted − available.
+export type BudgetAvailabilityRow = {
+  budget_category_id: string | null
+  budget_month: string | null // date 'YYYY-MM-DD'
+  budgeted: number | null
+  committed: number | null
+  executed: number | null
+  available: number | null
+}
+
+export type BudgetCategoryMeta = { id: string; name: string | null; category: string | null }
+
+// Partida agregada (suma de todos los centros de costo del periodo elegido).
+export type BudgetPartida = {
+  categoryId: string
+  name: string
+  group: string
+  budgeted: number
+  committed: number
+  executed: number
+  used: number      // committed + executed
+  available: number // budgeted − used
+  pctUsed: number   // used/budgeted*100; Infinity si budgeted<=0 pero hay uso
+  over: boolean     // sobregirado: available < 0
+  warn: boolean     // cerca del límite: pctUsed >= 90 y no sobregirado
+}
+
+export type BudgetTotals = {
+  budgeted: number
+  committed: number
+  executed: number
+  used: number
+  available: number
+  pctUsed: number
+}
+
+export type BudgetAggregate = {
+  partidas: BudgetPartida[]
+  totals: BudgetTotals
+  omittedCount: number // partidas sin presupuesto ni uso, omitidas del desglose
+  months: string[]     // budget_month distintos disponibles (YYYY-MM-DD), asc
+}
+
+// ── Sección "Solicitudes" (tabla public.payment_requests) ───────────────────────
+// Fila cruda de payment_requests. Periodo = budget_month (date 'YYYY-MM-DD', día 01)
+// para quedar en el MISMO eje que el presupuesto. No existe columna paid_amount en
+// el esquema, así que el monto pagado usa amount_requested (ver aggregateRequests).
+export type PaymentRequestRow = {
+  id: string
+  status: string | null
+  amount_requested: number | null
+  subtotal_amount: number | null
+  tax_amount: number | null
+  withholding_amount: number | null
+  budget_month: string | null // date 'YYYY-MM-DD'
+}
+
+// Etapa del embudo "cómo van vs pagadas".
+export type RequestStage = { key: string; label: string; count: number; amount: number }
+// Línea del desglose por status.
+export type RequestStatusLine = { status: string; label: string; count: number; amount: number }
+
+export type RequestsAggregate = {
+  total: number
+  funnel: RequestStage[]                        // en curso → aprobadas → programadas → pagadas
+  rejected: { count: number; amount: number }   // alerta roja
+  changesRequested: { count: number; amount: number } // alerta ámbar
+  inReview: { count: number; amount: number }   // finance_validation + changes_requested
+  byStatus: RequestStatusLine[]
+  months: string[]                              // budget_month distintos, asc
+}
+
+// ── Sección "Impuestos" (desglose fiscal de payment_requests) ───────────────────
+export type TaxesAggregate = {
+  iva: number          // suma tax_amount (IVA acreditable)
+  retenciones: number  // suma withholding_amount (IVA/ISR por enterar)
+  withDetail: number   // N: solicitudes con tax_amount o withholding_amount no null
+  total: number        // M: total de solicitudes del periodo
+}
