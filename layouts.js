@@ -18,17 +18,19 @@ const BBVA_MIXED_SAME_BANK_OPERATION = "PTC"
 const BBVA_MIXED_SAME_BANK_LINE_LENGTH = 3 + CXC_LINE_LENGTH
 const BBVA_MIXED_SAME_BANK_LINE_PATTERN = /^PTC\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}$/
 const BBVA_INTERBANK_BENEFICIARY_LENGTH = 30
-// `payment_reference` se conserva como dato operativo interno. Las posiciones
-// 86-90 del TXT son disponibilidad + banco, no esa referencia.
+// VBA Hoja5 / uExpPagInter: tipo de cuenta+banco en 86-90,
+// concepto en 91-120 y payment_reference en 121-127.
+// La captura conserva el límite operativo de 5 dígitos del RPC vigente.
 const BBVA_INTERBANK_REFERENCE_LENGTH = 5
-const BBVA_INTERBANK_REFERENCE_INPUT_RULE = "1 a 5 digitos como referencia operativa interna"
+const BBVA_INTERBANK_REFERENCE_FIELD_LENGTH = 7
+const BBVA_INTERBANK_REFERENCE_INPUT_RULE = "1 a 5 digitos; el TXT completa la referencia a 7 digitos"
 const BBVA_INTERBANK_BANK_FIELD_PREFIX = "40"
 const BBVA_INTERBANK_BANK_CODE_LENGTH = 3
 const BBVA_INTERBANK_BANK_FIELD_LENGTH = 5
-const BBVA_INTERBANK_CONCEPT_LENGTH = 37
+const BBVA_INTERBANK_CONCEPT_LENGTH = 30
 const BBVA_INTERBANK_INDICATOR = "H"
-const BBVA_INTERBANK_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + BBVA_INTERBANK_BENEFICIARY_LENGTH + BBVA_INTERBANK_BANK_FIELD_LENGTH + BBVA_INTERBANK_CONCEPT_LENGTH + 1
-const BBVA_INTERBANK_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}\d{5}[A-Z0-9 .,&\/-]{37}H$/
+const BBVA_INTERBANK_LINE_LENGTH = CXC_ACCOUNT_LENGTH * 2 + CXC_CURRENCY_LENGTH + CXC_AMOUNT_LENGTH + BBVA_INTERBANK_BENEFICIARY_LENGTH + BBVA_INTERBANK_BANK_FIELD_LENGTH + BBVA_INTERBANK_CONCEPT_LENGTH + BBVA_INTERBANK_REFERENCE_FIELD_LENGTH + 1
+const BBVA_INTERBANK_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9 .,&\/-]{30}\d{5}[A-Z0-9 .,&\/-]{30}\d{7}H$/
 const BBVA_CIE_CONCEPT_LENGTH = 30
 const BBVA_CIE_CONVENIO_LENGTH = 7
 const BBVA_CIE_REFERENCE_LENGTH = 20
@@ -1722,7 +1724,7 @@ async function submitPagosintReference(event) {
         throw new Error("La referencia no reaparecio despues de refrescar la linea del layout.")
       }
     }
-    showToast("Referencia guardada", `PAGOSINT usara ${formatBbvaReference(referenceDigits)} en las posiciones 86-90.`, "success")
+    showToast("Referencia guardada", `Referencia ${formatBbvaReference(referenceDigits)} lista para el archivo bancario.`, "success")
   } catch (error) {
     showToast("No se pudo guardar", pagosintSaveHint(error), "danger")
   } finally {
@@ -2177,6 +2179,7 @@ function buildBbvaInterbankRecord128(line) {
     formatBbvaText(line.beneficiary_name, BBVA_INTERBANK_BENEFICIARY_LENGTH, "titular PAGOSINT"),
     formatBbvaInterbankBankField(line.destination_value),
     formatBbvaText(line.payment_concept, BBVA_INTERBANK_CONCEPT_LENGTH, "motivo PAGOSINT"),
+    formatBbvaReference(line.payment_reference),
     BBVA_INTERBANK_INDICATOR,
   ].join("")
 
@@ -2374,11 +2377,12 @@ function validateBbvaInterbankFields(line, lineNumber, errors) {
   if (!/^\d{5}$/.test(fields.bankField)) {
     errors.push(`Layout PAGOSINT invalido: campo banco de linea ${lineNumber} debe ocupar 5 posiciones numericas.`)
   } else if (fields.destinationAccount.startsWith(BBVA_CLABE_BANK_CODE)) {
-    errors.push(`Layout PAGOSINT invalido: la CLABE de linea ${lineNumber} pertenece a BBVA y debe salir en PAGOSBBV.`)
+    errors.push(`Layout PAGOSINT invalido: la CLABE de linea ${lineNumber} pertenece a BBVA y debe salir en PAGOSMIX.`)
   } else if (fields.bankField !== expectedBankField) {
     errors.push(`Layout PAGOSINT invalido: campo banco de linea ${lineNumber} debe ser ${expectedBankField}.`)
   }
-  if (!/^[A-Z0-9 .,&\/-]{37}$/.test(fields.concept)) errors.push(`Layout PAGOSINT invalido: motivo de linea ${lineNumber} contiene caracteres no permitidos.`)
+  if (!/^[A-Z0-9 .,&\/-]{30}$/.test(fields.concept)) errors.push(`Layout PAGOSINT invalido: motivo de linea ${lineNumber} debe ocupar 30 posiciones con caracteres permitidos.`)
+  if (!/^\d{7}$/.test(fields.numericReference)) errors.push(`Layout PAGOSINT invalido: referencia numerica de linea ${lineNumber} debe contener 7 digitos en posiciones 121-127; revisa que el motivo no invada ese campo.`)
   if (fields.indicator !== BBVA_INTERBANK_INDICATOR) errors.push(`Layout PAGOSINT invalido: indicador de linea ${lineNumber} debe ser ${BBVA_INTERBANK_INDICATOR}.`)
 }
 
@@ -2432,9 +2436,8 @@ function parseBbvaInterbankLine(line) {
     amount: line.slice(39, 55),
     beneficiary: line.slice(55, 85),
     bankField: line.slice(85, 90),
-    // Alias temporal para consumidores antiguos.
-    numericReference: line.slice(85, 90),
-    concept: line.slice(90, 127),
+    concept: line.slice(90, 120),
+    numericReference: line.slice(120, 127),
     indicator: line.slice(127, 128),
   }
 }
@@ -2587,10 +2590,11 @@ function formatBbvaText(value, length, label) {
 }
 
 function formatBbvaReference(value) {
-  const digits = cxcDigits(value)
+  const digits = String(value ?? "").trim()
   if (!digits) throw new Error("referencia numerica PAGOSINT requerida")
+  if (!/^\d+$/.test(digits)) throw new Error("referencia numerica PAGOSINT debe contener solo digitos")
   if (digits.length > BBVA_INTERBANK_REFERENCE_LENGTH) throw new Error("referencia numerica PAGOSINT acepta maximo 5 digitos")
-  return digits.padStart(BBVA_INTERBANK_REFERENCE_LENGTH, "0")
+  return digits.padStart(BBVA_INTERBANK_REFERENCE_FIELD_LENGTH, "0")
 }
 
 // Contrato recuperado de archivos productivos aceptados por BBVA:

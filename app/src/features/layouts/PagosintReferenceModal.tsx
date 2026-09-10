@@ -69,7 +69,7 @@ export function PagosintReferenceModal({
       if (refreshedReference !== referenceDigits) {
         throw new Error('La referencia no reaparecio despues de refrescar la linea del layout.')
       }
-      showToast('Referencia guardada', `PAGOSINT usara ${formatBbvaReference(referenceDigits)} en las posiciones 86-90.`, 'success')
+      showToast('Referencia guardada', `Referencia ${formatBbvaReference(referenceDigits)} lista para el archivo bancario.`, 'success')
       onClose()
     } catch (error) {
       showToast('No se pudo guardar', pagosintSaveHint(error), 'error')

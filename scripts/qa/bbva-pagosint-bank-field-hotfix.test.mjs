@@ -69,11 +69,11 @@ const line = (overrides = {}) => ({
   ...overrides,
 })
 
-test("PAGOSINT derives availability+bank from CLABE and never serializes operational reference", () => {
+test("PAGOSINT derives account type+bank from CLABE and keeps the numeric reference separate", () => {
   const row = bbva.buildBbvaInterbankRecord128(line())
   assert.equal(row.length, 128)
   assert.equal(row.slice(85, 90), "40002")
-  assert.equal(row.includes("03082"), false)
+  assert.equal(row.slice(120, 127), "0003082")
   assert.equal(bbva.formatBbvaInterbankBankField("014180568222970573"), "40014")
   assert.equal(bbva.formatBbvaInterbankBankField("137443105288819697"), "40137")
 })
