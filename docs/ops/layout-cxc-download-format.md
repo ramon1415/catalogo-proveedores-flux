@@ -74,15 +74,16 @@ La macro permite que el campo de abono ocupe 18 posiciones. Flux usa este rail �
 | 37-39 | 3 | Moneda | `MXP` |
 | 40-55 | 16 | Importe | 13 digitos, punto decimal, 2 decimales |
 | 56-85 | 30 | Titular / beneficiario | Mayusculas, sin acentos, espacios a la derecha |
-| 86-90 | 5 | Campo banco / disponibilidad | `40` + código de banco de 3 dígitos tomado de las primeras 3 posiciones de la CLABE (`002` → `40002`) |
-| 91-127 | 37 | Motivo de pago | Mayusculas, sin acentos, espacios a la derecha |
-| 128 | 1 | Indicador | `H` segun ejemplo recibido |
+| 86-90 | 5 | Tipo de cuenta y banco | `40` + código de banco de 3 dígitos tomado de las primeras 3 posiciones de la CLABE (`002` → `40002`) |
+| 91-120 | 30 | Motivo de pago | Mayusculas, sin acentos, espacios a la derecha; truncado a 30 |
+| 121-127 | 7 | Referencia numerica | `payment_reference`, completada con ceros a la izquierda |
+| 128 | 1 | Disponibilidad | `H`, como establece `Hoja5.GenerateRow` |
 | 129-130 | 2 | Terminador fisico | `CRLF` |
 
 Ejemplo:
 
 ```text
-002180700287444966000000000191134094MXP0000000000806.00CLAUDIA YANIN NAVARRETE       40002REEMBOLSO                            H\r\n
+002180000000000001000000000123456789MXP0000000000100.00BENEFICIARIO DE PRUEBA        40002REEMBOLSO                     0000042H\r\n
 ```
 
 ## Seleccion de formato en Flux
@@ -108,13 +109,40 @@ La convencion deja el tipo de layout al inicio (`PAGOSBBV`, `PAGOSMIX` o `PAGOSI
 
 Las posiciones 86-90 **no son una referencia capturada por el usuario**. Los archivos históricos aceptados por BBVA muestran el contrato:
 
-- prefijo fijo de disponibilidad: `40`;
+- tipo de cuenta: `40`;
 - código de banco: primeras 3 posiciones de la CLABE;
 - ejemplos: CLABE `002...` → `40002`, CLABE `014...` → `40014`.
 
-Flux deriva este campo automáticamente al descargar el archivo. `payment_reference` se conserva como dato operativo interno de la solicitud/layout, pero no se serializa en ese bloque.
+Flux deriva este campo automáticamente al descargar el archivo. `payment_reference` no se serializa en ese bloque: ocupa las posiciones **121-127**, después de los 30 caracteres de motivo.
 
 Una CLABE `012` pertenece a BBVA y se genera en `PAGOSMIX` con tipo `PTC`, no en `PAGOSINT` ni en el archivo corto `PAGOSBBV`.
+
+## Referencia numerica PAGOSINT: corrección del 10 de septiembre de 2026
+
+El contrato anterior unía por error motivo y referencia en un campo de 37 caracteres. Los conceptos cortos dejaban espacios en el campo numérico y ocultaban el defecto. Con un motivo largo, las posiciones 121-127 contenían letras y Net Cash rechazaba el registro por referencia numérica inválida.
+
+La recuperación estática de `Qna 15_2026 AFE Macro Cuentas interbancarias.xlsm` confirma:
+
+- Workbook SHA-256: `CC5B4376A2BD7C9B8E1DE02B29CAFBF186E03D371BC0B9CE7364BC4DA26DF556`.
+- `xl/vbaProject.bin` SHA-256: `4785E40BC10DAC3AF4698D2F29FE1FCC72BB037CEA0FD8A93F16FA6C02945DCD`.
+- `Módulo1.uExpPagInter`: `u8_Ref_Pago As String * 30`, seguido de `u9_Ref_Num As String * 7`.
+- `Hoja5.GenerateRow`: `u9_Ref_Num = Format(Hoja5.Cells(lFila, 6).Value, "0000000")`.
+- `u10_Disp = "H"` y `u11_CRLF = vbCrLf`.
+
+No se ejecutó la macro. Los anchos y el formato numérico se verificaron sobre su código recuperado. La captura de Flux mantiene el límite vigente de 1 a 5 dígitos para conservar el contrato del RPC. El exportador completa esa referencia a 7 dígitos, sin inventarla ni extraerla del concepto. Una referencia vacía o con letras bloquea la descarga.
+
+El concepto completo permanece en la solicitud. Solo su representación en el TXT se limita a 30 caracteres. No cambian cuentas, beneficiarios, importes, moneda, separación por destino ni estados de pago.
+
+## Importación en Net Cash
+
+| Archivo de Flux | Importación correspondiente |
+| --- | --- |
+| `PAGOSBBV` | Pagos mismo banco, sin marcar Lote mixto |
+| `PAGOSINT` | Pagos interbancarios, sin marcar Lote mixto |
+| `PAGOSMIX` | Lote mixto, registros con prefijo `PTC` |
+| `PAGOSCIE` | Pagos CIE, archivo dedicado |
+
+Que la cuenta de cargo sea BBVA no convierte un archivo interbancario en mixto. La clasificación depende del destino. Si un lote de Flux tiene destinos BBVA y externos, se descargan y se importan los archivos separados correspondientes.
 
 ## Validaciones locales
 
@@ -133,13 +161,13 @@ Validaciones adicionales:
 
 - `PAGOSBBV`: 85 caracteres utiles por registro.
 - `PAGOSMIX`: 88 caracteres utiles por registro, prefijo `PTC`, CLABE BBVA `012` completa y CRLF final.
-- `PAGOSINT`: 128 caracteres utiles por registro, titular 30, campo banco/disponibilidad de 5 posiciones, motivo 37, indicador final `H`.
+- `PAGOSINT`: 128 caracteres utiles por registro, titular 30, tipo de cuenta y banco de 5 posiciones, motivo 30, referencia numerica 7 e indicador final `H`.
 - `PAGOSINT`: el campo banco debe coincidir con `40` + las primeras 3 posiciones de la CLABE; no se toma de `payment_reference`.
+- `PAGOSINT`: la referencia de las posiciones 121-127 debe contener exactamente 7 dígitos. El validador identifica la línea y el campo que fallan.
 
 ## Riesgos / pendientes
 
-- El indicador final `H` de `PAGOSINT` se toma del ejemplo recibido; si BBVA entrega catalogo formal, validar su significado.
-- Si hay pagos por convenio, debe implementarse o habilitarse layout `CIE` en otro PR.
+- La corrección de PAGOSINT reproduce el contrato recuperado de la macro. La aceptación del archivo corregido en Net Cash se confirma con la siguiente importación bancaria del usuario; una prueba local no acredita ejecución de pagos.
 - `PAGOSMIX` reproduce el registro `PTC` recuperado de la macro. La aceptación bancaria final se confirma con el primer upload real usando la opción **Lote mixto** de Net Cash.
 - Si una TDC debe ir por mismo banco y no por interbancario, hay que capturar ese tipo de destino de forma explicita; hoy Flux solo distingue `cuenta`, `clabe` y `convenio`.
 

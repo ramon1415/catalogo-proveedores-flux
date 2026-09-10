@@ -1,0 +1,36 @@
+name: BBVA interbank reference contract
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - layouts.js
+      - app/src/features/layouts/**
+      - scripts/qa/bbva-*.test.mjs
+      - docs/ops/layout-cxc-download-format.md
+      - .github/workflows/bbva-pagosint-reference.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reference-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm --prefix app ci
+      - name: Verify interbank references and bank routing
+        run: >-
+          node --test
+          scripts/qa/bbva-pagosint-reference-contract.test.mjs
+          scripts/qa/bbva-pagosint-bank-field-hotfix.test.mjs
+          scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs
+          scripts/qa/bbva-mixed-clabe-macro-contract.test.mjs
+          scripts/qa/bbva-cie-layout-contract.test.mjs
+      - run: npm --prefix app run typecheck
