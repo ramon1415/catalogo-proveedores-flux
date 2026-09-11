@@ -4,7 +4,7 @@
 import type { BadgeVariant } from '../../components/ui/Badge'
 import { normalize, numberValue } from '../../lib/format'
 import type {
-  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
+  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   BudgetAvailabilityRow, ApproverCandidate, ApproverSelection,
   DecisionAction, RequestPayload, EmployeeBankAccount, ReimbursementDraftItem,
 } from './types'
@@ -807,13 +807,18 @@ export function isValidRequestId(value: string | null): boolean {
   return !!value && UUID_RE.test(value)
 }
 
-// Filtro de tabla: haystack idéntico al vanilla (NFD via normalize()).
+export function requesterDisplayName(profile?: Profile | null): string {
+  return profile?.full_name?.trim() || profile?.email?.trim() || 'No disponible'
+}
+
+// Búsqueda normalizada por datos de la solicitud y su solicitante.
 export function requestSearchHaystack(
   request: PaymentRequest,
   proveedor: Proveedor | null,
   company: Company | null,
   center: CostCenter | null,
   category: BudgetCategory | null,
+  requester?: Profile | null,
 ): string {
   return normalize(
     [
@@ -824,6 +829,8 @@ export function requestSearchHaystack(
       companyName(company),
       costCenterName(center),
       budgetCategoryLabel(category),
+      requester?.full_name,
+      requester?.email,
     ].join(' '),
   )
 }

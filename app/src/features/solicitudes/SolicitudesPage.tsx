@@ -25,6 +25,7 @@ import { RequestModal } from './RequestModal'
 import { DetailModal } from './DetailModal'
 import { EditModal } from './EditModal'
 import { ReimbursementEditModal } from './ReimbursementEditModal'
+import { RequesterIdentity } from './RequesterIdentity'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   StatusFilter, BudgetDecisionFilter,
@@ -133,6 +134,12 @@ export default function SolicitudesPage() {
     proveedor: (id: string | null) => proveedores.find((p) => p.id === id) || null,
   }), [companies, costCenters, budgetCategories, proveedores])
 
+  const requestersById = useMemo(() => {
+    const byId = new Map(profiles.map((p) => [p.id, p]))
+    if (profile && !byId.has(profile.id)) byId.set(profile.id, profile)
+    return byId
+  }, [profiles, profile])
+
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const active = scopedRequests.filter(isActiveRequest)
@@ -150,14 +157,18 @@ export default function SolicitudesPage() {
   const rows = useMemo(() => {
     const q = normalize(query)
     return scopedRequests.filter((r) => {
-      const haystack = requestSearchHaystack(r, lookups.proveedor(r.proveedor_id), lookups.company(r.company_id), lookups.center(r.cost_center_id), lookups.category(r.budget_category_id))
+      const haystack = requestSearchHaystack(r, lookups.proveedor(r.proveedor_id), lookups.company(r.company_id), lookups.center(r.cost_center_id), lookups.category(r.budget_category_id), requestersById.get(r.requested_by || ''))
       return (
         haystack.includes(q) &&
         statusMatches(r, statusFilter) &&
         budgetDecisionMatches(r, decisionFilter)
       )
     })
-  }, [scopedRequests, lookups, query, statusFilter, decisionFilter])
+  }, [scopedRequests, lookups, requestersById, query, statusFilter, decisionFilter])
+
+  // Agrupar por identidad, nunca por nombre: dos personas pueden llamarse igual.
+  const commonRequesterId = rows[0]?.requested_by && rows.every((r) => r.requested_by === rows[0].requested_by)
+    ? rows[0].requested_by : null
 
   const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos'
 
@@ -244,7 +255,7 @@ export default function SolicitudesPage() {
         <div className={s.toolbar}>
           <div className={s.searchBox}>
             <IcSearch size={16} />
-            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por folio, proveedor o descripcion..." aria-label="Buscar solicitudes" />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar folio, solicitante, proveedor o descripción…" aria-label="Buscar solicitudes" />
           </div>
           <select aria-label="Filtrar por estatus" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
             <option value="todos">Estatus: Todos</option>
@@ -274,8 +285,15 @@ export default function SolicitudesPage() {
 
         {status === 'error' && <div className={`${s.messageBox} ${s.error}`}>{errorMsg}</div>}
 
+        {status === 'ready' && commonRequesterId && (
+          <div className={s.requesterSummary} id="requests-requester-summary">
+            <RequesterIdentity profile={requestersById.get(commonRequesterId)} compact />
+            <span className={s.requesterCount}>{rows.length} {rows.length === 1 ? 'solicitud' : 'solicitudes'} en esta vista</span>
+          </div>
+        )}
+
         <div className={s.tableWrap}>
-          <table className={s.table} aria-label="Solicitudes de pago">
+          <table className={s.table} aria-label="Solicitudes de pago" aria-describedby={commonRequesterId ? 'requests-requester-summary' : undefined}>
             <thead>
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
             </thead>
@@ -304,6 +322,7 @@ export default function SolicitudesPage() {
                   <tr key={r.id} className={highlightedId === r.id ? s.highlightRow : undefined}>
                     <td data-label="Folio">
                       <span className={s.cellMain}>{r.request_number || 'Sin folio'}{r.is_extraordinary_adjustment && <> <Badge variant="accent">Extraordinario</Badge></>}{extra && <> <Badge variant="warning">{extra.status === 'draft' ? 'Evidencia pendiente' : 'Extraordinario'}</Badge></>}</span>
+                      {!commonRequesterId && <RequesterIdentity profile={requestersById.get(r.requested_by || '')} compact />}
                       <span className={s.cellSub}>{formatDate(r.submitted_at || r.created_at)}</span>
                       {meta && (
                         <span className={s.inlineBadges}>
@@ -355,6 +374,7 @@ export default function SolicitudesPage() {
           budgetCategories={budgetCategories}
           proveedores={proveedores}
           profiles={profiles}
+          requester={requestersById.get(detailRequest.requested_by || '')}
           fase2={detailRequest.request_number ? fase2.get(detailRequest.request_number) : undefined}
           canApprove={canApprove}
           canEditRequest={canEditRequest}
@@ -367,6 +387,7 @@ export default function SolicitudesPage() {
 
       {editRequest && editIsReimbursement && (
         <ReimbursementEditModal
+          requester={requestersById.get(editRequest.requested_by || '')}
           request={{
             ...editRequest,
             request_type: editRequestMeta?.request_type ?? editRequest.request_type,
@@ -383,6 +404,7 @@ export default function SolicitudesPage() {
       {editRequest && !editIsReimbursement && (
         <EditModal
           request={editRequest}
+          requester={requestersById.get(editRequest.requested_by || '')}
           companies={companies}
           costCenters={costCenters}
           budgetCategories={budgetCategories}
