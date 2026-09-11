@@ -26,6 +26,8 @@ function load(path, imports = {}, globals = {}) {
 }
 const format = load('app/src/lib/format.ts')
 const logic = load(feature + 'logic.ts', { '../../lib/format': format })
+const bank = load('app/src/features/layouts/logic.ts')
+const convenio = load(feature + 'convenio.ts', { '../layouts/logic': bank })
 const companies = [{ id: 'operadora', name: 'Operadora Tlacatecpan' }, { id: 'fersana', name: 'Soporte Fersana' }]
 const profile = { id: 'requester', email: 'qa@example.com' }
 const provider = { id: 'provider', razon_social: 'Proveedor QA' }
@@ -64,6 +66,7 @@ async function mount(companyId, options = {}) {
   }
   const imports = {
     './api': api, './logic': logic, '../../lib/format': format,
+    './convenio': convenio, './ConvenioFields': { ConvenioFields: () => null },
     '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
     './ProviderCombo': { ProviderCombo }, './QuickProviderModal': { QuickProviderModal: () => null },

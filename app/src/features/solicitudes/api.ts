@@ -12,7 +12,7 @@ import type {
 const UPLOAD_BUCKET = 'payment-receipts'
 
 const PAYMENT_REQUEST_COLUMNS =
-  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,partida_unsure,created_at,updated_at'
+  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,partida_unsure,request_type,payment_method,payment_reference,payment_concept,created_at,updated_at'
 
 // ── Cargas iniciales (paralelas) ──────────────────────────────────────────
 export async function loadCompanies(): Promise<Company[]> {
@@ -36,7 +36,7 @@ export async function loadBudgetCategories(): Promise<BudgetCategory[]> {
 export async function loadProveedores(): Promise<Proveedor[]> {
   const { data, error } = await supabase
     .from('proveedores')
-    .select('id,alias,nombre_completo,rfc,banco,clabe,cuenta_bancaria,metodo_pago,activo')
+    .select('id,alias,nombre_completo,rfc,banco,clabe,cuenta_bancaria,metodo_pago,activo,destination_type,convenio_number')
     .eq('activo', true)
     .order('alias', { ascending: true })
   if (error) throw error
@@ -190,7 +190,17 @@ export async function getApproverDetails(paymentRequestId: string): Promise<any 
 }
 
 // ── Crear solicitud ────────────────────────────────────────────────────────
+export async function createConvenioPaymentRequest(payload: RequestPayload, invoiceStoragePath: string | null = null): Promise<any> {
+  const { data, error } = await supabase.rpc('create_convenio_payment_request', {
+    p_request: payload,
+    p_invoice_storage_path: invoiceStoragePath,
+  })
+  if (error) throw error
+  return data
+}
+
 export async function createPaymentRequest(payload: RequestPayload): Promise<any> {
+  if (payload.request_type === 'convenio') return createConvenioPaymentRequest(payload)
   const { data, error } = await supabase.rpc('create_payment_request', {
     p_proveedor_id: payload.proveedor_id,
     p_company_id: payload.company_id,
@@ -222,6 +232,7 @@ export async function createPaymentRequestWithDocument(
   payload: RequestPayload,
   invoiceStoragePath: string,
 ): Promise<any> {
+  if (payload.request_type === 'convenio') return createConvenioPaymentRequest(payload, invoiceStoragePath)
   const { data, error } = await supabase.rpc('create_payment_request_with_document', {
     p_proveedor_id: payload.proveedor_id,
     p_company_id: payload.company_id,

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { ProviderCombo } from './ProviderCombo'
+import { ConvenioFields } from './ConvenioFields'
+import { isConvenioProvider, convenioDataError, CONVENIO_ERRORS } from './convenio'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions,
@@ -100,6 +102,8 @@ export function RequestModal({
   const [partidaUnsure, setPartidaUnsure] = useState(false)
   const [proveedorId, setProveedorId] = useState('')
   const [providerSearch, setProviderSearch] = useState('')
+  const [cieReference, setCieReference] = useState('')
+  const [cieConcept, setCieConcept] = useState('')
   const [amount, setAmount] = useState('')
   // Desglose fiscal (opcional): el budget descuenta el subtotal cuando existe.
   const [subtotal, setSubtotal] = useState('')
@@ -174,6 +178,8 @@ export function RequestModal({
   }, [showIncidencias])
 
   const isReembolso = isReimbursement(requestType)
+  const isConvenio = requestType === 'convenio'
+  const availableProviders = isConvenio ? proveedores.filter(isConvenioProvider) : proveedores
 
   // Catálogo de beneficiarios. Solo se carga en modo reembolso y solo si el
   // usuario puede elegir a alguien más; en el caso normal basta su propio perfil.
@@ -402,7 +408,10 @@ export function RequestModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveAmount])
 
-  function onCompanyChange(v: string) { setCompanyId(v); reloadBudgetCategories(v, costCenterId, budgetMonth) }
+  function onCompanyChange(v: string) {
+    if (v !== companyId) { setCieReference(''); setCieConcept('') }
+    setCompanyId(v); reloadBudgetCategories(v, costCenterId, budgetMonth)
+  }
   function onCostCenterChange(v: string) { setCostCenterId(v); reloadBudgetCategories(companyId, v, budgetMonth) }
   function onMonthChange(v: string) { setBudgetMonth(v); reloadBudgetCategories(companyId, costCenterId, v) }
 
@@ -450,13 +459,30 @@ export function RequestModal({
   }
 
   function onProviderSelect(id: string, label: string) {
+    if (id !== proveedorId) { setCieReference(''); setCieConcept('') }
     setProveedorId(id)
     setProviderSearch(label)
     categoryTouched.current = false
     if (id) {
       // Aplica método de pago preferido del proveedor (bindProviderPreferredMethod).
       const p = proveedores.find((x) => x.id === id)
-      if (p?.metodo_pago) setPaymentMethod(normalizePaymentMethod(p.metodo_pago))
+      if (isConvenioProvider(p)) {
+        setRequestType('convenio'); setPaymentMethod('transfer'); setCurrency('MXN'); setExchangeRate('1')
+      } else if (isConvenio) setPaymentMethod('transfer')
+      else if (p?.metodo_pago) setPaymentMethod(normalizePaymentMethod(p.metodo_pago))
+    }
+  }
+
+  function onRequestTypeChange(value: string) {
+    setRequestType(value)
+    setCieReference(''); setCieConcept('')
+    if (value === 'convenio') {
+      setPaymentMethod('transfer'); setCurrency('MXN'); setExchangeRate('1')
+      if (!isConvenioProvider(proveedores.find((p) => p.id === proveedorId))) {
+        setProveedorId(''); setProviderSearch('')
+      }
+    } else if (isConvenioProvider(proveedores.find((p) => p.id === proveedorId))) {
+      setProveedorId(''); setProviderSearch('')
     }
   }
 
@@ -494,6 +520,10 @@ export function RequestModal({
     return {
       request_type: normalizeRequestType(requestType || 'provider_payment'),
       payment_method: normalizePaymentMethod(paymentMethod || 'transfer'),
+      ...(isConvenio ? {
+        payment_reference: cieReference.trim(), payment_concept: cieConcept.trim(),
+        convenio_number: proveedor?.convenio_number?.trim() || null,
+      } : {}),
       // En reembolso no hay proveedor: el destinatario es el empleado y se
       // registra aparte, en beneficiary_profile_id.
       proveedor_id: isReembolso ? null : (proveedorId || null),
@@ -559,6 +589,10 @@ export function RequestModal({
     }
 
     const payload = collectPayload()
+    if (isConvenio) {
+      const error = convenioDataError(proveedor, cieReference, cieConcept)
+      if (error) { showToast('Revisa los datos del convenio', error, 'warning'); return }
+    }
     const validation = validateRequestPayload(payload, availabilityForCategory, candidates)
     if (validation) { showToast('Revisa la solicitud', validation, 'warning'); return }
 
@@ -611,7 +645,7 @@ export function RequestModal({
       const requestId = result.payment_request_id || result.id || null
       if (!requestId) throw new Error('No se obtuvo el id de la solicitud creada.')
 
-      const warning = await updateFase2Metadata(requestId, payload.request_type, payload.payment_method)
+      const warning = isConvenio ? '' : await updateFase2Metadata(requestId, payload.request_type, payload.payment_method)
 
       // Metadata local de efectivo/cheque (persistCashMetadataIfNeeded).
       if (['cash', 'check'].includes(payload.payment_method)) {
@@ -640,7 +674,8 @@ export function RequestModal({
         await loadApprovers()
         setApproverHelp((h) => ({ text: `La lista de aprobadores cambió. Revisa y selecciona nuevamente. ${h.text}`.trim(), color: 'var(--amber)' }))
       }
-      showToast('No se pudo crear la solicitud', friendlyError(error, 'create_payment_request'), 'error')
+      const message = String((error as { message?: string })?.message || error)
+      showToast('No se pudo crear la solicitud', CONVENIO_ERRORS[message] || friendlyError(error, 'create_payment_request'), 'error')
     } finally {
       setSubmitting(false)
     }
@@ -649,6 +684,7 @@ export function RequestModal({
   function resetForAnother() {
     setSuccess(null)
     setRequestType('provider_payment'); setPaymentMethod('transfer')
+    setCieReference(''); setCieConcept('')
     setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
@@ -700,16 +736,16 @@ export function RequestModal({
                   <h3>{isReembolso ? 'Datos del reembolso' : 'Datos del pago'}</h3>
                   <div className={s.formGrid}>
                     <label className={s.fullRow}>Tipo de solicitud *
-                      <select className={s.formControl} value={requestType} onChange={(e) => setRequestType(e.target.value)} required>
+                      <select className={s.formControl} value={requestType} onChange={(e) => onRequestTypeChange(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
-                      <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
+                      <span className={s.fieldHint}>{isConvenio ? 'Pago de servicios por convenio BBVA CIE. Captura abajo la referencia y el concepto de este recibo.' : 'Selecciona Convenio para servicios que se pagan con un convenio BBVA CIE.'}</span>
                     </label>
                     <label className={s.fullRow}>Metodo de pago *
-                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
+                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required disabled={isConvenio}>
                         {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
-                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
+                      <span className={s.fieldHint}>{isConvenio ? 'El layout de este pago se generará como Convenio CIE.' : 'Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.'}</span>
                     </label>
                     {!isReembolso && (
                       <label>Monto solicitado *
@@ -720,7 +756,7 @@ export function RequestModal({
                       </label>
                     )}
                     <label className={isReembolso ? s.fullRow : ''}>Moneda *
-                      <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
+                      <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required disabled={isConvenio}>
                         <option value="MXN">MXN</option>
                         <option value="USD">USD</option>
                       </select>
@@ -800,14 +836,16 @@ export function RequestModal({
                 ) : (
                   <section className={s.formSection}>
                     <h3>Proveedor / beneficiario</h3>
-                    <div className={`${s.fieldHint} ${s.fullRow}`}>Selecciona el proveedor de forma independiente al presupuesto.</div>
+                    <div className={`${s.fieldHint} ${s.fullRow}`}>{isConvenio ? 'Elige el servicio o proveedor con convenio registrado. Si no aparece, Finanzas debe registrar su destino Convenio en Proveedores.' : 'Selecciona el proveedor de forma independiente al presupuesto.'}</div>
                     <div className={s.formGrid}>
                       <label className={s.fullRow}>Proveedor *
-                        <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
+                        <ProviderCombo proveedores={availableProviders} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
                       </label>
                     </div>
                   </section>
                 )}
+
+                {isConvenio && <ConvenioFields provider={proveedor} reference={cieReference} concept={cieConcept} onReference={setCieReference} onConcept={setCieConcept} />}
 
                 {!isReembolso && (
                   <section className={s.formSection}>

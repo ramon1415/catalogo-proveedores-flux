@@ -348,6 +348,17 @@ export function DetailModal({
             </div>
           )}
 
+          {request.request_type === 'convenio' && (
+            <section className={s.formSection}>
+              <h3>Convenio BBVA CIE</h3>
+              <div className={s.refGrid}>
+                <RefCell label="Convenio del proveedor" value={proveedor?.convenio_number || 'Sin convenio registrado'} />
+                <RefCell label="Referencia / línea de captura" value={request.payment_reference || 'Sin referencia'} />
+                <RefCell label="Concepto del pago CIE" value={request.payment_concept || 'Sin concepto'} />
+              </div>
+            </section>
+          )}
+
           <div className={`${s.notice} ${s[detailNotice.variant]}`}>
             <span className={s.noticeTitle}>{detailNotice.title}</span>
             <span className={s.noticeDesc}>— {detailNotice.desc}</span>

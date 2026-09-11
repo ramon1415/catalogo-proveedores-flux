@@ -6,6 +6,11 @@ on:
     paths:
       - layouts.js
       - app/src/features/layouts/**
+      - app/src/features/solicitudes/**
+      - scripts/qa/convenio-request-capture.test.mjs
+      - scripts/qa/convenio-request-server.test.mjs
+      - scripts/qa/fixtures/convenio-production-creators.json
+      - supabase/migrations/*_convenio_request_*.sql
       - scripts/qa/bbva-*.test.mjs
       - docs/ops/layout-cxc-download-format.md
       - docs/ops/bbva-cie-layout-format.md
@@ -37,4 +42,6 @@ jobs:
           scripts/qa/bbva-mixed-clabe-macro-contract.test.mjs
           scripts/qa/bbva-cie-layout-contract.test.mjs
           scripts/qa/bbva-cie-reference-validation.test.mjs
+          scripts/qa/convenio-request-capture.test.mjs
+          scripts/qa/convenio-request-server.test.mjs
       - run: npm --prefix app run typecheck

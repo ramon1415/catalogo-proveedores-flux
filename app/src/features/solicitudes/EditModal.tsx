@@ -2,6 +2,8 @@ import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { ProviderCombo } from './ProviderCombo'
+import { ConvenioFields } from './ConvenioFields'
+import { isConvenioProvider, convenioDataError, CONVENIO_ERRORS } from './convenio'
 import { loadBudgetAvailability, updatePaymentRequest, uploadReceipt } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -42,6 +44,10 @@ export function EditModal({
   const [proveedorId, setProveedorId] = useState(request.proveedor_id || '')
   const initProv = proveedores.find((p) => p.id === request.proveedor_id) || null
   const [providerSearch, setProviderSearch] = useState(initProv ? proveedorLabel(initProv) : '')
+  const isConvenio = request.request_type === 'convenio'
+  const [cieReference, setCieReference] = useState(request.payment_reference || '')
+  const [cieConcept, setCieConcept] = useState(request.payment_concept || '')
+  const provider = proveedores.find((p) => p.id === proveedorId) || null
   const [amount, setAmount] = useState(request.amount_requested != null ? String(request.amount_requested) : '')
   const [currency, setCurrency] = useState(request.currency || 'MXN')
   const [exchangeRate, setExchangeRate] = useState(request.exchange_rate != null ? String(request.exchange_rate) : '1')
@@ -116,9 +122,14 @@ export function EditModal({
     if (saving) return
     if (!proveedorId) { showToast('Revisa la solicitud', 'Selecciona un proveedor.', 'warning'); return }
     if (!budgetCategoryId) { showToast('Revisa la solicitud', 'Selecciona una partida presupuestal.', 'warning'); return }
+    if (isConvenio) {
+      const error = convenioDataError(provider, cieReference, cieConcept)
+      if (error) { showToast('Revisa los datos del convenio', error, 'warning'); return }
+    }
 
     setSaving(true)
     const payload: EditPayload = {
+      ...(isConvenio ? { payment_reference: cieReference.trim(), payment_concept: cieConcept.trim() } : {}),
       proveedor_id: proveedorId,
       company_id: companyId,
       cost_center_id: costCenterId,
@@ -138,7 +149,7 @@ export function EditModal({
       showToast('Solicitud actualizada', 'Los cambios se guardaron correctamente.', 'success')
       onSaved()
     } catch (error: any) {
-      showToast('Error al guardar', error?.message || 'No se pudo actualizar la solicitud.', 'error')
+      showToast('Error al guardar', CONVENIO_ERRORS[error?.message] || friendlyError(error, 'update_payment_request'), 'error')
     } finally {
       setSaving(false)
     }
@@ -185,10 +196,15 @@ export function EditModal({
                   <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => { setBudgetMonth(e.target.value); reloadCategories(companyId, costCenterId, e.target.value) }} required />
                 </label>
                 <label className={s.fullRow}>Proveedor *
-                  <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={(id, label) => { setProveedorId(id); setProviderSearch(label) }} />
+                  <ProviderCombo proveedores={isConvenio ? proveedores.filter(isConvenioProvider) : proveedores} value={proveedorId} search={providerSearch} onSelect={(id, label) => {
+                    if (id !== proveedorId) { setCieReference(''); setCieConcept('') }
+                    setProveedorId(id); setProviderSearch(label)
+                  }} />
                 </label>
               </div>
             </section>
+
+            {isConvenio && <ConvenioFields provider={provider} reference={cieReference} concept={cieConcept} onReference={setCieReference} onConcept={setCieConcept} />}
 
             <section className={s.formSection} style={{ marginTop: 12 }}>
               <h3>Datos financieros</h3>
@@ -197,7 +213,7 @@ export function EditModal({
                   <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} required />
                 </label>
                 <label>Moneda *
-                  <select className={s.formControl} value={currency} onChange={(e) => { setCurrency(e.target.value); if (e.target.value !== 'USD') setExchangeRate('1') }} required>
+                  <select className={s.formControl} value={currency} onChange={(e) => { setCurrency(e.target.value); if (e.target.value !== 'USD') setExchangeRate('1') }} required disabled={isConvenio}>
                     <option value="MXN">MXN</option>
                     <option value="USD">USD</option>
                   </select>

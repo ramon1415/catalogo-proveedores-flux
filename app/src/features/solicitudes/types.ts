@@ -39,6 +39,8 @@ export type PaymentRequest = {
   // sin la migración 004c; se lee de forma perezosa en detalle/tabla.
   request_type?: string | null
   payment_method?: string | null
+  payment_reference?: string | null
+  payment_concept?: string | null
   // Reembolsos: empleado que cobra. En el resto de tipos va null y el
   // destinatario del dinero sigue siendo el proveedor.
   beneficiary_profile_id?: string | null
@@ -88,6 +90,8 @@ export type Proveedor = {
   clabe?: string | null
   cuenta_bancaria?: string | null
   metodo_pago?: string | null
+  destination_type?: string | null
+  convenio_number?: string | null
   activo?: boolean | null
 }
 
@@ -343,6 +347,9 @@ export type BudgetDecisionFilter = 'todos' | 'aprobable' | 'excepciones'
 export type RequestPayload = {
   request_type: string
   payment_method: string
+  payment_reference?: string | null
+  payment_concept?: string | null
+  convenio_number?: string | null
   proveedor_id: string | null
   company_id: string | null
   approver_id: string | null
@@ -375,6 +382,8 @@ export type RequestPayload = {
 }
 
 export type EditPayload = {
+  payment_reference?: string | null
+  payment_concept?: string | null
   proveedor_id: string
   company_id: string
   cost_center_id: string
