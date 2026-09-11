@@ -1,4 +1,5 @@
 import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { RequesterIdentity } from './RequesterIdentity'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
@@ -39,6 +40,7 @@ export function DetailModal({
   budgetCategories,
   proveedores,
   profiles,
+  requester,
   fase2,
   canApprove,
   canEditRequest,
@@ -53,6 +55,7 @@ export function DetailModal({
   budgetCategories: BudgetCategory[]
   proveedores: Proveedor[]
   profiles: Profile[]
+  requester?: Profile | null
   fase2: Fase2Meta
   canApprove: boolean
   canEditRequest: boolean
@@ -334,7 +337,10 @@ export function DetailModal({
           <div>
             <h2>{request.request_number || 'Detalle de solicitud'}</h2>
             <p>{`${isReembolso ? 'Reembolso' : proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`}</p>
-            <CompanyCaptureContext company={company} />
+            <div className={s.captureIdentities}>
+              <CompanyCaptureContext company={company} />
+              <RequesterIdentity profile={requester ?? profiles.find((p) => p.id === request.requested_by)} />
+            </div>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

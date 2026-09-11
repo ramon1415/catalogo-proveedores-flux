@@ -1,4 +1,5 @@
 import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { RequesterIdentity } from './RequesterIdentity'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import {
@@ -42,6 +43,7 @@ function monthValue(value: string | null): string {
 
 export function ReimbursementEditModal({
   request,
+  requester,
   companies,
   costCenters,
   budgetCategories,
@@ -49,6 +51,7 @@ export function ReimbursementEditModal({
   onSaved,
 }: {
   request: PaymentRequest
+  requester?: Profile | null
   companies: Company[]
   costCenters: CostCenter[]
   budgetCategories: BudgetCategory[]
@@ -248,7 +251,10 @@ export function ReimbursementEditModal({
           <div>
             <h2>Editar reembolso</h2>
             <p>{request.request_number || 'Sin folio'} · sólo solicitudes abiertas</p>
-            <CompanyCaptureContext company={company} />
+            <div className={s.captureIdentities}>
+              <CompanyCaptureContext company={company} />
+              <RequesterIdentity profile={requester} />
+            </div>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

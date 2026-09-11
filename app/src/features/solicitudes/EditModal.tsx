@@ -1,4 +1,5 @@
 import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { RequesterIdentity } from './RequesterIdentity'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { ProviderCombo } from './ProviderCombo'
@@ -12,12 +13,13 @@ import {
 } from './logic'
 import { numberValue } from '../../lib/format'
 import type {
-  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow, EditPayload,
+  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow, EditPayload, Profile,
 } from './types'
 import s from './Solicitudes.module.css'
 
 export function EditModal({
   request,
+  requester,
   companies,
   costCenters,
   budgetCategories,
@@ -26,6 +28,7 @@ export function EditModal({
   onSaved,
 }: {
   request: PaymentRequest
+  requester?: Profile | null
   companies: Company[]
   costCenters: CostCenter[]
   budgetCategories: BudgetCategory[]
@@ -162,7 +165,10 @@ export function EditModal({
           <div>
             <h2>Editar solicitud</h2>
             <p>{`${request.request_number || 'Sin folio'} · editando todos los campos`}</p>
-            <CompanyCaptureContext company={companies.find(company => company.id === companyId)} />
+            <div className={s.captureIdentities}>
+              <CompanyCaptureContext company={companies.find(company => company.id === companyId)} />
+              <RequesterIdentity profile={requester} />
+            </div>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

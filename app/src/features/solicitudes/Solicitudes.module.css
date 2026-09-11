@@ -63,6 +63,21 @@
 
 .cellMain { display: block; color: var(--text-1); font-weight: 600; }
 .cellSub { display: block; color: var(--text-3); font-size: 11px; margin-top: 2px; }
+.requesterIdentity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.requesterIcon { display: grid; place-items: center; flex-shrink: 0; color: var(--text-3); }
+.requesterText { min-width: 0; overflow-wrap: anywhere; }
+.requesterLabel { color: var(--text-3); }
+.requesterName { color: var(--text-1); font-weight: 600; }
+.requesterHeader { margin-top: 12px; }
+.requesterHeader .requesterIcon { width: 32px; height: 32px; border-radius: 8px; background: var(--bg-hover); }
+.requesterHeader .requesterText { display: flex; flex-direction: column; line-height: 1.4; }
+.requesterHeader .requesterLabel { font-size: 10.5px; }
+.requesterHeader .requesterName { font-size: 13px; }
+.requesterCompact { gap: 5px; margin-top: 4px; font-size: 11.5px; line-height: 1.45; }
+.requesterCompact .requesterName { font-weight: 500; }
+.requesterSummary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.requesterSummary .requesterCompact { margin-top: 0; font-size: 12px; }
+.requesterCount { color: var(--text-3); font-size: 11.5px; }
 .rowActions { display: flex; gap: 6px; }
 .inlineBadges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 
@@ -80,6 +95,8 @@
 .dialog::backdrop { background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
 .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; max-height: 90vh; overflow: hidden; }
 .modalHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 22px 14px; border-bottom: 1px solid var(--border); }
+.modalHead > div { min-width: 0; }
+.captureIdentities { display: flex; flex-wrap: wrap; gap: 0 24px; }
 .modalHead h2 { font-size: 17px; font-weight: 600; color: var(--text-1); }
 .modalHead p { font-size: 11.5px; margin-top: 2px; color: var(--text-3); }
 .iconBtn { border: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 14px; padding: 4px 8px; border-radius: 7px; }

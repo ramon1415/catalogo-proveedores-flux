@@ -27,10 +27,14 @@ function load(path, imports = {}, globals = {}) {
 }
 const format = load('app/src/lib/format.ts')
 const logic = load(feature + 'logic.ts', { '../../lib/format': format })
+const requesterIdentity = load(feature + 'RequesterIdentity.tsx', {
+  './logic': logic, '../../components/ui/icons': load('app/src/components/ui/icons.tsx'),
+})
 const bank = load('app/src/features/layouts/logic.ts')
 const convenio = load(feature + 'convenio.ts', { '../layouts/logic': bank })
 const companies = [{ id: 'operadora', name: 'Operadora Tlacatecpan' }, { id: 'fersana', name: 'Soporte Fersana' }]
-const profile = { id: 'requester', email: 'qa@example.com' }
+const profile = { id: 'requester', full_name: 'Capturista QA', email: 'qa@example.com' }
+const originalRequester = { id: 'original-requester', full_name: 'Solicitante original QA', email: 'original@example.com' }
 const provider = { id: 'provider', razon_social: 'Proveedor QA' }
 const category = { id: 'category', name: 'Servicios' }
 const center = { id: 'center', name: 'Centro QA' }
@@ -66,6 +70,7 @@ async function mount(companyId, options = {}) {
     return React.createElement('input', { 'data-provider': true, onChange: () => props.onSelect(provider.id, provider.razon_social) })
   }
   const imports = {
+    './RequesterIdentity': requesterIdentity,
     './api': api, './logic': logic, '../../lib/format': format,
     './convenio': convenio, './ConvenioFields': { ConvenioFields: () => null },
     '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
@@ -84,8 +89,9 @@ async function mount(companyId, options = {}) {
   } })[component]
   const props = {
     companies, costCenters: [center], budgetCategories: [category], proveedores: [provider], profile,
+    requester: originalRequester,
     canApprove: false, showNomina: false, onProviderCreated() {}, onClose() {}, onCreated() {}, onSaved() {},
-    request: { id: 'existing', company_id: companyId, cost_center_id: center.id, budget_category_id: category.id,
+    request: { id: 'existing', requested_by: originalRequester.id, company_id: companyId, cost_center_id: center.id, budget_category_id: category.id,
       budget_month: '2026-09-01', proveedor_id: provider.id, amount_requested: 100, currency: 'MXN', description: 'Solicitud QA',
       invoice_storage_path: options.existingPath || null },
   }
@@ -108,21 +114,28 @@ async function mount(companyId, options = {}) {
 for (const company of companies) {
   test(`${company.name}: crear sin adjunto conserva empresa y envía una sola solicitud`, async () => {
     const h = await mount(company.id)
+    assert.equal(h.view.root.findAllByType(requesterIdentity.RequesterIdentity).length, 1)
+    assert.ok(text(h.view.root.findByType(requesterIdentity.RequesterIdentity)).includes(profile.full_name))
+    assert.ok(!text(h.view.toJSON()).includes(originalRequester.full_name))
     assert.equal(text(h.view.root.findByProps({ 'data-company-context': true })), company.name)
     assert.ok(!h.view.root.findByProps({ type: 'file' }).props.required)
     await h.submit()
     assert.deepEqual(h.calls.map(c => c[0]), ['create'])
     assert.equal(h.calls[0][1].company_id, company.id)
     assert.equal(h.calls[0][1].amount_requested, 100)
+    assert.equal(h.calls[0][1].requested_by, profile.id)
     assert.ok(h.toasts.some(t => t[0] === 'Solicitud creada'))
     h.close()
   })
   test(`${company.name}: editar sin adjunto no borra ni exige documentos`, async () => {
     const h = await mount(company.id, { edit: true })
+    assert.equal(text(h.view.toJSON()).split(originalRequester.full_name).length - 1, 1)
+    assert.ok(!text(h.view.toJSON()).includes(profile.full_name))
     await h.submit()
     assert.deepEqual(h.calls.map(c => c[0]), ['update'])
     assert.equal(h.calls[0][2].company_id, company.id)
     assert.ok(!Object.hasOwn(h.calls[0][2], 'invoice_storage_path'))
+    assert.ok(!Object.hasOwn(h.calls[0][2], 'requested_by'))
     h.close()
   })
 }
