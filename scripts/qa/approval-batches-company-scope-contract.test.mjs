@@ -8,7 +8,7 @@ const frame = fs.readFileSync('app/src/pages/LegacyModuleFrame.tsx', 'utf8')
 
 test('React passes the active company to the embedded weekly-cuts module', () => {
   assert.match(frame, /company_id=\$\{encodeURIComponent\(companyId\)\}/)
-  assert.match(frame, /const \{ companyId \} = useCompany\(\)/)
+  assert.match(frame, /const \{ companyId, companyName \} = useCompany\(\)/)
 })
 
 test('weekly cuts parse a valid company scope and fail closed on an invalid requested scope', () => {

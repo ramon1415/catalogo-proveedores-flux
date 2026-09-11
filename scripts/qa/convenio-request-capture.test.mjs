@@ -29,7 +29,7 @@ function load(relative) {
       if (name.endsWith('.css')) return { default: {} }
       return load(path.resolve(path.dirname(file), name))
     }, window: { setTimeout, clearTimeout }, localStorage: { setItem() {} },
-    console, TextEncoder, Blob, URL, setTimeout, clearTimeout,
+    console, TextEncoder, Blob, URL, setTimeout, clearTimeout, AbortController,
   }, { filename: file })
   return exports
 }
@@ -138,6 +138,13 @@ for (const company of companies) {
     if (company.name === 'Fersana') {
       const input = tree.root.findAllByType('input').find(n => n.props.type === 'file')
       await renderer.act(async () => input.props.onChange({ target: { files: [{ name: 'recibo.pdf', type: 'application/pdf', size: 100 }] } }))
+      // Unreadable replacement clears previous bank instructions. Manual entry
+      // remains possible with the selected receipt attached.
+      assert.equal(field(tree, 'Referencia / línea de captura *').props.value, '')
+      await change(field(tree, 'Referencia / línea de captura *'), reference)
+      await change(field(tree, 'Concepto del pago CIE *'), concept)
+      await change(field(tree, 'Monto solicitado *'), '70')
+      await renderer.act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
     }
     const before = createCalls.length
     await renderer.act(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }))

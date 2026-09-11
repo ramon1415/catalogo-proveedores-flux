@@ -19,6 +19,7 @@ function load(path, imports = {}, globals = {}) {
     if (Object.hasOwn(imports, name)) return imports[name]
     if (name.startsWith('react')) return require(name)
     if (name.endsWith('.css')) return new Proxy({}, { get: (_, key) => String(key) })
+    if (name === './ConvenioReceiptUpload') return { ConvenioReceiptUpload: () => null }
     throw new Error(`Unexpected import ${name}`)
   }
   new Function('require', 'module', 'exports', 'window', outputText)(dependency, module, module.exports, globals.window)

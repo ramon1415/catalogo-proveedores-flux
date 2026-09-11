@@ -34,6 +34,8 @@
     duplicateBatch: null, summaryFilter: "", trigger: null, busy: false,
     detailRequest: 0, candidateRequest: 0, previewRequest: 0, operationEpoch: 0,
     commandKeys: new Map(),
+    companyScopeId: null,
+    listRequest: 0,
   }
   const dom = {}
 
@@ -61,10 +63,15 @@
     dom.userName.textContent = profile?.full_name || session.user?.email || "Usuario"
     dom.userEmail.textContent = profile?.email || session.user?.email || "Sesión activa"
     try {
+      const params = new URLSearchParams(window.location.search)
+      const scope = params.has("company_id") ? params.get("company_id") : sessionStorage.getItem("flux.company")
+      state.companyScopeId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(scope || "") ? scope.toLowerCase() : null
+      if (!state.companyScopeId) return renderBlocked("Selecciona una empresa", "Abre Comprobantes batch desde Flux después de seleccionar la empresa.")
       const { data, error } = await client.rpc(RPC.context)
       if (error) throw error
       state.context = object(data)
       if (state.context.allowed === false || state.context.can_access === false) return renderBlocked("Acceso restringido", state.context.block_reason || "No tienes capacidad asignada para consultar conciliaciones.")
+      if (!array(state.context.companies).some(company => company.id === state.companyScopeId)) return renderBlocked("Empresa no disponible", "No tienes acceso a Comprobantes batch de la empresa seleccionada.")
       populateCompanies(array(state.context.companies))
       dom.accessState.hidden = true
       dom.batchWorkspace.hidden = false
@@ -167,22 +174,51 @@
   function capabilities() { const nested = object(state.context?.capabilities); return Object.keys(nested).length ? nested : object(state.context) }
   function can(name) { return capabilities()[name] === true }
   function syncCapabilities() { dom.newBatchBtn.hidden = !can("can_ingest"); dom.newBatchBtn.disabled = !can("can_ingest") }
-  function populateCompanies(companies) { dom.batchCompanyId.innerHTML = `<option value="">Selecciona…</option>${companies.map((company) => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.legal_name || company.name || "Empresa")}</option>`).join("")}` }
+  function inCompanyScope(batch) { return Boolean(state.companyScopeId) && batch?.company_id === state.companyScopeId }
+  function scopedBatches(data) { return array(data?.items || data).filter(inCompanyScope) }
+  function populateCompanies(companies) {
+    dom.batchCompanyId.innerHTML = companies.filter(company => company.id === state.companyScopeId).map(company => `<option value="${escapeHtml(company.id)}">${escapeHtml(company.legal_name || company.name || "Empresa")}</option>`).join("")
+    dom.batchCompanyId.value = state.companyScopeId || ""
+    dom.batchCompanyId.disabled = true
+  }
+  function clearBatchSelection() {
+    state.detailRequest += 1
+    state.selectedId = null
+    state.detail = null
+    state.operation = null
+    state.candidates = []
+    state.linkPreview = null
+    state.operationLinkStatuses = {}
+    state.candidateRequest += 1
+    state.previewRequest += 1
+    state.operationEpoch += 1
+    clearIndividualReceipt()
+    if (dom.operationDialog.open) dom.operationDialog.close()
+    dom.batchDetail.innerHTML = '<div class="receipt-batch-empty">Selecciona un batch de esta empresa.</div>'
+  }
 
   async function loadBatches(announce = false) {
+    if (!state.companyScopeId) return
+    const requestId = ++state.listRequest
     setBusy(true)
     try {
-      const { data, error } = await client.rpc(RPC.listBatches, { p_company_id: null, p_status: null, p_limit: 50 })
+      const { data, error } = await client.rpc(RPC.listBatches, { p_company_id: state.companyScopeId, p_status: null, p_limit: 50 })
+      if (requestId !== state.listRequest) return
       if (error) throw error
-      state.batches = array(data?.items || data)
+      state.batches = scopedBatches(data)
+      if (state.selectedId && !state.batches.some(batch => batch.id === state.selectedId)) clearBatchSelection()
       renderSummary()
       renderBatchList()
       if (state.selectedId && state.batches.some((batch) => batch.id === state.selectedId)) await openBatch(state.selectedId)
       if (announce) toast("Bandeja actualizada", "Se consultó el estado más reciente.", "success")
     } catch (error) {
+      if (requestId !== state.listRequest) return
+      state.batches = []
+      clearBatchSelection()
+      renderSummary()
       dom.batchList.innerHTML = `<div class="receipt-batch-empty">${escapeHtml(friendlyError(error))}</div>`
       toast("No se pudieron cargar los batches", friendlyError(error), "danger")
-    } finally { setBusy(false) }
+    } finally { if (requestId === state.listRequest) setBusy(false) }
   }
 
   function renderSummary() {
@@ -209,8 +245,10 @@
   }
 
   async function openBatch(batchId) {
+    if (!state.companyScopeId) return
     const requestId = ++state.detailRequest
     state.selectedId = batchId
+    state.detail = null
     state.operation = null
     state.candidates = []
     state.candidateOperationId = null
@@ -222,7 +260,9 @@
     const { data, error } = await client.rpc(RPC.batchDetail, { p_batch_id: batchId })
     if (requestId !== state.detailRequest || state.selectedId !== batchId) return
     if (error) { dom.batchDetail.innerHTML = `<div class="receipt-batch-empty">${escapeHtml(friendlyError(error))}</div>`; return }
-    state.detail = object(data)
+    const detail = object(data)
+    if (!inCompanyScope(detail.batch || detail.ingestion_batch)) { clearBatchSelection(); renderBatchList(); return }
+    state.detail = detail
     const operationLinkStatuses = await loadOperationLinkStatuses(state.detail)
     if (requestId !== state.detailRequest || state.selectedId !== batchId) return
     state.operationLinkStatuses = operationLinkStatuses
@@ -519,22 +559,25 @@
   }
 
   async function reconcileOperation(context, knownOperationId) {
-    if (!context.batchId) return
+    if (!context.batchId || !state.companyScopeId) return
+    const listRequest = ++state.listRequest
     try {
       const [batchesResult, detailResult] = await Promise.all([
-        client.rpc(RPC.listBatches, { p_company_id: null, p_status: null, p_limit: 50 }),
+        client.rpc(RPC.listBatches, { p_company_id: state.companyScopeId, p_status: null, p_limit: 50 }),
         client.rpc(RPC.batchDetail, { p_batch_id: context.batchId }),
       ])
       if (!operationContextIsCurrent(context)) return
 
-      if (!batchesResult.error) {
-        state.batches = array(batchesResult.data?.items || batchesResult.data)
+      if (!batchesResult.error && listRequest === state.listRequest) {
+        state.batches = scopedBatches(batchesResult.data)
         renderSummary()
         renderBatchList()
       }
       if (detailResult.error) return
 
-      state.detail = object(detailResult.data)
+      const detail = object(detailResult.data)
+      if (!inCompanyScope(detail.batch || detail.ingestion_batch)) { clearBatchSelection(); renderBatchList(); return }
+      state.detail = detail
       renderBatchDetail()
       const refreshed = batchOperations(state.detail).find((item) => (
         item.extraction_id === context.extractionId
@@ -915,7 +958,7 @@
     state.individualReceipt = null
   }
 
-  function openNewBatch() { dom.newBatchForm.reset(); dom.uploadError.textContent = ""; dom.uploadProgress.hidden = true; dom.newBatchDialog.showModal(); dom.batchCompanyId.focus() }
+  function openNewBatch() { if (!state.companyScopeId) return; dom.newBatchForm.reset(); dom.batchCompanyId.value = state.companyScopeId; dom.uploadError.textContent = ""; dom.uploadProgress.hidden = true; dom.newBatchDialog.showModal(); dom.batchPdfFile.focus() }
   function closeNewBatch() { if (!state.busy) dom.newBatchDialog.close() }
   function closeDuplicateBatch() { state.duplicateBatch = null; dom.duplicateBatchDialog.close() }
   async function openDuplicateBatch() {
@@ -938,7 +981,7 @@
     if (state.busy) return
     const companyId = String(dom.batchCompanyId.value || "")
     const file = dom.batchPdfFile.files[0]
-    if (!companyId) { dom.uploadError.textContent = "Selecciona una empresa."; return }
+    if (!state.companyScopeId || companyId !== state.companyScopeId) { dom.uploadError.textContent = "La empresa no coincide con la seleccionada en Flux. Vuelve a abrir la carga."; return }
     const validation = validateFile(file)
     if (validation) { dom.uploadError.textContent = validation; return }
     setBusy(true); setProgress(5, "Leyendo y verificando PDF…")
@@ -1066,7 +1109,7 @@
     return /payment_batch_upload_not_found/i.test(detail)
   }
 
-  function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = busy; dom.batchPdfFile.disabled = busy; dom.closeOperationBtn.disabled = busy; if (dom.operationDialog.open) renderOperation() }
+  function setBusy(busy) { state.busy = busy; dom.refreshBtn.disabled = busy; dom.submitNewBatchBtn.disabled = busy; dom.batchCompanyId.disabled = true; dom.batchPdfFile.disabled = busy; dom.closeOperationBtn.disabled = busy; if (dom.operationDialog.open) renderOperation() }
   function setProgress(percent, text) { dom.uploadProgress.hidden = false; dom.uploadProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`; dom.uploadProgressText.textContent = text }
   function updateSummaryFilter() { document.querySelectorAll("[data-summary-filter]").forEach((button) => { const active = button.dataset.summaryFilter === state.summaryFilter; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)) }) }
   function actionReason() { if (!can("can_review") && !can("can_match") && !can("can_link")) return state.context?.block_reason || "Acciones no autorizadas."; return "Las capacidades se revalidan en cada RPC." }

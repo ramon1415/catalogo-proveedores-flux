@@ -90,7 +90,9 @@ test('CIE correction form blocks incomplete input and requires bank-rejection co
     '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: 'Company' },
     '../../components/ui/Toast': { useToast: () => ({ showToast() {} }) },
     './logic': react,
-    './api': { updateCieReference: async params => { calls.push(params) } },
+    './api': { updateCieInstructions: async params => { calls.push(params) } },
+    '../solicitudes/ConvenioReceiptUpload': { ConvenioReceiptUpload: 'ReceiptUpload' },
+    '../solicitudes/convenio': { convenioConceptError: value => value ? null : 'Concepto requerido' },
     './Layouts.module.css': { default: {} },
   }
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { exports: component, require: name => { assert.ok(name in modules, name); return modules[name] } })
@@ -114,5 +116,7 @@ test('CIE correction form blocks incomplete input and requires bank-rejection co
   assert.equal(calls[0].p_line_id, 'qa-line')
   assert.equal(calls[0].p_payment_reference, capture)
   assert.equal(calls[0].p_expected_reference, '10092')
+  assert.equal(calls[0].p_payment_concept, 'PRUEBA CFE')
+  assert.equal(calls[0].p_expected_concept, 'PRUEBA CFE')
   assert.equal(closed, true)
 })

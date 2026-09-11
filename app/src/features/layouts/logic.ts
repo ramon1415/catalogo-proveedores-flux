@@ -208,13 +208,15 @@ export function formatBbvaCieReference(value: unknown, convenio: unknown): strin
 export function cieReferenceSaveError(error: any): string {
   const raw = String(error?.message || error || '')
   const messages: Record<string, string> = {
+    cie_concept_required: 'Captura el concepto indicado para pagar este recibo.',
+    cie_concept_invalid: 'El concepto debe tener hasta 30 caracteres válidos, sin acentos ni separadores verticales.',
     cie_reference_required: 'Copia la línea de captura o referencia CIE del recibo.',
     cie_reference_too_long: 'La referencia CIE excede 20 caracteres; no se recorta automáticamente.',
     cie_reference_invalid: 'La referencia CIE contiene caracteres no permitidos. Copia el dato exacto del recibo.',
     cie_reference_cfe_requires_20_characters: 'CFE requiere la línea de captura de 20 caracteres del recibo, sin espacios.',
     cie_reference_bank_rejection_confirmation_required: 'Confirma que el banco rechazó este pago y no lo ejecutó.',
     cie_reference_line_locked: 'Este pago ya fue cerrado o tiene comprobante. Su referencia no se puede modificar.',
-    cie_reference_changed: 'La referencia cambió mientras la revisabas. Cierra y vuelve a abrir el layout.',
+    cie_reference_changed: 'La referencia o el concepto cambiaron mientras los revisabas. Cierra y vuelve a abrir el layout.',
     cie_reference_not_authorized: 'Tu usuario no tiene acceso para corregir pagos de esta empresa.',
     cie_reference_line_not_found: 'No se encontró la línea CIE. Actualiza el layout.',
     not_authenticated: 'Inicia sesión nuevamente para guardar la referencia.',

@@ -72,6 +72,19 @@ export async function updateCieReference(params: {
   return data
 }
 
+export async function updateCieInstructions(params: {
+  p_line_id: string
+  p_payment_reference: string
+  p_payment_concept: string
+  p_expected_reference: string | null
+  p_expected_concept: string | null
+  p_bank_rejection_confirmed: boolean
+}) {
+  const { data, error } = await supabase.rpc('update_payment_layout_line_cie_instructions', params as any)
+  if (error) throw error
+  return data
+}
+
 export async function createLayout(params: {
   p_period_start: string
   p_period_end: string

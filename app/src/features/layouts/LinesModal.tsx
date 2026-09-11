@@ -162,7 +162,7 @@ export function LinesModal({
                             <button className={`${s.smallBtn} ${s.warning}`} type="button" onClick={() => openPagosint(line)}>Completar referencia</button>
                           )}
                           {line.destination_type === 'convenio' && !['confirmed', 'cancelled'].includes(layout.status || '') && (
-                            <button className={`${s.smallBtn} ${cieReferenceError(line.payment_reference, line.convenio_number) ? s.warning : ''}`} type="button" onClick={() => setCieLine(line)}>Corregir referencia CIE</button>
+                            <button className={`${s.smallBtn} ${cieReferenceError(line.payment_reference, line.convenio_number) ? s.warning : ''}`} type="button" onClick={() => setCieLine(line)}>Corregir datos CIE</button>
                           )}
                           <button className={`${s.smallBtn} ${s.danger}`} type="button" onClick={() => setRejectLineId(line.id)}>Rechazar</button>
                         </div>

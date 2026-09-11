@@ -7,6 +7,13 @@ on:
       - layouts.js
       - app/src/features/layouts/**
       - app/src/features/solicitudes/**
+      - app/src/pages/LegacyModuleFrame.tsx
+      - comprobantes_batch.js
+      - comprobantes_batch.html
+      - scripts/qa/convenio-receipt-autofill.test.mjs
+      - scripts/qa/cie-instructions-server.test.mjs
+      - scripts/qa/payment-batch-company-scope.test.mjs
+      - supabase/migrations/*_cie_receipt_instructions.sql
       - scripts/qa/convenio-request-capture.test.mjs
       - scripts/qa/convenio-request-server.test.mjs
       - scripts/qa/fixtures/convenio-production-creators.json
@@ -44,4 +51,9 @@ jobs:
           scripts/qa/bbva-cie-reference-validation.test.mjs
           scripts/qa/convenio-request-capture.test.mjs
           scripts/qa/convenio-request-server.test.mjs
+          scripts/qa/convenio-receipt-autofill.test.mjs
+          scripts/qa/cie-instructions-server.test.mjs
+          scripts/qa/payment-batch-company-scope.test.mjs
+          scripts/qa/payment-batch-step-transition-hotfix.test.mjs
+          scripts/qa/approval-batches-company-scope-contract.test.mjs
       - run: npm --prefix app run typecheck

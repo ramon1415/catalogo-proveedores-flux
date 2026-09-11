@@ -233,6 +233,6 @@ test("the modal cannot be dismissed while its reviewed PDF is being committed", 
 test("the deployed page cache-busts the corrected transition client", () => {
   assert.match(
     html,
-    /comprobantes_batch\.js\?v=20260809-step-transition-hotfix/,
+    /comprobantes_batch\.js\?v=20260911-company-scope/,
   );
 });

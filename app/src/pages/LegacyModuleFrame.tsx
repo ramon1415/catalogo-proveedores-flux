@@ -27,7 +27,7 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
   const [frameDocument, setFrameDocument] = useState<Document | null>(null)
   const frameSrc = companyId
     ? `${src}${src.includes('?') ? '&' : '?'}company_id=${encodeURIComponent(companyId)}`
-    : src
+    : `${src}${src.includes('?') ? '&' : '?'}company_id=`
 
   function prepareEmbeddedShell() {
     const doc = frameRef.current?.contentDocument
@@ -54,6 +54,7 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
   return (
     <section className={s.host} aria-label={title}>
       <iframe
+        key={frameSrc}
         ref={frameRef}
         className={`${s.frame} ${ready ? s.frameReady : ''}`}
         src={frameSrc}

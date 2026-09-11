@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { ProviderCombo } from './ProviderCombo'
 import { ConvenioFields } from './ConvenioFields'
+import { ConvenioReceiptUpload } from './ConvenioReceiptUpload'
+import type { ConvenioReceiptData } from './convenioReceipt'
 import { isConvenioProvider, convenioDataError, CONVENIO_ERRORS } from './convenio'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
@@ -104,6 +106,8 @@ export function RequestModal({
   const [providerSearch, setProviderSearch] = useState('')
   const [cieReference, setCieReference] = useState('')
   const [cieConcept, setCieConcept] = useState('')
+  const [readingConvenio, setReadingConvenio] = useState(false)
+  const [receiptEpoch, setReceiptEpoch] = useState(0)
   const [amount, setAmount] = useState('')
   // Desglose fiscal (opcional): el budget descuenta el subtotal cuando existe.
   const [subtotal, setSubtotal] = useState('')
@@ -409,7 +413,7 @@ export function RequestModal({
   }, [effectiveAmount])
 
   function onCompanyChange(v: string) {
-    if (v !== companyId) { setCieReference(''); setCieConcept('') }
+    if (v !== companyId) { setCieReference(''); setCieConcept(''); if (isConvenio) { setFile(null); setReceiptEpoch(value => value + 1) } }
     setCompanyId(v); reloadBudgetCategories(v, costCenterId, budgetMonth)
   }
   function onCostCenterChange(v: string) { setCostCenterId(v); reloadBudgetCategories(companyId, v, budgetMonth) }
@@ -459,7 +463,7 @@ export function RequestModal({
   }
 
   function onProviderSelect(id: string, label: string) {
-    if (id !== proveedorId) { setCieReference(''); setCieConcept('') }
+    if (id !== proveedorId) { setCieReference(''); setCieConcept(''); if (isConvenio) { setFile(null); setReceiptEpoch(value => value + 1) } }
     setProveedorId(id)
     setProviderSearch(label)
     categoryTouched.current = false
@@ -474,6 +478,7 @@ export function RequestModal({
   }
 
   function onRequestTypeChange(value: string) {
+    if (isConvenio || value === 'convenio') { setFile(null); setReceiptEpoch(current => current + 1) }
     setRequestType(value)
     setCieReference(''); setCieConcept('')
     if (value === 'convenio') {
@@ -484,6 +489,18 @@ export function RequestModal({
     } else if (isConvenioProvider(proveedores.find((p) => p.id === proveedorId))) {
       setProveedorId(''); setProviderSearch('')
     }
+  }
+
+  function applyConvenioReceipt(data: ConvenioReceiptData): string | void {
+    const matches = proveedores.filter(p => isConvenioProvider(p) && p.activo !== false && p.convenio_number?.trim().padStart(7, '0') === data.convenio?.padStart(7, '0'))
+    const selected = matches.find(p => p.id === proveedorId) || (matches.length === 1 ? matches[0] : null)
+    if (!selected) return 'Recibo leído y adjunto. Selecciona el proveedor con el convenio correspondiente y vuelve a cargar el recibo para completar sus datos.'
+    setProveedorId(selected.id); setProviderSearch(proveedorLabel(selected))
+    setCieReference(data.reference); setCieConcept(data.concept)
+    setAmount(data.amount); setCurrency('MXN'); setExchangeRate('1'); setPaymentMethod('transfer')
+    setSubtotal(''); setTaxAmount(''); setWithholding(''); setCfdiHint('')
+    if (data.description) setDescription(data.description)
+    categoryTouched.current = false
   }
 
   function applyPredictionCandidate(id: string) {
@@ -565,7 +582,7 @@ export function RequestModal({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (submitting) return
+    if (submitting || readingConvenio) return
 
     // Nómina usa el contrato de staging N2B dedicado; no se crea vía este RPC.
     if (normalizeRequestType(requestType) === 'nomina') {
@@ -739,8 +756,12 @@ export function RequestModal({
                       <select className={s.formControl} value={requestType} onChange={(e) => onRequestTypeChange(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
-                      <span className={s.fieldHint}>{isConvenio ? 'Pago de servicios por convenio BBVA CIE. Captura abajo la referencia y el concepto de este recibo.' : 'Selecciona Convenio para servicios que se pagan con un convenio BBVA CIE.'}</span>
+                      <span className={s.fieldHint}>{isConvenio ? 'Carga el recibo para completar los datos del convenio BBVA CIE.' : 'Selecciona Convenio para servicios que se pagan con un convenio BBVA CIE.'}</span>
                     </label>
+                    {isConvenio && <ConvenioReceiptUpload scopeKey={`${companyId}:${receiptEpoch}`} disabled={submitting} onPrepared={prepared => {
+                      setFile(prepared)
+                      if (!prepared) { setCieReference(''); setCieConcept(''); setAmount(''); setSubtotal(''); setTaxAmount(''); setWithholding('') }
+                    }} onRead={applyConvenioReceipt} onBusyChange={setReadingConvenio} />}
                     <label className={s.fullRow}>Metodo de pago *
                       <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required disabled={isConvenio}>
                         {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -750,7 +771,7 @@ export function RequestModal({
                     {!isReembolso && (
                       <label>Monto solicitado *
                         <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
-                          value={amount}
+                          value={amount} disabled={readingConvenio}
                           onChange={(e) => setAmount(e.target.value)}
                           required />
                       </label>
@@ -797,7 +818,7 @@ export function RequestModal({
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
+                    <label className={`${s.fullRow} ${isReembolso || isConvenio ? s.hidden : ''}`}>Factura / comprobante (opcional)
                       <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
@@ -845,7 +866,7 @@ export function RequestModal({
                   </section>
                 )}
 
-                {isConvenio && <ConvenioFields provider={proveedor} reference={cieReference} concept={cieConcept} onReference={setCieReference} onConcept={setCieConcept} />}
+                {isConvenio && <ConvenioFields provider={proveedor} reference={cieReference} concept={cieConcept} onReference={setCieReference} onConcept={setCieConcept} disabled={readingConvenio} />}
 
                 {!isReembolso && (
                   <section className={s.formSection}>
@@ -1022,7 +1043,7 @@ export function RequestModal({
           ) : (
             <>
               <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-              <button type="submit" className={s.primaryBtn} disabled={submitting}>
+              <button type="submit" className={s.primaryBtn} disabled={submitting || readingConvenio}>
                 {submitting
                   ? (isReembolso ? 'Creando reembolso...' : 'Creando solicitud...')
                   : (isReembolso ? 'Crear reembolso' : 'Crear solicitud')}

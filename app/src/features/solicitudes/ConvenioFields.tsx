@@ -3,7 +3,8 @@ import { convenioConceptError } from './convenio'
 import type { Proveedor } from './types'
 import s from './Solicitudes.module.css'
 
-export function ConvenioFields({ provider, reference, concept, onReference, onConcept }: {
+export function ConvenioFields({ provider, reference, concept, onReference, onConcept, disabled }: {
+  disabled?: boolean
   provider: Proveedor | null
   reference: string
   concept: string
@@ -23,14 +24,14 @@ export function ConvenioFields({ provider, reference, concept, onReference, onCo
         </label>
         <label className={s.fullRow}>Referencia / línea de captura *
           <input className={s.formControl} type="text" autoComplete="off" spellCheck={false} value={reference}
-            onChange={(e) => onReference(e.target.value)} required disabled={!provider} aria-invalid={!!referenceError} aria-describedby="cie-reference-hint" />
+            onChange={(e) => onReference(e.target.value)} required disabled={!provider || disabled} aria-invalid={!!referenceError} aria-describedby="cie-reference-hint" />
           <span id="cie-reference-hint" className={`${s.fieldHint} ${referenceError ? s.error : ''}`}>
             {referenceError || `${reference.trim().length}/20 caracteres${isCfeCieConvenio(provider?.convenio_number) ? ' · CFE requiere exactamente 20, sin espacios.' : ' como máximo. Conserva los ceros iniciales.'}`}
           </span>
         </label>
         <label className={s.fullRow}>Concepto del pago CIE *
           <input className={s.formControl} type="text" autoComplete="off" spellCheck={false} value={concept}
-            onChange={(e) => onConcept(e.target.value)} required disabled={!provider} aria-invalid={!!conceptError} aria-describedby="cie-concept-hint" />
+            onChange={(e) => onConcept(e.target.value)} required disabled={!provider || disabled} aria-invalid={!!conceptError} aria-describedby="cie-concept-hint" />
           <span id="cie-concept-hint" className={`${s.fieldHint} ${conceptError ? s.error : ''}`}>
             {conceptError || `${concept.trim().length}/30 caracteres · Usa el concepto indicado para pagar el recibo; conserva sus ceros iniciales.`}
           </span>
