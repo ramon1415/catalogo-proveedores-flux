@@ -459,6 +459,7 @@ export function decisionActionLabel(action: string): string {
 // ── Fase 2: request_type / payment_method ──────────────────────────────────
 export const REQUEST_TYPE_OPTIONS: Array<[string, string]> = [
   ['provider_payment', 'Pago a proveedor'],
+  ['convenio', 'Convenio'],
   ['online_purchase', 'Compra en linea'],
   ['reimbursement', 'Reembolso'],
   ['nomina', 'Nómina'],
@@ -473,6 +474,7 @@ export const PAYMENT_METHOD_OPTIONS: Array<[string, string]> = [
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
   provider_payment: 'Pago a proveedor',
+  convenio: 'Convenio',
   supplier_payment: 'Pago a proveedor',
   online_purchase: 'Compra en linea',
   reimbursement: 'Reembolso',
@@ -488,6 +490,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 
 export function normalizeRequestType(raw: unknown): string {
   const key = normalize(raw)
+  if (key === 'convenio') return 'convenio'
   if (key === 'online_purchase') return 'online_purchase'
   if (key === 'reimbursement') return 'reimbursement'
   if (key === 'nomina' || key === 'payroll') return 'nomina'

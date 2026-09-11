@@ -1003,7 +1003,7 @@ export function exclusionReasons(request: NotIncludedItem['request'], context: E
 
   if (type === 'cash' || type === 'check') {
     reasons.push(type === 'cash' ? 'Es solicitud de efectivo; se opera en Efectivo y comprobaciones.' : 'Es solicitud de cheque; se opera en Efectivo y comprobaciones.')
-  } else if (!['provider_payment', 'transfer', 'transferencia', '', null].includes(type)) {
+  } else if (!['provider_payment', 'convenio', 'transfer', 'transferencia', '', null].includes(type)) {
     reasons.push('El tipo de solicitud no corresponde a layout de pago por transferencia.')
   }
 

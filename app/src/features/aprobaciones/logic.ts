@@ -172,6 +172,7 @@ export function budgetBadge(r: PaymentRequest): BudgetBadgeDesc {
 export function typeLabel(type: string | null): string {
   const m: Record<string, string> = {
     provider_payment: 'Transferencia',
+    convenio: 'Convenio',
     cash: 'Efectivo',
     check: 'Cheque',
     reimbursement: 'Reembolso',
