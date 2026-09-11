@@ -6,7 +6,7 @@
 import type { BadgeVariant } from '../../components/ui/Badge'
 import type {
   PaymentLayout, PaymentLayoutLine, CompanyBankAccount, BbvaFormat, PreviewRow,
-  FormatSummary, FormatSummaryItem, LayoutValidation, BbvaFile, InvalidLine, NotIncludedItem,
+  FormatSummary, FormatSummaryItem, LayoutValidation, BbvaFile, InvalidLine, NotIncludedItem, EligibilityPreview,
 } from './types'
 
 // ── Constantes de formato (idénticas a layouts.js) ─────────────────────────
@@ -53,6 +53,7 @@ export const BBVA_INTERBANK_LINE_PATTERN = /^\d{18}\d{18}MXP\d{13}\.\d{2}[A-Z0-9
 export const BBVA_CIE_CONCEPT_LENGTH = 30
 export const BBVA_CIE_CONVENIO_LENGTH = 7
 export const BBVA_CIE_REFERENCE_LENGTH = 20
+export const BBVA_CFE_CONVENIO = '0578869'
 export const BBVA_CIE_LINE_LENGTH =
   BBVA_CIE_CONCEPT_LENGTH + BBVA_CIE_CONVENIO_LENGTH + CXC_ACCOUNT_LENGTH + CXC_AMOUNT_LENGTH +
   BBVA_CIE_CONCEPT_LENGTH + BBVA_CIE_REFERENCE_LENGTH
@@ -181,6 +182,79 @@ export function formatBbvaInterbankBankField(destinationValue: unknown): string 
 }
 
 // ── Formateadores CIE ──────────────────────────────────────────────────────
+export function isCfeCieConvenio(value: unknown): boolean {
+  const convenio = String(value ?? '').trim()
+  return /^\d{6,7}$/.test(convenio) && convenio.padStart(7, '0') === BBVA_CFE_CONVENIO
+}
+
+export function cieReferenceError(value: unknown, convenio: unknown): string | null {
+  const reference = String(value ?? '').trim()
+  if (!reference) return 'La referencia CIE es obligatoria. Copia la línea de captura del recibo.'
+  if (reference.length > BBVA_CIE_REFERENCE_LENGTH) return 'La referencia CIE excede 20 caracteres. Revisa el recibo; no se recorta automáticamente.'
+  if (!/^[\x20-\x7e]+$/.test(reference)) return 'La referencia CIE debe usar caracteres ASCII portables, sin acentos ni saltos de línea.'
+  if (reference.includes('|')) return 'La referencia CIE contiene el caracter | no permitido.'
+  if (isCfeCieConvenio(convenio) && (reference.length !== 20 || /\s/.test(reference))) {
+    return 'CFE requiere la línea de captura de 20 caracteres del recibo, sin espacios. No uses una fecha, el número de servicio ni ceros de relleno.'
+  }
+  return null
+}
+
+export function formatBbvaCieReference(value: unknown, convenio: unknown): string {
+  const error = cieReferenceError(value, convenio)
+  if (error) throw new Error(error)
+  return String(value).trim().padEnd(BBVA_CIE_REFERENCE_LENGTH, ' ')
+}
+
+export function cieReferenceSaveError(error: any): string {
+  const raw = String(error?.message || error || '')
+  const messages: Record<string, string> = {
+    cie_reference_required: 'Copia la línea de captura o referencia CIE del recibo.',
+    cie_reference_too_long: 'La referencia CIE excede 20 caracteres; no se recorta automáticamente.',
+    cie_reference_invalid: 'La referencia CIE contiene caracteres no permitidos. Copia el dato exacto del recibo.',
+    cie_reference_cfe_requires_20_characters: 'CFE requiere la línea de captura de 20 caracteres del recibo, sin espacios.',
+    cie_reference_bank_rejection_confirmation_required: 'Confirma que el banco rechazó este pago y no lo ejecutó.',
+    cie_reference_line_locked: 'Este pago ya fue cerrado o tiene comprobante. Su referencia no se puede modificar.',
+    cie_reference_changed: 'La referencia cambió mientras la revisabas. Cierra y vuelve a abrir el layout.',
+    cie_reference_not_authorized: 'Tu usuario no tiene acceso para corregir pagos de esta empresa.',
+    cie_reference_line_not_found: 'No se encontró la línea CIE. Actualiza el layout.',
+    not_authenticated: 'Inicia sesión nuevamente para guardar la referencia.',
+  }
+  return messages[raw] || raw || 'No se pudo guardar la referencia CIE.'
+}
+
+export function previewCieConvenio(row: PreviewRow): string {
+  return String(row.convenio_number || '').trim() || /^CONVENIO\s+(\d{6,7})$/i.exec(String(row.destination_value ?? '').trim())?.[1] || ''
+}
+
+export function ciePreviewProviderIds(preview: EligibilityPreview): string[] {
+  return [...new Set(Object.values(preview).flatMap((rows) => (Array.isArray(rows) ? rows : [])
+    .filter((row) => normalizeDestinationType(row.destination_type) === 'convenio' && row.proveedor_id)
+    .map((row) => row.proveedor_id as string)))]
+}
+
+export function withCiePreviewConvenios(preview: EligibilityPreview, providers: { id: string; convenio_number: string | null }[]): EligibilityPreview {
+  const convenios = new Map(providers.map((provider) => [provider.id, provider.convenio_number]))
+  return Object.fromEntries(Object.entries(preview).map(([key, rows]) => [key, Array.isArray(rows) ? rows.map((row) =>
+    normalizeDestinationType(row.destination_type) === 'convenio' && row.proveedor_id
+      ? { ...row, convenio_number: convenios.get(row.proveedor_id) ?? null }
+      : row) : rows]))
+}
+
+export function applyCieReferencePreflight(preview: EligibilityPreview): EligibilityPreview {
+  const result: EligibilityPreview = { ...preview, invalid_data: [...(preview.invalid_data || [])] }
+  for (const key of ['ready_regular', 'ready_extraordinary', 'legacy_eligible']) {
+    result[key] = (preview[key] || []).filter((row) => {
+      if (normalizeDestinationType(row.destination_type) !== 'convenio') return true
+      const convenio = previewCieConvenio(row)
+      const missing = !/^\d{6,7}$/.test(convenio) ? 'convenio_number' : cieReferenceError(row.payment_reference, convenio) ? 'payment_reference_invalid' : null
+      if (!missing) return true
+      result.invalid_data!.push({ ...row, classification: 'invalid_data', missing_fields: [...new Set([...(row.missing_fields || []), missing])] })
+      return false
+    })
+  }
+  return result
+}
+
 export function formatBbvaCieConvenio(value: unknown): string {
   const input = String(value ?? '').trim()
   if (!/^\d{6,7}$/.test(input)) throw new Error('convenio CIE debe contener 6 o 7 digitos')
@@ -286,7 +360,7 @@ export function serializeBbvaCieLine(line: PaymentLayoutLine): string {
     formatBbvaCieSourceAccount(line.source_account_number),
     formatBbvaCieAmount(line.amount),
     concept,
-    formatBbvaCieText(line.payment_reference, BBVA_CIE_REFERENCE_LENGTH, 'referencia CIE'),
+    formatBbvaCieReference(line.payment_reference, line.convenio_number),
   ].join('')
 
   if (row.length !== BBVA_CIE_LINE_LENGTH) throw new Error(`cie_line_length_invalid_${row.length}`)
@@ -407,6 +481,8 @@ function validateBbvaCieFields(line: string, lineNumber: number, errors: string[
   if (fields.reason !== fields.concept) errors.push(`Layout CIE invalido: concepto duplicado de linea ${lineNumber} no coincide.`)
   // eslint-disable-next-line no-control-regex
   if (!/^[\x20-\x7e]{20}$/.test(fields.reference)) errors.push(`Layout CIE invalido: referencia de linea ${lineNumber} no cumple 20 posiciones ASCII.`)
+  const referenceError = cieReferenceError(fields.reference, fields.convenio)
+  if (referenceError) errors.push(`Layout CIE invalido: linea ${lineNumber}. ${referenceError}`)
 }
 
 type ContentValidatorOptions = {
@@ -562,7 +638,7 @@ export function collectBbvaCieLineIssues(line: PaymentLayoutLine): string[] {
     () => formatBbvaCieConvenio(line.convenio_number),
     () => formatBbvaCieAmount(line.amount),
     () => formatBbvaCieText(line.payment_concept, BBVA_CIE_CONCEPT_LENGTH, 'concepto CIE'),
-    () => formatBbvaCieText(line.payment_reference, BBVA_CIE_REFERENCE_LENGTH, 'referencia CIE'),
+    () => formatBbvaCieReference(line.payment_reference, line.convenio_number),
   ]
   checks.forEach((check) => {
     try { check() } catch (error: any) { issues.push(error.message) }
@@ -1059,6 +1135,7 @@ const KNOWN_RPC_ERRORS: Record<string, string> = {
 }
 
 export function friendlyRpcError(error: any): string {
+  if (String(error?.message || error || "").startsWith("cie_reference_")) return cieReferenceSaveError(error)
   const message = error?.message || String(error || 'Error desconocido')
   const key = Object.keys(KNOWN_RPC_ERRORS).find((k) => message.includes(k))
   if (key) return KNOWN_RPC_ERRORS[key]
@@ -1075,6 +1152,7 @@ const RESULT_KNOWN_ERRORS: Record<string, string> = {
   company_bank_account_not_found_or_inactive: 'La cuenta origen no existe o esta inactiva.',
 }
 export function resultFriendlyError(error: any): string {
+  if (String(error?.message || error || "").startsWith("cie_reference_")) return cieReferenceSaveError(error)
   const message = error?.message || String(error || 'Error desconocido')
   const key = Object.keys(RESULT_KNOWN_ERRORS).find((item) => message.includes(item))
   if (key) return RESULT_KNOWN_ERRORS[key]

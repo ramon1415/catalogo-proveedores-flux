@@ -4,7 +4,7 @@ import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
 import {
   cleanText, friendlyRpcError, formatDate, formatMissingFields, formatPreviewMoney,
-  layoutAccountLabel, providerExecutionLayoutFields,
+  layoutAccountLabel, providerExecutionLayoutFields, cieReferenceError, isCfeCieConvenio,
 } from './logic'
 import {
   completeProviderPaymentExecutionData, completePaymentRequestLayoutData,
@@ -63,10 +63,12 @@ export function LayoutCompletionModal({
   const [clabe, setClabe] = useState(request.destination_type === 'clabe' ? request.destination_value || '' : '')
   const [providerAccount, setProviderAccount] = useState(request.destination_type === 'cuenta' ? request.destination_value || '' : '')
   const [convenio, setConvenio] = useState(
-    request.destination_type === 'convenio' ? String(request.destination_value || '').replace(/^CONVENIO\s+/i, '') : '',
+    request.destination_type === 'convenio' ? request.convenio_number || String(request.destination_value || '').replace(/^CONVENIO\s+/i, '') : '',
   )
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const isCie = destinationType === 'convenio'
+  const isCfe = isCie && isCfeCieConvenio(convenio)
 
   const refs = {
     bankAccount: useRef<HTMLSelectElement>(null),
@@ -127,7 +129,10 @@ export function LayoutCompletionModal({
       )
     }
     const referenceValue = cleanText(reference)
-    if (referenceValue && !/^\d{1,5}$/.test(referenceValue)) {
+    if (isCie) {
+      const referenceError = cieReferenceError(referenceValue, convenio)
+      if (referenceError) return fieldError(refs.reference, referenceError)
+    } else if (referenceValue && !/^\d{1,5}$/.test(referenceValue)) {
       return fieldError(refs.reference, 'La referencia debe contener de 1 a 5 dígitos.')
     }
     if (showProviderFields) {
@@ -223,9 +228,9 @@ export function LayoutCompletionModal({
             </select>
           </label>
 
-          <label>Referencia de pago
-            <input ref={refs.reference} type="text" inputMode="numeric" pattern="[0-9]{1,5}" maxLength={5} value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Ej. 7, 42 o 40002" />
-            <span className={s.fieldHint}>De 1 a 5 digitos.</span>
+          <label>{isCie ? 'Línea de captura / referencia CIE' : 'Referencia de pago'}
+            <input ref={refs.reference} type="text" inputMode={isCie ? 'text' : 'numeric'} pattern={isCie ? undefined : '[0-9]{1,5}'} maxLength={isCie ? undefined : 5} value={reference} onChange={(e) => setReference(e.target.value)} placeholder={isCie ? 'Copia la referencia del recibo' : 'Ej. 7, 42 o 40002'} />
+            <span className={s.fieldHint}>{isCie ? `${isCfe ? 'CFE: exactamente 20 caracteres, sin espacios.' : 'Hasta 20 caracteres, según el convenio.'} Copia el dato del recibo; no uses una fecha ni el número de servicio.` : 'De 1 a 5 dígitos.'}</span>
           </label>
 
           <label>Fecha programada

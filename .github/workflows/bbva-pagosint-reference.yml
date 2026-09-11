@@ -1,4 +1,4 @@
-name: BBVA interbank reference contract
+name: BBVA bank reference contracts
 
 on:
   pull_request:
@@ -8,6 +8,9 @@ on:
       - app/src/features/layouts/**
       - scripts/qa/bbva-*.test.mjs
       - docs/ops/layout-cxc-download-format.md
+      - docs/ops/bbva-cie-layout-format.md
+      - supabase/migrations/*_cie_capture_reference_validation.sql
+      - supabase/migrations/*_cie_reference_eligibility.sql
       - .github/workflows/bbva-pagosint-reference.yml
 
 permissions:
@@ -25,7 +28,7 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm --prefix app ci
-      - name: Verify interbank references and bank routing
+      - name: Verify bank references and routing
         run: >-
           node --test
           scripts/qa/bbva-pagosint-reference-contract.test.mjs
@@ -33,4 +36,5 @@ jobs:
           scripts/qa/bbva-clabe-012-routing-hotfix.test.mjs
           scripts/qa/bbva-mixed-clabe-macro-contract.test.mjs
           scripts/qa/bbva-cie-layout-contract.test.mjs
+          scripts/qa/bbva-cie-reference-validation.test.mjs
       - run: npm --prefix app run typecheck

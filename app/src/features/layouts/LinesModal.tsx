@@ -6,10 +6,11 @@ import { formatCurrency } from '../../lib/format'
 import { numberValue } from '../../lib/format'
 import {
   summarizeLayoutFormats, layoutSourceAccountDisplay, layoutDestinationDisplay, lineStatusBadge,
-  lineNeedsPagosintCompletion, lineNeedsPagosintReferenceCompletion, isPagosintLine,
+  lineNeedsPagosintCompletion, lineNeedsPagosintReferenceCompletion, isPagosintLine, cieReferenceError,
   BBVA_FORMAT_SAME_BANK, BBVA_FORMAT_MIXED, BBVA_FORMAT_INTERBANK, BBVA_FORMAT_CIE,
 } from './logic'
 import { PagosintReferenceModal } from './PagosintReferenceModal'
+import { CieReferenceModal } from './CieReferenceModal'
 import { RejectLineModal } from './RejectLineModal'
 import type { PaymentLayout, PaymentLayoutLine, BbvaFormat } from './types'
 import s from './Layouts.module.css'
@@ -33,6 +34,7 @@ export function LinesModal({
   const companyNames = [...new Set(lines.map(line => line.company_name).filter((name): name is string => Boolean(name)))]
   const multipleCompanies = (layout.company_count || 0) > 1 || companyNames.length > 1
   const [pagosintLine, setPagosintLine] = useState<PaymentLayoutLine | null>(null)
+  const [cieLine, setCieLine] = useState<PaymentLayoutLine | null>(null)
   const [rejectLineId, setRejectLineId] = useState<string | null>(null)
 
   const activeLines = useMemo(() => lines.filter((line) => line.status === 'included'), [lines])
@@ -159,6 +161,9 @@ export function LinesModal({
                           {lineNeedsPagosintReferenceCompletion(line) && (
                             <button className={`${s.smallBtn} ${s.warning}`} type="button" onClick={() => openPagosint(line)}>Completar referencia</button>
                           )}
+                          {line.destination_type === 'convenio' && !['confirmed', 'cancelled'].includes(layout.status || '') && (
+                            <button className={`${s.smallBtn} ${cieReferenceError(line.payment_reference, line.convenio_number) ? s.warning : ''}`} type="button" onClick={() => setCieLine(line)}>Corregir referencia CIE</button>
+                          )}
                           <button className={`${s.smallBtn} ${s.danger}`} type="button" onClick={() => setRejectLineId(line.id)}>Rechazar</button>
                         </div>
                       )}
@@ -178,6 +183,7 @@ export function LinesModal({
           onAfterSave={async () => reload()}
         />
       )}
+      {cieLine && <CieReferenceModal line={cieLine} bankUploadRecorded={layout.status === 'uploaded'} onClose={() => setCieLine(null)} reload={reload} />}
       {rejectLineId && (
         <RejectLineModal
           lineId={rejectLineId}
@@ -192,6 +198,10 @@ export function LinesModal({
 
 function ReferenceCell({ line }: { line: PaymentLayoutLine }) {
   const value = line.payment_reference || ''
+  if (line.status === 'included' && line.destination_type === 'convenio') {
+    const issue = cieReferenceError(value, line.convenio_number)
+    return <><span className={s.cellMain}>{value || 'Sin referencia'}</span>{issue && <small style={{ color: 'var(--text-2)', display: 'block', maxWidth: 260 }}>{issue}</small>}</>
+  }
   if (!lineNeedsPagosintCompletion(line)) {
     return value ? <>{value}</> : <span style={{ color: 'var(--text-3)', fontSize: 11 }}>-</span>
   }

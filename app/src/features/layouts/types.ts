@@ -102,6 +102,7 @@ export type PreviewRow = {
   scheduled_payment_date?: string | null
   destination_type?: string | null
   destination_value?: string | null
+  convenio_number?: string | null
   beneficiary_name?: string | null
   direction_approval_current?: boolean | null
 }

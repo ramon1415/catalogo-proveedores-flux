@@ -110,17 +110,18 @@ test("CIE serializer reproduces recovered 121-byte field order and duplicates co
   assert.equal(fields.reference, "REF20260812TEST".padEnd(20, " "))
 })
 
-test("CIE fixed strings pad and truncate like VBA String * N", () => {
+test("CIE pads references without truncating identifiers; concepts retain their field width", () => {
   const short = cie.serializeBbvaCieLine(syntheticCie({ payment_concept: "A", payment_reference: "R" }))
   assert.equal(cie.parseBbvaCieLine(short).concept, "A".padEnd(30, " "))
   assert.equal(cie.parseBbvaCieLine(short).reference, "R".padEnd(20, " "))
 
   const long = cie.serializeBbvaCieLine(syntheticCie({
     payment_concept: "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
-    payment_reference: "REFERENCE-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    payment_reference: "REFERENCE-ABCDEFGHIJ",
   }))
   assert.equal(cie.parseBbvaCieLine(long).concept, "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234")
   assert.equal(cie.parseBbvaCieLine(long).reference, "REFERENCE-ABCDEFGHIJ")
+  assert.throws(() => cie.serializeBbvaCieLine(syntheticCie({ payment_reference: "REFERENCE-ABCDEFGHIJKLMNOPQRSTUVWXYZ" })), /excede 20 caracteres/)
 })
 
 test("RemoveTrash mapping and uppercasing match the recovered VBA table", () => {
@@ -130,11 +131,11 @@ test("RemoveTrash mapping and uppercasing match the recovered VBA table", () => 
   )
   const row = cie.serializeBbvaCieLine(syntheticCie({
     payment_concept: "págo.cie!",
-    payment_reference: "ref-ñ.01",
+    payment_reference: "ref-01",
   }))
   const fields = cie.parseBbvaCieLine(row)
   assert.equal(fields.concept, "PAGO CIE ".padEnd(30, " "))
-  assert.equal(fields.reference, "REF-N 01".padEnd(20, " "))
+  assert.equal(fields.reference, "ref-01".padEnd(20, " "))
 })
 
 test("CIE requires a raw canonical convenio and never parses destination_value", () => {
@@ -151,7 +152,7 @@ test("CIE requires a raw canonical convenio and never parses destination_value",
 
 test("CIE rejects missing reference, source account, invalid amount, and missing concept", () => {
   const cases = [
-    [{ payment_reference: "" }, /referencia CIE requerido/],
+    [{ payment_reference: "" }, /referencia CIE es obligatoria/i],
     [{ source_account_number: "" }, /cuenta origen CIE debe ser numerica/],
     [{ source_account_number: "12345678" }, /9 o 10 digitos/],
     [{ amount: 0 }, /mayor a cero/],
@@ -248,6 +249,6 @@ test("documentation pins both source hashes and the no-golden limitation", () =>
     "CC5B4376A2BD7C9B8E1DE02B29CAFBF186E03D371BC0B9CE7364BC4DA26DF556",
     "4785E40BC10DAC3AF4698D2F29FE1FCC72BB037CEA0FD8A93F16FA6C02945DCD",
   ]) assert.match(docs, new RegExp(hash))
-  assert.match(docs, /CIE_SERIALIZER_MATCHES_RECOVERED_VBA_CONTRACT/)
+  assert.match(docs, /CIE_FIELD_LAYOUT_MATCHES_RECOVERED_VBA_CONTRACT_WITH_REFERENCE_VALIDATION/)
   assert.doesNotMatch(docs, /CIE_SERIALIZER_BYTE_PARITY_WITH_BBVA_MACRO.*PASS/)
 })
