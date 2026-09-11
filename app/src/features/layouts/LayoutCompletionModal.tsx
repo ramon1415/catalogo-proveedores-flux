@@ -132,7 +132,7 @@ export function LayoutCompletionModal({
     if (isCie) {
       const referenceError = cieReferenceError(referenceValue, convenio)
       if (referenceError) return fieldError(refs.reference, referenceError)
-    } else if (destinationType === 'clabe' && referenceValue && !/^\d{1,5}$/.test(referenceValue)) {
+    } else if (referenceValue && !/^\d{1,5}$/.test(referenceValue)) {
       return fieldError(refs.reference, 'La referencia debe contener de 1 a 5 dígitos.')
     }
     if (showProviderFields) {
@@ -229,8 +229,8 @@ export function LayoutCompletionModal({
           </label>
 
           <label>{isCie ? 'Línea de captura / referencia CIE' : 'Referencia de pago'}
-            <input ref={refs.reference} type="text" inputMode={isCie ? 'text' : 'numeric'} pattern={destinationType === 'clabe' ? '[0-9]{1,5}' : undefined} maxLength={isCie ? undefined : destinationType === 'clabe' ? 5 : undefined} value={reference} onChange={(e) => setReference(e.target.value)} placeholder={isCie ? 'Copia la referencia del recibo' : 'Ej. 7, 42 o 40002'} />
-            <span className={s.fieldHint}>{isCie ? `${isCfe ? 'CFE: exactamente 20 caracteres, sin espacios.' : 'Hasta 20 caracteres, según el convenio.'} Copia el dato del recibo; no uses una fecha ni el número de servicio.` : destinationType === 'clabe' ? 'De 1 a 5 dígitos.' : 'Referencia de la solicitud.'}</span>
+            <input ref={refs.reference} type="text" inputMode={isCie ? 'text' : 'numeric'} pattern={isCie ? undefined : '[0-9]{1,5}'} maxLength={isCie ? undefined : 5} value={reference} onChange={(e) => setReference(e.target.value)} placeholder={isCie ? 'Copia la referencia del recibo' : 'Ej. 7, 42 o 40002'} />
+            <span className={s.fieldHint}>{isCie ? `${isCfe ? 'CFE: exactamente 20 caracteres, sin espacios.' : 'Hasta 20 caracteres, según el convenio.'} Copia el dato del recibo; no uses una fecha ni el número de servicio.` : 'De 1 a 5 dígitos.'}</span>
           </label>
 
           <label>Fecha programada

@@ -9,6 +9,8 @@ declare
   v_other uuid;
   v_paid public.payment_layout_lines%rowtype;
   v_before_audit bigint;
+  v_probe public.payment_requests%rowtype;
+  v_baseline_missing text[];
   v_checks integer := 0;
 begin
   select l.* into strict v_line
@@ -97,6 +99,28 @@ begin
     raise exception 'paid payment changed';
   exception when others then if sqlerrm <> 'cie_reference_line_locked' then raise; end if; end;
   reset role;
+  v_checks := v_checks+1;
+  -- Exercise the actual eligibility helper without writing requests.
+  select * into strict v_probe from public.payment_requests where id=v_line.payment_request_id;
+  v_probe.payment_reference := '12345';
+  v_baseline_missing := public.payment_request_layout_missing_fields(v_probe);
+  foreach v_probe.payment_reference in array array['00123456789012345678','ref-12345'] loop
+    if public.payment_request_layout_missing_fields(v_probe) is distinct from v_baseline_missing then
+      raise exception 'valid CIE issuer reference changed eligibility or unrelated requirements';
+    end if;
+    v_checks := v_checks+1;
+  end loop;
+  v_probe.payment_reference := repeat('1',21);
+  if not ('payment_reference_invalid'=any(public.payment_request_layout_missing_fields(v_probe))) then
+    raise exception 'oversized CIE reference classified ready';
+  end if;
+  v_checks := v_checks+1;
+  select r.* into strict v_probe from public.payment_requests r join public.proveedores p on p.id=r.proveedor_id
+    where p.destination_type='clabe' and r.request_type::text<>'reimbursement' limit 1;
+  v_probe.payment_reference := '00123456789012345678';
+  if not ('payment_reference_invalid'=any(public.payment_request_layout_missing_fields(v_probe))) then
+    raise exception 'interbank reference rule changed';
+  end if;
   v_checks := v_checks+1;
   perform set_config('flux.cie_qa_result',jsonb_build_object('status','PASS','checks',v_checks,'rollback',true)::text,true);
 end;

@@ -10,6 +10,7 @@ on:
       - docs/ops/layout-cxc-download-format.md
       - docs/ops/bbva-cie-layout-format.md
       - supabase/migrations/*_cie_capture_reference_validation.sql
+      - supabase/migrations/*_cie_reference_eligibility.sql
       - .github/workflows/bbva-pagosint-reference.yml
 
 permissions:

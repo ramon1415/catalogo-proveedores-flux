@@ -104,6 +104,7 @@ BBVA aceptó la importación de un archivo y rechazó después dos pagos CFE con
 - Otros convenios mantienen referencias de 1 a 20 caracteres ASCII. La regla de 20 caracteres efectivos no se generaliza a convenios sin evidencia de ese requisito.
 - React y la interfaz anterior validan captura, vista previa y descarga. La vista previa consulta únicamente el convenio canónico de los proveedores porque el RPC oculta el destino bancario; la exportación siempre usa el snapshot de la línea.
 - El servidor valida las nuevas líneas y los cambios de referencia. Una línea antigua inválida permanece visible para su corrección, sin modificar importes, cuentas, convenio ni estado del pago.
+- La elegibilidad del servidor usa la misma regla CIE: acepta referencias completas y excluye las inválidas antes de crear el layout. Conserva las validaciones existentes de transferencias, reembolsos y autorizaciones.
 - En un layout existente: **Ver líneas → Corregir referencia CIE → copiar la línea del recibo → guardar → volver a descargar CIE**. Si el layout ya se registró como subido, se exige confirmar que el banco rechazó ese pago y no lo ejecutó. Se corrige la solicitud existente; no se crea otra.
 - La RPC de corrección comprueba sesión, permiso sobre la empresa, referencia original y estado pendiente. Bloquea pagos cerrados, cancelados o con comprobante; registra el cambio en auditoría privada. La validación aplica igual a Operadora y Fersana.
 
