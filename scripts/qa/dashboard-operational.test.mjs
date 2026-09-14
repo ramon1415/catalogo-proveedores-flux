@@ -503,8 +503,9 @@ test('top budget and chart use the same canonical amounts as detail, never the g
     assert.doesNotMatch(top, /8,888|bloqueos de cierre/)
     assert.doesNotMatch(text(p.renderer.toJSON()), /Cerrar periodo|Checklist de cierre/)
     const chart = p.renderer.root.findByType('figure').props['data-chart']
-    assert.equal(chart.rightTitle, undefined)
-    assert.deepEqual(chart.series.map(series => series.data.at(-1)), [1000, 700])
+    assert.equal(chart.rightTitle, 'Ingresos')
+    assert.deepEqual(chart.series.map(series => series.kind), ['bar', 'bar', 'line', 'line'])
+    assert.deepEqual(chart.series.slice(0, 2).map(series => series.data.at(-1)), [1000, 700])
     assert.match(p.section('sec-budget'), /Usado\$700/)
   } finally { p.unmount() }
 })
@@ -536,5 +537,33 @@ test('foreign-currency income is marked partial and never displayed as an MXN am
     assert.doesNotMatch(top, /9,000|9,020/)
     assert.match(p.section('sec-activity'), /1 cobros en otra moneda o sin moneda/)
     assert.match(p.section('sec-activity'), /Cobros registrados/)
+  } finally { p.unmount() }
+})
+
+test('restored income lines use scoped monthly data, preserve genuine zeros and omit incomplete currency months', async () => {
+  const p = await mountPage({ fetchActivity: async id => ({ legacyIncome: id === 'operadora', cash: [], incidents: [], income: id === 'operadora'
+    ? [incomeRow(), incomeRow({ period: '2026-08', expected_amount: 700, paid_amount: 350 }), incomeRow({ period: '2026-07', currency: 'USD' })]
+    : [incomeRow({ expected_amount: 30, paid_amount: 15 })] }) })
+  try {
+    const chart = () => p.renderer.root.findByType('figure').props['data-chart']
+    assert.deepEqual(chart().series[2].data, [0, 0, 0, 0, 0, 0, null, 700, 100])
+    assert.deepEqual(chart().series[3].data, [0, 0, 0, 0, 0, 0, null, 350, 20])
+    assert.equal(chart().series[2].dashed, true)
+    assert.equal(chart().series[3].axis, 'y2')
+    assert.match(text(p.renderer.toJSON()), /sin conversión completa a MXN se muestran sin punto/)
+    await p.switchCompany('fersana')
+    assert.deepEqual(chart().series[2].data, [0, 0, 0, 0, 0, 0, 0, 0, 30])
+    assert.equal(chart().series[3].data.at(-1), 15)
+  } finally { p.unmount() }
+})
+
+test('income query failure leaves gaps instead of zeroes while retaining the budget chart', async () => {
+  const p = await mountPage({ fetchActivity: async () => { throw new Error('Unavailable') } })
+  try {
+    const chart = p.renderer.root.findByType('figure').props['data-chart']
+    assert.ok(chart.series[2].data.every(value => value === null))
+    assert.ok(chart.series[3].data.every(value => value === null))
+    assert.equal(chart.series[1].data.at(-1), 700)
+    assert.match(text(p.renderer.toJSON()), /Ingresos no disponibles/)
   } finally { p.unmount() }
 })

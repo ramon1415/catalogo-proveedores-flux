@@ -36,10 +36,10 @@ const C = {
   esperado: 'rgba(16,185,129,.45)', cobrado: 'rgba(16,185,129,.9)',
 }
 
-type ChartModel = { labels: string[]; series: Serie[]; subtitle: string; empty?: boolean }
+type ChartModel = { labels: string[]; series: Serie[]; subtitle: string; empty?: boolean; incomeIncomplete?: boolean }
 type AlertTone = 'danger' | 'warning' | 'info'
 type AlertItem = { tone: AlertTone; value: string; label: string; target: string }
-type LegendItem = { color: string; label: string; dashed?: boolean; light?: boolean; note?: boolean }
+type LegendItem = { color: string; label: string; dashed?: boolean; light?: boolean; note?: boolean; kind?: 'bar' | 'line' }
 
 // Enfoca/scrollea a una sección por id (alertas accionables). No-op si no existe.
 function scrollToSection(id: string) {
@@ -51,8 +51,10 @@ type HistTableModel = { title: string; head: Cell[]; rows: Cell[][]; foot: Cell[
 type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: number }
 
 const OPERATIVE_LEGEND: LegendItem[] = [
-  { color: 'rgba(74,124,109,.25)', label: 'Presupuesto', dashed: true },
-  { color: 'rgba(74,124,109,.85)', label: 'Usado (pagado + pendiente)' },
+  { color: 'var(--op-budget-stroke)', label: 'Presupuesto', kind: 'bar', light: true },
+  { color: 'var(--op-used)', label: 'Usado', kind: 'bar' },
+  { color: 'var(--op-expected)', label: 'Esperado', kind: 'line', dashed: true },
+  { color: 'var(--op-collected)', label: 'Cobrado', kind: 'line' },
 ]
 
 const netColor = (v: number) => (v >= 0 ? 'var(--emerald)' : 'var(--ruby)')
@@ -323,16 +325,23 @@ export default function DashboardPage() {
     if (!budgetData) return { labels: [], series: [], subtitle: budgetError ? 'No se pudo cargar el presupuesto.' : 'Cargando presupuesto…' }
     const months = budgetPeriod === BUDGET_ALL_PERIOD ? summaryMonths : summaryMonths.slice(0, Number(periodKey.slice(5, 7)))
     const totals = months.map(month => aggregateBudget(budgetData.rows, budgetData.categories, month).totals)
+    const incomes = months.map(month => activity.data ? aggregateDashboardActivity(activity.data, month.slice(0, 7)) : null)
+    // Un fallo de consulta o una moneda sin conversión no se dibuja como ingreso cero.
+    const expected = incomes.map(row => row && !row.incomeExcluded ? row.income.expected : null)
+    const collected = incomes.map(row => row && !row.incomeExcluded ? row.income.paid : null)
     return {
       labels: months.map(month => new Date(`${month}T12:00:00`).toLocaleDateString('es-MX', { month: 'short' })),
       subtitle: `${companyName} · Enero a ${MONTH_LONG(reportYear, months.length)} de ${reportYear} · MXN`,
-      empty: totals.every(row => row.budgeted === 0 && row.used === 0),
+      empty: incomes.every(row => row && !row.incomeExcluded) && totals.every(row => row.budgeted === 0 && row.used === 0) && expected.every(v => !v) && collected.every(v => !v),
+      incomeIncomplete: incomes.some(row => !row || row.incomeExcluded > 0),
       series: [
-        { kind: 'bar', label: 'Presupuesto', data: totals.map(row => row.budgeted), color: C.presupBorder, fill: C.presupFill },
-        { kind: 'bar', label: 'Usado', data: totals.map(row => row.used), color: C.ejecBorder, fill: C.ejecFill },
+        { kind: 'bar', label: 'Presupuesto', data: totals.map(row => row.budgeted), color: 'var(--op-budget-stroke)', fill: 'var(--op-budget-fill)' },
+        { kind: 'bar', label: 'Usado', data: totals.map(row => row.used), color: 'var(--op-used)', fill: 'var(--op-used-fill)' },
+        { kind: 'line', label: 'Esperado', data: expected, color: 'var(--op-expected)', dashed: true, axis: 'y2' },
+        { kind: 'line', label: 'Cobrado', data: collected, color: 'var(--op-collected)', axis: 'y2' },
       ],
     }
-  }, [budgetData, budgetError, budgetPeriod, summaryMonths, periodKey, reportYear, companyName])
+  }, [budgetData, budgetError, budgetPeriod, summaryMonths, periodKey, reportYear, companyName, activity.data])
   const visibleTabs: [SectionTab, string][] = [['cash', 'Efectivo'], ['incidents', 'Incidencias']]
   const requestsAgg: RequestsAggregate | null = useMemo(
     () => (reqData ? aggregateRequests(reqData, budgetPeriod) : null),
@@ -558,10 +567,10 @@ export default function DashboardPage() {
       )}
 
       {/* Gráfica principal */}
-      <div className={s.chartCard}>
+      <div className={`${s.chartCard} ${!inHistView ? s.operationalChart : ''}`}>
         <div className={s.panelHeader}>
           <div>
-            <h2>{inHistView ? 'Presupuesto vs Ejecutado — evolucion mensual' : 'Presupuesto y uso por mes'}</h2>
+            <h2>{inHistView ? 'Presupuesto vs Ejecutado — evolucion mensual' : 'Presupuesto e ingresos — evolución mensual'}</h2>
             <div className={s.panelSub}>{activeChart?.subtitle}</div>
           </div>
           <div className={s.chartLegend}>
@@ -570,7 +579,8 @@ export default function DashboardPage() {
                 <div key={i} className={s.chartLegendItem} style={{ color: 'var(--text-3)' }}>{l.label}</div>
               ) : (
                 <div key={i} className={s.chartLegendItem}>
-                  <div className={s.chartLegendDot} style={{ background: l.color, ...(l.dashed ? { outline: '1px dashed', outlineOffset: '1px' } : {}) }} />
+                  {l.kind ? <span aria-hidden className={l.kind === 'line' ? s.legendLine : s.legendBar} style={{ color: l.color, ...(l.kind === 'line' ? { borderTopStyle: l.dashed ? 'dashed' : 'solid' } : { background: l.light ? 'var(--op-budget-fill)' : l.color }) }} /> :
+                    <div className={s.chartLegendDot} style={{ background: l.color, ...(l.dashed ? { outline: '1px dashed', outlineOffset: '1px' } : {}) }} />}
                   {l.label}
                 </div>
               )
@@ -582,12 +592,19 @@ export default function DashboardPage() {
             <ComboChart
               labels={activeChart.labels}
               series={activeChart.series}
-              leftTitle={inHistView ? undefined : 'MXN'}
+              leftTitle={inHistView ? undefined : 'Presupuesto y uso'}
+              rightTitle={inHistView ? undefined : 'Ingresos'}
+              presentation={inHistView ? undefined : 'operational'}
             />
           ) : !inHistView ? (
-            <div className={s.chartEmpty}>{opChart.empty ? 'Sin presupuesto ni uso registrado en el periodo.' : opChart.subtitle}</div>
+            <div className={s.chartEmpty}>{opChart.empty ? 'Sin presupuesto, uso ni ingresos registrados en el periodo.' : opChart.subtitle}</div>
           ) : null}
         </div>
+        {!inHistView && <div className={s.chartGuide}>
+          <span><strong>Barras · eje izquierdo</strong> Presupuesto y uso (pagado + pendiente).</span>
+          <span><strong>Líneas · eje derecho</strong> Cobros esperados y registrados. MXN; cada eje tiene su propia escala.</span>
+          {opChart.incomeIncomplete && <span role="status">{activity.loading ? 'Cargando ingresos…' : activity.error ? 'Ingresos no disponibles. Pulsa Actualizar para reintentar.' : 'Los meses con ingresos sin conversión completa a MXN se muestran sin punto.'}</span>}
+        </div>}
       </div>
 
       {/* ── Vista histórica ── */}

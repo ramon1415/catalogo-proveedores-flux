@@ -100,6 +100,31 @@
 .chartTooltipRow { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .chartTooltipDot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 
+/* Estilo operativo: barras suaves y líneas contrastantes, como el combinado original. */
+.operationalChart {
+  --op-budget-stroke: #6f9b8e; --op-budget-fill: rgba(111,155,142,.1);
+  --op-used: #9bc5b2; --op-used-fill: rgba(130,187,166,.72);
+  --op-expected: #57b8b3; --op-collected: #32dca0;
+}
+:global([data-theme="light"]) .operationalChart {
+  --op-budget-stroke: #72998a; --op-budget-fill: rgba(114,153,138,.1);
+  --op-used: #3c725d; --op-used-fill: rgba(60,114,93,.75);
+  --op-expected: #168a86; --op-collected: #007c50;
+}
+.operationalChart .panelHeader { flex-wrap: wrap; gap: 12px 24px; padding: 16px 18px; }
+.operationalChart .chartLegend { gap: 18px; color: var(--text-2); font-size: 12px; }
+.legendBar { width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; flex-shrink: 0; }
+.legendLine { width: 24px; height: 0; border-top: 3px solid currentColor; flex-shrink: 0; }
+.operationalChart .chartBody { height: 310px; padding: 14px 12px 8px; overflow-x: auto; }
+.operationalChart .chartSvgWrap { min-width: 600px; --chart-grid: rgba(171,203,187,.12); --chart-tick: #b5ccbf; }
+:global([data-theme="light"]) .operationalChart .chartSvgWrap { --chart-grid: rgba(39,79,63,.1); --chart-tick: #50685c; }
+.operationalChart .chartTick { font-size: 12px; font-variant-numeric: tabular-nums; }
+.operationalChart .chartAxisTitle { font-size: 11px; font-weight: 600; }
+.operationalChart .chartTooltip { min-width: 220px; font-size: 12px; line-height: 1.7; border-color: var(--op-budget-stroke); }
+.chartGuide { display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 10px 18px 14px; color: var(--text-2); font-size: 11px; line-height: 1.6; }
+.chartGuide strong { color: var(--text-1); font-weight: 600; margin-right: 5px; }
+.chartGuide [role="status"] { flex-basis: 100%; color: var(--amber); }
+
 /* Tabs */
 .tabsBlock { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .sectionTabs { display: flex; gap: 6px; flex-wrap: wrap; }
