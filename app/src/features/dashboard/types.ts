@@ -127,7 +127,8 @@ export type HistMapeo = Map<string, HistMapeoEntry>
 export type SectionTab = 'income' | 'cash' | 'incidents'
 
 // ── Sección "Presupuesto" (vista public.budget_availability) ────────────────────
-// Fila cruda de la vista. Semántica: usado = committed + executed = budgeted − available.
+// La vista incluye lo pagado en committed; executed es un subconjunto.
+// Usado = committed; disponible = budgeted − committed.
 export type BudgetAvailabilityRow = {
   budget_category_id: string | null
   budget_month: string | null // date 'YYYY-MM-DD'
@@ -145,7 +146,7 @@ export type BudgetPartida = {
   name: string
   group: string
   budgeted: number
-  committed: number
+  committed: number // pendiente de pago: committed de la vista − executed
   executed: number
   used: number      // committed + executed
   available: number // budgeted − used
@@ -181,28 +182,33 @@ export type PaymentRequestRow = {
   subtotal_amount: number | null
   tax_amount: number | null
   withholding_amount: number | null
+  currency: string | null
+  exchange_rate: number | null
   budget_month: string | null // date 'YYYY-MM-DD'
 }
 
 // Etapa del embudo "cómo van vs pagadas".
-export type RequestStage = { key: string; label: string; count: number; amount: number }
+export type RequestAmountSummary = { count: number; amount: number; unconvertedCount: number }
+export type RequestStage = RequestAmountSummary & { key: string; label: string }
 // Línea del desglose por status.
-export type RequestStatusLine = { status: string; label: string; count: number; amount: number }
+export type RequestStatusLine = RequestAmountSummary & { status: string; label: string }
 
 export type RequestsAggregate = {
   total: number
+  unconvertedCount: number // solicitudes contadas cuyo importe no se pudo convertir a MXN
   funnel: RequestStage[]                        // en curso → aprobadas → programadas → pagadas
-  rejected: { count: number; amount: number }   // alerta roja
-  changesRequested: { count: number; amount: number } // alerta ámbar
-  inReview: { count: number; amount: number }   // finance_validation + changes_requested
+  rejected: RequestAmountSummary   // alerta roja
+  changesRequested: RequestAmountSummary // alerta ámbar
+  inReview: RequestAmountSummary   // finance_validation + changes_requested
   byStatus: RequestStatusLine[]
   months: string[]                              // budget_month distintos, asc
 }
 
 // ── Sección "Impuestos" (desglose fiscal de payment_requests) ───────────────────
 export type TaxesAggregate = {
-  iva: number          // suma tax_amount (IVA acreditable)
-  retenciones: number  // suma withholding_amount (IVA/ISR por enterar)
+  iva: number          // IVA registrado en MXN; no determina acreditabilidad
+  retenciones: number  // retenciones registradas en MXN; no determina lo pendiente de enterar
   withDetail: number   // N: solicitudes con tax_amount o withholding_amount no null
-  total: number        // M: total de solicitudes del periodo
+  total: number        // M: aprobadas, programadas o pagadas del periodo
+  unconvertedCount: number // filas con desglose sin conversión válida a MXN
 }

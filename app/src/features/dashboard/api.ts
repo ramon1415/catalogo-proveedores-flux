@@ -78,7 +78,7 @@ export async function fetchHistoricalAll(companyId: string): Promise<HistoricalA
 
 // ── Presupuesto: disponible vs usado (vista public.budget_availability) ─────────
 // Lee la vista (RLS por membresía + security_invoker) acotada a la empresa activa
-// y al año en curso, y trae el catálogo de partidas para los nombres. El filtro
+// y al año seleccionado, y trae el catálogo de partidas para los nombres. El filtro
 // por company_id es obligatorio igual que en el histórico: RLS acota por membresía
 // (varias empresas), no por empresa activa. La agregación por partida/periodo se
 // hace en cliente (ver aggregateBudget) para reagrupar sin refetch al cambiar mes.
@@ -94,7 +94,9 @@ export async function fetchBudgetAvailability(
         .eq('company_id', companyId)
         .gte('budget_month', `${year}-01-01`)
         .lt('budget_month', `${year + 1}-01-01`)
-        .order('budget_month'),
+        .order('budget_month')
+        .order('cost_center_id')
+        .order('budget_category_id'),
     ),
     supabase.from('budget_categories').select('id,name,category').limit(2000),
   ])
@@ -105,7 +107,7 @@ export async function fetchBudgetAvailability(
   return { rows, categories }
 }
 
-// ── Solicitudes: payment_requests de la empresa activa / año en curso ───────────
+// ── Solicitudes: payment_requests de la empresa activa / año seleccionado ───────
 // Periodo por budget_month (mismo eje que el presupuesto). El filtro por
 // company_id es obligatorio igual que en presupuesto/histórico: RLS acota por
 // membresía (varias empresas), no por empresa activa. La agregación por
@@ -114,11 +116,12 @@ export async function fetchPaymentRequests(companyId: string, year: number): Pro
   return fetchAllRows<PaymentRequestRow>(() =>
     supabase
       .from('payment_requests')
-      .select('id,status,amount_requested,subtotal_amount,tax_amount,withholding_amount,budget_month')
+      .select('id,status,amount_requested,subtotal_amount,tax_amount,withholding_amount,currency,exchange_rate,budget_month')
       .eq('company_id', companyId)
       .gte('budget_month', `${year}-01-01`)
       .lt('budget_month', `${year + 1}-01-01`)
-      .order('budget_month'),
+      .order('budget_month')
+      .order('id'),
   )
 }
 
