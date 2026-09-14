@@ -6,7 +6,7 @@ import type {
   DashboardPayload, DashboardState, Kpis, BudgetRow, YtdRow, IncomeMemberRow,
   ClosureChecklist, HistoricalActual, HistMapeo,
   BudgetAvailabilityRow, BudgetCategoryMeta, BudgetAggregate, BudgetPartida, BudgetTotals,
-  PaymentRequestRow, RequestAmountSummary, RequestsAggregate, RequestStage, RequestStatusLine, TaxesAggregate,
+  PaymentRequestRow, RequestAmountSummary, RequestsAggregate, RequestStage, RequestStatusLine, TaxesAggregate, DashboardActivity,
 } from './types'
 
 // ── Formateadores es-MX (idénticos a dashboard.js) ──────────────────────────
@@ -389,6 +389,38 @@ export function aggregateBudget(
   partidas.sort((a, b) => (b.pctUsed - a.pctUsed) || (b.used - a.used))
 
   return { partidas, totals, omittedCount, months }
+}
+
+// El buscador filtra el detalle, no altera los indicadores generales del periodo.
+export function filterBudgetPartidas(partidas: BudgetPartida[], query: string): BudgetPartida[] {
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const words = normalize(query.trim()).split(/\s+/).filter(Boolean)
+  return partidas.filter(row => words.every(word => normalize(`${row.name} ${row.group}`).includes(word)))
+}
+
+export function aggregateDashboardActivity(data: DashboardActivity, period: string, today = new Date().toISOString().slice(0, 10)) {
+  const incomeRows = data.income.filter(row => row.period === period && !['cancelled', 'cancelado'].includes(row.status || ''))
+  // Ingresos genéricos no almacena un tipo de cambio. No sumar otras monedas a MXN.
+  const members = incomeRows.filter(row => row.currency?.toUpperCase() === 'MXN')
+  const income = computeIncomeTotals(members)
+  const incidents = data.incidents.filter(row => row.incident_date?.slice(0, 7) === period)
+  const open = incidents.filter(row => row.status === 'open').length
+  const invoiced = incidents.filter(row => row.status === 'invoiced').length
+  const paid = incidents.filter(row => row.status === 'paid').length
+  const funds = data.cash.filter(row => ['active', 'pending_receipt', 'blocked', 'receipt_review'].includes(row.status || ''))
+  const cash = {
+    active: funds.length,
+    pending: funds.filter(row => num(row.pending_amount) > 0).length,
+    inReview: funds.filter(row => row.status === 'receipt_review').length,
+    overdue: funds.filter(row => num(row.pending_amount) > 0 && !!row.due_date && row.due_date < today).length,
+    assigned: r2(funds.reduce((sum, row) => sum + num(row.assigned_amount), 0)),
+    verified: r2(funds.reduce((sum, row) => sum + num(row.verified_amount), 0)),
+    pendingAmount: r2(funds.reduce((sum, row) => sum + num(row.pending_amount), 0)),
+  }
+  return {
+    members, income, incomeExcluded: incomeRows.length - members.length, cash,
+    incidents: { open, invoiced, paid, pending: open + invoiced },
+  }
 }
 
 // ── Solicitudes (payment_requests) ───────────────────────────────────────────

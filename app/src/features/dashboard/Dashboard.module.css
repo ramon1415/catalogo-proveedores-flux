@@ -181,6 +181,14 @@
 }
 .budgetOmitNote { padding: 8px 16px 0; font-size: 11px; color: var(--text-3); }
 .budgetList { display: grid; gap: 8px; padding: 12px 14px; }
+.budgetSearchBar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 12px 16px 0; }
+.budgetSearchBar > span { color: var(--text-2); font-size: 12px; padding-bottom: 10px; }
+.budgetSearchField { display: grid; gap: 6px; flex: 1 1 240px; max-width: 420px; color: var(--text-2); font-size: 12px; }
+.budgetSearchField input { width: 100%; min-height: 40px; padding: 8px 12px; background: var(--bg-input); color: var(--text-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+.budgetSearchField input:focus-visible, .memberSearch:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.incomeSummary { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 12px 16px; color: var(--text-2); font-size: 12px; }
+.incomeSummary strong { display: block; color: var(--text-1); font-size: 17px; font-variant-numeric: tabular-nums; }
+.checkLink { flex-shrink: 0; color: var(--accent-text); text-align: right; font-size: 12px; }
 .budgetRow { border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.012); padding: 11px 13px; }
 .budgetRow.alert { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 7%, transparent); }
 .budgetRow.warn { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }

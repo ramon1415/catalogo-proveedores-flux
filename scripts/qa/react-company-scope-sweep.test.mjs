@@ -35,10 +35,10 @@ assert.match(layoutModal, /Empresa requerida/)
 assert.match(layoutApi, /select\('id,layout_id,company_id,/)
 
 const dashboard = read('app/src/features/dashboard/DashboardPage.tsx')
-assert.match(dashboard, /ds\.budgetComparison\.filter\(\(row\) => row\.company_id === companyId\)/)
-// El resumen operativo reemplazó YTD. El hook recibe la empresa activa; los
-// cambios de empresa, errores y respuestas tardías se prueban en dashboard-operational.
+// El operativo usa exclusivamente fuentes por empresa, incluido efectivo e ingresos.
+// Los cambios de empresa, errores y respuestas tardías se prueban en dashboard-operational.
 assert.match(dashboard, /useOperationalDashboard\(companyId, reportYear, canView && !anualMode\)/)
+assert.match(dashboard, /useDashboardActivity\(companyId, reportYear, canView && !anualMode, revision\)/)
 
 const providers = read('app/src/features/proveedores/ProveedoresPage.tsx')
 assert.match(providers, /hasActiveCompanyScope/)

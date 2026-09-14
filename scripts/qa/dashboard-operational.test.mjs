@@ -27,6 +27,7 @@ function load(path, imports = {}) {
 }
 
 const roles = load('app/src/lib/roles.ts')
+const tenantConfig = load('app/src/lib/tenantConfig.ts')
 const logic = load(`${dashboardPath}logic.ts`, { '../../lib/roles': roles })
 const month = '2026-09-01'
 const budgetRow = (overrides = {}) => ({
@@ -147,7 +148,7 @@ test('both operational API queries isolate company/year across pages and retriev
     }
     return builder
   } }
-  const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, './logic': logic })
+  const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, '../../lib/tenantConfig': tenantConfig, './logic': logic })
   const requests = await api.fetchPaymentRequests('operadora', 2026)
   const budget = await api.fetchBudgetAvailability('operadora', 2026)
   assert.equal(requests.length, 1001)
@@ -264,7 +265,7 @@ function text(node) {
   return text(node.children ?? node.props?.children)
 }
 
-async function mountPage({ fetchBudget, fetchRequests, pathname = '/dashboard' } = {}) {
+async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname = '/dashboard' } = {}) {
   let companyId = 'operadora'
   const calls = []
   const api = {
@@ -276,6 +277,10 @@ async function mountPage({ fetchBudget, fetchRequests, pathname = '/dashboard' }
     fetchPaymentRequests: async (id, year) => {
       calls.push(['requests', id, year])
       return fetchRequests ? fetchRequests(id, year) : [requestRow({ tax_amount: 16, withholding_amount: 10 })]
+    },
+    fetchDashboardActivity: async (id, year) => {
+      calls.push(['activity', id, year])
+      return fetchActivity ? fetchActivity(id, year) : { legacyIncome: id === 'operadora', cash: [], incidents: [], income: [] }
     },
     fetchHistoricalPeriods: async () => [], fetchHistoricalYear: async () => [], fetchHistoricalAll: async () => [], loadHistMapeo: async () => new Map(),
   }
@@ -291,7 +296,7 @@ async function mountPage({ fetchBudget, fetchRequests, pathname = '/dashboard' }
     '../../components/ui/Skeleton': { TableSkeletonRows: noop, Skeleton: noop },
     './api': api, './logic': { ...logic, currentPeriodKey: () => '2026-09' },
     './useOperationalDashboard': load(`${dashboardPath}useOperationalDashboard.ts`, { './api': api }),
-    './charts': { ComboChart: noop }, './HistoryModal': { HistoryModal: noop }, './ExportModal': { ExportModal: noop },
+    './charts': { ComboChart: props => React.createElement('figure', { 'data-chart': props }) }, './HistoryModal': { HistoryModal: noop }, './ExportModal': { ExportModal: noop },
     './Dashboard.module.css': { __esModule: true, default: new Proxy({}, { get: (_, key) => String(key) }) },
   })
   const previousDocument = globalThis.document
@@ -323,7 +328,7 @@ test('page refresh reloads both sources; month/year controls stay aligned even w
   try {
     const before = p.calls.length
     await act(async () => p.renderer.root.findAllByType('button').find(button => text(button) === 'Actualizar').props.onClick())
-    assert.deepEqual(p.calls.slice(before).filter(call => call[0] !== 'payload').map(call => call[0]).sort(), ['budget', 'requests'])
+    assert.deepEqual(p.calls.slice(before).map(call => call[0]).sort(), ['activity', 'budget', 'requests'])
     await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Mes operativo' }).props.onChange({ target: { value: '2025-03' } }))
     assert.deepEqual(p.calls.filter(call => call[0] === 'requests').at(-1), ['requests', 'operadora', 2025])
     assert.equal(p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.value, '2025-03-01')
@@ -331,7 +336,7 @@ test('page refresh reloads both sources; month/year controls stay aligned even w
     assert.match(p.section('sec-requests'), /Marzo de 2025/)
     assert.match(p.section('sec-requests'), /Pagadas1\$100/)
     await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.onChange({ target: { value: 'all' } }))
-    assert.match(text(p.renderer.toJSON()), /Resumen anual.*2025.*Cierre, cobranza y efectivo.*Marzo de 2025/)
+    assert.match(text(p.renderer.toJSON()), /Resumen anual.*2025.*Cobros, incidencias y solicitudes por atender.*Marzo de 2025.*Efectivo muestra el saldo actual/)
     await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.onChange({ target: { value: '2025-10-01' } }))
     assert.equal(p.renderer.root.findByProps({ 'aria-label': 'Mes operativo' }).props.value, '2025-10')
     assert.match(p.section('sec-requests'), /Sin solicitudes/)
@@ -367,5 +372,169 @@ test('annual route does not request or render the operational summary', async ()
     assert.equal(p.calls.filter(call => call[0] !== 'payload').length, 0)
     assert.equal(p.renderer.root.findAllByProps({ id: 'sec-budget' }).length, 0)
     assert.equal(p.renderer.root.findAllByProps({ id: 'sec-taxes' }).length, 0)
+  } finally { p.unmount() }
+})
+
+const cashRow = (overrides = {}) => ({ id: 'cash', status: 'pending_receipt', assigned_amount: 100, verified_amount: 20, pending_amount: 80, due_date: '2026-08-31', ...overrides })
+const incomeRow = (overrides = {}) => ({ id: 'income', period: '2026-09', currency: 'MXN', member_name: 'Socio QA', expected_amount: 100, paid_amount: 20, pending_amount: 80, status: 'partial', ...overrides })
+
+test('activity distinguishes monthly income/incidents from current cash, without double counting overdue funds', () => {
+  const result = logic.aggregateDashboardActivity({
+    legacyIncome: true,
+    cash: [cashRow(), cashRow({ id: 'review', status: 'receipt_review', due_date: '2026-09-30' }), cashRow({ id: 'closed', status: 'closed', assigned_amount: 1000 })],
+    income: [incomeRow(), incomeRow({ period: '2026-08' }), incomeRow({ status: 'cancelled' }), incomeRow({ currency: 'USD', expected_amount: 9999 }), incomeRow({ currency: null })],
+    incidents: [{ id: '1', status: 'open', incident_date: '2026-09-02' }, { id: '2', status: 'invoiced', incident_date: '2026-09-04' }, { id: '3', status: 'paid', incident_date: '2026-09-05' }, { id: '4', status: 'open', incident_date: '2026-08-04' }],
+  }, '2026-09', '2026-09-14')
+  assert.deepEqual(result.cash, { active: 2, pending: 2, inReview: 1, overdue: 1, assigned: 200, verified: 40, pendingAmount: 160 })
+  assert.deepEqual(result.incidents, { open: 1, invoiced: 1, paid: 1, pending: 2 })
+  assert.deepEqual(result.income, { expected: 100, paid: 20, pending: 80, members: 1 })
+  assert.equal(result.incomeExcluded, 2)
+})
+
+test('activity API selects the income model per company and scopes all tenant data before pagination', async () => {
+  const op = tenantConfig.LEGACY_INCOME_COMPANY_IDS[0]
+  const fer = '68b61801-74c0-44ea-a33b-f20e4bf53aa7'
+  const calls = []
+  const tables = {
+    cash_funds: [cashRow({ company_id: op }), cashRow({ id: 'fer', company_id: fer }), cashRow({ company_id: fer, status: 'closed' })],
+    incident_charges: [{ id: 'op', company_id: op, status: 'open', incident_date: '2026-09-01' }, { id: 'fer', company_id: fer, status: 'invoiced', incident_date: '2026-09-01' }, { id: 'old', company_id: fer, status: 'open', incident_date: '2025-09-01' }],
+    maintenance_fee_charges: [{ id: 'fee', expected_amount: 100, paid_amount: 20, pending_amount: 80, status: 'partial', members: { full_name: 'Socio de Operadora', lineage: 'QA' }, billing_periods: { name: 'Septiembre', cutoff_date: '2026-09-01' } }],
+    tenant_income_entries: [{ id: 'fer', company_id: fer, period: '2026-09', payer_name: 'Cliente Fersana', amount: 50, currency: 'MXN', status: 'cobrado' }, { id: 'other', company_id: op, period: '2026-09', payer_name: 'Otro', amount: 5000, currency: 'MXN', status: 'pendiente' }],
+  }
+  const supabase = { from(table) {
+    const call = { table, filters: [] }; calls.push(call)
+    const builder = {
+      select(fields) { call.fields = fields; return builder },
+      eq(k, v) { call.filters.push(['eq', k, v]); return builder },
+      gte(k, v) { call.filters.push(['gte', k, v]); return builder },
+      lt(k, v) { call.filters.push(['lt', k, v]); return builder },
+      in(k, v) { call.filters.push(['in', k, v]); return builder },
+      order() { return builder },
+      async range(from, to) {
+        const rows = tables[table].filter(row => call.filters.every(([op, k, value]) => {
+          const actual = k.split('.').reduce((obj, key) => obj?.[key], row)
+          return op === 'eq' ? actual === value : op === 'gte' ? actual >= value : op === 'lt' ? actual < value : value.includes(actual)
+        }))
+        return { data: rows.slice(from, to + 1), error: null }
+      },
+    }
+    return builder
+  } }
+  const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, '../../lib/tenantConfig': tenantConfig, './logic': logic })
+  const operator = await api.fetchDashboardActivity(op, 2026)
+  assert.equal(operator.legacyIncome, true)
+  assert.equal(operator.income[0].member_name, 'Socio de Operadora')
+  assert.equal(operator.income[0].period, '2026-09')
+  assert.equal(operator.cash.length, 1)
+  assert.equal(operator.incidents[0].id, 'op')
+  const before = calls.length
+  const fersana = await api.fetchDashboardActivity(fer, 2026)
+  assert.equal(fersana.legacyIncome, false)
+  assert.equal(fersana.income.length, 1)
+  assert.equal(fersana.income[0].member_name, 'Cliente Fersana')
+  assert.equal(fersana.income[0].paid_amount, 50)
+  assert.equal(fersana.cash.length, 1)
+  assert.equal(fersana.incidents.length, 1)
+  assert.equal(fersana.incidents[0].id, 'fer')
+  assert.ok(calls.slice(before).every(call => call.filters.some(([filter, key, value]) => filter === 'eq' && key === 'company_id' && value === fer)))
+  assert.ok(calls.slice(before).every(call => call.table !== 'maintenance_fee_charges'))
+  assert.match(calls.find(call => call.table === 'maintenance_fee_charges').fields, /billing_periods!inner/)
+  await assert.rejects(() => api.fetchDashboardActivity('', 2026), /Selecciona una empresa/)
+})
+
+test('activity hook masks old company/year on the first render, rejects late results, and retries with refresh revision', async () => {
+  const calls = [], renders = []
+  const api = { fetchDashboardActivity(companyId, year) { const pending = deferred(); calls.push({ companyId, year, ...pending }); return pending.promise } }
+  const { useDashboardActivity } = load(`${dashboardPath}useOperationalDashboard.ts`, { './api': api })
+  function Probe(props) { renders.push(useDashboardActivity(props.companyId, props.year, true, props.revision)); return null }
+  let renderer
+  const update = (companyId, year = 2026, revision = 0) => act(() => renderer.update(React.createElement(Probe, { companyId, year, revision })))
+  act(() => { renderer = create(React.createElement(Probe, { companyId: 'operadora', year: 2026, revision: 0 })) })
+  try {
+    await act(async () => calls[0].resolve({ company: 'operadora' }))
+    const index = renders.length
+    update('fersana')
+    assert.equal(renders[index].data, null)
+    await act(async () => calls[1].reject(new Error('Unavailable')))
+    assert.equal(renders.at(-1).error, true)
+    assert.equal(renders.at(-1).data, null)
+    update('fersana', 2026, 1)
+    update('fersana', 2025, 1)
+    await act(async () => calls[3].resolve({ company: 'fersana', year: 2025 }))
+    await act(async () => calls[2].resolve({ company: 'fersana', year: 2026 }))
+    assert.equal(renders.at(-1).data.year, 2025)
+    update('operadora', 2026, 1)
+    assert.equal(renders.at(-1).data, null)
+    await act(async () => calls[4].resolve({ company: 'operadora' }))
+    assert.equal(renders.at(-1).data.company, 'operadora')
+  } finally { act(() => renderer.unmount()) }
+})
+
+test('page partidas search handles accents, group names and no matches without changing period totals', async () => {
+  const cats = new Map([...categories, ['other', { id: 'other', name: 'Administración', category: 'Corporativo' }]])
+  const p = await mountPage({ fetchBudget: async () => ({ rows: [budgetRow(), budgetRow({ budget_category_id: 'other' })], categories: cats }) })
+  try {
+    const search = p.renderer.root.findByProps({ 'aria-label': 'Buscar partida o grupo' })
+    await act(async () => search.props.onChange({ target: { value: '  ADMINISTRACION corpo ' } }))
+    let section = p.section('sec-budget')
+    assert.match(section, /Administración/)
+    assert.doesNotMatch(section, /Servicios QA/)
+    assert.match(section, /1 de 2 partidas/)
+    assert.match(section, /Presupuestado\$2,000Usado\$1,400Disponible\$600/)
+    await act(async () => search.props.onChange({ target: { value: 'operacion servicios' } }))
+    section = p.section('sec-budget')
+    assert.match(section, /Servicios QA/)
+    assert.doesNotMatch(section, /Administración/)
+    await act(async () => search.props.onChange({ target: { value: 'inexistente' } }))
+    assert.match(p.section('sec-budget'), /No hay partidas que coincidan/)
+    await act(async () => p.renderer.root.findAllByType('button').find(button => text(button) === 'Limpiar búsqueda').props.onClick())
+    assert.match(p.section('sec-budget'), /2 de 2 partidas/)
+    assert.match(p.section('sec-budget'), /Administración/)
+    assert.match(p.section('sec-budget'), /Servicios QA/)
+  } finally { p.unmount() }
+})
+
+test('top budget and chart use the same canonical amounts as detail, never the global zero-budget RPC', async () => {
+  const p = await mountPage({ fetchRequests: async () => [requestRow({ amount_requested: 8888 })] })
+  try {
+    assert.equal(p.calls.some(call => call[0] === 'payload'), false)
+    const top = text(p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }))
+    assert.match(top, /Presupuesto usado\$700.*de \$1,000 presupuestado/)
+    assert.doesNotMatch(top, /8,888|bloqueos de cierre/)
+    assert.doesNotMatch(text(p.renderer.toJSON()), /Cerrar periodo|Checklist de cierre/)
+    const chart = p.renderer.root.findByType('figure').props['data-chart']
+    assert.equal(chart.rightTitle, undefined)
+    assert.deepEqual(chart.series.map(series => series.data.at(-1)), [1000, 700])
+    assert.match(p.section('sec-budget'), /Usado\$700/)
+  } finally { p.unmount() }
+})
+
+test('company change removes all old cash and payer data even when activity fails, without displaying false zeroes', async () => {
+  const p = await mountPage({ fetchActivity: async id => {
+    if (id === 'fersana') throw new Error('Income unavailable')
+    return { legacyIncome: true, income: [incomeRow({ member_name: 'Socio de Operadora' })], cash: [cashRow({ pending_amount: 4321 })], incidents: [] }
+  } })
+  try {
+    assert.match(p.section('sec-activity'), /Socio de Operadora/)
+    await p.switchCompany('fersana')
+    const page = text(p.renderer.toJSON())
+    assert.doesNotMatch(page, /Socio de Operadora|4,321/)
+    assert.match(page, /No se pudieron cargar los cobros/)
+    const cards = p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }).children
+    for (const card of cards.slice(1)) {
+      assert.match(text(card), /—No disponible/)
+      assert.doesNotMatch(text(card), /\$0/)
+    }
+  } finally { p.unmount() }
+})
+
+test('foreign-currency income is marked partial and never displayed as an MXN amount', async () => {
+  const p = await mountPage({ fetchActivity: async () => ({ legacyIncome: false, cash: [], incidents: [], income: [incomeRow(), incomeRow({ currency: 'USD', paid_amount: 9000 })] }) })
+  try {
+    const top = text(p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }))
+    assert.match(top, /Cobrado en el mes\$20 \(parcial\)/)
+    assert.doesNotMatch(top, /9,000|9,020/)
+    assert.match(p.section('sec-activity'), /1 cobros en otra moneda o sin moneda/)
+    assert.match(p.section('sec-activity'), /Cobros registrados/)
   } finally { p.unmount() }
 })

@@ -9,15 +9,13 @@ import { TableSkeletonRows, Skeleton } from '../../components/ui/Skeleton'
 import {
   fetchDashboardPayload, fetchHistoricalPeriods, fetchHistoricalYear, fetchHistoricalAll, loadHistMapeo,
 } from './api'
-import { useOperationalDashboard } from './useOperationalDashboard'
+import { useOperationalDashboard, useDashboardActivity } from './useOperationalDashboard'
 import {
   toDashboardState, currentPeriodKey, fmtDateTime, friendlyError, canViewDashboard,
-  computeKpis, computeClosure, filterMembers,
-  filterIncome, computeIncomeTotals, incomeStatusBadge, closureStatusBadge,
-  money, whole, pct, num, uniqueSorted, normKey,
-  buildYearMonths, aggregateYearly, hasChartData,
+  filterMembers, incomeStatusBadge,
+  money, whole, pct, num,
   aggregateHistYear, aggregateHistAll, histKpisTotals, buildHistMatrix, fmtCell, fmtMoney0, yearColor,
-  aggregateBudget, budgetMonthLabel, BUDGET_ALL_PERIOD,
+  aggregateBudget, budgetMonthLabel, BUDGET_ALL_PERIOD, filterBudgetPartidas, aggregateDashboardActivity,
   aggregateRequests, aggregateTaxes, requestAmountLabel,
 } from './logic'
 import type {
@@ -53,10 +51,8 @@ type HistTableModel = { title: string; head: Cell[]; rows: Cell[][]; foot: Cell[
 type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: number }
 
 const OPERATIVE_LEGEND: LegendItem[] = [
-  { color: 'rgba(74,124,109,.85)', label: 'Ejecutado' },
   { color: 'rgba(74,124,109,.25)', label: 'Presupuesto', dashed: true },
-  { color: 'rgba(16,185,129,.85)', label: 'Cobrado' },
-  { color: 'rgba(16,185,129,.25)', label: 'Esperado', dashed: true },
+  { color: 'rgba(74,124,109,.85)', label: 'Usado (pagado + pendiente)' },
 ]
 
 const netColor = (v: number) => (v >= 0 ? 'var(--emerald)' : 'var(--ruby)')
@@ -78,14 +74,9 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState('')
 
   // Filtros / tabs
-  const [activeTab, setActiveTab] = useState<SectionTab>('income')
+  const [activeTab, setActiveTab] = useState<SectionTab>('cash')
   const [memberSearch, setMemberSearch] = useState('')
-  const [incSearch, setIncSearch] = useState('')
-  const [incStatus, setIncStatus] = useState('todos')
-  const [incLineage, setIncLineage] = useState('todos')
-
-  // Gráfica operativa
-  const [opChart, setOpChart] = useState<ChartModel>({ labels: [], series: [], subtitle: 'Cargando datos del año...' })
+  const [budgetSearch, setBudgetSearch] = useState('')
 
   // Anual / histórico
   const [years, setYears] = useState<string[]>([])
@@ -106,11 +97,14 @@ export default function DashboardPage() {
   const [budgetPeriod, setBudgetPeriod] = useState(`${currentPeriodKey()}-01`)
   const reportYear = Number(periodKey.slice(0, 4))
   const {
-    budgetData, reqData, budgetError, reqError, loading: summaryLoading, refresh: refreshSummary,
+    budgetData, reqData, budgetError, reqError, loading: summaryLoading, refresh: refreshSummary, revision, loadedAt,
   } = useOperationalDashboard(companyId, reportYear, canView && !anualMode)
+  const activity = useDashboardActivity(companyId, reportYear, canView && !anualMode, revision)
+  const activityAgg = useMemo(() => activity.data ? aggregateDashboardActivity(activity.data, periodKey) : null, [activity.data, periodKey])
+  const allLoading = summaryLoading || activity.loading
   const budgetLoading = summaryLoading
   const reqLoading = summaryLoading
-  const summaryIncomplete = !companyId || budgetError || reqError
+  const summaryIncomplete = !companyId || budgetError || reqError || activity.error || !!activityAgg?.incomeExcluded
   const summaryMonths = useMemo(
     () => Array.from({ length: 12 }, (_, i) => `${reportYear}-${String(i + 1).padStart(2, '0')}-01`),
     [reportYear],
@@ -124,14 +118,14 @@ export default function DashboardPage() {
     document.title = anualMode ? 'Dashboard anual | Flux Operadora' : 'Dashboard operativo | Flux Operadora'
   }, [anualMode])
 
-  // ── Carga operativa ─────────────────────────────────────────────────────────
+  // El payload histórico se conserva para la vista anual. El operativo usa
+  // exclusivamente las fuentes acotadas a empresa y año de los hooks.
   const loadDashboard = useCallback(async (pk: string) => {
     setRefreshing(true)
     try {
       const payload = await fetchDashboardPayload(pk)
       setDs(toDashboardState(payload))
       setLastUpdated(`Ultima actualizacion: ${fmtDateTime(new Date())}`)
-      if (!anualMode) void loadYearlyChart(pk)
     } catch (err) {
       showToast('Error al cargar', friendlyError(err), 'error')
     } finally {
@@ -139,32 +133,6 @@ export default function DashboardPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anualMode, showToast])
-
-  async function loadYearlyChart(pk: string) {
-    const { months, labels, year } = buildYearMonths(pk)
-    setOpChart((c) => ({ ...c, subtitle: `Cargando ${months.length} meses...` }))
-    try {
-      const results = await Promise.all(months.map((m) => fetchDashboardPayload(m)))
-      const agg = aggregateYearly(results)
-      // Sin datos reales del periodo => empty state honesto (nunca serie de ejemplo).
-      if (!hasChartData(agg)) {
-        setOpChart({ labels: [], series: [], subtitle: 'Sin datos del periodo', empty: true })
-        return
-      }
-      setOpChart({
-        labels,
-        subtitle: `Enero – ${labels[labels.length - 1]} ${year}`,
-        series: [
-          { kind: 'bar', label: 'Presupuesto', data: agg.presupuesto, color: C.presupBorder, fill: C.presupFill, axis: 'y' },
-          { kind: 'bar', label: 'Ejecutado', data: agg.ejecutado, color: C.ejecBorder, fill: C.ejecFill, axis: 'y' },
-          { kind: 'line', label: 'Esperado', data: agg.esperado, color: C.esperado, dashed: true, axis: 'y2' },
-          { kind: 'line', label: 'Cobrado', data: agg.cobrado, color: C.cobrado, axis: 'y2' },
-        ],
-      })
-    } catch {
-      setOpChart((c) => ({ ...c, subtitle: 'No se pudo cargar la serie anual' }))
-    }
-  }
 
   // ── Histórico ────────────────────────────────────────────────────────────────
   const enterHistYear = useCallback(async (year: number, mapeo: HistMapeo) => {
@@ -280,9 +248,9 @@ export default function DashboardPage() {
     }
   }, [showToast, companyId])
 
-  // Init: carga operativa siempre; luego anual si aplica.
+  // Inicialización del histórico; el operativo no consulta el RPC global.
   useEffect(() => {
-    if (!canView) return
+    if (!canView || !anualMode) return
     let cancelled = false
     ;(async () => {
       await loadDashboard(currentPeriodKey())
@@ -314,7 +282,6 @@ export default function DashboardPage() {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) return
     setPeriodKey(v)
     setBudgetPeriod(`${v}-01`)
-    void loadDashboard(v)
   }
   function onBudgetPeriodChange(v: string) {
     if (v === BUDGET_ALL_PERIOD) setBudgetPeriod(v)
@@ -322,19 +289,12 @@ export default function DashboardPage() {
   }
   function onRefresh() {
     if (!anualMode) refreshSummary()
-    void loadDashboard(anualMode ? currentPeriodKey() : (periodKey || currentPeriodKey()))
+    else void loadDashboard(currentPeriodKey())
   }
   function onHistYearChange(v: string) {
     setHistSel(v)
     if (v === 'todos') void enterAllYears(histMapeoState)
     else void enterHistYear(Number(v), histMapeoState)
-  }
-  function onClosePeriod() {
-    if (ds?.closureChecklist?.can_close) {
-      showToast('Cierre pendiente', 'El cierre formal se conectara en la siguiente tanda.', 'success')
-    } else {
-      showToast('No se puede cerrar', 'Resuelve primero los bloqueos del checklist.', 'error')
-    }
   }
   function onExportPending() {
     showToast('Exportacion pendiente', 'La conexion a Google Drive se implementara mediante n8n.', 'info')
@@ -348,44 +308,32 @@ export default function DashboardPage() {
   }
 
   // ── Derivados ────────────────────────────────────────────────────────────────
-  const scopedBudget = useMemo(
-    () => (ds && companyId ? ds.budgetComparison.filter((row) => row.company_id === companyId) : []),
-    [ds, companyId],
-  )
-  const scopedCompanyLabel = scopedBudget[0]?.company || companyName
-  const kpis = useMemo(() => (ds ? computeKpis(ds.kpis, scopedBudget, ds.closureChecklist) : null), [ds, scopedBudget])
-  const closure = useMemo(() => (ds ? computeClosure(ds.kpis, ds.closureChecklist) : null), [ds])
-  const members = useMemo(() => (ds ? filterMembers(ds.incomeMembers, memberSearch) : []), [ds, memberSearch])
-
-  // Modelo de socios (cuotas/estirpe): se oculta cuando la empresa activa no tiene
-  // socios/cuotas, en vez de mostrar tablas vacías.
-  const hasMembers = !!ds && ds.incomeMembers.length > 0
-
-  const incomeLineages = useMemo(() => (ds ? uniqueSorted(ds.incomeMembers.map((r) => r.lineage)) : []), [ds])
-  const income = useMemo(
-    () => (ds ? filterIncome(ds.incomeMembers, { search: incSearch, status: incStatus, lineage: incLineage }) : []),
-    [ds, incSearch, incStatus, incLineage],
-  )
-  const incomeTotals = useMemo(() => computeIncomeTotals(income), [income])
+  const members = useMemo(() => filterMembers(anualMode ? (ds?.incomeMembers ?? []) : (activityAgg?.members ?? []), memberSearch), [anualMode, ds, activityAgg, memberSearch])
+  const incomeReady = anualMode ? !!ds : !!activityAgg
+  const legacyIncome = anualMode || activity.data?.legacyIncome
 
   const budgetAgg = useMemo(
     () => (budgetData ? aggregateBudget(budgetData.rows, budgetData.categories, budgetPeriod) : null),
     [budgetData, budgetPeriod],
   )
   const periodLabel = budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${reportYear}` : budgetMonthLabel(budgetPeriod)
-
-  // Tabs visibles: "Ingresos" (modelo de socios) solo si la empresa tiene cuotas.
-  const visibleTabs = useMemo<[SectionTab, string][]>(() => {
-    const t: [SectionTab, string][] = []
-    if (hasMembers) t.push(['income', 'Ingresos'])
-    t.push(['cash', 'Efectivo'], ['incidents', 'Incidencias'])
-    return t
-  }, [hasMembers])
-
-  // Si la pestaña activa deja de existir (p.ej. sin socios), cae a la primera.
-  useEffect(() => {
-    if (!visibleTabs.some(([t]) => t === activeTab)) setActiveTab(visibleTabs[0][0])
-  }, [visibleTabs, activeTab])
+  const monthLabel = budgetMonthLabel(`${periodKey}-01`)
+  const filteredPartidas = useMemo(() => filterBudgetPartidas(budgetAgg?.partidas ?? [], budgetSearch), [budgetAgg, budgetSearch])
+  const opChart = useMemo<ChartModel>(() => {
+    if (!budgetData) return { labels: [], series: [], subtitle: budgetError ? 'No se pudo cargar el presupuesto.' : 'Cargando presupuesto…' }
+    const months = budgetPeriod === BUDGET_ALL_PERIOD ? summaryMonths : summaryMonths.slice(0, Number(periodKey.slice(5, 7)))
+    const totals = months.map(month => aggregateBudget(budgetData.rows, budgetData.categories, month).totals)
+    return {
+      labels: months.map(month => new Date(`${month}T12:00:00`).toLocaleDateString('es-MX', { month: 'short' })),
+      subtitle: `${companyName} · Enero a ${MONTH_LONG(reportYear, months.length)} de ${reportYear} · MXN`,
+      empty: totals.every(row => row.budgeted === 0 && row.used === 0),
+      series: [
+        { kind: 'bar', label: 'Presupuesto', data: totals.map(row => row.budgeted), color: C.presupBorder, fill: C.presupFill },
+        { kind: 'bar', label: 'Usado', data: totals.map(row => row.used), color: C.ejecBorder, fill: C.ejecFill },
+      ],
+    }
+  }, [budgetData, budgetError, budgetPeriod, summaryMonths, periodKey, reportYear, companyName])
+  const visibleTabs: [SectionTab, string][] = [['cash', 'Efectivo'], ['incidents', 'Incidencias']]
   const requestsAgg: RequestsAggregate | null = useMemo(
     () => (reqData ? aggregateRequests(reqData, budgetPeriod) : null),
     [reqData, budgetPeriod],
@@ -397,7 +345,14 @@ export default function DashboardPage() {
 
   // ── Fila de alertas / estado del mes (accionables) ──────────────────────────
   const overspentCount = budgetAgg ? budgetAgg.partidas.filter((p) => p.over).length : 0
-  const closurePending = !!closure && closure.status !== 'closed'
+  const monthRequests = useMemo(() => reqData ? aggregateRequests(reqData, `${periodKey}-01`) : null, [reqData, periodKey])
+  const operationalChecks = [
+    { label: 'Solicitudes en trámite', count: monthRequests?.funnel.find(row => row.key === 'en_curso')?.count, to: '/solicitudes' },
+    { label: 'Aprobadas o programadas por pagar', count: monthRequests ? monthRequests.funnel.filter(row => ['aprobadas', 'programadas'].includes(row.key)).reduce((sum, row) => sum + row.count, 0) : undefined, to: '/solicitudes' },
+    { label: 'Fondos vencidos por comprobar · saldo actual', count: activityAgg?.cash.overdue, to: '/efectivo' },
+    { label: 'Fondos con comprobación en revisión · saldo actual', count: activityAgg?.cash.inReview, to: '/efectivo' },
+    { label: 'Incidencias pendientes del mes', count: activityAgg?.incidents.pending, to: '/ingresos' },
+  ]
   const alerts = useMemo<AlertItem[]>(() => {
     const out: AlertItem[] = []
     if (overspentCount > 0) out.push({
@@ -417,16 +372,18 @@ export default function DashboardPage() {
     if (requestsAgg && requestsAgg.unconvertedCount > 0) out.push({
       tone: 'warning', value: whole(requestsAgg.unconvertedCount), label: 'solicitudes sin conversión a MXN', target: 'sec-requests',
     })
-    if (closurePending) out.push({
-      tone: 'info', value: '1', label: 'cierre pendiente', target: 'sec-closure',
-    })
+    if (activityAgg?.cash.overdue) out.push({ tone: 'warning', value: whole(activityAgg.cash.overdue), label: 'fondos vencidos por comprobar', target: 'sec-activity' })
+    if (activityAgg?.incidents.pending) out.push({ tone: 'warning', value: whole(activityAgg.incidents.pending), label: 'incidencias pendientes', target: 'sec-activity' })
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overspentCount, requestsAgg, taxesAgg, closurePending])
+  }, [overspentCount, requestsAgg, taxesAgg, activityAgg])
 
-  const cash = ds?.kpis.efectivo || {}
-  const checks = ds?.closureChecklist?.checks || {}
-  const inc = ds?.kpis.ingresos || {}
+  const cash = activityAgg?.cash
+  const inc = activityAgg?.incidents
+  const activityEmpty = activity.loading ? 'Cargando…' : activity.error ? 'No disponible' : 'Selecciona una empresa'
+  const budgetEmpty = budgetLoading ? 'Cargando…' : budgetError ? 'No disponible' : 'Selecciona una empresa'
+  const incomeLabel = (amount: number) => activityAgg ? requestAmountLabel({ amount, count: activityAgg.members.length + activityAgg.incomeExcluded, unconvertedCount: activityAgg.incomeExcluded }) : '—'
+  const operationalUpdated = loadedAt && activity.loadedAt ? `Última actualización: ${fmtDateTime(new Date(loadedAt > activity.loadedAt ? loadedAt : activity.loadedAt))}` : ''
 
   if (!canView) {
     return (
@@ -444,18 +401,26 @@ export default function DashboardPage() {
     <div className={`${s.chartCard} ${compact ? s.compactRows : ''}`}>
       <div className={s.panelHeader}>
         <div>
-          <h2>Cobranza por socio</h2>
-          <div className={s.panelSub}>Cuotas del periodo — pendientes primero</div>
+          <h2>{anualMode ? 'Cobranza por socio' : legacyIncome ? 'Cuotas por cobrar' : 'Cobros registrados'}</h2>
+          <div className={s.panelSub}>{anualMode ? 'Cuotas del periodo — pendientes primero' : `${companyName} · ${monthLabel} · MXN`}</div>
         </div>
-        <input className={s.memberSearch} type="search" placeholder="Buscar..." value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} />
+        <input className={s.memberSearch} type="search" aria-label="Buscar cobros" placeholder={anualMode ? 'Buscar...' : legacyIncome ? 'Buscar socio…' : 'Buscar pagador…'} value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} />
       </div>
+      {!anualMode && <p className={s.budgetOmitNote}>Esperado: cobros registrados para el mes. Cobrado: pagos registrados. Pendiente: saldo por cobrar.</p>}
+      {!anualMode && activityAgg && <div className={s.incomeSummary}>
+        <span>Esperado <strong>{incomeLabel(activityAgg.income.expected)}</strong></span>
+        <span>Cobrado <strong>{incomeLabel(activityAgg.income.paid)}</strong></span>
+        <span>Pendiente <strong>{incomeLabel(activityAgg.income.pending)}</strong></span>
+      </div>}
+      {!anualMode && !!activityAgg?.incomeExcluded && <p className={s.budgetNote}>{activityAgg.incomeExcluded} cobros en otra moneda o sin moneda se excluyen de los importes en MXN. Consúltalos en Ingresos.</p>}
       <div className={s.memberTableWrap}>
         <table className={s.table}>
-          <thead><tr><th>Socio</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th></tr></thead>
+          <thead><tr><th>{legacyIncome ? 'Socio' : 'Pagador'}</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th></tr></thead>
           <tbody>
-            {!ds && <TableSkeletonRows cols={5} rows={4} />}
-            {ds && members.length === 0 && <tr><td colSpan={5} className={s.tableMsg}>Sin registros para este periodo.</td></tr>}
-            {ds && members.map((r, i) => {
+            {!incomeReady && (anualMode || activity.loading) && <TableSkeletonRows cols={5} rows={4} />}
+            {!anualMode && activity.error && <tr><td colSpan={5} className={s.tableMsg}>No se pudieron cargar los cobros. Pulsa Actualizar para reintentar.</td></tr>}
+            {incomeReady && members.length === 0 && <tr><td colSpan={5} className={s.tableMsg}>{anualMode ? 'Sin registros para este periodo.' : memberSearch ? 'Sin coincidencias.' : 'Sin cobros en MXN registrados para este periodo.'}</td></tr>}
+            {incomeReady && members.map((r, i) => {
               const b = incomeStatusBadge(r.status)
               return (
                 <tr key={i}>
@@ -480,7 +445,7 @@ export default function DashboardPage() {
           <h1>{anualMode ? 'Dashboard anual' : 'Dashboard operativo'}</h1>
           <p>{anualMode
             ? 'Ejercicios históricos: ingresos y egresos contables por año, mes y cuenta.'
-            : 'Ejecucion presupuestal, cobranza, efectivo y cierre mensual.'}</p>
+            : 'Presupuesto, cobros y pendientes de la empresa seleccionada.'}</p>
         </div>
         <div className={s.headActions}>
           {!anualMode && (
@@ -501,13 +466,15 @@ export default function DashboardPage() {
               <Link className={s.secondaryBtn} to="/dashboard">Año en curso</Link>
             </>
           )}
-          <button className={s.secondaryBtn} type="button" onClick={onRefresh} disabled={refreshing || summaryLoading}>{refreshing || summaryLoading ? 'Cargando...' : 'Actualizar'}</button>
-          <button className={s.secondaryBtn} type="button" onClick={() => setShowExport(true)}>Exportar</button>
-          <button className={s.secondaryBtn} type="button" onClick={() => setShowHistory(true)}>Historial</button>
+          <button className={s.secondaryBtn} type="button" onClick={onRefresh} disabled={refreshing || allLoading}>{refreshing || allLoading ? 'Cargando...' : 'Actualizar'}</button>
+          {anualMode && <>
+            <button className={s.secondaryBtn} type="button" onClick={() => setShowExport(true)}>Exportar</button>
+            <button className={s.secondaryBtn} type="button" onClick={() => setShowHistory(true)}>Historial</button>
+          </>}
         </div>
       </div>
 
-      <span className={s.lastUpdated}>{summaryLoading ? 'Actualizando resumen…' : summaryIncomplete && !anualMode ? 'Resumen incompleto: revisa las secciones con error.' : lastUpdated}</span>
+      <span className={s.lastUpdated}>{anualMode ? lastUpdated : allLoading ? 'Actualizando resumen…' : summaryIncomplete ? 'Resumen incompleto: revisa los avisos de cada sección.' : operationalUpdated}</span>
 
       {/* KPI histórico (solo hist) */}
       {inHistView && histKpi && (
@@ -521,30 +488,31 @@ export default function DashboardPage() {
 
       {/* KPI operativos */}
       {!inHistView && (
-        <div className={s.kpiGrid}>
+        <div className={s.kpiGrid} aria-label="Indicadores operativos">
           <div className={`${s.kpiCard} ${s.accent}`}>
-            <div className={s.kpiLabel}>Ejecucion presupuestal</div>
-            <div className={s.kpiValue}>{kpis ? kpis.executed : '$0'}</div>
-            <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${kpis ? kpis.execPct : 0}%` }} /></div>
-            <div className={s.kpiSub}>{kpis ? kpis.executedSub : 'de $0 presupuestado · 0%'}</div>
+            <div className={s.kpiLabel}>Presupuesto usado</div>
+            <div className={s.kpiValue}>{budgetAgg ? money(budgetAgg.totals.used) : '—'}</div>
+            {budgetAgg && <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${Math.max(0, Math.min(100, budgetAgg.totals.pctUsed))}%` }} /></div>}
+            <div className={s.kpiSub}>{budgetAgg ? `de ${money(budgetAgg.totals.budgeted)} presupuestado · ${Number.isFinite(budgetAgg.totals.pctUsed) ? pct(budgetAgg.totals.pctUsed) : 'Sin presupuesto'}` : budgetEmpty}</div>
+            <div className={s.kpiSub}>{periodLabel} · Pagado + pendiente presupuestal</div>
           </div>
           <div className={`${s.kpiCard} ${s.success}`}>
-            <div className={s.kpiLabel}>Cobranza de cuotas</div>
-            <div className={s.kpiValue}>{kpis ? kpis.collected : '$0'}</div>
-            <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${kpis ? kpis.collPct : 0}%` }} /></div>
-            <div className={s.kpiSub}>{kpis ? kpis.collectedSub : 'de $0 esperado · 0%'}</div>
+            <div className={s.kpiLabel}>Cobrado en el mes</div>
+            <div className={s.kpiValue}>{activityAgg ? incomeLabel(activityAgg.income.paid) : '—'}</div>
+            <div className={s.kpiSub}>{activityAgg ? `de ${incomeLabel(activityAgg.income.expected)} esperado` : activityEmpty}</div>
+            <div className={s.kpiSub}>{monthLabel} · {legacyIncome ? 'Cuotas de socios' : 'Ingresos registrados'}</div>
           </div>
           <div className={`${s.kpiCard} ${s.violet}`}>
-            <div className={s.kpiLabel}>Comprobacion de efectivo</div>
-            <div className={s.kpiValue}>{kpis ? kpis.cash : '0 fondos'}</div>
-            <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${kpis ? kpis.cashPct : 0}%` }} /></div>
-            <div className={s.kpiSub}>{kpis ? kpis.cashSub : '0 comprobados · 0 pendientes'}</div>
+            <div className={s.kpiLabel}>Efectivo por comprobar</div>
+            <div className={s.kpiValue}>{cash ? money(cash.pendingAmount) : '—'}</div>
+            <div className={s.kpiSub}>{cash ? `${whole(cash.pending)} fondos pendientes · ${whole(cash.overdue)} de ellos vencidos` : activityEmpty}</div>
+            <div className={s.kpiSub}>Saldo actual · incluye meses anteriores</div>
           </div>
           <div className={`${s.kpiCard} ${s.warning}`}>
-            <div className={s.kpiLabel}>Incidencias abiertas</div>
-            <div className={s.kpiValue}>{kpis ? kpis.incidents : '0'}</div>
-            <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${kpis ? kpis.incPct : 0}%` }} /></div>
-            <div className={s.kpiSub}>{kpis ? kpis.incidentsSub : '0 bloqueos de cierre'}</div>
+            <div className={s.kpiLabel}>Incidencias pendientes</div>
+            <div className={s.kpiValue}>{inc ? whole(inc.pending) : '—'}</div>
+            <div className={s.kpiSub}>{inc ? `${whole(inc.open)} abiertas · ${whole(inc.invoiced)} facturadas por cobrar` : activityEmpty}</div>
+            <div className={s.kpiSub}>{monthLabel} · Incidencias registradas</div>
           </div>
         </div>
       )}
@@ -552,20 +520,20 @@ export default function DashboardPage() {
       {/* ── Alertas / estado del mes (operativo) — lo primero tras los KPIs ── */}
       {!inHistView && (
         <div className={s.alertsRow} aria-label="Alertas del periodo">
-          {summaryLoading ? (
+          {allLoading ? (
             <div className={`${s.alertCard} ${s.info}`} role="status">
               <span className={s.alertLabel}>Cargando alertas de {companyName || 'la empresa activa'}…</span>
             </div>
           ) : <>
           {summaryIncomplete && (
             <div className={`${s.alertCard} ${s.warning}`} role="status">
-              <span className={s.alertLabel}>Resumen incompleto. {!companyId ? 'Selecciona una empresa.' : 'Pulsa Actualizar para reintentar.'}</span>
+              <span className={s.alertLabel}>Resumen incompleto. {!companyId ? 'Selecciona una empresa.' : activityAgg?.incomeExcluded ? 'Revisa los cobros excluidos por moneda.' : 'Pulsa Actualizar para reintentar.'}</span>
             </div>
           )}
           {!summaryIncomplete && alerts.length === 0 ? (
             <div className={`${s.alertCard} ${s.ok}`}>
               <span className={s.alertValue}>✓</span>
-              <span className={s.alertLabel}>Todo en orden este periodo</span>
+              <span className={s.alertLabel}>Sin alertas destacadas. Consulta los pendientes operativos.</span>
             </div>
           ) : (
             alerts.map((a, i) => (
@@ -585,7 +553,7 @@ export default function DashboardPage() {
       )}
       {!inHistView && budgetPeriod === BUDGET_ALL_PERIOD && (
         <p className={s.budgetOmitNote}>
-          Resumen anual de presupuesto, solicitudes e impuestos ({reportYear}). Cierre, cobranza y efectivo corresponden a {budgetMonthLabel(`${periodKey}-01`)}.
+          Resumen anual de presupuesto, solicitudes e impuestos ({reportYear}). Cobros, incidencias y solicitudes por atender corresponden a {monthLabel}. Efectivo muestra el saldo actual.
         </p>
       )}
 
@@ -593,7 +561,7 @@ export default function DashboardPage() {
       <div className={s.chartCard}>
         <div className={s.panelHeader}>
           <div>
-            <h2>Presupuesto vs Ejecutado — evolucion mensual</h2>
+            <h2>{inHistView ? 'Presupuesto vs Ejecutado — evolucion mensual' : 'Presupuesto y uso por mes'}</h2>
             <div className={s.panelSub}>{activeChart?.subtitle}</div>
           </div>
           <div className={s.chartLegend}>
@@ -610,15 +578,14 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className={s.chartBody}>
-          {activeChart && activeChart.labels.length > 0 ? (
+          {activeChart && activeChart.labels.length > 0 && !activeChart.empty ? (
             <ComboChart
               labels={activeChart.labels}
               series={activeChart.series}
-              leftTitle={inHistView ? undefined : 'Gastos'}
-              rightTitle={inHistView ? undefined : 'Ingresos'}
+              leftTitle={inHistView ? undefined : 'MXN'}
             />
-          ) : !inHistView && opChart.empty ? (
-            <div className={s.chartEmpty}>Sin datos del periodo</div>
+          ) : !inHistView ? (
+            <div className={s.chartEmpty}>{opChart.empty ? 'Sin presupuesto ni uso registrado en el periodo.' : opChart.subtitle}</div>
           ) : null}
         </div>
       </div>
@@ -666,47 +633,13 @@ export default function DashboardPage() {
       {/* ── Vista operativa ── */}
       {!inHistView && (
         <>
-          <div className={s.dashGrid} style={hasMembers ? undefined : { gridTemplateColumns: '1fr' }}>
-            {hasMembers && memberCard(false)}
-            <div id="sec-closure" className={`${s.chartCard} ${s.closureCard}`}>
-              <div className={s.panelHeader}>
-                <div>
-                  <h2>Checklist de cierre</h2>
-                  <div className={s.panelSub}>{closure ? closure.statusLabel : 'Calculando...'}</div>
-                </div>
-                <button className={s.primaryBtn} type="button" disabled={!closure?.canClose} onClick={onClosePeriod} style={{ whiteSpace: 'nowrap', fontSize: 12 }}>Cerrar periodo</button>
-              </div>
-              <div className={s.summaryList}>
-                {closure && (
-                  <>
-                    <div className={s.summaryRow}><span>Estatus</span><strong><Badge variant={closureStatusBadge(closure.status).variant}>{closureStatusBadge(closure.status).label}</Badge></strong></div>
-                    <div className={s.summaryRow}><span>Puede cerrar</span><strong><Badge variant={closure.canClose ? 'success' : 'danger'}>{closure.canClose ? 'Si' : 'No'}</Badge></strong></div>
-                    <div className={s.summaryRow}><span>Bloqueos</span><strong>{closure.blockersText}</strong></div>
-                  </>
-                )}
-              </div>
-              <div className={s.closureChecks}>
-                <div className={s.closureChecksLabel}>Revisiones de bloqueo</div>
-                <div className={s.closureChecksList}>
-                  {closure && closure.checkEntries.length === 0 && <div className={s.emptyNote}>Sin revisiones para este periodo.</div>}
-                  {closure && closure.checkEntries.map((c, i) => (
-                    <div key={i} className={`${s.summaryRow} ${s.summaryRowTight}`}>
-                      <span>{c.label}</span>
-                      <strong><Badge variant={c.blocks ? 'danger' : 'success'}>{c.blocks ? 'Bloquea' : 'OK'}</Badge></strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* ── Presupuesto: disponible vs usado, por partida ── */}
           <section id="sec-budget" className={s.tableCard}>
             <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
               <div>
                 <h2>Presupuesto — disponible vs usado por partida</h2>
                 <div className={s.panelSub}>
-                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {periodLabel} · MXN
+                  {(companyName || 'Empresa activa')} · {periodLabel} · MXN
                 </div>
               </div>
               <div className={s.budgetLegend}>
@@ -754,8 +687,18 @@ export default function DashboardPage() {
 
             {!budgetLoading && !budgetError && budgetAgg && budgetAgg.partidas.length > 0 && (
               <>
+                <div className={s.budgetSearchBar}>
+                  <label className={s.budgetSearchField}>
+                    <span>Buscar partida o grupo</span>
+                    <input type="search" aria-label="Buscar partida o grupo" placeholder="Ej. seguridad, combustible…" value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} />
+                  </label>
+                  {budgetSearch && <button type="button" className={s.secondaryBtn} onClick={() => setBudgetSearch('')}>Limpiar búsqueda</button>}
+                  <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
+                </div>
+                <p className={s.budgetOmitNote}>Usado = pagado + pendiente, con la base registrada en presupuesto. Excluye solicitudes no presupuestales. La búsqueda filtra el desglose; los totales conservan todo el periodo.</p>
                 <div className={s.budgetList}>
-                  {budgetAgg.partidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
+                  {filteredPartidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
+                  {filteredPartidas.length === 0 && <div className={s.tableMsg}>No hay partidas que coincidan con «{budgetSearch}».</div>}
                 </div>
                 {budgetAgg.omittedCount > 0 && (
                   <div className={s.budgetOmitNote}>
@@ -772,7 +715,7 @@ export default function DashboardPage() {
               <div>
                 <h2>Solicitudes — cómo van vs pagadas</h2>
                 <div className={s.panelSub}>
-                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {periodLabel} · por periodo presupuestal · MXN
+                  {(companyName || 'Empresa activa')} · {periodLabel} · por periodo presupuestal · MXN
                 </div>
               </div>
             </div>
@@ -844,7 +787,7 @@ export default function DashboardPage() {
                   </table>
                 </div>
                 <div className={s.budgetOmitNote}>
-                  Importes en MXN con el tipo de cambio registrado. En pagadas se muestra el importe solicitado.
+                  Importes totales solicitados, con impuestos y solicitudes no presupuestales, convertidos a MXN con el tipo de cambio registrado. Por eso pueden diferir del uso presupuestal. En pagadas se muestra el importe solicitado.
                   {requestsAgg.unconvertedCount > 0 && <> {whole(requestsAgg.unconvertedCount)} solicitudes se incluyen en el conteo, pero su importe se excluye por moneda o tipo de cambio faltante o inválido.</>}
                 </div>
               </>
@@ -857,7 +800,7 @@ export default function DashboardPage() {
               <div>
                 <h2>Impuestos — desglose fiscal</h2>
                 <div className={s.panelSub}>
-                  {(scopedCompanyLabel || companyName || 'Empresa activa')} · {periodLabel}
+                  {(companyName || 'Empresa activa')} · {periodLabel}
                   {' · Solicitudes aprobadas, programadas o pagadas · MXN'}
                 </div>
               </div>
@@ -896,6 +839,30 @@ export default function DashboardPage() {
             )}
           </section>
 
+          <div className={s.dashGrid} id="sec-activity">
+            {memberCard(false)}
+            <section className={`${s.chartCard} ${s.closureCard}`}>
+              <div className={s.panelHeader}>
+                <div>
+                  <h2>Pendientes operativos</h2>
+                  <div className={s.panelSub}>{companyName} · {monthLabel}</div>
+                </div>
+              </div>
+              <p className={s.budgetOmitNote}>Revisa los pendientes en su módulo. Esta lista sirve para seguimiento; no realiza ni certifica el cierre contable.</p>
+              <div className={s.summaryList}>
+                {operationalChecks.map(check => (
+                  <div key={check.label} className={s.summaryRow}>
+                    <span>{check.label}</span>
+                    <Link to={check.to} className={s.checkLink} aria-label={`Revisar ${check.label.toLowerCase()}`}>
+                      {check.count === undefined ? 'Sin datos' : <><strong>{whole(check.count)}</strong> · {check.count > 0 ? 'Revisar →' : 'Sin pendientes'}</>}
+                    </Link>
+                  </div>
+                ))}
+              </div>
+              {(activity.error || reqError) && <p className={s.budgetNote}>No fue posible consultar todos los pendientes. Pulsa Actualizar para reintentar.</p>}
+            </section>
+          </div>
+
           <div className={s.tabsBlock}>
             <div className={s.sectionTabs}>
               {visibleTabs.map(([tab, label]) => (
@@ -904,78 +871,34 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {activeTab === 'income' && hasMembers && (
-            <section className={s.tableCard}>
-              <div className={s.miniGrid}>
-                {[['Total esperado', money(incomeTotals.expected)], ['Total cobrado', money(incomeTotals.paid)], ['Total pendiente', money(incomeTotals.pending)], ['Socios con saldo', whole(incomeTotals.members)]].map(([l, v]) => (
-                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                ))}
-              </div>
-              <div className={s.toolbar} style={{ gridTemplateColumns: 'minmax(200px,1fr) 150px 150px' }}>
-                <input type="search" placeholder="Buscar socio..." value={incSearch} onChange={(e) => setIncSearch(e.target.value)} />
-                <select value={incStatus} onChange={(e) => setIncStatus(e.target.value)}>
-                  <option value="todos">Estatus: Todos</option><option value="pending">Pendiente</option><option value="partial">Parcial</option><option value="paid">Pagado</option><option value="overdue">Vencido</option>
-                </select>
-                <select value={incLineage} onChange={(e) => setIncLineage(e.target.value)}><option value="todos">Estirpe: Todas</option>{incomeLineages.map((v) => <option key={v} value={normKey(v)}>{v}</option>)}</select>
-              </div>
-              <div className={s.tableWrap}>
-                <table className={s.table} style={{ minWidth: 900 }}>
-                  <thead><tr><th>Socio</th><th>Estirpe</th><th>Periodo</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th><th>Inc.</th><th>Fact.</th></tr></thead>
-                  <tbody>
-                    {!ds && <TableSkeletonRows cols={9} rows={4} />}
-                    {ds && income.length === 0 && <tr><td colSpan={9} className={s.tableMsg}>Sin registros para este filtro.</td></tr>}
-                    {ds && income.map((r, i) => {
-                      const b = incomeStatusBadge(r.status)
-                      return (
-                        <tr key={i}>
-                          <td><span className={s.cellMain}>{r.member_name || '—'}</span></td>
-                          <td>{r.lineage || '-'}</td>
-                          <td>{r.billing_period || '-'}</td>
-                          <td>{money(r.expected_amount)}</td>
-                          <td>{money(r.paid_amount)}</td>
-                          <td>{money(r.pending_amount)}</td>
-                          <td><Badge variant={b.variant}>{b.label}</Badge></td>
-                          <td>{whole(r.open_incidents)}</td>
-                          <td>{whole(r.issued_invoices)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
           {activeTab === 'cash' && (
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
-                <h2>Efectivo y comprobaciones</h2>
-                <Link className={s.secondaryBtn} to="/efectivo">Ver modulo completo</Link>
+                <div><h2>Efectivo y comprobaciones</h2><div className={s.panelSub}>{companyName} · Fondos activos al día de hoy, incluidos los de meses anteriores</div></div>
+                <Link className={s.secondaryBtn} to="/efectivo">Ver módulo completo</Link>
               </div>
-              <div className={s.miniGrid}>
-                {[['Fondos activos', whole(cash.active_cash_funds)], ['Pendientes', whole(cash.pending_cash_reconciliation)], ['En revision', whole(cash.cash_in_review)], ['Vencidos', whole(cash.overdue_cash_funds)], ['Monto entregado', money(cash.cash_assigned_amount)], ['Monto comprobado', money(cash.cash_verified_amount)], ['Monto pendiente', money(cash.cash_pending_amount)]].map(([l, v]) => (
-                  <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
-                ))}
-              </div>
-              <div className={s.summaryList}>
-                {[['Fondos vencidos', num(checks.overdue_cash_funds)], ['Comprobaciones en revision', num(checks.cash_reconciliations_in_review)]].map(([label, count]) => (
-                  <div key={label as string} className={s.summaryRow}><span>{label}</span><strong><Badge variant={(count as number) > 0 ? 'danger' : 'success'}>{(count as number) > 0 ? 'Bloquea' : 'OK'}</Badge></strong></div>
-                ))}
-              </div>
+              {!cash ? <div className={s.tableMsg}>{activityEmpty}</div> : <>
+                <div className={s.miniGrid}>
+                  {[['Fondos activos', whole(cash.active)], ['Con saldo por comprobar', whole(cash.pending)], ['En revisión', whole(cash.inReview)], ['De los pendientes, vencidos', whole(cash.overdue)], ['Monto entregado', money(cash.assigned)], ['Monto comprobado', money(cash.verified)], ['Monto por comprobar', money(cash.pendingAmount)]].map(([l, v]) => (
+                    <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
+                  ))}
+                </div>
+                <p className={s.budgetOmitNote}>Los fondos vencidos ya están incluidos en los pendientes; no se suman de nuevo.</p>
+              </>}
             </section>
           )}
 
           {activeTab === 'incidents' && (
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
-                <h2>Incidencias y facturas</h2>
-                <Link className={s.secondaryBtn} to="/ingresos">Ver modulo completo</Link>
+                <div><h2>Incidencias del mes</h2><div className={s.panelSub}>{companyName} · {monthLabel} · Por fecha de incidencia</div></div>
+                <Link className={s.secondaryBtn} to="/ingresos">Ver módulo completo</Link>
               </div>
-              <div className={s.miniGrid}>
-                {[['Incidencias abiertas', whole(inc.open_incidents)], ['Incidencias cobradas', whole(inc.paid_incidents)], ['Facturas emitidas', whole(inc.issued_invoices)], ['Facturas pendientes', whole(inc.pending_invoices)]].map(([l, v]) => (
+              {!inc ? <div className={s.tableMsg}>{activityEmpty}</div> : <div className={s.miniGrid}>
+                {[['Abiertas', whole(inc.open)], ['Facturadas por cobrar', whole(inc.invoiced)], ['Cobradas', whole(inc.paid)], ['Total pendiente', whole(inc.pending)]].map(([l, v]) => (
                   <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
                 ))}
-              </div>
+              </div>}
             </section>
           )}
         </>

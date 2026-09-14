@@ -126,6 +126,23 @@ export type HistMapeo = Map<string, HistMapeoEntry>
 
 export type SectionTab = 'income' | 'cash' | 'incidents'
 
+export type DashboardCashFund = {
+  id: string
+  status: string | null
+  assigned_amount: number | null
+  verified_amount: number | null
+  pending_amount: number | null
+  due_date: string | null
+}
+export type DashboardIncident = { id: string; status: string | null; incident_date: string | null }
+export type DashboardIncomeRow = IncomeMemberRow & { id: string; period: string; currency: string | null }
+export type DashboardActivity = {
+  legacyIncome: boolean
+  income: DashboardIncomeRow[]
+  cash: DashboardCashFund[]
+  incidents: DashboardIncident[]
+}
+
 // ── Sección "Presupuesto" (vista public.budget_availability) ────────────────────
 // La vista incluye lo pagado en committed; executed es un subconjunto.
 // Usado = committed; disponible = budgeted − committed.

@@ -1,7 +1,9 @@
 import { supabase } from '../../lib/supabase'
+import { usesLegacyIncome } from '../../lib/tenantConfig'
 import type {
   DashboardPayload, MonthlyClosure, HistoricalActual, HistMapeo,
-  BudgetAvailabilityRow, BudgetCategoryMeta, PaymentRequestRow,
+  BudgetAvailabilityRow, BudgetCategoryMeta, PaymentRequestRow, DashboardActivity,
+  DashboardCashFund, DashboardIncident, DashboardIncomeRow,
 } from './types'
 import { parsePayload } from './logic'
 
@@ -123,6 +125,54 @@ export async function fetchPaymentRequests(companyId: string, year: number): Pro
       .order('budget_month')
       .order('id'),
   )
+}
+
+// Fuentes operativas con RLS. El RPC antiguo agrega todas las empresas y no puede
+// alimentar sus indicadores. Socios/cuotas solo pertenece a la variante explícita
+// de Operadora; las demás empresas consultan sus propios ingresos registrados.
+export async function fetchDashboardActivity(companyId: string, year: number): Promise<DashboardActivity> {
+  if (!companyId) throw new Error('Selecciona una empresa.')
+  const legacyIncome = usesLegacyIncome(companyId)
+  const [cash, incidents, income] = await Promise.all([
+    fetchAllRows<DashboardCashFund>(() => supabase.from('cash_funds')
+      .select('id,status,assigned_amount,verified_amount,pending_amount,due_date')
+      .eq('company_id', companyId).in('status', ['active', 'pending_receipt', 'blocked', 'receipt_review']).order('id')),
+    fetchAllRows<DashboardIncident>(() => supabase.from('incident_charges')
+      .select('id,status,incident_date').eq('company_id', companyId)
+      .gte('incident_date', `${year}-01-01`).lt('incident_date', `${year + 1}-01-01`).order('id')),
+    fetchDashboardIncome(companyId, year, legacyIncome),
+  ])
+  return { legacyIncome, cash, incidents, income }
+}
+
+async function fetchDashboardIncome(companyId: string, year: number, legacy: boolean): Promise<DashboardIncomeRow[]> {
+  if (legacy) {
+    type Fee = {
+      id: string; expected_amount: number; paid_amount: number; pending_amount: number; status: string
+      members: { full_name: string; lineage: string | null } | null
+      billing_periods: { name: string; cutoff_date: string }
+    }
+    const fees = await fetchAllRows<Fee>(() => supabase.from('maintenance_fee_charges')
+      .select('id,expected_amount,paid_amount,pending_amount,status,members(full_name,lineage),billing_periods!inner(name,cutoff_date)')
+      .gte('billing_periods.cutoff_date', `${year}-01-01`).lt('billing_periods.cutoff_date', `${year + 1}-01-01`).order('id'))
+    return fees.map(row => ({
+      id: row.id, period: row.billing_periods.cutoff_date.slice(0, 7), currency: 'MXN',
+      member_name: row.members?.full_name || 'Socio', lineage: row.members?.lineage,
+      billing_period: row.billing_periods.name, expected_amount: row.expected_amount,
+      paid_amount: row.paid_amount, pending_amount: row.pending_amount, status: row.status,
+    }))
+  }
+  type Entry = { id: string; period: string; payer_name: string; amount: number; currency: string | null; status: string }
+  const entries = await fetchAllRows<Entry>(() => supabase.from('tenant_income_entries')
+    .select('id,period,payer_name,amount,currency,status').eq('company_id', companyId)
+    .gte('period', `${year}-01`).lt('period', `${year + 1}-01`).order('id'))
+  return entries.map(row => ({
+    id: row.id, period: row.period, currency: row.currency, member_name: row.payer_name,
+    billing_period: row.period, expected_amount: row.amount,
+    paid_amount: row.status === 'cobrado' ? row.amount : 0,
+    pending_amount: row.status === 'pendiente' ? row.amount : 0,
+    status: row.status === 'cobrado' ? 'paid' : row.status === 'pendiente' ? 'pending' : 'cancelled',
+  }))
 }
 
 // Carga el mapeo cuenta CONTPAQ → partida/grupo. Degrada a mapa vacío si las
