@@ -185,7 +185,7 @@ function ComprobantesCompanyPage() {
         <div>
           <span className={s.eyebrow}>Comprobantes bancarios</span>
           <h1>Comprobantes batch</h1>
-          <p className="muted">Sube el PDF. Flux busca las solicitudes y te muestra las coincidencias para confirmar.</p>
+          <p className="muted">Sube un PDF, JPG o PNG. Flux busca las solicitudes y te muestra las coincidencias para confirmar.</p>
         </div>
         <div className={s.headActions}>
           <button className="secondary-btn" onClick={refreshAll}>Actualizar</button>
@@ -202,7 +202,7 @@ function ComprobantesCompanyPage() {
 
       <div className={s.helpNote}>
         <strong>¿Ya aparece un lote?</strong>
-        <span>Fue cargado anteriormente. Para iniciar otro usa <b>Nuevo batch</b>. Si subes exactamente el mismo PDF, Flux abrirá el lote original para evitar duplicados.</span>
+        <span>Fue cargado anteriormente. Para iniciar otro usa <b>Nuevo batch</b>. Si subes exactamente el mismo archivo, Flux abrirá el lote original para evitar duplicados.</span>
       </div>
 
       <div className={s.kpis}>
@@ -341,7 +341,7 @@ function ComprobantesCompanyPage() {
             setPendingReviewId(batchId)
             if (selectedId === batchId) await loadDetail(batchId)
             await loadBatchesList()
-            showToast('Lote existente', 'Abrimos el PDF que ya habías cargado para continuar la conciliación.', 'info')
+            showToast('Lote existente', 'Abrimos el comprobante que ya habías cargado para continuar la conciliación.', 'info')
           }}
         />
       )}

@@ -90,6 +90,11 @@
 .modalHead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border, rgba(120,120,120,.15)); }
 .modalHead h2 { margin: 0; }
 .modalBody { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+.uploadModal { max-height: 90vh; max-height: 90dvh; display: flex; flex-direction: column; overflow: hidden; }
+.uploadModal .modalHead { flex-shrink: 0; }
+.uploadBody { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.uploadBody input[type='file'] { min-width: 0; max-width: 100%; }
+.uploadActions { flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--border, rgba(120,120,120,.15)); }
 
 .operationModal { max-width: 1040px; max-height: min(86vh, 900px); overflow: hidden; box-shadow: 0 24px 80px rgba(0,0,0,.42); }
 .operationHeader { align-items: center; padding: 16px 20px; background: color-mix(in srgb, var(--bg-card) 62%, var(--bg)); }
