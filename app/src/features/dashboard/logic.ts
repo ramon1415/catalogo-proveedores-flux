@@ -5,6 +5,8 @@ import { ROLE_GROUPS } from '../../lib/roles'
 import type {
   DashboardPayload, DashboardState, Kpis, BudgetRow, YtdRow, IncomeMemberRow,
   ClosureChecklist, HistoricalActual, HistMapeo,
+  BudgetAvailabilityRow, BudgetCategoryMeta, BudgetAggregate, BudgetPartida, BudgetTotals,
+  PaymentRequestRow, RequestAmountSummary, RequestsAggregate, RequestStage, RequestStatusLine, TaxesAggregate, DashboardActivity,
 } from './types'
 
 // ── Formateadores es-MX (idénticos a dashboard.js) ──────────────────────────
@@ -300,6 +302,234 @@ export function demoChartSeries(count: number): YearlySeries {
     cobrado.push(Math.round(baseEsperado * cobroPct[i % 12]))
   }
   return { presupuesto, ejecutado, esperado, cobrado }
+}
+
+// ── Presupuesto: disponible vs usado, por partida ────────────────────────────
+// Umbral de alerta "cerca del límite" (% usado).
+export const BUDGET_WARN_PCT = 90
+
+export const BUDGET_ALL_PERIOD = 'all'
+
+// Etiqueta de mes a partir de 'YYYY-MM-DD' (día 01). En es-MX, capitalizada.
+export function budgetMonthLabel(iso: string): string {
+  const [y, m] = iso.split('-')
+  const d = new Date(Number(y), Number(m) - 1, 1)
+  const s = d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+// % usado seguro para ordenar/mostrar: Infinity cuando hay uso sin presupuesto.
+function budgetPctUsed(budgeted: number, used: number): number {
+  if (budgeted > 0) return (used / budgeted) * 100
+  return used > 0 ? Infinity : 0
+}
+
+// Agrega la vista por partida dentro del periodo elegido ('all' = todo el año, o
+// un 'YYYY-MM-DD'). Suma todos los centros de costo. Ordena por % usado desc.
+// Omite partidas sin presupuesto NI uso; las que tienen uso sin presupuesto sí se
+// listan (aparecen como sobregiradas). Los totales se calculan sobre TODAS las
+// filas del periodo (incluidas las omitidas), para que el resumen no pierda monto.
+export function aggregateBudget(
+  rows: BudgetAvailabilityRow[],
+  categories: Map<string, BudgetCategoryMeta>,
+  period: string,
+): BudgetAggregate {
+  const months = [...new Set(rows.map((r) => r.budget_month).filter((m): m is string => !!m))].sort()
+  const scoped = period === BUDGET_ALL_PERIOD ? rows : rows.filter((r) => r.budget_month === period)
+
+  type Acc = { budgeted: number; used: number; executed: number; available: number }
+  const byCat = new Map<string, Acc>()
+  const totals: BudgetTotals = { budgeted: 0, committed: 0, executed: 0, used: 0, available: 0, pctUsed: 0 }
+
+  for (const r of scoped) {
+    const id = r.budget_category_id || '__sin_partida__'
+    const acc = byCat.get(id) || { budgeted: 0, used: 0, executed: 0, available: 0 }
+    // committed de la vista YA incluye executed. Separa lo pendiente para la
+    // barra y conserva el disponible canónico, sin volver a descontar lo pagado.
+    const used = num(r.committed)
+    const available = r.available == null ? num(r.budgeted) - used : num(r.available)
+    acc.budgeted += num(r.budgeted)
+    acc.used += used
+    acc.executed += num(r.executed)
+    acc.available += available
+    byCat.set(id, acc)
+    totals.budgeted += num(r.budgeted)
+    totals.used += used
+    totals.executed += num(r.executed)
+    totals.available += available
+  }
+  totals.used = r2(totals.used)
+  totals.budgeted = r2(totals.budgeted)
+  totals.executed = r2(totals.executed)
+  totals.committed = r2(totals.used - totals.executed)
+  totals.available = r2(totals.available)
+  totals.pctUsed = budgetPctUsed(totals.budgeted, totals.used)
+
+  let omittedCount = 0
+  const partidas: BudgetPartida[] = []
+  for (const [id, acc] of byCat) {
+    const budgeted = r2(acc.budgeted)
+    const used = r2(acc.used)
+    const executed = r2(acc.executed)
+    const committed = r2(used - executed)
+    if (budgeted <= 0 && used <= 0) { omittedCount++; continue }
+    const available = r2(acc.available)
+    const pctUsed = budgetPctUsed(budgeted, used)
+    const cat = categories.get(id)
+    partidas.push({
+      categoryId: id,
+      name: cat?.name || 'Sin partida',
+      group: cat?.category || 'Sin grupo',
+      budgeted, committed, executed, used, available, pctUsed,
+      over: available < 0,
+      warn: available >= 0 && Number.isFinite(pctUsed) && pctUsed >= BUDGET_WARN_PCT,
+    })
+  }
+  // % usado desc (Infinity = sobregiro sin presupuesto primero); desempate por uso.
+  partidas.sort((a, b) => (b.pctUsed - a.pctUsed) || (b.used - a.used))
+
+  return { partidas, totals, omittedCount, months }
+}
+
+// El buscador filtra el detalle, no altera los indicadores generales del periodo.
+export function filterBudgetPartidas(partidas: BudgetPartida[], query: string): BudgetPartida[] {
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  const words = normalize(query.trim()).split(/\s+/).filter(Boolean)
+  return partidas.filter(row => words.every(word => normalize(`${row.name} ${row.group}`).includes(word)))
+}
+
+export function aggregateDashboardActivity(data: DashboardActivity, period: string, today = new Date().toISOString().slice(0, 10)) {
+  const incomeRows = data.income.filter(row => row.period === period && !['cancelled', 'cancelado'].includes(row.status || ''))
+  // Ingresos genéricos no almacena un tipo de cambio. No sumar otras monedas a MXN.
+  const members = incomeRows.filter(row => row.currency?.toUpperCase() === 'MXN')
+  const income = computeIncomeTotals(members)
+  const incidents = data.incidents.filter(row => row.incident_date?.slice(0, 7) === period)
+  const open = incidents.filter(row => row.status === 'open').length
+  const invoiced = incidents.filter(row => row.status === 'invoiced').length
+  const paid = incidents.filter(row => row.status === 'paid').length
+  const funds = data.cash.filter(row => ['active', 'pending_receipt', 'blocked', 'receipt_review'].includes(row.status || ''))
+  const cash = {
+    active: funds.length,
+    pending: funds.filter(row => num(row.pending_amount) > 0).length,
+    inReview: funds.filter(row => row.status === 'receipt_review').length,
+    overdue: funds.filter(row => num(row.pending_amount) > 0 && !!row.due_date && row.due_date < today).length,
+    assigned: r2(funds.reduce((sum, row) => sum + num(row.assigned_amount), 0)),
+    verified: r2(funds.reduce((sum, row) => sum + num(row.verified_amount), 0)),
+    pendingAmount: r2(funds.reduce((sum, row) => sum + num(row.pending_amount), 0)),
+  }
+  return {
+    members, income, incomeExcluded: incomeRows.length - members.length, cash,
+    incidents: { open, invoiced, paid, pending: open + invoiced },
+  }
+}
+
+// ── Solicitudes (payment_requests) ───────────────────────────────────────────
+// Etiquetas por status (es-MX). Alineadas con solicitudes/aprobaciones.
+export const REQUEST_STATUS_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  submitted: 'Enviada',
+  pending_approval: 'Pendiente de aprobación',
+  finance_validation: 'Validación financiera',
+  changes_requested: 'Cambios solicitados',
+  approved: 'Aprobada',
+  scheduled: 'Programada',
+  paid: 'Pagada',
+  rejected: 'Rechazada',
+  cancelled: 'Cancelada',
+}
+
+// Etapas del embudo. "en curso" agrupa todo lo que sigue en trámite.
+const FUNNEL_STAGES: { key: string; label: string; statuses: string[] }[] = [
+  { key: 'en_curso', label: 'En curso', statuses: ['draft', 'submitted', 'pending_approval', 'changes_requested', 'finance_validation'] },
+  { key: 'aprobadas', label: 'Aprobadas', statuses: ['approved'] },
+  { key: 'programadas', label: 'Programadas', statuses: ['scheduled'] },
+  { key: 'pagadas', label: 'Pagadas', statuses: ['paid'] },
+]
+
+// Filtra por periodo del presupuesto: 'all' = todo el año cargado, o un
+// 'YYYY-MM-DD' concreto (comparado contra budget_month).
+function scopeRequests(rows: PaymentRequestRow[], period: string): PaymentRequestRow[] {
+  return period === BUDGET_ALL_PERIOD ? rows : rows.filter((r) => r.budget_month === period)
+}
+
+// El tipo de cambio guardado expresa MXN por unidad de la moneda de origen.
+// Una moneda/rate faltante no se interpreta como paridad ni como importe cero.
+function requestExchangeRate(row: PaymentRequestRow): number | null {
+  const currency = row.currency?.trim().toUpperCase()
+  if (currency === 'MXN') return 1
+  const rate = Number(row.exchange_rate)
+  return currency && Number.isFinite(rate) && rate > 0 ? rate : null
+}
+
+export function requestAmountLabel(summary: RequestAmountSummary): string {
+  if (summary.count > 0 && summary.unconvertedCount === summary.count) return '—'
+  return `${money(summary.amount)}${summary.unconvertedCount > 0 ? ' (parcial)' : ''}`
+}
+
+// Agrega payment_requests por etapa del embudo, alertas y desglose por status.
+// Monto: amount_requested para todas las etapas (incluidas las pagadas: el
+// esquema no tiene columna paid_amount/monto pagado real, así que se declara el
+// uso de amount_requested como aproximación del pagado).
+export function aggregateRequests(rows: PaymentRequestRow[], period: string): RequestsAggregate {
+  const months = [...new Set(rows.map((r) => r.budget_month).filter((m): m is string => !!m))].sort()
+  const scoped = scopeRequests(rows, period)
+
+  const byStatusMap = new Map<string, RequestAmountSummary>()
+  for (const r of scoped) {
+    const st = r.status || 'sin_estatus'
+    const acc = byStatusMap.get(st) || { count: 0, amount: 0, unconvertedCount: 0 }
+    acc.count += 1
+    const rate = requestExchangeRate(r)
+    if (rate === null) acc.unconvertedCount += 1
+    else acc.amount += r2(num(r.amount_requested) * rate)
+    byStatusMap.set(st, acc)
+  }
+  const pick = (st: string) => byStatusMap.get(st) || { count: 0, amount: 0, unconvertedCount: 0 }
+  const combine = (statuses: string[]): RequestAmountSummary => {
+    let count = 0, amount = 0, unconvertedCount = 0
+    for (const st of statuses) {
+      const a = pick(st)
+      count += a.count
+      amount += a.amount
+      unconvertedCount += a.unconvertedCount
+    }
+    return { count, amount: r2(amount), unconvertedCount }
+  }
+
+  const funnel: RequestStage[] = FUNNEL_STAGES.map((stage) => ({
+    key: stage.key, label: stage.label, ...combine(stage.statuses),
+  }))
+
+  const rejected = combine(['rejected'])
+  const changesRequested = combine(['changes_requested'])
+  const inReview = combine(['changes_requested', 'finance_validation'])
+
+  const byStatus: RequestStatusLine[] = [...byStatusMap.entries()]
+    .map(([status, a]) => ({ status, label: REQUEST_STATUS_LABELS[status] || status, ...a, amount: r2(a.amount) }))
+    .sort((a, b) => b.amount - a.amount || b.count - a.count)
+
+  const unconvertedCount = byStatus.reduce((sum, row) => sum + row.unconvertedCount, 0)
+  return { total: scoped.length, unconvertedCount, funnel, rejected, changesRequested, inReview, byStatus, months }
+}
+
+// ── Impuestos (desglose fiscal de payment_requests) ──────────────────────────
+// Desglose registrado de solicitudes aprobadas, programadas o pagadas, en MXN.
+// No determina acreditabilidad ni obligaciones fiscales pendientes de enterar.
+// N/M se limita a ese mismo alcance; los importes no convertibles se declaran.
+export function aggregateTaxes(rows: PaymentRequestRow[], period: string): TaxesAggregate {
+  const scoped = scopeRequests(rows, period).filter((r) => ['approved', 'scheduled', 'paid'].includes(r.status || ''))
+  let iva = 0, retenciones = 0, withDetail = 0, unconvertedCount = 0
+  for (const r of scoped) {
+    const hasIva = r.tax_amount !== null && r.tax_amount !== undefined
+    const hasRet = r.withholding_amount !== null && r.withholding_amount !== undefined
+    if (!hasIva && !hasRet) continue
+    withDetail += 1
+    const rate = requestExchangeRate(r)
+    if (rate === null) { unconvertedCount += 1; continue }
+    if (hasIva) iva += r2(num(r.tax_amount) * rate)
+    if (hasRet) retenciones += r2(num(r.withholding_amount) * rate)
+  }
+  return { iva: r2(iva), retenciones: r2(retenciones), withDetail, total: scoped.length, unconvertedCount }
 }
 
 // ── Histórico ────────────────────────────────────────────────────────────────

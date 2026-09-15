@@ -124,4 +124,108 @@ export type HistoricalActual = {
 export type HistMapeoEntry = { partida: string; grupo: string }
 export type HistMapeo = Map<string, HistMapeoEntry>
 
-export type SectionTab = 'expenses' | 'ytd' | 'income' | 'cash' | 'incidents'
+export type SectionTab = 'income' | 'cash' | 'incidents'
+
+export type DashboardCashFund = {
+  id: string
+  status: string | null
+  assigned_amount: number | null
+  verified_amount: number | null
+  pending_amount: number | null
+  due_date: string | null
+}
+export type DashboardIncident = { id: string; status: string | null; incident_date: string | null }
+export type DashboardIncomeRow = IncomeMemberRow & { id: string; period: string; currency: string | null }
+export type DashboardActivity = {
+  legacyIncome: boolean
+  income: DashboardIncomeRow[]
+  cash: DashboardCashFund[]
+  incidents: DashboardIncident[]
+}
+
+// ── Sección "Presupuesto" (vista public.budget_availability) ────────────────────
+// La vista incluye lo pagado en committed; executed es un subconjunto.
+// Usado = committed; disponible = budgeted − committed.
+export type BudgetAvailabilityRow = {
+  budget_category_id: string | null
+  budget_month: string | null // date 'YYYY-MM-DD'
+  budgeted: number | null
+  committed: number | null
+  executed: number | null
+  available: number | null
+}
+
+export type BudgetCategoryMeta = { id: string; name: string | null; category: string | null }
+
+// Partida agregada (suma de todos los centros de costo del periodo elegido).
+export type BudgetPartida = {
+  categoryId: string
+  name: string
+  group: string
+  budgeted: number
+  committed: number // pendiente de pago: committed de la vista − executed
+  executed: number
+  used: number      // committed + executed
+  available: number // budgeted − used
+  pctUsed: number   // used/budgeted*100; Infinity si budgeted<=0 pero hay uso
+  over: boolean     // sobregirado: available < 0
+  warn: boolean     // cerca del límite: pctUsed >= 90 y no sobregirado
+}
+
+export type BudgetTotals = {
+  budgeted: number
+  committed: number
+  executed: number
+  used: number
+  available: number
+  pctUsed: number
+}
+
+export type BudgetAggregate = {
+  partidas: BudgetPartida[]
+  totals: BudgetTotals
+  omittedCount: number // partidas sin presupuesto ni uso, omitidas del desglose
+  months: string[]     // budget_month distintos disponibles (YYYY-MM-DD), asc
+}
+
+// ── Sección "Solicitudes" (tabla public.payment_requests) ───────────────────────
+// Fila cruda de payment_requests. Periodo = budget_month (date 'YYYY-MM-DD', día 01)
+// para quedar en el MISMO eje que el presupuesto. No existe columna paid_amount en
+// el esquema, así que el monto pagado usa amount_requested (ver aggregateRequests).
+export type PaymentRequestRow = {
+  id: string
+  status: string | null
+  amount_requested: number | null
+  subtotal_amount: number | null
+  tax_amount: number | null
+  withholding_amount: number | null
+  currency: string | null
+  exchange_rate: number | null
+  budget_month: string | null // date 'YYYY-MM-DD'
+}
+
+// Etapa del embudo "cómo van vs pagadas".
+export type RequestAmountSummary = { count: number; amount: number; unconvertedCount: number }
+export type RequestStage = RequestAmountSummary & { key: string; label: string }
+// Línea del desglose por status.
+export type RequestStatusLine = RequestAmountSummary & { status: string; label: string }
+
+export type RequestsAggregate = {
+  total: number
+  unconvertedCount: number // solicitudes contadas cuyo importe no se pudo convertir a MXN
+  funnel: RequestStage[]                        // en curso → aprobadas → programadas → pagadas
+  rejected: RequestAmountSummary   // alerta roja
+  changesRequested: RequestAmountSummary // alerta ámbar
+  inReview: RequestAmountSummary   // finance_validation + changes_requested
+  byStatus: RequestStatusLine[]
+  months: string[]                              // budget_month distintos, asc
+}
+
+// ── Sección "Impuestos" (desglose fiscal de payment_requests) ───────────────────
+export type TaxesAggregate = {
+  iva: number          // IVA registrado en MXN; no determina acreditabilidad
+  retenciones: number  // retenciones registradas en MXN; no determina lo pendiente de enterar
+  withDetail: number   // N: solicitudes con tax_amount o withholding_amount no null
+  total: number        // M: aprobadas, programadas o pagadas del periodo
+  unconvertedCount: number // filas con desglose sin conversión válida a MXN
+}
