@@ -9,9 +9,10 @@ import AccessRequestPage from './features/access/AccessRequestPage'
 import PendingAccessPage from './features/access/PendingAccessPage'
 import PresupuestoAnualPage from './features/reportes/PresupuestoAnualPage'
 
-// Intake ya completó su QA funcional. Comprobantes y Cortes conservan sus
-// respaldos vanilla hasta que terminen sus validaciones independientes.
+// Intake y Comprobantes completaron su QA funcional independiente en DEV.
+// Cortes conserva su superficie actual.
 const ProviderIntakesPage = lazy(() => import('./features/provider-intakes/ProviderIntakesPage'))
+const ComprobantesPage = lazy(() => import('./features/comprobantes/ComprobantesPage'))
 
 export default function App() {
   const { session, profile, group, memberships, loading } = useAuth()
@@ -41,7 +42,7 @@ export default function App() {
           {routes.map(({ path, Comp }) => (
             <Route key={path} path={path.slice(1)} element={<Comp />} />
           ))}
-          <Route path="comprobantes-batch" element={<LegacyModuleFrame src="/legacy/comprobantes_batch.html" title="Comprobantes batch" />} />
+          <Route path="comprobantes-batch" element={<ComprobantesPage />} />
           <Route path="solicitudes-proveedores" element={<ProviderIntakesPage />} />
           <Route path="cortes-semanales" element={<LegacyModuleFrame src="/legacy/approval_batches.html" title="Cortes semanales" />} />
           <Route path="presupuesto-anual" element={<PresupuestoAnualPage />} />
