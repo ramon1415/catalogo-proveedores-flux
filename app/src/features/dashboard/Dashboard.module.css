@@ -102,6 +102,7 @@
 
 /* Estilo operativo: barras suaves y líneas contrastantes, como el combinado original. */
 .operationalChart {
+  min-width: 0;
   --op-budget-stroke: #6f9b8e; --op-budget-fill: rgba(111,155,142,.1);
   --op-used: #9bc5b2; --op-used-fill: rgba(130,187,166,.72);
   --op-expected: #57b8b3; --op-collected: #32dca0;
@@ -115,12 +116,16 @@
 .operationalChart .chartLegend { gap: 18px; color: var(--text-2); font-size: 12px; }
 .legendBar { width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; flex-shrink: 0; }
 .legendLine { width: 24px; height: 0; border-top: 3px solid currentColor; flex-shrink: 0; }
-.operationalChart .chartBody { height: 310px; padding: 14px 12px 8px; overflow-x: auto; }
-.operationalChart .chartSvgWrap { min-width: 600px; --chart-grid: rgba(171,203,187,.12); --chart-tick: #b5ccbf; }
+.operationalChart .chartBody { height: 310px; padding: 14px 12px 8px; min-width: 0; overflow: hidden; }
+.operationalChart .chartSvgWrap { min-width: 0; max-width: 100%; --chart-grid: rgba(171,203,187,.12); --chart-tick: #b5ccbf; }
+.operationalChart .chartSvg { width: 100%; height: 100%; }
 :global([data-theme="light"]) .operationalChart .chartSvgWrap { --chart-grid: rgba(39,79,63,.1); --chart-tick: #50685c; }
 .operationalChart .chartTick { font-size: 12px; font-variant-numeric: tabular-nums; }
 .operationalChart .chartAxisTitle { font-size: 11px; font-weight: 600; }
-.operationalChart .chartTooltip { min-width: 220px; font-size: 12px; line-height: 1.7; border-color: var(--op-budget-stroke); }
+.operationalChart .chartTooltip { width: max-content; min-width: 0; max-width: calc(100% - 12px); box-sizing: border-box; font-size: 12px; line-height: 1.7; border-color: var(--op-budget-stroke); }
+.operationalChart .chartTooltipRow { white-space: normal; overflow-wrap: anywhere; }
+.operationalChart .chartCompact .chartTick { font-size: 11px; }
+.operationalChart .chartCompact .chartAxisTitle { font-size: 10px; }
 .chartGuide { display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 10px 18px 14px; color: var(--text-2); font-size: 11px; line-height: 1.6; }
 .chartGuide strong { color: var(--text-1); font-weight: 600; margin-right: 5px; }
 .chartGuide [role="status"] { flex-basis: 100%; color: var(--amber); }

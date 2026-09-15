@@ -55,18 +55,21 @@ function operationalMax(max: number): number {
   return magnitude * ([1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(step => step >= max / magnitude) ?? 10)
 }
 
-function useSize<T extends HTMLElement>() {
+function useSize<T extends HTMLElement>(active = true) {
   const ref = useRef<T>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
     const el = ref.current
-    if (!el) return
-    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight })
+    if (!el || !active) return
+    const update = () => setSize(previous => {
+      const next = { w: el.clientWidth, h: el.clientHeight }
+      return previous.w === next.w && previous.h === next.h ? previous : next
+    })
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [active])
   return { ref, ...size }
 }
 
@@ -74,9 +77,11 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
   const { ref, w, h } = useSize<HTMLDivElement>()
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null)
   const operational = presentation === 'operational'
+  const tooltip = useSize<HTMLDivElement>(operational && !!hover)
+  const compact = operational && w < 520
 
   const hasRight = series.some((se) => se.axis === 'y2')
-  const margin = operational ? { top: 26, bottom: 30, left: 74, right: hasRight ? 74 : 16 } : { ...M, right: hasRight ? 54 : M.right }
+  const margin = operational ? { top: 26, bottom: 30, left: compact ? 60 : 74, right: hasRight ? (compact ? 60 : 74) : 16 } : { ...M, right: hasRight ? 54 : M.right }
 
   const plotL = margin.left
   const plotT = margin.top
@@ -94,6 +99,7 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
 
   const n = labels.length
   const band = n > 0 ? plotW / n : plotW
+  const labelStride = operational ? Math.max(1, Math.ceil(32 / Math.max(band, 1))) : 1
   const cx = (i: number) => plotL + band * i + band / 2
   const yL = (v: number) => plotT + plotH * (1 - (leftMax > 0 ? v / leftMax : 0))
   const yR = (v: number) => plotT + plotH * (1 - (rightMax > 0 ? v / rightMax : 0))
@@ -132,9 +138,19 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
   }
 
   const ready = w > 0 && h > 0
+  // El recuadro se mide y cambia de lado al acercarse a un borde. Siempre queda
+  // dentro de la gráfica, también después de un resize o de envolver sus textos.
+  const tooltipLeft = hover ? Math.max(6, Math.min(
+    hover.x + 12 + tooltip.w > w - 6 ? hover.x - tooltip.w - 12 : hover.x + 12,
+    w - tooltip.w - 6,
+  )) : 6
+  const tooltipTop = hover ? Math.max(6, Math.min(
+    hover.y + 12 + tooltip.h > h - 6 ? hover.y - tooltip.h - 12 : hover.y + 12,
+    h - tooltip.h - 6,
+  )) : 6
 
   return (
-    <div ref={ref} className={s.chartSvgWrap} onMouseMove={onMove} onMouseLeave={() => setHover(null)} onPointerDown={operational ? onMove : undefined}>
+    <div ref={ref} className={`${s.chartSvgWrap} ${compact ? s.chartCompact : ''}`} onMouseMove={onMove} onMouseLeave={() => setHover(null)} onPointerDown={operational ? onMove : undefined}>
       {ready && (
         <svg width={w} height={h} className={s.chartSvg} role="img" aria-label="Gráfica del dashboard">
           {/* Gridlines + ticks eje izquierdo */}
@@ -156,7 +172,7 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
           })}
           {/* Títulos de eje */}
           {leftTitle && (
-            <text x={plotL} y={plotT - 3} textAnchor="start" className={s.chartAxisTitle}>{leftTitle}</text>
+            <text x={plotL} y={plotT - 3} textAnchor="start" className={s.chartAxisTitle}>{compact ? 'Presup. / uso' : leftTitle}</text>
           )}
           {hasRight && rightTitle && (
             <text x={plotL + plotW} y={plotT - 3} textAnchor="end" className={s.chartAxisTitle}>{rightTitle}</text>
@@ -209,9 +225,12 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
             )
           })}
           {/* Etiquetas X */}
-          {labels.map((lbl, i) => (
-            <text key={`x${i}`} x={cx(i)} y={plotT + plotH + 16} textAnchor="middle" className={s.chartTick}>{lbl}</text>
-          ))}
+          {labels.map((lbl, i) => {
+            // Se espacian las etiquetas, pero todos los meses conservan sus puntos
+            // y su detalle al pasar el cursor o tocar la gráfica.
+            if (i !== 0 && i !== n - 1 && (i % labelStride !== 0 || (operational && (n - 1 - i) * band < 32))) return null
+            return <text key={`x${i}`} x={cx(i)} y={plotT + plotH + 16} textAnchor="middle" className={s.chartTick}>{lbl}</text>
+          })}
           {/* Banda de hover */}
           {hover && (
             <line x1={cx(hover.i)} y1={plotT} x2={cx(hover.i)} y2={plotT + plotH} className={s.chartHoverLine} />
@@ -220,8 +239,9 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
       )}
       {hover && (
         <div
+          ref={tooltip.ref}
           className={s.chartTooltip}
-          style={{ left: Math.max(0, Math.min(hover.x + 12, (w || 0) - (operational ? 260 : 160))), top: Math.max(4, hover.y - 10) }}
+          style={operational ? { left: tooltipLeft, top: tooltipTop } : { left: Math.max(0, Math.min(hover.x + 12, (w || 0) - 160)), top: Math.max(4, hover.y - 10) }}
         >
           <div className={s.chartTooltipTitle}>{labels[hover.i]}</div>
           {series.map((se, i) => {

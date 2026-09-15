@@ -567,3 +567,79 @@ test('income query failure leaves gaps instead of zeroes while retaining the bud
     assert.match(text(p.renderer.toJSON()), /Ingresos no disponibles/)
   } finally { p.unmount() }
 })
+
+function mountChart(width = 1440, months = 9) {
+  const css = new Proxy({}, { get: (_, key) => String(key) })
+  const { ComboChart } = load(`${dashboardPath}charts.tsx`, { './Dashboard.module.css': { __esModule: true, default: css } })
+  const chartBox = { clientWidth: width, clientHeight: 288, getBoundingClientRect: () => ({ left: 0, top: 0 }) }
+  const tooltipBox = { clientWidth: Math.min(260, width - 12), clientHeight: 152 }
+  const previousObserver = globalThis.ResizeObserver
+  const observers = new Map()
+  globalThis.ResizeObserver = class {
+    constructor(callback) { this.callback = callback }
+    observe(element) { this.element = element; observers.set(element, this.callback) }
+    disconnect() { observers.delete(this.element) }
+  }
+  const labels = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'].slice(0, months)
+  const series = [
+    { kind: 'bar', label: 'Presupuesto', data: labels.map(() => 861700.58), color: '#72998a' },
+    { kind: 'bar', label: 'Usado', data: labels.map(() => 36249.97), color: '#3c725d' },
+    { kind: 'line', label: 'Esperado', data: labels.map(() => 2858856), color: '#168a86', axis: 'y2', dashed: true },
+    { kind: 'line', label: 'Cobrado', data: labels.map(() => 0), color: '#007c50', axis: 'y2' },
+  ]
+  let renderer
+  act(() => { renderer = create(React.createElement(ComboChart, { labels, series, leftTitle: 'Presupuesto y uso', rightTitle: 'Ingresos', presentation: 'operational' }), {
+    createNodeMock: element => element.props.className === 'chartTooltip' ? tooltipBox : chartBox,
+  }) })
+  const wrapper = () => renderer.root.findAllByType('div').find(node => typeof node.props.onMouseMove === 'function')
+  return {
+    renderer, chartBox, tooltipBox,
+    move(x, y) { act(() => wrapper().props.onMouseMove({ clientX: x, clientY: y, currentTarget: chartBox })) },
+    resize(w, tooltipWidth, tooltipHeight) {
+      act(() => {
+        chartBox.clientWidth = w; tooltipBox.clientWidth = tooltipWidth; tooltipBox.clientHeight = tooltipHeight
+        observers.get(chartBox)?.(); observers.get(tooltipBox)?.()
+      })
+    },
+    tooltip() { return renderer.root.findByProps({ className: 'chartTooltip' }) },
+    unmount() { act(() => renderer.unmount()); globalThis.ResizeObserver = previousObserver },
+  }
+}
+
+test('chart tooltip remains fully inside both axes at the edges and after resizing, including its four amounts', () => {
+  const p = mountChart()
+  const fits = () => {
+    const { left, top } = p.tooltip().props.style
+    assert.ok(left >= 0 && top >= 0)
+    assert.ok(left + p.tooltipBox.clientWidth <= p.chartBox.clientWidth, 'tooltip must not overflow horizontally')
+    assert.ok(top + p.tooltipBox.clientHeight <= p.chartBox.clientHeight, 'tooltip must not overflow vertically')
+    assert.match(text(p.tooltip()), /Presupuesto: \$861,700\.58/)
+    assert.match(text(p.tooltip()), /Usado: \$36,249\.97/)
+    assert.match(text(p.tooltip()), /Esperado: \$2,858,856\.00/)
+    assert.match(text(p.tooltip()), /Cobrado: \$0\.00/)
+  }
+  try {
+    p.move(1360, 287); fits()
+    p.move(76, 1); fits()
+    p.resize(280, 252, 190)
+    p.move(218, 287); fits()
+    p.move(61, 1); fits()
+  } finally { p.unmount() }
+})
+
+test('narrow charts fit twelve months without dropping series data and keep both endpoint month labels', () => {
+  const p = mountChart(280, 12)
+  try {
+    const svg = p.renderer.root.findByType('svg')
+    assert.equal(svg.props.width, 280)
+    const months = svg.findAllByType('text').map(text).filter(value => /^(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)$/.test(value))
+    assert.equal(months[0], 'ene')
+    assert.equal(months.at(-1), 'dic')
+    assert.ok(months.length < 12, 'axis labels must be spaced instead of forcing a wide chart')
+    assert.equal(svg.findAllByType('circle').length, 24, 'all twelve months remain in both line series')
+    assert.equal(svg.findAllByType('rect').length, 24)
+    for (const rect of svg.findAllByType('rect')) assert.ok(rect.props.x >= 0 && rect.props.x + rect.props.width <= 280)
+    p.move(215, 100)
+    assert.match(text(p.tooltip()), /^dic/)
+  } finally { p.unmount() }
+})

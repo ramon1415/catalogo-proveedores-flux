@@ -602,7 +602,7 @@ export default function DashboardPage() {
         </div>
         {!inHistView && <div className={s.chartGuide}>
           <span><strong>Barras · eje izquierdo</strong> Presupuesto y uso (pagado + pendiente).</span>
-          <span><strong>Líneas · eje derecho</strong> Cobros esperados y registrados. MXN; cada eje tiene su propia escala.</span>
+          <span><strong>Líneas · eje derecho</strong> {activity.data?.legacyIncome ? 'Cuotas por mes de corte; cobrado registrado para esas cuotas.' : 'Cobros esperados y registrados del periodo.'} MXN; cada eje tiene su propia escala.</span>
           {opChart.incomeIncomplete && <span role="status">{activity.loading ? 'Cargando ingresos…' : activity.error ? 'Ingresos no disponibles. Pulsa Actualizar para reintentar.' : 'Los meses con ingresos sin conversión completa a MXN se muestran sin punto.'}</span>}
         </div>}
       </div>
