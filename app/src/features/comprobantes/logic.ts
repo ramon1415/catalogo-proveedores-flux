@@ -29,6 +29,12 @@ export const issueLabel = (s: string) => ISSUE_LABELS[s] || s
 
 // Mapa `known` de friendlyError del vanilla (match por message y luego code).
 const KNOWN_ERRORS: Record<string, string> = {
+  batch_read_timeout: 'La lectura tardó demasiado. Usa una imagen más pequeña y nítida, o adjunta el PDF original.',
+  batch_read_cancelled: 'Lectura cancelada. No se cargó el comprobante.',
+  batch_image_multiple_payments: 'La imagen contiene más de un pago. Usa una imagen por comprobante o un PDF con un pago por página.',
+  batch_image_unreadable_fields: 'No pudimos leer todos los datos bancarios con claridad. Sube el comprobante BBVA completo y nítido, con importe, beneficiario, cuentas, fecha, folio único y estado Operado, o adjunta el PDF original.',
+  batch_image_read_failed: 'No se pudo leer la imagen. Intenta de nuevo con una imagen más nítida o con el PDF original.',
+  batch_converted_size: 'El comprobante preparado supera el tamaño permitido. Usa una imagen de menor tamaño.',
   payment_batch_company_mismatch: 'Este lote pertenece a otra empresa. Actualiza la bandeja de la empresa activa.',
   upload_contract_incomplete: 'El servidor no devolvió bucket, ruta y documento autorizados.',
   invalid_pdf_signature: 'El archivo no contiene la firma válida %PDF-.',

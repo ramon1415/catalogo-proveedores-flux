@@ -4,7 +4,7 @@
 // recibe el PDF por página.
 type ParserModule = {
   PARSER_VERSION: string
-  parseBbvaDocument: (pages: { pageNumber: number; text: string }[], opts: { fileName: string }) => {
+  parseBbvaDocument: (pages: { pageNumber: number; lines?: string[]; items?: { str?: string }[] }[], opts: { fileName: string }) => {
     page_count: number
     operations: Record<string, unknown>[]
   }

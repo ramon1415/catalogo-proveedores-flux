@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'app/src/features/comprobantes/**'
+      - 'app/src/features/nomina/receiptUpload.ts'
+      - 'app/src/lib/pdfText.ts'
       - 'app/src/App.tsx'
       - 'supabase/migrations/*receipt_preview_production_compatibility.sql'
       - 'scripts/qa/receipt-single-confirmation-*.test.mjs'
@@ -14,6 +16,8 @@ on:
     branches: [main]
     paths:
       - 'app/src/features/comprobantes/**'
+      - 'app/src/features/nomina/receiptUpload.ts'
+      - 'app/src/lib/pdfText.ts'
       - 'app/src/App.tsx'
       - 'supabase/migrations/*receipt_preview_production_compatibility.sql'
       - 'scripts/qa/receipt-single-confirmation-*.test.mjs'
@@ -36,6 +40,6 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm run qa:setup
-      - run: node --test scripts/qa/receipt-single-confirmation-*.test.mjs scripts/qa/react-comprobantes-visual-parity-contract.test.mjs scripts/qa/payment-batch-company-scope.test.mjs scripts/qa/payment-batch-step-transition-hotfix.test.mjs scripts/qa/pwa-*.test.mjs
+      - run: node --test scripts/qa/receipt-single-confirmation-*.test.mjs scripts/qa/react-comprobantes-visual-parity-contract.test.mjs scripts/qa/payment-batch-company-scope.test.mjs scripts/qa/payment-batch-step-transition-hotfix.test.mjs scripts/qa/pwa-*.test.mjs scripts/qa/payroll-receipt-autofill.test.mjs
       - run: npm --prefix app run build
       - run: node scripts/build-vercel-static.mjs
