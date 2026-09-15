@@ -35,6 +35,18 @@
   color: var(--text-1); padding: 0 10px; font: inherit; font-size: 12.5px; outline: none;
 }
 .periodField select { font-size: 13px; font-weight: 700; border-color: var(--border-strong); }
+.monthField { width: 230px; max-width: 100%; min-width: 0; }
+.periodField .monthControl { position: relative; display: block; font: inherit; letter-spacing: normal; text-transform: none; color: var(--text-1); }
+.monthControl input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding-right: 42px; cursor: pointer; color-scheme: dark; }
+:global([data-theme="light"]) .monthControl input { color-scheme: light; }
+.monthControl:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.monthIcon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--text-1); pointer-events: none; }
+/* El indicador nativo conserva su área de clic; el SVG da contraste en ambos temas. */
+.monthControl input::-webkit-calendar-picker-indicator { position: absolute; top: 0; right: 0; width: 44px; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.monthControl input::-webkit-date-and-time-value { text-align: left; }
+@media (pointer: coarse), (max-width: 600px) {
+  .monthControl input { font-size: 16px; } /* Evita el zoom al enfocar en iOS/PWA. */
+}
 .lastUpdated { font-size: 11px; color: var(--text-3); text-align: right; display: block; margin-bottom: 12px; }
 
 /* Buttons */

@@ -344,6 +344,37 @@ test('page refresh reloads both sources; month/year controls stay aligned even w
   } finally { p.unmount() }
 })
 
+test('month field opens on click or keyboard in both companies and preserves native fallback without changing the period', async () => {
+  const p = await mountPage()
+  try {
+    for (const company of ['operadora', 'fersana']) {
+      await p.switchCompany(company)
+      const input = p.renderer.root.findByProps({ 'aria-label': 'Mes operativo' })
+      const previousPeriod = input.props.value
+      const callsBefore = p.calls.length
+      let opened = 0
+      const currentTarget = { showPicker() { opened++ } }
+      // A click on the text and a touch-generated click use the same user-activation handler.
+      input.props.onClick({ currentTarget })
+      assert.equal(opened, 1)
+      let prevented = 0
+      for (const event of [{ key: 'Enter' }, { key: ' ' }, { key: 'ArrowDown', altKey: true }]) {
+        input.props.onKeyDown({ ...event, currentTarget, preventDefault() { prevented++ } })
+      }
+      assert.equal(opened, 4)
+      assert.equal(prevented, 3)
+      input.props.onKeyDown({ key: 'ArrowRight', currentTarget, preventDefault() { throw new Error('Native month editing must remain available') } })
+      assert.equal(opened, 4)
+      for (const fallback of [{}, { showPicker() { throw new Error('Picker unavailable') } }]) {
+        assert.doesNotThrow(() => input.props.onClick({ currentTarget: fallback }))
+        input.props.onKeyDown({ key: 'Enter', currentTarget: fallback, preventDefault() { throw new Error('Native fallback must remain available') } })
+      }
+      assert.equal(p.renderer.root.findByProps({ 'aria-label': 'Mes operativo' }).props.value, previousPeriod)
+      assert.equal(p.calls.length, callsBefore, 'Opening or cancelling the picker must not refresh or change the period')
+    }
+  } finally { p.unmount() }
+})
+
 test('page never reports all clear while loading or failing and removes old company alerts', async () => {
   const waiting = deferred()
   const p = await mountPage({
