@@ -47,6 +47,18 @@ function scrollToSection(id: string) {
   const el = document.getElementById(id)
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
+
+function openMonthPicker(input: HTMLInputElement): boolean {
+  if (typeof input.showPicker !== 'function') return false
+  try {
+    input.showPicker()
+    return true
+  } catch {
+    // Conserva la interacción nativa si el navegador no permite showPicker
+    // (por ejemplo, en WebKit móvil o en un preview dentro de un iframe).
+    return false
+  }
+}
 type Cell = { text: string; right?: boolean; color?: string; bold?: boolean; capitalize?: boolean }
 type HistTableModel = { title: string; head: Cell[]; rows: Cell[][]; foot: Cell[] | null }
 type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: number }
@@ -463,9 +475,24 @@ export default function DashboardPage() {
         </div>
         <div className={s.headActions}>
           {!anualMode && (
-            <label className={s.periodField}>
+            <label className={`${s.periodField} ${s.monthField}`}>
               <span>Mes operativo</span>
-              <input type="month" aria-label="Mes operativo" value={periodKey} onChange={(e) => onPeriodChange(e.target.value)} />
+              <span className={s.monthControl}>
+                <input
+                  type="month"
+                  aria-label="Mes operativo"
+                  value={periodKey}
+                  onChange={(e) => onPeriodChange(e.target.value)}
+                  onClick={(e) => { openMonthPicker(e.currentTarget) }}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ' ' || (e.altKey && e.key === 'ArrowDown')) && openMonthPicker(e.currentTarget)) e.preventDefault()
+                  }}
+                />
+                <svg className={s.monthIcon} aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="5" width="18" height="16" rx="2" />
+                  <path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 18h2" />
+                </svg>
+              </span>
             </label>
           )}
           {anualMode && (
