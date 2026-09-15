@@ -9,6 +9,7 @@ import { IcSearch, IcPlus } from '../../components/ui/icons'
 import { listProviders, setProviderActive } from './api'
 import { matchesFilters, normalize } from './logic'
 import { ProviderModal } from './ProviderModal'
+import { BulkProviderModal } from './BulkProviderModal'
 import type { ModalMode } from './ProviderModal'
 import type { Provider, StatusFilter } from './types'
 import s from './Proveedores.module.css'
@@ -27,6 +28,7 @@ export default function ProveedoresPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('todos')
   const [modal, setModal] = useState<ModalState>(null)
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const hasActiveCompanyScope = Boolean(companyId && memberships.some((membership) => membership.company_id === companyId))
   const canManage = canManageProviders() && !readonlyMode && hasActiveCompanyScope
@@ -102,9 +104,16 @@ export default function ProveedoresPage() {
           <p className="muted">Catálogo compartido de proveedores. Las acciones se registran desde {companyName || 'una empresa activa'}.</p>
         </div>
         {!readonlyMode && (
-          <button className={s.primaryBtn} disabled={!hasActiveCompanyScope} onClick={() => setModal({ mode: 'create', provider: null })}>
-            <IcPlus size={16} /> Nuevo proveedor
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {canManage && (
+              <button className={s.secondaryBtn} disabled={!hasActiveCompanyScope} onClick={() => setBulkOpen(true)}>
+                Carga masiva
+              </button>
+            )}
+            <button className={s.primaryBtn} disabled={!hasActiveCompanyScope} onClick={() => setModal({ mode: 'create', provider: null })}>
+              <IcPlus size={16} /> Nuevo proveedor
+            </button>
+          </div>
         )}
       </div>
 
@@ -195,6 +204,16 @@ export default function ProveedoresPage() {
           onClose={() => setModal(null)}
           onSaved={() => {
             setModal(null)
+            reload()
+          }}
+        />
+      )}
+
+      {bulkOpen && (
+        <BulkProviderModal
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => {
+            setBulkOpen(false)
             reload()
           }}
         />

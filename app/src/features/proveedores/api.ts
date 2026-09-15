@@ -28,6 +28,26 @@ export async function saveProvider(
   return id as string
 }
 
+// Alta masiva: reutiliza el mismo RPC vetado (validación + RLS) una vez por
+// fila. No hay endpoint nuevo. Devuelve el resultado por fila para poder
+// mostrar cuáles se crearon y cuáles fallaron sin abortar el lote.
+export type BulkRowResult = { index: number; alias: string; ok: boolean; id?: string; error?: string }
+
+export async function bulkCreateProviders(rows: ProviderPayload[]): Promise<BulkRowResult[]> {
+  const results: BulkRowResult[] = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    try {
+      const id = await saveProvider(null, row)
+      results.push({ index: i, alias: row.alias || '', ok: true, id })
+    } catch (error) {
+      const message = (error as { message?: string })?.message || 'error'
+      results.push({ index: i, alias: row.alias || '', ok: false, error: message })
+    }
+  }
+  return results
+}
+
 // Activar/desactivar: update directo, igual que toggleSupplier del vanilla.
 export async function setProviderActive(id: string, activo: boolean): Promise<void> {
   const { error } = await supabase
