@@ -35,6 +35,18 @@
   color: var(--text-1); padding: 0 10px; font: inherit; font-size: 12.5px; outline: none;
 }
 .periodField select { font-size: 13px; font-weight: 700; border-color: var(--border-strong); }
+.monthField { width: 230px; max-width: 100%; min-width: 0; }
+.periodField .monthControl { position: relative; display: block; font: inherit; letter-spacing: normal; text-transform: none; color: var(--text-1); }
+.monthControl input { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; padding-right: 42px; cursor: pointer; color-scheme: dark; }
+:global([data-theme="light"]) .monthControl input { color-scheme: light; }
+.monthControl:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+.monthIcon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--text-1); pointer-events: none; }
+/* El indicador nativo conserva su área de clic; el SVG da contraste en ambos temas. */
+.monthControl input::-webkit-calendar-picker-indicator { position: absolute; top: 0; right: 0; width: 44px; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: pointer; }
+.monthControl input::-webkit-date-and-time-value { text-align: left; }
+@media (pointer: coarse), (max-width: 600px) {
+  .monthControl input { font-size: 16px; } /* Evita el zoom al enfocar en iOS/PWA. */
+}
 .lastUpdated { font-size: 11px; color: var(--text-3); text-align: right; display: block; margin-bottom: 12px; }
 
 /* Buttons */
@@ -51,6 +63,7 @@
 
 /* KPI cards */
 .kpiGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.kpiGridThree { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kpiCard { background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px; padding: 18px 20px; position: relative; overflow: hidden; }
 .kpiCard::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
 .kpiCard.accent::before { background: linear-gradient(90deg, var(--accent), transparent); }
@@ -99,6 +112,36 @@
 .chartTooltipTitle { font-weight: 700; color: var(--text-1); margin-bottom: 4px; }
 .chartTooltipRow { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .chartTooltipDot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+/* Estilo operativo: barras suaves y líneas contrastantes, como el combinado original. */
+.operationalChart {
+  min-width: 0;
+  --op-budget-stroke: #6f9b8e; --op-budget-fill: rgba(111,155,142,.1);
+  --op-used: #9bc5b2; --op-used-fill: rgba(130,187,166,.72);
+  --op-expected: #57b8b3; --op-collected: #32dca0;
+}
+:global([data-theme="light"]) .operationalChart {
+  --op-budget-stroke: #72998a; --op-budget-fill: rgba(114,153,138,.1);
+  --op-used: #3c725d; --op-used-fill: rgba(60,114,93,.75);
+  --op-expected: #168a86; --op-collected: #007c50;
+}
+.operationalChart .panelHeader { flex-wrap: wrap; gap: 12px 24px; padding: 16px 18px; }
+.operationalChart .chartLegend { gap: 18px; color: var(--text-2); font-size: 12px; }
+.legendBar { width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; flex-shrink: 0; }
+.legendLine { width: 24px; height: 0; border-top: 3px solid currentColor; flex-shrink: 0; }
+.operationalChart .chartBody { height: 310px; padding: 14px 12px 8px; min-width: 0; overflow: hidden; }
+.operationalChart .chartSvgWrap { min-width: 0; max-width: 100%; --chart-grid: rgba(171,203,187,.12); --chart-tick: #b5ccbf; }
+.operationalChart .chartSvg { width: 100%; height: 100%; }
+:global([data-theme="light"]) .operationalChart .chartSvgWrap { --chart-grid: rgba(39,79,63,.1); --chart-tick: #50685c; }
+.operationalChart .chartTick { font-size: 12px; font-variant-numeric: tabular-nums; }
+.operationalChart .chartAxisTitle { font-size: 11px; font-weight: 600; }
+.operationalChart .chartTooltip { width: max-content; min-width: 0; max-width: calc(100% - 12px); box-sizing: border-box; font-size: 12px; line-height: 1.7; border-color: var(--op-budget-stroke); }
+.operationalChart .chartTooltipRow { white-space: normal; overflow-wrap: anywhere; }
+.operationalChart .chartCompact .chartTick { font-size: 11px; }
+.operationalChart .chartCompact .chartAxisTitle { font-size: 10px; }
+.chartGuide { display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 10px 18px 14px; color: var(--text-2); font-size: 11px; line-height: 1.6; }
+.chartGuide strong { color: var(--text-1); font-weight: 600; margin-right: 5px; }
+.chartGuide [role="status"] { flex-basis: 100%; color: var(--amber); }
 
 /* Tabs */
 .tabsBlock { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -171,6 +214,90 @@
 .mutedLine { display: block; font-size: 10px; color: var(--text-3); }
 .nowrap { white-space: nowrap; }
 .capitalize { text-transform: capitalize; }
+
+/* ── Sección Presupuesto (disponible vs usado por partida) ─────────────────── */
+/* Colores semánticos: ejecutado (verde), comprometido (ámbar), disponible
+   (neutro), sobregirado (rojo). Todos vía tokens theme-aware de .dash. */
+.budgetSelect {
+  min-height: 32px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
+  color: var(--text-1); padding: 0 10px; font: inherit; font-size: 12.5px; font-weight: 700; outline: none;
+}
+.budgetOmitNote { padding: 8px 16px 0; font-size: 11px; color: var(--text-3); }
+.budgetList { display: grid; gap: 8px; padding: 12px 14px; }
+.budgetSearchBar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 12px 16px 0; }
+.budgetSearchBar > span { color: var(--text-2); font-size: 12px; padding-bottom: 10px; }
+.budgetSearchField { display: grid; gap: 6px; flex: 1 1 240px; max-width: 420px; color: var(--text-2); font-size: 12px; }
+.budgetSearchField input { width: 100%; min-height: 40px; padding: 8px 12px; background: var(--bg-input); color: var(--text-1); border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+.budgetSearchField input:focus-visible, .memberSearch:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.incomeSummary { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 12px 16px; color: var(--text-2); font-size: 12px; }
+.incomeSummary strong { display: block; color: var(--text-1); font-size: 17px; font-variant-numeric: tabular-nums; }
+.checkLink { flex-shrink: 0; color: var(--accent-text); text-align: right; font-size: 12px; }
+.budgetRow { border: 1px solid var(--border); border-radius: 11px; background: rgba(255,255,255,.012); padding: 11px 13px; }
+.budgetRow.alert { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 7%, transparent); }
+.budgetRow.warn { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.budgetRowHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.budgetPartida { font-size: 12.5px; font-weight: 700; color: var(--text-1); }
+.budgetGroup { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-3); margin-left: 8px; }
+.budgetPct { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
+.budgetPct.alert { color: var(--ruby); }
+.budgetPct.warn { color: var(--amber); }
+.budgetBar { height: 10px; border-radius: 6px; overflow: hidden; background: var(--border); display: flex; }
+.budgetSeg { height: 100%; }
+.budgetSeg.executed { background: var(--emerald); }
+.budgetSeg.committed { background: var(--amber); }
+.budgetFigures { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 8px; font-size: 11.5px; }
+.budgetFigures span { color: var(--text-3); }
+.budgetFigures strong { color: var(--text-1); font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 5px; }
+.budgetFigures strong.alert { color: var(--ruby); }
+.budgetLegend { display: flex; flex-wrap: wrap; gap: 14px; }
+.budgetLegend .chartLegendItem { font-size: 11px; color: var(--text-3); }
+
+/* ── Fila de alertas / estado del mes ──────────────────────────────────────── */
+.alertsRow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.alertCard {
+  display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-radius: 11px;
+  border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; font: inherit; text-align: left;
+}
+.alertCard:hover { background: var(--bg-hover); }
+.alertCard.danger { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 8%, transparent); }
+.alertCard.warning { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.alertCard.info { border-color: color-mix(in srgb, var(--violet) 40%, var(--border)); background: color-mix(in srgb, var(--violet) 8%, transparent); }
+.alertCard.ok { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 8%, transparent); cursor: default; }
+.alertValue { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.alertCard.danger .alertValue { color: var(--ruby); }
+.alertCard.warning .alertValue { color: var(--amber); }
+.alertCard.info .alertValue { color: var(--violet); }
+.alertCard.ok .alertValue { color: var(--emerald); }
+.alertLabel { font-size: 12px; color: var(--text-2); }
+
+/* Empty state de la gráfica operativa (sin serie demo) */
+.chartEmpty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 13px; }
+
+/* ── Solicitudes: embudo + alertas ─────────────────────────────────────────── */
+.funnelRow { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+.funnelStage {
+  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 11px;
+  background: rgba(255,255,255,.012); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px;
+}
+.funnelStage.paid { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 7%, transparent); }
+.funnelLabel { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.funnelCount { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.funnelStage.paid .funnelCount { color: var(--emerald); }
+.funnelAmount { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.funnelArrow { position: absolute; right: -10px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--text-3); font-size: 13px; }
+.reqAlerts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 12px; }
+.reqAlert { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border); min-width: 160px; }
+.reqAlert span { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.reqAlert strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.reqAlert.danger { border-color: color-mix(in srgb, var(--ruby) 45%, var(--border)); background: color-mix(in srgb, var(--ruby) 8%, transparent); }
+.reqAlert.danger strong { color: var(--ruby); }
+.reqAlert.warning { border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: var(--amber-dim); }
+.reqAlert.warning strong { color: var(--amber); }
+
+/* ── Impuestos ─────────────────────────────────────────────────────────────── */
+.taxIva { border-color: color-mix(in srgb, var(--emerald) 35%, var(--border)); }
+.taxRet { border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); }
+.taxHint { display: block; margin-top: 4px; font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--text-3); }
 
 /* Access denied */
 .gate { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 40px; text-align: center; color: var(--text-3); }

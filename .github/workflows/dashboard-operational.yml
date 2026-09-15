@@ -1,0 +1,37 @@
+name: Dashboard operational release checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/src/features/dashboard/**'
+      - 'app/src/lib/tenantConfig.ts'
+      - 'scripts/qa/dashboard-operational.test.mjs'
+      - '.github/workflows/dashboard-operational.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/features/dashboard/**'
+      - 'app/src/lib/tenantConfig.ts'
+      - 'scripts/qa/dashboard-operational.test.mjs'
+      - '.github/workflows/dashboard-operational.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-and-pwa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: node --test scripts/qa/dashboard-operational.test.mjs scripts/qa/pwa-*.test.mjs
+      - run: npm --prefix app run build
+      - run: node scripts/build-vercel-static.mjs
