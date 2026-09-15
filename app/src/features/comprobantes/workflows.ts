@@ -111,11 +111,17 @@ export async function deriveIndividualReceipt(params: {
   storageBucket: string
   storagePath: string
   pageNumber: number
+  sourcePdf?: Blob
+  previewWidth?: number
 }): Promise<IndividualReceipt> {
   const runtime = await loadPdfRuntime()
-  const bucket = await privateBucket(params.storageBucket)
-  const { data, error } = await bucket.download(params.storagePath)
-  if (error || !data) throw error || new Error('source_pdf_download_unavailable')
+  let data = params.sourcePdf
+  if (!data) {
+    const bucket = await privateBucket(params.storageBucket)
+    const result = await bucket.download(params.storagePath)
+    if (result.error || !result.data) throw result.error || new Error('source_pdf_download_unavailable')
+    data = result.data
+  }
   const sourceBlobUrl = URL.createObjectURL(data)
   try {
     const bytes = await runtime.singlePage.deriveSinglePageFromUrl({
@@ -125,8 +131,27 @@ export async function deriveIndividualReceipt(params: {
     })
     await runtime.singlePage.assertSinglePageBytes(bytes, runtime.pdfLib)
     const sha256 = await sha256Hex(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    // Render the individual receipt in-page: mobile/PWA must not depend on a
+    // popup or on the browser having a native embedded PDF viewer.
+    const pdf = await runtime.pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise
+    let previewDataUrl: string
+    try {
+      if (pdf.numPages !== 1) throw new Error('single_page_receipt_required')
+      const page = await pdf.getPage(1)
+      const natural = page.getViewport({ scale: 1 })
+      const viewport = page.getViewport({ scale: Math.min((params.previewWidth || 1200) / natural.width, 2) })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      const canvasContext = canvas.getContext('2d')
+      if (!canvasContext) throw new Error('receipt_preview_unavailable')
+      await page.render({ canvasContext, viewport }).promise
+      previewDataUrl = canvas.toDataURL('image/png')
+      canvas.width = 0
+      canvas.height = 0
+    } finally { await pdf.destroy() }
     const blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-    return { extractionId: params.extractionId, bytes, blobUrl, pageCount: 1, sha256 }
+    return { extractionId: params.extractionId, bytes, blobUrl, pageCount: 1, sha256, previewDataUrl }
   } finally {
     URL.revokeObjectURL(sourceBlobUrl)
   }

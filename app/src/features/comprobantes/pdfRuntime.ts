@@ -24,7 +24,12 @@ type PdfJsModule = {
 
 export type PdfDocument = {
   numPages: number
-  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: { str?: string }[] }> }>
+  getPage: (n: number) => Promise<{
+    getTextContent: () => Promise<{ items: { str?: string }[] }>
+    getViewport: (params: { scale: number }) => { width: number; height: number }
+    render: (params: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> }
+  }>
+  destroy: () => Promise<void>
 }
 
 type PdfRuntime = {

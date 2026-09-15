@@ -1,5 +1,5 @@
 import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCompany } from '../../lib/company'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
@@ -12,7 +12,7 @@ import {
 import { UploadBatchModal } from './UploadBatchModal'
 import { OperationModal } from './OperationModal'
 import { BulkLinkModal } from './BulkLinkModal'
-import type { BatchContext, BatchListItem, BatchDetail, BatchOperation, CreateBatchResult } from './types'
+import type { BatchContext, BatchListItem, BatchDetail, BatchOperation } from './types'
 import s from './Comprobantes.module.css'
 
 // Migración a React de comprobantes_batch.html: bandeja de batches BBVA +
@@ -25,14 +25,12 @@ const SUMMARY_FILTERS: { key: string; label: string; subtitle: string; tone: str
   { key: 'failed', label: 'Con incidencia', subtitle: 'Requieren atención', tone: 'failed', statuses: ['failed', 'cancelled'] },
 ]
 
-const FLOW_STEPS = [
-  ['1', 'Revisar comprobante', 'Abre una sola página'],
-  ['2', 'Buscar solicitud aprobada', 'Consulta sin modificar datos'],
-  ['3', 'Confirmar coincidencia', 'Importe y moneda exactos'],
-  ['4', 'Comprobante vinculado', 'Solicitud marcada como pagada'],
-]
-
 export default function ComprobantesPage() {
+  const { companyId } = useCompany()
+  return <ComprobantesCompanyPage key={companyId || 'no-company'} />
+}
+
+function ComprobantesCompanyPage() {
   const { companyId } = useCompany()
   const { showToast } = useToast()
 
@@ -49,8 +47,9 @@ export default function ComprobantesPage() {
 
   const [uploadOpen, setUploadOpen] = useState(false)
   const [operation, setOperation] = useState<BatchOperation | null>(null)
-  const [duplicate, setDuplicate] = useState<{ id: string; folio: string; status: string } | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
+  const detailEpoch = useRef(0)
 
   const capabilities = useMemo(() => {
     const caps = context?.capabilities && Object.keys(context.capabilities).length ? context.capabilities : context
@@ -69,8 +68,10 @@ export default function ComprobantesPage() {
   }, [companyId, showToast])
 
   const loadDetail = useCallback(async (batchId: string) => {
+    const requestEpoch = ++detailEpoch.current
     try {
       const d = await getBatchDetail(batchId)
+      if (requestEpoch !== detailEpoch.current) return
       setDetail(d)
       // Conciliación por operación: N previews en paralelo (contrato vanilla).
       const ops = batchOperations(d).filter((op) => op.bank_operation_id)
@@ -82,9 +83,9 @@ export default function ComprobantesPage() {
           return [op.bank_operation_id!, op.reconciliation_status || 'unreconciled'] as const
         }
       }))
-      setLinkStatuses(Object.fromEntries(entries))
+      if (requestEpoch === detailEpoch.current) setLinkStatuses(Object.fromEntries(entries))
     } catch (e) {
-      showToast('No se pudo abrir el batch', friendlyBatchError(e), 'error')
+      if (requestEpoch === detailEpoch.current) showToast('No se pudo abrir el batch', friendlyBatchError(e), 'error')
     }
   }, [showToast])
 
@@ -108,8 +109,10 @@ export default function ComprobantesPage() {
   }, [loadBatchesList])
 
   useEffect(() => {
+    setDetail(null)
+    setLinkStatuses({})
     if (selectedId) loadDetail(selectedId)
-    else setDetail(null)
+    return () => { detailEpoch.current += 1 }
   }, [selectedId, loadDetail])
 
   async function refreshAll() {
@@ -142,6 +145,13 @@ export default function ComprobantesPage() {
   }, [batches, search, statusFilter, summaryFilter])
 
   const operations = useMemo(() => batchOperations(detail), [detail])
+  useEffect(() => {
+    const loadedId = String((detail?.batch || detail?.ingestion_batch)?.id || '')
+    if (!pendingReviewId || loadedId !== pendingReviewId || !operations.length) return
+    setPendingReviewId(null)
+    if (operations.length === 1) setOperation(operations[0])
+    else setBulkOpen(true)
+  }, [pendingReviewId, detail, operations])
   const reviewCount = operations.filter((op) => operationStatus(op) === 'review_required').length
   const acceptedCount = operations.filter((op) => op.bank_operation_id).length
 
@@ -159,9 +169,9 @@ export default function ComprobantesPage() {
     <>
       <div className={s.phead}>
         <div>
-          <span className={s.eyebrow}>Comprobantes bancarios · BBVA PDF V1</span>
+          <span className={s.eyebrow}>Comprobantes bancarios</span>
           <h1>Comprobantes batch</h1>
-          <p className="muted">Sube un lote, revisa cada operación y vincúlala con la solicitud aprobada correspondiente.</p>
+          <p className="muted">Sube el PDF. Flux busca las solicitudes y te muestra las coincidencias para confirmar.</p>
         </div>
         <div className={s.headActions}>
           <button className="secondary-btn" onClick={refreshAll}>Actualizar</button>
@@ -171,19 +181,10 @@ export default function ComprobantesPage() {
         </div>
       </div>
 
-      <div className={s.safetyBanner}>
-        <strong>! &nbsp;Vinculación 1:1 protegida</strong>
-        <span>Cada comprobante se vincula con una sola solicitud aprobada. El importe y la moneda se leen del PDF y nunca se capturan durante la vinculación.</span>
+      <div className={s.automaticNote}>
+        <strong>Conciliación automática</strong>
+        <span>Finanzas confirma las coincidencias correctas. Cada comprobante queda vinculado a una sola solicitud.</span>
       </div>
-
-      <ol className={s.flowSteps} aria-label="Flujo de vinculación de comprobantes">
-        {FLOW_STEPS.map(([number, title, copy]) => (
-          <li key={number}>
-            <span className={s.stepNumber}>{number}</span>
-            <span><strong>{title}</strong><small>{copy}</small></span>
-          </li>
-        ))}
-      </ol>
 
       <div className={s.helpNote}>
         <strong>¿Ya aparece un lote?</strong>
@@ -252,9 +253,9 @@ export default function ComprobantesPage() {
                 <div className={s.metric}><strong>{acceptedCount}</strong><span>Aceptadas</span></div>
               </div>
 
-              {capabilities.can_link === true && operations.some((op) => op.bank_operation_id && linkStatuses[op.bank_operation_id!] !== 'linked') && (
+              {capabilities.can_link === true && operations.some((op) => op.extraction_id && (!op.bank_operation_id || linkStatuses[op.bank_operation_id] !== 'linked')) && (
                 <div>
-                  <button className="secondary-btn" onClick={() => setBulkOpen(true)}>Vincular coincidencias exactas</button>
+                  <button className="primary-btn" onClick={() => setBulkOpen(true)}>Ver coincidencias para confirmar</button>
                 </div>
               )}
 
@@ -310,52 +311,34 @@ export default function ComprobantesPage() {
 
       {uploadOpen && context && (
         <UploadBatchModal
-          context={context}
+          context={{ ...context, companies: companyId ? context.companies?.filter(company => company.id === companyId) : context.companies }}
           defaultCompanyId={companyId}
           onClose={() => setUploadOpen(false)}
           onUploaded={async (batchId) => {
             setUploadOpen(false)
             setSelectedId(batchId)
+            setPendingReviewId(batchId)
+            if (selectedId === batchId) await loadDetail(batchId)
             await loadBatchesList()
           }}
-          onDuplicate={async (batchId, created: CreateBatchResult) => {
+          onDuplicate={async (batchId) => {
             setUploadOpen(false)
-            const items = await loadBatchesList()
-            const existing = items.find((b) => b.id === batchId)
-            setDuplicate({
-              id: batchId,
-              folio: existing?.batch_number || existing?.public_folio || created.batch_number || created.public_folio || shortBatchId(batchId),
-              status: batchStatus(existing || { status: created.status || 'awaiting_upload' }),
-            })
+            setSelectedId(batchId)
+            setPendingReviewId(batchId)
+            if (selectedId === batchId) await loadDetail(batchId)
+            await loadBatchesList()
+            showToast('Lote existente', 'Abrimos el PDF que ya habías cargado para continuar la conciliación.', 'info')
           }}
         />
       )}
 
-      {duplicate && (
-        <div className={s.overlay} onClick={() => setDuplicate(null)}>
-          <div className={s.modal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
-            <div className={s.modalHead}>
-              <div><h2 style={{ fontSize: '1.05rem' }}>Lote ya cargado</h2><ActiveCompanyCaptureContext /></div>
-              <button className="small-btn" onClick={() => setDuplicate(null)}>Cerrar</button>
-            </div>
-            <div className={s.modalBody}>
-              <p style={{ margin: 0 }}>
-                Este archivo ya fue cargado anteriormente como <strong>{duplicate.folio}</strong> ({statusLabel(duplicate.status)}).
-                No se creó otro lote.
-              </p>
-              <div className={s.formBtns}>
-                <button className="secondary-btn" onClick={() => setDuplicate(null)}>Entendido</button>
-                <button className="primary-btn" onClick={() => { setSelectedId(duplicate.id); setDuplicate(null) }}>Abrir lote existente</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {bulkOpen && (
+      {bulkOpen && detail && (
         <BulkLinkModal
           operations={operations}
+          detail={detail}
+          capabilities={capabilities}
           onClose={() => setBulkOpen(false)}
+          onReview={(item) => { setBulkOpen(false); setOperation(item) }}
           onLinked={async () => {
             await loadBatchesList()
             if (selectedId) await loadDetail(selectedId)
@@ -365,7 +348,8 @@ export default function ComprobantesPage() {
 
       {operation && detail && (
         <OperationModal
-          operation={operation}
+          key={operation.extraction_id || operation.bank_operation_id}
+          operation={operations.find(item => item.extraction_id === operation.extraction_id) || operation}
           detail={detail}
           capabilities={capabilities}
           onClose={() => setOperation(null)}

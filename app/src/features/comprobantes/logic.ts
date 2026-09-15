@@ -51,6 +51,15 @@ const KNOWN_ERRORS: Record<string, string> = {
   idempotency_key_conflict: 'La misma clave idempotente recibió datos distintos.',
   PGRST202: 'El contrato RPC todavía no está disponible en este ambiente.',
   pdf_runtime_unavailable: 'No se cargaron las dependencias seguras de conciliación. Recarga la página.',
+  payment_extraction_not_conciliable: 'El comprobante tiene datos incompletos o no acredita una operación bancaria completada. Revisa los campos señalados.',
+  receipt_candidates_preview_unavailable: 'No se pudo obtener la propuesta de conciliación. Actualiza e inténtalo de nuevo.',
+  receipt_candidate_changed: 'La solicitud propuesta cambió o ya no está disponible. Actualiza las coincidencias antes de confirmar.',
+  receipt_preview_unavailable: 'No se pudo mostrar el comprobante. Intenta cargar la vista nuevamente.',
+  source_pdf_download_unavailable: 'No se pudo cargar el PDF para compararlo. Inténtalo de nuevo.',
+  bank_receipt_already_linked: 'Este comprobante ya está vinculado. Actualiza el lote para consultar el resultado.',
+  payment_request_not_payable: 'La solicitud aún no está lista para conciliar. Verifica su aprobación y el cierre del corte.',
+  finance_role_required: 'Necesitas permisos de Finanzas en esta empresa para conciliar comprobantes.',
+  payment_extraction_not_found: 'No encontramos los datos de esta página. Actualiza el lote para volver a consultarlos.',
 }
 
 export function friendlyBatchError(error: unknown): string {
@@ -92,7 +101,11 @@ export function batchOperations(detail: BatchDetail | null): BatchOperation[] {
   const seen = new Set(merged.map(extractionKey).filter(Boolean))
   for (const ex of extractions) {
     const key = extractionKey(ex)
-    if (!key || !seen.has(key)) merged.push(ex)
+    if (!key || !seen.has(key)) merged.push({
+      ...ex, extraction_id: key,
+      extraction_status: ex.extraction_status || ex.status,
+      extraction_updated_at: ex.extraction_updated_at || ex.updated_at,
+    })
   }
   return merged
 }
