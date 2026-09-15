@@ -41,11 +41,11 @@ function fixture(options = {}) {
       if (options.waitPreview) await options.waitPreview.promise
       if (options.stale && previews.get(id) > 1) throw new Error('stale_payment_extraction')
       const items = candidatesFor(id)
-      return { items, outcome: options.blocked ? 'blocked' : items.length === 1 ? 'exact' : items.length ? 'multiple' : 'none', block_reason: options.blocked ? 'payment_extraction_not_conciliable' : null }
+      return { items, needs_acceptance: options.reopened ? !state(id).accepted : undefined, outcome: options.blocked ? 'blocked' : items.length === 1 ? 'exact' : items.length ? 'multiple' : 'none', block_reason: options.blocked ? 'payment_extraction_not_conciliable' : null }
     },
     getLinkPreview: async id => {
       calls.push(['linkPreview', id]); const s = state(id), key = id.replace(/^op-/, '')
-      if (!s.accepted) throw new Error('bank_payment_operation_not_found')
+      if (!s.accepted && !options.reopened) throw new Error('bank_payment_operation_not_found')
       return { operation_id: `op-${key}`, evidence: { status: s.evidence ? 'shareable' : 'pending_review' }, link: s.linked && { id: `link-${key}`, payment_request_id: s.linked, request_number: `SOL-${s.linked}` } }
     },
     acceptExtraction: async id => { calls.push(['accept', id]); state(id).accepted = true; return { operation_id: `op-${id}` } },
@@ -77,6 +77,46 @@ async function mount(options = {}) {
 }
 const writes = calls => calls.filter(call => ['accept', 'persist', 'link'].includes(call[0]))
 
+test('the React page filters batches by active company, rejects foreign detail and makes no requests without a company', async () => {
+  let activeCompany = 'company-a'
+  const calls = [], toast = { showToast: (...args) => calls.push(['toast', ...args]) }
+  const Empty = () => null
+  const Page = load('ComprobantesPage.tsx', {
+    '../../components/ui/CompanyCaptureContext': { ActiveCompanyCaptureContext: Empty },
+    '../../lib/company': { useCompany: () => ({ companyId: activeCompany }) },
+    '../../components/ui/Toast': { useToast: () => toast },
+    '../../components/ui/Badge': { Badge: props => React.createElement('span', null, props.children) },
+    '../../lib/format': { formatDateTime: () => '' },
+    './logic': logic, './Comprobantes.module.css': css,
+    './UploadBatchModal': { UploadBatchModal: Empty }, './OperationModal': { OperationModal: Empty }, './BulkLinkModal': { BulkLinkModal: Empty },
+    './api': {
+      getBatchContext: async () => { calls.push(['context']); return { capabilities: caps } },
+      listBatches: async company => { calls.push(['list', company]); return [{ id: 'batch-a',company_id:'company-a',original_file_name:'A-only.pdf' },{ id:'batch-b',company_id:'company-b',original_file_name:'B-only.pdf' }] },
+      getBatchDetail: async () => ({ batch: { id:'batch-a',company_id:'company-b' },extractions:[{id:'foreign',beneficiary_name:'FOREIGN DETAILS'}] }),
+      getLinkPreview: async () => ({}),
+    },
+  }).default
+  let renderer
+  await act(async () => { renderer = create(React.createElement(Page)) })
+  try {
+    assert.match(text(renderer.root), /A-only\.pdf/)
+    assert.doesNotMatch(text(renderer.root), /B-only\.pdf/)
+    const batch = renderer.root.findAllByType('button').find(button => text(button).includes('A-only.pdf'))
+    await act(async () => batch.props.onClick())
+    assert.doesNotMatch(text(renderer.root), /FOREIGN DETAILS/)
+    assert.ok(calls.some(call => call[0] === 'toast' && String(call).includes('otra empresa')))
+    activeCompany = 'company-b'
+    await act(async () => renderer.update(React.createElement(Page)))
+    assert.match(text(renderer.root), /B-only\.pdf/)
+    assert.doesNotMatch(text(renderer.root), /A-only\.pdf|FOREIGN DETAILS/)
+    calls.length = 0
+    activeCompany = null
+    await act(async () => renderer.update(React.createElement(Page)))
+    assert.match(text(renderer.root), /Selecciona una empresa/)
+    assert.equal(calls.length, 0)
+  } finally { act(() => renderer.unmount()) }
+})
+
 test('opening the modal automatically shows the PDF and unique request without any writes; one click completes reconciliation', async () => {
   const f = await mount()
   try {
@@ -100,6 +140,17 @@ test('double click has only one writer and no nested confirmation', async () => 
     await act(async () => { await Promise.all([click(), click()]) })
     assert.equal(f.calls.filter(call => call[0] === 'link').length, 1)
     assert.equal(f.renderer.root.findAllByProps({ role: 'dialog' }).length, 1)
+  } finally { act(() => f.renderer.unmount()) }
+})
+
+test('a reopened receipt invokes the existing acceptance command once after confirmation even when its operation id exists', async () => {
+  const f = await mount({ reopened: true })
+  try {
+    assert.deepEqual(writes(f.calls), [])
+    assert.equal(f.confirm().props.disabled, false)
+    await act(async () => f.confirm().props.onClick())
+    assert.deepEqual(writes(f.calls).map(call => call[0]), ['accept', 'persist', 'link'])
+    assert.match(text(f.renderer.root), /Conciliación confirmada/)
   } finally { act(() => f.renderer.unmount()) }
 })
 

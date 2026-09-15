@@ -48,7 +48,7 @@ export async function confirmReceiptMatch({ operation, candidate, receipt }: {
     throw new Error('receipt_candidate_changed')
   }
   let operationId = preview?.operation_id || operation.bank_operation_id
-  if (!operationId) {
+  if (!operationId || freshPreview.needs_acceptance === true) {
     const accepted = await acceptExtraction(extractionId, operation.extraction_updated_at || null)
     operationId = accepted.operation_id
     if (!operationId) throw new Error('bank_payment_operation_identifier_missing')

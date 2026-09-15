@@ -17,6 +17,7 @@ export type BatchContext = {
 
 export type BatchListItem = {
   id: string
+  company_id?: string | null
   batch_number: string | null
   public_folio: string | null
   company_name: string | null
@@ -99,6 +100,7 @@ export type ReceiptCandidate = {
 
 export type ReceiptCandidatePreview = {
   items: ReceiptCandidate[]
+  needs_acceptance?: boolean
   outcome: 'exact' | 'multiple' | 'none' | 'blocked' | 'linked'
   block_reason?: string | null
   operation_id?: string | null

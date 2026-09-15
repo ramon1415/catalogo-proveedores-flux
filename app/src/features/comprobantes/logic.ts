@@ -29,6 +29,7 @@ export const issueLabel = (s: string) => ISSUE_LABELS[s] || s
 
 // Mapa `known` de friendlyError del vanilla (match por message y luego code).
 const KNOWN_ERRORS: Record<string, string> = {
+  payment_batch_company_mismatch: 'Este lote pertenece a otra empresa. Actualiza la bandeja de la empresa activa.',
   upload_contract_incomplete: 'El servidor no devolvió bucket, ruta y documento autorizados.',
   invalid_pdf_signature: 'El archivo no contiene la firma válida %PDF-.',
   invalid_pdf_page_count: 'El PDF no tiene páginas válidas o supera el límite autorizado.',
@@ -45,6 +46,8 @@ const KNOWN_ERRORS: Record<string, string> = {
   bank_payment_operation_folio_duplicate: 'Ese Folio único BBVA ya identifica otra operación de la empresa.',
   bank_payment_operation_company_account_mismatch: 'La cuenta origen no coincide con una cuenta bancaria activa de la empresa.',
   bank_payment_operation_company_account_ambiguous: 'La cuenta origen coincide con más de una cuenta BBVA activa; corrige el catálogo antes de aceptar.',
+  cancelled_payment_operation_snapshot_mismatch: 'El comprobante reabierto ya no coincide con la operación original. Revisa los datos antes de continuar.',
+  cancelled_payment_operation_has_business_dependencies: 'La operación cancelada tiene movimientos relacionados y no puede reabrirse desde esta conciliación.',
   open_allocation_plan_exists: 'La operación ya tiene un plan abierto.',
   bank_payment_operation_capacity_exceeded: 'El remanente de la operación cambió; revisa los importes.',
   payable_snapshot_capacity_exceeded: 'El saldo pagable cambió; revisa los importes.',
