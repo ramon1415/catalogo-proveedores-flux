@@ -5,6 +5,8 @@ type PdfLibrary = {
   PDFDocument: { create: () => Promise<{
     embedJpg: (bytes: Uint8Array) => Promise<EmbeddedImage>
     embedPng: (bytes: Uint8Array) => Promise<EmbeddedImage>
+    setCreationDate: (date: Date) => void
+    setModificationDate: (date: Date) => void
     addPage: (size: [number, number]) => {
       pushOperators: (...operators: unknown[]) => void
       drawImage: (image: EmbeddedImage, options: { x: number; y: number; width: number; height: number }) => void
@@ -120,7 +122,7 @@ export function receiptImageMatrix(orientation: number, width: number, height: n
   return transforms[orientation] || transforms[1]
 }
 
-export async function prepareReceiptPdf(source: File, signal?: AbortSignal): Promise<{ file: File; converted: boolean }> {
+export async function prepareReceiptPdf(source: File, signal?: AbortSignal, options: { deterministic?: boolean } = {}): Promise<{ file: File; converted: boolean }> {
   const error = receiptSelectionError(source)
   if (error) throw new Error('receipt_selection_invalid')
   signal?.throwIfAborted()
@@ -134,6 +136,12 @@ export async function prepareReceiptPdf(source: File, signal?: AbortSignal): Pro
   let output: Uint8Array
   try {
     const pdf = await library.PDFDocument.create()
+    // Batch deduplication hashes the stored PDF. The same image must produce
+    // the same bytes even when a later session retries its interrupted upload.
+    if (options.deterministic) {
+      pdf.setCreationDate(new Date(0))
+      pdf.setModificationDate(new Date(0))
+    }
     const image = await (info.format === 'png' ? pdf.embedPng(bytes) : pdf.embedJpg(bytes))
     signal?.throwIfAborted()
     if (image.width !== info.width || image.height !== info.height) throw new Error('receipt_image_invalid')
