@@ -1,4 +1,5 @@
-import { loadPdfRuntime, sha256Hex, hasPdfSignature } from './pdfRuntime'
+import { loadPdfRuntime, sha256Hex } from './pdfRuntime'
+import { readBatchReceipt } from './receiptInput'
 import {
   createBatch, finalizeBatchUpload, submitExtractions, privateBucket,
   prepareEvidence, finalizeEvidence, reviewEvidence, getEvidenceAccess,
@@ -19,29 +20,11 @@ export async function uploadBatchWorkflow(params: {
   file: File
   context: BatchContext
   onProgress: UploadProgress
+  signal?: AbortSignal
 }): Promise<UploadResult> {
-  const { companyId, file, context, onProgress } = params
-  onProgress(5, 'Leyendo y verificando PDF…')
-  const runtime = await loadPdfRuntime()
-  const bytes = await file.arrayBuffer()
-  if (!hasPdfSignature(bytes)) throw new Error('invalid_pdf_signature')
-  const sha256 = await sha256Hex(bytes)
-
-  // Extracción local: pdfjs texto por página → parser BBVA. El servidor solo
-  // recibe los campos extraídos, nunca el PDF por página.
-  const pdf = await runtime.pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)), isEvalSupported: false }).promise
-  const maxPages = Number(context.upload_policy?.max_pages || 500)
-  if (!Number.isInteger(pdf.numPages) || pdf.numPages < 1 || pdf.numPages > maxPages) {
-    throw new Error('invalid_pdf_page_count')
-  }
-  const pagesRaw: { pageNumber: number; items: { str?: string }[] }[] = []
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    onProgress(8 + Math.round((pageNumber / pdf.numPages) * 22), `Extrayendo página ${pageNumber} de ${pdf.numPages}…`)
-    const page = await pdf.getPage(pageNumber)
-    const content = await page.getTextContent()
-    pagesRaw.push({ pageNumber, items: content.items })
-  }
-  const parsed = runtime.parser.parseBbvaDocument(pagesRaw as never, { fileName: file.name })
+  const { companyId, onProgress, signal } = params
+  const { file, parsed, sha256, parserVersion } = await readBatchReceipt(params)
+  signal?.throwIfAborted()
 
   // source_account / destination_account son propiedades no enumerables del
   // parser: se leen explícitamente, igual que el vanilla.
@@ -62,7 +45,7 @@ export async function uploadBatchWorkflow(params: {
       confidence: issues.length === 0 ? 0.99 : issues.length <= 2 ? 0.75 : 0.4,
     }
   })
-  onProgress(35, `Extracción local: ${parsed.page_count} página(s).`)
+  onProgress(40, `Guardando ${parsed.page_count} comprobante(s)…`)
 
   const created = await createBatch({ companyId, fileName: file.name, fileSizeBytes: file.size, sha256 })
   const { batch_id: batchId, document_id, storage_bucket, storage_path } = created
@@ -94,9 +77,9 @@ export async function uploadBatchWorkflow(params: {
   }
 
   onProgress(78, resumeExtraction ? 'Retomando extracción interrumpida…' : 'Enviando extracción a revisión interna…')
-  await submitExtractions(batchId, runtime.parser.PARSER_VERSION, pages)
+  await submitExtractions(batchId, parserVersion, pages)
   onProgress(100, 'Batch recibido; extracción enviada a revisión.')
-  return { kind: 'ok', batchId, pageCount: parsed.page_count, parserVersion: runtime.parser.PARSER_VERSION }
+  return { kind: 'ok', batchId, pageCount: parsed.page_count, parserVersion }
 }
 
 function isMissingPaymentBatchUpload(error: unknown): boolean {

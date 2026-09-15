@@ -8,13 +8,18 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "check:pwa": "node scripts/check-pwa.mjs"
+    "check:pwa": "node scripts/check-pwa.mjs",
+    "predev": "node ../scripts/prepare-payroll-ocr.mjs",
+    "prebuild": "node ../scripts/prepare-payroll-ocr.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "@tesseract.js-data/spa": "1.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
