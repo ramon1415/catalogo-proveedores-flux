@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { usesPropertyIncidents } from '../../lib/tenantConfig'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import { TableSkeletonRows, Skeleton } from '../../components/ui/Skeleton'
@@ -66,6 +67,7 @@ export default function DashboardPage() {
   const anualMode = pathname === '/dashboard-anual' || params.get('view') === 'anual'
   const { group } = useAuth()
   const { companyId, companyName } = useCompany()
+  const showIncidents = usesPropertyIncidents(companyId)
   const { showToast } = useToast()
   const canView = canViewDashboard(group)
 
@@ -342,7 +344,10 @@ export default function DashboardPage() {
       ],
     }
   }, [budgetData, budgetError, budgetPeriod, summaryMonths, periodKey, reportYear, companyName, activity.data])
-  const visibleTabs: [SectionTab, string][] = [['cash', 'Efectivo'], ['incidents', 'Incidencias']]
+  const visibleTabs: [SectionTab, string][] = showIncidents ? [['cash', 'Efectivo'], ['incidents', 'Incidencias']] : [['cash', 'Efectivo']]
+  // Si cambia desde la pestaña Incidencias de Operadora a Fersana, muestra
+  // Efectivo desde el primer render; no deja el panel anterior ni un hueco.
+  const selectedTab = showIncidents ? activeTab : 'cash'
   const requestsAgg: RequestsAggregate | null = useMemo(
     () => (reqData ? aggregateRequests(reqData, budgetPeriod) : null),
     [reqData, budgetPeriod],
@@ -360,7 +365,7 @@ export default function DashboardPage() {
     { label: 'Aprobadas o programadas por pagar', count: monthRequests ? monthRequests.funnel.filter(row => ['aprobadas', 'programadas'].includes(row.key)).reduce((sum, row) => sum + row.count, 0) : undefined, to: '/solicitudes' },
     { label: 'Fondos vencidos por comprobar · saldo actual', count: activityAgg?.cash.overdue, to: '/efectivo' },
     { label: 'Fondos con comprobación en revisión · saldo actual', count: activityAgg?.cash.inReview, to: '/efectivo' },
-    { label: 'Incidencias pendientes del mes', count: activityAgg?.incidents.pending, to: '/ingresos' },
+    ...(showIncidents ? [{ label: 'Incidencias pendientes del mes', count: activityAgg?.incidents.pending, to: '/incidencias' }] : []),
   ]
   const alerts = useMemo<AlertItem[]>(() => {
     const out: AlertItem[] = []
@@ -382,10 +387,10 @@ export default function DashboardPage() {
       tone: 'warning', value: whole(requestsAgg.unconvertedCount), label: 'solicitudes sin conversión a MXN', target: 'sec-requests',
     })
     if (activityAgg?.cash.overdue) out.push({ tone: 'warning', value: whole(activityAgg.cash.overdue), label: 'fondos vencidos por comprobar', target: 'sec-activity' })
-    if (activityAgg?.incidents.pending) out.push({ tone: 'warning', value: whole(activityAgg.incidents.pending), label: 'incidencias pendientes', target: 'sec-activity' })
+    if (showIncidents && activityAgg?.incidents.pending) out.push({ tone: 'warning', value: whole(activityAgg.incidents.pending), label: 'incidencias pendientes', target: 'sec-activity' })
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overspentCount, requestsAgg, taxesAgg, activityAgg])
+  }, [overspentCount, requestsAgg, taxesAgg, activityAgg, showIncidents])
 
   const cash = activityAgg?.cash
   const inc = activityAgg?.incidents
@@ -497,7 +502,7 @@ export default function DashboardPage() {
 
       {/* KPI operativos */}
       {!inHistView && (
-        <div className={s.kpiGrid} aria-label="Indicadores operativos">
+        <div className={`${s.kpiGrid} ${showIncidents ? '' : s.kpiGridThree}`} aria-label="Indicadores operativos">
           <div className={`${s.kpiCard} ${s.accent}`}>
             <div className={s.kpiLabel}>Presupuesto usado</div>
             <div className={s.kpiValue}>{budgetAgg ? money(budgetAgg.totals.used) : '—'}</div>
@@ -517,12 +522,12 @@ export default function DashboardPage() {
             <div className={s.kpiSub}>{cash ? `${whole(cash.pending)} fondos pendientes · ${whole(cash.overdue)} de ellos vencidos` : activityEmpty}</div>
             <div className={s.kpiSub}>Saldo actual · incluye meses anteriores</div>
           </div>
-          <div className={`${s.kpiCard} ${s.warning}`}>
+          {showIncidents && <div className={`${s.kpiCard} ${s.warning}`}>
             <div className={s.kpiLabel}>Incidencias pendientes</div>
             <div className={s.kpiValue}>{inc ? whole(inc.pending) : '—'}</div>
             <div className={s.kpiSub}>{inc ? `${whole(inc.open)} abiertas · ${whole(inc.invoiced)} facturadas por cobrar` : activityEmpty}</div>
             <div className={s.kpiSub}>{monthLabel} · Incidencias registradas</div>
-          </div>
+          </div>}
         </div>
       )}
 
@@ -562,7 +567,7 @@ export default function DashboardPage() {
       )}
       {!inHistView && budgetPeriod === BUDGET_ALL_PERIOD && (
         <p className={s.budgetOmitNote}>
-          Resumen anual de presupuesto, solicitudes e impuestos ({reportYear}). Cobros, incidencias y solicitudes por atender corresponden a {monthLabel}. Efectivo muestra el saldo actual.
+          Resumen anual de presupuesto, solicitudes e impuestos ({reportYear}). Cobros{showIncidents ? ', incidencias' : ''} y solicitudes por atender corresponden a {monthLabel}. Efectivo muestra el saldo actual.
         </p>
       )}
 
@@ -880,15 +885,15 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          <div className={s.tabsBlock}>
+          {visibleTabs.length > 1 && <div className={s.tabsBlock}>
             <div className={s.sectionTabs}>
               {visibleTabs.map(([tab, label]) => (
-                <button key={tab} type="button" className={`${s.sectionTab} ${activeTab === tab ? s.active : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>
+                <button key={tab} type="button" className={`${s.sectionTab} ${selectedTab === tab ? s.active : ''}`} onClick={() => setActiveTab(tab)}>{label}</button>
               ))}
             </div>
-          </div>
+          </div>}
 
-          {activeTab === 'cash' && (
+          {selectedTab === 'cash' && (
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
                 <div><h2>Efectivo y comprobaciones</h2><div className={s.panelSub}>{companyName} · Fondos activos al día de hoy, incluidos los de meses anteriores</div></div>
@@ -905,11 +910,11 @@ export default function DashboardPage() {
             </section>
           )}
 
-          {activeTab === 'incidents' && (
+          {showIncidents && selectedTab === 'incidents' && (
             <section className={s.tableCard}>
               <div className={s.panelHeader}>
                 <div><h2>Incidencias del mes</h2><div className={s.panelSub}>{companyName} · {monthLabel} · Por fecha de incidencia</div></div>
-                <Link className={s.secondaryBtn} to="/ingresos">Ver módulo completo</Link>
+                <Link className={s.secondaryBtn} to="/incidencias">Ver módulo completo</Link>
               </div>
               {!inc ? <div className={s.tableMsg}>{activityEmpty}</div> : <div className={s.miniGrid}>
                 {[['Abiertas', whole(inc.open)], ['Facturadas por cobrar', whole(inc.invoiced)], ['Cobradas', whole(inc.paid)], ['Total pendiente', whole(inc.pending)]].map(([l, v]) => (

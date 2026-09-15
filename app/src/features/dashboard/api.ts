@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase'
-import { usesLegacyIncome } from '../../lib/tenantConfig'
+import { usesLegacyIncome, usesPropertyIncidents } from '../../lib/tenantConfig'
 import type {
   DashboardPayload, MonthlyClosure, HistoricalActual, HistMapeo,
   BudgetAvailabilityRow, BudgetCategoryMeta, PaymentRequestRow, DashboardActivity,
@@ -137,9 +137,9 @@ export async function fetchDashboardActivity(companyId: string, year: number): P
     fetchAllRows<DashboardCashFund>(() => supabase.from('cash_funds')
       .select('id,status,assigned_amount,verified_amount,pending_amount,due_date')
       .eq('company_id', companyId).in('status', ['active', 'pending_receipt', 'blocked', 'receipt_review']).order('id')),
-    fetchAllRows<DashboardIncident>(() => supabase.from('incident_charges')
+    usesPropertyIncidents(companyId) ? fetchAllRows<DashboardIncident>(() => supabase.from('incident_charges')
       .select('id,status,incident_date').eq('company_id', companyId)
-      .gte('incident_date', `${year}-01-01`).lt('incident_date', `${year + 1}-01-01`).order('id')),
+      .gte('incident_date', `${year}-01-01`).lt('incident_date', `${year + 1}-01-01`).order('id')) : Promise.resolve([]),
     fetchDashboardIncome(companyId, year, legacyIncome),
   ])
   return { legacyIncome, cash, incidents, income }

@@ -14,3 +14,15 @@ export const LEGACY_INCOME_COMPANY_IDS = [
 export function usesLegacyIncome(companyId: string | null | undefined): boolean {
   return !!companyId && LEGACY_INCOME_COMPANY_IDS.includes(companyId)
 }
+
+// Las incidencias de propiedades aplican a Operadora y su empresa de prueba.
+// Es una capacidad independiente de la variante de ingresos: Fersana sí tiene
+// ingresos, pero no debe mostrar ni consultar incidencias en el dashboard.
+const PROPERTY_INCIDENT_COMPANY_IDS = [
+  '9680353c-9b86-4730-82e1-fce664f048a2', // Operadora Tlacatecpan
+  '55348443-03a1-4e0b-a10b-b08e7977d907', // Test - Demo Operadora
+]
+
+export function usesPropertyIncidents(companyId: string | null | undefined): boolean {
+  return !!companyId && PROPERTY_INCIDENT_COMPANY_IDS.includes(companyId)
+}

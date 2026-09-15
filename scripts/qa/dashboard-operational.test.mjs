@@ -265,8 +265,8 @@ function text(node) {
   return text(node.children ?? node.props?.children)
 }
 
-async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname = '/dashboard' } = {}) {
-  let companyId = 'operadora'
+async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname = '/dashboard', initialCompanyId = 'operadora' } = {}) {
+  let companyId = initialCompanyId
   const calls = []
   const api = {
     fetchDashboardPayload: async pk => { calls.push(['payload', pk]); return { kpis: { cierre: { closure_status: 'closed' } } } },
@@ -290,7 +290,8 @@ async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname =
   const { default: Page } = load(`${dashboardPath}DashboardPage.tsx`, {
     'react-router-dom': { useSearchParams: () => [new URLSearchParams()], useLocation: () => ({ pathname }), Link: span },
     '../../lib/auth': { useAuth: () => ({ group: roles.ROLE_GROUPS.SYSADMIN }) },
-    '../../lib/company': { useCompany: () => ({ companyId, companyName: companyId === 'operadora' ? 'Operadora QA' : 'Fersana QA' }) },
+    '../../lib/company': { useCompany: () => ({ companyId, companyName: companyId === 'operadora' || companyId === tenantConfig.LEGACY_INCOME_COMPANY_IDS[0] ? 'Operadora QA' : 'Fersana QA' }) },
+    '../../lib/tenantConfig': { ...tenantConfig, usesPropertyIncidents: id => tenantConfig.usesPropertyIncidents(id === 'operadora' ? tenantConfig.LEGACY_INCOME_COMPANY_IDS[0] : id) },
     '../../components/ui/Toast': { useToast: () => ({ showToast }) },
     '../../components/ui/Badge': { Badge: span },
     '../../components/ui/Skeleton': { TableSkeletonRows: noop, Skeleton: noop },
@@ -434,10 +435,9 @@ test('activity API selects the income model per company and scopes all tenant da
   assert.equal(fersana.income[0].member_name, 'Cliente Fersana')
   assert.equal(fersana.income[0].paid_amount, 50)
   assert.equal(fersana.cash.length, 1)
-  assert.equal(fersana.incidents.length, 1)
-  assert.equal(fersana.incidents[0].id, 'fer')
+  assert.deepEqual(fersana.incidents, [])
   assert.ok(calls.slice(before).every(call => call.filters.some(([filter, key, value]) => filter === 'eq' && key === 'company_id' && value === fer)))
-  assert.ok(calls.slice(before).every(call => call.table !== 'maintenance_fee_charges'))
+  assert.ok(calls.slice(before).every(call => !['maintenance_fee_charges', 'incident_charges'].includes(call.table)), 'Fersana never queries Operadora fees or property incidents')
   assert.match(calls.find(call => call.table === 'maintenance_fee_charges').fields, /billing_periods!inner/)
   await assert.rejects(() => api.fetchDashboardActivity('', 2026), /Selecciona una empresa/)
 })
@@ -526,6 +526,46 @@ test('company change removes all old cash and payer data even when activity fail
       assert.match(text(card), /—No disponible/)
       assert.doesNotMatch(text(card), /\$0/)
     }
+  } finally { p.unmount() }
+})
+
+test('Fersana omits every incident surface and falls back to cash when switching from Operadora incidents', async () => {
+  const op = '9680353c-9b86-4730-82e1-fce664f048a2'
+  const fer = '68b61801-74c0-44ea-a33b-f20e4bf53aa7'
+  const waiting = deferred()
+  const activity = { legacyIncome: false, cash: [], income: [], incidents: [{ id: 'incident', status: 'open', incident_date: '2026-09-02' }] }
+  const p = await mountPage({
+    initialCompanyId: op,
+    fetchActivity: async id => id === fer ? waiting.promise : { ...activity, legacyIncome: true },
+    fetchBudget: async id => ({ rows: [budgetRow(id === fer ? { budgeted: 641845.50, committed: 596, executed: 0, available: 641249.50 } : {})], categories }),
+  })
+  const cards = () => p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }).findAll(node => node.type === 'div' && node.props.className?.split(' ').includes('kpiCard'))
+  const assertNoIncidents = () => {
+    assert.doesNotMatch(text(p.renderer.toJSON()), /incidencias/i)
+    assert.equal(cards().length, 3)
+    assert.match(text(p.renderer.toJSON()), /Efectivo y comprobaciones/)
+  }
+  try {
+    assert.equal(cards().length, 4)
+    assert.match(text(p.renderer.toJSON()), /Incidencias pendientes/)
+    act(() => p.renderer.root.findAllByType('button').find(button => text(button) === 'Incidencias').props.onClick())
+    assert.match(text(p.renderer.toJSON()), /Incidencias del mes/)
+    await p.switchCompany(fer)
+    assertNoIncidents()
+    // Even unexpected incident rows cannot surface in a company where they do not apply.
+    await act(async () => waiting.resolve(activity))
+    assertNoIncidents()
+    assert.match(text(cards()[0]), /Presupuesto usado\$596/)
+    const chart = p.renderer.root.findByType('figure').props['data-chart']
+    assert.equal(chart.presentation, 'operational')
+    assert.deepEqual(chart.series.map(row => row.kind), ['bar', 'bar', 'line', 'line'])
+    assert.deepEqual(chart.series.slice(0, 2).map(row => row.data.at(-1)), [641845.50, 596])
+    await act(async () => p.renderer.root.findByProps({ 'aria-label': 'Periodo del resumen' }).props.onChange({ target: { value: 'all' } }))
+    assertNoIncidents()
+    await p.switchCompany(op)
+    assert.equal(cards().length, 4)
+    assert.match(text(p.renderer.toJSON()), /Incidencias del mes/)
+    assert.match(p.section('sec-activity'), /Incidencias pendientes del mes1/)
   } finally { p.unmount() }
 })
 

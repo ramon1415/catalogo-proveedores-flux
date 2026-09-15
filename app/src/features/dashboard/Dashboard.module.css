@@ -51,6 +51,7 @@
 
 /* KPI cards */
 .kpiGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.kpiGridThree { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .kpiCard { background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px; padding: 18px 20px; position: relative; overflow: hidden; }
 .kpiCard::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
 .kpiCard.accent::before { background: linear-gradient(90deg, var(--accent), transparent); }
