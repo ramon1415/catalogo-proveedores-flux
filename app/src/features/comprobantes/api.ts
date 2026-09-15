@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import type {
   BatchContext, BatchListItem, BatchDetail, LinkPreview, ReceiptCandidate,
-  CreateBatchResult, LinkEvidence,
+  CreateBatchResult, LinkEvidence, ReceiptCandidatePreview,
 } from './types'
 
 // ── Idempotencia (espejo de rpcIdempotent del vanilla) ─────────────────────
@@ -99,6 +99,17 @@ export async function getEvidenceAccess(evidenceId: string): Promise<{ storage_b
 }
 
 // ── Matching / vinculación ─────────────────────────────────────────────────
+export async function previewReceiptCandidates(extractionId: string, expectedUpdatedAt: string | null): Promise<ReceiptCandidatePreview> {
+  const { data, error } = await supabase.rpc('preview_payment_receipt_candidates', {
+    p_extraction_id: extractionId,
+    p_expected_updated_at: expectedUpdatedAt,
+    p_limit: 20,
+  })
+  if (error) throw error
+  if (!data || !Array.isArray(data.items)) throw new Error('receipt_candidates_preview_unavailable')
+  return data as ReceiptCandidatePreview
+}
+
 export async function findReceiptCandidates(operationId: string): Promise<ReceiptCandidate[]> {
   const { data, error } = await supabase.rpc('find_payment_receipt_candidates', {
     p_operation_id: operationId,

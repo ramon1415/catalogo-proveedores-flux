@@ -31,6 +31,7 @@ export type BatchOperation = {
   extraction_id?: string | null
   extraction_status?: string | null
   extraction_updated_at?: string | null
+  updated_at?: string | null
   rejection_reason?: string | null
   bank_operation_id?: string | null
   operation_status?: string | null
@@ -93,6 +94,16 @@ export type ReceiptCandidate = {
   amount_minor: number | string | null
   currency: string | null
   account_match: boolean
+  name_match?: boolean
+}
+
+export type ReceiptCandidatePreview = {
+  items: ReceiptCandidate[]
+  outcome: 'exact' | 'multiple' | 'none' | 'blocked' | 'linked'
+  block_reason?: string | null
+  operation_id?: string | null
+  extraction_updated_at?: string | null
+  link_preview?: LinkPreview | null
 }
 
 export type CreateBatchResult = {
@@ -113,4 +124,5 @@ export type IndividualReceipt = {
   blobUrl: string
   pageCount: number
   sha256: string
+  previewDataUrl: string
 }
