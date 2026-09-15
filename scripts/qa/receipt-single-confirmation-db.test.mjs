@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { before, beforeEach, after, test } from 'node:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 
 const id = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
@@ -28,13 +28,18 @@ before(async () => {
     end $$;
     create table payment_ingestion_batches(id uuid primary key, company_id uuid, status text);
     create table payment_document_extractions(id uuid primary key, batch_id uuid, company_id uuid, updated_at timestamptz, status text, bank_name text, bank_status text, application_date date, amount_minor bigint, currency text, bank_unique_folio text, source_account_hash text, destination_account_hash text, beneficiary_name text, payment_reason text);
-    create table bank_payment_operations(id uuid primary key, extraction_id uuid, company_id uuid, status text, bank_unique_folio text, amount_minor bigint, currency text, beneficiary_name text, payment_reason text, destination_account_hash text);
+    create table bank_payment_operations(id uuid primary key, extraction_id uuid, company_id uuid, status text, bank_unique_folio text, amount_minor bigint, currency text, beneficiary_name text, payment_reason text, destination_account_hash text, bank_name text, application_date date, source_account_hash text, source_company_bank_account_id uuid);
     create table payment_request_receipt_links(id uuid, operation_id uuid, payment_request_id uuid);
     create table payment_operation_evidence(operation_id uuid,status text,page_count integer,single_operation_attested boolean);
     create table company_bank_accounts(id uuid, company_id uuid, active boolean, bank_name text,currency text,account_number text,clabe text);
     create table payable_snapshots(id uuid primary key,payment_request_id uuid, company_id uuid, version integer, amount_minor bigint,currency text,eligible boolean);
-    create table payment_requests(id uuid primary key,company_id uuid,status text,request_number text,concept text,proveedor_id uuid);
+    create table payment_requests(id uuid primary key,company_id uuid,status text,request_number text,concept text,proveedor_id uuid,request_type text default 'provider_payment',beneficiary_profile_id uuid);
     create table proveedores(id uuid primary key,alias text,nombre_completo text,clabe text,cuenta_bancaria text);
+    create table profiles(id uuid primary key, full_name text, active boolean);
+    create table employee_bank_accounts(profile_id uuid, company_id uuid, beneficiary_name text, clabe text, cuenta text);
+    create function public.has_active_company_membership(p uuid,c uuid) returns boolean language sql stable as $$ select exists(select 1 from memberships where actor=p and company_id=c) $$;
+    create function public.find_payment_receipt_candidates_pre_reimb(uuid,integer) returns jsonb language sql stable as $$ select '{}'::jsonb $$;
+    create function public.payment_reconciliation_reactivate_cancelled_operation(uuid,timestamptz,text) returns jsonb language plpgsql as $$ begin raise exception 'preview_must_not_call_write'; end $$;
     create table payment_receipts(payment_request_id uuid);
     create function public.payment_reconciliation_normalize_bank_name(t text) returns text language sql immutable as $$ select upper(t) $$;
     create function public.payment_reconciliation_account_hash(t text) returns text language sql immutable as $$ select md5(t) $$;
@@ -46,13 +51,20 @@ before(async () => {
     alter table payment_requests enable row level security;
     alter table payable_snapshots enable row level security;
   `)
-  const baseline = readFileSync(new URL('../../supabase/migrations/20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql', import.meta.url), 'utf8')
-  await db.exec(baseline.match(/CREATE OR REPLACE FUNCTION "public"\."find_payment_receipt_candidates"[\s\S]*?\n\$\$;/)[0])
-  await db.exec(readFileSync(new URL('../../supabase/migrations/20260915030837_receipt_candidates_before_confirmation.sql', import.meta.url), 'utf8'))
+  const migrations = new URL('../../supabase/migrations/', import.meta.url)
+  const devBaseline = new URL('20260811035345_flux_dev_authoritative_brownfield_baseline_v2.sql', migrations)
+  const baseline = readFileSync(existsSync(devBaseline) ? devBaseline : new URL('20260810185817_paid_layout_receipt_match.sql', migrations), 'utf8')
+  const originalFind = baseline.match(/CREATE OR REPLACE FUNCTION "public"\."find_payment_receipt_candidates"[\s\S]*?\n\$\$;/)
+    || baseline.match(/create or replace function public\.find_payment_receipt_candidates\([\s\S]*?\$function\$;/i)
+  assert.ok(originalFind, 'the previously certified provider candidate function must be present')
+  await db.exec(originalFind[0])
+  const previews = readdirSync(migrations).filter(name => name.endsWith('_receipt_preview_production_compatibility.sql'))
+  assert.equal(previews.length, 1)
+  await db.exec(readFileSync(new URL(previews[0], migrations), 'utf8'))
 })
 after(async () => { await db.close() })
 beforeEach(async () => {
-  await db.exec('truncate memberships,payment_ingestion_batches,payment_document_extractions,bank_payment_operations,payment_request_receipt_links,payment_operation_evidence,company_bank_accounts,payable_snapshots,payment_requests,proveedores,payment_receipts')
+  await db.exec('truncate memberships,payment_ingestion_batches,payment_document_extractions,bank_payment_operations,payment_request_receipt_links,payment_operation_evidence,company_bank_accounts,payable_snapshots,payment_requests,proveedores,payment_receipts,profiles,employee_bank_accounts')
   await db.query('insert into memberships values($1,$2,true),($3,$2,false)', [finance, company, operator])
   await db.query("insert into payment_ingestion_batches values($1,$2,'review_required')", [id(5), company])
   await db.query("insert into company_bank_accounts values($1,$2,true,'BBVA','MXN','000000000199158804',null)", [id(6), company])
@@ -140,4 +152,38 @@ test('existing receipt links are excluded and accepted previews retain the old c
   const linked = await asActor(finance, () => call())
   assert.equal(linked.outcome, 'linked')
   assert.deepEqual(linked.items, [])
+})
+
+test('employee reimbursement uses its beneficiary, membership and bank account instead of a linked provider', async () => {
+  await db.query("insert into profiles values($1,'PERSONA BENEFICIARIA',true)", [id(80)])
+  await db.query('insert into memberships values($1,$2,false)', [id(80), company])
+  await db.query("insert into employee_bank_accounts values($1,$2,'PERSONA BENEFICIARIA',null,'888888880018')", [id(80), company])
+  await db.query("update payment_requests set request_type='reimbursement',beneficiary_profile_id=$1", [id(80)])
+  assert.equal((await asActor(finance, () => call())).outcome, 'none', 'matching the historical provider must not match an employee reimbursement')
+  await db.exec("update payment_document_extractions set beneficiary_name='PERSONA BENEFICIARIA',destination_account_hash=md5('888888880018')")
+  const result = await asActor(finance, () => call())
+  assert.equal(result.outcome, 'exact')
+  assert.equal(result.items[0].payee_kind, 'employee_beneficiary')
+  assert.equal(result.items[0].proveedor_name, 'PERSONA BENEFICIARIA')
+  for (const sql of ["update profiles set active=false", 'delete from employee_bank_accounts', `delete from memberships where actor='${id(80)}'`, 'update payable_snapshots set eligible=false', 'drop function public.find_payment_receipt_candidates_pre_reimb(uuid,integer)']) {
+    await db.exec('begin')
+    try { await db.exec(sql); assert.equal((await asActor(finance, () => call())).outcome, 'none') }
+    finally { await db.exec('rollback') }
+  }
+})
+
+test('an explicitly reopened cancelled receipt is previewed read-only and requires acceptance again', async () => {
+  await db.query("insert into bank_payment_operations select $1,id,company_id,'cancelled',bank_unique_folio,amount_minor,currency,beneficiary_name,payment_reason,destination_account_hash,bank_name,application_date,source_account_hash,$2 from payment_document_extractions", [id(40),id(6)])
+  const result = await asActor(finance, async () => {
+    await db.exec('begin read only')
+    try { return await call() } finally { await db.exec('rollback') }
+  })
+  assert.equal(result.outcome, 'exact')
+  assert.equal(result.needs_acceptance, true)
+  assert.equal((await db.query('select status from bank_payment_operations')).rows[0].status, 'cancelled')
+  for (const sql of ['update bank_payment_operations set amount_minor=1', 'update company_bank_accounts set active=false', "update payment_document_extractions set status='accepted'", 'drop function public.payment_reconciliation_reactivate_cancelled_operation(uuid,timestamptz,text)']) {
+    await db.exec('begin')
+    try { await db.exec(sql); assert.equal((await asActor(finance, () => call())).outcome, 'blocked') }
+    finally { await db.exec('rollback') }
+  }
 })

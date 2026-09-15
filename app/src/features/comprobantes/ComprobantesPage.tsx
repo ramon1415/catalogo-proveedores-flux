@@ -50,6 +50,7 @@ function ComprobantesCompanyPage() {
   const [bulkOpen, setBulkOpen] = useState(false)
   const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
   const detailEpoch = useRef(0)
+  const listEpoch = useRef(0)
 
   const capabilities = useMemo(() => {
     const caps = context?.capabilities && Object.keys(context.capabilities).length ? context.capabilities : context
@@ -57,8 +58,12 @@ function ComprobantesCompanyPage() {
   }, [context])
 
   const loadBatchesList = useCallback(async () => {
+    if (!companyId) { setBatches([]); return [] }
+    const requestEpoch = ++listEpoch.current
     try {
-      const items = await listBatches(companyId)
+      const received = await listBatches(companyId)
+      if (requestEpoch !== listEpoch.current) return []
+      const items = received.filter(item => item.company_id === companyId)
       setBatches(items)
       return items
     } catch (e) {
@@ -72,6 +77,9 @@ function ComprobantesCompanyPage() {
     try {
       const d = await getBatchDetail(batchId)
       if (requestEpoch !== detailEpoch.current) return
+      if (String((d.batch || d.ingestion_batch)?.company_id || '') !== companyId) {
+        throw new Error('payment_batch_company_mismatch')
+      }
       setDetail(d)
       // Conciliación por operación: N previews en paralelo (contrato vanilla).
       const ops = batchOperations(d).filter((op) => op.bank_operation_id)
@@ -87,9 +95,14 @@ function ComprobantesCompanyPage() {
     } catch (e) {
       if (requestEpoch === detailEpoch.current) showToast('No se pudo abrir el batch', friendlyBatchError(e), 'error')
     }
-  }, [showToast])
+  }, [companyId, showToast])
 
   useEffect(() => {
+    if (!companyId) {
+      setBlocked({ title: 'Selecciona una empresa', message: 'Elige Operadora o Fersana para consultar sus comprobantes.' })
+      setLoading(false)
+      return
+    }
     ;(async () => {
       setLoading(true)
       try {
@@ -106,7 +119,8 @@ function ComprobantesCompanyPage() {
         setLoading(false)
       }
     })()
-  }, [loadBatchesList])
+    return () => { listEpoch.current += 1 }
+  }, [companyId, loadBatchesList])
 
   useEffect(() => {
     setDetail(null)
