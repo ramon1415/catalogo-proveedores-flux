@@ -604,7 +604,7 @@ test('foreign-currency income is marked partial and never displayed as an MXN am
   const p = await mountPage({ fetchActivity: async () => ({ legacyIncome: false, cash: [], incidents: [], income: [incomeRow(), incomeRow({ currency: 'USD', paid_amount: 9000 })] }) })
   try {
     const top = text(p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }))
-    assert.match(top, /Cobrado en el mes\$20 \(parcial\)/)
+    assert.match(top, /Ingreso cobrado en el mes\$20 \(parcial\)/)
     assert.doesNotMatch(top, /9,000|9,020/)
     assert.match(p.section('sec-activity'), /1 cobros en otra moneda o sin moneda/)
     assert.match(p.section('sec-activity'), /Cobros registrados/)
@@ -655,8 +655,8 @@ function mountChart(width = 1440, months = 9) {
   const series = [
     { kind: 'bar', label: 'Presupuesto', data: labels.map(() => 861700.58), color: '#72998a' },
     { kind: 'bar', label: 'Usado', data: labels.map(() => 36249.97), color: '#3c725d' },
-    { kind: 'line', label: 'Esperado', data: labels.map(() => 2858856), color: '#168a86', axis: 'y2', dashed: true },
-    { kind: 'line', label: 'Cobrado', data: labels.map(() => 0), color: '#007c50', axis: 'y2' },
+    { kind: 'line', label: 'Ingreso esperado', data: labels.map(() => 2858856), color: '#168a86', axis: 'y2', dashed: true },
+    { kind: 'line', label: 'Ingreso cobrado', data: labels.map(() => 0), color: '#007c50', axis: 'y2' },
   ]
   let renderer
   act(() => { renderer = create(React.createElement(ComboChart, { labels, series, leftTitle: 'Presupuesto y uso', rightTitle: 'Ingresos', presentation: 'operational' }), {
@@ -686,8 +686,8 @@ test('chart tooltip remains fully inside both axes at the edges and after resizi
     assert.ok(top + p.tooltipBox.clientHeight <= p.chartBox.clientHeight, 'tooltip must not overflow vertically')
     assert.match(text(p.tooltip()), /Presupuesto: \$861,700\.58/)
     assert.match(text(p.tooltip()), /Usado: \$36,249\.97/)
-    assert.match(text(p.tooltip()), /Esperado: \$2,858,856\.00/)
-    assert.match(text(p.tooltip()), /Cobrado: \$0\.00/)
+    assert.match(text(p.tooltip()), /Ingreso esperado: \$2,858,856\.00/)
+    assert.match(text(p.tooltip()), /Ingreso cobrado: \$0\.00/)
   }
   try {
     p.move(1360, 287); fits()

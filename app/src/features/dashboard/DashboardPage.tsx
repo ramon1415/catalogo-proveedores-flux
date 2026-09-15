@@ -66,8 +66,8 @@ type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: numb
 const OPERATIVE_LEGEND: LegendItem[] = [
   { color: 'var(--op-budget-stroke)', label: 'Presupuesto', kind: 'bar', light: true },
   { color: 'var(--op-used)', label: 'Usado', kind: 'bar' },
-  { color: 'var(--op-expected)', label: 'Esperado', kind: 'line', dashed: true },
-  { color: 'var(--op-collected)', label: 'Cobrado', kind: 'line' },
+  { color: 'var(--op-expected)', label: 'Ingreso esperado', kind: 'line', dashed: true },
+  { color: 'var(--op-collected)', label: 'Ingreso cobrado', kind: 'line' },
 ]
 
 const netColor = (v: number) => (v >= 0 ? 'var(--emerald)' : 'var(--ruby)')
@@ -351,8 +351,8 @@ export default function DashboardPage() {
       series: [
         { kind: 'bar', label: 'Presupuesto', data: totals.map(row => row.budgeted), color: 'var(--op-budget-stroke)', fill: 'var(--op-budget-fill)' },
         { kind: 'bar', label: 'Usado', data: totals.map(row => row.used), color: 'var(--op-used)', fill: 'var(--op-used-fill)' },
-        { kind: 'line', label: 'Esperado', data: expected, color: 'var(--op-expected)', dashed: true, axis: 'y2' },
-        { kind: 'line', label: 'Cobrado', data: collected, color: 'var(--op-collected)', axis: 'y2' },
+        { kind: 'line', label: 'Ingreso esperado', data: expected, color: 'var(--op-expected)', dashed: true, axis: 'y2' },
+        { kind: 'line', label: 'Ingreso cobrado', data: collected, color: 'var(--op-collected)', axis: 'y2' },
       ],
     }
   }, [budgetData, budgetError, budgetPeriod, summaryMonths, periodKey, reportYear, companyName, activity.data])
@@ -432,16 +432,16 @@ export default function DashboardPage() {
         </div>
         <input className={s.memberSearch} type="search" aria-label="Buscar cobros" placeholder={anualMode ? 'Buscar...' : legacyIncome ? 'Buscar socio…' : 'Buscar pagador…'} value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} />
       </div>
-      {!anualMode && <p className={s.budgetOmitNote}>Esperado: cobros registrados para el mes. Cobrado: pagos registrados. Pendiente: saldo por cobrar.</p>}
+      {!anualMode && <p className={s.budgetOmitNote}>Ingreso esperado: cobros registrados para el mes. Ingreso cobrado: pagos registrados. Pendiente: saldo por cobrar.</p>}
       {!anualMode && activityAgg && <div className={s.incomeSummary}>
-        <span>Esperado <strong>{incomeLabel(activityAgg.income.expected)}</strong></span>
-        <span>Cobrado <strong>{incomeLabel(activityAgg.income.paid)}</strong></span>
+        <span>Ingreso esperado <strong>{incomeLabel(activityAgg.income.expected)}</strong></span>
+        <span>Ingreso cobrado <strong>{incomeLabel(activityAgg.income.paid)}</strong></span>
         <span>Pendiente <strong>{incomeLabel(activityAgg.income.pending)}</strong></span>
       </div>}
       {!anualMode && !!activityAgg?.incomeExcluded && <p className={s.budgetNote}>{activityAgg.incomeExcluded} cobros en otra moneda o sin moneda se excluyen de los importes en MXN. Consúltalos en Ingresos.</p>}
       <div className={s.memberTableWrap}>
         <table className={s.table}>
-          <thead><tr><th>{legacyIncome ? 'Socio' : 'Pagador'}</th><th>Esperado</th><th>Cobrado</th><th>Pendiente</th><th>Estatus</th></tr></thead>
+          <thead><tr><th>{legacyIncome ? 'Socio' : 'Pagador'}</th><th>{anualMode ? 'Esperado' : 'Ingreso esperado'}</th><th>{anualMode ? 'Cobrado' : 'Ingreso cobrado'}</th><th>Pendiente</th><th>Estatus</th></tr></thead>
           <tbody>
             {!incomeReady && (anualMode || activity.loading) && <TableSkeletonRows cols={5} rows={4} />}
             {!anualMode && activity.error && <tr><td colSpan={5} className={s.tableMsg}>No se pudieron cargar los cobros. Pulsa Actualizar para reintentar.</td></tr>}
@@ -538,9 +538,9 @@ export default function DashboardPage() {
             <div className={s.kpiSub}>{periodLabel} · Pagado + pendiente presupuestal</div>
           </div>
           <div className={`${s.kpiCard} ${s.success}`}>
-            <div className={s.kpiLabel}>Cobrado en el mes</div>
+            <div className={s.kpiLabel}>Ingreso cobrado en el mes</div>
             <div className={s.kpiValue}>{activityAgg ? incomeLabel(activityAgg.income.paid) : '—'}</div>
-            <div className={s.kpiSub}>{activityAgg ? `de ${incomeLabel(activityAgg.income.expected)} esperado` : activityEmpty}</div>
+            <div className={s.kpiSub}>{activityAgg ? `Ingreso esperado: ${incomeLabel(activityAgg.income.expected)}` : activityEmpty}</div>
             <div className={s.kpiSub}>{monthLabel} · {legacyIncome ? 'Cuotas de socios' : 'Ingresos registrados'}</div>
           </div>
           <div className={`${s.kpiCard} ${s.violet}`}>
@@ -634,7 +634,7 @@ export default function DashboardPage() {
         </div>
         {!inHistView && <div className={s.chartGuide}>
           <span><strong>Barras · eje izquierdo</strong> Presupuesto y uso (pagado + pendiente).</span>
-          <span><strong>Líneas · eje derecho</strong> {activity.data?.legacyIncome ? 'Cuotas por mes de corte; cobrado registrado para esas cuotas.' : 'Cobros esperados y registrados del periodo.'} MXN; cada eje tiene su propia escala.</span>
+          <span><strong>Líneas · eje derecho</strong> {activity.data?.legacyIncome ? 'Ingreso esperado y cobrado de cuotas por mes de corte.' : 'Ingreso esperado y cobrado del periodo.'} MXN; cada eje tiene su propia escala.</span>
           {opChart.incomeIncomplete && <span role="status">{activity.loading ? 'Cargando ingresos…' : activity.error ? 'Ingresos no disponibles. Pulsa Actualizar para reintentar.' : 'Los meses con ingresos sin conversión completa a MXN se muestran sin punto.'}</span>}
         </div>}
       </div>
