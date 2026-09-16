@@ -488,6 +488,19 @@ function renderBatchList() {
   `).join("")
 }
 
+async function withSinPartidaDescriptions(rows, requestId) {
+  const ids = [...new Set(rows.filter((row) => /^sin[_ ]partida\b/i.test(String(row.budget_category || '').trim())).map(requestId))].filter(Boolean)
+  if (!ids.length) return rows
+  const { data, error } = await supabaseClient.from('payment_requests')
+    .select('id,sin_partida_description').in('id', ids)
+  if (error) throw error
+  const descriptions = new Map((data || []).map((row) => [row.id, row.sin_partida_description]))
+  return rows.map((row) => {
+    const description = descriptions.get(requestId(row))
+    return description ? { ...row, budget_category: `Sin partida (${description})` } : row
+  })
+}
+
 async function openBatch(batchId) {
   const listedBatch = state.batches.find((batch) => batch.id === batchId)
   if (!listedBatch || !isWithinCompanyScope(listedBatch)) {
@@ -506,13 +519,14 @@ async function openBatch(batchId) {
     if (error) throw error
     state.detail = data || { batch: null, items: [] }
     if (!isWithinCompanyScope(state.detail.batch)) throw new Error("batch_company_scope_mismatch")
+    state.detail.items = await withSinPartidaDescriptions(asArray(state.detail.items), (item) => item.payment_request_id)
     state.eligible = []
     state.ineligible = []
     if (state.isFinance && state.detail.batch?.status === "draft") {
       const eligible = await supabaseClient.rpc("list_batch_eligible_requests", { p_company_id: state.detail.batch.company_id })
       if (eligible.error) throw eligible.error
       const included = new Set(asArray(state.detail.items).map((item) => item.payment_request_id))
-      const candidates = asArray(eligible.data).filter((item) => !included.has(item.id))
+      const candidates = await withSinPartidaDescriptions(asArray(eligible.data).filter((item) => !included.has(item.id)), (item) => item.id)
       state.eligible = candidates.filter((item) => item.eligible !== false)
       state.ineligible = candidates.filter((item) => item.eligible === false)
       const eligibleIds = new Set(state.eligible.map((item) => item.id))

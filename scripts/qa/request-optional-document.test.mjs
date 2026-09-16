@@ -17,6 +17,7 @@ function load(path, imports = {}, globals = {}) {
   const module = { exports: {} }
   const dependency = (name) => {
     if (Object.hasOwn(imports, name)) return imports[name]
+    if (name === '../../lib/requestClassification') return load('app/src/lib/requestClassification.ts')
     if (name.startsWith('react')) return require(name)
     if (name.endsWith('.css')) return new Proxy({}, { get: (_, key) => String(key) })
     if (name === './ConvenioReceiptUpload') return { ConvenioReceiptUpload: () => null }

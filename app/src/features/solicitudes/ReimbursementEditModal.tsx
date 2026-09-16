@@ -24,6 +24,7 @@ import {
 } from './logic'
 import { ReimbursementSection } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
+import { isSinPartida } from '../../lib/requestClassification'
 import type {
   BudgetAvailabilityRow,
   BudgetCategory,
@@ -84,6 +85,9 @@ export function ReimbursementEditModal({
   const categoryById = (id: string) => budgetCategories.find((category) => category.id === id) || null
   const company = companies.find((candidate) => candidate.id === companyId) || null
   const isUsd = currency === 'USD'
+  const sinPartidaId = budgetCategories.find(isSinPartida)?.id ?? ''
+  const originalSinPartida = isSinPartida(categoryById(request.budget_category_id || ''))
+  const isSinPartidaRequest = Boolean(sinPartidaId && items.some((item) => item.budgetCategoryId === sinPartidaId))
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -195,7 +199,7 @@ export function ReimbursementEditModal({
       showToast('Revisa el reembolso', 'Captura la descripción general.', 'warning')
       return
     }
-    const itemsError = validateReimbursementItems(items)
+    const itemsError = validateReimbursementItems(items, sinPartidaId)
     if (itemsError) {
       showToast('Revisa el desglose', itemsError, 'warning')
       return
@@ -232,7 +236,7 @@ export function ReimbursementEditModal({
         description: description.trim(),
         notes: notes.trim() || null,
         payment_method: paymentMethod,
-        is_extraordinary_adjustment: isExtraordinary,
+        is_extraordinary_adjustment: !isSinPartidaRequest && isExtraordinary,
         items: persistedItems,
       })
       showToast('Reembolso actualizado', 'Los cambios y el desglose quedaron guardados.', 'success')
@@ -298,10 +302,10 @@ export function ReimbursementEditModal({
                       <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} required />
                     </label>
                   )}
-                  <label className={s.checkboxCard}>
+                  {!isSinPartidaRequest && <label className={s.checkboxCard}>
                     <input type="checkbox" checked={isExtraordinary} onChange={(event) => setIsExtraordinary(event.target.checked)} />
                     Ajuste extraordinario
-                  </label>
+                  </label>}
                   <label className={s.fullRow}>Descripción *
                     <textarea className={s.formControl} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} required />
                   </label>
@@ -309,6 +313,9 @@ export function ReimbursementEditModal({
                     <textarea className={s.formControl} rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
                   </label>
                   <div className={`${s.fieldHint} ${s.fullRow}`}>{categoryHint}</div>
+                  {isSinPartidaRequest && <div className={`${s.fieldHint} ${s.fullRow}`}>
+                    César revisará este reembolso. Permanecerá en Sin partida y mostrará la descripción cuando lo apruebe.
+                  </div>}
                 </div>
               </section>
 
@@ -323,7 +330,7 @@ export function ReimbursementEditModal({
                 onBankLoaded={setBankAccount}
                 items={items}
                 onItemsChange={setItems}
-                categoryRows={budgetRows}
+                categoryRows={originalSinPartida ? budgetRows.filter((row) => row.budget_category_id === sinPartidaId) : budgetRows}
                 categoryLabel={categoryLabel}
                 categoryDisabled={categoryDisabled}
                 currency={currency}

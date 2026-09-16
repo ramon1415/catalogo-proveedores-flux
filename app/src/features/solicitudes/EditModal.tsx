@@ -12,6 +12,7 @@ import {
   validateReceiptFile, friendlyError,
 } from './logic'
 import { numberValue } from '../../lib/format'
+import { isSinPartida } from '../../lib/requestClassification'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow, EditPayload, Profile,
 } from './types'
@@ -77,6 +78,7 @@ export function EditModal({
   }, [])
 
   async function reloadCategories(nextCompany: string, nextCC: string, nextMonth: string, keepCategory = '') {
+    if (isSinPartida(categoryById(request.budget_category_id || ''))) keepCategory = request.budget_category_id || ''
     if (!keepCategory) setBudgetCategoryId('')
     const month = monthInputToDate(nextMonth)
     if (!nextCompany || !nextCC || !month) {
@@ -141,7 +143,7 @@ export function EditModal({
       amount_requested: numberValue(amount),
       currency,
       exchange_rate: numberValue(exchangeRate) || 1,
-      is_extraordinary_adjustment: isExtraordinary,
+      is_extraordinary_adjustment: !isSinPartida(categoryById(budgetCategoryId)) && isExtraordinary,
       description: description.trim(),
       notes: notes.trim() || null,
       updated_at: new Date().toISOString(),
@@ -190,13 +192,14 @@ export function EditModal({
                 <label className={s.fullRow}>Partida presupuestal *
                   <input className={s.formControl} type="text" placeholder="Filtrar partida por nombre…" style={{ marginBottom: 6 }}
                     value={categorySearch} disabled={categoryDisabled} onChange={(e) => setCategorySearch(e.target.value)} />
-                  <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled} onChange={(e) => setBudgetCategoryId(e.target.value)} required>
+                  <select className={s.formControl} value={budgetCategoryId} disabled={categoryDisabled || isSinPartida(categoryById(request.budget_category_id || ''))} onChange={(e) => setBudgetCategoryId(e.target.value)} required>
                     <option value="">{categoryDisabled ? 'Selecciona empresa, centro de costo y mes' : 'Seleccionar partida presupuestal'}</option>
                     {filteredRows.map((r) => (
                       <option key={r.budget_category_id} value={r.budget_category_id!}>{budgetCategoryAvailabilityLabel(categoryById(r.budget_category_id!), r)}</option>
                     ))}
                   </select>
                   <div className={s.fieldHint}>{categoryHelp}</div>
+                  {isSinPartida(categoryById(budgetCategoryId)) && <div className={s.fieldHint}>Permanecerá en Sin partida. Los cambios al gasto requieren una nueva aprobación de César.</div>}
                 </label>
                 <label>Mes presupuestal *
                   <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => { setBudgetMonth(e.target.value); reloadCategories(companyId, costCenterId, e.target.value) }} required />
@@ -227,7 +230,7 @@ export function EditModal({
                 <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
                   <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
                 </label>
-                <label className={s.checkboxCard}>
+                <label className={`${s.checkboxCard} ${isSinPartida(categoryById(budgetCategoryId)) ? s.hidden : ''}`}>
                   <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} /> Ajuste extraordinario
                 </label>
               </div>
