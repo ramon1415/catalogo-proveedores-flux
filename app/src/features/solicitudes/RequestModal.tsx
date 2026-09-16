@@ -28,6 +28,7 @@ import { saveCfdiData, findRequestByInvoiceUuid } from './api'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
 import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { RequesterIdentity } from './RequesterIdentity'
 import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
@@ -842,9 +843,18 @@ const availablePredictionCandidates = useMemo(
       <form className={s.modal} onSubmit={onSubmit}>
         <div className={s.modalHead}>
           <div>
-            <h2>{success ? 'Solicitud creada correctamente' : 'Nueva solicitud de pago'}</h2>
-            <p>{success ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.' : 'Completa los datos operativos y financieros para validar presupuesto al guardar.'}</p>
-            <CompanyCaptureContext name={company ? companyName(company) : null} />
+            <h2>{success
+              ? (isReembolso ? 'Reembolso creado correctamente' : 'Solicitud creada correctamente')
+              : (isReembolso ? 'Nueva solicitud de reembolso' : 'Nueva solicitud de pago')}</h2>
+            <p>{success
+              ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.'
+              : (isReembolso
+                  ? 'Captura cada gasto; el monto total se calculara automaticamente.'
+                  : 'Completa los datos operativos y financieros para validar presupuesto al guardar.')}</p>
+            <div className={s.captureIdentities}>
+              <CompanyCaptureContext name={company ? companyName(company) : null} />
+              <RequesterIdentity profile={profile} />
+            </div>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -861,34 +871,33 @@ const availablePredictionCandidates = useMemo(
             </section>
           </div>
         ) : (
-          <div className={s.modalScroll} style={{ padding: 0 }}>
-            <div className={s.requestLayout} style={{ padding: '0 2px 2px' }}>
+          <div className={s.modalScroll}>
+            <div className={s.requestLayout}>
               <div className={s.formSections}>
                 <section className={s.formSection}>
-                  <h3>Datos del pago</h3>
+                  <h3>{isReembolso ? 'Datos del reembolso' : 'Datos del pago'}</h3>
                   <div className={s.formGrid}>
-                    <label className={s.fullRow}>Metodo de pago *
-                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
-                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
-                    </label>
                     <label className={s.fullRow}>Tipo de solicitud *
                       <select className={s.formControl} value={requestType} onChange={(e) => setRequestType(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                       <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
                     </label>
-                    <label>Monto solicitado *
-                      {/* En reembolso el monto es la suma del desglose: se muestra
-                          calculado para que nadie lo edite por separado. */}
-                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
-                        value={isReembolso ? (reembolsoTotals.total || '') : amount}
-                        onChange={(e) => { fiscalTouched.current.amount = true; setAmount(e.target.value) }}
-                        readOnly={isReembolso} required />
-                      {isReembolso && <span className={s.fieldHint}>Suma de los renglones del desglose de gastos.</span>}
+                    <label className={s.fullRow}>Metodo de pago *
+                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
+                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
                     </label>
-                    <label>Moneda *
+                    {!isReembolso && (
+                      <label>Monto solicitado *
+                        <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
+                          value={amount}
+                          onChange={(e) => { fiscalTouched.current.amount = true; setAmount(e.target.value) }}
+                          required />
+                      </label>
+                    )}
+                    <label className={isReembolso ? s.fullRow : ''}>Moneda *
                       <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
                         <option value="MXN">MXN</option>
                         <option value="USD">USD</option>
@@ -921,7 +930,7 @@ const availablePredictionCandidates = useMemo(
                       </label>
                     )}
                     <label className={s.fullRow}>Descripcion *
-                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => { fiscalTouched.current.description = true; setDescription(e.target.value) }} required />
+                      <textarea className={s.formControl} rows={3} placeholder={isReembolso ? 'Concepto general del reembolso...' : 'Concepto de la solicitud...'} value={description} onChange={(e) => { fiscalTouched.current.description = true; setDescription(e.target.value) }} required />
                     </label>
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -956,7 +965,16 @@ const availablePredictionCandidates = useMemo(
                 {isReembolso ? (
                   <ReimbursementSection
                     profiles={beneficiaryProfiles}
+                    companies={myCompanies}
+                    costCenters={costCenters}
                     companyId={companyId}
+                    costCenterId={costCenterId}
+                    budgetMonth={budgetMonth}
+                    companyLocked={lockedCompany}
+                    onCompanyChange={onCompanyChange}
+                    onCostCenterChange={onCostCenterChange}
+                    onBudgetMonthChange={onMonthChange}
+                    categoryHelp={categoryHelp}
                     canChooseBeneficiary={canChooseBeneficiary}
                     beneficiaryId={beneficiaryId}
                     onBeneficiaryChange={setBeneficiaryId}
@@ -994,7 +1012,7 @@ const availablePredictionCandidates = useMemo(
                   </section>
                 )}
 
-                <section className={s.formSection}>
+                {!isReembolso && <section className={s.formSection}>
                   <h3>Clasificacion presupuestal</h3>
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
                   <div className={s.formGrid}>
@@ -1067,7 +1085,7 @@ const availablePredictionCandidates = useMemo(
                       </label>
                     )}
                   </div>
-                </section>
+                </section>}
 
                 {showIncidencias && (
                 <section className={s.formSection}>
@@ -1124,8 +1142,19 @@ const availablePredictionCandidates = useMemo(
 
                 <section className={s.formSection}>
                   <h3>Revisión final</h3>
-                  <div className={`${s.fieldHint} ${s.fullRow}`}>Después de completar los datos de la solicitud, selecciona quién realizará la revisión.</div>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>{isSinPartidaRequest
+                    ? 'César revisará esta solicitud porque seleccionaste Sin partida.'
+                    : 'Después de completar los datos de la solicitud, selecciona quién realizará la revisión.'}</div>
                   <div className={s.formGrid}>
+                    {isReembolso && projects.length > 0 && (
+                      <label>Proyecto
+                        <select className={s.formControl} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                          <option value="">Sin proyecto</option>
+                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <div className={s.fieldHint}>Solo si este gasto forma parte de un proyecto con costo a medir.</div>
+                      </label>
+                    )}
                     <label className={s.fullRow}>¿Quién revisará esta solicitud? *
                       <select className={s.formControl} value={approverId} disabled={approverDisabled} onChange={(e) => setApproverId(e.target.value)} required>
                         <option value="">{approverPlaceholder}</option>
@@ -1142,12 +1171,12 @@ const availablePredictionCandidates = useMemo(
               </div>
 
               <aside className={s.summaryPanel}>
-                <h3>Resumen</h3>
+                <h3>{isReembolso ? 'Resumen del reembolso' : 'Resumen'}</h3>
                 <p>Vista previa de la solicitud antes de validar.</p>
                 <div className={s.summaryList}>
                   <label>Empresa <span className={s.summaryValue}>{company ? companyName(company) : 'Sin seleccionar'}</span></label>
                   <label>Aprobador seleccionado <span className={s.summaryValue}>{approver
-                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
+                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'sin_partida' ? ' · Sin partida' : approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
                     : 'Pendiente de seleccionar'}</span></label>
                   <label>Centro de costo <span className={s.summaryValue}>{center ? costCenterName(center) : 'Sin seleccionar'}</span></label>
                   <label>Partida <span className={s.summaryValue}>{category
@@ -1163,7 +1192,7 @@ const availablePredictionCandidates = useMemo(
                     <label>Proveedor <span className={s.summaryValue}>{proveedor ? proveedorLabel(proveedor) : 'Sin seleccionar'}</span></label>
                   )}
                   <label>Mes <span className={s.summaryValue}>{budgetMonth ? formatMonth(`${budgetMonth}-01`) : 'Sin seleccionar'}</span></label>
-                  <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
+                  <label>{isReembolso ? 'Total del reembolso' : 'Monto'} <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
                 <div className={s.summaryNote}>{isSinPartidaRequest
@@ -1185,7 +1214,11 @@ const availablePredictionCandidates = useMemo(
           ) : (
             <>
               <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-              <button type="submit" className={s.primaryBtn} disabled={submitting || (!isReembolso && cfdiLoading) || Boolean(cfdiError) || Boolean(currentDuplicate)}>{submitting ? 'Creando solicitud...' : 'Crear solicitud'}</button>
+              <button type="submit" className={s.primaryBtn} disabled={submitting || (!isReembolso && cfdiLoading) || Boolean(cfdiError) || Boolean(currentDuplicate)}>
+                {submitting
+                  ? (isReembolso ? 'Creando reembolso...' : 'Creando solicitud...')
+                  : (isReembolso ? 'Crear reembolso' : 'Crear solicitud')}
+              </button>
             </>
           )}
         </div>

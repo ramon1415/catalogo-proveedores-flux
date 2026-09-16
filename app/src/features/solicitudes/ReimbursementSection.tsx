@@ -5,15 +5,24 @@ import { useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { loadEmployeeBankAccount, upsertEmployeeBankAccount } from './api'
 import {
-  employeeBankAccountIssues, formatCurrencyC, isValidClabe, normalizeClabe,
-  reimbursementTotals, validateReceiptFile,
+  companyName, costCenterName, employeeBankAccountIssues, formatCurrencyC,
+  isValidClabe, normalizeClabe, reimbursementTotals, validateReceiptFile,
 } from './logic'
 import { parseCfdiFile } from './cfdi'
 import { parseCfdiXml } from '../../lib/contpaq/cfdiBrowser'
 import type {
-  BudgetAvailabilityRow, EmployeeBankAccount, Profile, ReimbursementDraftItem,
+  BudgetAvailabilityRow, Company, CostCenter, EmployeeBankAccount, Profile,
+  ReimbursementDraftItem,
 } from './types'
 import s from './Solicitudes.module.css'
+
+function maskedBankDestination(account: EmployeeBankAccount | null): string {
+  const clabe = normalizeClabe(account?.clabe || '')
+  if (clabe) return `CLABE terminación ${clabe.slice(-4)}`
+  const accountDigits = String(account?.cuenta || '').replace(/\D/g, '')
+  if (accountDigits) return `Cuenta terminación ${accountDigits.slice(-4)}`
+  return 'Destino bancario registrado'
+}
 
 export function emptyReimbursementItem(): ReimbursementDraftItem {
   return {
@@ -33,7 +42,16 @@ export function emptyReimbursementItem(): ReimbursementDraftItem {
 
 export function ReimbursementSection({
   profiles,
+  companies,
+  costCenters,
   companyId,
+  costCenterId,
+  budgetMonth,
+  companyLocked,
+  onCompanyChange,
+  onCostCenterChange,
+  onBudgetMonthChange,
+  categoryHelp,
   canChooseBeneficiary,
   beneficiaryId,
   onBeneficiaryChange,
@@ -48,7 +66,16 @@ export function ReimbursementSection({
   currency,
 }: {
   profiles: Profile[]
+  companies?: Company[]
+  costCenters?: CostCenter[]
   companyId: string
+  costCenterId?: string
+  budgetMonth?: string
+  companyLocked?: boolean
+  onCompanyChange?: (id: string) => void
+  onCostCenterChange?: (id: string) => void
+  onBudgetMonthChange?: (month: string) => void
+  categoryHelp?: { text: string; state: string }
   canChooseBeneficiary: boolean
   beneficiaryId: string
   onBeneficiaryChange: (id: string) => void
@@ -183,7 +210,7 @@ export function ReimbursementSection({
               <div className={`${s.contextCard} ${s.contextSuccess}`}>
                 <strong>{bankAccount?.beneficiary_name}</strong>
                 <span>
-                  {bankAccount?.banco} · {bankAccount?.clabe ? `CLABE ${bankAccount.clabe}` : `Cuenta ${bankAccount?.cuenta}`}
+                  {bankAccount?.banco} · {maskedBankDestination(bankAccount)}
                 </span>
               </div>
             )}
@@ -210,6 +237,58 @@ export function ReimbursementSection({
 
       <section className={s.formSection}>
         <h3>Desglose de gastos</h3>
+
+        {companies && costCenters && costCenterId !== undefined && budgetMonth !== undefined
+          && onCompanyChange && onCostCenterChange && onBudgetMonthChange && categoryHelp ? (
+          <div className={s.reimbursementScope}>
+            <div className={s.reimbursementScopeIntro}>
+            <strong>Empresa y periodo del reembolso</strong>
+            <span>Selecciona estos datos una sola vez. Después asigna la partida correspondiente en cada gasto.</span>
+          </div>
+          <div className={`${s.formGrid} ${s.reimbursementScopeGrid}`}>
+            <label>Empresa *
+              <select
+                className={s.formControl}
+                value={companyId}
+                onChange={(e) => onCompanyChange(e.target.value)}
+                required
+                disabled={companyLocked === true}
+              >
+                {companyLocked !== true && <option value="">Seleccionar empresa</option>}
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>{companyName(company)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Centro de costo *
+              <select
+                className={s.formControl}
+                value={costCenterId}
+                onChange={(e) => onCostCenterChange(e.target.value)}
+                required
+              >
+                <option value="">Seleccionar centro de costo</option>
+                {costCenters.map((center) => (
+                  <option key={center.id} value={center.id}>{costCenterName(center)}</option>
+                ))}
+              </select>
+            </label>
+            <label>Mes presupuestal *
+              <input
+                className={s.formControl}
+                type="month"
+                value={budgetMonth}
+                onChange={(e) => onBudgetMonthChange(e.target.value)}
+                required
+              />
+            </label>
+            <div className={`${s.fieldHint} ${s.reimbursementScopeHelp} ${categoryHelp.state ? s[categoryHelp.state as 'success' | 'warning' | 'error'] : ''}`}>
+              {categoryHelp.text}
+            </div>
+          </div>
+          </div>
+        ) : null}
+
         <div className={`${s.fieldHint} ${s.fullRow}`}>
           Un renglón por gasto. La partida es obligatoria en todos: es la que atribuye el
           gasto a su área, tenga comprobante fiscal o no. Marcar “sin comprobante fiscal”
@@ -221,78 +300,73 @@ export function ReimbursementSection({
             <span>Descripción</span>
             <span>Monto</span>
             <span>Partida presupuestal *</span>
-            <span>Sin comprobante</span>
-            <span>Comprobante</span>
             <span />
           </div>
           {items.map((item, index) => (
             <div key={item.key} className={s.itemsRow}>
-              <label className={s.itemField}>
-                <span className={s.itemFieldLabel}>Descripción</span>
-                <input
-                  className={s.formControl}
-                  type="text"
-                  aria-label={`Descripción del gasto ${index + 1}`}
-                  placeholder={`Gasto ${index + 1}`}
-                  value={item.descripcion}
-                  onChange={(e) => patchItem(item.key, { descripcion: e.target.value })}
-                />
-              </label>
-              <label className={s.itemField}>
-                <span className={s.itemFieldLabel}>Monto</span>
-                <input
-                  className={s.formControl}
-                  type="number"
-                  aria-label={`Monto del gasto ${index + 1}`}
-                  min="0.01"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={item.amount}
-                  onChange={(e) => patchItem(item.key, { amount: e.target.value })}
-                />
-              </label>
-              <label className={s.itemField}>
-                <span className={s.itemFieldLabel}>Partida presupuestal *</span>
-                <select
-                  className={s.formControl}
-                  aria-label={`Partida del gasto ${index + 1}`}
-                  value={item.budgetCategoryId}
-                  disabled={categoryDisabled}
-                  onChange={(e) => patchItem(item.key, { budgetCategoryId: e.target.value })}
-                >
-                  <option value="">{categoryDisabled ? 'Selecciona empresa, CC y mes' : 'Seleccionar partida'}</option>
-                  {categoryRows.map((row) => (
-                    <option key={row.budget_category_id} value={row.budget_category_id!}>
-                      {categoryLabel(row.budget_category_id!)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <input
+                className={`${s.formControl} ${s.itemDescription}`}
+                aria-label={`Descripción del gasto ${index + 1}`}
+                type="text"
+                placeholder={`Gasto ${index + 1}`}
+                value={item.descripcion}
+                onChange={(e) => patchItem(item.key, { descripcion: e.target.value })}
+              />
+              <input
+                className={`${s.formControl} ${s.itemAmount}`}
+                aria-label={`Monto del gasto ${index + 1}`}
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="0.00"
+                value={item.amount}
+                onChange={(e) => patchItem(item.key, { amount: e.target.value })}
+              />
+              <select
+                className={`${s.formControl} ${s.itemCategory}`}
+                aria-label={`Partida del gasto ${index + 1}`}
+                value={item.budgetCategoryId}
+                disabled={categoryDisabled}
+                onChange={(e) => patchItem(item.key, { budgetCategoryId: e.target.value })}
+              >
+                <option value="">{categoryDisabled ? 'Selecciona empresa, CC y mes' : 'Seleccionar partida'}</option>
+                {categoryRows.map((row) => (
+                  <option key={row.budget_category_id} value={row.budget_category_id!}>
+                    {categoryLabel(row.budget_category_id!)}
+                  </option>
+                ))}
+              </select>
               {/* Desmarcar solo quita la exigencia de comprobante: el gasto
                   sigue cargando a su partida (atribución al área). */}
-              <label className={s.checkboxCard}>
+              <label className={`${s.checkboxCard} ${s.itemNoReceipt}`}>
                 <input
                   type="checkbox"
                   checked={!item.deducible}
                   onChange={(e) => patchItem(item.key, { deducible: !e.target.checked })}
                 />
-                Sin comprobante fiscal (no deducible)
+                Sin comprobante fiscal
               </label>
-              <label className={s.itemsFile}>
-                <span className={s.itemFieldLabel}>Comprobante</span>
-                <input
-                  type="file"
-                  aria-label={`Comprobante del gasto ${index + 1}`}
-                  accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml"
-                  onChange={(e) => onItemFile(item.key, e.target.files?.[0] ?? null)}
-                />
+              <div className={s.itemsFile}>
+                <label className={s.filePicker}>
+                  <input
+                    className={s.filePickerInput}
+                    aria-label={`Comprobante del gasto ${index + 1}`}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml"
+                    onChange={(e) => onItemFile(item.key, e.target.files?.[0] ?? null)}
+                  />
+                  <span className={s.filePickerButton}>{item.file ? 'Cambiar archivo' : 'Seleccionar archivo'}</span>
+                  <span className={s.filePickerName} title={item.file?.name || 'Sin archivo'}>
+                    {item.file?.name || 'Sin archivo'}
+                  </span>
+                </label>
                 <span className={s.fileHint}>
                   {item.deducible ? item.fileHint : 'Sin comprobante fiscal: el adjunto es opcional.'}
                 </span>
-              </label>
+              </div>
               <button
                 type="button"
-                className={s.iconBtn}
+                className={`${s.iconBtn} ${s.itemRemove}`}
                 aria-label={`Quitar gasto ${index + 1}`}
                 onClick={() => onItemsChange(items.filter((row) => row.key !== item.key))}
               >✕</button>

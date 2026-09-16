@@ -70,3 +70,28 @@ Migración aplicada como `20260916002650`. Una sola categoría, dos rutas activa
 a César y cero solicitudes nuevas (sin datos QA persistidos). El RPC de consulta
 requiere usuario autenticado con membresía y no permite ejecución anónima; los
 guards no son invocables directamente por usuarios.
+
+## Homologación del formulario de reembolso con PROD
+
+Referencia visual y de código: `main` en `ca6bc085d49ca5ae1f041c54a0abffead2e0b4b0`.
+Corrección sobre DEV `fcb5725babf41acda08a755c0bf3466d41dc810f`.
+
+- Se porta la presentación de `ReimbursementSection` de PROD: empresa/centro/mes
+  antes del desglose, descripción/monto/partida en la primera fila, comprobante y
+  condición fiscal en la segunda, y botón de archivo con nombre abreviado.
+- Cabecera con solicitante, textos específicos de reembolso, total calculado en
+  desglose/resumen, espaciado y botón Crear reembolso como en producción.
+- Se conservan el parser CFDI de DEV, las etiquetas accesibles y las protecciones
+  de scroll/área segura de la PWA. Proyecto sigue disponible si existe catálogo.
+- Sin partida continúa seleccionando y bloqueando a César. Cambiar a una partida
+  ordinaria devuelve el selector a sus aprobadores habituales. No se modifica la
+  migración, la API ni el snapshot de la descripción aprobada.
+- React real verifica captura en ambas empresas × cuatro perfiles para proveedores
+  y reembolsos, ubicación única del contexto y total automático. Las pruebas usan
+  adaptadores locales y datos ficticios, sin crear ni aprobar solicitudes reales.
+- Suite completa después de homologar: **1,273 aprobadas, 0 fallas, 0 omitidas**.
+- TypeScript, build y paquete PWA validados. Las pruebas móviles comprueban la
+  cascada de estilos y los flujos; no sustituyen una revisión visual autenticada.
+- El navegador remoto no accedió al servidor local (`ERR_BLOCKED_BY_CLIENT`) y su
+  sesión de DEV no está autenticada. No se presenta evidencia de screenshots/E2E
+  autenticado; la referencia visual es la captura de PROD proporcionada por el usuario.

@@ -60,7 +60,7 @@ test('a mixed reimbursement cannot silently skip budget validation',()=>{
 
 async function mount(t,{company='opt',group='operation'}={}){
   const calls={created:[],routing:[],toasts:[]},timers=[]
-  const profile={id:'me',email:'me@example.test'}, memberships=companies.map(c=>({company_id:c.id}))
+  const profile={id:'me',email:'me@example.test',full_name:'Solicitante QA'}, memberships=companies.map(c=>({company_id:c.id}))
   const api={
     loadActiveProjects:async()=>[],fetchPartidaPrediction:async()=>null,
     loadBudgetAvailability:async()=>categories.map(c=>({budget_category_id:c.id,responsible_email:c.id==='sin'?null:'someone-else@example.test',no_presupuestal:c.no_presupuestal})),
@@ -104,6 +104,8 @@ for(const company of ['opt','sf'])for(const group of ['operation','admin_finance
     assert.match(text(select),/Sin partida/)
     if(group!=='sysadmin')assert.doesNotMatch(text(select),/Presupuestada/)
     await h.change('Partida presupuestal','sin','select');await h.change('Descripcion','Taxi')
+    const approver=h.field('¿Quién revisará esta solicitud?','select')
+    assert.equal(approver.props.value,'cesar');assert.equal(approver.props.disabled,true)
     await h.provider();await h.submit()
     assert.equal(h.calls.created.length,1,JSON.stringify(h.calls.toasts))
     const payload=h.calls.created[0]
@@ -114,17 +116,47 @@ for(const company of ['opt','sf'])for(const group of ['operation','admin_finance
   })
 }
 
-for(const company of ['opt','sf'])test(`reimbursement capture uses Sin partida for the employee and routes to Cesar in ${company}`,async t=>{
-  const h=await mount(t,{company})
+for(const company of ['opt','sf'])for(const group of ['operation','admin_finance','direction','sysadmin'])test(`production reimbursement layout keeps Sin partida and locked Cesar in ${company} for ${group}`,async t=>{
+  const h=await mount(t,{company,group})
   await h.change('Tipo de solicitud','reimbursement','select')
+  assert.equal(text(h.view.root.findByType('h2')),'Nueva solicitud de reembolso')
+  assert.match(text(h.view.root.findByProps({className:'captureIdentities'})),/Solicitante QA/)
+  const sections=h.view.root.findAllByType('section')
+  const breakdown=sections.find(n=>text(n).startsWith('Desglose de gastos'))
+  assert.match(text(breakdown),/Empresa y periodo del reembolso/)
+  assert.equal(h.view.root.findAllByType('label').filter(n=>text(n).startsWith('Centro de costo *')).length,1)
+  assert.equal(breakdown.findAllByType('label').filter(n=>text(n).startsWith('Centro de costo *')).length,1)
+  assert.equal(sections.some(n=>text(n).startsWith('Clasificacion presupuestal')),false)
+  assert.equal(h.view.root.findAllByType('label').some(n=>text(n).startsWith('Monto solicitado')),false)
+  assert.equal(text(h.view.root.findByType('aside').findByType('h3')),'Resumen del reembolso')
+  assert.equal(text(h.view.root.findAllByType('button').find(b=>b.props.type==='submit')),'Crear reembolso')
+  assert.match(text(breakdown.findByProps({className:'filePicker'})),/Seleccionar archivoSin archivo/)
   await h.change('Centro de costo','cc','select')
   await h.item('Descripción del gasto 1','Traslado de trabajo')
   await h.item('Monto del gasto 1','100')
   await h.item('Partida del gasto 1','sin')
+  assert.equal(h.field('¿Quién revisará esta solicitud?','select').props.value,'cesar')
+  assert.equal(h.field('¿Quién revisará esta solicitud?','select').props.disabled,true)
+  assert.match(text(h.view.root.findByType('aside')),/\$100\.00/)
   await act(async()=>h.view.root.findAllByType('label').find(n=>text(n).includes('Sin comprobante fiscal')).findByType('input').props.onChange({target:{checked:true}}))
   await h.change('Descripcion','Traslado de trabajo')
   await h.submit()
   assert.equal(h.calls.created.length,1,JSON.stringify(h.calls.toasts))
   assert.equal(h.calls.created[0].request_type,'reimbursement');assert.equal(h.calls.created[0].beneficiary_profile_id,'me')
   assert.equal(h.calls.created[0].budget_category_id,'sin');assert.equal(h.calls.created[0].approver_id,'cesar')
+})
+
+for(const type of ['service','reimbursement'])test(`switching away from Sin partida restores the normal approver selector in ${type}`,async t=>{
+  const h=await mount(t,{group:'sysadmin'})
+  await h.change('Tipo de solicitud',type,'select')
+  await h.change('Centro de costo','cc','select')
+  if(type==='reimbursement')await h.item('Monto del gasto 1','100')
+  else await h.change('Monto solicitado','100')
+  const selectCategory=async value=>type==='reimbursement'?h.item('Partida del gasto 1',value):h.change('Partida presupuestal',value,'select')
+  await selectCategory('sin')
+  assert.equal(h.field('¿Quién revisará esta solicitud?','select').props.disabled,true)
+  await selectCategory('normal')
+  const approver=h.field('¿Quién revisará esta solicitud?','select')
+  assert.equal(approver.props.disabled,false);assert.equal(approver.props.value,'other')
+  assert.doesNotMatch(text(approver),/César/)
 })

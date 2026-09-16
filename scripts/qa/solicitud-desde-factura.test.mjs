@@ -72,6 +72,7 @@ async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = tr
     '../../components/ui/CompanyCaptureContext': { CompanyCaptureContext: ({ name }) => React.createElement('span', { 'data-company-context': true }, name) },
     '../../components/ui/Toast': { useToast: () => ({ showToast: (...args) => calls.toasts.push(args) }) },
     './ProviderCombo': { ProviderCombo }, './QuickProviderModal': { QuickProviderModal },
+    './RequesterIdentity': { RequesterIdentity: () => null },
     './ReimbursementSection': { ReimbursementSection: () => null, emptyReimbursementItem: () => ({ amount: '', descripcion: '', deducible: false }) },
     './Solicitudes.module.css': {},
   })
