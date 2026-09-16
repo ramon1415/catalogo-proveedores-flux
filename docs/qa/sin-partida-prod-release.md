@@ -12,7 +12,7 @@ Base: `main` en `ca6bc085d49ca5ae1f041c54a0abffead2e0b4b0`. Promoción acotada d
 
 ## Compatibilidad y despliegue
 
-Migración: `20260916011005_requests_sin_partida_cesar_prod.sql`. Se aplica antes del frontend y aborta si las cinco funciones de producción que modifica cambiaron respecto de la base revisada.
+Migración: `20260916012833_requests_sin_partida_cesar_prod.sql`. Se aplica antes del frontend y aborta si las cinco funciones de producción que modifica cambiaron respecto de la base revisada.
 
 Se preservan las firmas y privilegios existentes, los wrappers de documentos, la validación de propietario/ruta de los adjuntos, las restricciones de beneficiario por empresa, los controles de edición exclusivos de Finanzas y la inmutabilidad de reembolsos terminados. Se adaptan únicamente la creación base, el enrutamiento del aprobador, la disponibilidad y la aceptación de la categoría común en los dos RPC de reembolsos.
 
@@ -27,3 +27,14 @@ La configuración identifica a César por su identidad verificada y a las empres
 - Sin prueba visual autenticada: las sesiones de navegador disponibles están cerradas. La cobertura de formularios se ejecuta con React; la publicación se verifica mediante su estado y sus assets servidos.
 
 El workflow `sin-partida-prod.yml` reproduce el gate sin acceso a la base de producción. Después de aplicar la migración se deben verificar categoría, enrutamiento, privilegios, auditoría de seguridad y huellas de los datos históricos y funciones preservadas.
+
+
+## Verificación en PROD — 16 de septiembre de 2026
+
+Migración aplicada y registrada como `20260916012833`. Una categoría activa, César elegible en ambas empresas, consulta disponible a autenticados y denegada a anónimos. La tabla privada de configuración sigue inaccesible para clientes.
+
+Las huellas de las 22 solicitudes existentes, sus gastos de reembolso, las políticas RLS y los siete wrappers/funciones preservados coinciden antes y después. Ninguna solicitud histórica recibió una descripción o aprobación.
+
+Los asesores de seguridad añadieron únicamente los avisos esperados: [tabla privada con RLS sin políticas](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy) (acceso denegado por diseño) y [RPC de consulta autenticado con `SECURITY DEFINER`](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable) (valida identidad y pertenencia a la empresa). No se amplían sus privilegios para eliminar esos avisos.
+
+El gate de publicación y los otros tres workflows del PR #637 pasaron en GitHub antes de promover el frontend. Se ajustó la comprobación de `partida_unsure` para exigir `false` también al elegir Sin partida, manteniendo el resto del contrato.

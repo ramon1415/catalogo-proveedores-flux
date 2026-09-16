@@ -7,7 +7,7 @@ const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const opt = id(1), sf = id(2), other = id(3), cesar = id(10), cc = id(30), provider = id(31), normal = id(32)
 const actors = { operator: id(11), finance: id(12), director: id(13), sysadmin: id(14) }
 const read = p => readFileSync(new URL('../../' + p, import.meta.url), 'utf8')
-const migration = read('supabase/migrations/20260916011005_requests_sin_partida_cesar_prod.sql')
+const migration = read('supabase/migrations/20260916012833_requests_sin_partida_cesar_prod.sql')
 let db, sin
 async function as(actor, run, role = 'authenticated') {
   await db.query("select set_config('test.actor',$1,false)", [actor || ''])
