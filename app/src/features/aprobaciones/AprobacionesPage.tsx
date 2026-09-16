@@ -14,6 +14,7 @@ import {
   friendlyDecisionError, friendlyError,
 } from './logic'
 import { DecisionModal } from './DecisionModal'
+import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import type { ApprovalData, PaymentRequest, MainTab, SubFilter, ColumnKey, DecisionAction } from './types'
 import s from './Aprobaciones.module.css'
 
@@ -258,6 +259,8 @@ export default function AprobacionesPage() {
                         <div>
                           <div className={s.cardProvider}>{provider?.alias || provider?.nombre_completo || 'Sin proveedor'}</div>
                           <div className={s.cardSub}>{company?.legal_name || company?.name || 'Sin empresa'}</div>
+                          {isSinPartida(byId(data?.categories ?? [], r.budget_category_id)) &&
+                            <div className={s.cardSub}>{requestCategoryLabel(r, byId(data?.categories ?? [], r.budget_category_id))}</div>}
                         </div>
                         <div className={s.cardBadges}>
                           {(() => { const b = statusBadge(r.status); return <Badge variant={b.variant}>{b.label}</Badge> })()}

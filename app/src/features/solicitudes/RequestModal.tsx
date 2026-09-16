@@ -7,7 +7,7 @@ import {
   updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems, loadActiveProjects, setRequestProject,
-  fetchPartidaPrediction,
+  fetchPartidaPrediction, getSinPartidaApprover,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -21,6 +21,7 @@ import {
 } from './logic'
 import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
+import { isSinPartida } from '../../lib/requestClassification'
 import { parseCfdiFile, resolveCfdiCompany, validateCfdiSelection, cfdiCurrencyPrefill, type CfdiBreakdown } from './cfdi'
 import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
 import { saveCfdiData, findRequestByInvoiceUuid } from './api'
@@ -235,9 +236,11 @@ export function RequestModal({
   }, [isReembolso, beneficiaryId, companyId])
 
   // Totales derivados del desglose: en reembolso mandan sobre monto/partida.
-  const reembolsoTotals = useMemo(() => reimbursementTotals(items), [items])
+  const sinPartidaId = budgetCategories.find(isSinPartida)?.id ?? ''
+  const reembolsoTotals = useMemo(() => reimbursementTotals(items, sinPartidaId), [items, sinPartidaId])
   const effectiveAmount = isReembolso ? String(reembolsoTotals.total || '') : amount
   const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : budgetCategoryId
+  const isSinPartidaRequest = Boolean(sinPartidaId && effectiveCategoryId === sinPartidaId)
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -275,16 +278,17 @@ export function RequestModal({
       ? budgetRows.filter((r) => (
           String(r.responsible_email || '').trim().toLowerCase() === myEmail
           || r.has_additional_access === true
+          || r.budget_category_id === sinPartidaId
         ))
       : budgetRows
     const q = categorySearch.trim().toLowerCase()
     if (!q) return scoped
     return scoped.filter((r) => {
       const cat = categoryById(r.budget_category_id!)
-      return budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
+      return isSinPartida(cat) || budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetRows, categorySearch, profile, group])
+  }, [budgetRows, categorySearch, profile, group, sinPartidaId])
 
   // ── Carga de partidas al cambiar empresa / CC / mes ──────────────────────
   async function reloadBudgetCategories(nextCompany: string, nextCC: string, nextMonth: string) {
@@ -345,7 +349,9 @@ export function RequestModal({
     resetApprovers('Cargando aprobadores disponibles...', true)
     let data: ApproverCandidate[]
     try {
-      data = await listApproverOptions(companyId, costCenterId, amt)
+      data = isSinPartidaRequest
+        ? await getSinPartidaApprover(companyId)
+        : await listApproverOptions(companyId, costCenterId, amt)
     } catch (error) {
       if (version !== approverVersion.current) return
       setApproverPlaceholder('No se pudieron cargar aprobadores')
@@ -363,7 +369,7 @@ export function RequestModal({
       return
     }
     setCandidates(data)
-    setApproverDisabled(false)
+    setApproverDisabled(isSinPartidaRequest)
     setApproverPlaceholder('Seleccionar aprobador')
     const preserved = previous ? data.find((c) => candidateMatchesSelection(c, previous)) : null
     let nextId = ''
@@ -371,7 +377,9 @@ export function RequestModal({
     else if (data.length === 1) nextId = data[0].profile_id
     setApproverId(nextId)
     const source = data[0]?.source
-    const sourceHelp = source === 'assigned'
+    const sourceHelp = isSinPartidaRequest
+      ? 'Se enviará automáticamente a César para aprobación. La solicitud permanecerá en Sin partida.'
+      : source === 'assigned'
       ? 'Selecciona uno de los aprobadores configurados para ti en esta empresa.'
       : 'No tienes aprobadores configurados. Se muestran usuarios elegibles según las reglas de aprobación.'
     let text = sourceHelp
@@ -471,7 +479,7 @@ const availablePredictionCandidates = useMemo(
   useEffect(() => {
     loadApprovers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, costCenterId])
+  }, [companyId, costCenterId, isSinPartidaRequest])
 
   useEffect(() => {
     window.clearTimeout(amountTimer.current)
@@ -635,7 +643,7 @@ const availablePredictionCandidates = useMemo(
       description: description.trim(),
       notes: notesWithIncidentMarker(),
       requested_by: profile?.id || null,
-      is_extraordinary_adjustment: Boolean(canApprove && isExtraordinary),
+      is_extraordinary_adjustment: Boolean(!isSinPartidaRequest && canApprove && isExtraordinary),
       responsible_profile_id: responsibleId || null,
       due_date: dueDate || null,
       delivery_method: deliveryMethod || normalizePaymentMethod(paymentMethod),
@@ -655,7 +663,7 @@ const availablePredictionCandidates = useMemo(
         : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
       invoice_uuid: invoiceUuid || null,
       // El reembolso clasifica por renglón, así que la bandera global no aplica.
-      partida_unsure: isReembolso ? false : partidaUnsure,
+      partida_unsure: isReembolso || isSinPartidaRequest ? false : partidaUnsure,
     }
   }
 
@@ -688,7 +696,7 @@ const availablePredictionCandidates = useMemo(
         showToast('Datos bancarios incompletos', `Falta ${bankIssues.join(', ')} del beneficiario. Captúralos para poder dispersar.`, 'warning')
         return
       }
-      const itemsValidation = validateReimbursementItems(items)
+      const itemsValidation = validateReimbursementItems(items, sinPartidaId)
       if (itemsValidation) { showToast('Revisa el desglose', itemsValidation, 'warning'); return }
     }
 
@@ -906,7 +914,7 @@ const availablePredictionCandidates = useMemo(
                         </label>
                       </div>
                     </div>
-                    {canApprove && (
+                    {canApprove && !isSinPartidaRequest && (
                       <label className={s.checkboxCard}>
                         <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
                         Ajuste extraordinario
@@ -1038,7 +1046,7 @@ const availablePredictionCandidates = useMemo(
                     {/* Señalización opcional: el solicitante no está seguro de la
                         partida y pide que Finanzas la confirme. Siempre disponible;
                         no aplica en reembolso (clasifica por renglón). */}
-                    {!isReembolso && (
+                    {!isReembolso && !isSinPartidaRequest && (
                       <label className={`${s.checkboxCard} ${s.fullRow}`}>
                         <input type="checkbox" checked={partidaUnsure} onChange={(e) => setPartidaUnsure(e.target.checked)} />
                         No estoy seguro de la partida
@@ -1158,7 +1166,9 @@ const availablePredictionCandidates = useMemo(
                   <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
-                <div className={s.summaryNote}>{isNoBudgetCategory
+                <div className={s.summaryNote}>{isSinPartidaRequest
+                  ? 'César debe aprobarla. Después se mostrará como Sin partida (descripción de la solicitud), dentro de la misma clasificación.'
+                  : isNoBudgetCategory
                   ? 'Esta partida no consume presupuesto y seguirá el flujo normal de autorización.'
                   : 'Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.'}</div>
               </aside>
