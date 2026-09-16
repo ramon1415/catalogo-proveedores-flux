@@ -46,7 +46,7 @@ la categoría sigue siendo la misma hasta el pago. No se crean categorías por c
 ## DEV / promoción
 
 Base DEV: `8613ddc34e44d1a365fd186dcad5cda033696f0d`.
-Migración: `20260916000423_requests_sin_partida_cesar.sql`.
+Migración: `20260916002650_requests_sin_partida_cesar.sql`.
 
 La revisión de PROD fue de solo lectura. Su RPC `create_payment_request` y su guard
 de aprobadores difieren de DEV (incluye otra firma de compatibilidad y controles de
@@ -63,3 +63,10 @@ acotada y conservar convenio, documento y permisos de reembolso de producción.
 5. En Solicitudes filtrar por Sin partida y elegir el estatus deseado: todas
    comparten una categoría aunque sus descripciones sean diferentes.
 6. Repetir con un reembolso y probar filtros/detalle desde móvil/PWA.
+
+### Verificación de base DEV
+
+Migración aplicada como `20260916002650`. Una sola categoría, dos rutas activas
+a César y cero solicitudes nuevas (sin datos QA persistidos). El RPC de consulta
+requiere usuario autenticado con membresía y no permite ejecución anónima; los
+guards no son invocables directamente por usuarios.
