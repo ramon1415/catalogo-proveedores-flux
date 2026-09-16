@@ -5,7 +5,7 @@ import type { BadgeVariant } from '../../components/ui/Badge'
 import { normalize, numberValue } from '../../lib/format'
 import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import type {
-  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
+  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   BudgetAvailabilityRow, ApproverCandidate, ApproverSelection,
   DecisionAction, RequestPayload, EmployeeBankAccount, ReimbursementDraftItem,
 } from './types'
@@ -807,6 +807,10 @@ export function normalizeRpcResult<T = any>(data: any): T {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export function isValidRequestId(value: string | null): boolean {
   return !!value && UUID_RE.test(value)
+}
+
+export function requesterDisplayName(profile?: Profile | null): string {
+  return profile?.full_name?.trim() || profile?.email?.trim() || 'No disponible'
 }
 
 // Filtro de tabla: haystack idéntico al vanilla (NFD via normalize()).
