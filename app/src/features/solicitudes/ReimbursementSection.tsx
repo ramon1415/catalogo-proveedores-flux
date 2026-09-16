@@ -300,6 +300,7 @@ export function ReimbursementSection({
                 className={`${s.formControl} ${s.itemDescription}`}
                 type="text"
                 placeholder={`Gasto ${index + 1}`}
+                aria-label={`Descripción del gasto ${index + 1}`}
                 value={item.descripcion}
                 onChange={(e) => patchItem(item.key, { descripcion: e.target.value })}
               />
@@ -309,11 +310,13 @@ export function ReimbursementSection({
                 min="0.01"
                 step="0.01"
                 placeholder="0.00"
+                aria-label={`Monto del gasto ${index + 1}`}
                 value={item.amount}
                 onChange={(e) => patchItem(item.key, { amount: e.target.value })}
               />
               <select
                 className={`${s.formControl} ${s.itemCategory}`}
+                aria-label={`Partida del gasto ${index + 1}`}
                 value={item.budgetCategoryId}
                 disabled={categoryDisabled}
                 onChange={(e) => patchItem(item.key, { budgetCategoryId: e.target.value })}

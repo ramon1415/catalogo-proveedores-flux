@@ -10,7 +10,7 @@ import {
   loadBudgetAvailability, listApproverOptions,
   createPaymentRequest, createPaymentRequestWithDocument, createReimbursementRequestWithDocuments,
   updateFase2Metadata, uploadReceipt, removeReceipt, loadIncidencias,
-  loadActiveProfiles, loadEmployeeBankAccount, fetchPartidaPrediction,
+  loadActiveProfiles, loadEmployeeBankAccount, fetchPartidaPrediction, getSinPartidaApprover,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -24,6 +24,7 @@ import {
 } from './logic'
 import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
+import { isSinPartida } from '../../lib/requestClassification'
 import { parseCfdiFile } from './cfdi'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
@@ -216,9 +217,11 @@ export function RequestModal({
   }, [isReembolso, beneficiaryId, companyId])
 
   // Totales derivados del desglose: en reembolso mandan sobre monto/partida.
-  const reembolsoTotals = useMemo(() => reimbursementTotals(items), [items])
+  const sinPartidaId = budgetCategories.find(isSinPartida)?.id ?? ''
+  const reembolsoTotals = useMemo(() => reimbursementTotals(items, sinPartidaId), [items, sinPartidaId])
   const effectiveAmount = isReembolso ? String(reembolsoTotals.total || '') : amount
   const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : budgetCategoryId
+  const isSinPartidaRequest = Boolean(sinPartidaId && effectiveCategoryId === sinPartidaId)
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -269,10 +272,10 @@ export function RequestModal({
     if (!q) return scoped
     return scoped.filter((r) => {
       const cat = categoryById(r.budget_category_id!)
-      return budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
+      return isSinPartida(cat) || budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetRows, categorySearch, profile, group])
+  }, [budgetRows, categorySearch, profile, group, sinPartidaId])
 
   // ── Carga de partidas al cambiar empresa / CC / mes ──────────────────────
   async function reloadBudgetCategories(nextCompany: string, nextCC: string, nextMonth: string) {
@@ -332,7 +335,9 @@ export function RequestModal({
     resetApprovers('Cargando aprobadores disponibles...', true)
     let data: ApproverCandidate[]
     try {
-      data = await listApproverOptions(companyId, costCenterId, amt)
+      data = isSinPartidaRequest
+        ? await getSinPartidaApprover(companyId)
+        : await listApproverOptions(companyId, costCenterId, amt)
     } catch (error) {
       if (version !== approverVersion.current) return
       setApproverPlaceholder('No se pudieron cargar aprobadores')
@@ -350,7 +355,7 @@ export function RequestModal({
       return
     }
     setCandidates(data)
-    setApproverDisabled(false)
+    setApproverDisabled(isSinPartidaRequest)
     setApproverPlaceholder('Seleccionar aprobador')
     const preserved = previous ? data.find((c) => candidateMatchesSelection(c, previous)) : null
     let nextId = ''
@@ -358,7 +363,9 @@ export function RequestModal({
     else if (data.length === 1) nextId = data[0].profile_id
     setApproverId(nextId)
     const source = data[0]?.source
-    const sourceHelp = source === 'assigned'
+    const sourceHelp = isSinPartidaRequest
+      ? 'Se enviará automáticamente a César para aprobación. La solicitud permanecerá en Sin partida.'
+      : source === 'assigned'
       ? 'Selecciona uno de los aprobadores configurados para ti en esta empresa.'
       : 'No tienes aprobadores configurados. Se muestran usuarios elegibles según las reglas de aprobación.'
     let text = sourceHelp
@@ -404,7 +411,7 @@ export function RequestModal({
   useEffect(() => {
     loadApprovers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, costCenterId])
+  }, [companyId, costCenterId, isSinPartidaRequest])
 
   useEffect(() => {
     window.clearTimeout(amountTimer.current)
@@ -557,7 +564,7 @@ export function RequestModal({
       description: description.trim(),
       notes: notesWithIncidentMarker(),
       requested_by: profile?.id || null,
-      is_extraordinary_adjustment: Boolean(canApprove && isExtraordinary),
+      is_extraordinary_adjustment: Boolean(!isSinPartidaRequest && canApprove && isExtraordinary),
       responsible_profile_id: responsibleId || null,
       due_date: dueDate || null,
       delivery_method: deliveryMethod || normalizePaymentMethod(paymentMethod),
@@ -577,7 +584,7 @@ export function RequestModal({
         : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
       invoice_uuid: null,
       // Reembolsos clasifican por renglón: la bandera global siempre es false.
-      partida_unsure: isReembolso ? false : partidaUnsure,
+      partida_unsure: isReembolso || isSinPartidaRequest ? false : partidaUnsure,
     }
   }
 
@@ -602,7 +609,7 @@ export function RequestModal({
         showToast('Datos bancarios incompletos', `Falta ${bankIssues.join(', ')} del beneficiario. Captúralos para poder dispersar.`, 'warning')
         return
       }
-      const itemsValidation = validateReimbursementItems(items)
+      const itemsValidation = validateReimbursementItems(items, sinPartidaId)
       if (itemsValidation) { showToast('Revisa el desglose', itemsValidation, 'warning'); return }
     }
 
@@ -806,7 +813,7 @@ export function RequestModal({
                         </label>
                       </div>
                     </div>
-                    {canApprove && (
+                    {canApprove && !isSinPartidaRequest && (
                       <label className={s.checkboxCard}>
                         <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
                         Ajuste extraordinario
@@ -922,10 +929,12 @@ export function RequestModal({
                           <div className={s.fieldHint}>El historial de este proveedor tiene partidas que no están disponibles para la combinación seleccionada.</div>
                         )}
                       </label>
+                      {!isSinPartidaRequest && (
                       <label className={`${s.checkboxCard} ${s.fullRow}`}>
                         <input type="checkbox" checked={partidaUnsure} onChange={(e) => setPartidaUnsure(e.target.checked)} />
                         No estoy seguro de la partida
                       </label>
+                      )}
                       <label>Mes presupuestal *
                         <input className={s.formControl} type="month" value={budgetMonth} onChange={(e) => onMonthChange(e.target.value)} required />
                       </label>
@@ -988,7 +997,9 @@ export function RequestModal({
 
                 <section className={s.formSection}>
                   <h3>Revisión final</h3>
-                  <div className={`${s.fieldHint} ${s.fullRow}`}>Después de completar los datos de la solicitud, selecciona quién realizará la revisión.</div>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>{isSinPartidaRequest
+                    ? 'César revisará esta solicitud porque seleccionaste Sin partida.'
+                    : 'Después de completar los datos de la solicitud, selecciona quién realizará la revisión.'}</div>
                   <div className={s.formGrid}>
                     <label className={s.fullRow}>¿Quién revisará esta solicitud? *
                       <select className={s.formControl} value={approverId} disabled={approverDisabled} onChange={(e) => setApproverId(e.target.value)} required>
@@ -1011,7 +1022,7 @@ export function RequestModal({
                 <div className={s.summaryList}>
                   <label>Empresa <span className={s.summaryValue}>{company ? companyName(company) : 'Sin seleccionar'}</span></label>
                   <label>Aprobador seleccionado <span className={s.summaryValue}>{approver
-                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
+                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'sin_partida' ? ' · Sin partida' : approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
                     : 'Pendiente de seleccionar'}</span></label>
                   <label>Centro de costo <span className={s.summaryValue}>{center ? costCenterName(center) : 'Sin seleccionar'}</span></label>
                   <label>Partida <span className={s.summaryValue}>{category
@@ -1030,7 +1041,9 @@ export function RequestModal({
                   <label>{isReembolso ? 'Total del reembolso' : 'Monto'} <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
-                <div className={s.summaryNote}>{isNoBudgetCategory
+                <div className={s.summaryNote}>{isSinPartidaRequest
+                  ? 'César debe aprobarla. Después se mostrará como Sin partida (descripción de la solicitud), dentro de la misma clasificación.'
+                  : isNoBudgetCategory
                   ? 'Esta partida no consume presupuesto y seguirá el flujo normal de autorización.'
                   : 'Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.'}</div>
               </aside>

@@ -22,6 +22,7 @@ import {
   STATUS_FILTER_LABELS,
 } from './logic'
 import { RequestModal } from './RequestModal'
+import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import { DetailModal } from './DetailModal'
 import { EditModal } from './EditModal'
 import { ReimbursementEditModal } from './ReimbursementEditModal'
@@ -59,6 +60,8 @@ export default function SolicitudesPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('activas')
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  useEffect(() => setCategoryFilter(''), [activeCompanyId])
   const allowedCompanyIds = useMemo(
     () => new Set(memberships.map((membership) => membership.company_id)),
     [memberships],
@@ -161,29 +164,31 @@ export default function SolicitudesPage() {
       return (
         haystack.includes(q) &&
         statusMatches(r, statusFilter) &&
-        budgetDecisionMatches(r, decisionFilter)
+        budgetDecisionMatches(r, decisionFilter) &&
+        (!categoryFilter || r.budget_category_id === categoryFilter)
       )
     })
-  }, [scopedRequests, lookups, requestersById, query, statusFilter, decisionFilter])
+  }, [scopedRequests, lookups, requestersById, query, statusFilter, decisionFilter, categoryFilter])
 
   // Agrupar por identidad, nunca por nombre: dos personas pueden llamarse igual.
   const commonRequesterId = rows[0]?.requested_by && rows.every((r) => r.requested_by === rows[0].requested_by)
     ? rows[0].requested_by : null
 
-  const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos'
+  const hasActiveFilters = Boolean(query.trim() || categoryFilter) || statusFilter !== 'todos' || decisionFilter !== 'todos'
 
   const filterParts = useMemo(() => {
     const parts: string[] = []
     if (query.trim()) parts.push('Busqueda')
+    if (categoryFilter) parts.push(lookups.category(categoryFilter)?.name || 'Partida')
     if (statusFilter !== 'todos') parts.push(STATUS_FILTER_LABELS[statusFilter] || `Estatus: ${statusFilter}`)
     if (decisionFilter === 'aprobable') parts.push('Aprobables')
     if (decisionFilter === 'excepciones') parts.push('Excepciones presupuestales')
     if (activeCompanyId) { const c = lookups.company(activeCompanyId); parts.push(c ? companyName(c) : 'Empresa activa') }
     return parts
-  }, [query, statusFilter, decisionFilter, activeCompanyId, lookups])
+  }, [query, statusFilter, decisionFilter, categoryFilter, activeCompanyId, lookups])
 
   function setFilters(next: { status: StatusFilter; decision: BudgetDecisionFilter }) {
-    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision)
+    setQuery(''); setCategoryFilter(''); setStatusFilter(next.status); setDecisionFilter(next.decision)
   }
 
   // ── Card active state (mirror renderFilterState) ─────────────────────────
@@ -274,12 +279,17 @@ export default function SolicitudesPage() {
             <option value="aprobable">Aprobable</option>
             <option value="excepciones">Excepciones</option>
           </select>
+          <select aria-label="Filtrar por partida" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="">Todas las partidas</option>
+            {budgetCategories.filter((category) => isSinPartida(category) || scopedRequests.some((r) => r.budget_category_id === category.id))
+              .map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+          </select>
         </div>
 
         {filterParts.length > 0 && (
           <div className={s.filterSummary}>
             <span className={s.filterPill}>Vista filtrada: {filterParts.join(' · ')}</span>
-            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Ver todas</button>
+            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setCategoryFilter(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Ver todas</button>
           </div>
         )}
 
@@ -305,7 +315,7 @@ export default function SolicitudesPage() {
                     <div className={s.esIcon}>{hasActiveFilters ? '🔍' : '📋'}</div>
                     <div className={s.esTitle}>{hasActiveFilters ? 'Sin resultados' : 'Sin solicitudes'}</div>
                     <div className={s.esDesc}>{hasActiveFilters ? 'Ninguna solicitud coincide con los filtros aplicados.' : 'Crea una nueva solicitud de pago para iniciar la bandeja.'}</div>
-                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Limpiar filtros</button></div>}
+                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setCategoryFilter(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Limpiar filtros</button></div>}
                   </div>
                 </td></tr>
               )}
@@ -336,8 +346,8 @@ export default function SolicitudesPage() {
                       <span className={s.cellSub}>{companyName(company)} · {costCenterName(center)}</span>
                     </td>
                     <td data-label="Partida">
-                      <span className={s.cellMain}>{category?.code || 'Sin partida'}</span>
-                      <span className={s.cellSub}>{category?.name || ''} · {formatMonth(r.budget_month)}</span>
+                      <span className={s.cellMain}>{isSinPartida(category) ? requestCategoryLabel(r, category) : category?.code || 'Sin partida'}</span>
+                      <span className={s.cellSub}>{isSinPartida(category) ? '' : `${category?.name || ''} · `}{formatMonth(r.budget_month)}</span>
                     </td>
                     <td data-label="Monto"><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
                     <td data-label="Estatus"><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>

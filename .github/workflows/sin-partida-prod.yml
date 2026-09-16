@@ -1,0 +1,60 @@
+name: Sin partida production contracts
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/src/features/solicitudes/**'
+      - 'app/src/features/aprobaciones/**'
+      - 'app/src/lib/requestClassification.ts'
+      - 'approval_batches.js'
+      - 'supabase/migrations/*requests_sin_partida_cesar_prod.sql'
+      - 'scripts/qa/sin-partida-*.test.mjs'
+      - 'scripts/qa/fixtures/sin-partida*'
+      - '.github/workflows/sin-partida-prod.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/src/features/solicitudes/**'
+      - 'app/src/features/aprobaciones/**'
+      - 'app/src/lib/requestClassification.ts'
+      - 'approval_batches.js'
+      - 'supabase/migrations/*requests_sin_partida_cesar_prod.sql'
+      - 'scripts/qa/sin-partida-*.test.mjs'
+      - 'scripts/qa/fixtures/sin-partida*'
+      - '.github/workflows/sin-partida-prod.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  request-and-reimbursement-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm run qa:setup
+      - run: >-
+          node --test scripts/qa/sin-partida-*.test.mjs
+          scripts/qa/partida-prediction-prod-contract.test.mjs
+          scripts/qa/request-optional-document.test.mjs
+          scripts/qa/prod-reimbursement-permissions.test.mjs
+          scripts/qa/prod-reimbursement-ux-hotfix.test.mjs
+          scripts/qa/reimbursement-inline-classification-ux.test.mjs
+          scripts/qa/convenio-request-*.test.mjs
+          scripts/qa/convenio-receipt-autofill.test.mjs
+          scripts/qa/fonacot-no-presupuestal-prod-contract.test.mjs
+          scripts/qa/company-context.test.mjs
+          scripts/qa/pwa-*.test.mjs
+          scripts/qa/solicitudes-mobile.test.mjs
+          scripts/qa/solicitudes-scroll-contract.test.mjs
+          scripts/qa/approval-batches-company-scope-contract.test.mjs
+      - run: npm --prefix app run build
+      - run: node scripts/build-vercel-static.mjs
+      - run: VERIFY_VERCEL_ARTIFACT=1 node --test scripts/qa/pwa-*.test.mjs

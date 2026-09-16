@@ -46,6 +46,7 @@ export type PaymentRequest = {
   beneficiary_profile_id?: string | null
   // Señalización: Finanzas debe confirmar la partida seleccionada.
   partida_unsure?: boolean | null
+  sin_partida_description?: string | null
   created_at: string | null
   updated_at: string | null
 }
