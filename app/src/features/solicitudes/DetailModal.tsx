@@ -1,4 +1,5 @@
 import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { requestCategoryLabel } from '../../lib/requestClassification'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
@@ -369,7 +370,7 @@ export function DetailModal({
             <div className={`${s.refCell} ${s.full}`}>
               <span className={s.refLabel}>Partida</span>
               <span className={`${s.refValue} ${s.muted}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {budgetCategoryLabel(category)}
+                {requestCategoryLabel(request, category)}
                 {request.partida_unsure && <Badge variant="warning">Partida por confirmar</Badge>}
               </span>
             </div>

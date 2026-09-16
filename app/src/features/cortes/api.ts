@@ -8,6 +8,19 @@ import type {
 
 const asArray = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : [])
 
+async function withSinPartidaDescriptions<T extends { budget_category: string | null }>(rows: T[], requestId: (row: T) => string | null): Promise<T[]> {
+  const ids = rows.filter((row) => /sin[_ ]partida/i.test(row.budget_category || '')).map(requestId).filter((id): id is string => Boolean(id))
+  if (!ids.length) return rows
+  const { data, error } = await supabase.from('payment_requests')
+    .select('id,sin_partida_description').in('id', ids)
+  if (error) throw error
+  const descriptions = new Map((data ?? []).map((r) => [r.id, r.sin_partida_description]))
+  return rows.map((row) => {
+    const description = descriptions.get(requestId(row))
+    return description ? { ...row, budget_category: `Sin partida (${description})` } : row
+  })
+}
+
 // Query directa a companies (solo Finanzas). Con empresa activa, se acota a ella.
 export async function listActiveCompanies(activeCompanyId: string | null): Promise<Company[]> {
   let query = supabase.from('companies').select('id,name,legal_name,active').eq('active', true)
@@ -47,14 +60,14 @@ export async function getBatchDetail(batchId: string): Promise<BatchDetail> {
   const { data, error } = await supabase.rpc('get_approval_batch_detail', { p_batch_id: batchId })
   if (error) throw error
   const r = (data && typeof data === 'object' ? data : {}) as Partial<BatchDetail>
-  return { batch: r.batch ?? null, items: asArray(r.items) }
+  return { batch: r.batch ?? null, items: await withSinPartidaDescriptions(asArray<NonNullable<BatchDetail['items']>[number]>(r.items), (item) => item.payment_request_id) }
 }
 
 // Solo Finanzas + corte en borrador (el llamador aplica el gating).
 export async function listBatchEligibleRequests(companyId: string | null): Promise<EligibleRequest[]> {
   const { data, error } = await supabase.rpc('list_batch_eligible_requests', { p_company_id: companyId })
   if (error) throw error
-  return asArray<EligibleRequest>(data)
+  return withSinPartidaDescriptions(asArray<EligibleRequest>(data), (request) => request.id)
 }
 
 // Acceso a evidencia extraordinaria: la RPC entrega bucket/path/ttl y Storage firma la URL.

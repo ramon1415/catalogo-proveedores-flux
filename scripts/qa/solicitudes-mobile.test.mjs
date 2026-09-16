@@ -12,12 +12,13 @@ const text = node => typeof node === 'string' ? node : Array.isArray(node) ? nod
 const companies = [{ id: 'opt', name: 'Operadora Tlacatecpan' }, { id: 'sf', name: 'Soporte Fersana' }]
 const requests = companies.flatMap(company => ['submitted', 'paid'].map((status, i) => ({
   id: `${company.id}-${i}`, request_number: `SOL-${company.id}-${i}`, company_id: company.id,
-  proveedor_id: 'provider', cost_center_id: null, budget_category_id: null, budget_month: '2026-09-01',
+  proveedor_id: 'provider', cost_center_id: null, budget_category_id: 'sin', budget_month: '2026-09-01',
+  sin_partida_description: i === 1 ? `Viaje ${company.id}` : null,
   amount_requested: 12345, currency: 'MXN', status, budget_decision: 'aprobable',
   requested_by: i === 0 ? 'me' : 'other', description: 'Compra de prueba', created_at: '2026-09-09',
 })))
 
-async function mount({ group = 'sysadmin', failed = false } = {}) {
+async function mount({ group = 'sysadmin', failed = false, extraRequests = [] } = {}) {
   let activeCompanyId = 'opt'
   const cache = new Map()
   const auth = { group, profile: { id: 'me' }, roles: ['finance'], memberships: companies.map(c => ({ company_id: c.id })) }
@@ -27,9 +28,11 @@ async function mount({ group = 'sysadmin', failed = false } = {}) {
     if (path.endsWith('/lib/company.tsx')) return { useCompany: () => ({ companyId: activeCompanyId }) }
     if (path.endsWith('/ui/Toast.tsx')) return { useToast: () => ({ showToast() {} }) }
     if (path.endsWith('/solicitudes/api.ts')) return {
-      loadCompanies: async () => companies, loadCostCenters: async () => [], loadBudgetCategories: async () => [],
+      loadCompanies: async () => companies, loadCostCenters: async () => [], loadBudgetCategories: async () => [
+        {id:'sin',code:'SIN_PARTIDA',name:'Sin partida'}, {id:'regular',code:'REGULAR',name:'Regular'},
+      ],
       loadProveedores: async () => [{ id: 'provider', alias: 'Proveedor de prueba' }], loadProfiles: async () => [],
-      loadPaymentRequests: async () => { if (failed) throw Error('Error de conexión de prueba'); return requests },
+      loadPaymentRequests: async () => { if (failed) throw Error('Error de conexión de prueba'); return [...requests,...extraRequests] },
       loadFase2Metadata: async () => new Map(), loadExtraordinaryBadges: async () => new Map(),
     }
     if (/\/solicitudes\/(Request|Detail|Edit|ReimbursementEdit)Modal\.tsx$/.test(path)) {
@@ -62,6 +65,23 @@ async function mount({ group = 'sysadmin', failed = false } = {}) {
     close() { act(() => view.unmount()) },
   }
 }
+
+test('one Sin partida filter groups different approved descriptions without crossing companies', async () => {
+  const h = await mount({extraRequests:[{...requests[0],id:'regular-request',request_number:'SOL-REGULAR',budget_category_id:'regular'}]})
+  try {
+    await h.click('Ver todas')
+    for(const company of companies) {
+      await h.company(company.id)
+      await h.change('Filtrar por partida','sin')
+      const table=h.view.root.findByProps({'aria-label':'Solicitudes de pago'})
+      assert.equal(table.findAll(n=>n.type==='td' && n.props['data-label']==='Partida').length,2)
+      assert.match(text(table),new RegExp(`Sin partida \\(Viaje ${company.id}\\)`))
+      assert.doesNotMatch(text(table),/SOL-REGULAR/)
+      assert.doesNotMatch(text(table),new RegExp(`SOL-${company.id==='opt'?'sf':'opt'}-`))
+      assert.equal(h.view.root.findByProps({'aria-label':'Filtrar por partida'}).findAllByType('option').filter(o=>text(o)==='Sin partida').length,1)
+    }
+  } finally {h.close()}
+})
 
 test('the same mobile rows show only the active company and open its request detail', async () => {
   const h = await mount()
