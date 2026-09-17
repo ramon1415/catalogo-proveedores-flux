@@ -16,7 +16,3 @@ verify_jwt = true
 [functions.payroll-obligation-notifications]
 # Worker authenticates the Vault dispatcher secret before claims or delivery.
 verify_jwt = false
-
-[functions.weekly-request-digest]
-# Authenticated with the existing Vault dispatcher secret before any data access.
-verify_jwt = false
