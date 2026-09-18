@@ -703,7 +703,8 @@ export default function DashboardPage() {
                 <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--emerald)' }} />Ejecutado</div>
                 <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--amber)' }} />Pendiente de pago</div>
                 <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--border)' }} />Disponible</div>
-                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Sobregirado</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Excedente</div>
+                <div className={s.chartLegendItem}><span className={s.budgetInfo} aria-hidden="true">ⓘ</span> Sin presupuesto asignado</div>
               </div>
               <label className={s.periodField}>
                 <span>Ver resumen</span>
@@ -771,7 +772,7 @@ export default function DashboardPage() {
                   {budgetSearch && <button type="button" className={s.secondaryBtn} onClick={() => setBudgetSearch('')}>Limpiar búsqueda</button>}
                   <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
                 </div>
-                <p className={s.budgetOmitNote}>Incluye gastos no presupuestales y excepciones autorizadas. Una partida puede estar sobregirada aunque quede saldo global. La búsqueda filtra el desglose; los totales conservan todo el periodo.</p>
+                <p className={s.budgetOmitNote}>Los gastos sin presupuesto asignado también consumen el saldo global. El sobregiro solo se calcula cuando la partida tiene presupuesto. La búsqueda no modifica los totales.</p>
                 <div className={s.budgetList}>
                   {filteredPartidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
                   {filteredPartidas.length === 0 && <div className={s.tableMsg}>No hay partidas que coincidan con «{budgetSearch}».</div>}
@@ -1095,9 +1096,13 @@ function BudgetPartidaRow({ p }: { p: BudgetPartida }) {
   const exW = (p.executed / base) * 100
   const comW = (p.committed / base) * 100
   const availW = p.available > 0 ? (p.available / base) * 100 : 0
-  const rowCls = `${s.budgetRow} ${p.over ? s.alert : p.warn ? s.warn : ''}`
-  const pctCls = `${s.budgetPct} ${p.over ? s.alert : p.warn ? s.warn : ''}`
-  const pctText = Number.isFinite(p.pctUsed) ? pct(p.pctUsed) : 'sin presup.'
+  const hasBudget = p.budgeted > 0
+  const excess = Math.max(0, p.used - p.budgeted)
+  const excessPct = hasBudget ? excess / p.budgeted * 100 : 0
+  const excessLabel = excessPct > 0 && excessPct < 0.1 ? '<0.1%' : pct(excessPct)
+  const rowCls = `${s.budgetRow} ${p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''}`
+  const pctCls = `${s.budgetPct} ${p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''}`
+  const pctText = !hasBudget ? 'Sin presupuesto asignado' : p.over ? `${excessLabel} por encima` : `${pct(p.pctUsed)} utilizado`
   return (
     <div className={rowCls}>
       <div className={s.budgetRowHead}>
@@ -1105,19 +1110,26 @@ function BudgetPartidaRow({ p }: { p: BudgetPartida }) {
           <span className={s.budgetPartida}>{p.name}</span>
           {p.group && p.group !== 'Sin grupo' && <span className={s.budgetGroup}>{p.group}</span>}
         </div>
-        <span className={pctCls}>{p.over ? 'Sobregirado · ' : ''}{pctText}</span>
+        <span className={pctCls}>
+          {(p.over || !hasBudget) && <span aria-hidden="true">{p.over ? '↑' : 'ⓘ'}</span>}
+          {pctText}
+        </span>
       </div>
-      <div className={s.budgetBar} role="img" aria-label={`Usado ${pctText} de ${money(p.budgeted)}`}>
+      {hasBudget && <div className={s.budgetBar} role="img" aria-label={p.over ? `Excedente de ${money(excess)}; ${excessLabel} por encima del presupuesto de ${money(p.budgeted)}` : `Utilizado ${pct(p.pctUsed)} del presupuesto de ${money(p.budgeted)}`}>
         <div className={`${s.budgetSeg} ${s.executed}`} style={{ width: `${exW}%` }} />
         <div className={`${s.budgetSeg} ${s.committed}`} style={{ width: `${comW}%` }} />
         {availW > 0 && <div className={s.budgetSeg} style={{ width: `${availW}%` }} />}
-      </div>
+        {p.over && <>
+          <div className={s.budgetExcess} style={{ width: `${excess / base * 100}%` }} />
+          <span className={s.budgetLimit} style={{ left: `${p.budgeted / base * 100}%` }} />
+        </>}
+      </div>}
       <div className={s.budgetFigures}>
-        <span>Presupuestado<strong>{money(p.budgeted)}</strong></span>
+        <span>Presupuestado<strong>{hasBudget ? money(p.budgeted) : 'Sin asignar'}</strong></span>
         <span>Ejecutado<strong>{money(p.executed)}</strong></span>
         <span>Pendiente de pago<strong>{money(p.committed)}</strong></span>
         <span>Usado<strong>{money(p.used)}</strong></span>
-        <span>Disponible<strong className={p.over ? s.alert : undefined}>{money(p.available)}</strong></span>
+        {hasBudget && <span>{p.over ? 'Excedente' : 'Disponible'}<strong className={p.over ? s.alert : undefined}>{money(p.over ? excess : p.available)}</strong></span>}
       </div>
     </div>
   )

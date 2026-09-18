@@ -381,12 +381,13 @@ export function aggregateBudget(
       name: cat?.name || 'Sin partida',
       group: cat?.category || 'Sin grupo',
       budgeted, committed, executed, used, available, pctUsed,
-      over: available < 0,
+      over: budgeted > 0 && available < 0,
       warn: available >= 0 && Number.isFinite(pctUsed) && pctUsed >= BUDGET_WARN_PCT,
     })
   }
-  // % usado desc (Infinity = sobregiro sin presupuesto primero); desempate por uso.
-  partidas.sort((a, b) => (b.pctUsed - a.pctUsed) || (b.used - a.used))
+  // Prioritize actual overruns. Unallocated spending is informational, not an overrun.
+  const priority = (p: BudgetPartida) => p.over ? 3 : p.warn ? 2 : p.budgeted <= 0 ? 1 : 0
+  partidas.sort((a, b) => priority(b) - priority(a) || (b.used - a.used))
 
   return { partidas, totals, omittedCount, months }
 }
