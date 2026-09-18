@@ -228,9 +228,10 @@ test('menu opens explicitly, stays open for reading, and closes after choosing a
       await act(async () => toggle().props.onClick())
       assert.equal(toggle().props['aria-expanded'], true)
       assert.match(rail().props.className, /expanded/)
-      assert.equal(rail().props.onPointerLeave, undefined, 'moving away does not dismiss names')
-      assert.equal(rail().props.onFocusCapture, undefined, 'focus cannot race with the toggle')
-      assert.equal(rail().props.onPointerEnter, undefined, 'hover cannot override explicit state')
+      await act(async () => rail().props.onPointerEnter({ pointerType: 'touch' }))
+      await act(async () => rail().props.onPointerLeave())
+      await act(async () => rail().props.onFocusCapture({ target: { matches: () => true } }))
+      assert.equal(toggle().props['aria-expanded'], true, 'touch events keep the menu open for reading')
       await act(async () => links().find(a => a.props.href === href).props.onClick())
       assert.equal(toggle().props['aria-expanded'], false, href)
       assert.doesNotMatch(rail().props.className, /expanded/)
@@ -250,5 +251,29 @@ test('menu opens explicitly, stays open for reading, and closes after choosing a
     await act(async () => rail().props.onKeyDown({ key: 'Escape', preventDefault() { prevented = true }, stopPropagation() {} }))
     assert.equal(prevented, true)
     assert.equal(toggle().props['aria-expanded'], false, 'Escape closes the menu')
+  } finally { f.close() }
+})
+
+
+test('desktop opens with mouse or keyboard and collapses without changing mobile interaction', async () => {
+  const f = await mount()
+  try {
+    window.matchMedia = query => ({ matches: query === '(min-width: 761px) and (hover: hover) and (pointer: fine)' })
+    const rail = () => f.renderer.root.findByType('aside')
+    assert.doesNotMatch(rail().props.className, /expanded/)
+    await act(async () => rail().props.onPointerEnter({ pointerType: 'mouse' }))
+    assert.match(rail().props.className, /expanded/)
+    await act(async () => rail().props.onPointerLeave())
+    assert.doesNotMatch(rail().props.className, /expanded/)
+    await act(async () => rail().props.onPointerEnter({ pointerType: 'touch' }))
+    assert.doesNotMatch(rail().props.className, /expanded/, 'touch must not synthesize desktop hover')
+    await act(async () => rail().props.onFocusCapture({ target: { matches: () => true } }))
+    assert.match(rail().props.className, /expanded/, 'keyboard can read section names')
+    const link = rail().findAllByType('a').find(a => a.props.onClick)
+    await act(async () => link.props.onClick())
+    assert.doesNotMatch(rail().props.className, /expanded/)
+    await act(async () => rail().props.onPointerEnter({ pointerType: 'mouse' }))
+    await act(async () => rail().props.onBlurCapture({ currentTarget: { contains: () => false }, relatedTarget: {} }))
+    assert.doesNotMatch(rail().props.className, /expanded/)
   } finally { f.close() }
 })
