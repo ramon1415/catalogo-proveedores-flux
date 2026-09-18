@@ -403,7 +403,8 @@ export default function LayoutsPage() {
         {/* Nota ux2: la tabla principal muestra el resumen operativo. */}
         <div className={s.ux2Note}>La tabla principal muestra el resumen operativo. Los datos bancarios y el detalle pesado viven en Ver lineas.</div>
 
-        <div className={s.tableWrap}>
+        <p className={s.scrollHint}>Desliza dentro de la tabla para ver más filas y columnas ↔ ↕</p>
+        <div className={s.tableWrap} role="region" aria-label="Tabla de Layouts de pago" tabIndex={0}>
           <table className={s.table}>
             <thead>
               <tr>

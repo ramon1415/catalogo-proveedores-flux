@@ -177,9 +177,9 @@ test('equal names do not merge distinct creators and absent creators never becom
 // Resolve the actual CSS cascade at the target widths. A zero-height flex item
 // cannot be detected by React's renderer, so guard the specific collapse here.
 const css = postcss.parse(readFileSync(resolve(root, 'app/src/features/solicitudes/Solicitudes.module.css'), 'utf8'))
-function styles(selector, width) {
+function styles(selector, width, stylesheet = css) {
   const result = {}
-  css.walkRules(rule => {
+  stylesheet.walkRules(rule => {
     if (!rule.selectors.includes(selector)) return
     for (let parent = rule.parent; parent; parent = parent.parent) {
       if (parent.type === 'atrule' && parent.name === 'media') {
@@ -199,10 +199,10 @@ test('phone widths preserve request height even when filters fill the card; deta
     assert.equal(card.flex, '0 0 auto', `${width}: card must size from its content`)
     assert.equal(wrap.flex, '0 0 auto', `${width}: requests must not shrink behind filters`)
     assert.ok(parseFloat(wrap['min-height']) >= 200, `${width}: loading/empty state needs visible space`)
-    assert.equal(wrap['max-height'], 'none', `${width}: rows must not overflow a shorter card`)
-    assert.equal(wrap.overflow, 'visible', `${width}: page scroll must reach every request`)
-    assert.equal(styles('.table', width)['min-width'], '0', `${width}: rows fit phone width`)
-    assert.equal(styles('.table tbody tr', width).display, 'grid')
+    assert.equal(wrap['max-height'], '55dvh', `${width}: table scrolling must stay inside a bounded viewport`)
+    assert.equal(wrap.overflow, 'auto', `${width}: scroll must belong to the table`)
+    assert.equal(styles('.table', width)['min-width'], '820px', `${width}: preserve readable columns inside the scroll region`)
+    assert.notEqual(styles('.table tbody tr', width).display, 'grid')
     assert.ok(parseFloat(styles('.rowActions .smallBtn', width)['min-height']) >= 44)
   }
   for (const width of [761, 900, 1440]) {
@@ -210,4 +210,59 @@ test('phone widths preserve request height even when filters fill the card; deta
     assert.equal(styles('.tableWrap', width).flex, '1')
     assert.equal(styles('.table', width)['min-width'], '820px')
   }
+})
+
+
+test('mobile module tables constrain scrolling while headers and filters fit the available width', () => {
+  for (const name of ['layouts/Layouts', 'proveedores/Proveedores', 'comprobantes/Comprobantes']) {
+    const stylesheet = postcss.parse(readFileSync(resolve(root, `app/src/features/${name}.module.css`), 'utf8'))
+    const receipt = name.startsWith('comprobantes')
+    for (const width of [320, 390, 760]) {
+      const table = styles(receipt ? '.wrap' : '.tableWrap', width, stylesheet)
+      assert.equal(table.overflow, 'auto', `${name} ${width}: both scroll directions stay internal`)
+      assert.equal(table['max-height'], '55dvh')
+      assert.equal(table['min-width'], '0')
+      if (!receipt) {
+        assert.equal(styles('.phead', width, stylesheet)['flex-wrap'], 'wrap')
+        assert.equal(styles('.toolbar', width, stylesheet)['grid-template-columns'], 'minmax(0, 1fr)')
+        assert.equal(styles('.searchBox input', width, stylesheet)['min-width'], '0')
+      }
+    }
+  }
+})
+
+test('draft editing is discoverable for Finance and its shortcut only moves focus, never mutates payment data', async () => {
+  const source = readFileSync(resolve(root, 'approval_batches.js'), 'utf8')
+  const ast = ts.createSourceFile('approval_batches.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const definition = name => ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === name).getText(ast)
+  for (const companyId of ['opt', 'sf']) {
+    for (const isFinance of [true, false]) {
+      for (const status of ['draft', 'closed']) {
+        const state = { isFinance, selectedId: 'cut', mutating: false, detail: { batch: { status, company_id: companyId } } }
+        const actions = new Function('state', 'escapeHtml', `return (${definition('detailActions')})`)(state, String)
+        assert.equal(actions(state.detail.batch, []).includes('Editar solicitudes'), isFinance && status === 'draft')
+        const calls = []
+        const section = { focus: () => calls.push('focus'), scrollIntoView: () => calls.push('scroll') }
+        const dom = { batchDetail: { querySelector: selector => { assert.equal(selector, '#draftRequestsSection'); return section } } }
+        const handler = new Function('state', 'dom', `return (${definition('handleDetailAction')})`)(state, dom)
+        const button = { disabled: false, dataset: { detailAction: 'edit-draft' } }
+        await handler({ target: { closest: selector => selector === '[data-detail-action]' ? button : null } })
+        assert.deepEqual(calls, isFinance && status === 'draft' ? ['focus', 'scroll'] : [])
+        assert.equal(state.mutating, false)
+      }
+    }
+  }
+})
+
+test('embedded cuts can scroll to a draft below the list without using a fixed header offset', () => {
+  const frameSource = readFileSync(resolve(root, 'app/src/pages/LegacyModuleFrame.tsx'), 'utf8')
+  const embeddedCss = postcss.parse(frameSource.match(/const EMBED_STYLES = `([\s\S]*?)`/)[1])
+  const hostCss = postcss.parse(readFileSync(resolve(root, 'app/src/pages/LegacyModuleFrame.module.css'), 'utf8'))
+  for (const width of [240, 320, 390, 720]) {
+    assert.equal(styles('.page:has(.batch-workspace)', width, embeddedCss).overflow, 'auto')
+    assert.equal(styles('.page:has(.batch-workspace)', width, embeddedCss).height, '100dvh')
+  }
+  assert.equal(styles('.host', 390, hostCss).position, 'relative')
+  assert.equal(styles('.host', 390, hostCss).inset, undefined)
+  assert.equal(styles('.page:has(.batch-workspace)', 1200, embeddedCss).overflow, undefined)
 })

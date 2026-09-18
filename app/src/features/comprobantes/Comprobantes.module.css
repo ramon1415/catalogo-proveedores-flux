@@ -259,3 +259,24 @@
   .operationBody { min-height: 0; max-height: none; overscroll-behavior: contain; }
   .closeButton { flex-basis: 44px; width: 44px; min-height: 44px; }
 }
+
+.scrollHint { display: none; }
+@media (max-width: 900px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .split { flex: 0 0 auto; }
+  .detailPane, .detailBody, .wrap { min-width: 0; max-width: 100%; }
+  .wrap { max-height: 55vh; max-height: 55dvh; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .table { min-width: 820px; }
+  .table th { position: sticky; top: 0; background: var(--bg-surface); z-index: 1; }
+  .batchList { max-height: 30vh; max-height: 30dvh; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .batchItem { flex-shrink: 0; overflow-wrap: anywhere; }
+  .batchItemHead > strong { min-width: 0; }
+  .detailBody button { max-width: 100%; white-space: normal; min-height: 44px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 10px; min-height: 86px; }
+  .kpi:first-child { grid-column: 1 / -1; }
+  .scrollHint { display: block; margin: 0; color: var(--text-2); font-size: 11px; }
+  .eventList { max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
+}

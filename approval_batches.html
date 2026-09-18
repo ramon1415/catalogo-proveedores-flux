@@ -114,6 +114,17 @@
 
     @media(max-width:980px){.batch-workspace{grid-template-columns:1fr;grid-template-rows:minmax(170px,28vh) minmax(0,1fr)}.batch-list-panel{border-right:0;border-bottom:1px solid var(--border)}.batch-metrics{grid-template-columns:repeat(2,1fr)}.batch-metric:nth-child(2){border-right:0}.batch-decision-bar{grid-template-columns:1fr}.batch-decision-actions{justify-content:flex-start}.modal-grid{grid-template-columns:1fr}.modal-grid .full{grid-column:auto}}
     @media(max-width:720px){.sidebar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;min-height:auto;padding:10px 12px}.brand{margin:0;padding:4px 4px 9px}.nav{flex-direction:row;overflow-x:auto;padding-top:7px}.nav-section{display:contents}.nav-section-title{display:none}.nav-link{white-space:nowrap;flex:0 0 auto}.user-card{padding:7px;align-self:start}.user-card p,.user-card span{display:none}.content{height:auto;overflow:visible}.page{height:auto;display:block;overflow:visible}.topbar{padding:0 14px}.batch-workspace{display:block;min-height:0;overflow:visible}.batch-list-panel{max-height:none}.batch-list{max-height:260px;overflow:auto}.batch-detail{overflow:visible}.batch-metrics{grid-template-columns:1fr}.batch-metric,.batch-metric:nth-child(2){border-right:0;border-bottom:1px solid var(--border)}.batch-metric:last-child{border-bottom:0}.batch-bulk-bar{position:static;grid-template-columns:1fr 1fr}.batch-select-all,.batch-selection-count{grid-column:1/-1}.batch-bulk-bar button{width:100%}.batch-action-help{text-align:left}.batch-decision-bar{position:static}.batch-decision-actions{display:grid;grid-template-columns:1fr}.batch-decision-actions button{width:100%}.batch-status-banner{flex-direction:column}.batch-table-scroll{max-height:400px}}
+    @media(max-width:720px){
+      .page{padding:14px 12px 24px;min-width:0;box-sizing:border-box}
+      .phead,.batch-section-head,.batch-list-head{flex-wrap:wrap}
+      .phead>div,.batch-detail-head>div,.batch-section{min-width:0;max-width:100%}
+      .batch-toolbar{width:100%}.batch-toolbar button,.batch-detail-actions button{min-height:44px;max-width:100%;white-space:normal}
+      .batch-list-controls .batch-field{min-width:0;width:100%;min-height:44px}
+      .batch-list-item{flex-shrink:0;overflow-wrap:anywhere}
+      .batch-detail{scroll-margin-top:12px;overflow-wrap:anywhere}
+      .batch-table-wrap{min-width:0;max-width:100%;max-height:55vh;max-height:55dvh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+      .batch-section:focus,.batch-detail:focus{outline:2px solid var(--accent);outline-offset:-2px}
+    }
   </style>
 </head>
 <body>
@@ -150,7 +161,7 @@
             <div class="batch-list-controls"><input class="batch-field" id="batchSearch" type="search" placeholder="Buscar corte o empresa"><select class="batch-field" id="batchStatusFilter"><option value="">Todos los estatus</option><option value="draft">Borrador</option><option value="submitted">Enviado</option><option value="approved">Aprobado</option><option value="partially_approved">Con rechazos</option><option value="closed">Liberado para pago</option></select></div>
             <div class="batch-list" id="batchList"><div class="batch-empty">Cargando cortes...</div></div>
           </div>
-          <div class="batch-detail" id="batchDetail"><div class="batch-empty">Selecciona un corte.</div></div>
+          <div class="batch-detail" id="batchDetail" tabindex="-1" aria-label="Detalle del corte"><div class="batch-empty">Selecciona un corte.</div></div>
         </section>
       </section>
     </main>
@@ -202,6 +213,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
   <script src="./config.js?v=20260712-approval-batches"></script>
   <script src="./components.js?v=20260610-toast-indialog"></script>
-  <script src="./approval_batches.js?v=20260903-company-scope"></script>
+  <script src="./approval_batches.js?v=20260903-company-scope-mobile-scroll-20260918"></script>
 </body>
 </html>
