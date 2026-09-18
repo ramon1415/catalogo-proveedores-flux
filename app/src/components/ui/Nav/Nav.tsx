@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
 import s from './Nav.module.css'
@@ -10,6 +11,11 @@ import { NAV_SECTIONS } from './navModel'
 import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
 
 export function Nav() {
+  const [selectionCollapsed, setSelectionCollapsed] = useState(false)
+  const collapseAfterSelection = () => {
+    setSelectionCollapsed(true)
+  }
+  const reopenRail = () => setSelectionCollapsed(false)
   const { profile, session, group, signOut } = useAuth()
   const { isEnabled } = useModules()
   const payrollAccess = usePayrollAccess()
@@ -23,18 +29,18 @@ export function Nav() {
     .filter((section) => section.items.length > 0)
 
   return (
-    <aside className={s.rail}>
+    <aside className={`${s.rail} ${selectionCollapsed ? s.selectionCollapsed : ''}`} onPointerEnter={reopenRail} onFocusCapture={reopenRail}>
       <div className={s.brand}>
         <img className={s.iso} src={isotipo} alt="Flux" />
         <img className={s.full} src={logoFull} alt="Flux" />
       </div>
 
-      <nav className={s.nav}>
+      <nav className={s.nav} aria-label="Secciones de Flux">
         {sections.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => it.vanillaHref ? (
-              <a key={it.key} href={it.vanillaHref} className={s.item}>
+              <a key={it.key} href={it.vanillaHref} className={s.item} onClick={collapseAfterSelection}>
                 {it.icon}
                 <span className={s.txt}>{it.label}</span>
               </a>
@@ -42,6 +48,7 @@ export function Nav() {
               <NavLink
                 key={it.key}
                 to={it.path}
+                onClick={collapseAfterSelection}
                 className={({ isActive }) => `${s.item} ${isActive ? s.active : ''}`}
               >
                 {it.icon}
