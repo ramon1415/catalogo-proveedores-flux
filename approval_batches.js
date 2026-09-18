@@ -94,7 +94,7 @@ function bindEvents() {
   })
   dom.batchList?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-batch-id]")
-    if (button) openBatch(button.dataset.batchId)
+    if (button) openBatch(button.dataset.batchId, { reveal: true })
   })
   dom.batchDetail?.addEventListener("click", handleDetailAction)
   dom.batchDetail?.addEventListener("change", handleDetailChange)
@@ -423,7 +423,7 @@ function renderBatchList() {
   `).join("")
 }
 
-async function openBatch(batchId) {
+async function openBatch(batchId, { reveal = false } = {}) {
   if (state.selectedId !== batchId) state.selectedEligibleIds.clear()
   state.selectedId = batchId
   renderBatchList()
@@ -445,6 +445,10 @@ async function openBatch(batchId) {
       state.selectedEligibleIds = new Set(Array.from(state.selectedEligibleIds).filter((id) => eligibleIds.has(id)))
     }
     renderDetail()
+    if (reveal && state.selectedId === batchId && window.matchMedia("(max-width: 980px)").matches) {
+      dom.batchDetail.focus({ preventScroll: true })
+      dom.batchDetail.scrollIntoView({ block: "start", behavior: "auto" })
+    }
   } catch (error) {
     renderEmptyDetail(friendlyError(error))
     showToast("No se pudo abrir el corte", friendlyError(error), "error")
@@ -482,12 +486,16 @@ function detailActions(batch, items) {
     `<button class="secondary-btn" type="button" data-detail-action="pdf">PDF</button>`,
   ]
   if (state.isFinance && batch.status === "draft") actions.push(`<button class="primary-btn" type="button" data-detail-action="submit" aria-describedby="sendBatchHelp" title="${items.length ? `Enviar ${items.length} solicitudes a ${escapeHtml(batch.director_name || "Direccion")}` : "Agrega solicitudes antes de enviar"}" ${items.length && !state.addingProgress ? "" : "disabled"}>Enviar ${items.length} a Direccion</button><span class="batch-action-help" id="sendBatchHelp">${items.length ? `Se enviaran ${items.length} solicitudes a ${escapeHtml(batch.director_name || "Direccion")}.` : "Agrega al menos una solicitud para habilitar el envio."}</span>`)
+  if (state.isFinance && batch.status === "draft") actions.unshift(`<button class="secondary-btn" type="button" data-detail-action="edit-draft">Editar solicitudes</button>`)
   const hasApprovedItems = items.some((item) => item.director_status === "approved")
   if (state.isFinance && hasApprovedItems && ["approved", "partially_approved"].includes(batch.status)) actions.push(`<button class="primary-btn" type="button" data-detail-action="close">Liberar para pago</button>`)
   return actions.join("")
 }
 
 function renderStatusBanner(batch, items) {
+  if (batch.status === "draft") {
+    return `<div class="batch-status-banner info"><div><strong>Corte en borrador</strong><span>${state.isFinance ? "Puedes agregar o quitar solicitudes antes de enviarlo a Dirección. Usa Editar solicitudes para ir a las disponibles." : "Finanzas está preparando las solicitudes de este corte."}</span></div></div>`
+  }
   if (batch.status === "submitted") {
     return `<div class="batch-status-banner info"><div><strong>Corte enviado a Direccion</strong><span>Pendiente de decision de ${escapeHtml(batch.director_name || "la persona directora")}.</span></div><span>${escapeHtml(formatDateTime(batch.submitted_at))}</span></div>`
   }
@@ -547,7 +555,7 @@ function renderItemReviewContext(item, canDecide) {
 function renderEligibleSection() {
   const rows = state.eligible
   const selected = rows.filter((item) => state.selectedEligibleIds.has(item.id)).length
-  return `<div class="batch-section"><div class="batch-section-head"><h3>Solicitudes elegibles</h3><span class="batch-list-meta">Enviadas con presupuesto disponible y aun no ejecutadas</span></div>${rows.length ? `<div class="batch-bulk-bar" data-eligible-toolbar>
+  return `<div class="batch-section" id="draftRequestsSection" tabindex="-1"><div class="batch-section-head"><h3>Solicitudes elegibles</h3><span class="batch-list-meta">Enviadas con presupuesto disponible y aun no ejecutadas</span></div>${rows.length ? `<div class="batch-bulk-bar" data-eligible-toolbar>
     <label class="batch-select-all"><input class="batch-check" type="checkbox" data-select-all-eligible aria-label="Seleccionar todas las solicitudes elegibles"> Seleccionar todas</label>
     <span class="batch-selection-count" data-selected-count aria-live="polite">${selected} de ${rows.length} seleccionadas</span>
     <button class="secondary-btn" type="button" data-detail-action="clear-selection" ${selected ? "" : "disabled"}>Limpiar seleccion</button>
@@ -679,6 +687,14 @@ async function handleDetailAction(event) {
   }
   const button = event.target.closest("[data-detail-action]")
   if (!button || button.disabled || !state.selectedId || state.mutating) return
+  if (button.dataset.detailAction === "edit-draft") {
+    if (state.isFinance && state.detail?.batch?.status === "draft") {
+      const section = dom.batchDetail.querySelector("#draftRequestsSection")
+      section?.focus({ preventScroll: true })
+      section?.scrollIntoView({ block: "start", behavior: "auto" })
+    }
+    return
+  }
   if (button.dataset.detailAction === "clear-selection") {
     state.selectedEligibleIds.clear()
     syncEligibleSelectionUi()

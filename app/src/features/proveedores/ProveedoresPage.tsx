@@ -127,7 +127,8 @@ export default function ProveedoresPage() {
           </select>
         </div>
 
-        <div className={s.tableWrap}>
+        <p className={s.scrollHint}>Desliza dentro de la tabla para ver más filas y columnas ↔ ↕</p>
+        <div className={s.tableWrap} role="region" aria-label="Tabla de Proveedores" tabIndex={0}>
           <table className={s.table}>
             <thead>
               <tr>

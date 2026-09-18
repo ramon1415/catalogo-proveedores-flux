@@ -277,7 +277,8 @@ export default function SolicitudesPage() {
 
         {status === 'error' && <div className={`${s.messageBox} ${s.error}`}>{errorMsg}</div>}
 
-        <div className={s.tableWrap}>
+        <p className={s.scrollHint}>Desliza dentro de la tabla para ver más filas y columnas ↔ ↕</p>
+        <div className={s.tableWrap} role="region" aria-label="Tabla de Solicitudes" tabIndex={0}>
           <table className={s.table} aria-label="Solicitudes de pago">
             <thead>
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
