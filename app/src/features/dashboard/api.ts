@@ -78,31 +78,21 @@ export async function fetchHistoricalAll(companyId: string): Promise<HistoricalA
   )
 }
 
-// ── Presupuesto: disponible vs usado (vista public.budget_availability) ─────────
-// Lee la vista (RLS por membresía + security_invoker) acotada a la empresa activa
-// y al año seleccionado, y trae el catálogo de partidas para los nombres. El filtro
-// por company_id es obligatorio igual que en el histórico: RLS acota por membresía
-// (varias empresas), no por empresa activa. La agregación por partida/periodo se
-// hace en cliente (ver aggregateBudget) para reagrupar sin refetch al cambiar mes.
+// Reporte global de solo lectura: incluye gasto no presupuestal, excepciones
+// pagadas/aprobadas e IMSS/ISN. El RPC valida rol y acceso a la empresa en servidor.
 export async function fetchBudgetAvailability(
   companyId: string,
   year: number,
 ): Promise<{ rows: BudgetAvailabilityRow[]; categories: Map<string, BudgetCategoryMeta> }> {
-  const [rows, catRes] = await Promise.all([
-    fetchAllRows<BudgetAvailabilityRow>(() =>
-      supabase
-        .from('budget_availability')
-        .select('budget_category_id,budget_month,budgeted,committed,executed,available')
-        .eq('company_id', companyId)
-        .gte('budget_month', `${year}-01-01`)
-        .lt('budget_month', `${year + 1}-01-01`)
-        .order('budget_month')
-        .order('cost_center_id')
-        .order('budget_category_id'),
-    ),
+  const [report, catRes] = await Promise.all([
+    supabase.rpc('dashboard_global_budget_report', { p_company_id: companyId, p_year: year }),
     supabase.from('budget_categories').select('id,name,category').limit(2000),
   ])
+  if (report.error) throw report.error
   if (catRes.error) throw catRes.error
+  const rows = (report.data ?? []) as BudgetAvailabilityRow[]
+  // Never present an understated consumption or an inflated remaining balance.
+  if (rows.some(row => Number(row.unconverted_count) > 0)) throw new Error('Consumo incompleto: falta conversión a MXN.')
   const categories = new Map<string, BudgetCategoryMeta>(
     ((catRes.data ?? []) as BudgetCategoryMeta[]).map((c) => [c.id, c]),
   )

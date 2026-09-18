@@ -143,8 +143,8 @@ export type DashboardActivity = {
   incidents: DashboardIncident[]
 }
 
-// ── Sección "Presupuesto" (vista public.budget_availability) ────────────────────
-// La vista incluye lo pagado en committed; executed es un subconjunto.
+// ── Sección "Presupuesto" (RPC dashboard_global_budget_report) ─────────────────
+// El reporte incluye lo pagado en committed; executed es un subconjunto.
 // Usado = committed; disponible = budgeted − committed.
 export type BudgetAvailabilityRow = {
   budget_category_id: string | null
@@ -153,6 +153,10 @@ export type BudgetAvailabilityRow = {
   committed: number | null
   executed: number | null
   available: number | null
+  paid_amount?: number | null // importe total registrado como pagado, con impuestos
+  non_budget_used?: number | null // subconjunto del consumo, nunca se vuelve a sumar
+  payroll_used?: number | null // nómina, también un subconjunto del consumo
+  unconverted_count?: number | null
 }
 
 export type BudgetCategoryMeta = { id: string; name: string | null; category: string | null }

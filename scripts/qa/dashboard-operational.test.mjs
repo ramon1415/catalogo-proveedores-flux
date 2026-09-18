@@ -50,6 +50,17 @@ test('budget uses committed including paid once and separates pending payment', 
   assert.equal(logic.aggregateBudget([budgetRow({ available: 299.99 })], categories, month).totals.available, 299.99)
 })
 
+test('coverage totals are subsets, and failed or incomplete global reports never fall back to the old understated budget', async () => {
+  const rows = [budgetRow({ paid_amount: 116, non_budget_used: 100, payroll_used: 75 }), budgetRow({ budget_month: '2026-10-01', paid_amount: 99 })]
+  assert.deepEqual(logic.aggregateBudgetCoverage(rows, month), { paid: 116, nonBudget: 100, payroll: 75 })
+  assert.equal(logic.aggregateBudget(rows, categories, month).totals.used, 700)
+  for (const result of [{ data: null, error: new Error('unavailable') }, { data: [budgetRow({ unconverted_count: 1 })], error: null }]) {
+    const supabase = { rpc: async () => result, from: () => ({ select: () => ({ limit: async () => ({ data: [], error: null }) }) }) }
+    const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, '../../lib/tenantConfig': tenantConfig, './logic': logic })
+    await assert.rejects(() => api.fetchBudgetAvailability('operadora', 2026))
+  }
+})
+
 test('budget aggregates centers with cent precision and filters months; unbudgeted use stays visible', () => {
   const rows = [
     budgetRow({ budgeted: 100.10, committed: 50.05, executed: 30.02, available: 50.05 }),
@@ -126,7 +137,11 @@ test('both operational API queries isolate company/year across pages and retriev
   for (const table of ['payment_requests', 'budget_availability']) {
     data[table].push({ ...data[table][0], company_id: 'fersana' }, { ...data[table][0], budget_month: '2025-09-01' }, { ...data[table][0], budget_month: '2027-01-01' })
   }
-  const supabase = { from(table) {
+  const supabase = { async rpc(name, args) {
+    assert.equal(name, 'dashboard_global_budget_report')
+    assert.deepEqual(args, { p_company_id: 'operadora', p_year: 2026 })
+    return { data: data.budget_availability.filter(row => row.company_id === args.p_company_id && row.budget_month.startsWith(String(args.p_year))), error: null }
+  }, from(table) {
     const call = { table, filters: [], orders: [] }
     calls.push(call)
     const builder = {
@@ -324,6 +339,19 @@ test('actual page renders canonical budget split and neutral fiscal labels', asy
   } finally { p.unmount() }
 })
 
+test('global overrun is visible in headline, alerts and details while gross paid remains separate', async () => {
+  const p = await mountPage({ fetchBudget: async () => ({ rows: [budgetRow({ budgeted: 1000, committed: 1200, executed: 1000, available: -200, paid_amount: 1160, non_budget_used: 400, payroll_used: 300 })], categories }) })
+  try {
+    const page = text(p.renderer.toJSON())
+    assert.match(page, /Consumo global del presupuesto\$1,200/)
+    assert.match(page, /Saldo restante: -\$200/)
+    assert.match(page, /\$200de excedente sobre el presupuesto global/)
+    assert.match(p.section('sec-budget'), /Total registrado como pagado\$1,160/)
+    assert.match(p.section('sec-budget'), /Comprometido por pagar\$200/)
+    assert.doesNotMatch(page, /Sin alertas destacadas/)
+  } finally { p.unmount() }
+})
+
 test('page refresh reloads both sources; month/year controls stay aligned even without a budget', async () => {
   const p = await mountPage({ fetchBudget: async () => ({ rows: [], categories }), fetchRequests: async () => [requestRow({ budget_month: '2025-03-01' })] })
   try {
@@ -511,7 +539,7 @@ test('page partidas search handles accents, group names and no matches without c
     assert.match(section, /Administración/)
     assert.doesNotMatch(section, /Servicios QA/)
     assert.match(section, /1 de 2 partidas/)
-    assert.match(section, /Presupuestado\$2,000Usado\$1,400Disponible\$600/)
+    assert.match(section, /Presupuestado\$2,000Consumo global\$1,400Saldo restante\$600/)
     await act(async () => search.props.onChange({ target: { value: 'operacion servicios' } }))
     section = p.section('sec-budget')
     assert.match(section, /Servicios QA/)
@@ -530,14 +558,14 @@ test('top budget and chart use the same canonical amounts as detail, never the g
   try {
     assert.equal(p.calls.some(call => call[0] === 'payload'), false)
     const top = text(p.renderer.root.findByProps({ 'aria-label': 'Indicadores operativos' }))
-    assert.match(top, /Presupuesto usado\$700.*de \$1,000 presupuestado/)
+    assert.match(top, /Consumo global del presupuesto\$700.*de \$1,000 presupuestado/)
     assert.doesNotMatch(top, /8,888|bloqueos de cierre/)
     assert.doesNotMatch(text(p.renderer.toJSON()), /Cerrar periodo|Checklist de cierre/)
     const chart = p.renderer.root.findByType('figure').props['data-chart']
     assert.equal(chart.rightTitle, 'Ingresos')
     assert.deepEqual(chart.series.map(series => series.kind), ['bar', 'bar', 'line', 'line'])
     assert.deepEqual(chart.series.slice(0, 2).map(series => series.data.at(-1)), [1000, 700])
-    assert.match(p.section('sec-budget'), /Usado\$700/)
+    assert.match(p.section('sec-budget'), /Consumo global\$700/)
   } finally { p.unmount() }
 })
 
@@ -586,7 +614,7 @@ test('Fersana omits every incident surface and falls back to cash when switching
     // Even unexpected incident rows cannot surface in a company where they do not apply.
     await act(async () => waiting.resolve(activity))
     assertNoIncidents()
-    assert.match(text(cards()[0]), /Presupuesto usado\$596/)
+    assert.match(text(cards()[0]), /Consumo global del presupuesto\$596/)
     const chart = p.renderer.root.findByType('figure').props['data-chart']
     assert.equal(chart.presentation, 'operational')
     assert.deepEqual(chart.series.map(row => row.kind), ['bar', 'bar', 'line', 'line'])
