@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:pago20="http://www.sat.gob.mx/Pagos20" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd http://www.sat.gob.mx/Pagos20 http://www.sat.gob.mx/sitio_internet/cfd/Pagos/Pagos20.xsd"
+  Version="4.0" Serie="P" Folio="77" Fecha="2026-06-28T12:00:00"
+  Moneda="XXX" SubTotal="0" Total="0" TipoDeComprobante="P"
+  Exportacion="01" LugarExpedicion="80000"
+  Sello="SELLOFAKE==" NoCertificado="30001000000400002434" Certificado="CERTFAKE==">
+  <cfdi:CfdiRelacionados TipoRelacion="04">
+    <cfdi:CfdiRelacionado UUID="DDDD6666-EEEE-7777-FFFF-888899990000"/>
+  </cfdi:CfdiRelacionados>
+  <cfdi:Emisor Rfc="CGS851125HB9" Nombre="COPPEL SA DE CV" RegimenFiscal="601"/>
+  <cfdi:Receptor Rfc="OPT150312QV1" Nombre="OPERADORA DE PERSONAL TECNICO" DomicilioFiscalReceptor="06600" RegimenFiscalReceptor="601" UsoCFDI="CP01"/>
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="84111506" Cantidad="1" ClaveUnidad="ACT" Descripcion="Pago" ValorUnitario="0" Importe="0" ObjetoImp="01"/>
+  </cfdi:Conceptos>
+  <cfdi:Complemento>
+    <pago20:Pagos Version="2.0">
+      <pago20:Totales MontoTotalPagos="62391.01"/>
+      <pago20:Pago FechaPago="2026-06-27T00:00:00" FormaDePagoP="03" MonedaP="MXN" TipoCambioP="1" Monto="62391.01">
+        <pago20:DoctoRelacionado IdDocumento="DDDD6666-EEEE-7777-FFFF-888899990000"
+          Serie="F" Folio="390122" MonedaDR="MXN" EquivalenciaDR="1"
+          NumParcialidad="1" ImpSaldoAnt="62391.01" ImpPagado="62391.01" ImpSaldoInsoluto="0.00" ObjetoImpDR="01"/>
+      </pago20:Pago>
+    </pago20:Pagos>
+    <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital"
+      Version="1.1" UUID="12121212-3434-5656-7878-909090909090"
+      FechaTimbrado="2026-06-28T12:01:00" RfcProvCertif="SAT970701NN3"
+      SelloCFD="SELLOFAKE==" NoCertificadoSAT="30001000000400002495" SelloSAT="SELLOSATFAKE=="/>
+  </cfdi:Complemento>
+</cfdi:Comprobante>
