@@ -16,7 +16,7 @@ import {
   filterMembers, incomeStatusBadge,
   money, whole, pct, num,
   aggregateHistYear, aggregateHistAll, histKpisTotals, buildHistMatrix, fmtCell, fmtMoney0, yearColor,
-  aggregateBudget, budgetMonthLabel, BUDGET_ALL_PERIOD, filterBudgetPartidas, aggregateDashboardActivity,
+  aggregateBudget, aggregateBudgetCoverage, budgetMonthLabel, BUDGET_ALL_PERIOD, filterBudgetPartidas, aggregateDashboardActivity,
   aggregateRequests, aggregateTaxes, requestAmountLabel,
 } from './logic'
 import type {
@@ -65,7 +65,7 @@ type HistKpi = { ingresos: number; egresos: number; neto: number; promedio: numb
 
 const OPERATIVE_LEGEND: LegendItem[] = [
   { color: 'var(--op-budget-stroke)', label: 'Presupuesto', kind: 'bar', light: true },
-  { color: 'var(--op-used)', label: 'Usado', kind: 'bar' },
+  { color: 'var(--op-used)', label: 'Consumo global', kind: 'bar' },
   { color: 'var(--op-expected)', label: 'Ingreso esperado', kind: 'line', dashed: true },
   { color: 'var(--op-collected)', label: 'Ingreso cobrado', kind: 'line' },
 ]
@@ -332,6 +332,10 @@ export default function DashboardPage() {
     () => (budgetData ? aggregateBudget(budgetData.rows, budgetData.categories, budgetPeriod) : null),
     [budgetData, budgetPeriod],
   )
+  const budgetCoverage = useMemo(
+    () => budgetData ? aggregateBudgetCoverage(budgetData.rows, budgetPeriod) : null,
+    [budgetData, budgetPeriod],
+  )
   const periodLabel = budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${reportYear}` : budgetMonthLabel(budgetPeriod)
   const monthLabel = budgetMonthLabel(`${periodKey}-01`)
   const filteredPartidas = useMemo(() => filterBudgetPartidas(budgetAgg?.partidas ?? [], budgetSearch), [budgetAgg, budgetSearch])
@@ -350,7 +354,7 @@ export default function DashboardPage() {
       incomeIncomplete: incomes.some(row => !row || row.incomeExcluded > 0),
       series: [
         { kind: 'bar', label: 'Presupuesto', data: totals.map(row => row.budgeted), color: 'var(--op-budget-stroke)', fill: 'var(--op-budget-fill)' },
-        { kind: 'bar', label: 'Usado', data: totals.map(row => row.used), color: 'var(--op-used)', fill: 'var(--op-used-fill)' },
+        { kind: 'bar', label: 'Consumo global', data: totals.map(row => row.used), color: 'var(--op-used)', fill: 'var(--op-used-fill)' },
         { kind: 'line', label: 'Ingreso esperado', data: expected, color: 'var(--op-expected)', dashed: true, axis: 'y2' },
         { kind: 'line', label: 'Ingreso cobrado', data: collected, color: 'var(--op-collected)', axis: 'y2' },
       ],
@@ -381,6 +385,10 @@ export default function DashboardPage() {
   ]
   const alerts = useMemo<AlertItem[]>(() => {
     const out: AlertItem[] = []
+    if (budgetAgg && budgetAgg.totals.available < 0) out.push({
+      tone: 'danger', value: money(-budgetAgg.totals.available),
+      label: 'de excedente sobre el presupuesto global', target: 'sec-budget',
+    })
     if (overspentCount > 0) out.push({
       tone: 'danger', value: whole(overspentCount),
       label: `partida${overspentCount === 1 ? '' : 's'} sobregirada${overspentCount === 1 ? '' : 's'}`, target: 'sec-budget',
@@ -402,7 +410,7 @@ export default function DashboardPage() {
     if (showIncidents && activityAgg?.incidents.pending) out.push({ tone: 'warning', value: whole(activityAgg.incidents.pending), label: 'incidencias pendientes', target: 'sec-activity' })
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overspentCount, requestsAgg, taxesAgg, activityAgg, showIncidents])
+  }, [budgetAgg, overspentCount, requestsAgg, taxesAgg, activityAgg, showIncidents])
 
   const cash = activityAgg?.cash
   const inc = activityAgg?.incidents
@@ -531,11 +539,14 @@ export default function DashboardPage() {
       {!inHistView && (
         <div className={`${s.kpiGrid} ${showIncidents ? '' : s.kpiGridThree}`} aria-label="Indicadores operativos">
           <div className={`${s.kpiCard} ${s.accent}`}>
-            <div className={s.kpiLabel}>Presupuesto usado</div>
+            <div className={s.kpiLabel}>Consumo global del presupuesto</div>
             <div className={s.kpiValue}>{budgetAgg ? money(budgetAgg.totals.used) : '—'}</div>
             {budgetAgg && <div className={s.kpiProgress}><div className={s.kpiProgressBar} style={{ width: `${Math.max(0, Math.min(100, budgetAgg.totals.pctUsed))}%` }} /></div>}
             <div className={s.kpiSub}>{budgetAgg ? `de ${money(budgetAgg.totals.budgeted)} presupuestado · ${Number.isFinite(budgetAgg.totals.pctUsed) ? pct(budgetAgg.totals.pctUsed) : 'Sin presupuesto'}` : budgetEmpty}</div>
-            <div className={s.kpiSub}>{periodLabel} · Pagado + pendiente presupuestal</div>
+            <div className={s.kpiSub} style={budgetAgg && budgetAgg.totals.available < 0 ? { color: 'var(--ruby)' } : undefined}>
+              {budgetAgg ? `Saldo restante: ${money(budgetAgg.totals.available)}` : '—'}
+            </div>
+            <div className={s.kpiSub}>{periodLabel} · Incluye nómina, Sin partida y excepciones</div>
           </div>
           <div className={`${s.kpiCard} ${s.success}`}>
             <div className={s.kpiLabel}>Ingreso cobrado en el mes</div>
@@ -686,7 +697,7 @@ export default function DashboardPage() {
           <section id="sec-budget" className={s.tableCard}>
             <div className={s.panelHeader} style={{ flexWrap: 'wrap' }}>
               <div>
-                <h2>Presupuesto — disponible vs usado por partida</h2>
+                <h2>Presupuesto global y consumo por partida</h2>
                 <div className={s.panelSub}>
                   {(companyName || 'Empresa activa')} · {periodLabel} · MXN
                 </div>
@@ -710,14 +721,33 @@ export default function DashboardPage() {
               <div className={s.miniGrid}>
                 {([
                   ['Presupuestado', money(budgetAgg.totals.budgeted)],
-                  ['Usado', money(budgetAgg.totals.used)],
-                  ['Disponible', money(budgetAgg.totals.available)],
+                  ['Consumo global', money(budgetAgg.totals.used)],
+                  ['Saldo restante', money(budgetAgg.totals.available)],
                   ['% usado', Number.isFinite(budgetAgg.totals.pctUsed) ? pct(budgetAgg.totals.pctUsed) : 'Sin presupuesto'],
                 ] as [string, string][]).map(([l, v]) => (
                   <div key={l} className={s.miniCard}><span>{l}</span><strong>{v}</strong></div>
                 ))}
               </div>
             )}
+
+            {budgetAgg && budgetCoverage && !budgetLoading && !budgetError && <>
+              <div className={s.miniGrid} aria-label="Desglose del consumo global">
+                {([
+                  ['Total registrado como pagado', money(budgetCoverage.paid)],
+                  ['Pagado · base presupuestal', money(budgetAgg.totals.executed)],
+                  ['Comprometido por pagar', money(budgetAgg.totals.committed)],
+                  ['Del consumo: no presupuestal', money(budgetCoverage.nonBudget)],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label} className={s.miniCard}><span>{label}</span><strong>{value}</strong></div>
+                ))}
+              </div>
+              <p className={s.budgetOmitNote}>
+                Consumo global = pagado + comprometido por pagar, usando el subtotal cuando está registrado.
+                El total pagado incluye impuestos y corresponde al periodo presupuestal seleccionado.
+                Nómina incluida en el consumo: {money(budgetCoverage.payroll)}. Nómina y no presupuestal son desgloses del mismo consumo.
+                Las excepciones autorizadas aumentan el gasto, no el presupuesto.
+              </p>
+            </>}
 
             {budgetLoading && (
               <div className={s.budgetList}>
@@ -744,7 +774,7 @@ export default function DashboardPage() {
                   {budgetSearch && <button type="button" className={s.secondaryBtn} onClick={() => setBudgetSearch('')}>Limpiar búsqueda</button>}
                   <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
                 </div>
-                <p className={s.budgetOmitNote}>Usado = pagado + pendiente, con la base registrada en presupuesto. Excluye solicitudes no presupuestales. La búsqueda filtra el desglose; los totales conservan todo el periodo.</p>
+                <p className={s.budgetOmitNote}>Incluye gastos no presupuestales y excepciones autorizadas. Una partida puede estar sobregirada aunque quede saldo global. La búsqueda filtra el desglose; los totales conservan todo el periodo.</p>
                 <div className={s.budgetList}>
                   {filteredPartidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
                   {filteredPartidas.length === 0 && <div className={s.tableMsg}>No hay partidas que coincidan con «{budgetSearch}».</div>}

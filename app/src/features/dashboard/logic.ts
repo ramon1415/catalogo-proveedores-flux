@@ -391,6 +391,16 @@ export function aggregateBudget(
   return { partidas, totals, omittedCount, months }
 }
 
+// These are breakdowns of the global report, not additional amounts to add to it.
+export function aggregateBudgetCoverage(rows: BudgetAvailabilityRow[], period: string) {
+  const scoped = period === BUDGET_ALL_PERIOD ? rows : rows.filter(row => row.budget_month === period)
+  return {
+    paid: r2(scoped.reduce((sum, row) => sum + num(row.paid_amount), 0)),
+    nonBudget: r2(scoped.reduce((sum, row) => sum + num(row.non_budget_used), 0)),
+    payroll: r2(scoped.reduce((sum, row) => sum + num(row.payroll_used), 0)),
+  }
+}
+
 // El buscador filtra el detalle, no altera los indicadores generales del periodo.
 export function filterBudgetPartidas(partidas: BudgetPartida[], query: string): BudgetPartida[] {
   const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
