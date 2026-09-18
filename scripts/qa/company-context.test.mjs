@@ -28,7 +28,7 @@ async function mount({ single = false, installed = false, theme } = {}) {
     const { outputText } = ts.transpileModule(readFileSync(path, 'utf8'), { fileName: path, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } })
     const module = { exports: {} }; cache.set(path, module.exports)
     new Function('require', 'module', 'exports', outputText)(name => {
-      if (name === 'react-router-dom') return { useLocation: () => ({ pathname: '/nomina' }), Outlet: () => React.createElement('main', null, 'Solicitudes'), NavLink: p => React.createElement('a', { href: p.to }, p.children) }
+      if (name === 'react-router-dom') return { useLocation: () => ({ pathname: '/nomina' }), Outlet: () => React.createElement('main', null, 'Solicitudes'), NavLink: p => React.createElement('a', { href: p.to, onClick: p.onClick }, p.children) }
       if (name.startsWith('react')) return require(name)
       let dep = resolve(dirname(path), name)
       if (!existsSync(dep)) dep = ['.tsx','.ts'].map(ext => dep+ext).find(existsSync)
@@ -211,4 +211,27 @@ test('embedded modal company follows its own selector, refreshes on open/change,
     if (view) act(() => view.unmount())
     globalThis.MutationObserver = previousObserver
   }
+})
+
+
+test('selecting any section collapses the rail immediately; pointer re-entry and keyboard focus reopen it', async () => {
+  const f = await mount()
+  try {
+    const rail = () => f.renderer.root.findByType('aside')
+    const links = () => rail().findAllByType('a').filter(a => a.props.onClick)
+    assert.ok(links().length > 5, 'exercise real module links, not a standalone mock')
+    const targets = links().map(a => a.props.href)
+    for (const href of targets) {
+      await act(async () => rail().props.onPointerEnter())
+      assert.doesNotMatch(rail().props.className, /selectionCollapsed/)
+      await act(async () => links().find(a => a.props.href === href).props.onClick())
+      assert.match(rail().props.className, /selectionCollapsed/, href)
+      assert.deepEqual(links().map(a => a.props.href), targets, 'destinations and module permissions stay intact')
+      // Re-selecting the active route must also close the menu, without a route change.
+      await act(async () => rail().props.onFocusCapture())
+      assert.doesNotMatch(rail().props.className, /selectionCollapsed/)
+      await act(async () => links().find(a => a.props.href === href).props.onClick())
+      assert.match(rail().props.className, /selectionCollapsed/)
+    }
+  } finally { f.close() }
 })
