@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import s from './Nav.module.css'
 import isotipo from '../../../assets/favicon-512.png'
@@ -12,6 +12,12 @@ import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
 
 export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobile?: boolean; open?: boolean; onClose?: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const [selectionCollapsed, setSelectionCollapsed] = useState(false)
+  const collapseAfterSelection = () => {
+    setSelectionCollapsed(true)
+    onClose()
+  }
+  const reopenRail = () => setSelectionCollapsed(false)
   const { profile, session, group, signOut } = useAuth()
   const { isEnabled } = useModules()
   const payrollAccess = usePayrollAccess()
@@ -44,7 +50,7 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => it.vanillaHref ? (
-              <a key={it.key} href={it.vanillaHref} className={s.item} onClick={onClose}>
+              <a key={it.key} href={it.vanillaHref} className={s.item} onClick={collapseAfterSelection}>
                 {it.icon}
                 <span className={s.txt}>{it.label}</span>
               </a>
@@ -52,7 +58,7 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
               <NavLink
                 key={it.key}
                 to={it.path}
-                onClick={onClose}
+                onClick={collapseAfterSelection}
                 className={({ isActive }) => `${s.item} ${isActive ? s.active : ''}`}
               >
                 {it.icon}
@@ -81,5 +87,5 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
       onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
       {content}
     </dialog>
-  ) : <aside id="flux-navigation" className={s.rail}>{content}</aside>
+  ) : <aside id="flux-navigation" className={`${s.rail} ${selectionCollapsed ? s.selectionCollapsed : ''}`} onPointerEnter={reopenRail} onFocusCapture={reopenRail}>{content}</aside>
 }
