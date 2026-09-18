@@ -214,24 +214,41 @@ test('embedded modal company follows its own selector, refreshes on open/change,
 })
 
 
-test('selecting any section collapses the rail immediately; pointer re-entry and keyboard focus reopen it', async () => {
+test('menu opens explicitly, stays open for reading, and closes after choosing any section', async () => {
   const f = await mount()
   try {
     const rail = () => f.renderer.root.findByType('aside')
+    const toggle = () => rail().findAllByType('button').find(b => b.props['aria-controls'] === 'flux-menu-sections')
     const links = () => rail().findAllByType('a').filter(a => a.props.onClick)
-    assert.ok(links().length > 5, 'exercise real module links, not a standalone mock')
+    assert.equal(toggle().props['aria-expanded'], false)
+    assert.equal(text(toggle()), 'Menú')
     const targets = links().map(a => a.props.href)
+    assert.ok(targets.length > 5)
     for (const href of targets) {
-      await act(async () => rail().props.onPointerEnter())
-      assert.doesNotMatch(rail().props.className, /selectionCollapsed/)
+      await act(async () => toggle().props.onClick())
+      assert.equal(toggle().props['aria-expanded'], true)
+      assert.match(rail().props.className, /expanded/)
+      assert.equal(rail().props.onPointerLeave, undefined, 'moving away does not dismiss names')
+      assert.equal(rail().props.onFocusCapture, undefined, 'focus cannot race with the toggle')
+      assert.equal(rail().props.onPointerEnter, undefined, 'hover cannot override explicit state')
       await act(async () => links().find(a => a.props.href === href).props.onClick())
-      assert.match(rail().props.className, /selectionCollapsed/, href)
-      assert.deepEqual(links().map(a => a.props.href), targets, 'destinations and module permissions stay intact')
-      // Re-selecting the active route must also close the menu, without a route change.
-      await act(async () => rail().props.onFocusCapture())
-      assert.doesNotMatch(rail().props.className, /selectionCollapsed/)
+      assert.equal(toggle().props['aria-expanded'], false, href)
+      assert.doesNotMatch(rail().props.className, /expanded/)
+      assert.deepEqual(links().map(a => a.props.href), targets)
+      await act(async () => toggle().props.onClick())
       await act(async () => links().find(a => a.props.href === href).props.onClick())
-      assert.match(rail().props.className, /selectionCollapsed/)
+      assert.equal(toggle().props['aria-expanded'], false, 'repeat selection also closes')
     }
+    await act(async () => toggle().props.onClick())
+    await act(async () => toggle().props.onClick())
+    assert.equal(toggle().props['aria-expanded'], false, 'same button closes the menu')
+    await act(async () => toggle().props.onClick())
+    await act(async () => f.renderer.root.findByProps({ 'aria-label': 'Cerrar menú de navegación' }).props.onClick())
+    assert.equal(toggle().props['aria-expanded'], false, 'outside tap closes the menu')
+    await act(async () => toggle().props.onClick())
+    let prevented = false
+    await act(async () => rail().props.onKeyDown({ key: 'Escape', preventDefault() { prevented = true }, stopPropagation() {} }))
+    assert.equal(prevented, true)
+    assert.equal(toggle().props['aria-expanded'], false, 'Escape closes the menu')
   } finally { f.close() }
 })

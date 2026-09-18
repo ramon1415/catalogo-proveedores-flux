@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import s from './Nav.module.css'
-import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useModules } from '../../../lib/moduleAccess'
@@ -12,12 +11,16 @@ import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
 
 export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobile?: boolean; open?: boolean; onClose?: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const [selectionCollapsed, setSelectionCollapsed] = useState(false)
+  const [railExpanded, setRailExpanded] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
   const collapseAfterSelection = () => {
-    setSelectionCollapsed(true)
+    setRailExpanded(false)
     onClose()
   }
-  const reopenRail = () => setSelectionCollapsed(false)
+  const dismissRail = () => {
+    setRailExpanded(false)
+    menuButtonRef.current?.focus()
+  }
   const { profile, session, group, signOut } = useAuth()
   const { isEnabled } = useModules()
   const payrollAccess = usePayrollAccess()
@@ -40,17 +43,24 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
   const content = (
     <>
       <div className={s.brand}>
-        <img className={s.iso} src={isotipo} alt="Flux" />
+        {!mobile && <button ref={menuButtonRef} type="button" className={s.menuToggle}
+          aria-label={railExpanded ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={railExpanded} aria-controls="flux-menu-sections"
+          onClick={() => setRailExpanded(value => !value)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d={railExpanded ? 'M6 6l12 12M6 18 18 6' : 'M4 6h16M4 12h16M4 18h16'} />
+          </svg>
+          <span>Menú</span>
+        </button>}
         <img className={s.full} src={logoFull} alt="Flux" />
         {mobile && <button type="button" className={s.closeMenu} onClick={onClose} aria-label="Cerrar menú">✕</button>}
       </div>
 
-      <nav className={s.nav} aria-label="Secciones de Flux">
+      <nav id="flux-menu-sections" className={s.nav} aria-label="Secciones de Flux">
         {sections.map((sec) => (
           <div key={sec.title}>
             <div className={`${s.sec} ${s.txt}`}>{sec.title}</div>
             {sec.items.map((it) => it.vanillaHref ? (
-              <a key={it.key} href={it.vanillaHref} className={s.item} onClick={collapseAfterSelection}>
+              <a key={it.key} href={it.vanillaHref} title={it.label} aria-label={it.label} className={s.item} onClick={collapseAfterSelection}>
                 {it.icon}
                 <span className={s.txt}>{it.label}</span>
               </a>
@@ -58,6 +68,8 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
               <NavLink
                 key={it.key}
                 to={it.path}
+                title={it.label}
+                aria-label={it.label}
                 onClick={collapseAfterSelection}
                 className={({ isActive }) => `${s.item} ${isActive ? s.active : ''}`}
               >
@@ -87,5 +99,9 @@ export function Nav({ mobile = false, open = false, onClose = () => {} }: { mobi
       onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
       {content}
     </dialog>
-  ) : <aside id="flux-navigation" className={`${s.rail} ${selectionCollapsed ? s.selectionCollapsed : ''}`} onPointerEnter={reopenRail} onFocusCapture={reopenRail}>{content}</aside>
+  ) : <>
+    <aside id="flux-navigation" className={`${s.rail} ${railExpanded ? s.expanded : ''}`}
+      onKeyDown={(event) => { if (event.key === 'Escape' && railExpanded) { event.preventDefault(); event.stopPropagation(); dismissRail() } }}>{content}</aside>
+    {railExpanded && <button type="button" className={s.menuBackdrop} aria-label="Cerrar menú de navegación" onClick={dismissRail} />}
+  </>
 }
