@@ -104,3 +104,12 @@
 .menuToggle:focus-visible, .item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .menuBackdrop { position: fixed; inset: 0; z-index: 39; padding: 0; border: 0; background: rgba(0, 0, 0, .25); cursor: default; }
 @media (prefers-reduced-motion: reduce) { .rail, .txt, .sec { transition: none; } }
+
+/* Desktop keeps the original logo/hover rail. Phones keep explicit Menu. */
+.desktopLogo { display: none; }
+@media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  .rail .menuToggle, .menuBackdrop { display: none; }
+  .rail .brand { padding: 0 16px; gap: 11px; }
+  .rail:not(.expanded):not(.drawer) .desktopLogo { display: block; }
+  .rail.expanded { width: 240px; }
+}

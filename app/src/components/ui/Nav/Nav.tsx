@@ -2,12 +2,15 @@ import { useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { InstallFluxButton } from '../../../features/install/InstallFluxButton'
 import s from './Nav.module.css'
+import isotipo from '../../../assets/favicon-512.png'
 import logoFull from '../../../assets/logo-flux-verde.webp'
 import { useAuth } from '../../../lib/auth'
 import { useModules } from '../../../lib/moduleAccess'
 import { IcUser, IcLogout } from '../icons'
 import { NAV_SECTIONS } from './navModel'
 import { usePayrollAccess } from '../../../features/nomina/usePayrollAccess'
+
+const isDesktopNavigation = () => window.matchMedia('(min-width: 761px) and (hover: hover) and (pointer: fine)').matches
 
 export function Nav() {
   const [railExpanded, setRailExpanded] = useState(false)
@@ -17,7 +20,7 @@ export function Nav() {
   }
   const dismissRail = () => {
     setRailExpanded(false)
-    menuButtonRef.current?.focus()
+    if (!isDesktopNavigation()) menuButtonRef.current?.focus()
   }
   const { profile, session, group, signOut } = useAuth()
   const { isEnabled } = useModules()
@@ -34,8 +37,13 @@ export function Nav() {
   return (
     <>
     <aside id="flux-navigation" className={`${s.rail} ${railExpanded ? s.expanded : ''}`}
+      onPointerEnter={(event) => { if (isDesktopNavigation() && event.pointerType === 'mouse') setRailExpanded(true) }}
+      onPointerLeave={() => { if (isDesktopNavigation()) setRailExpanded(false) }}
+      onFocusCapture={(event) => { if (isDesktopNavigation() && event.target.matches(':focus-visible')) setRailExpanded(true) }}
+      onBlurCapture={(event) => { if (isDesktopNavigation() && !event.currentTarget.contains(event.relatedTarget)) setRailExpanded(false) }}
       onKeyDown={(event) => { if (event.key === 'Escape' && railExpanded) { event.preventDefault(); event.stopPropagation(); dismissRail() } }}>
       <div className={s.brand}>
+        <img className={`${s.iso} ${s.desktopLogo}`} src={isotipo} alt="Flux" />
         <button ref={menuButtonRef} type="button" className={s.menuToggle}
           aria-label={railExpanded ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={railExpanded} aria-controls="flux-menu-sections"
           onClick={() => setRailExpanded(value => !value)}>
