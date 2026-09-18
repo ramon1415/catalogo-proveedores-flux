@@ -73,7 +73,62 @@ function useSize<T extends HTMLElement>(active = true) {
   return { ref, ...size }
 }
 
-export function ComboChart({ labels, series, leftTitle, rightTitle, presentation }: ComboChartProps) {
+export function ComboChart(props: ComboChartProps) {
+  const { ref, w } = useSize<HTMLDivElement>()
+  return <div ref={ref} className={s.chartResponsive}>
+    {w > 0 && (w <= 640
+      ? <MobileChart key={props.labels.join('|')} {...props} />
+      : <ChartPlot {...props} />)}
+  </div>
+}
+
+const detailMoney = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function MobileChart({ labels, series, leftTitle, rightTitle, presentation }: ComboChartProps) {
+  const [selected, setSelected] = useState(Math.max(0, labels.length - 1))
+  // Four legible months per window; selecting a month also selects its window.
+  const end = labels.length - Math.floor((labels.length - 1 - selected) / 4) * 4
+  const start = Math.max(0, end - 4)
+  const groups = [
+    { title: leftTitle || 'Evolución mensual', series: series.filter(se => se.axis !== 'y2') },
+    { title: rightTitle || 'Ingresos', series: series.filter(se => se.axis === 'y2').map(se => ({ ...se, axis: 'y' as const })) },
+  ].filter(group => group.series.length > 0)
+  return <div className={s.chartMobile}>
+    <div className={s.chartNavigation} aria-label="Periodos de la gráfica">
+      <button type="button" aria-label="Ver meses anteriores" disabled={start === 0} onClick={() => setSelected(Math.max(0, start - 1))}>←</button>
+      <span aria-live="polite">{labels[start]}{end - start > 1 ? ` – ${labels[end - 1]}` : ''}</span>
+      <button type="button" aria-label="Ver meses siguientes" disabled={end >= labels.length} onClick={() => setSelected(end)}>→</button>
+    </div>
+    {groups.map(group => <section key={group.title} className={s.mobileChartPanel} aria-label={group.title}>
+      <h3>{group.title}</h3>
+      <div className={s.mobileChartLegend}>
+        {group.series.map((se, i) => <span key={i}>
+          <i aria-hidden="true" className={se.kind === 'line' ? s.legendLine : s.legendBar} style={{ color: se.color, ...(se.kind === 'line' ? { borderTopStyle: se.dashed ? 'dashed' : 'solid' } : { background: se.fill ?? se.color }) }} />
+          {se.label}
+        </span>)}
+      </div>
+      <div className={s.mobilePlot}>
+        <ChartPlot labels={labels.slice(start, end)} series={group.series.map(se => ({ ...se, data: se.data.slice(start, end) }))} scaleSeries={group.series} presentation={presentation} selectedIndex={selected - start} onSelect={i => setSelected(start + i)} />
+      </div>
+    </section>)}
+    <p className={s.mobileChartHint}>Toca un mes para ver sus importes. MXN{groups.length > 1 ? ' · Cada gráfica tiene su propia escala.' : '.'}</p>
+    <div className={s.mobileChartDetail}>
+      <label className={s.mobileMonthSelect}>Detalle del mes
+        <select value={selected} onChange={event => setSelected(Number(event.target.value))}>
+          {labels.map((label, i) => <option key={i} value={i}>{label}</option>)}
+        </select>
+      </label>
+      <dl aria-live="polite" aria-atomic="true">
+        {series.map((se, i) => <div key={i}>
+          <dt>{se.label}</dt>
+          <dd>{se.data[selected] == null ? 'Sin datos' : detailMoney.format(se.data[selected]!)}</dd>
+        </div>)}
+      </dl>
+    </div>
+  </div>
+}
+
+function ChartPlot({ labels, series, leftTitle, rightTitle, presentation, scaleSeries = series, selectedIndex, onSelect }: ComboChartProps & { scaleSeries?: Serie[]; selectedIndex?: number; onSelect?: (index: number) => void }) {
   const { ref, w, h } = useSize<HTMLDivElement>()
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null)
   const operational = presentation === 'operational'
@@ -88,8 +143,8 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
   const plotW = Math.max(0, w - margin.left - margin.right)
   const plotH = Math.max(0, h - margin.top - margin.bottom)
 
-  const leftSeries = series.filter((se) => (se.axis ?? 'y') === 'y')
-  const rightSeries = series.filter((se) => se.axis === 'y2')
+  const leftSeries = scaleSeries.filter((se) => (se.axis ?? 'y') === 'y')
+  const rightSeries = scaleSeries.filter((se) => se.axis === 'y2')
 
   const rawLeftMax = Math.max(0, ...leftSeries.flatMap((se) => se.data.map((v) => (v == null ? 0 : v))))
   const rawRightMax = Math.max(0, ...rightSeries.flatMap((se) => se.data.map((v) => (v == null ? 0 : v))))
@@ -134,7 +189,8 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
     const px = e.clientX - rect.left
     if (px < plotL || px > plotL + plotW) { setHover(null); return }
     const i = Math.min(n - 1, Math.max(0, Math.floor((px - plotL) / band)))
-    setHover({ i, x: px, y: e.clientY - rect.top })
+    if (onSelect) onSelect(i)
+    else setHover({ i, x: px, y: e.clientY - rect.top })
   }
 
   const ready = w > 0 && h > 0
@@ -150,7 +206,7 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
   )) : 6
 
   return (
-    <div ref={ref} className={`${s.chartSvgWrap} ${compact ? s.chartCompact : ''}`} onMouseMove={onMove} onMouseLeave={() => setHover(null)} onPointerDown={operational ? onMove : undefined}>
+    <div ref={ref} className={`${s.chartSvgWrap} ${compact ? s.chartCompact : ''}`} onMouseMove={onSelect ? undefined : onMove} onMouseLeave={() => setHover(null)} onClick={onSelect ? onMove : undefined} onPointerDown={!onSelect && operational ? onMove : undefined}>
       {ready && (
         <svg width={w} height={h} className={s.chartSvg} role="img" aria-label="Gráfica del dashboard">
           {/* Gridlines + ticks eje izquierdo */}
@@ -229,11 +285,11 @@ export function ComboChart({ labels, series, leftTitle, rightTitle, presentation
             // Se espacian las etiquetas, pero todos los meses conservan sus puntos
             // y su detalle al pasar el cursor o tocar la gráfica.
             if (i !== 0 && i !== n - 1 && (i % labelStride !== 0 || (operational && (n - 1 - i) * band < 32))) return null
-            return <text key={`x${i}`} x={cx(i)} y={plotT + plotH + 16} textAnchor="middle" className={s.chartTick}>{lbl}</text>
+            return <text key={`x${i}`} x={cx(i)} y={plotT + plotH + 16} textAnchor="middle" className={`${s.chartTick} ${selectedIndex === i ? s.selectedTick : ''}`}>{lbl}</text>
           })}
           {/* Banda de hover */}
-          {hover && (
-            <line x1={cx(hover.i)} y1={plotT} x2={cx(hover.i)} y2={plotT + plotH} className={s.chartHoverLine} />
+          {(hover || selectedIndex != null) && (
+            <line x1={cx(selectedIndex ?? hover!.i)} y1={plotT} x2={cx(selectedIndex ?? hover!.i)} y2={plotT + plotH} className={s.chartHoverLine} />
           )}
         </svg>
       )}
