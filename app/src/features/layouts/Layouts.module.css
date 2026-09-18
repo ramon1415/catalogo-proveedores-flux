@@ -168,3 +168,18 @@
   .invalidList li { grid-template-columns: 1fr; align-items: stretch; }
 }
 @media (max-width: 640px) { .formGrid { grid-template-columns: 1fr; } }
+
+/* Keep phone controls in view; only the table scrolls across columns. */
+.scrollHint { display: none; }
+@media (max-width: 760px) {
+  .phead { flex-wrap: wrap; margin-bottom: 0; }
+  .phead > div { flex: 1 1 100%; min-width: 0; }
+  .phead button { min-height: 44px; max-width: 100%; white-space: normal; }
+  .tableCard { flex: 0 0 auto; min-width: 0; min-height: 0; }
+  .toolbar { display: grid; grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .searchBox, .searchBox input, .toolbar select { min-width: 0; width: 100%; }
+  .searchBox input, .toolbar select, .smallBtn { min-height: 44px; }
+  .tableWrap { flex: 0 0 auto; min-width: 0; min-height: 240px; max-height: 55vh; max-height: 55dvh; overflow: auto; }
+  .scrollHint { display: block; margin: 0; padding: 8px 12px; color: var(--text-2); font-size: 11px; border-bottom: 1px solid var(--border); }
+}
+@media (max-width: 760px) { .headActions { flex-wrap: wrap; width: 100%; } .statsGrid { gap: 8px; } .statCard { padding: 10px; min-width: 0; } .statCard strong { overflow-wrap: anywhere; } }
