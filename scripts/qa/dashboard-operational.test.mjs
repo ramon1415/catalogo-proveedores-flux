@@ -696,7 +696,7 @@ test('income query failure leaves gaps instead of zeroes while retaining the bud
   } finally { p.unmount() }
 })
 
-function mountChart(width = 1440, months = 9) {
+function mountChart(width = 1440, months = 9, overrides = {}) {
   const css = new Proxy({}, { get: (_, key) => String(key) })
   const { ComboChart } = load(`${dashboardPath}charts.tsx`, { './Dashboard.module.css': { __esModule: true, default: css } })
   const chartBox = { clientWidth: width, clientHeight: 288, getBoundingClientRect: () => ({ left: 0, top: 0 }) }
@@ -705,8 +705,8 @@ function mountChart(width = 1440, months = 9) {
   const observers = new Map()
   globalThis.ResizeObserver = class {
     constructor(callback) { this.callback = callback }
-    observe(element) { this.element = element; observers.set(element, this.callback) }
-    disconnect() { observers.delete(this.element) }
+    observe(element) { this.element = element; if (!observers.has(element)) observers.set(element, new Set()); observers.get(element).add(this.callback) }
+    disconnect() { observers.get(this.element)?.delete(this.callback) }
   }
   const labels = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'].slice(0, months)
   const series = [
@@ -716,17 +716,19 @@ function mountChart(width = 1440, months = 9) {
     { kind: 'line', label: 'Cobrado', data: labels.map(() => 0), color: '#007c50', axis: 'y2' },
   ]
   let renderer
-  act(() => { renderer = create(React.createElement(ComboChart, { labels, series, leftTitle: 'Presupuesto y uso', rightTitle: 'Ingresos', presentation: 'operational' }), {
+  const props = { labels, series, leftTitle: 'Presupuesto y uso', rightTitle: 'Ingresos', presentation: 'operational', ...overrides }
+  act(() => { renderer = create(React.createElement(ComboChart, props), {
     createNodeMock: element => element.props.className === 'chartTooltip' ? tooltipBox : chartBox,
   }) })
   const wrapper = () => renderer.root.findAllByType('div').find(node => typeof node.props.onMouseMove === 'function')
   return {
-    renderer, chartBox, tooltipBox,
+    renderer, chartBox, tooltipBox, props,
+    update(next) { act(() => renderer.update(React.createElement(ComboChart, { ...props, ...next }))) },
     move(x, y) { act(() => wrapper().props.onMouseMove({ clientX: x, clientY: y, currentTarget: chartBox })) },
     resize(w, tooltipWidth, tooltipHeight) {
       act(() => {
         chartBox.clientWidth = w; tooltipBox.clientWidth = tooltipWidth; tooltipBox.clientHeight = tooltipHeight
-        observers.get(chartBox)?.(); observers.get(tooltipBox)?.()
+        for (const callback of [...(observers.get(chartBox) || []), ...(observers.get(tooltipBox) || [])]) callback()
       })
     },
     tooltip() { return renderer.root.findByProps({ className: 'chartTooltip' }) },
@@ -749,25 +751,78 @@ test('chart tooltip remains fully inside both axes at the edges and after resizi
   try {
     p.move(1360, 287); fits()
     p.move(76, 1); fits()
-    p.resize(280, 252, 190)
-    p.move(218, 287); fits()
-    p.move(61, 1); fits()
+    p.resize(700, 252, 190)
+    p.move(618, 287); fits()
+    p.move(76, 1); fits()
   } finally { p.unmount() }
 })
 
-test('narrow charts fit twelve months without dropping series data and keep both endpoint month labels', () => {
+test('mobile splits axes into two charts, browses every month, and exposes exact amounts without hover', () => {
   const p = mountChart(280, 12)
   try {
-    const svg = p.renderer.root.findByType('svg')
-    assert.equal(svg.props.width, 280)
-    const months = svg.findAllByType('text').map(text).filter(value => /^(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)$/.test(value))
-    assert.equal(months[0], 'ene')
-    assert.equal(months.at(-1), 'dic')
-    assert.ok(months.length < 12, 'axis labels must be spaced instead of forcing a wide chart')
-    assert.equal(svg.findAllByType('circle').length, 24, 'all twelve months remain in both line series')
-    assert.equal(svg.findAllByType('rect').length, 24)
-    for (const rect of svg.findAllByType('rect')) assert.ok(rect.props.x >= 0 && rect.props.x + rect.props.width <= 280)
-    p.move(215, 100)
-    assert.match(text(p.tooltip()), /^dic/)
+    const root = p.renderer.root
+    assert.equal(root.findAllByType('svg').length, 2)
+    const select = () => root.findByType('select')
+    assert.equal(select().findAllByType('option').length, 12)
+    assert.equal(select().props.value, 11)
+    const button = label => root.findByProps({ 'aria-label': label })
+    assert.equal(button('Ver meses siguientes').props.disabled, true)
+    const months = () => root.findAllByType('svg')[0].findAllByType('text').map(text).filter(value => /^(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)$/.test(value))
+    assert.deepEqual(months(), ['sep', 'oct', 'nov', 'dic'])
+    assert.equal(root.findAllByProps({ className: 'chartTooltip' }).length, 0)
+    assert.match(text(root.findByType('dl')), /\$861,700\.58/)
+    assert.match(text(root.findByType('dl')), /\$0\.00/)
+    act(() => button('Ver meses anteriores').props.onClick())
+    assert.deepEqual(months(), ['may', 'jun', 'jul', 'ago'])
+    act(() => button('Ver meses anteriores').props.onClick())
+    assert.deepEqual(months(), ['ene', 'feb', 'mar', 'abr'])
+    assert.equal(button('Ver meses anteriores').props.disabled, true)
+    act(() => button('Ver meses siguientes').props.onClick())
+    assert.deepEqual(months(), ['may', 'jun', 'jul', 'ago'])
+    act(() => select().props.onChange({ target: { value: '11' } }))
+    assert.deepEqual(months(), ['sep', 'oct', 'nov', 'dic'])
+    const plot = root.findAllByType('div').find(node => typeof node.props.onClick === 'function')
+    act(() => plot.props.onClick({ clientX: 65, clientY: 100, currentTarget: p.chartBox }))
+    assert.equal(select().props.value, 8, 'tap selects the same month for both plots and detail')
+    for (const svg of root.findAllByType('svg')) {
+      assert.equal(svg.props.width, 280)
+      for (const rect of svg.findAllByType('rect')) {
+        assert.ok(rect.props.width >= 16, 'bars remain readable on a narrow phone')
+        assert.ok(rect.props.x >= 0 && rect.props.x + rect.props.width <= 280)
+      }
+    }
+  } finally { p.unmount() }
+})
+
+test('mobile keeps missing income distinct from zero, refreshes company data and survives resizing and period changes', () => {
+  const p = mountChart(320, 9)
+  try {
+    const root = p.renderer.root
+    const replacement = p.props.series.map((se, i) => ({ ...se, data: se.data.map(() => i === 2 ? null : 0) }))
+    p.update({ series: replacement })
+    const detail = text(root.findByType('dl'))
+    assert.match(detail, /esperadoSin datos/i)
+    assert.match(detail, /cobrado\$0\.00/i)
+    assert.doesNotMatch(detail, /861,700/)
+    p.resize(1000, 260, 152)
+    assert.equal(root.findAllByType('svg').length, 1)
+    assert.equal(root.findAllByType('select').length, 0)
+    p.resize(320, 260, 152)
+    assert.equal(root.findAllByType('svg').length, 2)
+    p.update({ labels: ['ene'], series: replacement.map(se => ({ ...se, data: [0] })) })
+    assert.equal(root.findByType('select').props.value, 0)
+    for (const button of root.findAllByType('button')) assert.equal(button.props.disabled, true)
+  } finally { p.unmount() }
+})
+
+test('mobile historical single-axis chart remains navigable and preserves the full-period scale', () => {
+  const p = mountChart(280, 12, { presentation: undefined, series: [{ kind: 'bar', label: 'Egresos', data: [900000, ...Array(11).fill(100)], color: '#72998a' }] })
+  try {
+    const root = p.renderer.root
+    assert.equal(root.findAllByType('svg').length, 1)
+    assert.match(text(root.findByType('svg')), /\$1000k/)
+    act(() => root.findByType('select').props.onChange({ target: { value: '0' } }))
+    assert.match(text(root.findByType('dl')), /\$900,000\.00/)
+    assert.match(text(root.findByType('svg')), /\$1000k/)
   } finally { p.unmount() }
 })
