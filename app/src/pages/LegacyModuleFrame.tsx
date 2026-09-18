@@ -13,6 +13,9 @@ const EMBED_STYLES = `
   @media (max-width: 1040px) {
     .app-shell { height: 100vh !important; min-height: 0 !important; overflow: hidden !important; }
   }
+  @media (max-width: 720px) {
+    .page:has(.batch-workspace) { height: 100dvh !important; overflow: auto !important; box-sizing: border-box; }
+  }
 `
 
 interface LegacyModuleFrameProps {
@@ -52,7 +55,7 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
   }, [frameSrc])
 
   return (
-    <section className={s.host} aria-label={title}>
+    <section className={s.host} aria-label={title} data-legacy-module>
       <iframe
         ref={frameRef}
         className={`${s.frame} ${ready ? s.frameReady : ''}`}

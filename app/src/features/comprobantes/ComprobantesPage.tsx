@@ -273,7 +273,8 @@ function ComprobantesCompanyPage() {
                 </div>
               )}
 
-              <div className={s.wrap}>
+              <p className={s.scrollHint}>Desliza dentro de la tabla para ver más filas y columnas ↔ ↕</p>
+              <div className={s.wrap} role="region" aria-label="Operaciones del batch" tabIndex={0}>
                 <table className={s.table}>
                   <thead>
                     <tr><th>Página</th><th>Fecha / referencia</th><th>Beneficiario / concepto</th><th>Importe</th><th>Extracción</th><th>Conciliación</th><th></th></tr>
