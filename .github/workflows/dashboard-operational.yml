@@ -2,18 +2,22 @@ name: Dashboard operational release checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'app/src/features/dashboard/**'
       - 'app/src/lib/tenantConfig.ts'
       - 'scripts/qa/dashboard-operational.test.mjs'
+      - 'scripts/qa/dashboard-global-budget.test.mjs'
+      - 'supabase/migrations/*_dashboard_global_budget_report.sql'
       - '.github/workflows/dashboard-operational.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'app/src/features/dashboard/**'
       - 'app/src/lib/tenantConfig.ts'
       - 'scripts/qa/dashboard-operational.test.mjs'
+      - 'scripts/qa/dashboard-global-budget.test.mjs'
+      - 'supabase/migrations/*_dashboard_global_budget_report.sql'
       - '.github/workflows/dashboard-operational.yml'
 
 permissions:
@@ -32,6 +36,6 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm run qa:setup
-      - run: node --test scripts/qa/dashboard-operational.test.mjs scripts/qa/pwa-*.test.mjs
+      - run: node --test scripts/qa/dashboard-operational.test.mjs scripts/qa/dashboard-global-budget.test.mjs scripts/qa/pwa-*.test.mjs
       - run: npm --prefix app run build
       - run: node scripts/build-vercel-static.mjs
