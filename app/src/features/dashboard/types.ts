@@ -169,7 +169,7 @@ export type BudgetPartida = {
   used: number      // committed + executed
   available: number // budgeted − used
   pctUsed: number   // used/budgeted*100; Infinity si budgeted<=0 pero hay uso
-  over: boolean     // sobregirado: available < 0
+  over: boolean     // sobregirado: existe presupuesto (>0) y available < 0
   warn: boolean     // cerca del límite: pctUsed >= 90 y no sobregirado
 }
 

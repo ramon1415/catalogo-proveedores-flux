@@ -82,7 +82,7 @@ test('budget aggregates centers with cent precision and filters months; unbudget
   assert.equal(september.omittedCount, 1)
   const october = logic.aggregateBudget(rows, categories, '2026-10-01')
   assert.equal(october.totals.pctUsed, Infinity)
-  assert.equal(october.partidas[0].over, true)
+  assert.equal(october.partidas[0].over, false)
   assert.equal(logic.aggregateBudget(rows, categories, 'all').totals.used, 135.15)
   assert.equal(logic.aggregateBudget([budgetRow({ available: null })], categories, month).totals.available, 300)
 })
@@ -354,6 +354,35 @@ test('global overrun is visible in headline, alerts and details while gross paid
     assert.match(p.section('sec-budget'), /Comprometido por pagar\$200/)
     assert.doesNotMatch(page, /Sin alertas destacadas/)
   } finally { p.unmount() }
+})
+
+test('unallocated categories remain in global consumption but never appear as category overruns', async () => {
+  const rows = [budgetRow({ budgeted: 1000, committed: 1129, executed: 1129, available: -129 }),
+    budgetRow({ budget_category_id: 'unallocated', budgeted: 0, committed: 300, executed: 300, available: -300 })]
+  const result = logic.aggregateBudget(rows, categories, month)
+  assert.equal(result.totals.used, 1429)
+  assert.equal(result.totals.available, -429)
+  assert.equal(result.partidas.filter(p => p.over).length, 1)
+  assert.equal(result.partidas[0].categoryId, 'qa')
+  const p = await mountPage({ fetchBudget: async () => ({ rows, categories }) })
+  try {
+    const section = p.section('sec-budget')
+    assert.match(section, /12\.9% por encima/)
+    assert.doesNotMatch(section, /112\.9%/)
+    assert.match(section, /Excedente\$129/)
+    const unallocated = p.renderer.root.findAll(node => node.props.className === 'budgetRow unbudgeted')[0]
+    assert.match(text(unallocated), /Sin presupuesto asignado/)
+    assert.doesNotMatch(text(unallocated), /Sobregirado|Disponible|%|-\$300/)
+    assert.equal(unallocated.findAll(node => node.props.role === 'img').length, 0)
+    assert.match(text(p.renderer.toJSON()), /1partida sobregirada/)
+  } finally { p.unmount() }
+})
+
+test('budget delta handles small overruns and exact budget without a false zero-percent overrun', async () => {
+  for (const [used, label] of [[1039, '3.9% por encima'], [1000.01, '<0.1% por encima'], [1000, '100.0% utilizado']]) {
+    const p = await mountPage({ fetchBudget: async () => ({ rows: [budgetRow({ budgeted: 1000, committed: used, executed: used, available: 1000-used })], categories }) })
+    try { assert.ok(p.section('sec-budget').includes(label)) } finally { p.unmount() }
+  }
 })
 
 test('page refresh reloads both sources; month/year controls stay aligned even without a budget', async () => {
