@@ -3274,7 +3274,7 @@ from (values
 ('RSJT-2026-R0112','60205002000',false,'exact_name',NULL),
 ('RSJT-2026-R0113','60202010000',false,'judgment',NULL),
 ('RSJT-2026-R0116','60204004000',false,'exact_name',NULL),
-('RSJT-2026-R0119','60208020000',false,'judgment',NULL),
+('RSJT-2026-R0119','60208020000',false,'judgment',NULL)
 ) as v(category_code,account_code,needs_review,mapping_method,mapping_reason)
 join public.budget_categories bc on bc.code=v.category_code
 where exists (
