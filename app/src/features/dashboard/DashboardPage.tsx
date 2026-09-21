@@ -339,6 +339,16 @@ export default function DashboardPage() {
   const periodLabel = budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${reportYear}` : budgetMonthLabel(budgetPeriod)
   const monthLabel = budgetMonthLabel(`${periodKey}-01`)
   const filteredPartidas = useMemo(() => filterBudgetPartidas(budgetAgg?.partidas ?? [], budgetSearch), [budgetAgg, budgetSearch])
+  // Curadas: con movimiento (usado > 0), lo que incluye sobregiradas y cerca del
+  // límite. Sin uso: presupuesto sin consumir (usado <= 0), colapsadas al final.
+  // Orden curadas: sobregiradas → % usado desc (sin-presupuesto con uso arriba) → usado desc.
+  const curatedPartidas = useMemo(() => filteredPartidas
+    .filter((p) => p.used > 0)
+    .sort((a, b) => Number(b.over) - Number(a.over)
+      || (Number.isFinite(b.pctUsed) ? b.pctUsed : Number.MAX_SAFE_INTEGER) - (Number.isFinite(a.pctUsed) ? a.pctUsed : Number.MAX_SAFE_INTEGER)
+      || b.used - a.used),
+    [filteredPartidas])
+  const noUsePartidas = useMemo(() => filteredPartidas.filter((p) => p.used <= 0), [filteredPartidas])
   const opChart = useMemo<ChartModel>(() => {
     if (!budgetData) return { labels: [], series: [], subtitle: budgetError ? 'No se pudo cargar el presupuesto.' : 'Cargando presupuesto…' }
     const months = budgetPeriod === BUDGET_ALL_PERIOD ? summaryMonths : summaryMonths.slice(0, Number(periodKey.slice(5, 7)))
@@ -703,10 +713,9 @@ export default function DashboardPage() {
                 </div>
               </div>
               <div className={s.budgetLegend}>
-                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--emerald)' }} />Ejecutado</div>
-                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--amber)' }} />Pendiente de pago</div>
-                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--border)' }} />Disponible</div>
-                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Excedente</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--emerald)' }} />En uso</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--amber)' }} />Cerca del límite (≥90%)</div>
+                <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Sobregirado</div>
                 <div className={s.chartLegendItem}><span className={s.budgetInfo} aria-hidden="true">ⓘ</span> Sin presupuesto asignado</div>
               </div>
               <label className={s.periodField}>
@@ -775,11 +784,8 @@ export default function DashboardPage() {
                   {budgetSearch && <button type="button" className={s.secondaryBtn} onClick={() => setBudgetSearch('')}>Limpiar búsqueda</button>}
                   <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
                 </div>
-                <p className={s.budgetOmitNote}>Los gastos sin presupuesto asignado también consumen el saldo global. El sobregiro solo se calcula cuando la partida tiene presupuesto. La búsqueda no modifica los totales.</p>
-                <div className={s.budgetList}>
-                  {filteredPartidas.map((p) => <BudgetPartidaRow key={p.categoryId} p={p} />)}
-                  {filteredPartidas.length === 0 && <div className={s.tableMsg}>No hay partidas que coincidan con «{budgetSearch}».</div>}
-                </div>
+                <p className={s.budgetOmitNote}>Se muestran primero las partidas con movimiento; las sobregiradas y cerca del límite van arriba. Las partidas sin uso quedan colapsadas al final. Los gastos sin presupuesto asignado también consumen el saldo global. La búsqueda no modifica los totales.</p>
+                <BudgetTable curated={curatedPartidas} noUse={noUsePartidas} search={budgetSearch} />
                 {budgetAgg.omittedCount > 0 && (
                   <div className={s.budgetOmitNote}>
                     {budgetAgg.omittedCount} partida{budgetAgg.omittedCount === 1 ? '' : 's'} sin presupuesto ni uso omitida{budgetAgg.omittedCount === 1 ? '' : 's'} del desglose.
@@ -1091,49 +1097,87 @@ function FragmentGroup({ children }: { open: boolean; children: ReactNode }) {
   return <>{children}</>
 }
 
-// ── Fila de partida: barra usado (ejecutado+comprometido) vs disponible ─────────
-function BudgetPartidaRow({ p }: { p: BudgetPartida }) {
-  // Escala: 100% = presupuestado; si está sobregirado, el usado (mayor) llena la
-  // barra. base = max(presupuestado, usado) para no perder proporción al sobregirar.
-  const base = Math.max(p.budgeted, p.used, 1)
-  const exW = (p.executed / base) * 100
-  const comW = (p.committed / base) * 100
-  const availW = p.available > 0 ? (p.available / base) * 100 : 0
+// ── Tabla compacta de partidas: curadas visibles, sin uso colapsadas ────────────
+function BudgetTable({ curated, noUse, search }: { curated: BudgetPartida[]; noUse: BudgetPartida[]; search: string }) {
+  const [showNoUse, setShowNoUse] = useState(false)
+  if (curated.length === 0 && noUse.length === 0) {
+    return <div className={s.tableMsg}>No hay partidas que coincidan con «{search}».</div>
+  }
+  return (
+    <div className={s.budgetTableWrap}>
+      <table className={s.budgetTable}>
+        <thead>
+          <tr>
+            <th scope="col">Partida</th>
+            <th scope="col" className={s.budgetNum}>Presupuestado</th>
+            <th scope="col" className={s.budgetNum}>Usado</th>
+            <th scope="col" className={s.budgetNum}>Disponible</th>
+            <th scope="col" className={s.budgetNum}>% utilizado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {curated.map((p) => <BudgetTableRow key={p.categoryId} p={p} />)}
+          {curated.length === 0 && (
+            <tr><td colSpan={5} className={s.budgetTableMsg}>Ninguna partida con movimiento en este periodo.</td></tr>
+          )}
+          {noUse.length > 0 && (
+            <tr className={s.budgetToggleRow}>
+              <td colSpan={5}>
+                <button type="button" className={s.budgetToggleBtn} aria-expanded={showNoUse} onClick={() => setShowNoUse((v) => !v)}>
+                  <span aria-hidden="true" className={showNoUse ? s.budgetCaretOpen : s.budgetCaret}>▸</span>
+                  {showNoUse ? 'Ocultar' : '+'} {noUse.length} partida{noUse.length === 1 ? '' : 's'} sin uso
+                </button>
+              </td>
+            </tr>
+          )}
+          {showNoUse && noUse.map((p) => <BudgetTableRow key={p.categoryId} p={p} />)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Fila de partida: esencial + mini-barra; expande al detalle completo ─────────
+function BudgetTableRow({ p }: { p: BudgetPartida }) {
+  const [open, setOpen] = useState(false)
   const hasBudget = p.budgeted > 0
   const excess = Math.max(0, p.used - p.budgeted)
-  const excessPct = hasBudget ? excess / p.budgeted * 100 : 0
-  const excessLabel = excessPct > 0 && excessPct < 0.1 ? '<0.1%' : pct(excessPct)
-  const rowCls = `${s.budgetRow} ${p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''}`
-  const pctCls = `${s.budgetPct} ${p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''}`
-  const pctText = !hasBudget ? 'Sin presupuesto asignado' : p.over ? `${excessLabel} por encima` : `${pct(p.pctUsed)} utilizado`
+  const tone = p.over ? s.alert : p.warn ? s.warn : !hasBudget ? s.unbudgeted : ''
+  // Mini-barra: llena al 100% si sobregirado o sin presupuesto; si no, al % usado.
+  const barW = !hasBudget ? 100 : p.over ? 100 : Math.max(0, Math.min(100, p.pctUsed))
+  const barTone = p.over ? s.barAlert : p.warn ? s.barWarn : !hasBudget ? s.barInfo : s.barOk
+  const pctText = !hasBudget ? 's/p' : Number.isFinite(p.pctUsed) ? pct(p.pctUsed) : '—'
   return (
-    <div className={rowCls}>
-      <div className={s.budgetRowHead}>
-        <div>
-          <span className={s.budgetPartida}>{p.name}</span>
-          {p.group && p.group !== 'Sin grupo' && <span className={s.budgetGroup}>{p.group}</span>}
-        </div>
-        <span className={pctCls}>
-          {(p.over || !hasBudget) && <span aria-hidden="true">{p.over ? '↑' : 'ⓘ'}</span>}
-          {pctText}
-        </span>
-      </div>
-      {hasBudget && <div className={s.budgetBar} role="img" aria-label={p.over ? `Excedente de ${money(excess)}; ${excessLabel} por encima del presupuesto de ${money(p.budgeted)}` : `Utilizado ${pct(p.pctUsed)} del presupuesto de ${money(p.budgeted)}`}>
-        <div className={`${s.budgetSeg} ${s.executed}`} style={{ width: `${exW}%` }} />
-        <div className={`${s.budgetSeg} ${s.committed}`} style={{ width: `${comW}%` }} />
-        {availW > 0 && <div className={s.budgetSeg} style={{ width: `${availW}%` }} />}
-        {p.over && <>
-          <div className={s.budgetExcess} style={{ width: `${excess / base * 100}%` }} />
-          <span className={s.budgetLimit} style={{ left: `${p.budgeted / base * 100}%` }} />
-        </>}
-      </div>}
-      <div className={s.budgetFigures}>
-        <span>Presupuestado<strong>{hasBudget ? money(p.budgeted) : 'Sin asignar'}</strong></span>
-        <span>Ejecutado<strong>{money(p.executed)}</strong></span>
-        <span>Pendiente de pago<strong>{money(p.committed)}</strong></span>
-        <span>Usado<strong>{money(p.used)}</strong></span>
-        {hasBudget && <span>{p.over ? 'Excedente' : 'Disponible'}<strong className={p.over ? s.alert : undefined}>{money(p.over ? excess : p.available)}</strong></span>}
-      </div>
-    </div>
+    <>
+      <tr className={`${s.budgetTr} ${tone}`} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <th scope="row" className={s.budgetNameCell}>
+          <span aria-hidden="true" className={open ? s.budgetCaretOpen : s.budgetCaret}>▸</span>
+          <span className={s.budgetNameInner}>
+            <span className={s.budgetPartida}>{p.name}</span>
+            {p.group && p.group !== 'Sin grupo' && <span className={s.budgetGroup}>{p.group}</span>}
+            <span className={s.budgetMiniBar}><span className={`${s.budgetMiniFill} ${barTone}`} style={{ width: `${barW}%` }} /></span>
+          </span>
+        </th>
+        <td className={s.budgetNum}>{hasBudget ? money(p.budgeted) : <span className={s.budgetMuted}>Sin asignar</span>}</td>
+        <td className={s.budgetNum}>{money(p.used)}</td>
+        <td className={`${s.budgetNum} ${p.over ? s.alertText : ''}`}>{hasBudget ? money(p.available) : '—'}</td>
+        <td className={`${s.budgetNum} ${s.budgetPctCell} ${tone}`}>
+          {p.over && <span aria-hidden="true">↑ </span>}{pctText}
+        </td>
+      </tr>
+      {open && (
+        <tr className={s.budgetDetailRow}>
+          <td colSpan={5}>
+            <div className={s.budgetDetail}>
+              <span>Ejecutado (pagado)<strong>{money(p.executed)}</strong></span>
+              <span>Comprometido · pendiente de pago<strong>{money(p.committed)}</strong></span>
+              <span>Usado total<strong>{money(p.used)}</strong></span>
+              {hasBudget && <span>{p.over ? 'Excedente' : 'Disponible'}<strong className={p.over ? s.alertText : undefined}>{money(p.over ? excess : p.available)}</strong></span>}
+              {!hasBudget && <span className={s.budgetDetailNote}>Gasto sin presupuesto asignado; consume el saldo global pero no genera sobregiro de partida.</span>}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
