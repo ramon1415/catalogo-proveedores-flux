@@ -193,10 +193,12 @@
 .summaryRow { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.012); font-size: 12.5px; }
 .summaryRow span { color: var(--text-3); }
 .summaryRow strong { font-variant-numeric: tabular-nums; color: var(--text-1); }
-.miniGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
-.miniCard { border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.012); padding: 11px 12px; }
-.miniCard span { display: block; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .55px; font-weight: 800; }
-.miniCard strong { display: block; margin-top: 4px; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--text-1); }
+/* Tile compacto compartido: Presupuesto global, Solicitudes (embudo) y Efectivo/comprobaciones
+   comparten esta densidad para eliminar el espacio en blanco de números chicos. */
+.miniGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 8px 14px; }
+.miniCard { border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.012); padding: 6px 9px; }
+.miniCard span { display: block; color: var(--text-3); font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; font-weight: 800; }
+.miniCard strong { display: block; margin-top: 1px; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--text-1); }
 
 .closureCard { display: flex; flex-direction: column; }
 .closureChecks { border-top: 1px solid var(--border); padding: 10px 14px 4px; }
@@ -367,14 +369,15 @@
 .chartEmpty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 13px; }
 
 /* ── Solicitudes: embudo + alertas ─────────────────────────────────────────── */
-.funnelRow { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+/* Mismo criterio de densidad compacta que .miniCard (tile compartido). */
+.funnelRow { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; }
 .funnelStage {
-  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 11px;
-  background: rgba(255,255,255,.012); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px;
+  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 9px;
+  background: rgba(255,255,255,.012); padding: 6px 11px; display: flex; flex-direction: column; gap: 2px;
 }
 .funnelStage.paid { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 7%, transparent); }
-.funnelLabel { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
-.funnelCount { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.funnelLabel { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.funnelCount { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
 .funnelStage.paid .funnelCount { color: var(--emerald); }
 .funnelAmount { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .funnelArrow { position: absolute; right: -10px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--text-3); font-size: 13px; }
