@@ -8,15 +8,26 @@ export function target(base:string){
  if(base==='https://ucantptjhwttexzmslvm.supabase.co')return {environment:'prod',recipient:'lisette@dezdez.earth'}
  throw Error('DIGEST_UNKNOWN_ENVIRONMENT')
 }
+// A missing or invalid mode is disabled, before credentials, reads or claims.
+export function notificationSendMode(env:Runtime['env']):'disabled'|'test_only'|'real'{
+ const mode=(env('NOTIFICATION_SEND_MODE')??'disabled').trim().toLowerCase()
+ return mode==='test_only'||mode==='real'?mode:'disabled'
+}
 export async function handleRequest(req:Request,runtime:Runtime):Promise<Response>{
  if(req.method!=='POST')return json({error:'METHOD_NOT_ALLOWED'},405)
  const secret=runtime.env('NOTIFICATION_DISPATCHER_SECRET')?.trim()
  if(!secret||req.headers.get('x-notification-dispatcher-secret')!==secret)return json({error:'UNAUTHORIZED'},401)
+ const mode=notificationSendMode(runtime.env)
+ if(mode==='disabled')return json({sent:0,mode,reason:'notification_send_disabled'})
  let id:string|undefined;let worker:string|undefined;let rpc:((name:string,body:unknown)=>Promise<any>)|undefined
  try{
   const body=await req.json().catch(()=>({}))
   if(Object.keys(body).some(k=>k!=='dry_run'))return json({error:'DIGEST_UNSUPPORTED_INPUT'},400)
   const base=required(runtime,'SUPABASE_URL').replace(/\/$/,'');const destination=target(base)
+  // Keep the fixed destination and reject copied PROD configuration in DEV.
+  // test_only is deliberately DEV-only; production requires explicit real mode.
+  if(destination.environment==='dev'&&mode==='real')throw Error('DIGEST_DEV_REAL_SEND_FORBIDDEN')
+  if(mode==='test_only'&&(destination.environment!=='dev'||runtime.env('NOTIFICATION_TEST_EMAIL')?.trim()!==destination.recipient))throw Error('DIGEST_TEST_RECIPIENT_MISMATCH')
   const key=required(runtime,'SUPABASE_SERVICE_ROLE_KEY');const resend=required(runtime,'RESEND_API_KEY');const from=required(runtime,'NOTIFICATION_FROM_EMAIL')
   rpc=async(name,body)=>{const response=await runtime.fetch(`${base}/rest/v1/rpc/${name}`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error(`DIGEST_RPC_FAILED_${response.status}`);return response.json()}
   if(body.dry_run===true){
