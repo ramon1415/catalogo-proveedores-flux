@@ -57,7 +57,8 @@ test('seed uses only PROD tenant ids and exact expected counts',()=>{
   assert.match(seed,/FONACOT existe en PROD pero no tenía mapeo validado en DEV/)
   assert.match(seed,/contpaq_seed_opt_tax_count/)
   assert.match(seed,/tax_account_mappings where company_id=opt\)<>4/)
-  assert.doesNotMatch(seed,/66001060300/)
+  const seedSql = seed.replace(/--.*$/gm,'')
+  assert.doesNotMatch(seedSql,/66001060300/)
   assert.match(seed,/ajusteRedondeo\/noDeducibles se omiten/)
 })
 
