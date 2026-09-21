@@ -99,7 +99,7 @@ jobs:
           op_start=text.index('-- Snapshot read-only de DEV',sf_start)
           tax_start=text.index('insert into public.tax_account_mappings',op_start)
           def codes(block):
-              return [m.group(1) for m in re.finditer(r"^\('([^']+)','[^']+'", block, re.M)]
+              return [m.group(1) for m in re.finditer(r"^\(\s*'([^']+)'\s*,\s*'[^']+'", block, re.M)]
           sf=codes(text[sf_start:op_start])
           op=codes(text[op_start:tax_start])
           assert len(sf)==60 and len(set(sf))==60, (len(sf),len(set(sf)))
