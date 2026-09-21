@@ -106,6 +106,8 @@ with sync_playwright() as pw:
                 data = {}
             elif u.path == '/rest/v1/rpc/ensure_current_profile':
                 data = profile
+            elif u.path == '/rest/v1/rpc/get_my_payroll_access':
+                data = dict(can_capture=False, can_pay=False)
             elif u.path == '/rest/v1/user_roles':
                 data = [dict(role_id='qa-role', roles=dict(name='finanzas'))]
             elif u.path == '/rest/v1/profile_company_memberships':
@@ -169,7 +171,7 @@ with sync_playwright() as pw:
 
     def open_bulk(text):
         button('Carga masiva').click()
-        page.get_by_label('Listado de proveedores', exact=True).fill(text)
+        page.get_by_role('dialog').locator('textarea').fill(text)
         button('Verificar catálogo').click()
         expect(page.get_by_text('Catálogo verificado. Los existentes se omiten sin cambiar sus datos.', exact=True)).to_be_visible()
 
@@ -214,7 +216,7 @@ with sync_playwright() as pw:
         expect(page.get_by_text('Creado.', exact=True)).to_be_visible()
         assert len(writes) == before + 2
         button('Corregir solo pendientes').click()
-        assert 'QA Bien' not in page.get_by_label('Listado de proveedores', exact=True).input_value()
+        assert 'QA Bien' not in page.get_by_role('dialog').locator('textarea').input_value()
         scenario.update(mode='normal', fired=False)
         button('Verificar catálogo').click()
         button('Crear 1 proveedores').click()
@@ -245,7 +247,7 @@ with sync_playwright() as pw:
         page.evaluate('(theme) => document.documentElement.dataset.theme = theme', theme)
         button('Carga masiva').click()
         text = '\n'.join(f'QA Visual {n},Proveedor visual {n},,Efectivo,,' for n in range(35))
-        page.get_by_label('Listado de proveedores', exact=True).fill(text)
+        page.get_by_role('dialog').locator('textarea').fill(text)
         region = page.get_by_role('region', name='Revisión por proveedor; tabla con desplazamiento interno')
         box = page.get_by_role('dialog').bounding_box()
         assert box and box['x'] >= -1 and box['x'] + box['width'] <= width + 1, box
