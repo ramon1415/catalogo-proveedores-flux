@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import type { Provider, ProviderPayload } from './types'
+import { collectProviderIdentities, runBulkProviders } from './bulkProviders'
+import type { BulkPort, BulkRow, ProviderIdentity } from './bulkProviders'
 
 // Bucket y esquema de ruta idénticos a upload_helper.js (payment-receipts).
 const UPLOAD_BUCKET = 'payment-receipts'
@@ -26,6 +28,32 @@ export async function saveProvider(
   const id = (data as any)?.id
   if (!id) throw { code: 'provider_rpc_response_invalid', message: 'provider_rpc_response_invalid' }
   return id as string
+}
+
+// The catalog is shared, as in individual capture. Do not invent company_id
+// filters or bypass RLS. Include inactive rows so they cannot be recreated.
+export async function listBulkProviderIdentities(): Promise<ProviderIdentity[]> {
+  return collectProviderIdentities(async (after, limit) => {
+    let query = supabase.from('proveedores')
+      .select('id,alias,nombre_completo,rfc,clabe,activo')
+      .order('id', { ascending: true }).limit(limit)
+    if (after) query = query.gt('id', after)
+    const { data, error } = await query
+    if (error) throw error
+    return (data ?? []) as ProviderIdentity[]
+  })
+}
+
+export async function bulkCreateProviders(
+  rows: BulkRow[],
+  controls: Pick<BulkPort, 'canContinue' | 'onResult'>,
+): Promise<BulkRow[]> {
+  return runBulkProviders(rows, {
+    identities: listBulkProviderIdentities,
+    create: payload => saveProvider(null, payload),
+    canContinue: controls.canContinue,
+    onResult: controls.onResult,
+  })
 }
 
 // Activar/desactivar: update directo, igual que toggleSupplier del vanilla.
