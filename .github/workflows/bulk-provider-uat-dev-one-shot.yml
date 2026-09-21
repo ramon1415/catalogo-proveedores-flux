@@ -55,7 +55,7 @@ jobs:
       CANDIDATE_SHA: 2a835488a39377f173246c0a9ec19eb915c4c8ff
       EVIDENCE_DIR: /tmp/bulk-provider-dev-uat
       SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
-      SUPABASE_DEV_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_DEV_SERVICE_ROLE_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
 
     steps:
@@ -66,11 +66,22 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == 'ramon1415/catalogo-proveedores-flux' ]]
           [[ "${GITHUB_REF}" == 'refs/heads/dev' ]]
           [[ "${SUPABASE_DEV_PROJECT_REF}" == "${SUPABASE_PROJECT_ID}" ]]
-          [[ -n "${SUPABASE_DEV_DB_URL:-}" && -n "${SUPABASE_DEV_SERVICE_ROLE_KEY:-}" ]]
+          [[ -n "${SUPABASE_DEV_DB_URL:-}" && -n "${SUPABASE_ACCESS_TOKEN:-}" ]]
           echo "::add-mask::${SUPABASE_DEV_DB_URL}"
-          echo "::add-mask::${SUPABASE_DEV_SERVICE_ROLE_KEY}"
+          echo "::add-mask::${SUPABASE_ACCESS_TOKEN}"
           mkdir -p "${EVIDENCE_DIR}"
           chmod 700 "${EVIDENCE_DIR}"
+
+      - name: Resolve admin API key from Supabase Management API
+        shell: bash
+        run: |
+          set -euo pipefail
+          keys_json="$(curl --fail --silent --show-error --max-time 30             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}"             "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/api-keys?reveal=true")"
+          admin_key="$(jq -r '((map(select(.name=="service_role")) | .[0].api_key) // (map(select(.type=="secret")) | .[0].api_key) // empty)' <<<"${keys_json}")"
+          [[ -n "${admin_key}" ]]
+          echo "::add-mask::${admin_key}"
+          echo "SUPABASE_ADMIN_API_KEY=${admin_key}" >> "${GITHUB_ENV}"
+          unset keys_json admin_key
 
       - name: Install PostgreSQL client
         shell: bash
@@ -126,8 +137,8 @@ jobs:
           echo "::add-mask::${qa_password}"
           body="$(jq -nc --arg email "${qa_email}" --arg password "${qa_password}" '{email:$email,password:$password,email_confirm:true,app_metadata:{qa_fixture:"true",qa_scope:"bulk_provider_uat_659"}}')"
           curl --fail --silent --show-error --max-time 30 -X POST "${SUPABASE_URL}/auth/v1/admin/users" \
-            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_ADMIN_API_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ADMIN_API_KEY}" \
             -H 'Content-Type: application/json' --data "${body}" > "${EVIDENCE_DIR}/auth-private.json"
           auth_user_id="$(jq -r '.id // empty' "${EVIDENCE_DIR}/auth-private.json")"
           [[ "${auth_user_id}" =~ ^[0-9a-f-]{36}$ ]]
@@ -151,7 +162,7 @@ jobs:
           set -euo pipefail
           body="$(jq -nc --arg email "${QA_EMAIL}" --arg password "${QA_PASSWORD}" '{email:$email,password:$password}')"
           curl --fail --silent --show-error --max-time 30 -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
-            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H 'Content-Type: application/json' \
+            -H "apikey: ${SUPABASE_ADMIN_API_KEY}" -H 'Content-Type: application/json' \
             --data "${body}" > "${EVIDENCE_DIR}/session-private.json"
           user_token="$(jq -r '.access_token // empty' "${EVIDENCE_DIR}/session-private.json")"
           [[ -n "${user_token}" ]]
@@ -173,7 +184,7 @@ jobs:
             local body="$1" out="$2"
             curl --silent --show-error --max-time 30 -o "${out}" -w '%{http_code}' \
               -X POST "${SUPABASE_URL}/rest/v1/rpc/save_provider_catalog_with_payment_execution_data" \
-              -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
+              -H "apikey: ${SUPABASE_ADMIN_API_KEY}" \
               -H "Authorization: Bearer ${USER_TOKEN}" \
               -H 'Content-Type: application/json' --data "${body}"
           }
@@ -184,7 +195,9 @@ jobs:
           provider_a_id="$(jq -r '.id // empty' "${EVIDENCE_DIR}/create-transfer.json")"
           [[ "${provider_a_id}" =~ ^[0-9a-f-]{36}$ ]]
 
-          psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set provider_id="${provider_a_id}" -c "update public.proveedores set activo=false where id=:'provider_id'::uuid;" >/dev/null
+          psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set provider_id="${provider_a_id}" <<'SQL' >/dev/null
+          update public.proveedores set activo=false where id=:'provider_id'::uuid;
+          SQL
 
           dup="$(jq -nc --arg alias "${QA_PREFIX}-DUP-RFC" --arg rfc "${rfc_a}" --arg clabe "$(printf '012181%012d' $((GITHUB_RUN_ID % 1000000000000)))" '{p_proveedor_id:null,p_payload:{alias:$alias,nombre_completo:"QA Duplicate RFC",metodo_pago:"Transferencia bancaria",tipo_cuenta:"CLABE",destination_type:"clabe",beneficiary_name:"QA Duplicate RFC",banco:"BBVA",clabe:$clabe,cuenta_bancaria:null,convenio_number:null,rfc:$rfc,persona_tipo:null,email:null,telefono:null,tipo_proveedor:null,notas:"QA duplicate RFC",es_personal_eventual:false,activo:true,updated_at:"2026-09-21T00:00:00Z"}}')"
           status_dup="$(rpc_call "${dup}" "${EVIDENCE_DIR}/duplicate-rfc.json")"
@@ -197,15 +210,18 @@ jobs:
 
           curl --fail --silent --show-error --max-time 30 \
             "${SUPABASE_URL}/rest/v1/proveedores?select=id,alias,rfc,activo&rfc=eq.${rfc_a}" \
-            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-inactive.json"
+            -H "apikey: ${SUPABASE_ADMIN_API_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-inactive.json"
           jq -e 'length==1 and .[0].activo==false' "${EVIDENCE_DIR}/read-inactive.json" >/dev/null
 
           curl --fail --silent --show-error --max-time 30 \
             "${SUPABASE_URL}/rest/v1/proveedores?select=id,alias,rfc,beneficiary_name,metodo_pago,activo&rfc=eq.${rfc_b}" \
-            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-non-transfer.json"
+            -H "apikey: ${SUPABASE_ADMIN_API_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-non-transfer.json"
           jq -e 'length==1 and .[0].metodo_pago=="Efectivo" and .[0].beneficiary_name==null and .[0].activo==true' "${EVIDENCE_DIR}/read-non-transfer.json" >/dev/null
 
-          count="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${QA_PREFIX}%" -c "select count(*) from public.proveedores where alias like :'prefix';")"
+          count="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${QA_PREFIX}%" <<'SQL'
+          select count(*) from public.proveedores where alias like :'prefix';
+          SQL
+          )"
           [[ "${count}" == '2' ]]
           jq -n --argjson create_transfer "${status_a}" --argjson duplicate_rfc "${status_dup}" --argjson create_non_transfer "${status_b}" \
             '{status:"PASS",created:2,duplicate_code:"23505",create_transfer_http:$create_transfer,duplicate_rfc_http:$duplicate_rfc,create_non_transfer_http:$create_non_transfer,inactive_existing_visible:true,non_transfer_beneficiary_null:true}' \
@@ -216,6 +232,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${EVIDENCE_DIR}"
           prefix="${QA_PREFIX:-QA-BULK-${GITHUB_RUN_ID}}%"
           email="${QA_EMAIL:-qa-bulk-${GITHUB_RUN_ID}@example.invalid}"
           psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set prefix="${prefix}" --set email="${email}" <<'SQL'
@@ -228,10 +245,16 @@ jobs:
           SQL
           if [[ -n "${AUTH_USER_ID:-}" ]]; then
             curl --fail --silent --show-error --max-time 30 -X DELETE "${SUPABASE_URL}/auth/v1/admin/users/${AUTH_USER_ID}" \
-              -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${SUPABASE_DEV_SERVICE_ROLE_KEY}" >/dev/null
+              -H "apikey: ${SUPABASE_ADMIN_API_KEY}" -H "Authorization: Bearer ${SUPABASE_ADMIN_API_KEY}" >/dev/null
           fi
-          pcount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${prefix}" -c "select count(*) from public.proveedores where alias like :'prefix';")"
-          ucount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set email="${email}" -c "select count(*) from public.profiles where email=:'email';")"
+          pcount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${prefix}" <<'SQL'
+          select count(*) from public.proveedores where alias like :'prefix';
+          SQL
+          )"
+          ucount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set email="${email}" <<'SQL'
+          select count(*) from public.profiles where email=:'email';
+          SQL
+          )"
           [[ "${pcount}" == 0 && "${ucount}" == 0 ]]
           printf '{"providers_remaining":0,"profiles_remaining":0}\n' > "${EVIDENCE_DIR}/cleanup.json"
           rm -f "${EVIDENCE_DIR}/auth-private.json" "${EVIDENCE_DIR}/session-private.json"
@@ -241,6 +264,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${EVIDENCE_DIR}"
           psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 <<'SQL' > "${EVIDENCE_DIR}/cron-after.json"
           select coalesce(jsonb_agg(jsonb_build_object('jobname',jobname,'active',active) order by jobid),'[]'::jsonb)
           from cron.job
