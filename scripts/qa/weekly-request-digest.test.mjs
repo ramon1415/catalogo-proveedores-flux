@@ -1,3 +1,4 @@
+import './weekly-request-digest-send-mode.test.mjs'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs'
@@ -8,7 +9,7 @@ import {renderEmail,renderPdf,totals} from '../../supabase/functions/weekly-requ
 const uuid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`
 const row=(n,status='pending_approval')=>({id:uuid(n),folio:`SOL-QA-${n}`,company:n%2?'Operadora Tlacatecpan':'Soporte Fersana',beneficiary:'Beneficiario <QA>',description:'Solicitud de prueba con acentos: aprobación',cost_center:'Centro',category:'Sin partida (QA)',amount_minor:10000,currency:'MXN',status,request_type:'provider_payment',requester:'QA',created_at:'2026-09-17T12:00:00Z'})
 const doc={id:uuid(50),environment:'dev',recipient:'ramon@quantta.mx',period_start:'2026-09-16T23:00:00Z',period_end:'2026-09-23T23:00:00Z',rows:[row(1),row(2,'approved')]}
-const env={NOTIFICATION_DISPATCHER_SECRET:'secret',SUPABASE_URL:'https://scsirgbuqjcwoaxfacth.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service',RESEND_API_KEY:'resend',NOTIFICATION_FROM_EMAIL:'Flux <test@example.com>'}
+const env={NOTIFICATION_DISPATCHER_SECRET:'secret',SUPABASE_URL:'https://scsirgbuqjcwoaxfacth.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service',RESEND_API_KEY:'resend',NOTIFICATION_FROM_EMAIL:'Flux <test@example.com>',NOTIFICATION_SEND_MODE:'test_only',NOTIFICATION_TEST_EMAIL:'ramon@quantta.mx'}
 const request=(body={},auth=true)=>new Request('https://worker',{method:'POST',headers:auth?{'x-notification-dispatcher-secret':'secret'}:{},body:JSON.stringify(body)})
 
 test('PDF contains all rows, correct states and amounts across company pages; HTML escapes data',async()=>{
@@ -38,7 +39,7 @@ for(const claim of [null,{empty:true}])test(`no delivery for ${claim?'empty week
 })
 for(const environment of ['dev','prod'])test(`${environment} freezes complete PDF payload and uses the fixed recipient`,async()=>{
  const d={...doc,environment,recipient:environment==='prod'?'lisette@dezdez.earth':doc.recipient};let payload,delivered,finish
- const runtime={env:n=>n==='SUPABASE_URL'&&environment==='prod'?'https://ucantptjhwttexzmslvm.supabase.co':env[n],fetch:async(url,init)=>{
+ const runtime={env:n=>n==='NOTIFICATION_SEND_MODE'&&environment==='prod'?'real':n==='SUPABASE_URL'&&environment==='prod'?'https://ucantptjhwttexzmslvm.supabase.co':env[n],fetch:async(url,init)=>{
   const body=JSON.parse(init.body)
   if(url.endsWith('/claim_weekly_request_digest'))return Response.json({id:d.id,document:d,payload:null})
   if(url.endsWith('/prepare_weekly_request_digest')){payload=body.p_payload;return Response.json(payload)}
