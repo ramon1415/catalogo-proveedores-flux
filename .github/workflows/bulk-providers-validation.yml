@@ -5,13 +5,13 @@ on:
     branches: [fix/ramon-bulk-provider-validation]
     paths:
       - 'app/src/features/proveedores/**'
-      - 'scripts/qa/bulk-providers*.mjs'
+      - 'scripts/qa/bulk-providers*'
       - '.github/workflows/bulk-providers-validation.yml'
       - 'docs/qa/bulk-providers-validation.md'
   pull_request:
     paths:
       - 'app/src/features/proveedores/**'
-      - 'scripts/qa/bulk-providers*.mjs'
+      - 'scripts/qa/bulk-providers*'
       - '.github/workflows/bulk-providers-validation.yml'
 
 permissions:
@@ -20,7 +20,7 @@ permissions:
 jobs:
   local-contracts-and-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -42,15 +42,32 @@ jobs:
           VITE_SUPABASE_URL: https://flux-qa.invalid
           VITE_SUPABASE_ANON_KEY: synthetic-offline-qa-key-not-a-credential
         run: npm run build
+      - name: Install pinned browser QA tools outside application dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/flux-browser-venv"
+          "$RUNNER_TEMP/flux-browser-venv/bin/pip" install playwright==1.55.0
+          "$RUNNER_TEMP/flux-browser-venv/bin/python" -m playwright install --with-deps chromium
+          mkdir -p "$RUNNER_TEMP/flux-browser-bin"
+          curl --fail --location --retry 2 --max-time 90 https://github.com/vercel-labs/agent-browser/releases/download/v0.38.1/agent-browser-linux-x64 -o "$RUNNER_TEMP/flux-browser-bin/agent-browser"
+          echo "5100149a1903211c889de4e545bf36d90803740cea4f99aa22651649f9205ea1  $RUNNER_TEMP/flux-browser-bin/agent-browser" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/flux-browser-bin/agent-browser"
+          echo "$RUNNER_TEMP/flux-browser-bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/flux-browser-venv/bin" >> "$GITHUB_PATH"
+      - name: Full built app browser tests with synthetic API only
+        run: |
+          mkdir -p qa-artifact/browser-full
+          agent-browser --help > qa-artifact/browser-full/agent-browser-help.txt
+          python scripts/qa/bulk-providers-browser.py
       - name: Package built app and tracked source for offline verification
         run: |
           mkdir -p qa-artifact
           printf '%s\n' "$GITHUB_SHA" > qa-artifact/source-commit.txt
-          tar -czf qa-artifact/flux-pr561-offline-app.tgz app/dist app/src app/public app/package.json app/package-lock.json app/tsconfig.json app/vite.config.ts app/index.html scripts/qa/bulk-providers.test.mjs
-      - name: Retain QA artifact (no secrets or business data)
+          tar -czf qa-artifact/flux-pr561-offline-app.tgz app/dist app/src app/public app/package.json app/package-lock.json app/tsconfig.json app/vite.config.ts app/index.html scripts/qa/bulk-providers.test.mjs scripts/qa/bulk-providers-browser.py
+      - name: Retain QA evidence even on test failure (no secrets or business data)
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: flux-pr561-offline-app-${{ github.sha }}
           path: qa-artifact/
           retention-days: 3
-          if-no-files-found: error
+          if-no-files-found: warn
