@@ -55,6 +55,10 @@ test('seed uses only PROD tenant ids and exact expected counts',()=>{
   assert.doesNotMatch(seed,/AUTO-RSJT-2026-ROW-/)
   for (const code of ['OP-001','OP-002','OP-003','REC-RSJT-2026-001']) assert.doesNotMatch(seed,new RegExp(`\\('${code}'`))
   assert.match(seed,/FONACOT existe en PROD pero no tenía mapeo validado en DEV/)
+  assert.match(seed,/contpaq_seed_opt_tax_count/)
+  assert.match(seed,/tax_account_mappings where company_id=opt\)<>4/)
+  assert.doesNotMatch(seed,/66001060300/)
+  assert.match(seed,/ajusteRedondeo\/noDeducibles se omiten/)
 })
 
 test('account review/export code is present but remains behind module gate',()=>{
