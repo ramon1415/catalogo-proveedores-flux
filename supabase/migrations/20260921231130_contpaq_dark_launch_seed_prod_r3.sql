@@ -1,7 +1,7 @@
 begin;
 
 -- CONTPAQ dark launch PROD R3 seed. Reutiliza el dataset determinista validado del candidato anterior.
--- El esquema R3 conserva 1:1 partida→cuenta, compatible con estos datos y con la UI actual.
+-- El esquema R3 conserva 1:1 partida→cuenta, compatible con estos datos y con la UI actual.\n-- ajusteRedondeo/noDeducibles se omiten: DEV apuntaba a 66001060300, ausente del catálogo; no se adivina cuenta en PROD.
 
 do $pre$ begin if not exists(select 1 from public.companies where id='144042c1-e493-4256-a86c-cd088a8898ce'::uuid and name='Operadora Tlacatecpan' and active) or not exists(select 1 from public.companies where id='20cd72aa-f281-4985-931b-a83422404b66'::uuid and name='Soporte Fersana' and active) then raise exception 'contpaq_prod_company_identity_mismatch'; end if; end $pre$;
 
@@ -3290,9 +3290,7 @@ insert into public.tax_account_mappings(company_id,tax_key,contpaq_account_code,
   ('144042c1-e493-4256-a86c-cd088a8898ce','ivaAcreditablePagado','11801100000',false),
   ('144042c1-e493-4256-a86c-cd088a8898ce','ivaRetenidoAcreditable','11801200000',false),
   ('144042c1-e493-4256-a86c-cd088a8898ce','retIvaPasivo','21308000000',true),
-  ('144042c1-e493-4256-a86c-cd088a8898ce','retIsrPasivo','21309000000',true),
-  ('144042c1-e493-4256-a86c-cd088a8898ce','ajusteRedondeo','66001060300',false),
-  ('144042c1-e493-4256-a86c-cd088a8898ce','noDeducibles','66001060300',false)
+  ('144042c1-e493-4256-a86c-cd088a8898ce','retIsrPasivo','21309000000',true)
 on conflict(company_id,tax_key) do nothing;
 
 
@@ -3308,7 +3306,7 @@ begin
   if (select count(*) from public.budget_account_mappings where company_id=sf)<>60 then raise exception 'contpaq_seed_sf_maps_count'; end if;
   if (select count(*) from public.budget_account_mappings where company_id=opt and needs_review)<>4 then raise exception 'contpaq_seed_opt_review_count'; end if;
   if (select count(*) from public.budget_account_mappings where company_id=sf and needs_review)<>18 then raise exception 'contpaq_seed_sf_review_count'; end if;
-  if (select count(*) from public.tax_account_mappings where company_id=opt)<>6 then raise exception 'contpaq_seed_opt_tax_count'; end if;
+  if (select count(*) from public.tax_account_mappings where company_id=opt)<>4 then raise exception 'contpaq_seed_opt_tax_count'; end if;
   if exists(select 1 from public.budget_account_mappings m left join public.contpaq_accounts a on a.company_id=m.company_id and a.code=m.contpaq_account_code where a.code is null or not a.is_detail or not a.activo) then raise exception 'contpaq_seed_invalid_mapping_account'; end if;
 end
 $post$;
