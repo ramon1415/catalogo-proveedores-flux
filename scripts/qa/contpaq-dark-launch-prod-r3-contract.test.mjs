@@ -50,7 +50,11 @@ test('seed uses only PROD tenant ids and exact expected counts',()=>{
   assert.match(seed,/20cd72aa-f281-4985-931b-a83422404b66/)
   assert.doesNotMatch(seed,/9680353c-9b86-4730-82e1-fce664f048a2/)
   assert.doesNotMatch(seed,/68b61801-74c0-44ea-a33b-f20e4bf53aa7/)
-  for (const marker of ['<>1646','<>694','<>95','<>396','<>187','<>87','<>60']) assert.ok(seed.includes(marker),marker)
+  for (const marker of ['<>1646','<>694','<>95','<>396','<>187','<>83','<>60']) assert.ok(seed.includes(marker),marker)
+  assert.ok(seed.includes("needs_review)<>4"),'Operadora review count must be 4')
+  assert.doesNotMatch(seed,/AUTO-RSJT-2026-ROW-/)
+  for (const code of ['OP-001','OP-002','OP-003','REC-RSJT-2026-001']) assert.doesNotMatch(seed,new RegExp(`\\('${code}'`))
+  assert.match(seed,/FONACOT existe en PROD pero no tenía mapeo validado en DEV/)
 })
 
 test('account review/export code is present but remains behind module gate',()=>{
