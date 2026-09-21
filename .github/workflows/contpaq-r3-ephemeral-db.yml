@@ -115,6 +115,10 @@ jobs:
               q=c.replace("'","''")
               print("insert into public.company_cost_center_budget_categories(company_id,budget_category_id,active) "
                     f"select '144042c1-e493-4256-a86c-cd088a8898ce'::uuid,id,true from public.budget_categories where code='{q}';")
+          for c in sf:
+              q=c.replace("'","''")
+              print("insert into public.company_cost_center_budget_categories(company_id,budget_category_id,active) "
+                    f"select '20cd72aa-f281-4985-931b-a83422404b66'::uuid,id,true from public.budget_categories where code='{q}';")
           PY
           psql -v ON_ERROR_STOP=1 -f /tmp/categories.sql
 
