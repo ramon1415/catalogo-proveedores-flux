@@ -1,0 +1,39 @@
+name: Generate CONTPAQ R3 migration names
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/generate-contpaq-r3-migration-names.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+      - name: Generate names with Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version
+          supabase migration new contpaq_dark_launch_schema_prod_r3
+          sleep 1
+          supabase migration new contpaq_dark_launch_seed_prod_r3
+          find supabase/migrations -maxdepth 1 -type f \
+            \( -name '*_contpaq_dark_launch_schema_prod_r3.sql' -o -name '*_contpaq_dark_launch_seed_prod_r3.sql' \) \
+            -printf '%f\n' | sort | tee /tmp/contpaq-r3-migration-names.txt
+          [[ "$(wc -l < /tmp/contpaq-r3-migration-names.txt)" -eq 2 ]]
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: contpaq-r3-migration-names
+          path: /tmp/contpaq-r3-migration-names.txt
+          retention-days: 1
