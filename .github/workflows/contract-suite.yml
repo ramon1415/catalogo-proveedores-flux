@@ -1,0 +1,60 @@
+name: Contract suite
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-suite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Offline contracts and app build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+      - name: Install locked QA and app dependencies
+        run: npm run qa:setup
+      - name: Typecheck and build the deployed static artifact
+        run: npm --prefix app run build && node scripts/build-vercel-static.mjs
+      - name: Run the complete offline contract suite including the built artifact
+        env:
+          VERIFY_VERCEL_ARTIFACT: "1"
+        run: npm test
+
+  dev-database-contracts:
+    name: DEV database contracts (read only)
+    # Credentials are never given to pull request code. PR review uses the unit
+    # suite; the deployed database is checked after integration and on demand.
+    if: github.ref == 'refs/heads/dev' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: DEV
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Read current DEV catalog and verify SQL contracts
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: npm run test:db

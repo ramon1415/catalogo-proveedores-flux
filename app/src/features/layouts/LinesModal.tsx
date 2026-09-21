@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useMemo, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { Badge } from '../../components/ui/Badge'
@@ -29,6 +30,8 @@ export function LinesModal({
   // Recarga layouts + relee líneas, actualiza el estado y devuelve las líneas frescas.
   reload: () => Promise<PaymentLayoutLine[]>
 }) {
+  const companyNames = [...new Set(lines.map(line => line.company_name).filter((name): name is string => Boolean(name)))]
+  const multipleCompanies = (layout.company_count || 0) > 1 || companyNames.length > 1
   const [pagosintLine, setPagosintLine] = useState<PaymentLayoutLine | null>(null)
   const [rejectLineId, setRejectLineId] = useState<string | null>(null)
 
@@ -54,7 +57,7 @@ export function LinesModal({
 
   return (
     <>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={multipleCompanies ? null : companyNames[0]} emptyLabel={multipleCompanies ? 'Varias empresas' : 'Empresa no identificada'} />}
         title={layout.layout_number || 'Lineas del layout'}
         subtitle={`${layout.name || ''} - archivo CxC BBVA`.trim()}
         size="lg"

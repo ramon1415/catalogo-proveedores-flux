@@ -6,12 +6,12 @@ const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), '
 const page = read('app/src/features/nomina/NominaPage.tsx')
 const modal = read('app/src/features/nomina/CaptureModal.tsx')
 const api = read('app/src/features/nomina/api.ts')
-const migration = read('supabase/migrations/20260827225332_payroll_active_company_scope.sql')
+const migration = read('supabase/migrations/20260827231155_payroll_active_company_scope.sql')
 
 assert.match(page, /useCompany\(\)/)
 assert.match(page, /session\.company_id === companyId/)
-assert.match(page, /loadSourceAccounts\(companyId\)/)
-assert.match(page, /loadAccountingScope\(companyId\)/)
+assert.match(page, /loadCaptureContext\(companyId\)/)
+assert.match(page, /usePayrollAccess\(\)/)
 assert.doesNotMatch(page, /loadCompanies/)
 
 assert.match(modal, /activeCompanyId: string/)

@@ -2,7 +2,7 @@
 // requeridos, validación de metadata, inspección local de archivos, mapas de
 // estado/error y formateadores. Portado 1:1 desde payroll_capture.js.
 
-import { summarizePayrollSpeiForCapture, parsePayrollSpeiTxt } from './speiParser'
+import { parsePayrollSpeiTxt } from './speiParser'
 import type {
   BankAccount,
   CompanyCostCenter,
@@ -290,45 +290,60 @@ export async function inspectFile(
     issueCodes: [],
   }
 
-  if (slot === 'layout_spei') {
-    const parsedWithoutAccount = parsePayrollSpeiTxt(buffer)
-    const summary = sourceCandidates.length
-      ? summarizePayrollSpeiForCapture(buffer, sourceCandidates)
-      : {
-          parserVersion: parsedWithoutAccount.parserVersion,
-          contractVersion: parsedWithoutAccount.contractVersion,
-          valid: parsedWithoutAccount.issues.length === 0 && parsedWithoutAccount.records.length > 0,
-          recordCount: parsedWithoutAccount.issues.length === 0 ? parsedWithoutAccount.records.length : 0,
-          totalAmountMinor:
-            parsedWithoutAccount.issues.length === 0
-              ? parsedWithoutAccount.records.reduce((sum, record) => sum + record.amountMinor, 0)
-              : null,
-          currency: 'MXN',
-          issues: parsedWithoutAccount.issues,
-        }
-    if (!summary.valid) {
-      return { ...base, status: 'parser_error', uploadable: false, parserSummary: summary, issueCodes: ['PARSER_ERROR'] }
-    }
-    return {
-      ...base,
-      status: 'parsed',
-      parserSummary: summary,
-      recordCount: summary.recordCount,
-      totalAmountMinor: summary.totalAmountMinor,
-    }
-  }
-  if (slot === 'layout_toka') {
+  if (slot === 'layout_spei' || slot === 'layout_toka') {
     const parsed = parsePayrollSpeiTxt(buffer)
-    const allowed = new Set(sourceCandidates.map(normalizeAccount18))
-    if (
-      parsed.issues.length ||
-      parsed.records.length !== 1 ||
-      (allowed.size > 0 && parsed.records.some((record) => !allowed.has(record.sourceAccount)))
-    ) {
+    if (parsed.issues.length || !parsed.records.length || (slot === 'layout_toka' && parsed.records.length !== 1)) {
       return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
     }
+    const totalAmountMinor = parsed.records.reduce((sum, record) => sum + record.amountMinor, 0)
+    if (!Number.isSafeInteger(totalAmountMinor)) {
+      return { ...base, status: 'parser_error', uploadable: false, issueCodes: ['PARSER_ERROR'] }
+    }
+    const physical: FileSlotState = {
+      ...base,
+      status: slot === 'layout_spei' ? 'parsed' : 'server_verification_pending',
+      recordCount: parsed.records.length,
+      totalAmountMinor,
+      encodedSourceAccounts: Array.from(new Set(parsed.records.map((record) => record.sourceAccount))),
+      ...(slot === 'layout_spei' ? { parserSummary: {
+        parserVersion: parsed.parserVersion, contractVersion: parsed.contractVersion,
+        valid: true, recordCount: parsed.records.length, totalAmountMinor, currency: 'MXN', issues: [],
+      } } : {}),
+    }
+    return validateFileSourceAccount(slot, physical, sourceCandidates)
   }
   return base
+}
+
+// Physical parsing is cached with the file; account validation always follows
+// the current selection. Uploaded files remain under the server's authority.
+export function validateFileSourceAccount(slot: PayrollSlot, state: FileSlotState, candidates: string[]): FileSlotState {
+  if (state.uploaded || !state.encodedSourceAccounts?.length || !['layout_spei', 'layout_toka'].includes(slot)) return state
+  const code = 'PAYROLL_SOURCE_ACCOUNT_MISMATCH'
+  const allowed = new Set(candidates.map(normalizeAccount18).filter(Boolean))
+  const mismatch = allowed.size > 0 && state.encodedSourceAccounts.some((account) => !allowed.has(account))
+  const issueCodes = (state.issueCodes || []).filter((issue) => issue !== code)
+  if (mismatch) issueCodes.push(code)
+  const issues = (state.parserSummary?.issues || []).filter((issue) => issue.code !== code)
+  if (mismatch) issues.push({ code, severity: 'blocking', source: 'source_account' })
+  return {
+    ...state, issueCodes, uploadable: issueCodes.length === 0,
+    status: issueCodes.length ? 'parser_error' : slot === 'layout_spei' ? 'parsed' : 'server_verification_pending',
+    ...(state.parserSummary ? { parserSummary: { ...state.parserSummary, valid: issues.length === 0, issues } } : {}),
+  }
+}
+
+export function validateFilesSourceAccount(files: FileMap, candidates: string[]): FileMap {
+  return Object.fromEntries(Object.entries(files).map(([slot, state]) =>
+    [slot, validateFileSourceAccount(slot as PayrollSlot, state, candidates)]))
+}
+
+export function fileValidationMessage(state: FileSlotState): string {
+  if (state.issueCodes?.includes('PAYROLL_SOURCE_ACCOUNT_MISMATCH')) {
+    return 'La cuenta origen de este archivo no coincide con la seleccionada. Revisa la cuenta y la empresa de la captura.'
+  }
+  return state.status === 'parser_error' || state.status === 'failed'
+    ? 'El archivo no pasó la validación. Revisa su formato o vuelve a seleccionarlo.' : ''
 }
 
 // Estado de un slot cuando falla el parseo antes de inspeccionar (catch del bind).
@@ -349,7 +364,7 @@ export function validateMetadata(input: {
   concept: string
   channels: PayrollChannel[]
 }): string {
-  if (!input.isFinance) return 'La Nómina es exclusiva de Finanzas.'
+  if (!input.isFinance) return 'Necesitas acceso a Nómina en la empresa activa.'
   if (!input.companyId) return 'Selecciona empresa.'
   if (!input.sourceAccountId) return 'Selecciona cuenta origen.'
   if (!input.costCenterId) return 'Selecciona centro de costo.'
@@ -388,6 +403,27 @@ export function slotLabel(value: PayrollSlot | string): string {
       } as Record<string, string>
     )[value] || value || 'Captura'
   )
+}
+
+export function fileRecordCountLabel(slot: PayrollSlot, count: number): string {
+  const labels: Record<PayrollSlot, [string, string]> = {
+    caratula: ['persona', 'personas'],
+    layout_mismo_banco: ['pago', 'pagos'],
+    layout_spei: ['transferencia', 'transferencias'],
+    layout_toka: ['transferencia', 'transferencias'],
+    cfdi_vales: ['beneficiario de vales', 'beneficiarios de vales'],
+  }
+  return `${count} ${labels[slot][count === 1 ? 0 : 1]}`
+}
+
+export function fileAmountLabel(slot: PayrollSlot): string {
+  return {
+    caratula: 'Neto de nómina',
+    layout_mismo_banco: 'Total BBVA',
+    layout_spei: 'Total SPEI',
+    layout_toka: 'Fondeo TOKA',
+    cfdi_vales: 'Importe de vales',
+  }[slot]
 }
 
 export function channelLabel(value: PayrollChannel | string): string {
@@ -472,6 +508,9 @@ const ERROR_MAP: Record<string, string> = {
   PAYROLL_SAME_BANK_SERVER_PARSE_FAILED: 'El archivo BBVA mismo banco no coincide con Nómina 108.',
   PAYROLL_TOKA_CFDI_SERVER_PARSE_FAILED: 'El CFDI TOKA no coincide con el contrato certificado.',
   PAYROLL_TOKA_FUNDING_SERVER_PARSE_FAILED: 'El TXT de fondeo TOKA no coincide con el contrato certificado.',
+  PAYROLL_NON_BUDGET_CONTEXT_REQUIRED: 'Esta corrida no tiene el nuevo contexto no presupuestal. Crea una captura nueva para usar el flujo actual.',
+  PAYROLL_APPROVAL_FLOW_DISABLED: 'La Nómina ya no usa aprobación. Revisa los montos y confirma la corrida desde Finanzas.',
+  PAYROLL_FINANCE_CONFIRM_RPC_REQUIRED: 'La confirmación debe realizarse desde la acción de revisión de Finanzas.',
 }
 
 export function friendlyError(error: unknown): string {

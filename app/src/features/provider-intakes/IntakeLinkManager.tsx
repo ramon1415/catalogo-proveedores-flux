@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '../../components/ui/Badge'
 import { formatDateTime } from '../../lib/format'
@@ -193,6 +194,7 @@ export function IntakeLinkManager({ onClose }: { onClose: () => void }) {
           <div>
             <h2 style={{ fontSize: '1.1rem' }}>Ligas públicas de proveedor</h2>
             <p className="muted">Genera y administra las ligas de captura sin crear intakes ni proveedores.</p>
+            <CompanyCaptureContext company={company} />
           </div>
           <button className="small-btn" onClick={onClose}>Cerrar</button>
         </div>

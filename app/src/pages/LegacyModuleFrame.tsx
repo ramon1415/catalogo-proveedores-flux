@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useCompany } from '../lib/company'
+import { LegacyCompanyModalContexts } from './LegacyCompanyModalContexts'
 import s from './LegacyModuleFrame.module.css'
 
 const EMBED_STYLES = `
@@ -12,6 +13,9 @@ const EMBED_STYLES = `
   @media (max-width: 1040px) {
     .app-shell { height: 100vh !important; min-height: 0 !important; overflow: hidden !important; }
   }
+  @media (max-width: 720px) {
+    .page:has(.batch-workspace) { height: 100dvh !important; overflow: auto !important; box-sizing: border-box; }
+  }
 `
 
 interface LegacyModuleFrameProps {
@@ -20,9 +24,10 @@ interface LegacyModuleFrameProps {
 }
 
 export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps) {
-  const { companyId } = useCompany()
+  const { companyId, companyName } = useCompany()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
+  const [frameDocument, setFrameDocument] = useState<Document | null>(null)
   const frameSrc = companyId
     ? `${src}${src.includes('?') ? '&' : '?'}company_id=${encodeURIComponent(companyId)}`
     : src
@@ -40,15 +45,17 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
     }
 
     doc.documentElement.dataset.theme = document.documentElement.dataset.theme ?? 'dark'
+    setFrameDocument(doc)
     setReady(true)
   }
 
   useEffect(() => {
     setReady(false)
+    setFrameDocument(null)
   }, [frameSrc])
 
   return (
-    <section className={s.host} aria-label={title}>
+    <section className={s.host} aria-label={title} data-legacy-module>
       <iframe
         ref={frameRef}
         className={`${s.frame} ${ready ? s.frameReady : ''}`}
@@ -56,6 +63,7 @@ export default function LegacyModuleFrame({ src, title }: LegacyModuleFrameProps
         title={title}
         onLoad={prepareEmbeddedShell}
       />
+      <LegacyCompanyModalContexts doc={frameDocument} companyName={companyName} />
     </section>
   )
 }

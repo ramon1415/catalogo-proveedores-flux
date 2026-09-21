@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const migration = readFileSync(
-  'supabase/migrations/20260901062149_company_scoped_rls_rpc_cutover.sql',
+  'supabase/migrations/20260901071915_company_scoped_rls_rpc_cutover.sql',
   'utf8',
 )
 const rpcMigration = readFileSync(
-  'supabase/migrations/20260901063043_company_scoped_rpc_cutover.sql',
+  'supabase/migrations/20260901071923_company_scoped_rpc_cutover.sql',
   'utf8',
 )
 const preflight = readFileSync(

@@ -7,11 +7,45 @@ const modal = readFileSync('app/src/features/nomina/CaptureModal.tsx', 'utf8')
 const logic = readFileSync('app/src/features/nomina/logic.ts', 'utf8')
 const formats = readFileSync('payroll_real_formats.js', 'utf8')
 
-test('Edge non-2xx keeps the safe PAYROLL_* server code', () => {
-  assert.match(api, /async function throwFunctionInvokeError/)
-  assert.equal((api.match(/await throwFunctionInvokeError\(error\)/g) || []).length, 2)
-  assert.match(api, /context\.clone\(\)\.json\(\)/)
-})
+import { runInNewContext } from 'node:vm'
+import ts from '../../app/node_modules/typescript/lib/typescript.js'
+
+const compiledApi = ts.transpileModule(api, { compilerOptions: {
+  module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+} }).outputText
+function payrollApi(invoke) {
+  const exports = {}
+  runInNewContext(compiledApi, {
+    exports, require: (name) => {
+      if (name.includes('supabase')) return { supabase: { functions: { invoke } } }
+      if (name.includes('logic')) return {}
+      throw new Error(`Unexpected runtime import ${name}`)
+    },
+  })
+  return exports
+}
+const edgeCalls = [
+  ['materializeCapture', ['session-qa', 1], 'payroll-materialize'],
+  ['revalidateMaterializedCapture', ['session-qa', 1], 'payroll-materialize'],
+  ['getCaptureFileUrl', ['file-qa'], 'payroll-capture-file-url'],
+]
+for (const [name, args, edge] of edgeCalls) {
+  test(`${name} preserves a safe PAYROLL code from Edge non-2xx`, async () => {
+    const error = Object.assign(new Error('Edge non-2xx'), {
+      context: new Response(JSON.stringify({ error: 'PAYROLL_ACCESS_DENIED' }), { status: 403 }),
+    })
+    const client = payrollApi(async (actual) => { assert.equal(actual, edge); return { error } })
+    await assert.rejects(client[name](...args), { message: 'PAYROLL_ACCESS_DENIED' })
+    assert.equal(error.context.bodyUsed, false, 'Parsing must not consume the original response')
+  })
+  for (const payload of ['not JSON', JSON.stringify({ error: 'internal database detail' })]) {
+    test(`${name} retains the transport error for an unsafe or invalid response: ${payload}`, async () => {
+      const error = Object.assign(new Error('Edge non-2xx'), { context: new Response(payload, { status: 500 }) })
+      const client = payrollApi(async () => ({ error }))
+      await assert.rejects(client[name](...args), actual => actual === error)
+    })
+  }
+}
 
 test('manual assignment cannot bypass canonical physical parser', () => {
   assert.match(modal, /const classified = await classifyPayrollFile\(entry\.file\)/)

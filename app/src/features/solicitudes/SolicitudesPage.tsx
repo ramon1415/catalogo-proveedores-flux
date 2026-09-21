@@ -21,6 +21,7 @@ import {
   STATUS_FILTER_LABELS,
 } from './logic'
 import { RequestModal } from './RequestModal'
+import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import { DetailModal } from './DetailModal'
 import { EditModal } from './EditModal'
 import type {
@@ -55,6 +56,8 @@ export default function SolicitudesPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('activas')
   const [decisionFilter, setDecisionFilter] = useState<BudgetDecisionFilter>('todos')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  useEffect(() => setCategoryFilter(''), [activeCompanyId])
   const allowedCompanyIds = useMemo(
     () => new Set(memberships.map((membership) => membership.company_id)),
     [memberships],
@@ -151,25 +154,27 @@ export default function SolicitudesPage() {
       return (
         haystack.includes(q) &&
         statusMatches(r, statusFilter) &&
-        budgetDecisionMatches(r, decisionFilter)
+        budgetDecisionMatches(r, decisionFilter) &&
+        (!categoryFilter || r.budget_category_id === categoryFilter)
       )
     })
-  }, [scopedRequests, lookups, query, statusFilter, decisionFilter])
+  }, [scopedRequests, lookups, query, statusFilter, decisionFilter, categoryFilter])
 
-  const hasActiveFilters = Boolean(query.trim()) || statusFilter !== 'todos' || decisionFilter !== 'todos'
+  const hasActiveFilters = Boolean(query.trim() || categoryFilter) || statusFilter !== 'todos' || decisionFilter !== 'todos'
 
   const filterParts = useMemo(() => {
     const parts: string[] = []
     if (query.trim()) parts.push('Busqueda')
+    if (categoryFilter) parts.push(lookups.category(categoryFilter)?.name || 'Partida')
     if (statusFilter !== 'todos') parts.push(STATUS_FILTER_LABELS[statusFilter] || `Estatus: ${statusFilter}`)
     if (decisionFilter === 'aprobable') parts.push('Aprobables')
     if (decisionFilter === 'excepciones') parts.push('Excepciones presupuestales')
     if (activeCompanyId) { const c = lookups.company(activeCompanyId); parts.push(c ? companyName(c) : 'Empresa activa') }
     return parts
-  }, [query, statusFilter, decisionFilter, activeCompanyId, lookups])
+  }, [query, statusFilter, decisionFilter, categoryFilter, activeCompanyId, lookups])
 
   function setFilters(next: { status: StatusFilter; decision: BudgetDecisionFilter }) {
-    setQuery(''); setStatusFilter(next.status); setDecisionFilter(next.decision)
+    setQuery(''); setCategoryFilter(''); setStatusFilter(next.status); setDecisionFilter(next.decision)
   }
 
   // ── Card active state (mirror renderFilterState) ─────────────────────────
@@ -239,7 +244,7 @@ export default function SolicitudesPage() {
             <IcSearch size={16} />
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por folio, proveedor o descripcion..." aria-label="Buscar solicitudes" />
           </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
+          <select aria-label="Filtrar por estatus" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}>
             <option value="todos">Estatus: Todos</option>
             <option value="activas">Activas</option>
             <option value="submitted">Enviada</option>
@@ -251,24 +256,30 @@ export default function SolicitudesPage() {
             <option value="rejected">Rechazada</option>
             <option value="cancelled">Cancelada</option>
           </select>
-          <select value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as BudgetDecisionFilter)}>
+          <select aria-label="Filtrar por presupuesto" value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as BudgetDecisionFilter)}>
             <option value="todos">Presupuesto: Todos</option>
             <option value="aprobable">Aprobable</option>
             <option value="excepciones">Excepciones</option>
+          </select>
+          <select aria-label="Filtrar por partida" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="">Todas las partidas</option>
+            {budgetCategories.filter((category) => isSinPartida(category) || scopedRequests.some((r) => r.budget_category_id === category.id))
+              .map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
           </select>
         </div>
 
         {filterParts.length > 0 && (
           <div className={s.filterSummary}>
             <span className={s.filterPill}>Vista filtrada: {filterParts.join(' · ')}</span>
-            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Ver todas</button>
+            <button type="button" className={s.smallBtn} onClick={() => { setQuery(''); setCategoryFilter(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Ver todas</button>
           </div>
         )}
 
         {status === 'error' && <div className={`${s.messageBox} ${s.error}`}>{errorMsg}</div>}
 
-        <div className={s.tableWrap}>
-          <table className={s.table}>
+        <p className={s.scrollHint}>Desliza dentro de la tabla para ver más filas y columnas ↔ ↕</p>
+        <div className={s.tableWrap} role="region" aria-label="Tabla de Solicitudes" tabIndex={0}>
+          <table className={s.table} aria-label="Solicitudes de pago">
             <thead>
               <tr><th>Folio</th><th>Proveedor</th><th>Partida</th><th>Monto</th><th>Estatus</th><th>Acciones</th></tr>
             </thead>
@@ -280,7 +291,7 @@ export default function SolicitudesPage() {
                     <div className={s.esIcon}>{hasActiveFilters ? '🔍' : '📋'}</div>
                     <div className={s.esTitle}>{hasActiveFilters ? 'Sin resultados' : 'Sin solicitudes'}</div>
                     <div className={s.esDesc}>{hasActiveFilters ? 'Ninguna solicitud coincide con los filtros aplicados.' : 'Crea una nueva solicitud de pago para iniciar la bandeja.'}</div>
-                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Limpiar filtros</button></div>}
+                    {hasActiveFilters && <div className={s.esAction}><button className={s.secondaryBtn} onClick={() => { setQuery(''); setCategoryFilter(''); setStatusFilter('todos'); setDecisionFilter('todos') }}>Limpiar filtros</button></div>}
                   </div>
                 </td></tr>
               )}
@@ -295,7 +306,7 @@ export default function SolicitudesPage() {
                 const extra = extraBadges.get(r.id)
                 return (
                   <tr key={r.id} className={highlightedId === r.id ? s.highlightRow : undefined}>
-                    <td>
+                    <td data-label="Folio">
                       <span className={s.cellMain}>{r.request_number || 'Sin folio'}{r.is_extraordinary_adjustment && <> <Badge variant="accent">Extraordinario</Badge></>}{extra && <> <Badge variant="warning">{extra.status === 'draft' ? 'Evidencia pendiente' : 'Extraordinario'}</Badge></>}</span>
                       <span className={s.cellSub}>{formatDate(r.submitted_at || r.created_at)}</span>
                       {meta && (
@@ -305,17 +316,17 @@ export default function SolicitudesPage() {
                         </span>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Proveedor">
                       <span className={s.cellMain}>{proveedorAlias(proveedor)}</span>
                       <span className={s.cellSub}>{companyName(company)} · {costCenterName(center)}</span>
                     </td>
-                    <td>
-                      <span className={s.cellMain}>{category?.code || 'Sin partida'}</span>
-                      <span className={s.cellSub}>{category?.name || ''} · {formatMonth(r.budget_month)}</span>
+                    <td data-label="Partida">
+                      <span className={s.cellMain}>{isSinPartida(category) ? requestCategoryLabel(r, category) : category?.code || 'Sin partida'}</span>
+                      <span className={s.cellSub}>{isSinPartida(category) ? '' : `${category?.name || ''} · `}{formatMonth(r.budget_month)}</span>
                     </td>
-                    <td><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
-                    <td><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant}>{db.label}</Badge></td>
-                    <td><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
+                    <td data-label="Monto"><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
+                    <td data-label="Estatus"><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
+                    <td data-label="Acciones"><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
                   </tr>
                 )
               })}

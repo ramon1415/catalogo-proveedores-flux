@@ -1,0 +1,54 @@
+{
+  "project_ref": "scsirgbuqjcwoaxfacth",
+  "status": "Read-only pre-change evidence. Migration NOT applied.",
+  "tables": [
+    {
+      "table": "recurring_income_templates",
+      "rls_enabled": true,
+      "anon_crud_or_truncate": true,
+      "service_role_truncate": true,
+      "authenticated_truncate": true
+    },
+    {
+      "table": "tenant_income_entries",
+      "rls_enabled": true,
+      "anon_crud_or_truncate": true,
+      "service_role_truncate": true,
+      "authenticated_truncate": true
+    }
+  ],
+  "generator": {
+    "config": [
+      "search_path=public"
+    ],
+    "anon_execute": false,
+    "definition_md5": "f2acb3ecfa899566afdc684217a7e567",
+    "service_role_execute": true,
+    "authenticated_execute": true,
+    "explicit_session_guard": false
+  },
+  "read_only": "on",
+  "table_rows": {
+    "cross_company_links": 0,
+    "tenant_income_entries": 0,
+    "recurring_income_templates": 0
+  },
+  "captured_at": "2026-09-07T23:53:39.025485+00:00",
+  "foreign_keys": [
+    {
+      "name": "tenant_income_entries_company_id_fkey",
+      "validated": true,
+      "definition": "FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "tenant_income_entries_created_by_fkey",
+      "validated": true,
+      "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id)"
+    },
+    {
+      "name": "tenant_income_entries_template_id_fkey",
+      "validated": true,
+      "definition": "FOREIGN KEY (template_id) REFERENCES recurring_income_templates(id) ON DELETE SET NULL"
+    }
+  ]
+}

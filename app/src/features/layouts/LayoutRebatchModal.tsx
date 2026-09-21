@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -66,7 +67,7 @@ export function LayoutRebatchModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={item.company_name} />}
         title="Enviar nuevamente a aprobacion"
         subtitle="El rechazo anterior se conserva; se crea una nueva participacion en corte."
         onClose={onClose}

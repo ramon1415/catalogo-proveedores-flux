@@ -1,4 +1,5 @@
 import { supabase } from '../../lib/supabase'
+import { SIN_PARTIDA_CODE } from '../../lib/requestClassification'
 import { activeRows } from './logic'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
@@ -12,7 +13,7 @@ import type {
 const UPLOAD_BUCKET = 'payment-receipts'
 
 const PAYMENT_REQUEST_COLUMNS =
-  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,partida_unsure,created_at,updated_at'
+  'id,request_number,proveedor_id,company_id,cost_center_id,budget_category_id,budget_month,amount_requested,currency,exchange_rate,status,description,notes,requested_by,approver_id,submitted_at,budget_decision,budget_block_reason,budget_available_before,budget_available_after,budget_shortfall,budget_checked_at,budget_result,no_presupuestal,is_extraordinary_adjustment,exception_status,exception_action,exception_reason,exception_approved_by,exception_approved_at,requires_budget_adjustment,operational_comments,invoice_storage_path,partida_unsure,sin_partida_description,created_at,updated_at'
 
 // ── Cargas iniciales (paralelas) ──────────────────────────────────────────
 export async function loadCompanies(): Promise<Company[]> {
@@ -111,7 +112,7 @@ export async function loadBudgetAvailability(
       .eq('active', true),
     supabase
       .from('budget_categories')
-      .select('id')
+      .select('id,code')
       .eq('active', true)
       .eq('no_presupuestal', true),
   ])
@@ -153,7 +154,15 @@ export async function loadBudgetAvailability(
       responsible_email: relation.responsible_email,
       has_additional_access: additionalAccess.has(relation.budget_category_id),
     } satisfies BudgetAvailabilityRow))
-  return [...rows, ...syntheticRows]
+  const commonCategory = (noBudgetRes.data ?? []).find((category) => category.code === SIN_PARTIDA_CODE)
+  const combined: BudgetAvailabilityRow[] = [...rows, ...syntheticRows]
+  if (commonCategory && !combined.some((row) => row.budget_category_id === commonCategory.id)) {
+    combined.push({ company_id: companyId, cost_center_id: costCenterId,
+      budget_category_id: commonCategory.id, budget_month: budgetMonth,
+      budgeted: 0, committed: 0, executed: 0, available: 0,
+      no_presupuestal: true, responsible_email: null, has_additional_access: false })
+  }
+  return combined
 }
 
 // ── Aprobadores ────────────────────────────────────────────────────────────
@@ -167,6 +176,12 @@ export async function listApproverOptions(
     p_cost_center_id: costCenterId,
     p_amount: amount,
   })
+  if (error) throw error
+  return Array.isArray(data) ? (data as ApproverCandidate[]) : []
+}
+
+export async function getSinPartidaApprover(companyId: string): Promise<ApproverCandidate[]> {
+  const { data, error } = await supabase.rpc('get_sin_partida_approver', { p_company_id: companyId })
   if (error) throw error
   return Array.isArray(data) ? (data as ApproverCandidate[]) : []
 }
@@ -336,6 +351,26 @@ export async function quickCreateProvider(payload: Record<string, unknown>): Pro
     .maybeSingle()
   if (error) throw error
   return data as Proveedor
+}
+
+// E1 · Aviso de duplicado antes de crear: ¿ya existe una solicitud con este
+// CFDI en la empresa? La unicidad dura la refuerza la base (anti-duplicado por
+// invoice_uuid); esto solo adelanta el aviso en pantalla. Puede quedar corto si
+// RLS oculta solicitudes de otras personas — por eso el candado real es la BD.
+export async function findRequestByInvoiceUuid(
+  companyId: string,
+  uuid: string,
+): Promise<{ id: string; request_number: string | null; status: string | null } | null> {
+  const { data, error } = await supabase
+    .from('payment_requests')
+    .select('id,request_number,status')
+    .eq('company_id', companyId)
+    .ilike('invoice_uuid', uuid)
+    .not('status', 'in', '(rejected,cancelled)')
+    .limit(1)
+    .maybeSingle()
+  if (error) return null
+  return (data as { id: string; request_number: string | null; status: string | null } | null) ?? null
 }
 
 // ── Edición de solicitud ───────────────────────────────────────────────────

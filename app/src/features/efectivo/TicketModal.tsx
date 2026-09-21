@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -9,11 +10,13 @@ import s from './Efectivo.module.css'
 
 export function TicketModal({
   reconciliationId,
+  companyName,
   providers,
   budgetCategories,
   onClose,
   onSaved,
 }: {
+  companyName: string | null
   reconciliationId: string
   providers: ProviderLite[]
   budgetCategories: BudgetCategory[]
@@ -63,7 +66,7 @@ export function TicketModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={companyName} />}
         title="Nuevo ticket de comprobación"
         subtitle="Registra el gasto comprobado."
         onClose={onClose}

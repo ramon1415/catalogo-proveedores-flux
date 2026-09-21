@@ -29,6 +29,13 @@ export const issueLabel = (s: string) => ISSUE_LABELS[s] || s
 
 // Mapa `known` de friendlyError del vanilla (match por message y luego code).
 const KNOWN_ERRORS: Record<string, string> = {
+  batch_read_timeout: 'La lectura tardó demasiado. Usa una imagen más pequeña y nítida, o adjunta el PDF original.',
+  batch_read_cancelled: 'Lectura cancelada. No se cargó el comprobante.',
+  batch_image_multiple_payments: 'La imagen contiene más de un pago. Usa una imagen por comprobante o un PDF con un pago por página.',
+  batch_image_unreadable_fields: 'No pudimos leer todos los datos bancarios con claridad. Sube el comprobante BBVA completo y nítido, con importe, beneficiario, cuentas, fecha, folio único y estado Operado, o adjunta el PDF original.',
+  batch_image_read_failed: 'No se pudo leer la imagen. Intenta de nuevo con una imagen más nítida o con el PDF original.',
+  batch_converted_size: 'El comprobante preparado supera el tamaño permitido. Usa una imagen de menor tamaño.',
+  payment_batch_company_mismatch: 'Este lote pertenece a otra empresa. Actualiza la bandeja de la empresa activa.',
   upload_contract_incomplete: 'El servidor no devolvió bucket, ruta y documento autorizados.',
   invalid_pdf_signature: 'El archivo no contiene la firma válida %PDF-.',
   invalid_pdf_page_count: 'El PDF no tiene páginas válidas o supera el límite autorizado.',
@@ -45,12 +52,23 @@ const KNOWN_ERRORS: Record<string, string> = {
   bank_payment_operation_folio_duplicate: 'Ese Folio único BBVA ya identifica otra operación de la empresa.',
   bank_payment_operation_company_account_mismatch: 'La cuenta origen no coincide con una cuenta bancaria activa de la empresa.',
   bank_payment_operation_company_account_ambiguous: 'La cuenta origen coincide con más de una cuenta BBVA activa; corrige el catálogo antes de aceptar.',
+  cancelled_payment_operation_snapshot_mismatch: 'El comprobante reabierto ya no coincide con la operación original. Revisa los datos antes de continuar.',
+  cancelled_payment_operation_has_business_dependencies: 'La operación cancelada tiene movimientos relacionados y no puede reabrirse desde esta conciliación.',
   open_allocation_plan_exists: 'La operación ya tiene un plan abierto.',
   bank_payment_operation_capacity_exceeded: 'El remanente de la operación cambió; revisa los importes.',
   payable_snapshot_capacity_exceeded: 'El saldo pagable cambió; revisa los importes.',
   idempotency_key_conflict: 'La misma clave idempotente recibió datos distintos.',
   PGRST202: 'El contrato RPC todavía no está disponible en este ambiente.',
   pdf_runtime_unavailable: 'No se cargaron las dependencias seguras de conciliación. Recarga la página.',
+  payment_extraction_not_conciliable: 'El comprobante tiene datos incompletos o no acredita una operación bancaria completada. Revisa los campos señalados.',
+  receipt_candidates_preview_unavailable: 'No se pudo obtener la propuesta de conciliación. Actualiza e inténtalo de nuevo.',
+  receipt_candidate_changed: 'La solicitud propuesta cambió o ya no está disponible. Actualiza las coincidencias antes de confirmar.',
+  receipt_preview_unavailable: 'No se pudo mostrar el comprobante. Intenta cargar la vista nuevamente.',
+  source_pdf_download_unavailable: 'No se pudo cargar el PDF para compararlo. Inténtalo de nuevo.',
+  bank_receipt_already_linked: 'Este comprobante ya está vinculado. Actualiza el lote para consultar el resultado.',
+  payment_request_not_payable: 'La solicitud aún no está lista para conciliar. Verifica su aprobación y el cierre del corte.',
+  finance_role_required: 'Necesitas permisos de Finanzas en esta empresa para conciliar comprobantes.',
+  payment_extraction_not_found: 'No encontramos los datos de esta página. Actualiza el lote para volver a consultarlos.',
 }
 
 export function friendlyBatchError(error: unknown): string {
@@ -92,7 +110,11 @@ export function batchOperations(detail: BatchDetail | null): BatchOperation[] {
   const seen = new Set(merged.map(extractionKey).filter(Boolean))
   for (const ex of extractions) {
     const key = extractionKey(ex)
-    if (!key || !seen.has(key)) merged.push(ex)
+    if (!key || !seen.has(key)) merged.push({
+      ...ex, extraction_id: key,
+      extraction_status: ex.extraction_status || ex.status,
+      extraction_updated_at: ex.extraction_updated_at || ex.updated_at,
+    })
   }
   return merged
 }

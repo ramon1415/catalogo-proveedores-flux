@@ -50,17 +50,17 @@ chat ni editarlo en Supabase Studio.
 1. `20260826223239_platform_module_registry.sql` — crea `modules`,
    `module_releases` y `company_modules`.
 2. `20260826223357_platform_module_registry_advisor_hardening.sql`
-3. `20260827090000_platform_module_incidencias.sql` — fija Incidencias en ON
+3. `20260901074848_platform_module_incidencias.sql` — fija Incidencias en ON
    para el único `company_id` incumbente validado por el preflight; no usa
    nombre ni UUID hardcodeado.
-4. `20260827100000_platform_module_nomina.sql`
-5. `20260831003419_fersana_company_access_onboarding.sql` +
-   `20260831005200_fersana_company_access_advisor_hardening.sql` — DDL y RPC
+4. `20260901074849_platform_module_nomina.sql`
+5. `20260831004813_fersana_company_access_onboarding.sql` +
+   `20260831004957_fersana_company_access_advisor_hardening.sql` — DDL y RPC
    atómicos; la liga `fersana` se crea después, dentro del seed.
-6. `20260831120000_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
+6. `20260831194350_tenant_recurring_income.sql` — **WS7** (2 tablas + RLS +
    `generate_recurring_income`), con FK compuesta que impide ligar un template
    de otra empresa.
-7. `20260831130000_budget_category_responsible.sql` — agrega `responsible_email` e índice para scoping de partidas.
+7. `20260831233032_budget_category_responsible.sql` — agrega `responsible_email` e índice para scoping de partidas.
 
 Cada archivo debe cerrar con `COMMIT`. Después: `get_advisors(security)` en
 prod y verificación de RLS.

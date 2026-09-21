@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const migration = readFileSync('supabase/migrations/20260901055111_company_scoped_roles_foundation.sql', 'utf8')
-const hardening = readFileSync('supabase/migrations/20260901070846_company_scoped_power_override_hardening.sql', 'utf8')
+const migration = readFileSync('supabase/migrations/20260901065625_company_scoped_roles_foundation.sql', 'utf8')
+const hardening = readFileSync('supabase/migrations/20260901071929_company_scoped_power_override_hardening.sql', 'utf8')
 const auth = readFileSync('app/src/lib/auth.tsx', 'utf8')
 const platformPower = readFileSync('app/src/lib/platformPower.ts', 'utf8')
 const company = readFileSync('app/src/lib/company.tsx', 'utf8')
@@ -28,12 +28,18 @@ test('database and SPA reserve platform power for Carlos and Ramon', () => {
     const escaped = email.replace('.', '\\.')
     assert.match(migration, new RegExp(escaped))
     assert.match(hardening, new RegExp(escaped))
+    // El allowlist salió de auth.tsx a su propio módulo; auth.tsx lo consume.
     assert.match(platformPower, new RegExp(escaped))
   }
   assert.match(hardening, /security definer\s+set search_path = ''/i)
   assert.match(hardening, /company_role_power_override_hardening_failed/)
-  assert.match(auth, /hasPlatformPowerEmail/)
+  // La compuerta sigue cableada: auth.tsx consume el helper del allowlist y lo
+  // exige junto con el grupo sysadmin. Y el allowlist no crece por descuido.
+  assert.match(auth, /import \{ hasPlatformPowerEmail \} from '\.\/platformPower'/)
+  assert.match(auth, /hasPlatformPowerEmail\(profile\?\.email\)/)
   assert.match(platformPower, /PLATFORM_POWER_EMAILS\.has/)
+  assert.match(auth, /globalGroup === ROLE_GROUPS\.SYSADMIN\s*\n?\s*&& hasPlatformPowerEmail/)
+  assert.equal((platformPower.match(/@/g) || []).length, 2, 'el allowlist de poder de plataforma son exactamente dos correos')
 })
 
 test('access approval and admin edits write the exact company membership role', () => {

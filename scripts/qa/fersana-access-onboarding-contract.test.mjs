@@ -3,15 +3,15 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 const migration = fs.readFileSync(
-  'supabase/migrations/20260831003419_fersana_company_access_onboarding.sql',
+  'supabase/migrations/20260831004813_fersana_company_access_onboarding.sql',
   'utf8',
 )
 const hardening = fs.readFileSync(
-  'supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql',
+  'supabase/migrations/20260831004957_fersana_company_access_advisor_hardening.sql',
   'utf8',
 )
 const scopedRoles = fs.readFileSync(
-  'supabase/migrations/20260901055111_company_scoped_roles_foundation.sql',
+  'supabase/migrations/20260901065625_company_scoped_roles_foundation.sql',
   'utf8',
 )
 const productionSeed = fs.readFileSync('prod-readiness/paso5-fersana-seed.sql', 'utf8')
@@ -80,7 +80,9 @@ test('existing members skip the landing and enter the linked company directly', 
   assert.match(accessPage, /result\.status === 'already_member'/)
   assert.match(accessPage, /result\.status === 'approved'/)
   assert.match(accessPage, /setCompany\(result\.company_id\)/)
-  assert.match(accessPage, /window\.location\.replace\('\/app\/solicitudes'\)/)
+  // React se movió a la raíz (#492/#493): el destino perdió el prefijo /app,
+  // que hoy solo sobrevive como redirect de compatibilidad en vercel.json.
+  assert.match(accessPage, /window\.location\.replace\('\/solicitudes'\)/)
   assert.doesNotMatch(accessPage, /Acceso disponible/)
 })
 

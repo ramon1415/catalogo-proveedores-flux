@@ -1,0 +1,193 @@
+{
+  "base_dev_commit": "ab71a3264fe12ca3367597d1d374a01cca89ad55",
+  "scope": "Repository filename and references only; no database writes or migration repair.",
+  "rename": {
+    "old_path": "supabase/migrations/20260831003419_fersana_company_access_onboarding.sql",
+    "new_path": "supabase/migrations/20260831004813_fersana_company_access_onboarding.sql",
+    "sha256_before": "f2697747ecbf09a5b8e8db82b68f0af1dafa6840972a4bec8956be7f7c3828b8",
+    "sha256_after": "f2697747ecbf09a5b8e8db82b68f0af1dafa6840972a4bec8956be7f7c3828b8",
+    "dev_ledger_version": "20260831004813",
+    "historical_statement_join": "newline",
+    "historical_sql_sha256": "1bb4cf45afa0e6c17d0d19839de684078fbd40b60dfb3e2fe3d4b0507e27a37b",
+    "historical_sql_identical_to_repository": false
+  },
+  "historical_differences": [
+    "Repository keeps explicit auth.uid() guards and outer BEGIN/COMMIT.",
+    "Historical DEV SQL also seeded the Fersana link by company name; repository keeps that operation in the separate prod-readiness seed.",
+    "No historical seed is imported or executed; later function definitions and request reopening behavior are preserved."
+  ],
+  "access_audit": {
+    "captured_at_dev": "2026-09-08T18:24:44.314386Z",
+    "captured_at_prod": "2026-09-08T18:24:45.780490Z",
+    "method": "Read-only function definitions and privileges; isolated PGlite 0.3.16 execution with captured actual helpers/RPC definitions and fixture tables.",
+    "results": {
+      "cases": 28,
+      "passed": 28,
+      "results": [
+        {
+          "environment": "dev",
+          "case": "anon cannot request even with a fixture admin subject",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "anon cannot reject even with a fixture admin subject",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "authenticated without subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "authenticated without subject cannot reject",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "service role without subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "email-only JWT does not resolve a profile",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "inactive profile with sysadmin role cannot reject",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "unlinked subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "request reopens inactive membership and repeated request keeps same id",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "operator cannot reject another access request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "active sysadmin can reject pending request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "sysadmin cannot reject an already-approved request",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "active membership returns already_member",
+          "result": "PASS"
+        },
+        {
+          "environment": "dev",
+          "case": "disabled link refuses requests",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "anon cannot request even with a fixture admin subject",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "anon cannot reject even with a fixture admin subject",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "authenticated without subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "authenticated without subject cannot reject",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "service role without subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "email-only JWT does not resolve a profile",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "inactive profile with sysadmin role cannot reject",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "unlinked subject cannot request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "request reopens inactive membership and repeated request keeps same id",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "operator cannot reject another access request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "active sysadmin can reject pending request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "sysadmin cannot reject an already-approved request",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "active membership returns already_member",
+          "result": "PASS"
+        },
+        {
+          "environment": "prod",
+          "case": "disabled link refuses requests",
+          "result": "PASS"
+        }
+      ]
+    },
+    "decision": "No additional auth guard migration needed for the reviewed request/reject functions. Current DEV profile resolution requires an active profile linked to auth.uid(); PROD already has explicit guards.",
+    "limits": "Not browser/OAuth UAT, remote RPC execution, full baseline replay, or a complete security certification.",
+    "reproducible_archive": "Flux_Revision_Accesos_Fersana_2026-09-08.zip",
+    "archive_sha256": "25ccd7a354c0b406dc7f9b73fc235533f086b30a8d41675e533892a6676ed0b9"
+  },
+  "inventory": {
+    "local_files": 117,
+    "dev_versions": 117,
+    "common_versions": 115,
+    "remote_only": [
+      {
+        "version": "20260906003626",
+        "name": "drop_backup_tables"
+      },
+      {
+        "version": "20260908184710",
+        "name": "payroll_obligations_shared_budget_guard"
+      }
+    ],
+    "local_only": [
+      "20260827090000_platform_module_incidencias.sql",
+      "20260827100000_platform_module_nomina.sql"
+    ]
+  }
+}

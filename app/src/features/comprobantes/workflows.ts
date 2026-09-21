@@ -1,4 +1,5 @@
-import { loadPdfRuntime, sha256Hex, hasPdfSignature } from './pdfRuntime'
+import { loadPdfRuntime, sha256Hex } from './pdfRuntime'
+import { readBatchReceipt } from './receiptInput'
 import {
   createBatch, finalizeBatchUpload, submitExtractions, privateBucket,
   prepareEvidence, finalizeEvidence, reviewEvidence, getEvidenceAccess,
@@ -19,29 +20,11 @@ export async function uploadBatchWorkflow(params: {
   file: File
   context: BatchContext
   onProgress: UploadProgress
+  signal?: AbortSignal
 }): Promise<UploadResult> {
-  const { companyId, file, context, onProgress } = params
-  onProgress(5, 'Leyendo y verificando PDF…')
-  const runtime = await loadPdfRuntime()
-  const bytes = await file.arrayBuffer()
-  if (!hasPdfSignature(bytes)) throw new Error('invalid_pdf_signature')
-  const sha256 = await sha256Hex(bytes)
-
-  // Extracción local: pdfjs texto por página → parser BBVA. El servidor solo
-  // recibe los campos extraídos, nunca el PDF por página.
-  const pdf = await runtime.pdfjs.getDocument({ data: new Uint8Array(bytes.slice(0)), isEvalSupported: false }).promise
-  const maxPages = Number(context.upload_policy?.max_pages || 500)
-  if (!Number.isInteger(pdf.numPages) || pdf.numPages < 1 || pdf.numPages > maxPages) {
-    throw new Error('invalid_pdf_page_count')
-  }
-  const pagesRaw: { pageNumber: number; items: { str?: string }[] }[] = []
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    onProgress(8 + Math.round((pageNumber / pdf.numPages) * 22), `Extrayendo página ${pageNumber} de ${pdf.numPages}…`)
-    const page = await pdf.getPage(pageNumber)
-    const content = await page.getTextContent()
-    pagesRaw.push({ pageNumber, items: content.items })
-  }
-  const parsed = runtime.parser.parseBbvaDocument(pagesRaw as never, { fileName: file.name })
+  const { companyId, onProgress, signal } = params
+  const { file, parsed, sha256, parserVersion } = await readBatchReceipt(params)
+  signal?.throwIfAborted()
 
   // source_account / destination_account son propiedades no enumerables del
   // parser: se leen explícitamente, igual que el vanilla.
@@ -62,7 +45,7 @@ export async function uploadBatchWorkflow(params: {
       confidence: issues.length === 0 ? 0.99 : issues.length <= 2 ? 0.75 : 0.4,
     }
   })
-  onProgress(35, `Extracción local: ${parsed.page_count} página(s).`)
+  onProgress(40, `Guardando ${parsed.page_count} comprobante(s)…`)
 
   const created = await createBatch({ companyId, fileName: file.name, fileSizeBytes: file.size, sha256 })
   const { batch_id: batchId, document_id, storage_bucket, storage_path } = created
@@ -94,9 +77,9 @@ export async function uploadBatchWorkflow(params: {
   }
 
   onProgress(78, resumeExtraction ? 'Retomando extracción interrumpida…' : 'Enviando extracción a revisión interna…')
-  await submitExtractions(batchId, runtime.parser.PARSER_VERSION, pages)
+  await submitExtractions(batchId, parserVersion, pages)
   onProgress(100, 'Batch recibido; extracción enviada a revisión.')
-  return { kind: 'ok', batchId, pageCount: parsed.page_count, parserVersion: runtime.parser.PARSER_VERSION }
+  return { kind: 'ok', batchId, pageCount: parsed.page_count, parserVersion }
 }
 
 function isMissingPaymentBatchUpload(error: unknown): boolean {
@@ -111,11 +94,17 @@ export async function deriveIndividualReceipt(params: {
   storageBucket: string
   storagePath: string
   pageNumber: number
+  sourcePdf?: Blob
+  previewWidth?: number
 }): Promise<IndividualReceipt> {
   const runtime = await loadPdfRuntime()
-  const bucket = await privateBucket(params.storageBucket)
-  const { data, error } = await bucket.download(params.storagePath)
-  if (error || !data) throw error || new Error('source_pdf_download_unavailable')
+  let data = params.sourcePdf
+  if (!data) {
+    const bucket = await privateBucket(params.storageBucket)
+    const result = await bucket.download(params.storagePath)
+    if (result.error || !result.data) throw result.error || new Error('source_pdf_download_unavailable')
+    data = result.data
+  }
   const sourceBlobUrl = URL.createObjectURL(data)
   try {
     const bytes = await runtime.singlePage.deriveSinglePageFromUrl({
@@ -125,8 +114,27 @@ export async function deriveIndividualReceipt(params: {
     })
     await runtime.singlePage.assertSinglePageBytes(bytes, runtime.pdfLib)
     const sha256 = await sha256Hex(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    // Render the individual receipt in-page: mobile/PWA must not depend on a
+    // popup or on the browser having a native embedded PDF viewer.
+    const pdf = await runtime.pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise
+    let previewDataUrl: string
+    try {
+      if (pdf.numPages !== 1) throw new Error('single_page_receipt_required')
+      const page = await pdf.getPage(1)
+      const natural = page.getViewport({ scale: 1 })
+      const viewport = page.getViewport({ scale: Math.min((params.previewWidth || 1200) / natural.width, 2) })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      const canvasContext = canvas.getContext('2d')
+      if (!canvasContext) throw new Error('receipt_preview_unavailable')
+      await page.render({ canvasContext, viewport }).promise
+      previewDataUrl = canvas.toDataURL('image/png')
+      canvas.width = 0
+      canvas.height = 0
+    } finally { await pdf.destroy() }
     const blobUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }))
-    return { extractionId: params.extractionId, bytes, blobUrl, pageCount: 1, sha256 }
+    return { extractionId: params.extractionId, bytes, blobUrl, pageCount: 1, sha256, previewDataUrl }
   } finally {
     URL.revokeObjectURL(sourceBlobUrl)
   }

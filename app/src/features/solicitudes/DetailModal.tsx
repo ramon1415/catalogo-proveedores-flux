@@ -1,3 +1,5 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { requestCategoryLabel } from '../../lib/requestClassification'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useToast } from '../../components/ui/Toast'
@@ -328,6 +330,7 @@ export function DetailModal({
           <div>
             <h2>{request.request_number || 'Detalle de solicitud'}</h2>
             <p>{`${isReembolso ? 'Reembolso' : proveedorAlias(proveedor)} · ${formatMonth(request.budget_month)}`}</p>
+            <CompanyCaptureContext company={company} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -367,7 +370,7 @@ export function DetailModal({
             <div className={`${s.refCell} ${s.full}`}>
               <span className={s.refLabel}>Partida</span>
               <span className={`${s.refValue} ${s.muted}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {budgetCategoryLabel(category)}
+                {requestCategoryLabel(request, category)}
                 {request.partida_unsure && <Badge variant="warning">Partida por confirmar</Badge>}
               </span>
             </div>
@@ -375,7 +378,7 @@ export function DetailModal({
 
           <div className={s.dataSection}>
             <DataRow label="Estatus" value={<Badge variant={statusBadge(request.status).variant}>{statusBadge(request.status).label}</Badge>} />
-            <DataRow label="Validación presupuestal" value={<Badge variant={budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').variant}>{budgetDecisionBadge(request.budget_decision, request.budget_block_reason || '').label}</Badge>} />
+            <DataRow label="Validación presupuestal" value={(() => { const b = budgetDecisionBadge(request.budget_decision, request.budget_block_reason || ''); return <Badge variant={b.variant} title={b.title}>{b.label}</Badge> })()} />
             <DataRow label="Descripción" value={request.description || 'Sin descripción'} muted />
             {request.notes && <DataRow label="Notas" value={request.notes} muted />}
             {request.invoice_storage_path && (

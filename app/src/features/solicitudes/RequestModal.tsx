@@ -7,7 +7,7 @@ import {
   updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems, loadActiveProjects, setRequestProject,
-  fetchPartidaPrediction,
+  fetchPartidaPrediction, getSinPartidaApprover,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
@@ -21,11 +21,14 @@ import {
 } from './logic'
 import { ReimbursementSection, emptyReimbursementItem } from './ReimbursementSection'
 import { numberValue } from '../../lib/format'
-import { parseCfdiFile } from './cfdi'
+import { isSinPartida } from '../../lib/requestClassification'
+import { parseCfdiFile, resolveCfdiCompany, validateCfdiSelection, cfdiCurrencyPrefill, type CfdiBreakdown } from './cfdi'
 import { parseCfdiXml, type CfdiParsed } from '../../lib/contpaq/cfdiBrowser'
-import { saveCfdiData } from './api'
+import { saveCfdiData, findRequestByInvoiceUuid } from './api'
 import { useAuth } from '../../lib/auth'
 import { useCompany } from '../../lib/company'
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { RequesterIdentity } from './RequesterIdentity'
 import { useModules } from '../../lib/moduleAccess'
 import type {
   Company, CostCenter, BudgetCategory, Proveedor, BudgetAvailabilityRow,
@@ -70,7 +73,7 @@ export function RequestModal({
   const dialogRef = useRef<HTMLDialogElement>(null)
   const cfdiParseVersion = useRef(0)
   const { showToast } = useToast()
-  const { memberships, group } = useAuth()
+  const { memberships, group, canManageProviders } = useAuth()
   const { companyId: activeCompanyId } = useCompany()
   // "Visita/incidencia asociada" es concepto de socios (Operadora). Solo se muestra
   // para empresas con el módulo incidencias habilitado.
@@ -115,6 +118,16 @@ export function RequestModal({
   const [withholding, setWithholding] = useState('')
   const [invoiceUuid, setInvoiceUuid] = useState('')
   const [cfdiHint, setCfdiHint] = useState('')
+  // E1 · Solicitud desde factura: aviso de duplicado por UUID y prefill del
+  // alta rápida cuando el emisor del CFDI no está en el padrón.
+  const [dupWarning, setDupWarning] = useState<{ id: string; folio: string; status: string; companyId: string; uuid: string } | null>(null)
+  const [providerPrefill, setProviderPrefill] = useState<{ nombre: string; rfc: string } | null>(null)
+  const [cfdi, setCfdi] = useState<CfdiBreakdown | null>(null)
+  const [cfdiLoading, setCfdiLoading] = useState(false)
+  const currencyTouched = useRef(false)
+  const exchangeRateTouched = useRef(false)
+  const fiscalTouched = useRef({ amount: false, subtotal: false, tax: false, withholding: false, description: false })
+  const providerTouched = useRef(false)
   // FB-2: el CFDI completo parseado con el parser certificado del módulo
   // CONTPAQ; se persiste tras crear la solicitud para el feeder contable.
   const cfdiFull = useRef<CfdiParsed | null>(null)
@@ -171,6 +184,7 @@ export function RequestModal({
   useEffect(() => {
     const dlg = dialogRef.current
     if (dlg && !dlg.open) dlg.showModal()
+    return () => { ++cfdiParseVersion.current }
   }, [])
 
   useEffect(() => {
@@ -223,9 +237,11 @@ export function RequestModal({
   }, [isReembolso, beneficiaryId, companyId])
 
   // Totales derivados del desglose: en reembolso mandan sobre monto/partida.
-  const reembolsoTotals = useMemo(() => reimbursementTotals(items), [items])
+  const sinPartidaId = budgetCategories.find(isSinPartida)?.id ?? ''
+  const reembolsoTotals = useMemo(() => reimbursementTotals(items, sinPartidaId), [items, sinPartidaId])
   const effectiveAmount = isReembolso ? String(reembolsoTotals.total || '') : amount
   const effectiveCategoryId = isReembolso ? reembolsoTotals.dominantCategoryId : budgetCategoryId
+  const isSinPartidaRequest = Boolean(sinPartidaId && effectiveCategoryId === sinPartidaId)
 
   const isCashOrCheck = paymentMethod === 'cash' || paymentMethod === 'check'
   const isUsd = currency === 'USD'
@@ -263,16 +279,17 @@ export function RequestModal({
       ? budgetRows.filter((r) => (
           String(r.responsible_email || '').trim().toLowerCase() === myEmail
           || r.has_additional_access === true
+          || r.budget_category_id === sinPartidaId
         ))
       : budgetRows
     const q = categorySearch.trim().toLowerCase()
     if (!q) return scoped
     return scoped.filter((r) => {
       const cat = categoryById(r.budget_category_id!)
-      return budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
+      return isSinPartida(cat) || budgetCategoryAvailabilityLabel(cat, r).toLowerCase().includes(q)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetRows, categorySearch, profile, group])
+  }, [budgetRows, categorySearch, profile, group, sinPartidaId])
 
   // ── Carga de partidas al cambiar empresa / CC / mes ──────────────────────
   async function reloadBudgetCategories(nextCompany: string, nextCC: string, nextMonth: string) {
@@ -333,7 +350,9 @@ export function RequestModal({
     resetApprovers('Cargando aprobadores disponibles...', true)
     let data: ApproverCandidate[]
     try {
-      data = await listApproverOptions(companyId, costCenterId, amt)
+      data = isSinPartidaRequest
+        ? await getSinPartidaApprover(companyId)
+        : await listApproverOptions(companyId, costCenterId, amt)
     } catch (error) {
       if (version !== approverVersion.current) return
       setApproverPlaceholder('No se pudieron cargar aprobadores')
@@ -351,7 +370,7 @@ export function RequestModal({
       return
     }
     setCandidates(data)
-    setApproverDisabled(false)
+    setApproverDisabled(isSinPartidaRequest)
     setApproverPlaceholder('Seleccionar aprobador')
     const preserved = previous ? data.find((c) => candidateMatchesSelection(c, previous)) : null
     let nextId = ''
@@ -359,7 +378,9 @@ export function RequestModal({
     else if (data.length === 1) nextId = data[0].profile_id
     setApproverId(nextId)
     const source = data[0]?.source
-    const sourceHelp = source === 'assigned'
+    const sourceHelp = isSinPartidaRequest
+      ? 'Se enviará automáticamente a César para aprobación. La solicitud permanecerá en Sin partida.'
+      : source === 'assigned'
       ? 'Selecciona uno de los aprobadores configurados para ti en esta empresa.'
       : 'No tienes aprobadores configurados. Se muestran usuarios elegibles según las reglas de aprobación.'
     let text = sourceHelp
@@ -381,6 +402,37 @@ export function RequestModal({
     })
     return () => { active = false }
   }, [companyId])
+
+  // Reacciona al resultado con la selección vigente, no la que había al
+  // empezar a leer el archivo. Una empresa ya elegida se conserva y valida.
+  const allowedCompanyIds = myCompanies.map((c) => c.id)
+  const cfdiCompany = cfdi ? resolveCfdiCompany(cfdi.rfcReceptor, companies, allowedCompanyIds) : null
+  const cfdiError = isReembolso ? '' : validateCfdiSelection(cfdi, companies, allowedCompanyIds, companyId, currency)
+  const currentDuplicate = !isReembolso && dupWarning?.companyId === companyId && dupWarning?.uuid === invoiceUuid ? dupWarning : null
+  const canQuickCreate = canManageProviders() && Boolean(companyId && myCompanies.some((c) => c.id === companyId))
+
+  useEffect(() => {
+    if (!isReembolso && !companyId && cfdiCompany?.company) onCompanyChange(cfdiCompany.company.id)
+  }, [cfdi, companyId, companies, myCompanies, isReembolso])
+
+  useEffect(() => {
+    if (!cfdi?.rfcEmisor || proveedorId || isReembolso) return
+    const match = proveedores.find((p) => (p.rfc ?? '').trim().toUpperCase() === cfdi.rfcEmisor)
+    if (match) onProviderSelect(match.id, proveedorLabel(match), false)
+    else setProviderPrefill({ nombre: cfdi.nombreEmisor ?? '', rfc: cfdi.rfcEmisor })
+    // Sólo un nuevo documento dispara la precarga; se conserva la elección manual.
+  }, [cfdi])
+
+  useEffect(() => {
+    setDupWarning(null)
+    if (isReembolso || !invoiceUuid || !companyId) return
+    let active = true
+    findRequestByInvoiceUuid(companyId, invoiceUuid).then((dup) => {
+      if (!active || !dup) return
+      setDupWarning({ id: dup.id, folio: dup.request_number ?? '—', status: dup.status ?? '', companyId, uuid: invoiceUuid })
+    }).catch(() => { /* El índice único sigue siendo el candado si falla el aviso. */ })
+    return () => { active = false }
+  }, [invoiceUuid, companyId, isReembolso])
 
   // ── Predicción de partida ────────────────────────────────────────────────
   // Al cambiar el proveedor (o la empresa activa) consulta el histórico
@@ -428,7 +480,7 @@ const availablePredictionCandidates = useMemo(
   useEffect(() => {
     loadApprovers()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, costCenterId])
+  }, [companyId, costCenterId, isSinPartidaRequest])
 
   useEffect(() => {
     window.clearTimeout(amountTimer.current)
@@ -442,8 +494,12 @@ const availablePredictionCandidates = useMemo(
   function onMonthChange(v: string) { setBudgetMonth(v); reloadBudgetCategories(companyId, costCenterId, v) }
 
   function onCurrencyChange(v: string) {
+    currencyTouched.current = true
     setCurrency(v)
     if (v !== 'USD') setExchangeRate('1')
+    else if (cfdi?.moneda === 'USD' && !exchangeRateTouched.current) {
+      setExchangeRate(cfdi.tipoCambio != null && cfdi.tipoCambio > 0 ? String(cfdi.tipoCambio) : '')
+    }
     else if (!exchangeRate || Number(exchangeRate) <= 0) setExchangeRate('1')
   }
 
@@ -452,30 +508,59 @@ const availablePredictionCandidates = useMemo(
     setFile(f)
     setCfdiHint('')
     setInvoiceUuid('')
+    setDupWarning(null)
+    setProviderPrefill(null)
+    setCfdi(null)
+    setCfdiLoading(false)
     cfdiFull.current = null // el snapshot pertenece al adjunto vigente
+    // Al sustituir el documento se retira únicamente la precarga automática.
+    // Los importes y el concepto que la persona editó se conservan.
+    if (!fiscalTouched.current.amount) setAmount('')
+    if (!fiscalTouched.current.subtotal) setSubtotal('')
+    if (!fiscalTouched.current.tax) setTaxAmount('')
+    if (!fiscalTouched.current.withholding) setWithholding('')
+    if (!fiscalTouched.current.description) setDescription('')
+    if (!currencyTouched.current) setCurrency('MXN')
+    if (!exchangeRateTouched.current) setExchangeRate('1')
+    if (!providerTouched.current) { setProveedorId(''); setProviderSearch('') }
     if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
     setFileHint(res.message)
-    // Autollenado del desglose desde el CFDI (XML). Solo rellena vacíos;
-    // nunca pisa lo que el usuario ya capturó.
+    // E1 · Solicitud desde factura: al subir el XML se precarga lo que trae el
+    // CFDI. Solo rellena vacíos; nunca pisa lo que el usuario ya capturó.
     if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
-      parseCfdiFile(f).then((cfdi) => {
+      setCfdiLoading(true)
+      Promise.all([parseCfdiFile(f), f.text()]).then(([cfdi, xml]) => {
         if (parseVersion !== cfdiParseVersion.current) return
-        if (!cfdi) return
+        // Prefill y snapshot pertenecen a la misma lectura vigente.
+        try { cfdiFull.current = parseCfdiXml(xml) } catch { cfdiFull.current = null }
+        setCfdiLoading(false)
+        if (!cfdi) { setCfdiHint('No se pudo leer el CFDI. Revisa el documento y captura los datos manualmente.'); return }
+        setCfdi(cfdi)
+        const monetary = cfdiCurrencyPrefill(cfdi, currencyTouched.current, exchangeRateTouched.current)
+        if (monetary.currency !== undefined) setCurrency(monetary.currency)
+        if (monetary.exchangeRate !== undefined) setExchangeRate(monetary.exchangeRate)
+        // Desglose fiscal.
         if (cfdi.subtotal != null) setSubtotal((prev) => prev || String(cfdi.subtotal))
         if (cfdi.traslados != null) setTaxAmount((prev) => prev || String(cfdi.traslados))
         if (cfdi.retenciones != null) setWithholding((prev) => prev || String(cfdi.retenciones))
         if (cfdi.total != null) setAmount((prev) => prev || String(cfdi.total))
         if (cfdi.uuid) setInvoiceUuid(cfdi.uuid)
+        // Concepto de la solicitud desde la descripción de los conceptos.
+        if (cfdi.conceptos) setDescription((prev) => prev || cfdi.conceptos!)
+
+        const ref = [cfdi.serie, cfdi.folio].filter(Boolean).join('-')
+        const fechaShort = cfdi.fecha ? cfdi.fecha.slice(0, 10) : ''
         setCfdiHint(
-          `Desglose leído del CFDI${cfdi.uuid ? ` (folio fiscal …${cfdi.uuid.slice(-12)})` : ''}. Verifica los importes antes de enviar.`,
+          `Leído del CFDI${ref ? ` · folio ${ref}` : ''}${fechaShort ? ` · ${fechaShort}` : ''}${cfdi.moneda ? ` · ${cfdi.moneda}` : ''}. Verifica los datos antes de enviar.`,
         )
+      }).catch(() => {
+        if (parseVersion !== cfdiParseVersion.current) return
+        setCfdiLoading(false)
+        setFile(null)
+        setFileHint('No se pudo leer el archivo. Vuelve a adjuntarlo antes de continuar.')
       })
-      // FB-2: parse completo con el parser certificado, para contabilidad.
-      // Independiente del prefill: si el XML no cumple el contrato fiscal
-      // (CfdiParseError) simplemente no se persiste snapshot.
-      f.text().then((xml) => { cfdiFull.current = parseCfdiXml(xml) }).catch(() => { cfdiFull.current = null })
     }
   }
 
@@ -495,7 +580,8 @@ const availablePredictionCandidates = useMemo(
     return ''
   }
 
-  function onProviderSelect(id: string, label: string) {
+  function onProviderSelect(id: string, label: string, manual = true) {
+    providerTouched.current = manual
     setProveedorId(id)
     setProviderSearch(label)
     // Nuevo proveedor: reabrimos la puerta a la auto-sugerencia de partida.
@@ -558,7 +644,7 @@ const availablePredictionCandidates = useMemo(
       description: description.trim(),
       notes: notesWithIncidentMarker(),
       requested_by: profile?.id || null,
-      is_extraordinary_adjustment: Boolean(canApprove && isExtraordinary),
+      is_extraordinary_adjustment: Boolean(!isSinPartidaRequest && canApprove && isExtraordinary),
       responsible_profile_id: responsibleId || null,
       due_date: dueDate || null,
       delivery_method: deliveryMethod || normalizePaymentMethod(paymentMethod),
@@ -578,13 +664,21 @@ const availablePredictionCandidates = useMemo(
         : (subtotal === '' ? null : (withholding === '' ? 0 : numberValue(withholding))),
       invoice_uuid: invoiceUuid || null,
       // El reembolso clasifica por renglón, así que la bandera global no aplica.
-      partida_unsure: isReembolso ? false : partidaUnsure,
+      partida_unsure: isReembolso || isSinPartidaRequest ? false : partidaUnsure,
     }
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (submitting) return
+    if (!isReembolso && cfdiLoading) {
+      showToast('Leyendo factura', 'Espera a que termine la lectura del XML.', 'warning')
+      return
+    }
+    if (cfdiError || currentDuplicate) {
+      showToast('Revisa la factura', cfdiError || `La factura ya está en la solicitud ${currentDuplicate!.folio}.`, 'warning')
+      return
+    }
 
     // Nómina usa el contrato de staging N2B dedicado; no se crea vía este RPC.
     if (normalizeRequestType(requestType) === 'nomina') {
@@ -603,7 +697,7 @@ const availablePredictionCandidates = useMemo(
         showToast('Datos bancarios incompletos', `Falta ${bankIssues.join(', ')} del beneficiario. Captúralos para poder dispersar.`, 'warning')
         return
       }
-      const itemsValidation = validateReimbursementItems(items)
+      const itemsValidation = validateReimbursementItems(items, sinPartidaId)
       if (itemsValidation) { showToast('Revisa el desglose', itemsValidation, 'warning'); return }
     }
 
@@ -615,13 +709,9 @@ const availablePredictionCandidates = useMemo(
     const fiscalValidation = isReembolso ? '' : validateFiscalBreakdown()
     if (fiscalValidation) { showToast('Desglose fiscal', fiscalValidation, 'warning'); return }
 
-    // Documento obligatorio en toda solicitud (política global). En reembolso
-    // los comprobantes van por renglón, ya validados arriba.
-    if (!isReembolso && !file) {
-      showToast('Documento requerido', 'Adjunta la factura o comprobante antes de enviar la solicitud.', 'warning')
-      return
-    }
-
+    // Se fija junto al payload: otra selección de archivo durante el RPC no
+    // puede cambiar la evidencia fiscal de la solicitud que ya se está creando.
+    const cfdiSnapshot = cfdiFull.current
     setSubmitting(true)
     try {
       const data = await createPaymentRequest(payload)
@@ -632,8 +722,8 @@ const availablePredictionCandidates = useMemo(
       const warning = await updateFase2Metadata(requestId, payload.request_type, payload.payment_method)
 
       // FB-2: snapshot del CFDI para el feeder contable (no bloqueante).
-      if (cfdiFull.current) {
-        const cfdiWarning = await saveCfdiData(requestId, cfdiFull.current)
+      if (cfdiSnapshot) {
+        const cfdiWarning = await saveCfdiData(requestId, cfdiSnapshot)
         if (cfdiWarning) showToast('CFDI no persistido', cfdiWarning, 'warning')
       }
 
@@ -724,13 +814,21 @@ const availablePredictionCandidates = useMemo(
   }
 
   function resetForAnother() {
+    ++cfdiParseVersion.current
+    cfdiFull.current = null
+    currencyTouched.current = false
+    exchangeRateTouched.current = false
+    fiscalTouched.current = { amount: false, subtotal: false, tax: false, withholding: false, description: false }
+    providerTouched.current = false
+    setCfdi(null); setCfdiLoading(false)
     setSuccess(null)
     setRequestType('provider_payment'); setPaymentMethod('transfer')
-    setCompanyId(''); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
+    setCompanyId(initialCompanyId); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
     setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
     setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
+    setDupWarning(null); setProviderPrefill(null)
     setIncidentId('')
     setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
@@ -745,8 +843,18 @@ const availablePredictionCandidates = useMemo(
       <form className={s.modal} onSubmit={onSubmit}>
         <div className={s.modalHead}>
           <div>
-            <h2>{success ? 'Solicitud creada correctamente' : 'Nueva solicitud de pago'}</h2>
-            <p>{success ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.' : 'Completa los datos operativos y financieros para validar presupuesto al guardar.'}</p>
+            <h2>{success
+              ? (isReembolso ? 'Reembolso creado correctamente' : 'Solicitud creada correctamente')
+              : (isReembolso ? 'Nueva solicitud de reembolso' : 'Nueva solicitud de pago')}</h2>
+            <p>{success
+              ? 'La solicitud ya fue registrada y esta disponible en la bandeja de solicitudes.'
+              : (isReembolso
+                  ? 'Captura cada gasto; el monto total se calculara automaticamente.'
+                  : 'Completa los datos operativos y financieros para validar presupuesto al guardar.')}</p>
+            <div className={s.captureIdentities}>
+              <CompanyCaptureContext name={company ? companyName(company) : null} />
+              <RequesterIdentity profile={profile} />
+            </div>
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -763,41 +871,40 @@ const availablePredictionCandidates = useMemo(
             </section>
           </div>
         ) : (
-          <div className={s.modalScroll} style={{ padding: 0 }}>
-            <div className={s.requestLayout} style={{ padding: '0 2px 2px' }}>
+          <div className={s.modalScroll}>
+            <div className={s.requestLayout}>
               <div className={s.formSections}>
                 <section className={s.formSection}>
-                  <h3>Datos del pago</h3>
+                  <h3>{isReembolso ? 'Datos del reembolso' : 'Datos del pago'}</h3>
                   <div className={s.formGrid}>
-                    <label className={s.fullRow}>Metodo de pago *
-                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
-                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                      </select>
-                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
-                    </label>
                     <label className={s.fullRow}>Tipo de solicitud *
                       <select className={s.formControl} value={requestType} onChange={(e) => setRequestType(e.target.value)} required>
                         {REQUEST_TYPE_OPTIONS.filter(([v]) => v !== 'nomina' || showNomina).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                       <span className={s.fieldHint}>Define la naturaleza de la solicitud. No determina si entra a layout bancario.</span>
                     </label>
-                    <label>Monto solicitado *
-                      {/* En reembolso el monto es la suma del desglose: se muestra
-                          calculado para que nadie lo edite por separado. */}
-                      <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
-                        value={isReembolso ? (reembolsoTotals.total || '') : amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        readOnly={isReembolso} required />
-                      {isReembolso && <span className={s.fieldHint}>Suma de los renglones del desglose de gastos.</span>}
+                    <label className={s.fullRow}>Metodo de pago *
+                      <select className={s.formControl} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} required>
+                        {PAYMENT_METHOD_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                      <span className={s.fieldHint}>Este metodo decide el flujo operativo: transferencia, efectivo, cheque u otro.</span>
                     </label>
-                    <label>Moneda *
+                    {!isReembolso && (
+                      <label>Monto solicitado *
+                        <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00"
+                          value={amount}
+                          onChange={(e) => { fiscalTouched.current.amount = true; setAmount(e.target.value) }}
+                          required />
+                      </label>
+                    )}
+                    <label className={isReembolso ? s.fullRow : ''}>Moneda *
                       <select className={s.formControl} value={currency} onChange={(e) => onCurrencyChange(e.target.value)} required>
                         <option value="MXN">MXN</option>
                         <option value="USD">USD</option>
                       </select>
                     </label>
                     <label className={isUsd ? '' : s.hidden}>Tipo de cambio *
-                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+                      <input className={s.formControl} type="number" min="0.0001" step="0.0001" value={exchangeRate} onChange={(e) => { exchangeRateTouched.current = true; setExchangeRate(e.target.value) }} required={isUsd} />
                     </label>
                     <div className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>
                       <div className={s.fieldHint} style={{ marginBottom: 4 }}>
@@ -806,41 +913,68 @@ const availablePredictionCandidates = useMemo(
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
                         <label>Subtotal
-                          <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0.01" step="0.01" placeholder="0.00" value={subtotal} onChange={(e) => { fiscalTouched.current.subtotal = true; setSubtotal(e.target.value) }} />
                         </label>
                         <label>IVA
-                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={taxAmount} onChange={(e) => { fiscalTouched.current.tax = true; setTaxAmount(e.target.value) }} />
                         </label>
                         <label>Retenciones
-                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={withholding} onChange={(e) => setWithholding(e.target.value)} />
+                          <input className={s.formControl} type="number" min="0" step="0.01" placeholder="0.00" value={withholding} onChange={(e) => { fiscalTouched.current.withholding = true; setWithholding(e.target.value) }} />
                         </label>
                       </div>
                     </div>
-                    {canApprove && (
+                    {canApprove && !isSinPartidaRequest && (
                       <label className={s.checkboxCard}>
                         <input type="checkbox" checked={isExtraordinary} onChange={(e) => setIsExtraordinary(e.target.checked)} />
                         Ajuste extraordinario
                       </label>
                     )}
                     <label className={s.fullRow}>Descripcion *
-                      <textarea className={s.formControl} rows={3} placeholder="Concepto de la solicitud..." value={description} onChange={(e) => setDescription(e.target.value)} required />
+                      <textarea className={s.formControl} rows={3} placeholder={isReembolso ? 'Concepto general del reembolso...' : 'Concepto de la solicitud...'} value={description} onChange={(e) => { fiscalTouched.current.description = true; setDescription(e.target.value) }} required />
                     </label>
                     <label className={s.fullRow}>Notas
                       <textarea className={s.formControl} rows={2} placeholder="Notas internas opcionales..." value={notes} onChange={(e) => setNotes(e.target.value)} />
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante *
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} required={!isReembolso} />
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
+                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
+                    {!isReembolso && cfdiLoading && <p className={`${s.fullRow} ${s.fieldHint}`} role="status">Leyendo factura…</p>}
+                    {cfdiError && (
+                      <div className={`${s.fullRow} ${s.fieldHint}`} role="alert" style={{ color: 'var(--ruby)' }}>
+                        {cfdiError}
+                        {cfdiCompany?.company && cfdiCompany.company.id !== companyId && !lockedCompany && (
+                          <button type="button" className={s.secondaryBtn} onClick={() => onCompanyChange(cfdiCompany.company!.id)}>
+                            Usar {companyName(cfdiCompany.company)}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {currentDuplicate && (
+                      <div className={`${s.fullRow} ${s.fieldHint}`} style={{ color: 'var(--ruby)', fontWeight: 600 }}>
+                        ⚠ Ya existe una solicitud con esta factura en la empresa: {currentDuplicate.folio}
+                        {currentDuplicate.status ? ` (${currentDuplicate.status})` : ''}.{' '}
+                        <a href={`/solicitudes?request_id=${encodeURIComponent(currentDuplicate.id)}`} target="_blank" rel="noopener noreferrer">Ver solicitud</a>
+                      </div>
+                    )}
                   </div>
                 </section>
 
                 {isReembolso ? (
                   <ReimbursementSection
                     profiles={beneficiaryProfiles}
+                    companies={myCompanies}
+                    costCenters={costCenters}
                     companyId={companyId}
+                    costCenterId={costCenterId}
+                    budgetMonth={budgetMonth}
+                    companyLocked={lockedCompany}
+                    onCompanyChange={onCompanyChange}
+                    onCostCenterChange={onCostCenterChange}
+                    onBudgetMonthChange={onMonthChange}
+                    categoryHelp={categoryHelp}
                     canChooseBeneficiary={canChooseBeneficiary}
                     beneficiaryId={beneficiaryId}
                     onBeneficiaryChange={setBeneficiaryId}
@@ -865,11 +999,20 @@ const availablePredictionCandidates = useMemo(
                       <label className={s.fullRow}>Proveedor *
                         <ProviderCombo proveedores={proveedores} value={proveedorId} search={providerSearch} onSelect={onProviderSelect} />
                       </label>
+                      {providerPrefill && !proveedorId && (
+                        <div className={`${s.fieldHint} ${s.fullRow}`}>
+                          El emisor del CFDI no está en el padrón{providerPrefill.rfc ? ` (RFC ${providerPrefill.rfc})` : ''}.{' '}
+                          {canQuickCreate ? <><button type="button" onClick={() => setQuickOpen(true)}
+                            style={{ background: 'none', border: 0, padding: 0, color: 'var(--accent-text)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
+                            Darlo de alta
+                          </button>{' '}con los datos de la factura.</> : 'Pide a Finanzas que lo registre para continuar.'}
+                        </div>
+                      )}
                     </div>
                   </section>
                 )}
 
-                <section className={s.formSection}>
+                {!isReembolso && <section className={s.formSection}>
                   <h3>Clasificacion presupuestal</h3>
                   <div className={`${s.fieldHint} ${s.fullRow}`}>Empresa, centro de costo, partida y mes para validar presupuesto.</div>
                   <div className={s.formGrid}>
@@ -921,7 +1064,7 @@ const availablePredictionCandidates = useMemo(
                     {/* Señalización opcional: el solicitante no está seguro de la
                         partida y pide que Finanzas la confirme. Siempre disponible;
                         no aplica en reembolso (clasifica por renglón). */}
-                    {!isReembolso && (
+                    {!isReembolso && !isSinPartidaRequest && (
                       <label className={`${s.checkboxCard} ${s.fullRow}`}>
                         <input type="checkbox" checked={partidaUnsure} onChange={(e) => setPartidaUnsure(e.target.checked)} />
                         No estoy seguro de la partida
@@ -942,7 +1085,7 @@ const availablePredictionCandidates = useMemo(
                       </label>
                     )}
                   </div>
-                </section>
+                </section>}
 
                 {showIncidencias && (
                 <section className={s.formSection}>
@@ -999,8 +1142,19 @@ const availablePredictionCandidates = useMemo(
 
                 <section className={s.formSection}>
                   <h3>Revisión final</h3>
-                  <div className={`${s.fieldHint} ${s.fullRow}`}>Después de completar los datos de la solicitud, selecciona quién realizará la revisión.</div>
+                  <div className={`${s.fieldHint} ${s.fullRow}`}>{isSinPartidaRequest
+                    ? 'César revisará esta solicitud porque seleccionaste Sin partida.'
+                    : 'Después de completar los datos de la solicitud, selecciona quién realizará la revisión.'}</div>
                   <div className={s.formGrid}>
+                    {isReembolso && projects.length > 0 && (
+                      <label>Proyecto
+                        <select className={s.formControl} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                          <option value="">Sin proyecto</option>
+                          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <div className={s.fieldHint}>Solo si este gasto forma parte de un proyecto con costo a medir.</div>
+                      </label>
+                    )}
                     <label className={s.fullRow}>¿Quién revisará esta solicitud? *
                       <select className={s.formControl} value={approverId} disabled={approverDisabled} onChange={(e) => setApproverId(e.target.value)} required>
                         <option value="">{approverPlaceholder}</option>
@@ -1017,12 +1171,12 @@ const availablePredictionCandidates = useMemo(
               </div>
 
               <aside className={s.summaryPanel}>
-                <h3>Resumen</h3>
+                <h3>{isReembolso ? 'Resumen del reembolso' : 'Resumen'}</h3>
                 <p>Vista previa de la solicitud antes de validar.</p>
                 <div className={s.summaryList}>
                   <label>Empresa <span className={s.summaryValue}>{company ? companyName(company) : 'Sin seleccionar'}</span></label>
                   <label>Aprobador seleccionado <span className={s.summaryValue}>{approver
-                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
+                    ? `${approver.display_name || approver.email}${approver.eligible_roles?.length ? ` · ${approver.eligible_roles.join(', ')}` : ''}${approver.source === 'sin_partida' ? ' · Sin partida' : approver.source === 'assigned' ? ' · Configurado' : ' · Elegible por reglas'}`
                     : 'Pendiente de seleccionar'}</span></label>
                   <label>Centro de costo <span className={s.summaryValue}>{center ? costCenterName(center) : 'Sin seleccionar'}</span></label>
                   <label>Partida <span className={s.summaryValue}>{category
@@ -1038,10 +1192,12 @@ const availablePredictionCandidates = useMemo(
                     <label>Proveedor <span className={s.summaryValue}>{proveedor ? proveedorLabel(proveedor) : 'Sin seleccionar'}</span></label>
                   )}
                   <label>Mes <span className={s.summaryValue}>{budgetMonth ? formatMonth(`${budgetMonth}-01`) : 'Sin seleccionar'}</span></label>
-                  <label>Monto <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
+                  <label>{isReembolso ? 'Total del reembolso' : 'Monto'} <span className={s.summaryValue}>{formatCurrencyC(numberValue(effectiveAmount), currency)}</span></label>
                   {isReembolso && <label>Gastos <span className={s.summaryValue}>{items.length} renglón(es) en el desglose</span></label>}
                 </div>
-                <div className={s.summaryNote}>{isNoBudgetCategory
+                <div className={s.summaryNote}>{isSinPartidaRequest
+                  ? 'César debe aprobarla. Después se mostrará como Sin partida (descripción de la solicitud), dentro de la misma clasificación.'
+                  : isNoBudgetCategory
                   ? 'Esta partida no consume presupuesto y seguirá el flujo normal de autorización.'
                   : 'Al guardar, el sistema validara automaticamente la disponibilidad presupuestal.'}</div>
               </aside>
@@ -1058,13 +1214,17 @@ const availablePredictionCandidates = useMemo(
           ) : (
             <>
               <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-              <button type="submit" className={s.primaryBtn} disabled={submitting}>{submitting ? 'Creando solicitud...' : 'Crear solicitud'}</button>
+              <button type="submit" className={s.primaryBtn} disabled={submitting || (!isReembolso && cfdiLoading) || Boolean(cfdiError) || Boolean(currentDuplicate)}>
+                {submitting
+                  ? (isReembolso ? 'Creando reembolso...' : 'Creando solicitud...')
+                  : (isReembolso ? 'Crear reembolso' : 'Crear solicitud')}
+              </button>
             </>
           )}
         </div>
       </form>
 
-      {quickOpen && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} />}
+      {quickOpen && canQuickCreate && <QuickProviderModal onClose={() => setQuickOpen(false)} onCreated={onQuickCreated} prefill={providerPrefill} />}
     </dialog>
   )
 }

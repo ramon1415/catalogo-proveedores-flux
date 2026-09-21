@@ -1,7 +1,12 @@
 // N4B payroll channel receipt verification.
 // Server downloads the reserved PDF, verifies bytes/hash/MIME, then confirms evidence.
 
-const JSON_HEADERS = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+const JSON_HEADERS = { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
 type Input = { run_file_id?: string };
 type Context = {
   run_file_id:string;
@@ -58,6 +63,7 @@ function errorStatus(code:string):number {
 }
 
 async function handler(req:Request):Promise<Response> {
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
   if (req.method !== 'POST') return response(405,{error:'METHOD_NOT_ALLOWED'});
   try {
     const base = requiredEnv('SUPABASE_URL');

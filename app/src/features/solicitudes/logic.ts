@@ -3,8 +3,9 @@
 // solicitudes_batch_execution.js, cash_flow_extension.js). Sin DOM ni efectos.
 import type { BadgeVariant } from '../../components/ui/Badge'
 import { normalize, numberValue } from '../../lib/format'
+import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import type {
-  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor,
+  PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   BudgetAvailabilityRow, ApproverCandidate, ApproverSelection,
   DecisionAction, RequestPayload, EmployeeBankAccount, ReimbursementDraftItem,
 } from './types'
@@ -63,7 +64,7 @@ export function isTerminalStatus(status: string | null): boolean {
 }
 
 // ── Badges (label + variante del componente Badge) ─────────────────────────
-type BadgeDesc = { label: string; variant: BadgeVariant }
+type BadgeDesc = { label: string; variant: BadgeVariant; title?: string }
 
 // React Badge no tiene variante "violet"; se mapea a "accent" (ver MIGRATION_NOTES).
 export function statusBadge(status: string | null): BadgeDesc {
@@ -80,12 +81,49 @@ export function statusBadge(status: string | null): BadgeDesc {
   return map[status ?? ''] ?? { label: status || 'Sin estatus', variant: 'neutral' }
 }
 
+// Motivos de bloqueo presupuestal (enum de la BD) → texto legible. La validación
+// puede devolver: sin_disponible, sin_match_presupuesto, budget_validation_data_missing,
+// monto_invalido, no_presupuestal. Cualquier otro se humaniza (guiones bajos → espacios).
+// Motivos de bloqueo presupuestal (enum de la BD) → tag corto y legible. La
+// validación puede devolver: sin_disponible, sin_match_presupuesto,
+// budget_validation_data_missing, monto_invalido, no_presupuestal. Cualquier
+// otro se humaniza (guiones bajos → espacios) para nunca mostrar código.
+const BUDGET_BLOCK_REASON_LABELS: Record<string, string> = {
+  sin_disponible: 'Sin presupuesto',
+  sin_match_presupuesto: 'Sin partida',
+  budget_validation_data_missing: 'Faltan datos',
+  monto_invalido: 'Monto inválido',
+  no_presupuestal: 'No presupuestal',
+}
+
+// Explicación de una línea para el hover del tag (title nativo).
+const BUDGET_BLOCK_REASON_TOOLTIPS: Record<string, string> = {
+  sin_disponible: 'La partida no tiene disponible suficiente para este monto.',
+  sin_match_presupuesto: 'No hay línea de presupuesto para esta empresa, centro, partida y mes.',
+  budget_validation_data_missing: 'Falta empresa, centro, partida o mes en la solicitud.',
+  monto_invalido: 'El monto de la solicitud no es válido.',
+  no_presupuestal: 'Partida no presupuestal: no consume presupuesto.',
+}
+
+export function budgetBlockReasonLabel(reason: string | null | undefined): string {
+  const key = (reason ?? '').trim()
+  if (!key) return ''
+  return BUDGET_BLOCK_REASON_LABELS[key] ?? key.replace(/_/g, ' ')
+}
+
+export function budgetBlockReasonTooltip(reason: string | null | undefined): string {
+  const key = (reason ?? '').trim()
+  return BUDGET_BLOCK_REASON_TOOLTIPS[key] ?? 'Requiere autorización por excepción presupuestal.'
+}
+
 export function budgetDecisionBadge(decision: string | null, reason = ''): BadgeDesc {
   if (decision === 'aprobable' && reason === 'no_presupuestal') {
-    return { label: 'No presupuestal', variant: 'success' }
+    return { label: 'No presupuestal', variant: 'success', title: BUDGET_BLOCK_REASON_TOOLTIPS.no_presupuestal }
   }
-  if (decision === 'aprobable') return { label: 'Aprobable', variant: 'success' }
-  if (decision === 'bloqueado') return { label: reason ? `Excepción: ${reason}` : 'Excepción', variant: 'accent' }
+  if (decision === 'aprobable') return { label: 'Aprobable', variant: 'success', title: 'Hay presupuesto disponible para este monto.' }
+  if (decision === 'bloqueado') {
+    return { label: budgetBlockReasonLabel(reason) || 'Excepción', variant: 'accent', title: budgetBlockReasonTooltip(reason) }
+  }
   return { label: decision ? decision : 'Sin validar', variant: 'neutral' }
 }
 
@@ -137,6 +175,7 @@ export function budgetCategoryAvailabilityLabel(
   row: BudgetAvailabilityRow,
 ): string {
   const label = budgetCategoryLabel(category)
+  if (isSinPartida(category)) return 'Sin partida · aprobación de César'
   if (category?.no_presupuestal === true || row.no_presupuestal === true) {
     return `${label} | No presupuestal`
   }
@@ -316,7 +355,7 @@ export type ReimbursementTotals = {
 //    como en el resto de tipos.
 //  · partida  = la del renglón de mayor monto, para que el gate presupuestal
 //    siga teniendo una sola partida contra la cual validar.
-export function reimbursementTotals(items: ReimbursementDraftItem[]): ReimbursementTotals {
+export function reimbursementTotals(items: ReimbursementDraftItem[], sinPartidaId = ''): ReimbursementTotals {
   let total = 0
   let deducibleTotal = 0
   let deducibleSubtotal = 0
@@ -346,7 +385,8 @@ export function reimbursementTotals(items: ReimbursementDraftItem[]): Reimbursem
     total: round2(total),
     subtotal: fiscalOk ? round2(total - tax) : null,
     tax: fiscalOk ? round2(tax) : null,
-    dominantCategoryId,
+    dominantCategoryId: sinPartidaId && items.some((item) => item.budgetCategoryId === sinPartidaId)
+      ? sinPartidaId : dominantCategoryId,
   }
 }
 
@@ -358,8 +398,12 @@ function round2(value: number): number {
 // deducibles o no: es la que atribuye el gasto a su área (un gasto de RH sin
 // factura sigue siendo de RH), y la columna es NOT NULL en la BD. Lo único que
 // cambia al marcar "sin comprobante fiscal" es que no se exige el adjunto.
-export function validateReimbursementItems(items: ReimbursementDraftItem[]): string {
+export function validateReimbursementItems(items: ReimbursementDraftItem[], sinPartidaId = ''): string {
   if (!items.length) return 'Agrega al menos un gasto al desglose del reembolso.'
+  if (sinPartidaId && items.some((item) => item.budgetCategoryId === sinPartidaId)
+    && items.some((item) => item.budgetCategoryId && item.budgetCategoryId !== sinPartidaId)) {
+    return 'Separa los gastos con partida en otra solicitud. Este reembolso se clasificará completo como Sin partida.'
+  }
   for (const [index, item] of items.entries()) {
     const position = `Gasto ${index + 1}`
     if (!item.descripcion.trim()) return `${position}: captura la descripción del gasto.`
@@ -612,6 +656,16 @@ export function currentLinkedIncidentId(notes: string | null): string | null {
 
 // ── Mapas de errores (idénticos al vanilla) ────────────────────────────────
 const ROUTING_ERRORS: Record<string, string> = {
+  sin_partida_approver_unavailable: 'César no está disponible como aprobador de esta empresa. Solicita a un administrador revisar la configuración.',
+  sin_partida_description_required: 'Describe el gasto. Esa descripción identificará la solicitud Sin partida después de aprobarse.',
+  sin_partida_classification_immutable: 'Esta solicitud permanece en la clasificación Sin partida.',
+  sin_partida_cesar_approval_required: 'Esta solicitud requiere la aprobación de César desde la cola de aprobación.',
+  sin_partida_approval_required: 'Primero se requiere la aprobación de César.',
+  sin_partida_reimbursement_incomplete: 'Completa el desglose Sin partida y verifica que su suma coincida con el total del reembolso.',
+  sin_partida_reimbursement_mixed_categories: 'Separa los gastos con partida en otra solicitud. Este reembolso se clasifica completo como Sin partida.',
+  sin_partida_reimbursement_approved_immutable: 'El desglose Sin partida ya fue aprobado y no se puede modificar.',
+  sin_partida_executed_request_immutable: 'La solicitud Sin partida ya está programada o pagada y no se puede modificar.',
+  sin_partida_extraordinary_not_allowed: 'Sin partida se envía a César para aprobación sin marcar ajuste extraordinario.',
   fiscal_subtotal_invalid: 'El subtotal del desglose fiscal debe ser mayor a 0.',
   fiscal_breakdown_invalid: 'IVA y retenciones no pueden ser negativos.',
   fiscal_breakdown_mismatch: 'El desglose fiscal no cuadra con el total (subtotal + IVA − retenciones).',
@@ -755,6 +809,10 @@ export function isValidRequestId(value: string | null): boolean {
   return !!value && UUID_RE.test(value)
 }
 
+export function requesterDisplayName(profile?: Profile | null): string {
+  return profile?.full_name?.trim() || profile?.email?.trim() || 'No disponible'
+}
+
 // Filtro de tabla: haystack idéntico al vanilla (NFD via normalize()).
 export function requestSearchHaystack(
   request: PaymentRequest,
@@ -771,7 +829,7 @@ export function requestSearchHaystack(
       proveedorLabel(proveedor),
       companyName(company),
       costCenterName(center),
-      budgetCategoryLabel(category),
+      requestCategoryLabel(request, category),
     ].join(' '),
   )
 }

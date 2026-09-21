@@ -1,0 +1,28 @@
+name: Payroll cover compatibility
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'payroll_real_formats.js'
+      - 'scripts/qa/payroll-cover-headers.test.mjs'
+      - '.github/workflows/payroll-cover-checks.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'payroll_real_formats.js'
+      - 'scripts/qa/payroll-cover-headers.test.mjs'
+      - '.github/workflows/payroll-cover-checks.yml'
+permissions:
+  contents: read
+jobs:
+  cover-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: node --test scripts/qa/payroll-cover-headers.test.mjs

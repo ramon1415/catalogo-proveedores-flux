@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext, CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import {
@@ -137,6 +138,7 @@ export function ExtraordinaryModal({
           <div>
             <h2>Registrar autorización externa de Dirección</h2>
             <p>{subtitle}</p>
+            <CompanyCaptureContext name={request.companyName} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -234,6 +236,7 @@ export function RevokeExtraordinaryModal({ requestId, onClose, onDone }: { reque
           <div>
             <h2>Revocar contingencia extraordinaria</h2>
             <p>Solo puede revocarse mientras esté en borrador o vigente y antes de incorporarse a un layout.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

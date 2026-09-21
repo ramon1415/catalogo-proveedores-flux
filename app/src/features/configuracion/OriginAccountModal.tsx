@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useRef, useState } from 'react'
 import type { Company, OriginAccount, OriginAccountPayload } from './types'
 import { validateOriginAccount, originRlsMessage } from './logic'
@@ -114,6 +115,7 @@ export function OriginAccountModal({
           <div>
             <h2>{isEdit ? 'Editar cuenta origen' : 'Nueva cuenta origen'}</h2>
             <p>Cuenta de la empresa desde la que se realizaran pagos.</p>
+            <CompanyCaptureContext company={companies.find(company => company.id === f.company_id)} />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>

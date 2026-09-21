@@ -47,7 +47,7 @@ jobs:
           mkdir -p qa-artifact
           printf '%s\n' "$GITHUB_SHA" > qa-artifact/source-commit.txt
           tar -czf qa-artifact/flux-pr561-offline-app.tgz app/dist app/src app/public app/package.json app/package-lock.json app/tsconfig.json app/vite.config.ts app/index.html scripts/qa/bulk-providers.test.mjs
-      - name: Retain private QA artifact (no secrets or business data)
+      - name: Retain QA artifact (no secrets or business data)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: flux-pr561-offline-app-${{ github.sha }}

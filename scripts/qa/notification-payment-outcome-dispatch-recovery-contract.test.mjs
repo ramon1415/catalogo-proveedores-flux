@@ -4,7 +4,7 @@ import test from "node:test";
 
 const migration = readFileSync(
   new URL(
-    "../../supabase/migrations/20260831155017_notification_payment_outcome_dispatch_recovery_dev.sql",
+    "../../supabase/migrations/20260831195803_notification_payment_outcome_dispatch_recovery_dev.sql",
     import.meta.url,
   ),
   "utf8",
@@ -12,7 +12,7 @@ const migration = readFileSync(
 
 const retryMigration = readFileSync(
   new URL(
-    "../../supabase/migrations/20260831201500_notification_payment_outcome_authorized_retry_dev.sql",
+    "../../supabase/migrations/20260831201434_notification_payment_outcome_authorized_retry_dev.sql",
     import.meta.url,
   ),
   "utf8",

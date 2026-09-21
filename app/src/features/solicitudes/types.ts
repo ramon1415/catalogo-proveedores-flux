@@ -45,6 +45,7 @@ export type PaymentRequest = {
   // "No estoy seguro de la partida": el solicitante marca que la partida debe
   // confirmarse. Solo señalización; no bloquea el flujo.
   partida_unsure?: boolean | null
+  sin_partida_description?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -54,6 +55,7 @@ export type Company = {
   name?: string | null
   legal_name?: string | null
   display_name?: string | null
+  rfc?: string | null
   active?: boolean | null
   activo?: boolean | null
   is_active?: boolean | null

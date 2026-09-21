@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
@@ -187,7 +188,7 @@ export function LayoutCompletionModal({
 
   return (
     <form onSubmit={onSubmit}>
-      <Modal
+      <Modal headerContext={<CompanyCaptureContext name={request.company_name} />}
         title={`Completar ${request.request_number || 'solicitud'}`}
         subtitle="Corrige lo necesario sin salir de la generacion del layout."
         onClose={onClose}

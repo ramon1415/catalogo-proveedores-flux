@@ -10,7 +10,7 @@ const receipts = read('comprobantes_batch.js')
 const intakes = read('provider_intakes.js')
 
 test('the React legacy frame propagates the active company and reloads on company changes', () => {
-  assert.match(frame, /const \{ companyId \} = useCompany\(\)/)
+  assert.match(frame, /const \{[^}]*\bcompanyId\b[^}]*\} = useCompany\(\)/)
   assert.match(frame, /company_id=\$\{encodeURIComponent\(companyId\)\}/)
   assert.match(frame, /\[frameSrc\]/)
   assert.match(frame, /src=\{frameSrc\}/)

@@ -1,3 +1,5 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
+import { isSinPartida, requestCategoryLabel } from '../../lib/requestClassification'
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
 import { Badge } from '../../components/ui/Badge'
@@ -105,12 +107,13 @@ export function DecisionModal({
     // Si no hay error, el modal se desmonta (la página recarga y cierra).
   }
 
-  const categoryValue = [category?.code, category?.name || category?.category].filter(Boolean).join(' · ') || 'Sin partida'
+  const categoryValue = isSinPartida(category) ? requestCategoryLabel(request, category)
+    : [category?.code, category?.name || category?.category].filter(Boolean).join(' · ') || 'Sin partida'
   const operationValue = layoutLine ? 'En layout' : fund ? 'Fondo creado' : 'Sin operacion creada'
   const showOperationSection = Boolean(layoutLine || fund || request.is_extraordinary_adjustment)
 
   return (
-    <Modal
+    <Modal headerContext={<CompanyCaptureContext company={company} />}
       title={request.request_number || 'Solicitud'}
       size="lg"
       onClose={onClose}

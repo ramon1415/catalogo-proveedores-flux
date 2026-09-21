@@ -1,0 +1,388 @@
+{
+  "captured_on": "2026-09-08",
+  "dev_base_sha": "4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7",
+  "main_sha": "a5391ea614f5946bbc4c04690123b98ac8d840f5",
+  "scope": "DEV repository filename alignment only; no database writes or ledger repairs",
+  "comparison_note": "Lexical comparison is a review aid, not semantic proof. All 21 repository SQL byte hashes preserved. Full replay remains blocked at historical 047 guard.",
+  "before": {
+    "local_files": 106,
+    "remote_rows": 113,
+    "common_versions": 80,
+    "remote_only": 33,
+    "local_only": 26
+  },
+  "after": {
+    "local_files": 106,
+    "remote_rows": 113,
+    "common_versions": 101,
+    "remote_only": 12,
+    "local_only": 5
+  },
+  "pairs": [
+    {
+      "old_version": "20260827202122",
+      "new_version": "20260827203337",
+      "old_path": "supabase/migrations/20260827202122_payment_batch_bbva_padded_source_account_hotfix.sql",
+      "new_path": "supabase/migrations/20260827203337_payment_batch_bbva_padded_source_account_hotfix.sql",
+      "local_sha256": "4a0c7b95b9c0c5ab49ea1936fe5b16312f0e075ab84723041e1fcde3431a7baf",
+      "recorded_sha256": "4a0c7b95b9c0c5ab49ea1936fe5b16312f0e075ab84723041e1fcde3431a7baf",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260827225332",
+      "new_version": "20260827231155",
+      "old_path": "supabase/migrations/20260827225332_payroll_active_company_scope.sql",
+      "new_path": "supabase/migrations/20260827231155_payroll_active_company_scope.sql",
+      "local_sha256": "23da556c9eb60fb1fda328eae3540cc336fc025363dd81d4c320e338f9901d4b",
+      "recorded_sha256": "23da556c9eb60fb1fda328eae3540cc336fc025363dd81d4c320e338f9901d4b",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260827231436",
+      "new_version": "20260827232110",
+      "old_path": "supabase/migrations/20260827231436_payroll_service_role_claim_compat.sql",
+      "new_path": "supabase/migrations/20260827232110_payroll_service_role_claim_compat.sql",
+      "local_sha256": "30d40b4d4f2ce27fe319433de482e081d39d82d86c23bef07f1540ecb6ca8f6a",
+      "recorded_sha256": "30d40b4d4f2ce27fe319433de482e081d39d82d86c23bef07f1540ecb6ca8f6a",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831003419",
+      "new_version": "20260831004813",
+      "old_path": "supabase/migrations/20260831003419_fersana_company_access_onboarding.sql",
+      "new_path": "supabase/migrations/20260831004813_fersana_company_access_onboarding.sql",
+      "local_sha256": "f2697747ecbf09a5b8e8db82b68f0af1dafa6840972a4bec8956be7f7c3828b8",
+      "recorded_sha256": "1bb4cf45afa0e6c17d0d19839de684078fbd40b60dfb3e2fe3d4b0507e27a37b",
+      "exact_bytes": false,
+      "lexically_equal": false,
+      "selected": false
+    },
+    {
+      "old_version": "20260831005200",
+      "new_version": "20260831004957",
+      "old_path": "supabase/migrations/20260831005200_fersana_company_access_advisor_hardening.sql",
+      "new_path": "supabase/migrations/20260831004957_fersana_company_access_advisor_hardening.sql",
+      "local_sha256": "81ec92ab3326e85a97c1aa1ed12283e08d6960855bc3d139698796c8af2facce",
+      "recorded_sha256": "81ec92ab3326e85a97c1aa1ed12283e08d6960855bc3d139698796c8af2facce",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831033300",
+      "new_version": "20260831033553",
+      "old_path": "supabase/migrations/20260831033300_operator_own_payment_requests.sql",
+      "new_path": "supabase/migrations/20260831033553_operator_own_payment_requests.sql",
+      "local_sha256": "ece27e4f2f012c7f911b6675fee15292a09266a89aaf38cdf4b19b89b1fac634",
+      "recorded_sha256": "0a89593b986cce90db784e4369b687e5832cc6841dc0d01286e7b03313e46d57",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831120000",
+      "new_version": "20260831194350",
+      "old_path": "supabase/migrations/20260831120000_tenant_recurring_income.sql",
+      "new_path": "supabase/migrations/20260831194350_tenant_recurring_income.sql",
+      "local_sha256": "b184b44374d55a844a97d66b5a93ff1fd2f6f2a1975fc8eb3101d753869e18d7",
+      "recorded_sha256": "a5712fb4c92e788ea0eeb6a852b362c799bdc30bab901bcfd38f4c430c09eaf0",
+      "exact_bytes": false,
+      "lexically_equal": false,
+      "selected": false
+    },
+    {
+      "old_version": "20260831155017",
+      "new_version": "20260831195803",
+      "old_path": "supabase/migrations/20260831155017_notification_payment_outcome_dispatch_recovery_dev.sql",
+      "new_path": "supabase/migrations/20260831195803_notification_payment_outcome_dispatch_recovery_dev.sql",
+      "local_sha256": "a51b6ba00a0f296ed7ea4bbd4b1dd60f2ceaa45dbf5d2f9e98e0b2ae3a5dfd70",
+      "recorded_sha256": "a51b6ba00a0f296ed7ea4bbd4b1dd60f2ceaa45dbf5d2f9e98e0b2ae3a5dfd70",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831201500",
+      "new_version": "20260831201434",
+      "old_path": "supabase/migrations/20260831201500_notification_payment_outcome_authorized_retry_dev.sql",
+      "new_path": "supabase/migrations/20260831201434_notification_payment_outcome_authorized_retry_dev.sql",
+      "local_sha256": "6b77c98692d7fbd1f8ae510114e1b4f6b52e80f4ecafd3fcd795c593221b2964",
+      "recorded_sha256": "6b77c98692d7fbd1f8ae510114e1b4f6b52e80f4ecafd3fcd795c593221b2964",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831210159",
+      "new_version": "20260831211229",
+      "old_path": "supabase/migrations/20260831210159_notification_dev_dynamic_business_recipients.sql",
+      "new_path": "supabase/migrations/20260831211229_notification_dev_dynamic_business_recipients.sql",
+      "local_sha256": "f9d0339a55314084c636b920bda01c10f42d469a7009849b449e0beed7a76870",
+      "recorded_sha256": "f9d0339a55314084c636b920bda01c10f42d469a7009849b449e0beed7a76870",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260831130000",
+      "new_version": "20260831233032",
+      "old_path": "supabase/migrations/20260831130000_budget_category_responsible.sql",
+      "new_path": "supabase/migrations/20260831233032_budget_category_responsible.sql",
+      "local_sha256": "ece48290137dcf492b303aaabd49cee4b67d7c58d7686895d8f01d44a50bec20",
+      "recorded_sha256": "dd8931ae74378aa250d6cfb2c9aeb176e253d892016e021370828d8e84952ac2",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260901055111",
+      "new_version": "20260901065625",
+      "old_path": "supabase/migrations/20260901055111_company_scoped_roles_foundation.sql",
+      "new_path": "supabase/migrations/20260901065625_company_scoped_roles_foundation.sql",
+      "local_sha256": "98d01d41df78ea8cfa20d343b484e1b97a019515eb69bf3dc6c41d5daa77aac0",
+      "recorded_sha256": "6338f4a94367fdb5fd05265a0162207cb216c274e3d3e9e8a94463ac83a041ed",
+      "exact_bytes": false,
+      "lexically_equal": false,
+      "selected": false
+    },
+    {
+      "old_version": "20260901062149",
+      "new_version": "20260901071915",
+      "old_path": "supabase/migrations/20260901062149_company_scoped_rls_rpc_cutover.sql",
+      "new_path": "supabase/migrations/20260901071915_company_scoped_rls_rpc_cutover.sql",
+      "local_sha256": "b5c5ac32bc6135984a014d45060b91c2a7c670c54eb2581f3901c01ff3feb3ff",
+      "recorded_sha256": "b5c5ac32bc6135984a014d45060b91c2a7c670c54eb2581f3901c01ff3feb3ff",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260901063043",
+      "new_version": "20260901071923",
+      "old_path": "supabase/migrations/20260901063043_company_scoped_rpc_cutover.sql",
+      "new_path": "supabase/migrations/20260901071923_company_scoped_rpc_cutover.sql",
+      "local_sha256": "bae9913047b69cfa8fb14f197461306b8b3326796c0cabd27a0ff5f210350113",
+      "recorded_sha256": "bae9913047b69cfa8fb14f197461306b8b3326796c0cabd27a0ff5f210350113",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260901070846",
+      "new_version": "20260901071929",
+      "old_path": "supabase/migrations/20260901070846_company_scoped_power_override_hardening.sql",
+      "new_path": "supabase/migrations/20260901071929_company_scoped_power_override_hardening.sql",
+      "local_sha256": "5b263075bfe77223f05ac28772bc995f6e46e787199a488f6db4525b3f9bc0a2",
+      "recorded_sha256": "5b263075bfe77223f05ac28772bc995f6e46e787199a488f6db4525b3f9bc0a2",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260901180000",
+      "new_version": "20260901102134",
+      "old_path": "supabase/migrations/20260901180000_desglose_fiscal_subtotal_budget.sql",
+      "new_path": "supabase/migrations/20260901102134_desglose_fiscal_subtotal_budget.sql",
+      "local_sha256": "0071031a32ca02ea5285458343a2d2110d48969c7e6cfe5417791d28c6aac455",
+      "recorded_sha256": "31c02b161ae2a10c09cc3edd1ba15ee057efe4b05beb2521d2cb88f90b1a454a",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260902030000",
+      "new_version": "20260902041542",
+      "old_path": "supabase/migrations/20260902030000_fix_extraordinary_execution_context_recursion.sql",
+      "new_path": "supabase/migrations/20260902041542_fix_extraordinary_execution_context_recursion.sql",
+      "local_sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "recorded_sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260903014009",
+      "new_version": "20260903015237",
+      "old_path": "supabase/migrations/20260903014009_budget_category_shared_access.sql",
+      "new_path": "supabase/migrations/20260903015237_budget_category_shared_access.sql",
+      "local_sha256": "92968364934c43d8f8f6733a1ba891e9c239a0006e7f64a7d389474289edbabe",
+      "recorded_sha256": "ccf8c92cc74ab4d4c3dac23a7c8ba07f77a7d82b4a986cd094406fd9cc90d6d3",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260902030000",
+      "new_version": "20260903023224",
+      "old_path": "supabase/migrations/20260902030000_fix_extraordinary_execution_context_recursion.sql",
+      "new_path": "supabase/migrations/20260903023224_fix_extraordinary_execution_context_recursion.sql",
+      "local_sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "recorded_sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": false
+    },
+    {
+      "old_version": "20260907174500",
+      "new_version": "20260907173216",
+      "old_path": "supabase/migrations/20260907174500_payroll_provision_pending_does_not_block_dev.sql",
+      "new_path": "supabase/migrations/20260907173216_payroll_provision_pending_does_not_block_dev.sql",
+      "local_sha256": "1f25e9d55e5196979dd69cbda885cb63633d25164237276744ad91f150547277",
+      "recorded_sha256": "76b418399731e0e2045e8d554b07329900aef1a70baa48915ac6118eef580872",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260907120000",
+      "new_version": "20260907184613",
+      "old_path": "supabase/migrations/20260907120000_payroll_folio_en_materializacion.sql",
+      "new_path": "supabase/migrations/20260907184613_payroll_folio_en_materializacion.sql",
+      "local_sha256": "825b8d8858d18c5d6e3c5a68bdcf2f291646adf1558c00d920723dd0ff033aeb",
+      "recorded_sha256": "25d360c1606bb1f17530ce723c152a8a04fb5f7a1bc58f7de6bc979995235891",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260907161500",
+      "new_version": "20260907221608",
+      "old_path": "supabase/migrations/20260907161500_payroll_capture_file_download_context.sql",
+      "new_path": "supabase/migrations/20260907221608_payroll_capture_file_download_context.sql",
+      "local_sha256": "6172c607e9e37aea44a6533d58f933db89e6c21c06dee6636936c2334fda0dcd",
+      "recorded_sha256": "6172c607e9e37aea44a6533d58f933db89e6c21c06dee6636936c2334fda0dcd",
+      "exact_bytes": true,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260907164000",
+      "new_version": "20260907225200",
+      "old_path": "supabase/migrations/20260907164000_payroll_nonbudget_finance_confirm.sql",
+      "new_path": "supabase/migrations/20260907225200_payroll_nonbudget_finance_confirm.sql",
+      "local_sha256": "22ec30a8df23395dece62d7d71b9e725af84b20618bab88f95d79051105a9a32",
+      "recorded_sha256": "53823f2c15ff62170bd810e55b82d013ce130fef8685b798e28cd4cc82441610",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260907164100",
+      "new_version": "20260907225213",
+      "old_path": "supabase/migrations/20260907164100_payroll_finance_confirm_trigger_safe.sql",
+      "new_path": "supabase/migrations/20260907225213_payroll_finance_confirm_trigger_safe.sql",
+      "local_sha256": "7ceae747a204ca2625c9f824028abc803c1fe5dd1be077707f3a39cdcd8b31ba",
+      "recorded_sha256": "9b539819813a4ca74d798c68298b2531a2f554e02624b156a9672b9e91409c41",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    },
+    {
+      "old_version": "20260907173300",
+      "new_version": "20260908001439",
+      "old_path": "supabase/migrations/20260907173300_payroll_separate_payment_flow_restore.sql",
+      "new_path": "supabase/migrations/20260908001439_payroll_separate_payment_flow_restore.sql",
+      "local_sha256": "c2e206590fe6f62347226b13bc076482af5d5143539a9a1157b30bb9677f053f",
+      "recorded_sha256": "cb9b86b68fa5dd30c372e430e38e6ace28a4c94992d0a5d60c4b34c8b4939869",
+      "exact_bytes": false,
+      "lexically_equal": true,
+      "selected": true
+    }
+  ],
+  "remaining_remote_only": [
+    {
+      "name": "fersana_company_access_onboarding",
+      "version": "20260831004813"
+    },
+    {
+      "name": "tenant_recurring_income",
+      "version": "20260831194350"
+    },
+    {
+      "name": "company_scoped_roles_foundation",
+      "version": "20260901065625"
+    },
+    {
+      "name": "invoice_uuid_anti_duplicado",
+      "version": "20260901171427"
+    },
+    {
+      "name": "fix_extraordinary_execution_context_recursion",
+      "version": "20260903023224"
+    },
+    {
+      "name": "partida_predictions",
+      "version": "20260903035514"
+    },
+    {
+      "name": "partida_unsure_flag",
+      "version": "20260903040733"
+    },
+    {
+      "name": "confirm_provider_account_rpc",
+      "version": "20260903041629"
+    },
+    {
+      "name": "drop_backup_tables",
+      "version": "20260906003626"
+    },
+    {
+      "name": "payroll_confirmation_weekly_cut_bridge",
+      "version": "20260907232403"
+    },
+    {
+      "name": "payroll_direct_finance_confirmation_snapshot",
+      "version": "20260907232743"
+    },
+    {
+      "name": "payroll_weekly_cut_submit_bridge",
+      "version": "20260907233050"
+    }
+  ],
+  "remaining_local_only": [
+    {
+      "version": "20260827090000",
+      "path": "supabase/migrations/20260827090000_platform_module_incidencias.sql"
+    },
+    {
+      "version": "20260827100000",
+      "path": "supabase/migrations/20260827100000_platform_module_nomina.sql"
+    },
+    {
+      "version": "20260831003419",
+      "path": "supabase/migrations/20260831003419_fersana_company_access_onboarding.sql"
+    },
+    {
+      "version": "20260831120000",
+      "path": "supabase/migrations/20260831120000_tenant_recurring_income.sql"
+    },
+    {
+      "version": "20260901055111",
+      "path": "supabase/migrations/20260901055111_company_scoped_roles_foundation.sql"
+    }
+  ],
+  "prod": {
+    "ledger_rows": 120,
+    "release_prs": [
+      575,
+      576,
+      577
+    ],
+    "native_sql_matches_main": [
+      {
+        "version": "20260908075132",
+        "md5": "88e9e3d8ddf9f9da5a7388b5ca4c5a92"
+      },
+      {
+        "version": "20260908075149",
+        "md5": "7d1463e08cabaf1a7aa0f3a55c871555"
+      }
+    ]
+  }
+}

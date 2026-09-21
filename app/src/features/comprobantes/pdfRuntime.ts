@@ -4,7 +4,7 @@
 // recibe el PDF por página.
 type ParserModule = {
   PARSER_VERSION: string
-  parseBbvaDocument: (pages: { pageNumber: number; text: string }[], opts: { fileName: string }) => {
+  parseBbvaDocument: (pages: { pageNumber: number; lines?: string[]; items?: { str?: string }[] }[], opts: { fileName: string }) => {
     page_count: number
     operations: Record<string, unknown>[]
   }
@@ -24,7 +24,12 @@ type PdfJsModule = {
 
 export type PdfDocument = {
   numPages: number
-  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: { str?: string }[] }> }>
+  getPage: (n: number) => Promise<{
+    getTextContent: () => Promise<{ items: { str?: string }[] }>
+    getViewport: (params: { scale: number }) => { width: number; height: number }
+    render: (params: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> }
+  }>
+  destroy: () => Promise<void>
 }
 
 type PdfRuntime = {

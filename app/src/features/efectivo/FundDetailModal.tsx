@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { Modal } from '../../components/ui/Modal'
 import { Badge } from '../../components/ui/Badge'
 import { formatCurrency, formatDate, formatDateTime } from '../../lib/format'
@@ -58,7 +59,7 @@ export function FundDetailModal({
   const tickets = reconciliation ? lookups.itemsForReconciliation(reconciliation.id) : []
 
   return (
-    <Modal
+    <Modal headerContext={<CompanyCaptureContext name={lookups.companyName(fund.company_id)} />}
       title={request?.request_number || 'Detalle de fondo'}
       subtitle={`${methodLabel(fund.delivery_method)} — ${fundStatusLabel(fund.status)}`}
       size="lg"

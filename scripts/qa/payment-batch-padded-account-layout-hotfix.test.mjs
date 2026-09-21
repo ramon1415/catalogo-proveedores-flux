@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const migration = readFileSync(
-  join(root, "supabase/migrations/20260827202122_payment_batch_bbva_padded_source_account_hotfix.sql"),
+  join(root, "supabase/migrations/20260827203337_payment_batch_bbva_padded_source_account_hotfix.sql"),
   "utf8",
 );
 const css = readFileSync(join(root, "comprobantes_batch.css"), "utf8");

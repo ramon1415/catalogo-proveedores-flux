@@ -1,0 +1,232 @@
+{
+  "captured_on": "2026-09-08",
+  "dev_base_sha": "8a1a42e94f8c243726c0e91edfdbc8132155f6cd",
+  "main_sha": "a5391ea614f5946bbc4c04690123b98ac8d840f5",
+  "scope": "Repository recovery of five already-executed DEV sources; no SQL applied to any remote database; no ledger repair.",
+  "sources": [
+    {
+      "version": "20260901171427",
+      "name": "invoice_uuid_anti_duplicado",
+      "path": "supabase/migrations/20260901171427_invoice_uuid_anti_duplicado.sql",
+      "sha256": "a3aa2243607af0ffaf4c81bf57fc38e7ebb7da1c70a6ce1b1476a9f4d26e199b",
+      "bytes": 9465,
+      "statement_count": 1,
+      "source": "DEV supabase_migrations.schema_migrations.statements[1]"
+    },
+    {
+      "version": "20260903023224",
+      "name": "fix_extraordinary_execution_context_recursion",
+      "path": "supabase/migrations/20260903023224_fix_extraordinary_execution_context_recursion.sql",
+      "sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "bytes": 8499,
+      "statement_count": 1,
+      "source": "DEV supabase_migrations.schema_migrations.statements[1]",
+      "peer_path": "supabase/migrations/20260902041542_fix_extraordinary_execution_context_recursion.sql",
+      "peer_sha256": "c6338fe3dc50922112939c6fa899ae0c0d7845a311293ff5e14100921ebeb27e",
+      "lexically_equal_to_peer": true
+    },
+    {
+      "version": "20260903035514",
+      "name": "partida_predictions",
+      "path": "supabase/migrations/20260903035514_partida_predictions.sql",
+      "sha256": "d2050500f5c4405dfb31b85863953b89244077356c868f00adb40e05dde892e7",
+      "bytes": 958,
+      "statement_count": 1,
+      "source": "DEV supabase_migrations.schema_migrations.statements[1]",
+      "peer_path": "supabase/migrations/20260903213133_partida_predictions_v2_170000.sql",
+      "peer_sha256": "36bf894e315194a8d8e554e21f1ba01b0aef583a312f2b83f935ec721dafb2a6",
+      "lexically_equal_to_peer": true
+    },
+    {
+      "version": "20260903040733",
+      "name": "partida_unsure_flag",
+      "path": "supabase/migrations/20260903040733_partida_unsure_flag.sql",
+      "sha256": "26a0747b8b855e8b338cb1fe1cd935e76874823196b7deb2e279c6e3e48c45b2",
+      "bytes": 10572,
+      "statement_count": 1,
+      "source": "DEV supabase_migrations.schema_migrations.statements[1]",
+      "peer_path": "supabase/migrations/20260903213224_partida_unsure_flag_v2_170100.sql",
+      "peer_sha256": "a403d006f349edab6473b5ecbb921eaa75f891c221343dbeb3d212b30f37930a",
+      "lexically_equal_to_peer": true
+    },
+    {
+      "version": "20260903041629",
+      "name": "confirm_provider_account_rpc",
+      "path": "supabase/migrations/20260903041629_confirm_provider_account_rpc.sql",
+      "sha256": "df31c777f4f5a2f260125ad864b233663d074ababe5ca771b0a25b16c0de28c6",
+      "bytes": 2700,
+      "statement_count": 1,
+      "source": "DEV supabase_migrations.schema_migrations.statements[1]",
+      "peer_path": "supabase/migrations/20260903213236_confirm_provider_account_rpc_v2_170200.sql",
+      "peer_sha256": "29925758de9677daa3debed095a53ca71749a529be93daa595a95292d535ca03",
+      "lexically_equal_to_peer": true
+    }
+  ],
+  "comparison_note": "Recovered bytes exactly match one recorded statement per version. Lexical peer comparison is only a review aid, not a semantic proof.",
+  "before": {
+    "files": 106,
+    "ledger_rows": 113,
+    "common_versions": 101,
+    "remote_only": 12,
+    "local_only": 5
+  },
+  "after": {
+    "files": 111,
+    "ledger_rows": 113,
+    "common_versions": 106,
+    "remote_only": 7,
+    "local_only": 5
+  },
+  "remaining_remote_only": [
+    {
+      "version": "20260831004813",
+      "name": "fersana_company_access_onboarding"
+    },
+    {
+      "version": "20260831194350",
+      "name": "tenant_recurring_income"
+    },
+    {
+      "version": "20260901065625",
+      "name": "company_scoped_roles_foundation"
+    },
+    {
+      "version": "20260906003626",
+      "name": "drop_backup_tables"
+    },
+    {
+      "version": "20260907232403",
+      "name": "payroll_confirmation_weekly_cut_bridge"
+    },
+    {
+      "version": "20260907232743",
+      "name": "payroll_direct_finance_confirmation_snapshot"
+    },
+    {
+      "version": "20260907233050",
+      "name": "payroll_weekly_cut_submit_bridge"
+    }
+  ],
+  "remaining_local_only": [
+    "20260827090000_platform_module_incidencias.sql",
+    "20260827100000_platform_module_nomina.sql",
+    "20260831003419_fersana_company_access_onboarding.sql",
+    "20260831120000_tenant_recurring_income.sql",
+    "20260901055111_company_scoped_roles_foundation.sql"
+  ],
+  "live_readonly_evidence": {
+    "indexes": [
+      {
+        "name": "partida_predictions_company_rfc_idx",
+        "valid": true,
+        "unique": false,
+        "definition": "CREATE INDEX partida_predictions_company_rfc_idx ON public.partida_predictions USING btree (company_id, rfc_emisor)"
+      },
+      {
+        "name": "payment_requests_invoice_uuid_unique",
+        "valid": true,
+        "unique": true,
+        "definition": "CREATE UNIQUE INDEX payment_requests_invoice_uuid_unique ON public.payment_requests USING btree (company_id, upper(invoice_uuid)) WHERE ((invoice_uuid IS NOT NULL) AND (status <> ALL (ARRAY['rejected'::payment_request_status, 'cancelled'::payment_request_status])))"
+      }
+    ],
+    "policies": [
+      {
+        "cmd": "SELECT",
+        "qual": "has_active_company_membership(current_profile_id(), company_id)",
+        "roles": [
+          "public"
+        ],
+        "tablename": "partida_predictions",
+        "permissive": "PERMISSIVE",
+        "policyname": "partida_predictions_select_members",
+        "schemaname": "public",
+        "with_check": null
+      }
+    ],
+    "functions": [
+      {
+        "args": "p_company_id uuid, p_proveedor_id uuid, p_account_code text",
+        "name": "confirm_provider_account",
+        "nargs": 3,
+        "argnames": [
+          "p_company_id",
+          "p_proveedor_id",
+          "p_account_code"
+        ],
+        "definition": "CREATE OR REPLACE FUNCTION public.confirm_provider_account(p_company_id uuid, p_proveedor_id uuid, p_account_code text)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_code text := upper(regexp_replace(coalesce(p_account_code, ''), '[^0-9A-Za-z]', '', 'g'));\nbegin\n  if not public.contpaq_mapper_company_access(p_company_id) then\n    raise exception using errcode = '42501', message = 'contpaq_mapper_company_access_denied';\n  end if;\n\n  if p_proveedor_id is null then\n    raise exception using errcode = '23514', message = 'proveedor_id_required';\n  end if;\n\n  if coalesce(char_length(v_code), 0) = 0 then\n    raise exception using errcode = '23514', message = 'account_code_required';\n  end if;\n\n  if not exists (\n    select 1 from public.contpaq_accounts a\n    where a.company_id = p_company_id\n      and a.code = v_code\n      and a.is_detail\n  ) then\n    raise exception using errcode = '23503',\n      message = 'contpaq_account_not_found_or_not_detail: ' || v_code;\n  end if;\n\n  insert into public.provider_account_mappings (\n    company_id, proveedor_id, contpaq_account_code, updated_at\n  )\n  values (p_company_id, p_proveedor_id, v_code, now())\n  on conflict (company_id, proveedor_id)\n  do update set\n    contpaq_account_code = excluded.contpaq_account_code,\n    updated_at = now();\n\n  return jsonb_build_object(\n    'ok', true,\n    'proveedor_id', p_proveedor_id,\n    'contpaq_account_code', v_code\n  );\nend;\n$function$\n",
+        "anon_execute": false,
+        "service_execute": true,
+        "authenticated_execute": true
+      },
+      {
+        "args": "p_proveedor_id uuid, p_company_id uuid, p_cost_center_id uuid, p_budget_category_id uuid, p_budget_month date, p_amount_requested numeric, p_currency text, p_exchange_rate numeric, p_description text, p_notes text, p_requested_by uuid, p_is_extraordinary_adjustment boolean, p_approver_id uuid, p_approver_assignment_id uuid, p_subtotal_amount numeric, p_tax_amount numeric, p_withholding_amount numeric, p_invoice_uuid text, p_beneficiary_profile_id uuid, p_request_type text, p_partida_unsure boolean",
+        "name": "create_payment_request",
+        "nargs": 21,
+        "argnames": [
+          "p_proveedor_id",
+          "p_company_id",
+          "p_cost_center_id",
+          "p_budget_category_id",
+          "p_budget_month",
+          "p_amount_requested",
+          "p_currency",
+          "p_exchange_rate",
+          "p_description",
+          "p_notes",
+          "p_requested_by",
+          "p_is_extraordinary_adjustment",
+          "p_approver_id",
+          "p_approver_assignment_id",
+          "p_subtotal_amount",
+          "p_tax_amount",
+          "p_withholding_amount",
+          "p_invoice_uuid",
+          "p_beneficiary_profile_id",
+          "p_request_type",
+          "p_partida_unsure"
+        ],
+        "definition": "CREATE OR REPLACE FUNCTION public.create_payment_request(p_proveedor_id uuid, p_company_id uuid, p_cost_center_id uuid, p_budget_category_id uuid, p_budget_month date, p_amount_requested numeric, p_currency text DEFAULT 'MXN'::text, p_exchange_rate numeric DEFAULT 1, p_description text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_requested_by uuid DEFAULT NULL::uuid, p_is_extraordinary_adjustment boolean DEFAULT false, p_approver_id uuid DEFAULT NULL::uuid, p_approver_assignment_id uuid DEFAULT NULL::uuid, p_subtotal_amount numeric DEFAULT NULL::numeric, p_tax_amount numeric DEFAULT NULL::numeric, p_withholding_amount numeric DEFAULT NULL::numeric, p_invoice_uuid text DEFAULT NULL::text, p_beneficiary_profile_id uuid DEFAULT NULL::uuid, p_request_type text DEFAULT NULL::text, p_partida_unsure boolean DEFAULT false)\n RETURNS jsonb\n LANGUAGE plpgsql\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_current_profile_id uuid := public.current_profile_id();\n  v_requester_id uuid;\n  v_assignment public.approver_assignments%rowtype;\n  v_has_pool boolean;\n  v_budget_month date;\n  v_currency text;\n  v_exchange_rate numeric;\n  v_budget_amount numeric;\n  v_budget_result jsonb;\n  v_budget_decision text;\n  v_budget_block_reason text;\n  v_available_before numeric;\n  v_available_after numeric;\n  v_shortfall numeric;\n  v_request_number text;\n  v_payment_request_id uuid;\n  v_year integer;\n  v_concept text;\n  v_invoice_uuid text;\n  v_request_type public.payment_request_type;\n  v_is_reimbursement boolean;\nbegin\n  if v_current_profile_id is null then\n    raise exception 'not_authenticated';\n  end if;\n\n  v_request_type := coalesce(\n    nullif(btrim(coalesce(p_request_type, '')), '')::public.payment_request_type,\n    'provider_payment'::public.payment_request_type\n  );\n  v_is_reimbursement := v_request_type = 'reimbursement'::public.payment_request_type\n    or p_beneficiary_profile_id is not null;\n  if v_is_reimbursement then\n    v_request_type := 'reimbursement'::public.payment_request_type;\n  end if;\n\n  v_requester_id := coalesce(p_requested_by, v_current_profile_id);\n  if v_requester_id <> v_current_profile_id\n     and not public.current_user_has_role(public.flux_sysadmin_roles()) then\n    raise exception 'requested_by_must_match_current_profile';\n  end if;\n  if not exists (\n    select 1 from public.profiles\n    where id = v_requester_id and coalesce(active, true)\n  ) then\n    raise exception 'requested_by_not_found_or_inactive';\n  end if;\n\n  if v_is_reimbursement then\n    if p_beneficiary_profile_id is null then\n      raise exception 'beneficiary_profile_id_required';\n    end if;\n    if not exists (\n      select 1 from public.profiles\n      where id = p_beneficiary_profile_id and coalesce(active, true)\n    ) then\n      raise exception 'beneficiary_not_found_or_inactive';\n    end if;\n    if p_proveedor_id is not null\n       and not exists (select 1 from public.proveedores where id = p_proveedor_id) then\n      raise exception 'El proveedor indicado no existe en public.proveedores';\n    end if;\n  else\n    if p_proveedor_id is null then\n      raise exception 'proveedor_id es obligatorio';\n    end if;\n    if not exists (select 1 from public.proveedores where id = p_proveedor_id) then\n      raise exception 'El proveedor indicado no existe en public.proveedores';\n    end if;\n  end if;\n\n  if p_company_id is null or not exists (\n    select 1 from public.companies where id = p_company_id and coalesce(active, true)\n  ) then\n    raise exception 'La empresa indicada no existe';\n  end if;\n  if not public.has_active_company_membership(v_requester_id, p_company_id) then\n    raise exception 'requester_company_membership_required';\n  end if;\n  if p_cost_center_id is null or not exists (\n    select 1 from public.cost_centers where id = p_cost_center_id\n  ) then\n    raise exception 'El centro de costo indicado no existe';\n  end if;\n  if p_budget_category_id is null or not exists (\n    select 1 from public.budget_categories where id = p_budget_category_id\n  ) then\n    raise exception 'La partida presupuestal indicada no existe';\n  end if;\n  if p_budget_month is null then\n    raise exception 'budget_month es obligatorio';\n  end if;\n  if p_amount_requested is null or p_amount_requested <= 0 then\n    raise exception 'amount_requested debe ser mayor a 0';\n  end if;\n  if p_approver_id is null then\n    raise exception 'approver_id_required';\n  end if;\n  if p_approver_id = v_requester_id then\n    raise exception 'requester_cannot_be_own_approver';\n  end if;\n\n  if p_subtotal_amount is not null then\n    if p_subtotal_amount <= 0 then\n      raise exception 'fiscal_subtotal_invalid';\n    end if;\n    if coalesce(p_tax_amount, 0) < 0 or coalesce(p_withholding_amount, 0) < 0 then\n      raise exception 'fiscal_breakdown_invalid';\n    end if;\n    if abs((p_subtotal_amount + coalesce(p_tax_amount, 0) - coalesce(p_withholding_amount, 0)) - p_amount_requested) > 0.01 then\n      raise exception 'fiscal_breakdown_mismatch';\n    end if;\n  elsif p_tax_amount is not null or p_withholding_amount is not null then\n    raise exception 'fiscal_subtotal_required';\n  end if;\n\n  v_invoice_uuid := nullif(upper(trim(coalesce(p_invoice_uuid, ''))), '');\n  if v_invoice_uuid is not null then\n    if v_invoice_uuid !~ '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$' then\n      raise exception 'invoice_uuid_invalid';\n    end if;\n    if exists (\n      select 1 from public.payment_requests pr\n      where pr.company_id = p_company_id\n        and upper(pr.invoice_uuid) = v_invoice_uuid\n        and pr.status not in ('rejected', 'cancelled')\n    ) then\n      raise exception 'invoice_uuid_duplicate';\n    end if;\n  end if;\n\n  v_has_pool := public.payment_request_has_active_approver_pool(v_requester_id, p_company_id);\n  if v_has_pool then\n    if p_approver_assignment_id is null then\n      raise exception 'approver_assignment_id_required';\n    end if;\n\n    select * into v_assignment\n    from public.approver_assignments aa\n    where aa.id = p_approver_assignment_id\n      and aa.company_id = p_company_id\n      and aa.requester_id = v_requester_id\n      and aa.approver_id = p_approver_id\n      and aa.active;\n    if not found then\n      raise exception 'approver_not_in_configured_pool';\n    end if;\n    if not public.is_payment_request_approver_for_company(p_approver_id, p_company_id) then\n      raise exception 'configured_approver_no_longer_eligible';\n    end if;\n  else\n    if p_approver_assignment_id is not null then\n      raise exception 'approver_assignment_not_allowed_without_pool';\n    end if;\n    if not public.payment_request_rule_allows(\n      p_approver_id, p_company_id, p_cost_center_id, p_amount_requested, 'approved'\n    ) then\n      raise exception 'approver_not_allowed_by_approval_rules';\n    end if;\n  end if;\n\n  v_currency := upper(coalesce(nullif(trim(p_currency), ''), 'MXN'));\n  v_exchange_rate := coalesce(p_exchange_rate, 1);\n  if v_exchange_rate <= 0 then\n    raise exception 'exchange_rate debe ser mayor a 0';\n  end if;\n\n  v_budget_month := date_trunc('month', p_budget_month)::date;\n  v_budget_amount := round(coalesce(p_subtotal_amount, p_amount_requested) * v_exchange_rate, 2);\n  v_year := extract(year from v_budget_month)::integer;\n  v_concept := coalesce(nullif(trim(p_description), ''), 'Solicitud de pago');\n\n  v_budget_result := public.verify_budget_availability(\n    p_company_id,\n    p_cost_center_id,\n    p_budget_category_id,\n    v_budget_month,\n    v_budget_amount,\n    coalesce(p_is_extraordinary_adjustment, false)\n  );\n  v_budget_decision := coalesce(v_budget_result ->> 'status', 'bloqueado');\n  if v_budget_decision not in ('aprobable', 'bloqueado') then\n    v_budget_decision := 'bloqueado';\n  end if;\n  v_budget_block_reason := v_budget_result ->> 'motivo';\n  v_available_before := nullif(v_budget_result ->> 'disponible_actual', '')::numeric;\n  v_available_after := nullif(v_budget_result ->> 'disponible_despues', '')::numeric;\n  v_shortfall := nullif(v_budget_result ->> 'faltante', '')::numeric;\n  v_request_number := public.generate_payment_request_number(v_year);\n\n  insert into public.payment_requests (\n    provider_id, proveedor_id, beneficiary_profile_id,\n    company_id, cost_center_id, budget_category_id,\n    budget_month, request_type, requested_by, approver_id, approver_assignment_id,\n    approver_selection_source,\n    amount_requested, currency, exchange_rate, requires_invoice, invoice_received,\n    subtotal_amount, tax_amount, withholding_amount, invoice_uuid,\n    status, concept, description, notes, submitted_at, request_number,\n    budget_decision, budget_block_reason, budget_available_before,\n    budget_available_after, budget_shortfall, budget_checked_at, budget_result,\n    is_extraordinary_adjustment, partida_unsure, created_at, updated_at\n  ) values (\n    null, p_proveedor_id, p_beneficiary_profile_id,\n    p_company_id, p_cost_center_id, p_budget_category_id,\n    v_budget_month, v_request_type, v_requester_id,\n    p_approver_id, p_approver_assignment_id,\n    case when p_approver_assignment_id is null then 'approval_rules' else 'assigned' end,\n    p_amount_requested, v_currency,\n    v_exchange_rate, false, false,\n    p_subtotal_amount, p_tax_amount, p_withholding_amount, v_invoice_uuid,\n    'submitted'::payment_request_status,\n    v_concept, p_description, p_notes, now(), v_request_number,\n    v_budget_decision, v_budget_block_reason, v_available_before,\n    v_available_after, v_shortfall, now(), v_budget_result,\n    coalesce(p_is_extraordinary_adjustment, false), coalesce(p_partida_unsure, false), now(), now()\n  ) returning id into v_payment_request_id;\n\n  return jsonb_build_object(\n    'payment_request_id', v_payment_request_id,\n    'request_number', v_request_number,\n    'status', 'submitted',\n    'request_type', v_request_type,\n    'beneficiary_profile_id', p_beneficiary_profile_id,\n    'budget_decision', v_budget_decision,\n    'budget_block_reason', v_budget_block_reason,\n    'budget_result', v_budget_result,\n    'approver_id', p_approver_id,\n    'approver_assignment_id', p_approver_assignment_id,\n    'approver_source', case when p_approver_assignment_id is null then 'approval_rules' else 'assigned' end,\n    'partida_unsure', coalesce(p_partida_unsure, false)\n  );\nend;\n$function$\n",
+        "anon_execute": true,
+        "service_execute": true,
+        "authenticated_execute": true
+      },
+      {
+        "args": "p_payment_request_id uuid",
+        "name": "get_payment_request_execution_context_pre_037",
+        "nargs": 1,
+        "argnames": [
+          "p_payment_request_id"
+        ],
+        "definition": "CREATE OR REPLACE FUNCTION public.get_payment_request_execution_context_pre_037(p_payment_request_id uuid)\n RETURNS jsonb\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'\nAS $function$\ndeclare\n  v_actor uuid;\n  v_request public.payment_requests%rowtype;\n  v_extra record;\n  v_batch record;\n  v_is_finance boolean;\n  v_executed boolean;\n  v_budget jsonb;\n  v_budget_current boolean;\n  v_direction_current boolean;\n  v_direction_stale boolean;\n  v_can_authorize boolean;\n  v_block_reason text;\n  v_history jsonb;\n  v_readiness jsonb;\nbegin\n  v_actor := public.approval_batch_require_actor();\n  v_is_finance := public.current_user_has_role(public.flux_finance_roles());\n  select * into v_request\n  from public.payment_requests\n  where id = p_payment_request_id;\n  if not found then raise exception 'payment_request_not_found'; end if;\n\n  if not v_is_finance\n     and v_request.requested_by <> v_actor\n     and not exists (\n       select 1\n       from public.company_directors cd\n       where cd.company_id = v_request.company_id\n         and cd.director_profile_id = v_actor\n         and cd.active\n     ) then\n    raise exception 'payment_request_execution_context_denied';\n  end if;\n\n  select prea.*, p.full_name as authorized_by_name\n    into v_extra\n  from public.payment_request_extraordinary_authorizations prea\n  join public.profiles p on p.id = prea.authorized_by\n  where prea.payment_request_id = v_request.id\n    and prea.status = 'active'\n  order by prea.authorized_at desc\n  limit 1;\n\n  select\n    abi.id as item_id,\n    abi.director_status,\n    abi.director_reject_reason,\n    abi.rebatch_status,\n    abi.rebatch_release_note,\n    abi.decided_at,\n    abi.review_sequence,\n    abi.previous_item_id,\n    abi.resubmitted_at,\n    abi.resubmission_note,\n    ab.id as batch_id,\n    ab.label as batch_label,\n    ab.status as batch_status,\n    ab.closed_at\n  into v_batch\n  from public.approval_batch_items abi\n  join public.approval_batches ab on ab.id = abi.batch_id\n  where abi.payment_request_id = v_request.id\n    and abi.removed_at is null\n  order by abi.review_sequence desc, abi.created_at desc, abi.id desc\n  limit 1;\n\n  select coalesce(jsonb_agg(jsonb_build_object(\n    'item_id', abi.id,\n    'batch_id', ab.id,\n    'batch_label', ab.label,\n    'batch_status', ab.status,\n    'review_sequence', abi.review_sequence,\n    'director_status', abi.director_status,\n    'reject_reason', abi.director_reject_reason,\n    'decided_at', abi.decided_at,\n    'decided_by_name', decider.full_name,\n    'rebatch_status', abi.rebatch_status,\n    'correction_note', abi.rebatch_release_note,\n    'resubmitted_at', abi.resubmitted_at,\n    'resubmitted_by_name', resubmitter.full_name,\n    'resubmission_note', abi.resubmission_note,\n    'closed_at', ab.closed_at\n  ) order by abi.review_sequence, abi.created_at), '[]'::jsonb)\n    into v_history\n  from public.approval_batch_items abi\n  join public.approval_batches ab on ab.id = abi.batch_id\n  left join public.profiles decider on decider.id = abi.decided_by\n  left join public.profiles resubmitter on resubmitter.id = abi.resubmitted_by\n  where abi.payment_request_id = v_request.id\n    and abi.removed_at is null;\n\n  v_executed := public.approval_batch_request_has_any_execution_record(v_request.id);\n  v_budget := public.approval_batch_budget_validation(v_request.id);\n  v_budget_current := coalesce(v_budget ->> 'status', 'bloqueado') = 'aprobable';\n  v_direction_current := public.approval_batch_request_has_current_direction_approval(v_request.id);\n  v_readiness := public.get_payment_request_execution_readiness(v_request.id);\n  v_direction_stale := coalesce(\n    v_batch.director_status = 'approved'\n    and (\n      v_batch.decided_at is null\n      or v_batch.decided_at < v_request.approval_material_updated_at\n    ),\n    false\n  );\n\n  v_block_reason := case\n    when not v_is_finance then 'finance_role_required'\n    when v_request.status::text not in ('submitted', 'pending_approval', 'approved')\n      then 'payment_request_not_available_for_extraordinary'\n    when v_executed then 'payment_request_already_executed'\n    when v_extra.id is not null then 'extraordinary_authorization_already_active'\n    when exists (\n      select 1\n      from public.approval_batch_items abi\n      where abi.payment_request_id = v_request.id\n        and abi.removed_at is null\n        and abi.director_status = 'rejected'\n    ) then 'direction_rejected_request_cannot_be_extraordinary'\n    when exists (\n      select 1\n      from public.approval_batch_items abi\n      join public.approval_batches ab on ab.id = abi.batch_id\n      where abi.payment_request_id = v_request.id\n        and abi.removed_at is null\n        and ab.status in ('draft', 'submitted')\n    ) then 'remove_request_from_open_batch_first'\n    when v_direction_current then 'batch_approved_request_cannot_be_extraordinary'\n    else null\n  end;\n  v_can_authorize := v_block_reason is null;\n\n  return jsonb_build_object(\n    'payment_request_id', v_request.id,\n    'is_finance', v_is_finance,\n    'approval_model', 'single_direction',\n    'budget_validation_current', v_budget_current,\n    'budget_status', v_budget ->> 'status',\n    'budget_reason', v_budget ->> 'motivo',\n    'budget_available', nullif(v_budget ->> 'disponible_actual', '')::numeric,\n    'finance_approval_current', v_budget_current,\n    'compatibility_field_semantics', 'finance_approval_current_maps_to_budget_validation_in_023',\n    'direction_approval_current', v_direction_current,\n    'direction_approval_stale', v_direction_stale,\n    'execution_block_reason', case\n      when v_extra.id is not null\n        and v_extra.authorized_at < v_request.approval_material_updated_at\n        then 'extraordinary_reauthorization_required'\n      when v_direction_stale then 'direction_reapproval_required'\n      when v_executed then 'payment_request_already_executed'\n      when v_batch.item_id is not null and not v_direction_current then 'closed_batch_authorization_required'\n      else null\n    end,\n    'executed', v_executed,\n    'can_execute', coalesce((v_readiness ->> 'can_execute')::boolean, false),\n    'can_create_cash_fund', coalesce((v_readiness ->> 'can_create_cash_fund')::boolean, false),\n    'cash_fund_block_reason', v_readiness ->> 'cash_fund_block_reason',\n    'execution_authorization_source', v_readiness ->> 'authorization_source',\n    'execution_readiness_block_reason', v_readiness ->> 'block_reason',\n    'request_status', v_readiness ->> 'request_status',\n    'payment_method', v_readiness ->> 'payment_method',\n    'can_authorize_extraordinary', v_can_authorize,\n    'authorization_block_reason', v_block_reason,\n    'extraordinary', case when v_extra.id is null then null else jsonb_build_object(\n      'id', v_extra.id,\n      'category', v_extra.category,\n      'reason', v_extra.reason,\n      'authorized_by', v_extra.authorized_by,\n      'authorized_by_name', v_extra.authorized_by_name,\n      'authorized_at', v_extra.authorized_at,\n      'authorization_current', v_extra.authorized_at >= v_request.approval_material_updated_at,\n      'can_revoke', v_is_finance and not v_executed,\n      'revoke_block_reason', case when v_executed then 'extraordinary_already_materialized' else null end\n    ) end,\n    'latest_batch', case when v_batch.item_id is null then null else jsonb_build_object(\n      'item_id', v_batch.item_id,\n      'batch_id', v_batch.batch_id,\n      'batch_label', v_batch.batch_label,\n      'batch_status', v_batch.batch_status,\n      'director_status', v_batch.director_status,\n      'direction_approval_current', v_direction_current,\n      'direction_decided_at', v_batch.decided_at,\n      'closed_at', v_batch.closed_at,\n      'reject_reason', v_batch.director_reject_reason,\n      'rebatch_status', v_batch.rebatch_status,\n      'correction_note', v_batch.rebatch_release_note,\n      'review_sequence', v_batch.review_sequence,\n      'previous_item_id', v_batch.previous_item_id,\n      'resubmitted_at', v_batch.resubmitted_at,\n      'resubmission_note', v_batch.resubmission_note\n    ) end,\n    'approval_history', v_history\n  );\nend\n$function$\n",
+        "anon_execute": false,
+        "service_execute": true,
+        "authenticated_execute": false
+      }
+    ],
+    "read_only": "on",
+    "captured_at": "2026-09-08T16:45:54.048993+00:00",
+    "partida_unsure": {
+      "type": "boolean",
+      "default": "false",
+      "notnull": true
+    }
+  },
+  "isolated_validation": {
+    "engine": "PGlite 0.3.16 / PostgreSQL 17",
+    "cases": 6,
+    "dependencies": "Minimal tables and authorization helper fixtures; migrations executed as complete source files.",
+    "tested": [
+      "single create_payment_request signature across fiscal/UUID/reimbursement/unsure evolution",
+      "case-insensitive UUID uniqueness per company, excluding rejected/cancelled",
+      "duplicate extraordinary execution preserves body and ACL",
+      "E2/E3 successors preserve signatures, security config, ACL and RLS policy",
+      "prediction member-company select and write denial",
+      "account confirmation denies foreign scope and invalid accounts, preserves contpaq_provider_id"
+    ],
+    "limitations": [
+      "Not a full baseline reconstruction; historical 047 precheck remains unresolved.",
+      "Not authenticated hosted Supabase UAT.",
+      "No successful payment/request creation through the full business workflow is claimed."
+    ]
+  }
+}

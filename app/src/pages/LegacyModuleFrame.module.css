@@ -1,6 +1,7 @@
 .host {
-  position: fixed;
-  inset: var(--topbar-h, 56px) 0 0 var(--rail-w, 66px);
+  position: relative;
+  flex: 1 1 0;
+  width: 100%;
   z-index: 1;
   min-width: 0;
   min-height: 0;

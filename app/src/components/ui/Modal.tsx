@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import s from './Modal.module.css'
+import { ActiveCompanyCaptureContext } from './CompanyCaptureContext'
 
 export function Modal({
   title,
   subtitle,
+  headerContext,
   children,
   actions,
   onClose,
@@ -12,6 +14,7 @@ export function Modal({
 }: {
   title: ReactNode
   subtitle?: ReactNode
+  headerContext?: ReactNode
   children: ReactNode
   actions?: ReactNode
   onClose: () => void
@@ -27,12 +30,24 @@ export function Modal({
     onClose()
   }
   return (
-    <dialog ref={ref} className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`} onCancel={(event) => { event.preventDefault(); close() }} onClose={onClose}>
+    <dialog
+      ref={ref}
+      className={`${s.dialog} ${size === 'lg' ? s.lg : ''}`}
+      onCancel={(event) => {
+        // File pickers emit a bubbling cancel event when dismissed or when the
+        // same file is selected again. Only this dialog's own cancel closes it.
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        close()
+      }}
+      onClose={onClose}
+    >
       <div className={s.content}>
         <div className={s.head}>
           <div>
             <h2>{title}</h2>
             {subtitle != null && <p className="muted">{subtitle}</p>}
+            {headerContext === undefined ? <ActiveCompanyCaptureContext /> : headerContext}
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={close}>✕</button>
         </div>

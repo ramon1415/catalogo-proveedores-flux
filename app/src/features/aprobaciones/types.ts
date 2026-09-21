@@ -6,6 +6,7 @@ export type PaymentRequest = {
   id: string
   request_number: string | null
   description: string | null
+  sin_partida_description?: string | null
   notes: string | null
   status: string | null
   request_type: string | null

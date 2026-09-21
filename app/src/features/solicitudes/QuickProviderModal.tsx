@@ -1,3 +1,4 @@
+import { ActiveCompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 import { useRef, useEffect, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { quickCreateProvider } from './api'
@@ -6,12 +7,18 @@ import type { Proveedor } from './types'
 import s from './Solicitudes.module.css'
 
 // Alta mínima de proveedor sin salir de la solicitud (fase2 quick provider).
-export function QuickProviderModal({ onClose, onCreated }: { onClose: () => void; onCreated: (p: Proveedor) => void }) {
+export function QuickProviderModal({ onClose, onCreated, prefill }: {
+  onClose: () => void
+  onCreated: (p: Proveedor) => void
+  // E1: nombre y RFC leídos del CFDI cuando el emisor no está en el padrón.
+  prefill?: { nombre?: string; rfc?: string } | null
+}) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const { showToast } = useToast()
   const [saving, setSaving] = useState(false)
   const [f, setF] = useState({
-    alias: '', nombre: '', metodo: 'Transferencia bancaria', destino: 'clabe',
+    alias: prefill?.nombre ?? '', nombre: prefill?.nombre ?? '', rfc: prefill?.rfc ?? '',
+    metodo: 'Transferencia bancaria', destino: 'clabe',
     beneficiario: '', banco: '', clabe: '', cuenta: '', convenio: '',
   })
 
@@ -35,6 +42,7 @@ export function QuickProviderModal({ onClose, onCreated }: { onClose: () => void
     const payload = {
       alias: f.alias.trim(),
       nombre_completo: f.nombre.trim(),
+      rfc: f.rfc.trim().toUpperCase() || null,
       metodo_pago: f.metodo,
       destination_type: bankRequired ? f.destino : null,
       beneficiary_name: f.beneficiario.trim() || f.nombre.trim(),
@@ -64,6 +72,7 @@ export function QuickProviderModal({ onClose, onCreated }: { onClose: () => void
           <div>
             <h2>Proveedor rapido</h2>
             <p>Alta minima para continuar la solicitud sin salir de la pantalla.</p>
+            <ActiveCompanyCaptureContext />
           </div>
           <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
         </div>
@@ -74,6 +83,9 @@ export function QuickProviderModal({ onClose, onCreated }: { onClose: () => void
             </label>
             <label>Nombre completo / razon social *
               <input className={s.formControl} value={f.nombre} onChange={(e) => set('nombre', e.target.value)} required />
+            </label>
+            <label>RFC
+              <input className={s.formControl} value={f.rfc} onChange={(e) => set('rfc', e.target.value.toUpperCase())} maxLength={13} placeholder="Del CFDI" />
             </label>
             <label>Metodo preferido *
               <select className={s.formControl} value={f.metodo} onChange={(e) => set('metodo', e.target.value)} required>

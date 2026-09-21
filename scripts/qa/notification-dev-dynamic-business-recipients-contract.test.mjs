@@ -6,7 +6,7 @@ import { resolveFinalRecipient } from "../../supabase/functions/notification-dis
 
 const migration = readFileSync(
   new URL(
-    "../../supabase/migrations/20260831210159_notification_dev_dynamic_business_recipients.sql",
+    "../../supabase/migrations/20260831211229_notification_dev_dynamic_business_recipients.sql",
     import.meta.url,
   ),
   "utf8",

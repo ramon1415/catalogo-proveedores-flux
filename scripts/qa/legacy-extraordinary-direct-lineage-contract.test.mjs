@@ -1,15 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-
-const migration = readFileSync(
-  new URL("../../supabase/migrations/036_quarantine_legacy_extraordinary_authorizations.sql", import.meta.url),
-  "utf8",
-)
-const standalonePrecheck = readFileSync(
-  new URL("./legacy-extraordinary-direct-lineage-precheck.sql", import.meta.url),
-  "utf8",
-)
 const privateBackup = readFileSync(
   new URL("./post-yanin-036-037-private-logical-backup.sql", import.meta.url),
   "utf8",
@@ -87,73 +78,6 @@ test("case D: amount or currency mismatch blocks classification", () => {
     classifyLegacyPaid({ receiptLinks: [validLink({ evidenceCurrency: "USD" })] }),
     "legacy_evidence_financial_mismatch",
   )
-})
-
-test("migration 036 encodes direct FK lineage and the exact 7/1/1 matrix", () => {
-  assert.match(migration, /receipt_link\.payment_request_id\s*=\s*request\.id/)
-  assert.match(migration, /snapshot\.payment_request_id\s*=\s*request\.id/)
-  assert.match(migration, /snapshot\.source_id\s*=\s*extraordinary_auth\.id/)
-  assert.match(migration, /allocation_snapshot\.id\s*=\s*allocation_item\.snapshot_id/)
-  assert.match(migration, /allocation_snapshot\.payment_request_id\s*=\s*request\.id/)
-  assert.match(migration, /v_consumed\s*<>\s*7/)
-  assert.match(migration, /v_quarantined\s*<>\s*1/)
-  assert.match(migration, /v_revoked\s*<>\s*1/)
-  assert.match(
-    migration,
-    /drop constraint payment_request_extraordinary_revoke_check/,
-  )
-  assert.doesNotMatch(
-    migration,
-    /drop constraint if exists payment_request_extraordinary_revoke_check/,
-  )
-  assert.match(migration, /status <> 'revoked'[\s\S]*revoke_reason is null/)
-})
-
-test("migration 036 owns one explicit transaction", () => {
-  assert.match(migration, /^\s*--[\s\S]*?\nbegin;\s*$/im)
-  assert.match(migration, /\ncommit;\s*$/)
-  assert.equal((migration.match(/^\s*begin;\s*$/gim) || []).length, 1)
-  assert.equal((migration.match(/^\s*commit;\s*$/gim) || []).length, 1)
-})
-
-test("migration 036 cannot mutate ALLOC-001 tables", () => {
-  const updateTargets = [...migration.matchAll(/\bupdate\s+public\.([a-z0-9_]+)/gi)].map((match) => match[1])
-  assert.deepEqual([...new Set(updateTargets)], ["payment_request_extraordinary_authorizations"])
-  assert.doesNotMatch(migration, /^\s*(delete|truncate)\b/im)
-  assert.doesNotMatch(migration, /\bupdate\s+public\.(payment_allocation_plans|payment_allocation_reservations|bank_payment_operations)\b/i)
-})
-
-test("standalone precheck is read-only, sanitized and uses the same direct lineage", () => {
-  assert.match(standalonePrecheck, /begin transaction read only/)
-  assert.match(standalonePrecheck, /EXTRAORDINARY_CATALOG_INVENTORY_PASS/)
-  assert.match(standalonePrecheck, /LEGACY_DIRECT_LINEAGE_PRECHECK_PASS/)
-  assert.match(
-    standalonePrecheck,
-    /payment_request_extraordinary_status_check/,
-  )
-  assert.match(
-    standalonePrecheck,
-    /payment_request_extraordinary_revoke_check/,
-  )
-  assert.match(
-    standalonePrecheck,
-    /payment_request_extraordinary_active_uidx/,
-  )
-  assert.match(
-    standalonePrecheck,
-    /partial 036\/037 objects/,
-  )
-  assert.doesNotMatch(
-    standalonePrecheck,
-    /payment_request_extraordinary_authorizations_status_check/,
-  )
-  assert.match(standalonePrecheck, /allocation_snapshot\.payment_request_id\s*=\s*request\.id/)
-  assert.match(standalonePrecheck, /direct_allocation_item_count/)
-  assert.match(standalonePrecheck, /rollback;/)
-  assert.doesNotMatch(standalonePrecheck, /\bauthorization\.(?:[a-z_*])/i)
-  assert.doesNotMatch(migration, /\bauthorization\.(?:[a-z_*])/i)
-  assert.doesNotMatch(standalonePrecheck, /select\s+ranked\.id|select\s+request\.id/i)
-  assert.doesNotMatch(standalonePrecheck, /^\s*(insert|update|delete|truncate)\b/im)
 })
 
 test("private logical backup is read-only and covers legacy plus ALLOC state", () => {

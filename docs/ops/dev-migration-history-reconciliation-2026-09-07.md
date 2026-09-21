@@ -1,0 +1,290 @@
+# DEV: conciliación del historial y diferencia real de ingresos recurrentes
+
+> Actualización vigente: ver las secciones de conciliación y recuperación del 8 de septiembre al final. Los cortes anteriores se conservan como evidencia histórica; no son instrucciones de ejecución actuales.
+
+Estado actualizado 2026-09-08: **hardening puntual aplicado y verificado en DEV como 20260908000916**. La conciliación histórica y Supabase Preview siguen pendientes. El inventario del 7-sep se conserva como evidencia del diagnóstico previo.
+
+Base revisada: `523f72baf7e8a1bbf273b52d5359d0d4830e8c79`. Inventario DEV `scsirgbuqjcwoaxfacth` capturado en transacción de solo lectura el **2026-09-07 23:49:03 UTC**, PostgreSQL 17.6. [Inventario y hashes](../qa/migration-history-dev-inventory-2026-09-07.json). Este archivo conserva evidencia de versiones; no sustituye un respaldo restaurable.
+
+## Hallazgo que requiere SQL nuevo
+
+La migración local `20260831120000_tenant_recurring_income.sql` contiene protecciones que el SQL registrado en DEV como `20260831194350` nunca incluyó. El catálogo actual confirma:
+
+- `recurring_income_templates` y `tenant_income_entries` tienen RLS, pero `anon`, `authenticated` y `service_role` conservan permisos amplios, incluido `TRUNCATE`. RLS no restringe las operaciones que afectan toda la tabla ([PostgreSQL 17](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)). Esto es un hallazgo de privilegios; no se ejecutó una prueba destructiva en DEV ni se afirma una vía de explotación HTTP.
+- La FK actual sólo relaciona `template_id → recurring_income_templates.id`. Falta asegurar que ingreso y plantilla pertenecen a la misma empresa.
+- El generador tiene `search_path=public` y carece del guard explícito `auth.uid() is null` presente en el repo.
+- A las 23:37 UTC ambas tablas tenían **0 filas** y **0 referencias cruzadas**. Estos conteos deben repetirse inmediatamente antes de aplicar.
+
+Se preparó `20260907234427_tenant_recurring_income_runtime_hardening.sql`, creada con `supabase migration new` (CLI 2.113.0). Su alcance es exactamente:
+
+1. Añadir la clave única `(company_id,id)`, sustituir la FK simple por la compuesta y crear su índice de soporte en ingresos. Al eliminar una plantilla se conserva el ingreso y su empresa; sólo `template_id` queda vacío.
+2. Retirar permisos de `PUBLIC`/`anon` y dejar CRUD a `authenticated`/`service_role` en **esas dos tablas**.
+3. Reponer la definición del generador ya aprobada en el repo: sesión explícita, membresía y `search_path=public,pg_temp`.
+
+La migración es transaccional, con límites de espera de bloqueo y duración. Una referencia cruzada existente provoca rollback; no se corrige ni elimina silenciosamente. Mantiene las políticas RLS, los datos y los respaldos. Reaplicarla conserva filas y políticas. No ejecuta el generador ni crea ingresos.
+
+Pruebas: `scripts/qa/recurring-income-hardening.test.mjs` ejecuta el DDL histórico real y el SQL propuesto en PostgreSQL 17.5 aislado mediante PGlite 0.3.16. Ocho casos verifican permisos, FK entre empresas incluso con BYPASSRLS, membresía, sesión ausente, generación idempotente, borrado de plantilla sin borrar ingreso, repetición de la migración y rollback ante datos incompatibles. Los helpers de autenticación/membresía son fixtures: no sustituye pruebas de sesión en Supabase.
+
+Validación local: TypeScript, Vite y artifact estático correctos; suite con artifact: **1077 pasan, 0 fallas, 0 omitidas**. Los ocho casos de la migración se repitieron después de añadir el índice de soporte. [Evidencia previa de DEV a las 23:53:39 UTC](../qa/recurring-income-runtime-before-2026-09-07.json): confirma que la corrección todavía no está aplicada y que las dos tablas siguen vacías.
+
+## Inventario de versiones
+
+| Grupo | Cantidad | Tratamiento |
+|---|---:|---|
+| Versiones presentes con el mismo número | 75 | Conservar. El número por sí solo no prueba que el texto SQL sea idéntico. |
+| Mismo nombre con otra fecha | 23 | 20 candidatos a renombre sin diferencia de instrucciones; tres requieren la revisión de contenido indicada abajo. |
+| Segunda ejecución de la misma corrección | 1 | Conservar evidencia de ambas ejecuciones; no borrar la fila duplicada por conveniencia. |
+| Cambios antiguos presentes sólo en DEV | 4 | Recuperar fuente y orden; algunos fueron reemplazados por versiones v2. |
+| Borrado histórico de respaldos | 1 | Fuera de la cadena que pueda volver a ejecutarse; cualquier ajuste del registro requiere autorización. |
+| Nómina del PR #568, aún fuera de DEV en Git | 3 | Coordinar los nombres antes de integrar su SQL; no copiar la lógica de un PR pendiente como si estuviera revisada. |
+| **Total registrado en DEV** | **107** | **100 archivos en la base del repo; 32 versiones remotas sin archivo con el mismo número, 25 archivos locales sin ese número remoto.** |
+
+La nueva migración de este PR no se incluye en esos 100 archivos históricos. Fue autorizada como `20260907234427` y quedó registrada en DEV como **`20260908000916`**; el archivo ahora usa la versión efectiva, con exactamente el mismo contenido. DEV pasó de 107 a 108 registros.
+
+### Mapa de los 23 nombres con fechas distintas
+
+Los destinos son las versiones que DEV ya registró. Los nombres locales y su contenido aún no se cambian en este PR: los renombres se ejecutarán como un conjunto revisado junto con la recuperación de fuentes, para preservar dependencias y consumidores que usan rutas exactas.
+
+| Archivo local: versión | Versión DEV | Nombre / decisión |
+|---|---|---|
+| 20260827202122 | 20260827203337 | payment_batch_bbva_padded_source_account_hotfix — idéntico |
+| 20260827225332 | 20260827231155 | payroll_active_company_scope — idéntico |
+| 20260827231436 | 20260827232110 | payroll_service_role_claim_compat — idéntico |
+| 20260831003419 | 20260831004813 | fersana_company_access_onboarding — revisar guards/seed; conservar mejoras posteriores |
+| 20260831005200 | 20260831004957 | fersana_company_access_advisor_hardening — idéntico |
+| 20260831033300 | 20260831033553 | operator_own_payment_requests — comentarios |
+| 20260831120000 | 20260831194350 | tenant_recurring_income — requiere el hardening nuevo de este PR |
+| 20260831155017 | 20260831195803 | notification_payment_outcome_dispatch_recovery_dev — idéntico |
+| 20260831201500 | 20260831201434 | notification_payment_outcome_authorized_retry_dev — idéntico |
+| 20260831210159 | 20260831211229 | notification_dev_dynamic_business_recipients — idéntico |
+| 20260831130000 | 20260831233032 | budget_category_responsible — comentarios |
+| 20260901055111 | 20260901065625 | company_scoped_roles_foundation — override inicial distinto; hardening posterior confirmado en catálogo |
+| 20260901062149 | 20260901071915 | company_scoped_rls_rpc_cutover — idéntico |
+| 20260901063043 | 20260901071923 | company_scoped_rpc_cutover — idéntico |
+| 20260901070846 | 20260901071929 | company_scoped_power_override_hardening — idéntico |
+| 20260901180000 | 20260901102134 | desglose_fiscal_subtotal_budget — comentarios; debe preceder el patch UUID |
+| 20260902030000 | 20260902041542 | fix_extraordinary_execution_context_recursion — idéntico; segunda ejecución 20260903023224 |
+| 20260903014009 | 20260903015237 | budget_category_shared_access — comentarios |
+| 20260907174500 | 20260907173216 | payroll_provision_pending_does_not_block_dev — comentarios |
+| 20260907120000 | 20260907184613 | payroll_folio_en_materializacion — comentarios y envoltura transaccional; revisar orden de reemplazos de funciones |
+| 20260907161500 | 20260907221608 | payroll_capture_file_download_context_dev — idéntico; sufijo `_dev` remoto |
+| 20260907164000 | 20260907225200 | payroll_nonbudget_finance_confirm — comentarios |
+| 20260907164100 | 20260907225213 | payroll_finance_confirm_trigger_safe — salto de línea |
+
+El SQL del onboarding aplicado originalmente omite cuatro guards de sesión del repo e incluye un seed de Fersana que el repo difiere a otra etapa. DEV tiene mejoras posteriores en `request_company_access`, `approve_company_access_request` y `list_company_access_requests`; no debe reponerse la función antigua completa. La revisión posterior del 8 de septiembre, documentada al final, cerró la diferencia de sesión sin necesitar otra migración: los helpers vigentes ya exigen un perfil activo vinculado a auth.uid().
+
+### Entradas sin pareja y módulos sin versión registrada
+
+| Versión | Situación | Acción pendiente |
+|---|---|---|
+| 20260901171427 | invoice_uuid_anti_duplicado | Recuperar la fuente, después de la migración fiscal; el índice UUID sí existe actualmente. |
+| 20260903023224 | Segunda ejecución idéntica de extraordinary recursion | Mantener evidencia y decidir su representación histórica; no reejecutar el fix en DEV. |
+| 20260903035514 | partida_predictions | Recuperar fuente y verificar su sucesora 20260903213133. |
+| 20260903040733 | partida_unsure_flag | Recuperar fuente y verificar su sucesora 20260903213224. |
+| 20260903041629 | confirm_provider_account_rpc | Recuperar fuente y verificar su sucesora 20260903213236. |
+| 20260906003626 | drop_backup_tables | SQL histórico con borrado por patrón: **no importar a migrations ni ejecutar**. Respaldos siguen en tarea 86bbw39a5. |
+| 20260907232403 | payroll_confirmation_weekly_cut_bridge | En #568 como 20260907173000; renombrar a la versión DEV. |
+| 20260907232743 | payroll_direct_finance_confirmation_snapshot | En #568 como 20260907173100; renombrar a la versión DEV. |
+| 20260907233050 | payroll_weekly_cut_submit_bridge | En #568 como 20260907173200; renombrar a la versión DEV. |
+| 20260827090000 local | platform_module_incidencias | Módulo y release 1 existen; habilitado sólo para Operadora. No reejecutar el guard de una empresa: DEV tiene seis. |
+| 20260827100000 local | platform_module_nomina | Módulo y release 1 existen; habilitado actualmente en Operadora/Fersana. Preservar activaciones posteriores. |
+
+El SQL de las tres migraciones de #568 se comparó con sus ejecuciones remotas y coincide al omitir comentarios/formato. Su lógica de negocio y su integración siguen siendo responsabilidad de la revisión de #568.
+
+### Diferencias con número coincidente
+
+Se contrastaron 98 pares de textos, incluyendo una ejecución duplicada y excluyendo el baseline: 28 coinciden en bytes y 88 tras comparación léxica que omite formato/comentarios/envolturas. Esta normalización sirve para localizar diferencias, no certifica equivalencia semántica.
+
+- Registro de módulos: el SQL inicial remoto tiene políticas `FOR ALL` e índice distinto; la migración posterior de hardening los corrige. El catálogo actual confirma políticas separadas y `company_modules_module_version_idx`.
+- FB-Integración `20260902200000` y `20260902201500`: el ledger guarda comentarios de registro, no el SQL completo. Las dos FKs compuestas y el índice de reversa sí se confirmaron en el catálogo. **No sustituir los archivos ejecutables del repo por esos comentarios.**
+- Histórico financiero: la política transitoria varía en casts explícitos; existe una sustitución posterior. El backfill remoto de `flujo` por prefijo no está en el repo; conservar la decisión de no reclasificar datos por prefijo al reconstruir.
+- Los textos de dispatcher/graph reviews contienen diferencias de formato, comentarios o metadatos que la comparación conservadora señala para revisión. No se infiere una regresión de negocio ni se reemplazan funciones vigentes por versiones antiguas.
+- El baseline tiene statements divididos por la CLI; no se auditó su equivalencia semántica en este corte.
+
+## Ejecución autorizada del hardening — 8 de septiembre
+
+Ramón autorizó aplicar únicamente el hardening preparado en DEV, con snapshot previo y advisors/check de privilegios posteriores. Se ejecutó una vez y se registró como **20260908000916**. SHA-256 del SQL antes/después: `5a4882e14525e8b8a5999cc9a013ad1c6bd1a7ed97902ba3ff3e379bece01240`.
+
+- Snapshot capturado a las 00:05:24 UTC; ZIP SHA-256 `b29bdd3295c93de20f27bd5894d520bcbded7e79d80578b1de1974478433cc17`, guardado antes de aplicar. Contiene datos/esquema/ACL de los dos objetos, función y ledger completo; no es un backup de todo Supabase. Reconstrucción, aplicación y restauración aislada del catálogo previo: PASS.
+- Post-check a las 00:10:11 UTC: FK compuesta validada, ambos índices válidos y listos, RLS conservado, anon sin privilegios de tabla ni EXECUTE, auth/service con sólo CRUD y sin TRUNCATE. Generador con sesión explícita y `search_path=public,pg_temp`.
+- Las dos tablas siguen con 0 filas. Inventario de 186 tablas idéntico; no se creó/eliminó ninguna tabla. Las 107 filas anteriores del ledger son idénticas al snapshot al comparar JSON por contenido; sólo se añadió esta migración con SQL exacto.
+- Advisors: seguridad 242 → 242, sin entradas nuevas o retiradas. El aviso existente de [RPC SECURITY DEFINER accesible por usuarios autenticados](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable) sigue siendo intencional: el RPC exige sesión y membresía.
+- Rendimiento 329 → 330: sólo se añade [índice nuevo aún sin uso](https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index), nivel INFO, sobre `tenant_income_entries_company_template_idx`. Se conserva para dar soporte a la FK; ambas tablas están vacías. Los dos avisos previos de FK `created_by` sin índice permanecen fuera de este alcance.
+- Se añadieron tres contratos al catálogo real de DEV para detectar una regresión futura de permisos, FK/índices o guard del generador. Catálogo capturado a las 00:12:34 UTC: **111 contratos pasan, 0 fallas, 0 omitidos**. Los ocho casos aislados también pasan después del renombre.
+- [Evidencia de ejecución y comparación](../qa/pr569-dev-execution-2026-09-08.json). No se ejecutó migration repair ni otra migración. No se modificó PROD ni se tocó ningún respaldo.
+
+## Secuencia de aplicación y cierre (plan histórico; pasos 1 y 2 completados)
+
+1. **Aplicar sólo el hardening nuevo, cuando Ramón autorice DEV.** Snapshot recuperable previo de las dos tablas, definición/config/ACL de la función y ledger. Repetir los conteos y revisar el hash del archivo. Aplicación selectiva: no lanzar `db push --linked` sobre toda la cadena mientras existan los desajustes. Si el mecanismo de aplicación genera otro número, renombrar inmediatamente el archivo a ese número efectivo antes del merge, como se hizo en #552; no crear una segunda ejecución para arreglar el nombre.
+2. Ejecutar [pre/post de sólo lectura](../../scripts/qa/recurring-income-runtime-readonly.sql), advisors de seguridad/rendimiento y comparación de privilegios. Esperado: FK compuesta validada, `anon` sin CRUD/TRUNCATE/EXECUTE, auth/service con CRUD y sin TRUNCATE, generador con sesión explícita y search_path fijo, conteos sin cambio. Sólo entonces registrar el cierre del hardening.
+3. Resolver la dependencia #568 y completar el conjunto de renombres/recuperaciones indicado arriba. Conservar los archivos aprobados y documentar las diferencias reales con correcciones hacia adelante.
+4. Preparar el snapshot íntegro de las filas afectadas de `supabase_migrations.schema_migrations`. Candidatos de reparación **sujetos a aprobación específica**: marcar los dos módulos locales como ya aplicados, una vez revalidado el estado; retirar únicamente del ledger activo la ejecución histórica `20260906003626` después de archivar su fila completa como evidencia de mantenimiento. Retirar del ledger no revierte el SQL que se ejecutó ni recupera tablas. No se ejecuta el SQL de borrado y no se tocan respaldos.
+5. Revisar y autorizar la lista exacta de `migration repair`; abortar si el ledger cambia durante la ventana. El mandato de [supabase-cli-migrations.md](supabase-cli-migrations.md) exige autorización explícita para este comando. Este PR no la presume ni ejecuta reparaciones.
+6. Verificar igualdad de versiones, `db push --dry-run` sin migraciones históricas pendientes, suite, advisors y Supabase Preview exitoso en el commit integrado. Ningún guard se desactiva para lograr el cierre.
+
+La reconstrucción aislada del baseline y las siguientes cuatro migraciones pasa en PGlite 0.3.16 / PostgreSQL 17.5. Se detiene de nuevo en `047_precheck: public layout contract drifted`, igual que la sonda anterior con PGlite 0.5.8. Por tanto, no basta atribuirlo a un cambio de versión mayor: falta comparar el contrato exacto y la captura del baseline. No se eludió el guard ni se declara validada la reconstrucción completa.
+
+## PROD y exclusiones
+
+PROD (`ucantptjhwttexzmslvm`) conserva 118 versiones de una cadena histórica distinta; sólo tres números coinciden con la base activa de DEV. Requiere su propia reconciliación revisada. No aplicar el baseline DEV ni correr un push general a PROD. `main` sigue en `b998919341b1e337f0cc2a7b7d31b289b4944e7c`.
+
+La migración de seguridad #552 permanece canónica en `20260907171549`. No se consultaron datos de negocio de PROD en esta revisión. El único cambio de ambiente fue el hardening autorizado en DEV, documentado arriba. No se enviaron mensajes a Carlos y no se ejecutó ninguna limpieza de respaldos.
+
+## Conciliación de nombres tras las liberaciones del 8 de septiembre
+
+Base de este cambio: DEV `4339b09cec3c5b1f2b906aceb97e25ddd6cac5f7`; PROD/main `a5391ea614f5946bbc4c04690123b98ac8d840f5`. Se volvió a consultar el historial real: 113 versiones DEV y 120 PROD.
+
+### Impacto de las entregas concurrentes
+
+- #568 ya está integrado. Su migración final restaura el flujo separado de nómina; el archivo `20260907173300` corresponde a la ejecución DEV `20260908001439`. Las tres migraciones puente de su borrador fueron retiradas del PR, aunque sus ejecuciones históricas siguen registradas. La recomendación anterior de renombrar esos tres archivos dentro de #568 queda superada; su recuperación histórica continúa pendiente.
+- DEV incorpora #570, #571, #572, #573 y #574. #562 se cerró sin merge, sustituido por #570. Se conservan íntegros estos desarrollos y las cuatro migraciones recientes con versión coincidente.
+- [#575](https://github.com/ramon1415/catalogo-proveedores-flux/pull/575), [#576](https://github.com/ramon1415/catalogo-proveedores-flux/pull/576) y [#577](https://github.com/ramon1415/catalogo-proveedores-flux/pull/577) liberaron nómina en PROD. Las versiones nativas `20260908075132` y `20260908075149` coinciden con main en nombre y MD5 del SQL registrado. Su generador usa un catálogo congelado, no los nombres históricos que se corrigen aquí. No trasladar a PROD los parches históricos de nómina de DEV ni importar a DEV las dos consolidaciones de PROD.
+- #561 (alta masiva de proveedores) sigue abierto en el corte revisado. No está incluido en este cambio. La liberación aislada de nómina no equivale a promover todo DEV ni a desplegar #569 en PROD.
+
+### Cambio de repositorio
+
+Se renombran **21 archivos** a las versiones ya registradas en DEV: 20 parejas históricas y la migración final de #568. Se preserva cada byte del SQL, incluidos comentarios y envolturas transaccionales. Doce pares también coinciden byte por byte con el SQL remoto; nueve difieren en comentarios, formato o envoltura. La comparación léxica se usa sólo como ayuda de revisión, no como prueba formal de equivalencia.
+
+Se actualizan las rutas que utiliza la suite y los enlaces/manifiesto del runbook existente. Los hashes del manifiesto Fersana se conservan; su SQL no cambia. No se crea un runner nuevo ni se modifica ningún workflow de aplicación. Las referencias fechadas de informes anteriores se mantienen como evidencia histórica.
+
+[Inventario, hashes y lista exacta de renombres](../qa/migration-version-alignment-2026-09-08.json).
+
+| Comparación DEV | Antes | Después de los renombres |
+|---|---:|---:|
+| Archivos locales | 106 | 106 |
+| Versiones registradas en DEV | 113 | 113 |
+| Números coincidentes | 80 | 101 |
+| Sólo en remoto | 33 | 12 |
+| Sólo en local | 26 | 5 |
+
+### Lo que todavía impide cerrar el historial
+
+- Tres parejas con diferencias reales de SQL: onboarding Fersana, ingreso recurrente histórico y roles por empresa. El hardening hacia adelante de ingresos de #569 ya se completó en DEV; no sustituye la conciliación documental de su origen.
+- Dos archivos de módulos sin versión registrada. No reejecutar seeds/guards antiguos sobre empresas y activaciones actuales. Cualquier reparación del ledger necesita la autorización explícita exigida por `supabase-cli-migrations.md`.
+- Cuatro fuentes ausentes (UUID y tres predecesoras de E2/E3), una ejecución duplicada de extraordinarios y tres puentes de nómina retirados del repositorio. Recuperar su historia sin restablecer un comportamiento obsoleto.
+- Registro histórico `20260906003626` de mantenimiento de respaldos. No importar su SQL destructivo a la cadena activa. La eventual reparación de metadatos requiere snapshot y autorización específica. La limpieza de respaldos permanece en 86bbw39a5.
+- Reconstrucción completa detenida en `047_precheck: public layout contract drifted`. Los renombres alteran el orden local para reflejar fechas reales, pero no se afirma una reconstrucción exitosa. No saltar el guard ni usar un push general para comprobarlo.
+
+**Supabase Preview permanece pendiente.** Este cambio sólo reduce el desajuste de nombres; no declara el historial conciliado ni autoriza una aplicación general a DEV/PROD. En esta etapa no se ejecutó SQL de escritura ni `migration repair`, ni se modificaron respaldos o datos de negocio.
+
+Validación de este cambio: TypeScript/Vite y artefacto estático correctos; **1115/1115 contratos offline**, 0 fallas y 0 omitidos. Manifiesto Fersana: 14/14 hashes correctos. Los 21 SQL conservan exactamente su SHA-256 previo. Los contratos reales de DEV estaban verdes en el commit base; no se presenta ese resultado anterior como ejecución de este nuevo commit.
+
+## Recuperación de cinco fuentes históricas — 8 de septiembre
+
+Siguiente paso después de #579, basado en DEV `8a1a42e94f8c243726c0e91edfdbc8132155f6cd`. Se volvió a consultar GitHub: no había merges posteriores; main permanece en `a5391ea`. El historial DEV conserva 113 entradas.
+
+Se recuperan cinco archivos completos desde `supabase_migrations.schema_migrations.statements`, conservando sus bytes y sus números originales. Cada entrada tiene un statement; no se reformateó ni añadió un salto final al SQL. Son fuentes que DEV ya ejecutó, no migraciones nuevas para aplicar al ambiente activo.
+
+| Versión recuperada | Fuente | Revisión |
+|---|---|---|
+| 20260901171427 | invoice_uuid_anti_duplicado | Índice único por empresa/UUID sin distinguir mayúsculas; evolución del RPC de 17 a 18 argumentos, previa a reembolso y bandera de partida. |
+| 20260903023224 | fix_extraordinary_execution_context_recursion | Segunda ejecución registrada, idéntica byte a byte a 20260902041542. Se conserva como hecho histórico, sin borrar ninguna fila del ledger. |
+| 20260903035514 | partida_predictions | Predecesora de 20260903213133; sólo cambian comentarios/formato. |
+| 20260903040733 | partida_unsure_flag | Predecesora de 20260903213224; sólo cambian comentarios/formato. |
+| 20260903041629 | confirm_provider_account_rpc | Predecesora de 20260903213236; sólo cambia el salto final. |
+
+La versión UUID falta en la secuencia local anterior: la migración fiscal crea una firma de 17 argumentos; UUID la sustituye por la de 18; reembolso por la de 20 y partida por la de 21. Recuperarla permite que ese tramo aislado termine con un solo RPC, como sucede en DEV. No basta ejecutar únicamente la última definición para demostrar una reconstrucción sin overloads.
+
+### Verificación acotada
+
+- [Inventario y evidencia de sólo lectura](../qa/migration-source-recovery-2026-09-08.json): cinco SHA-256 exactos, relación con pares ya presentes, catálogo y permisos actuales.
+- Catálogo DEV capturado a las 16:45:54 UTC, read_only=on: una sola firma de `create_payment_request`, 21 argumentos; índice UUID único/válido; índice de predicción válido; bandera `partida_unsure` boolean no nula con default false; política de lectura por membresía.
+- `confirm_provider_account`: anon sin EXECUTE, authenticated/service_role con EXECUTE; se conserva su gate de empresa. El helper `get_payment_request_execution_context_pre_037` no es ejecutable por anon/authenticated y sí por service_role en el catálogo actual. No se modifican estos privilegios.
+- `create_payment_request` mantiene EXECUTE para anon en el catálogo previo; su guard de sesión es el control de entrada. Esta recuperación no modifica ese permiso ni se presenta como hardening adicional.
+- Seis pruebas PGlite ejecutan los archivos completos del tramo fiscal → UUID → reembolso → E2/E3, además de las dos ejecuciones de extraordinarios. Verifican firma única, UUID por empresa/estado, preservación de definición/ACL en el duplicado, contratos/ACL/política tras las sucesoras, aislamiento de lectura y rechazo de escritura en predicciones, y confirmación de cuenta con conservación de `contpaq_provider_id`.
+- Tablas dependientes y helpers de autorización son fixtures explícitos. Estas pruebas no son una reconstrucción completa ni UAT de Supabase con sesiones reales; tampoco afirman que se ejecutó un pago o una solicitud completa.
+
+| Inventario DEV | Tras #579 | Tras recuperar fuentes |
+|---|---:|---:|
+| Archivos locales | 106 | 111 |
+| Versiones registradas | 113 | 113 |
+| Números coincidentes | 101 | 106 |
+| Sólo remoto | 12 | 7 |
+| Sólo local | 5 | 5 |
+
+Quedan siete entradas sólo remotas: las tres parejas con SQL diferente (onboarding Fersana, ingresos recurrentes y roles), tres puentes de nómina retirados del PR #568 y el mantenimiento histórico de respaldos. Los cinco archivos sólo locales son las tres contrapartes con SQL diferente y los dos módulos sin versión registrada. No se recupera el SQL de borrado de respaldos ni se decide una reparación del ledger dentro de este cambio.
+
+**El frente 06 sigue abierto.** Falta conciliar esas entradas, revisar el guard de reconstrucción 047 y recuperar Supabase Preview. No ejecutar un push general ni promover esta cadena DEV a PROD. Cualquier `migration repair` requiere el snapshot y la autorización específica de `supabase-cli-migrations.md`.
+
+Validación del cambio de recuperación: TypeScript/Vite y artefacto estático correctos; **1121/1121 contratos offline** (incluidos los seis casos nuevos), 0 fallas y 0 omitidos. Los cinco archivos recuperados coinciden byte a byte con su SQL registrado. No se afirma que Supabase Preview esté resuelto.
+
+Nota de formato: la fuente registrada del duplicado de extraordinarios termina con una línea vacía adicional, igual que su primera ejecución ya versionada. Se conserva intencionalmente para mantener el hash exacto; no se reformatea SQL histórico.
+
+## Tramo de nómina y dos diferencias ya endurecidas — 8 de septiembre
+
+Base: DEV `40bb756` (#580); sin merges posteriores al comenzar. #578 evolucionó de documentación a lectura de documentos IMSS/ISN y sigue abierto; no se integra dentro de este cambio.
+
+### Tres fuentes de nómina recuperadas
+
+Se recuperan, byte a byte desde DEV, `20260907232403_payroll_confirmation_weekly_cut_bridge`, `20260907232743_payroll_direct_finance_confirmation_snapshot` y `20260907233050_payroll_weekly_cut_submit_bridge`. Las tres ya están registradas. No se aplican a DEV y no se crea una nueva versión para volver a ejecutarlas.
+
+No son tres archivos totalmente obsoletos. Cinco funciones vigentes aún tienen su última definición en esos puentes: `add_request_to_approval_batch`, `approval_batch_request_base_eligible`, `approval_batch_request_has_any_execution_record`, `list_batch_eligible_requests` y `submit_approval_batch`. La restricción de snapshot también sigue vigente.
+
+La migración posterior `20260908001439_payroll_separate_payment_flow_restore` desactiva el paso de nómina por cortes y conserva la confirmación de Finanzas. Los cambios de acceso `20260908015626` y totales `20260908060513` definen después dos lecturas. La matriz de las 13 funciones afectadas ubica su última fuente y contrasta su cuerpo con DEV: 13/13 coincidencias léxicas. Es una comparación de fuentes, no prueba formal de equivalencia semántica.
+
+Siete casos PGlite ejecutan los tres puentes completos y la restauración posterior: transición de semanal a separado; confirmación que habilita pago sin crear un ítem de corte; rechazo al agregar nómina a corte; rechazo al enviar un corte que ya contuviera nómina; solicitud ordinaria que se agrega/envía correctamente; restricción que impide nómina aprobada sin confirmación; y diferencia de fondeo TOKA que exige reconocimiento. Se reutiliza el esquema de pruebas del piloto y la función real de elegibilidad ordinaria del baseline; dependencias de membresía, presupuesto y materialización son fixtures. No se afirma replay completo ni UAT real.
+
+### Dos nombres alineados conservando la variante más restrictiva del repo
+
+| Archivo anterior | Versión DEV alineada | Por qué puede alinearse |
+|---|---|---|
+| 20260831120000_tenant_recurring_income | 20260831194350 | #569 / 20260908000916 ya estableció en DEV FK por empresa, índices, CRUD limitado, sesión explícita y search_path fijo. Se revalidaron función y constraints. |
+| 20260901055111_company_scoped_roles_foundation | 20260901065625 | 20260901071929 ya restringe el override global a rol sysadmin y correos aprobados. Su función coincide con la actual. |
+
+**Estos dos SQL no son idénticos a sus ejecuciones históricas remotas.** Se conserva cada byte de la variante más restrictiva del repositorio, se corrige sólo el número y se documenta la corrección posterior que lleva al estado vigente. No se importan versiones antiguas con controles más débiles. Los drops condicionales de triggers/policies de ingresos se mantienen para idempotencia. Esta decisión alinea el identificador sin afirmar una identidad histórica inexistente ni sustituir el ledger. Las referencias ejecutables y el manifiesto se actualizan conservando sus hashes.
+
+[Fuentes, hashes, matriz y catálogo vigente](../qa/payroll-history-reconciliation-2026-09-08.json). Catálogos de sólo lectura capturados a las 17:01:57 y 17:05:27 UTC.
+
+| Inventario | Tras #580 | Este cambio |
+|---|---:|---:|
+| Archivos locales | 111 | 114 |
+| Versiones DEV | 113 | 113 |
+| Números coincidentes | 106 | 111 |
+| Sólo remoto | 7 | 2 |
+| Sólo local | 5 | 3 |
+
+### Pendiente concreto
+
+1. Onboarding Fersana: remoto `20260831004813`, local `20260831003419`. La fuente remota inicial contiene el seed de Fersana y omite guards explícitos de auth.uid(). Las funciones actuales `request_company_access` y `reject_company_access_request` conservan comprobaciones de perfil/rol, pero no el guard explícito de sesión del repo. No se deduce una vulnerabilidad sólo de esa diferencia. **Actualización posterior:** la auditoría de sesión del 8 de septiembre descartó la necesidad de esa corrección para las dos funciones revisadas. Véase el cierre al final; se conserva la lógica vigente y no se repite el seed.
+2. Módulos `20260827090000` y `20260827100000`: el estado aplicado debe revalidarse antes de proponer reparación de metadatos. No reejecutar guards/seeds sobre las empresas y activaciones actuales.
+3. Histórico de respaldos `20260906003626`: mantener fuera el SQL destructivo. Cualquier retiro de su registro activo exige snapshot completo de esa fila y autorización específica; no es limpieza de respaldos ni reversión de lo que ocurrió.
+4. Resolver `047_precheck: public layout contract drifted`, completar la conciliación y verificar Supabase Preview. No ejecutar un push general ni eludir guards. `migration repair` sigue sujeto a autorización explícita conforme a `supabase-cli-migrations.md`.
+
+Este cambio no escribe en bases DEV/PROD, no repara el ledger y no toca respaldos. El frente 06 permanece abierto.
+
+Validación de este tramo: TypeScript/Vite y artefacto estático correctos; **1128/1128 contratos offline**, 0 fallas y 0 omitidos; 14/14 hashes del manifiesto Fersana correctos. Los tres SQL recuperados son exactos y los dos SQL renombrados conservan sus bytes.
+
+## Cierre del nombre histórico de Fersana y revisión de sesión — 8 de septiembre
+
+Base: DEV `ab71a32` (#583), que ya incorpora #578 y #582 de IMSS/ISN y su primera ronda de UAT. Este ajuste conserva esos desarrollos. La captura de DEV contiene 117 versiones; los inventarios anteriores son fotografías históricas, no el estado actual.
+
+Se renombra `20260831003419_fersana_company_access_onboarding.sql` a **`20260831004813_fersana_company_access_onboarding.sql`**, la versión ya registrada en DEV. Su SHA-256 permanece `f2697747ecbf09a5b8e8db82b68f0af1dafa6840972a4bec8956be7f7c3828b8`. Se actualizan las dos suites que leen el archivo y la ruta del runbook/manifiesto; no cambia ningún SQL ni hash del manifiesto.
+
+**Alinear el número no significa que las fuentes históricas sean idénticas.** El SQL registrado originalmente en DEV omite cuatro comprobaciones explícitas de auth.uid(), carece del BEGIN/COMMIT exterior e incluye un bloque que busca una sola empresa por nombre/legal_name y crea el enlace Fersana. Se conserva la variante del repo: controles explícitos y seed separado en `prod-readiness/paso5-fersana-seed.sql`. No se importa ni ejecuta el seed histórico, ni se reinstalan funciones anteriores sobre las mejoras posteriores de reapertura de solicitudes.
+
+### La revisión de accesos se cierra sin otra migración
+
+Esta conclusión sustituye la propuesta anterior de preparar un guard adicional. La auditoría de sólo lectura del 8 de septiembre a las 18:24 UTC verificó definiciones y privilegios en DEV y PROD:
+
+- `request_company_access(text)` y `reject_company_access_request(uuid)` no conceden EXECUTE a anon; authenticated y service_role sí tienen ese privilegio.
+- En ambos ambientes `current_profile_id()` exige un perfil activo con `auth_user_id = auth.uid()`, sin alternativa por correo. Un UID nulo no resuelve un perfil. DEV ya rechaza solicitud/rechazo sin ese perfil; rechazar además exige el rol administrador.
+- PROD ya contiene las comprobaciones explícitas de auth.uid(). No se propone retirarlas ni cambiar accesos que funcionan.
+- La solicitud crea/reabre una petición pendiente sin conceder membresía. Se conserva ese comportamiento y la revisión administrativa.
+
+Las definiciones reales capturadas, ejecutadas sobre tablas fixture en PGlite 0.3.16, pasan **28/28 casos, 14 por ambiente**: permisos anon, sesión ausente, perfil inactivo/no vinculado, JWT sólo con correo, reapertura idempotente, separación operador/administrador, rechazo y membresía/enlace activos. El detalle y hash del paquete reproducible están en [la evidencia](../qa/fersana-history-alignment-2026-09-08.json). Es una prueba aislada de las funciones revisadas, no UAT de navegador, ejecución de RPC remotas, replay completo ni certificación de toda la seguridad.
+
+### Inventario tras el renombre sobre esta base
+
+| Elemento | Cantidad |
+|---|---:|
+| Archivos locales | 117 |
+| Versiones registradas en DEV | 117 |
+| Versiones coincidentes | 115 |
+| Sólo local | 2 |
+| Sólo remoto | 2 |
+
+Las dos versiones locales son los módulos `20260827090000` y `20260827100000`: requieren comprobar su estado actual y preparar una decisión de metadatos con autorización específica. Una remota es el mantenimiento histórico `20260906003626_drop_backup_tables`, cuyo SQL destructivo sigue fuera del directorio activo. La otra, `20260908184710_payroll_obligations_shared_budget_guard`, pertenece al desarrollo concurrente de IMSS/ISN y aún no aparece en esta base; debe conciliarse con su PR de origen, sin duplicarla desde este trabajo.
+
+El renombre Fersana queda resuelto en el repositorio. El frente 06 permanece abierto por las entradas anteriores, `047_precheck: public layout contract drifted` y Supabase Preview. Este cambio no ejecuta SQL, `db push` ni `migration repair` en ningún ambiente. La reparación del ledger continúa sujeta a snapshot y autorización explícita según `supabase-cli-migrations.md`.
+
+Validación local del renombre: **14/14 contratos Fersana**, 0 fallas; **14/14 hashes** del manifiesto correctos; `git diff --check` sin errores. No se agregan pruebas que sólo repitan el renombre; se utilizan los contratos existentes.

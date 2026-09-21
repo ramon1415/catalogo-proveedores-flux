@@ -1,3 +1,4 @@
+import { CompanyCaptureContext } from '../../components/ui/CompanyCaptureContext'
 // Diálogo "Crear corte semanal" (espejo de createBatchDialog + createBatch del vanilla).
 import { useMemo, useState } from 'react'
 import { Modal } from '../../components/ui/Modal'
@@ -56,7 +57,7 @@ export function CreateBatchDialog({
   }
 
   return (
-    <Modal title="Crear corte semanal" subtitle="Nuevo corte para decision de Direccion." onClose={onClose}>
+    <Modal headerContext={<CompanyCaptureContext company={companies.find(company => company.id === companyId)} />} title="Crear corte semanal" subtitle="Nuevo corte para decision de Direccion." onClose={onClose}>
       <form onSubmit={submit}>
         <div className={s.modalGrid}>
           <label>
