@@ -1,167 +1,201 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useToast } from '../../components/ui/Toast'
-import { bulkCreateProviders } from './api'
-import type { ProviderPayload } from './types'
+import { useSearchParams } from 'react-router-dom'
+import { useAuth } from '../../lib/auth'
+import { useCompany } from '../../lib/company'
+import { bulkCreateProviders, listBulkProviderIdentities } from './api'
+import { classifyBulkRow, MAX_BULK_CHARS, parseBulkProviders, pendingBulkText } from './bulkProviders'
+import type { BulkRow, BulkStatus } from './bulkProviders'
 import s from './Proveedores.module.css'
+import b from './BulkProviderModal.module.css'
 
-// Alta masiva por listado (junta Fersana 7-sep): pegar CSV/TSV de los
-// proveedores recurrentes y crearlos de golpe, en vez de uno por uno. Reusa el
-// mismo RPC de alta (validación + RLS por fila). No expone ningún dato nuevo.
-//
-// Formato (una fila por proveedor, separado por TAB o coma; encabezado opcional):
-//   alias, nombre / razón social, RFC, método, banco, CLABE
-// Solo alias y nombre son obligatorios; el resto es opcional.
-
-type ParsedRow = { payload: ProviderPayload; error: string }
-
-const HEADER_HINT = /alias|nombre|raz[oó]n|rfc/i
-
-function splitCells(line: string): string[] {
-  const byTab = line.split('\t')
-  const cells = byTab.length > 1 ? byTab : line.split(',')
-  return cells.map((c) => c.trim())
-}
-
-function buildPayload(cells: string[]): ProviderPayload {
-  const [alias = '', nombre = '', rfc = '', metodo = '', banco = '', clabe = ''] = cells
-  const metodoPago = metodo.trim() || 'Transferencia bancaria'
-  const isTransfer = /transfer/i.test(metodoPago)
-  const clabeClean = clabe.replace(/\s+/g, '')
-  const hasClabe = isTransfer && clabeClean.length > 0
-  return {
-    alias: alias.trim(),
-    nombre_completo: nombre.trim(),
-    rfc: rfc.trim().toUpperCase() || null,
-    metodo_pago: metodoPago,
-    tipo_cuenta: hasClabe ? 'CLABE' : null,
-    destination_type: hasClabe ? 'clabe' : null,
-    beneficiary_name: nombre.trim(),
-    banco: isTransfer ? banco.trim() || null : null,
-    clabe: hasClabe ? clabeClean : null,
-    cuenta_bancaria: null,
-    convenio_number: null,
-    persona_tipo: null,
-    email: null,
-    telefono: null,
-    tipo_proveedor: null,
-    notas: null,
-    es_personal_eventual: false,
-    activo: true,
-    updated_at: new Date().toISOString(),
-  }
-}
-
-function validate(p: ProviderPayload): string {
-  if (!p.alias) return 'Falta alias'
-  if (!p.nombre_completo) return 'Falta nombre / razón social'
-  if (p.rfc && !/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(p.rfc)) return 'RFC con formato inválido'
-  if (p.clabe && !/^\d{18}$/.test(p.clabe)) return 'CLABE debe tener 18 dígitos'
-  return ''
+const labels: Record<BulkStatus, string> = {
+  ready: 'Listo', invalid: 'Revisar datos', duplicate: 'Repetido en listado', existing: 'Ya existe',
+  conflict: 'Conflicto', created: 'Creado', failed: 'No creado', unconfirmed: 'Por verificar', stopped: 'Pendiente',
 }
 
 export function BulkProviderModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const { showToast } = useToast()
+  const { companyId, companyName } = useCompany()
+  const { canManageProviders, memberships, profile } = useAuth()
+  const [params] = useSearchParams()
+  const allowed = Boolean(profile?.id) && canManageProviders() && params.get('mode') !== 'readonly' && Boolean(companyId && memberships.some(m => m.company_id === companyId))
+  const initialCompany = useRef({ id: companyId, name: companyName, actor: profile?.id })
+  const context = useRef({ companyId, allowed, actor: profile?.id })
+  context.current = { companyId, allowed, actor: profile?.id }
+  const dialog = useRef<HTMLDialogElement>(null)
+  const alive = useRef(true)
+  const busyRef = useRef(false)
+  const stop = useRef(false)
+  const readVersion = useRef(0)
+  const createdAny = useRef(false)
   const [raw, setRaw] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [reviewed, setReviewed] = useState<BulkRow[] | null>(null)
+  const [busy, setBusy] = useState<'read' | 'save' | null>(null)
+  const [notice, setNotice] = useState('')
+  const [attempted, setAttempted] = useState(false)
+  const parsed = useMemo(() => parseBulkProviders(raw), [raw])
+  const rows = reviewed ?? parsed.rows
+  const contextValid = allowed && companyId === initialCompany.current.id && profile?.id === initialCompany.current.actor
+  const canContinue = () => alive.current && !stop.current && context.current.allowed && context.current.companyId === initialCompany.current.id && context.current.actor === initialCompany.current.actor
+  const eligible = rows.filter(r => ['ready', 'failed', 'unconfirmed', 'stopped'].includes(r.status)).length
+  const count = (status: BulkStatus) => rows.filter(r => r.status === status).length
 
   useEffect(() => {
-    const dlg = dialogRef.current
-    if (dlg && !dlg.open) dlg.showModal()
+    alive.current = true
+    if (dialog.current && !dialog.current.open) dialog.current.showModal()
+    return () => { alive.current = false; stop.current = true; readVersion.current++ }
   }, [])
 
-  const rows = useMemo<ParsedRow[]>(() => {
-    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-    if (lines.length && HEADER_HINT.test(lines[0]) && /rfc|método|metodo|banco|clabe/i.test(lines[0])) lines.shift()
-    return lines.map((line) => {
-      const payload = buildPayload(splitCells(line))
-      return { payload, error: validate(payload) }
-    })
-  }, [raw])
+  useEffect(() => {
+    if (!contextValid) {
+      stop.current = true
+      readVersion.current++
+      setNotice('Cambió la empresa o el permiso. Cierra este lote y ábrelo desde la empresa correcta. No se enviarán nuevas filas.')
+    }
+  }, [contextValid])
 
-  const validRows = rows.filter((r) => !r.error)
-  const invalidCount = rows.length - validRows.length
+  useEffect(() => {
+    if (busy !== 'save') return
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [busy])
 
-  async function onSubmit() {
-    if (saving || !validRows.length) return
-    setSaving(true)
+  function close() {
+    if (busyRef.current) {
+      if (busy === 'save') stop.current = true
+      setNotice('Se detendrá al terminar la fila en curso. Los proveedores ya creados se conservarán.')
+      return
+    }
+    // Parent's onSaved closes and reloads: defer it until the user has reviewed
+    // ALL results, rather than closing on the first partial success.
+    if (createdAny.current) onSaved()
+    else onClose()
+  }
+
+  function changeRaw(value: string) {
+    readVersion.current++
+    setRaw(value); setReviewed(null); setAttempted(false); setNotice('')
+  }
+
+  async function readFile(file?: File) {
+    if (!file || busyRef.current || !contextValid) return
+    if (file.size > MAX_BULK_CHARS) { setNotice('Archivo demasiado grande. Divide el listado en lotes.'); return }
+    const version = ++readVersion.current
+    busyRef.current = true; setBusy('read')
     try {
-      const results = await bulkCreateProviders(validRows.map((r) => r.payload))
-      const ok = results.filter((r) => r.ok).length
-      const failed = results.filter((r) => !r.ok)
-      if (failed.length) {
-        showToast(
-          `${ok} creados, ${failed.length} con error`,
-          failed.slice(0, 3).map((f) => `${f.alias}: ${f.error}`).join(' · '),
-          ok ? 'warning' : 'error',
-        )
-      } else {
-        showToast('Proveedores creados', `${ok} proveedores dados de alta.`, 'success')
-      }
-      if (ok) onSaved()
-    } catch (error) {
-      showToast('No se pudo cargar el lote', (error as { message?: string })?.message || 'error', 'error')
+      const text = await file.text()
+      if (alive.current && version === readVersion.current && context.current.companyId === initialCompany.current.id) changeRaw(text)
+    } catch {
+      if (alive.current) setNotice('No se pudo leer el archivo. Puedes pegar el listado desde Excel.')
     } finally {
-      setSaving(false)
+      busyRef.current = false
+      if (alive.current) setBusy(null)
     }
   }
 
+  async function review() {
+    if (busyRef.current || !contextValid || parsed.error || !rows.length) return
+    stop.current = false; busyRef.current = true; setBusy('read'); setNotice('')
+    const version = ++readVersion.current
+    try {
+      const catalog = await listBulkProviderIdentities()
+      if (canContinue() && version === readVersion.current) {
+        setReviewed(rows.map(row => classifyBulkRow(row, catalog)))
+        setNotice('Catálogo verificado. Los existentes se omiten sin cambiar sus datos.')
+      }
+    } catch {
+      if (alive.current) { setReviewed(null); setNotice('No se pudo verificar el catálogo. No se habilitará la creación hasta verificarlo.') }
+    } finally {
+      busyRef.current = false
+      if (alive.current) setBusy(null)
+    }
+  }
+
+  async function submit() {
+    if (busyRef.current || !reviewed || !eligible || !contextValid) return
+    stop.current = false; busyRef.current = true; setBusy('save'); setAttempted(true); setNotice('')
+    const snapshot = reviewed
+    try {
+      const results = await bulkCreateProviders(snapshot, {
+        canContinue,
+        onResult: row => {
+          if (row.status === 'created') createdAny.current = true
+          if (alive.current) setReviewed(prev => (prev ?? snapshot).map(r => r.line === row.line ? row : r))
+        },
+      })
+      if (alive.current) {
+        setReviewed(results)
+        setNotice(results.some(r => ['failed', 'unconfirmed', 'stopped', 'conflict', 'invalid'].includes(r.status))
+          ? 'Hay filas pendientes. Conservamos el resultado de cada una; no se reenviarán las confirmadas.'
+          : 'Revisión terminada. Puedes consultar los resultados y cerrar el lote.')
+      }
+    } catch {
+      if (alive.current) setNotice('No se pudo completar el lote. Conserva los resultados y verifica el catálogo antes de reintentar.')
+    } finally {
+      busyRef.current = false
+      if (alive.current) setBusy(null)
+    }
+  }
+
+  const hasPending = rows.some(r => !['created', 'existing', 'duplicate'].includes(r.status))
   return (
-    <dialog ref={dialogRef} className={s.dialog} onCancel={onClose} onClose={onClose}>
-      <form className={s.modal} onSubmit={(e) => { e.preventDefault(); void onSubmit() }}>
-        <div className={s.modalHead}>
+    <dialog ref={dialog} className={b.dialog} aria-labelledby="bulk-title" aria-describedby="bulk-help"
+      onCancel={event => { event.preventDefault(); close() }} onClose={close}>
+      <form className={b.modal} onSubmit={event => { event.preventDefault(); void submit() }} aria-busy={Boolean(busy)}>
+        <header className={b.header}>
           <div>
-            <h2>Alta masiva de proveedores</h2>
-            <p>Pega un proveedor por línea. Columnas: alias, nombre / razón social, RFC, método, banco, CLABE. Solo alias y nombre son obligatorios.</p>
+            <h2 id="bulk-title">Alta masiva de proveedores</h2>
+            <p className={b.company}>Empresa de captura: <strong>{initialCompany.current.name || 'Sin empresa'}</strong></p>
+            <p id="bulk-help">Catálogo compartido. No cambiaremos proveedores existentes ni sus datos bancarios.</p>
           </div>
-          <button type="button" className={s.iconBtn} aria-label="Cerrar" onClick={onClose}>✕</button>
-        </div>
-        <div className={s.modalScroll}>
-          <label className={s.fullRow}>Listado (TAB o coma como separador)
-            <textarea
-              className={s.formControl}
-              rows={7}
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              placeholder={'CFE Suministrador, CFE SUMINISTRADOR SA, CSS160330CP7, Transferencia, Santander\nTOKA, TOKA INTERNACIONAL SAPI DE CV, TIN090211JC9, Transferencia, BBVA, 012180001135096214'}
-              style={{ fontFamily: 'var(--mono)', fontSize: '12.5px' }}
-            />
+          <button type="button" className={s.iconBtn} aria-label="Cerrar alta masiva" disabled={Boolean(busy)} onClick={close}>✕</button>
+        </header>
+        <div className={b.body}>
+          <p>Columnas: <strong>alias, nombre, RFC, método, banco, CLABE</strong>. Alias y nombre son obligatorios. Si omites el método se usa Transferencia bancaria; los datos bancarios pueden completarse después.</p>
+          <p>Admite CSV, TSV y pegar desde Excel. Conserva RFC y CLABE como <strong>Texto</strong>. Máximo 200 filas. Cuenta bancaria y convenio se capturan desde el alta individual.</p>
+          <label className={b.field}>Archivo CSV o TSV (opcional)
+            <input type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" disabled={Boolean(busy) || !contextValid || Boolean(reviewed)}
+              onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void readFile(file) }} />
           </label>
-
+          <label className={b.field}>Listado de proveedores
+            <textarea value={raw} onChange={event => changeRaw(event.target.value)} rows={5} spellCheck={false}
+              disabled={Boolean(busy) || !contextValid || Boolean(reviewed)} placeholder={'alias,nombre,RFC,método,banco,CLABE\nProveedor QA,"Proveedor de prueba, SA",ABC010101AA1,Efectivo,,'} />
+          </label>
+          {parsed.error && <p role="alert" className={b.error}>{parsed.error}</p>}
+          {!contextValid && <p role="alert" className={b.error}>Este lote pertenece a la empresa con la que se abrió. Cierra y vuelve a abrir.</p>}
+          <div className={b.summary} role="status" aria-live="polite">
+            <span>{rows.length} filas</span><span>{count('ready')} listas</span><span>{count('created')} creadas</span>
+            <span>{count('existing')} existentes</span><span>{count('duplicate')} repetidas</span>
+            <span>{rows.filter(r => ['invalid', 'conflict', 'failed', 'unconfirmed', 'stopped'].includes(r.status)).length} por revisar</span>
+          </div>
+          {notice && <p role="status" className={b.notice}>{notice}</p>}
           {rows.length > 0 && (
-            <div style={{ marginTop: 10, display: 'flex', gap: 12, fontSize: 13 }}>
-              <span style={{ color: 'var(--text-2)' }}>{validRows.length} válidos</span>
-              {invalidCount > 0 && <span style={{ color: 'var(--ruby, #c93047)' }}>{invalidCount} con error</span>}
-            </div>
-          )}
-
-          {rows.length > 0 && (
-            <div className={s.tableWrap} style={{ marginTop: 8 }}>
-              <table className={s.table}>
-                <thead><tr><th>Alias</th><th>Nombre / razón social</th><th>RFC</th><th>Método</th><th>Estado</th></tr></thead>
-                <tbody>
-                  {rows.map((r, i) => (
-                    <tr key={i}>
-                      <td>{r.payload.alias || '—'}</td>
-                      <td>{r.payload.nombre_completo || '—'}</td>
-                      <td>{r.payload.rfc || '—'}</td>
-                      <td>{r.payload.metodo_pago}</td>
-                      <td style={{ color: r.error ? 'var(--ruby, #c93047)' : 'var(--emerald, #0d9f57)', fontWeight: 500 }}>
-                        {r.error || 'Listo'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+            <div className={b.tableWrap} tabIndex={0} role="region" aria-label="Revisión por proveedor; tabla con desplazamiento interno">
+              <table className={b.table}>
+                <thead><tr><th>Línea</th><th>Alias</th><th>Razón social</th><th>RFC</th><th>Método</th><th>Banco</th><th>CLABE</th><th>Resultado</th></tr></thead>
+                <tbody>{rows.map(row => (
+                  <tr key={row.line}>
+                    <td>{row.line}</td><td>{row.payload.alias || '—'}</td><td>{row.payload.nombre_completo || '—'}</td>
+                    <td>{row.payload.rfc || '—'}</td><td>{row.payload.metodo_pago}</td><td>{row.payload.banco || '—'}</td>
+                    <td className={b.account}>{row.payload.clabe || '—'}</td>
+                    <td><strong>{reviewed || row.status !== 'ready' ? labels[row.status] : 'Por verificar'}</strong><small>{row.message}</small></td>
+                  </tr>
+                ))}</tbody>
               </table>
             </div>
           )}
         </div>
-        <div className={s.modalActions}>
-          <button type="button" className={s.secondaryBtn} onClick={onClose}>Cancelar</button>
-          <button type="submit" className={s.primaryBtn} disabled={saving || !validRows.length}>
-            {saving ? 'Creando…' : `Crear ${validRows.length} proveedor${validRows.length === 1 ? '' : 'es'}`}
-          </button>
-        </div>
+        <footer className={b.actions}>
+          <button type="button" className={s.secondaryBtn} disabled={Boolean(busy)} onClick={close}>{createdAny.current ? 'Cerrar y actualizar catálogo' : 'Cerrar'}</button>
+          {reviewed && hasPending && <button type="button" className={s.secondaryBtn} disabled={Boolean(busy) || !contextValid}
+            onClick={() => changeRaw(pendingBulkText(rows))}>Corregir solo pendientes</button>}
+          <button type="button" className={s.secondaryBtn} disabled={Boolean(busy) || !contextValid || !!parsed.error || !rows.length}
+            onClick={() => void review()}>{busy === 'read' ? 'Verificando…' : 'Verificar catálogo'}</button>
+          {busy === 'save' ? <button type="button" className={s.secondaryBtn} onClick={() => { stop.current = true; setNotice('Deteniendo después de la fila en curso…') }}>Detener después de esta fila</button>
+            : <button type="submit" className={s.primaryBtn} disabled={Boolean(busy) || !contextValid || !reviewed || !eligible}>
+              {attempted ? `Reintentar ${eligible} pendientes` : `Crear ${eligible} proveedores`}
+            </button>}
+        </footer>
       </form>
     </dialog>
   )

@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import type { Provider, ProviderPayload } from './types'
+import { collectProviderIdentities, runBulkProviders } from './bulkProviders'
+import type { BulkPort, BulkRow, ProviderIdentity } from './bulkProviders'
 
 // Bucket y esquema de ruta idénticos a upload_helper.js (payment-receipts).
 const UPLOAD_BUCKET = 'payment-receipts'
@@ -28,24 +30,30 @@ export async function saveProvider(
   return id as string
 }
 
-// Alta masiva: reutiliza el mismo RPC vetado (validación + RLS) una vez por
-// fila. No hay endpoint nuevo. Devuelve el resultado por fila para poder
-// mostrar cuáles se crearon y cuáles fallaron sin abortar el lote.
-export type BulkRowResult = { index: number; alias: string; ok: boolean; id?: string; error?: string }
+// The catalog is shared, as in individual capture. Do not invent company_id
+// filters or bypass RLS. Include inactive rows so they cannot be recreated.
+export async function listBulkProviderIdentities(): Promise<ProviderIdentity[]> {
+  return collectProviderIdentities(async (after, limit) => {
+    let query = supabase.from('proveedores')
+      .select('id,alias,nombre_completo,rfc,clabe,activo')
+      .order('id', { ascending: true }).limit(limit)
+    if (after) query = query.gt('id', after)
+    const { data, error } = await query
+    if (error) throw error
+    return (data ?? []) as ProviderIdentity[]
+  })
+}
 
-export async function bulkCreateProviders(rows: ProviderPayload[]): Promise<BulkRowResult[]> {
-  const results: BulkRowResult[] = []
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    try {
-      const id = await saveProvider(null, row)
-      results.push({ index: i, alias: row.alias || '', ok: true, id })
-    } catch (error) {
-      const message = (error as { message?: string })?.message || 'error'
-      results.push({ index: i, alias: row.alias || '', ok: false, error: message })
-    }
-  }
-  return results
+export async function bulkCreateProviders(
+  rows: BulkRow[],
+  controls: Pick<BulkPort, 'canContinue' | 'onResult'>,
+): Promise<BulkRow[]> {
+  return runBulkProviders(rows, {
+    identities: listBulkProviderIdentities,
+    create: payload => saveProvider(null, payload),
+    canContinue: controls.canContinue,
+    onResult: controls.onResult,
+  })
 }
 
 // Activar/desactivar: update directo, igual que toggleSupplier del vanilla.

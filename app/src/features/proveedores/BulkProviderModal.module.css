@@ -1,0 +1,37 @@
+/* Isolated to bulk capture; the individual-provider modal is untouched. */
+.dialog { border: 0; padding: 0; margin: auto; width: min(1060px, 96vw); max-width: 96vw; max-height: 94vh; max-height: 94dvh; background: transparent; color: var(--text-1); }
+.dialog::backdrop { background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
+.modal { display: flex; flex-direction: column; width: 100%; max-height: 92vh; max-height: 92dvh; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); }
+.header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.header h2 { margin: 0 0 8px; font-size: 18px; }
+.header p, .body p { font-size: 13px; line-height: 1.5; color: var(--text-2); margin: 4px 0 10px; }
+.company { overflow-wrap: anywhere; }
+.body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 16px 20px; }
+.field { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; font-size: 13px; }
+.field input, .field textarea { box-sizing: border-box; min-width: 0; max-width: 100%; width: 100%; font: inherit; color: var(--text-1); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.field textarea { resize: vertical; min-height: 100px; max-height: 240px; font-family: var(--mono, monospace); }
+.field :focus-visible, .tableWrap:focus-visible, .actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; font-variant-numeric: tabular-nums; margin: 14px 0; }
+.body .notice { padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px; }
+.body .error { color: var(--ruby, #e05a6a); font-weight: 600; }
+.tableWrap { max-width: 100%; max-height: 34vh; max-height: 34dvh; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 8px; scrollbar-gutter: stable; }
+.table { width: 100%; min-width: 1000px; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+.table th { position: sticky; top: 0; z-index: 1; background: var(--bg-surface); text-align: left; color: var(--text-2); }
+.table td, .table th { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table td { overflow-wrap: anywhere; max-width: 260px; }
+.table small { display: block; min-width: 190px; margin-top: 4px; line-height: 1.45; }
+.table .account { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.actions { flex: 0 0 auto; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 12px 20px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+.actions button, .header button { min-height: 44px; }
+.header button { flex: 0 0 44px; width: 44px; height: 44px; }
+.actions button { justify-content: center; white-space: normal; }
+.actions button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 640px) {
+  .dialog { width: 96vw; }
+  .header, .body { padding: 12px; }
+  .header h2 { font-size: 17px; }
+  .field textarea { font-size: 16px; }
+  .actions { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); }
+  .actions button { flex: 1 1 140px; padding: 9px; font-size: 12px; }
+  .tableWrap { max-height: 30dvh; }
+}

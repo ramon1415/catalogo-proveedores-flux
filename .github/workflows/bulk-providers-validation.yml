@@ -1,0 +1,56 @@
+name: Bulk providers validation (no remote data)
+
+on:
+  push:
+    branches: [fix/ramon-bulk-provider-validation]
+    paths:
+      - 'app/src/features/proveedores/**'
+      - 'scripts/qa/bulk-providers*.mjs'
+      - '.github/workflows/bulk-providers-validation.yml'
+      - 'docs/qa/bulk-providers-validation.md'
+  pull_request:
+    paths:
+      - 'app/src/features/proveedores/**'
+      - 'scripts/qa/bulk-providers*.mjs'
+      - '.github/workflows/bulk-providers-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  local-contracts-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Synthetic parser, identity, pagination and retry tests
+        run: node --test scripts/qa/bulk-providers.test.mjs
+      - name: Install existing locked app dependencies
+        working-directory: app
+        run: npm ci
+      - name: Typecheck complete app
+        working-directory: app
+        run: npm run typecheck
+      - name: Build complete app for offline browser verification (no deployment)
+        working-directory: app
+        env:
+          VITE_SUPABASE_URL: https://flux-qa.invalid
+          VITE_SUPABASE_ANON_KEY: synthetic-offline-qa-key-not-a-credential
+        run: npm run build
+      - name: Package built app and tracked source for offline verification
+        run: |
+          mkdir -p qa-artifact
+          printf '%s\n' "$GITHUB_SHA" > qa-artifact/source-commit.txt
+          tar -czf qa-artifact/flux-pr561-offline-app.tgz app/dist app/src app/public app/package.json app/package-lock.json app/tsconfig.json app/vite.config.ts app/index.html scripts/qa/bulk-providers.test.mjs
+      - name: Retain private QA artifact (no secrets or business data)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flux-pr561-offline-app-${{ github.sha }}
+          path: qa-artifact/
+          retention-days: 3
+          if-no-files-found: error
