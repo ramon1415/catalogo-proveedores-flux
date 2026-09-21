@@ -1,27 +1,30 @@
--- DRAFT (para revisión de Ramón) — bloque de backfill del dashboard operativo
--- con el histórico contable, por partida. NO modifica `budget_availability`;
--- es una vista independiente que budget_availability puede blend-ear.
+-- DRAFT (para revisión de Ramón) — v2 — histórico contable por partida, SOLO LECTURA.
+-- NO modifica `budget_availability` ni `dashboard_global_budget_report`. Es una vista
+-- independiente para revisar totales en DEV antes de decidir la integración aislada.
 --
--- Contexto: el operativo calcula "usado" desde payment_requests (Flux), que
--- solo tiene datos desde ~jun-2026. El gasto real de los meses anteriores vive
--- en historical_actuals (CONTPAQ). Este bloque lo expone por partida.
+-- Contexto: el operativo calcula "usado" desde payment_requests (Flux), con datos solo
+-- desde ~jun-2026. El gasto real de meses anteriores vive en historical_actuals (CONTPAQ).
+-- Ramón pidió: (a) NO tocar budget_availability (participa en validaciones de solicitudes
+-- y nómina); integrar en la capa de reportes (dashboard_global_budget_report) más adelante;
+-- (b) filtro de egreso propio por empresa (OPT egresos=6xxx, Fersana=5xxx); (c) validación
+-- de cobertura mensual; (d) distinguir "Por clasificar" (ambiguo) de "Sin partida" (sin mapeo).
 --
--- Atribución (validada en dev, Operadora ene-jul 2026):
---   - Formato: historical_actuals.account_code trae guiones (602-01-001-000);
---     budget_account_mappings NO (60201001000). `replace(...,'-','')` los empata.
---   - Se atribuye a la partida SOLO cuando la cuenta mapea a UNA partida
---     (68.7% del gasto = $4,713,565). Lo ambiguo (cuenta a varias partidas) y
---     lo sin mapeo (31% = $2,149,065) cae en budget_category_id NULL =
---     "Por clasificar". Total = $6,862,629 (cuadra con el histórico real).
---   - Sin doble conteo: agrega por cuenta antes de mapear.
+-- CAMBIOS v1→v2:
+--   1) Universo de egreso robusto por empresa: en vez de `account_code like '6%'`
+--      (rompía Fersana), se usa contpaq_accounts.tipo = 'G' (RESULTADO DEUDOR). Cubre
+--      OPT (6/5/7xxx) y Fersana (5xxx) sin hardcodear prefijo. Verificado en DEV.
+--   2) Se distinguen 3 buckets (columna `clasificacion`):
+--        - 'partida'        : cuenta mapea a EXACTAMENTE una partida (atribución limpia)
+--        - 'por_clasificar' : cuenta mapea a >1 partida (ambiguo, requiere desambiguar)
+--        - 'sin_partida'    : cuenta egreso SIN ningún mapeo (gap de mapeo)
+--   3) Bandera `es_nomina` (cuenta en payroll_contpaq_role_mappings) para hacer VISIBLE
+--      el riesgo de doble conteo: la nómina/cargas ya la suma el reporte vía
+--      payroll_obligations. NO se filtra aquí (queda a decisión de Ramón en la integración),
+--      pero se marca para poder excluirla al blend-ear.
 --
--- BLEND propuesto para budget_availability (decisión de Ramón):
---   - Mes CERRADO (existe historical_actuals para ese company+month): usar el
---     `historical_executed` de esta vista como ejecutado/usado por partida.
---   - Mes EN CURSO (sin histórico aún): seguir con payment_requests (Flux).
---   - NUNCA sumar ambas fuentes para el mismo mes (jun/jul tienen datos en las
---     dos). El "Por clasificar" (partida NULL) se muestra como renglón propio
---     en la tabla del dashboard y se achica al ampliar budget_account_mappings.
+-- Formato de código: historical_actuals.account_code trae guiones (602-01-001-000);
+-- contpaq_accounts.code y budget_account_mappings NO (60201001000). replace(...,'-','') empata.
+-- Sin doble conteo interno: agrega por cuenta antes de mapear.
 
 create or replace view public.budget_historical_by_partida
 with (security_invoker = true) as
@@ -31,26 +34,45 @@ with hist as (
          date_trunc('month', ha.period_month)::date as period_month,
          sum(ha.amount) as monto
   from public.historical_actuals ha
-  where ha.account_code like '6%'   -- egresos / gasto
   group by ha.company_id,
            replace(ha.account_code, '-', ''),
            date_trunc('month', ha.period_month)::date
 ),
-map1 as (   -- cuentas que mapean EXACTAMENTE a una partida (atribución limpia)
+egreso as (   -- universo de egreso por empresa vía naturaleza contable (no por prefijo)
+  select h.*
+  from hist h
+  join public.contpaq_accounts a
+    on a.company_id = h.company_id and a.code = h.code
+  where a.tipo = 'G'                      -- 'G' = resultado deudor (gasto/costo/egreso)
+),
+mapcount as (   -- clasificación por nº de partidas a las que mapea la cuenta
   select company_id, contpaq_account_code,
-         (array_agg(distinct budget_category_id))[1] as budget_category_id
+         count(distinct budget_category_id) as nparts,
+         (array_agg(distinct budget_category_id))[1] as one_cat
   from public.budget_account_mappings
   group by company_id, contpaq_account_code
-  having count(distinct budget_category_id) = 1
+),
+nomina as (   -- cuentas de nómina (para marcar doble conteo con payroll_obligations)
+  select distinct company_id, contpaq_account_code
+  from public.payroll_contpaq_role_mappings
 )
-select h.company_id,
-       m.budget_category_id,        -- NULL = "Por clasificar" (ambiguo o sin mapeo)
-       h.period_month,
-       sum(h.monto) as historical_executed
-from hist h
-left join map1 m
-  on m.company_id = h.company_id and m.contpaq_account_code = h.code
-group by h.company_id, m.budget_category_id, h.period_month;
+select e.company_id,
+       e.period_month,
+       case
+         when m.nparts = 1 then 'partida'
+         when m.nparts > 1 then 'por_clasificar'
+         else 'sin_partida'
+       end as clasificacion,
+       case when m.nparts = 1 then m.one_cat else null end as budget_category_id,
+       (n.contpaq_account_code is not null) as es_nomina,
+       sum(e.monto) as historical_executed,
+       count(distinct e.code) as cuentas
+from egreso e
+left join mapcount m
+  on m.company_id = e.company_id and m.contpaq_account_code = e.code
+left join nomina n
+  on n.company_id = e.company_id and n.contpaq_account_code = e.code
+group by e.company_id, e.period_month, clasificacion, budget_category_id, es_nomina;
 
 comment on view public.budget_historical_by_partida is
-'DRAFT backfill: gasto historico (historical_actuals 6xx) por partida para meses cerrados. budget_category_id NULL = Por clasificar (cuenta ambigua o sin mapeo). Blend en budget_availability: mes cerrado usa esto; mes en curso usa Flux; nunca sumar ambos.';
+'DRAFT solo-lectura (v2). Gasto historico (historical_actuals, tipo=G resultado deudor) por partida y mes cerrado. clasificacion: partida (1 mapeo) / por_clasificar (mapeo ambiguo) / sin_partida (sin mapeo). es_nomina marca cuentas ya cubiertas por payroll_obligations (riesgo doble conteo). NO toca budget_availability ni dashboard_global_budget_report.';
