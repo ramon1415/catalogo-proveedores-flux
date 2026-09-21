@@ -1,0 +1,272 @@
+name: Bulk Provider DEV UAT One-shot
+
+on:
+  pull_request:
+    branches: [dev]
+    paths: [.github/workflows/bulk-provider-uat-dev-one-shot.yml]
+  push:
+    branches: [dev]
+    paths: [.github/workflows/bulk-provider-uat-dev-one-shot.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bulk-provider-dev-uat-one-shot
+  cancel-in-progress: false
+
+jobs:
+  static_guardrails:
+    name: Validate DEV UAT workflow
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate one-file scope and YAML
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_PATH: .github/workflows/bulk-provider-uat-dev-one-shot.yml
+        run: |
+          set -euo pipefail
+          ruby -e "require 'yaml'; YAML.safe_load_file(ARGV.fetch(0), aliases: true)" "${EXPECTED_PATH}"
+          mapfile -t changed < <(git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")
+          [[ "${#changed[@]}" -eq 1 && "${changed[0]}" == "${EXPECTED_PATH}" ]]
+          grep -Fq 'SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth' "${EXPECTED_PATH}"
+          grep -Fq 'QA_COMPANY_ID: 55348443-03a1-4e0b-a10b-b08e7977d907' "${EXPECTED_PATH}"
+          grep -Fq '23505' "${EXPECTED_PATH}"
+          grep -Fq 'notification_send_disabled' "${EXPECTED_PATH}"
+
+  uat:
+    name: Real provider RPC UAT in FLUX DEV
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    environment: DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_PROJECT_ID: scsirgbuqjcwoaxfacth
+      SUPABASE_URL: https://scsirgbuqjcwoaxfacth.supabase.co
+      QA_COMPANY_ID: 55348443-03a1-4e0b-a10b-b08e7977d907
+      CANDIDATE_SHA: 2a835488a39377f173246c0a9ec19eb915c4c8ff
+      EVIDENCE_DIR: /tmp/bulk-provider-dev-uat
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+      SUPABASE_DEV_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_DEV_SERVICE_ROLE_KEY }}
+      SUPABASE_DEV_PROJECT_REF: ${{ secrets.SUPABASE_DEV_PROJECT_REF }}
+
+    steps:
+      - name: Validate DEV target and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == 'ramon1415/catalogo-proveedores-flux' ]]
+          [[ "${GITHUB_REF}" == 'refs/heads/dev' ]]
+          [[ "${SUPABASE_DEV_PROJECT_REF}" == "${SUPABASE_PROJECT_ID}" ]]
+          [[ -n "${SUPABASE_DEV_DB_URL:-}" && -n "${SUPABASE_DEV_SERVICE_ROLE_KEY:-}" ]]
+          echo "::add-mask::${SUPABASE_DEV_DB_URL}"
+          echo "::add-mask::${SUPABASE_DEV_SERVICE_ROLE_KEY}"
+          mkdir -p "${EVIDENCE_DIR}"
+          chmod 700 "${EVIDENCE_DIR}"
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          psql --version > "${EVIDENCE_DIR}/psql-version.txt"
+
+      - name: Re-prove notification safety before writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 <<'SQL' > "${EVIDENCE_DIR}/cron-before.json"
+          select coalesce(jsonb_agg(jsonb_build_object('jobname',jobname,'active',active) order by jobid),'[]'::jsonb)
+          from cron.job
+          where jobname = any(array[
+            'notification-payment-outcome-recovery-dev',
+            'payroll-notification-recovery',
+            'payroll-obligation-notification-recovery',
+            'weekly-request-digest'
+          ]::text[]);
+          SQL
+          python3 - "${EVIDENCE_DIR}/cron-before.json" <<'PY'
+          import json,pathlib,sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text().strip())
+          assert len(rows)==4 and all(r['active'] is False for r in rows), rows
+          PY
+          request_id="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 -c "select private.wake_weekly_request_digest(true);")"
+          [[ "${request_id}" =~ ^[0-9]+$ ]]
+          response=''
+          for _ in $(seq 1 15); do
+            response="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 -c "select content::text from net._http_response where id=${request_id} and status_code=200;")"
+            [[ -n "${response}" ]] && break
+            sleep 2
+          done
+          RESPONSE="${response}" python3 - <<'PY'
+          import json,os
+          d=json.loads(os.environ['RESPONSE'])
+          assert d.get('sent')==0 and d.get('mode')=='disabled' and d.get('reason')=='notification_send_disabled', d
+          PY
+
+      - name: Create ephemeral finance QA identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          qa_email="qa-bulk-${GITHUB_RUN_ID}@example.invalid"
+          qa_password="$(openssl rand -hex 24)Aa1!"
+          qa_prefix="QA-BULK-${GITHUB_RUN_ID}"
+          echo "QA_EMAIL=${qa_email}" >> "${GITHUB_ENV}"
+          echo "QA_PASSWORD=${qa_password}" >> "${GITHUB_ENV}"
+          echo "QA_PREFIX=${qa_prefix}" >> "${GITHUB_ENV}"
+          echo "::add-mask::${qa_password}"
+          body="$(jq -nc --arg email "${qa_email}" --arg password "${qa_password}" '{email:$email,password:$password,email_confirm:true,app_metadata:{qa_fixture:"true",qa_scope:"bulk_provider_uat_659"}}')"
+          curl --fail --silent --show-error --max-time 30 -X POST "${SUPABASE_URL}/auth/v1/admin/users" \
+            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
+            -H 'Content-Type: application/json' --data "${body}" > "${EVIDENCE_DIR}/auth-private.json"
+          auth_user_id="$(jq -r '.id // empty' "${EVIDENCE_DIR}/auth-private.json")"
+          [[ "${auth_user_id}" =~ ^[0-9a-f-]{36}$ ]]
+          echo "AUTH_USER_ID=${auth_user_id}" >> "${GITHUB_ENV}"
+          profile_id="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 -c 'select gen_random_uuid();')"
+          echo "PROFILE_ID=${profile_id}" >> "${GITHUB_ENV}"
+          psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set auth_user_id="${auth_user_id}" --set profile_id="${profile_id}" --set qa_email="${qa_email}" --set company_id="${QA_COMPANY_ID}" <<'SQL'
+          begin;
+          insert into public.profiles(id,auth_user_id,full_name,email,active)
+          values (:'profile_id'::uuid,:'auth_user_id'::uuid,'QA Bulk Provider UAT',:'qa_email',true);
+          insert into public.user_roles(profile_id,role_id)
+          select :'profile_id'::uuid,id from public.roles where name='finance';
+          insert into public.profile_company_memberships(profile_id,company_id,active,role_key)
+          values (:'profile_id'::uuid,:'company_id'::uuid,true,'finance');
+          commit;
+          SQL
+
+      - name: Sign in QA user
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(jq -nc --arg email "${QA_EMAIL}" --arg password "${QA_PASSWORD}" '{email:$email,password:$password}')"
+          curl --fail --silent --show-error --max-time 30 -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H 'Content-Type: application/json' \
+            --data "${body}" > "${EVIDENCE_DIR}/session-private.json"
+          user_token="$(jq -r '.access_token // empty' "${EVIDENCE_DIR}/session-private.json")"
+          [[ -n "${user_token}" ]]
+          echo "::add-mask::${user_token}"
+          echo "USER_TOKEN=${user_token}" >> "${GITHUB_ENV}"
+
+      - name: Execute real provider RPC UAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix="$(printf '%03d' $((GITHUB_RUN_ID % 1000)))"
+          clabe="$(printf '012180%012d' $((GITHUB_RUN_ID % 1000000000000)))"
+          rfc_a="QBA260921${suffix}"
+          rfc_b="QBB260921${suffix}"
+          alias_a="${QA_PREFIX}-TRANSFER"
+          alias_b="${QA_PREFIX}-CASH"
+
+          rpc_call() {
+            local body="$1" out="$2"
+            curl --silent --show-error --max-time 30 -o "${out}" -w '%{http_code}' \
+              -X POST "${SUPABASE_URL}/rest/v1/rpc/save_provider_catalog_with_payment_execution_data" \
+              -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${USER_TOKEN}" \
+              -H 'Content-Type: application/json' --data "${body}"
+          }
+
+          payload_a="$(jq -nc --arg alias "${alias_a}" --arg rfc "${rfc_a}" --arg clabe "${clabe}" '{p_proveedor_id:null,p_payload:{alias:$alias,nombre_completo:"QA Bulk Transfer",metodo_pago:"Transferencia bancaria",tipo_cuenta:"CLABE",destination_type:"clabe",beneficiary_name:"QA Bulk Transfer",banco:"BBVA",clabe:$clabe,cuenta_bancaria:null,convenio_number:null,rfc:$rfc,persona_tipo:null,email:null,telefono:null,tipo_proveedor:null,notas:"QA bulk UAT 659",es_personal_eventual:false,activo:true,updated_at:"2026-09-21T00:00:00Z"}}')"
+          status_a="$(rpc_call "${payload_a}" "${EVIDENCE_DIR}/create-transfer.json")"
+          [[ "${status_a}" == '200' ]]
+          provider_a_id="$(jq -r '.id // empty' "${EVIDENCE_DIR}/create-transfer.json")"
+          [[ "${provider_a_id}" =~ ^[0-9a-f-]{36}$ ]]
+
+          psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set provider_id="${provider_a_id}" -c "update public.proveedores set activo=false where id=:'provider_id'::uuid;" >/dev/null
+
+          dup="$(jq -nc --arg alias "${QA_PREFIX}-DUP-RFC" --arg rfc "${rfc_a}" --arg clabe "$(printf '012181%012d' $((GITHUB_RUN_ID % 1000000000000)))" '{p_proveedor_id:null,p_payload:{alias:$alias,nombre_completo:"QA Duplicate RFC",metodo_pago:"Transferencia bancaria",tipo_cuenta:"CLABE",destination_type:"clabe",beneficiary_name:"QA Duplicate RFC",banco:"BBVA",clabe:$clabe,cuenta_bancaria:null,convenio_number:null,rfc:$rfc,persona_tipo:null,email:null,telefono:null,tipo_proveedor:null,notas:"QA duplicate RFC",es_personal_eventual:false,activo:true,updated_at:"2026-09-21T00:00:00Z"}}')"
+          status_dup="$(rpc_call "${dup}" "${EVIDENCE_DIR}/duplicate-rfc.json")"
+          [[ "${status_dup}" == '409' ]]
+          jq -e '.code=="23505"' "${EVIDENCE_DIR}/duplicate-rfc.json" >/dev/null
+
+          payload_b="$(jq -nc --arg alias "${alias_b}" --arg rfc "${rfc_b}" '{p_proveedor_id:null,p_payload:{alias:$alias,nombre_completo:"QA Bulk Cash",metodo_pago:"Efectivo",tipo_cuenta:null,destination_type:null,beneficiary_name:null,banco:null,clabe:null,cuenta_bancaria:null,convenio_number:null,rfc:$rfc,persona_tipo:null,email:null,telefono:null,tipo_proveedor:null,notas:"QA non-transfer beneficiary null",es_personal_eventual:false,activo:true,updated_at:"2026-09-21T00:00:00Z"}}')"
+          status_b="$(rpc_call "${payload_b}" "${EVIDENCE_DIR}/create-non-transfer.json")"
+          [[ "${status_b}" == '200' ]]
+
+          curl --fail --silent --show-error --max-time 30 \
+            "${SUPABASE_URL}/rest/v1/proveedores?select=id,alias,rfc,activo&rfc=eq.${rfc_a}" \
+            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-inactive.json"
+          jq -e 'length==1 and .[0].activo==false' "${EVIDENCE_DIR}/read-inactive.json" >/dev/null
+
+          curl --fail --silent --show-error --max-time 30 \
+            "${SUPABASE_URL}/rest/v1/proveedores?select=id,alias,rfc,beneficiary_name,metodo_pago,activo&rfc=eq.${rfc_b}" \
+            -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${USER_TOKEN}" > "${EVIDENCE_DIR}/read-non-transfer.json"
+          jq -e 'length==1 and .[0].metodo_pago=="Efectivo" and .[0].beneficiary_name==null and .[0].activo==true' "${EVIDENCE_DIR}/read-non-transfer.json" >/dev/null
+
+          count="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${QA_PREFIX}%" -c "select count(*) from public.proveedores where alias like :'prefix';")"
+          [[ "${count}" == '2' ]]
+          jq -n --argjson create_transfer "${status_a}" --argjson duplicate_rfc "${status_dup}" --argjson create_non_transfer "${status_b}" \
+            '{status:"PASS",created:2,duplicate_code:"23505",create_transfer_http:$create_transfer,duplicate_rfc_http:$duplicate_rfc,create_non_transfer_http:$create_non_transfer,inactive_existing_visible:true,non_transfer_beneficiary_null:true}' \
+            > "${EVIDENCE_DIR}/uat-summary.json"
+
+      - name: Cleanup ephemeral fixtures
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="${QA_PREFIX:-QA-BULK-${GITHUB_RUN_ID}}%"
+          email="${QA_EMAIL:-qa-bulk-${GITHUB_RUN_ID}@example.invalid}"
+          psql "${SUPABASE_DEV_DB_URL}" --set ON_ERROR_STOP=1 --set prefix="${prefix}" --set email="${email}" <<'SQL'
+          begin;
+          delete from public.activity_log where entity_type='proveedor'
+            and entity_id in (select id from public.proveedores where alias like :'prefix');
+          delete from public.proveedores where alias like :'prefix';
+          delete from public.profiles where email=:'email';
+          commit;
+          SQL
+          if [[ -n "${AUTH_USER_ID:-}" ]]; then
+            curl --fail --silent --show-error --max-time 30 -X DELETE "${SUPABASE_URL}/auth/v1/admin/users/${AUTH_USER_ID}" \
+              -H "apikey: ${SUPABASE_DEV_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${SUPABASE_DEV_SERVICE_ROLE_KEY}" >/dev/null
+          fi
+          pcount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set prefix="${prefix}" -c "select count(*) from public.proveedores where alias like :'prefix';")"
+          ucount="$(psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 --set email="${email}" -c "select count(*) from public.profiles where email=:'email';")"
+          [[ "${pcount}" == 0 && "${ucount}" == 0 ]]
+          printf '{"providers_remaining":0,"profiles_remaining":0}\n' > "${EVIDENCE_DIR}/cleanup.json"
+          rm -f "${EVIDENCE_DIR}/auth-private.json" "${EVIDENCE_DIR}/session-private.json"
+
+      - name: Recheck notification isolation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "${SUPABASE_DEV_DB_URL}" -At --set ON_ERROR_STOP=1 <<'SQL' > "${EVIDENCE_DIR}/cron-after.json"
+          select coalesce(jsonb_agg(jsonb_build_object('jobname',jobname,'active',active) order by jobid),'[]'::jsonb)
+          from cron.job
+          where jobname = any(array[
+            'notification-payment-outcome-recovery-dev',
+            'payroll-notification-recovery',
+            'payroll-obligation-notification-recovery',
+            'weekly-request-digest'
+          ]::text[]);
+          SQL
+          python3 - "${EVIDENCE_DIR}/cron-after.json" <<'PY'
+          import json,pathlib,sys
+          rows=json.loads(pathlib.Path(sys.argv[1]).read_text().strip())
+          assert len(rows)==4 and all(r['active'] is False for r in rows), rows
+          PY
+
+      - name: Upload sanitized UAT evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bulk-provider-dev-uat-one-shot-evidence
+          path: |
+            /tmp/bulk-provider-dev-uat/uat-summary.json
+            /tmp/bulk-provider-dev-uat/cleanup.json
+            /tmp/bulk-provider-dev-uat/cron-before.json
+            /tmp/bulk-provider-dev-uat/cron-after.json
+            /tmp/bulk-provider-dev-uat/psql-version.txt
+          if-no-files-found: warn
+          retention-days: 14
