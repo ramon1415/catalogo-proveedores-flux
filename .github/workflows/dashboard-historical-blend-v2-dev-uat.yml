@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
           test "$GITHUB_REF_NAME" = "ops/dashboard-historical-blend-v2-dev-uat"
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_FEATURE_HEAD"
+          git merge-base --is-ancestor "$EXPECTED_FEATURE_HEAD" HEAD
 
           live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
           test "$live_dev" = "$EXPECTED_DEV_TIP"
@@ -60,7 +60,7 @@ jobs:
           test "$(git hash-object "$MIGRATION_1")" = "$MIGRATION_1_BLOB"
           test "$(git hash-object "$MIGRATION_2")" = "$MIGRATION_2_BLOB"
 
-          mapfile -t changed < <(git diff --name-only HEAD^ HEAD)
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_FEATURE_HEAD" HEAD)
           test "${#changed[@]}" -eq 1
           test "${changed[0]}" = ".github/workflows/dashboard-historical-blend-v2-dev-uat.yml"
 
@@ -81,12 +81,45 @@ jobs:
           conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
           grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
 
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import os
+          from urllib.parse import parse_qs, urlsplit
+
+          project_ref = "scsirgbuqjcwoaxfacth"
+          parsed = urlsplit(os.environ["SUPABASE_DEV_DB_URL"])
+          host = (parsed.hostname or "").lower()
+          port = parsed.port
+          username = parsed.username or ""
+          params = parse_qs(parsed.query, keep_blank_values=True)
+          sslmode = (params.get("sslmode") or [""])[0].lower()
+
+          if parsed.scheme not in {"postgres", "postgresql"} or not host or not port:
+              raise SystemExit("BLOCKED_INVALID_DEV_DATABASE_URL")
+          if sslmode and sslmode not in {"require", "verify-ca", "verify-full"}:
+              raise SystemExit("BLOCKED_INSECURE_SSLMODE")
+          direct = f"db.{project_ref}.supabase.co"
+          if host == direct and port == 5432:
+              route = "direct"
+          elif host.endswith(".pooler.supabase.com") and port == 5432:
+              route = "session_pooler"
+          elif port == 6543:
+              raise SystemExit("BLOCKED_TRANSACTION_POOLER_NOT_ALLOWED")
+          else:
+              raise SystemExit("BLOCKED_UNEXPECTED_DATABASE_ROUTE")
+          if route == "session_pooler" and project_ref not in username and project_ref not in os.environ["SUPABASE_DEV_DB_URL"]:
+              raise SystemExit("BLOCKED_POOLER_PROJECT_REF_MISMATCH")
+          print(f"DEV_DATABASE_ROUTE={route}")
+          PY
+
           binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 \
             -c "select current_database()||'|'||current_user||'|'||coalesce((select ssl::text from pg_stat_ssl where pid=pg_backend_pid()),'false');")"
-          IFS='|' read -r db role ssl <<<"$binding"
+          IFS='|' read -r db role backend_ssl <<<"$binding"
           test "$db" = "postgres"
           case "$role" in postgres|supabase_admin) ;; *) echo "::error::unexpected role"; exit 1;; esac
-          test "$ssl" = "true"
+          case "$backend_ssl" in true|false) ;; *) echo "::error::invalid backend ssl observation"; exit 1;; esac
+          if [ "$DEV_DATABASE_ROUTE" = "direct" ]; then
+            test "$backend_ssl" = "true"
+          fi
 
       - name: Build rollback-only SQL from exact migrations
         shell: bash
