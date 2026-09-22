@@ -1,0 +1,405 @@
+name: Dashboard historical blend v2 DEV rollback UAT
+
+on:
+  push:
+    branches:
+      - ops/dashboard-historical-blend-v2-dev-uat
+    paths:
+      - .github/workflows/dashboard-historical-blend-v2-dev-uat.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-historical-blend-v2-dev-uat
+  cancel-in-progress: false
+
+env:
+  DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+  EXPECTED_DEV_TIP: d6b3ca00ca7cd4bae04cd8c045d05c07afc1ca9c
+  EXPECTED_FEATURE_HEAD: 5928bc9fb336e23291e4aa3bb5740e006fb1421e
+  MIGRATION_1: supabase/migrations/20260922151516_historical_actuals_period_certification.sql
+  MIGRATION_2: supabase/migrations/20260922151518_dashboard_historical_blend_v2.sql
+  MIGRATION_1_BLOB: f98648c6d0c97b688d1cf724607e674d68246110
+  MIGRATION_2_BLOB: dbc7d5d1d3cf48e553404647b21b58c69c18a7c7
+  TEST_COMPANY: 9680353c-9b86-4730-82e1-fce664f048a2
+  TEST_YEAR: "2026"
+  CERTIFIED_MONTH: "2026-07-01"
+  CONTROL_MONTH: "2026-06-01"
+
+jobs:
+  rollback-uat:
+    name: Apply, assert and rollback on Supabase DEV
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - name: Checkout exact UAT branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard target, ancestry and immutable migration blobs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
+          test "$GITHUB_REF_NAME" = "ops/dashboard-historical-blend-v2-dev-uat"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_FEATURE_HEAD"
+
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_TIP"
+          git merge-base --is-ancestor "$EXPECTED_DEV_TIP" "$EXPECTED_FEATURE_HEAD"
+
+          test "$(git hash-object "$MIGRATION_1")" = "$MIGRATION_1_BLOB"
+          test "$(git hash-object "$MIGRATION_2")" = "$MIGRATION_2_BLOB"
+
+          mapfile -t changed < <(git diff --name-only HEAD^ HEAD)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/dashboard-historical-blend-v2-dev-uat.yml"
+
+      - name: Require secure DEV database route
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          export PGCONNECT_TIMEOUT=15
+
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+
+          conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
+          grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
+
+          binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 \
+            -c "select current_database()||'|'||current_user||'|'||coalesce((select ssl::text from pg_stat_ssl where pid=pg_backend_pid()),'false');")"
+          IFS='|' read -r db role ssl <<<"$binding"
+          test "$db" = "postgres"
+          case "$role" in postgres|supabase_admin) ;; *) echo "::error::unexpected role"; exit 1;; esac
+          test "$ssl" = "true"
+
+      - name: Build rollback-only SQL from exact migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/historical-blend-uat
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path("supabase/migrations/20260922151516_historical_actuals_period_certification.sql"),
+              Path("supabase/migrations/20260922151518_dashboard_historical_blend_v2.sql"),
+          ]
+          out = []
+          for path in paths:
+              text = path.read_text()
+              lines = text.splitlines()
+              if lines[0].strip().lower() != "begin;" or lines[-1].strip().lower() != "commit;":
+                  raise SystemExit(f"unexpected transaction wrapper in {path}")
+              inner = "\n".join(lines[1:-1]).strip() + "\n"
+              if "\nbegin;" in "\n" + inner.lower() or "\ncommit;" in "\n" + inner.lower():
+                  raise SystemExit(f"nested transaction marker in {path}")
+              out.append(f"-- SOURCE {path}\n{inner}")
+          Path("/tmp/historical-blend-uat/migrations-inner.sql").write_text("\n".join(out))
+          PY
+
+          cat > /tmp/historical-blend-uat/uat.sql <<'SQL'
+          \set ON_ERROR_STOP on
+          begin;
+
+          \ir /tmp/historical-blend-uat/migrations-inner.sql
+
+          -- Select a real DEV identity already authorized for Operadora Dashboard.
+          select p.auth_user_id::text as auth_user_id
+          from public.profiles p
+          join public.profile_company_memberships pcm
+            on pcm.profile_id=p.id
+           and pcm.active
+           and pcm.company_id=:'TEST_COMPANY'::uuid
+          join public.user_roles ur on ur.profile_id=p.id
+          join public.roles r on r.id=ur.role_id
+          where p.active
+            and p.auth_user_id is not null
+            and r.name in (
+              'admin','superadmin','sysadmin','system_admin',
+              'finance','finanzas','treasury','tesoreria','administracion',
+              'approver_2','aprobador_2','direccion','director'
+            )
+          order by p.auth_user_id
+          limit 1
+          \gset
+
+          \if :{?auth_user_id}
+          \else
+            \quit 3
+          \endif
+
+          select set_config(
+            'request.jwt.claims',
+            jsonb_build_object('sub', :'auth_user_id', 'role', 'authenticated')::text,
+            true
+          );
+
+          set local role authenticated;
+
+          -- Fail-closed invariant: with zero certifications v2 must equal v1 financially.
+          create temp table qa_v1 as
+          select *
+          from jsonb_to_recordset(
+            public.dashboard_global_budget_report(:'TEST_COMPANY'::uuid, :'TEST_YEAR'::integer)
+          ) as x(
+            budget_category_id uuid,
+            budget_month date,
+            budgeted numeric,
+            committed numeric,
+            executed numeric,
+            available numeric,
+            paid_amount numeric,
+            non_budget_used numeric,
+            payroll_used numeric,
+            unconverted_count integer
+          );
+
+          create temp table qa_v2_before as
+          select
+            budget_category_id,budget_month,budgeted,committed,executed,available,
+            paid_amount,non_budget_used,payroll_used,unconverted_count
+          from jsonb_to_recordset(
+            public.dashboard_global_budget_report_v2(:'TEST_COMPANY'::uuid, :'TEST_YEAR'::integer)
+          ) as x(
+            budget_category_id uuid,
+            budget_month date,
+            classification text,
+            data_source text,
+            budgeted numeric,
+            committed numeric,
+            executed numeric,
+            available numeric,
+            paid_amount numeric,
+            non_budget_used numeric,
+            payroll_used numeric,
+            unconverted_count integer
+          );
+
+          do $$
+          begin
+            if exists (
+              (select * from qa_v1 except all select * from qa_v2_before)
+              union all
+              (select * from qa_v2_before except all select * from qa_v1)
+            ) then
+              raise exception 'UAT_FAIL_UNCERTIFIED_V2_DIFFERS_FROM_V1';
+            end if;
+          end;
+          $$;
+
+          reset role;
+
+          -- Certification exists only inside this transaction.
+          insert into public.historical_actuals_periods(
+            company_id, period_month, status, certified_at, source_ref, note
+          ) values (
+            :'TEST_COMPANY'::uuid,
+            :'CERTIFIED_MONTH'::date,
+            'certified',
+            now(),
+            'uat:rollback-only',
+            'Temporary certification for dashboard blend UAT; transaction is rolled back.'
+          );
+
+          create temp table qa_expected_history as
+          select classification,budget_category_id,historical_executed
+          from private.dashboard_historical_spend_v2
+          where company_id=:'TEST_COMPANY'::uuid
+            and period_month=:'CERTIFIED_MONTH'::date;
+
+          do $$
+          begin
+            if coalesce((select sum(historical_executed) from qa_expected_history),0) <= 0 then
+              raise exception 'UAT_FAIL_NO_HISTORICAL_SPEND';
+            end if;
+          end;
+          $$;
+
+          set local role authenticated;
+
+          create temp table qa_v2_after as
+          select *
+          from jsonb_to_recordset(
+            public.dashboard_global_budget_report_v2(:'TEST_COMPANY'::uuid, :'TEST_YEAR'::integer)
+          ) as x(
+            budget_category_id uuid,
+            budget_month date,
+            classification text,
+            data_source text,
+            budgeted numeric,
+            committed numeric,
+            executed numeric,
+            available numeric,
+            paid_amount numeric,
+            non_budget_used numeric,
+            payroll_used numeric,
+            unconverted_count integer
+          );
+
+          do $$
+          declare
+            expected_total numeric;
+            actual_committed numeric;
+            actual_executed numeric;
+          begin
+            select round(coalesce(sum(historical_executed),0),2)
+              into expected_total from qa_expected_history;
+            select round(coalesce(sum(committed),0),2),
+                   round(coalesce(sum(executed),0),2)
+              into actual_committed, actual_executed
+            from qa_v2_after
+            where budget_month=:'CERTIFIED_MONTH'::date;
+
+            if exists (
+              select 1 from qa_v2_after
+              where budget_month=:'CERTIFIED_MONTH'::date
+                and data_source <> 'historical'
+            ) then raise exception 'UAT_FAIL_CERTIFIED_MONTH_HAS_FLUX'; end if;
+
+            if actual_committed <> expected_total or actual_executed <> expected_total then
+              raise exception 'UAT_FAIL_HISTORICAL_TOTAL expected %, committed %, executed %',
+                expected_total, actual_committed, actual_executed;
+            end if;
+
+            if exists (
+              select 1 from qa_v2_after
+              where budget_month=:'CERTIFIED_MONTH'::date
+                and (
+                  coalesce(paid_amount,0) <> 0
+                  or coalesce(non_budget_used,0) <> 0
+                  or coalesce(payroll_used,0) <> 0
+                  or coalesce(unconverted_count,0) <> 0
+                )
+            ) then raise exception 'UAT_FAIL_HISTORICAL_INVENTS_FLUX_BREAKDOWNS'; end if;
+
+            if exists (
+              (select budget_category_id,budget_month,budgeted,committed,executed,available,
+                      paid_amount,non_budget_used,payroll_used,unconverted_count
+               from qa_v2_after where budget_month=:'CONTROL_MONTH'::date
+               except all
+               select * from qa_v1 where budget_month=:'CONTROL_MONTH'::date)
+              union all
+              (select * from qa_v1 where budget_month=:'CONTROL_MONTH'::date
+               except all
+               select budget_category_id,budget_month,budgeted,committed,executed,available,
+                      paid_amount,non_budget_used,payroll_used,unconverted_count
+               from qa_v2_after where budget_month=:'CONTROL_MONTH'::date)
+            ) then raise exception 'UAT_FAIL_CONTROL_MONTH_CHANGED'; end if;
+
+            if exists (
+              select 1 from qa_v2_after
+              where budget_month=:'CONTROL_MONTH'::date
+                and data_source <> 'flux'
+            ) then raise exception 'UAT_FAIL_CONTROL_MONTH_NOT_FLUX'; end if;
+
+            if exists (
+              (select classification,budget_category_id,round(historical_executed,2)
+               from qa_expected_history
+               except all
+               select classification,budget_category_id,round(executed,2)
+               from qa_v2_after
+               where budget_month=:'CERTIFIED_MONTH'::date and budgeted=0)
+              union all
+              (select classification,budget_category_id,round(executed,2)
+               from qa_v2_after
+               where budget_month=:'CERTIFIED_MONTH'::date and budgeted=0
+               except all
+               select classification,budget_category_id,round(historical_executed,2)
+               from qa_expected_history)
+            ) then raise exception 'UAT_FAIL_CLASSIFICATION_RECONCILIATION'; end if;
+          end;
+          $$;
+
+          reset role;
+
+          select jsonb_build_object(
+            'result','DASHBOARD_HISTORICAL_BLEND_V2_ROLLBACK_UAT_PASS',
+            'certified_month', :'CERTIFIED_MONTH',
+            'control_month', :'CONTROL_MONTH',
+            'historical_total', (
+              select round(sum(historical_executed),2) from qa_expected_history
+            ),
+            'historical_buckets', (
+              select jsonb_agg(
+                jsonb_build_object(
+                  'classification',classification,
+                  'amount',round(sum(historical_executed),2)
+                )
+                order by classification
+              )
+              from qa_expected_history
+              group by true
+            ),
+            'v1_certified_month_committed', (
+              select round(sum(committed),2) from qa_v1
+              where budget_month=:'CERTIFIED_MONTH'::date
+            ),
+            'v2_certified_month_committed', (
+              select round(sum(committed),2) from qa_v2_after
+              where budget_month=:'CERTIFIED_MONTH'::date
+            )
+          ) as evidence;
+
+          rollback;
+
+          -- Rollback proof: none of the candidate objects/data may remain.
+          do $$
+          begin
+            if to_regclass('public.historical_actuals_periods') is not null
+              or to_regclass('private.dashboard_historical_spend_v2') is not null
+              or to_regprocedure('public.dashboard_global_budget_report_v2(uuid,integer)') is not null
+              or to_regprocedure('private.dashboard_global_budget_report_v2(uuid,integer)') is not null
+            then
+              raise exception 'UAT_FAIL_ROLLBACK_LEFT_OBJECTS';
+            end if;
+          end;
+          $$;
+
+          select jsonb_build_object(
+            'rollback', 'PASS',
+            'periods_table_absent', to_regclass('public.historical_actuals_periods') is null,
+            'historical_view_absent', to_regclass('private.dashboard_historical_spend_v2') is null,
+            'public_v2_absent', to_regprocedure('public.dashboard_global_budget_report_v2(uuid,integer)') is null,
+            'private_v2_absent', to_regprocedure('private.dashboard_global_budget_report_v2(uuid,integer)') is null
+          ) as rollback_evidence;
+          SQL
+
+      - name: Execute rollback-only UAT against DEV
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          export PGCONNECT_TIMEOUT=15
+          export PGOPTIONS="-c statement_timeout=90000 -c lock_timeout=5000"
+
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set VERBOSITY=terse \
+            --set TEST_COMPANY="$TEST_COMPANY" \
+            --set TEST_YEAR="$TEST_YEAR" \
+            --set CERTIFIED_MONTH="$CERTIFIED_MONTH" \
+            --set CONTROL_MONTH="$CONTROL_MONTH" \
+            --file /tmp/historical-blend-uat/uat.sql \
+            | tee /tmp/historical-blend-uat/uat-output.txt
+
+          grep -F 'DASHBOARD_HISTORICAL_BLEND_V2_ROLLBACK_UAT_PASS' /tmp/historical-blend-uat/uat-output.txt
+          grep -F '"rollback" : "PASS"' /tmp/historical-blend-uat/uat-output.txt || \
+            grep -F '"rollback":"PASS"' /tmp/historical-blend-uat/uat-output.txt
