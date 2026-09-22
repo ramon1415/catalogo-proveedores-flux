@@ -1,0 +1,93 @@
+name: Dashboard historical blend v2 DEV migration dry-run
+
+on:
+  push:
+    branches:
+      - ops/dashboard-historical-blend-v2-dev-deploy
+    paths:
+      - .github/workflows/dashboard-historical-blend-v2-dev-deploy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-historical-blend-v2-dev-deploy
+  cancel-in-progress: false
+
+env:
+  DEV_PROJECT_REF: scsirgbuqjcwoaxfacth
+  EXPECTED_DEV_SHA: 297900b5d3191f4bd2bd24735e14da6188208b97
+
+jobs:
+  dry-run:
+    name: Verify exact pending DEV migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - name: Checkout exact ops branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard DEV tip and candidate files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ramon1415/catalogo-proveedores-flux"
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_SHA"
+          git merge-base --is-ancestor "$EXPECTED_DEV_SHA" HEAD
+
+          test -f supabase/migrations/20260922151516_historical_actuals_period_certification.sql
+          test -f supabase/migrations/20260922151518_dashboard_historical_blend_v2.sql
+
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+
+      - name: Require secure DEV route
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          export PGCONNECT_TIMEOUT=15
+
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+
+          conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
+          grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
+
+          binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 \
+            -c "select current_database()||'|'||current_user;")"
+          IFS='|' read -r db role <<<"$binding"
+          test "$db" = "postgres"
+          case "$role" in postgres|supabase_admin) ;; *) echo "::error::unexpected DEV DB role"; exit 1;; esac
+
+      - name: List remote migration history
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          supabase migration list --db-url "$SUPABASE_DEV_DB_URL" | tee /tmp/migration-list.txt
+
+      - name: Dry-run pending migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          supabase db push --db-url "$SUPABASE_DEV_DB_URL" --dry-run |& tee /tmp/db-push-dry-run.txt
