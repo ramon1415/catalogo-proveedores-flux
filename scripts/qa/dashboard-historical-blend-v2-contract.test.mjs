@@ -37,9 +37,9 @@ test('certified month replaces Flux and payroll obligations instead of adding to
 test('v2 is isolated from transactional budget controls and v1', () => {
   assert.match(blend, /private\.dashboard_global_budget_report_v2/)
   assert.match(blend, /public\.dashboard_global_budget_report_v2/)
-  assert.doesNotMatch(blend, /budget_availability/)
-  assert.doesNotMatch(blend, /create or replace function public\.dashboard_global_budget_report\s*\(/)
-  assert.doesNotMatch(blend, /create or replace function private\.dashboard_global_budget_report\s*\(/)
+  assert.doesNotMatch(blendSql, /budget_availability/)
+  assert.doesNotMatch(blendSql, /create or replace function public\.dashboard_global_budget_report\s*\(/)
+  assert.doesNotMatch(blendSql, /create or replace function private\.dashboard_global_budget_report\s*\(/)
   assert.match(blend, /dashboard_assert_access\(\)/)
   assert.match(blend, /company_access_required/)
 })
