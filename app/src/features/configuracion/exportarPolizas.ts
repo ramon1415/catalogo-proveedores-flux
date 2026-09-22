@@ -286,7 +286,11 @@ export function generarExport(
 //     ABONO  proveedor por pagar (201012xx) por el BRUTO  ← proveedor[businessId].cuenta
 //   Pago (egreso, tipoPol 2, fecha = fecha de pago):
 //     CARGO  proveedor por pagar (mismo bruto)
+//     CARGO  IVA acreditable PAGADO (11801…)   ← traspaso por flujo (si hay IVA)
 //     ABONO  banco (mismo bruto)
+//     ABONO  IVA acreditable PENDIENTE (11901…) ← traspaso por flujo (si hay IVA)
+//   (el traspaso IVA pendiente→pagado se reconoce EN CADA PAGO, verificado en
+//    pólizas reales jul/ago 2026; sin IVA el pago es sólo proveedor→banco.)
 //
 // DECISIÓN (fiel a los datos reales): una factura CON retención
 // (honorarios / persona física) NO se parte en dos — se mantiene en
@@ -431,13 +435,25 @@ function planProvisionYPago(
   asientosProvision.push(mk(prov?.cuenta, 'abono', brutoCent))
 
   // ── Pago (egreso) ──
+  // Verificado en pólizas reales de Operadora jul/ago 2026: además de
+  // proveedor→banco, el pago mueve el IVA de "acreditable pendiente/por
+  // acreditar" (11901…, impuesto.ivaAcreditablePendiente) a "acreditable
+  // pagado" (11801…, impuesto.ivaAcreditablePagado). El traspaso por flujo se
+  // reconoce EN CADA PAGO (no mensual). Sin IVA, el pago es sólo proveedor→banco.
   const cuentaOrigenId = (contrato.efectivo as { cuentaOrigenId?: unknown } | undefined)?.cuentaOrigenId
   const cuentaBanco = mapeoRow.banco?.[String(cuentaOrigenId)]
   if (!cuentaBanco) faltantes.push(`banco:${String(cuentaOrigenId)}`)
-  const asientosPago: Asiento[] = [
-    mk(prov?.cuenta, 'cargo', brutoCent),
-    mk(cuentaBanco, 'abono', brutoCent),
-  ]
+  const asientosPago: Asiento[] = [mk(prov?.cuenta, 'cargo', brutoCent)]
+  if (imp.ivaTrasladoCent > 0) {
+    const cuentaIvaPagado = mapeoRow.impuesto?.ivaAcreditablePagado
+    if (!cuentaIvaPagado) faltantes.push('impuesto:ivaAcreditablePagado')
+    asientosPago.push(mk(cuentaIvaPagado, 'cargo', imp.ivaTrasladoCent))
+  }
+  asientosPago.push(mk(cuentaBanco, 'abono', brutoCent))
+  if (imp.ivaTrasladoCent > 0) {
+    // ivaAcreditablePendiente ya se validó como faltante en la provisión.
+    asientosPago.push(mk(mapeoRow.impuesto?.ivaAcreditablePendiente, 'abono', imp.ivaTrasladoCent))
+  }
 
   if (faltantes.length > 0) return { polizas: null, faltantes, error: null }
 

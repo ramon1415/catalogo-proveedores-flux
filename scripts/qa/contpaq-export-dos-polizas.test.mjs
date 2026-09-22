@@ -150,20 +150,28 @@ test('factura SIN retención → dos pólizas (provisión + pago), ambas cuadran
   assert.equal(cP.cargos, cP.abonos, 'provisión cuadra en centavos (tolerancia 0)')
   assert.equal(cP.cargos, centavos(BRUTO))
 
-  // Pago: egreso, fecha de PAGO, proveedor(bruto) → banco(bruto).
+  // Pago: egreso, fecha de PAGO. proveedor(bruto)→banco(bruto) + traspaso de IVA
+  // pendiente→pagado (11901→11801) por el IVA, verificado en pólizas reales jul/ago.
   assert.equal(pago.tipo, 'egreso')
   assert.equal(pago.kind, 'pago')
   assert.equal(pago.fecha, '2026-06-20', 'pago se fecha con la fecha de pago')
-  assert.equal(pago.asientos.length, 2)
+  assert.equal(pago.asientos.length, 4, 'proveedor→banco + traspaso IVA (2 asientos)')
   const cargoProvPago = pago.asientos.find((a) => a.cuenta === CTA.proveedor)
   assert.ok(cargoProvPago && cargoProvPago.tipoMovto === 'cargo', 'proveedor por pagar en cargo')
   assert.equal(centavos(cargoProvPago.importe), centavos(BRUTO))
   const abonoBanco = pago.asientos.find((a) => a.cuenta === CTA.banco)
   assert.ok(abonoBanco && abonoBanco.tipoMovto === 'abono', 'banco en abono')
   assert.equal(centavos(abonoBanco.importe), centavos(BRUTO))
+  // Traspaso de IVA por flujo (en cada pago): cargo IVA pagado, abono IVA pendiente.
+  const cargoIvaPagado = pago.asientos.find((a) => a.cuenta === CTA.ivaPagado && a.tipoMovto === 'cargo')
+  assert.ok(cargoIvaPagado, 'IVA acreditable pagado en cargo (traspaso)')
+  assert.equal(centavos(cargoIvaPagado.importe), centavos(IVA), 'traspaso = IVA trasladado')
+  const abonoIvaPend = pago.asientos.find((a) => a.cuenta === CTA.ivaPendiente && a.tipoMovto === 'abono')
+  assert.ok(abonoIvaPend, 'IVA acreditable pendiente en abono (traspaso)')
+  assert.equal(centavos(abonoIvaPend.importe), centavos(IVA))
   const cPago = cuadre(pago.asientos)
   assert.equal(cPago.cargos, cPago.abonos, 'pago cuadra en centavos (tolerancia 0)')
-  assert.equal(cPago.cargos, centavos(BRUTO))
+  assert.equal(cPago.cargos, centavos(BRUTO) + centavos(IVA), 'cargos = bruto + IVA (por el traspaso)')
 })
 
 // ── 2. SIN retención → generarExportDosPolizas emite 2 pólizas al ledger ──
