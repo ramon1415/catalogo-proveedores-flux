@@ -84,10 +84,14 @@ export async function fetchBudgetAvailability(
   companyId: string,
   year: number,
 ): Promise<{ rows: BudgetAvailabilityRow[]; categories: Map<string, BudgetCategoryMeta> }> {
-  const [report, catRes] = await Promise.all([
-    supabase.rpc('dashboard_global_budget_report', { p_company_id: companyId, p_year: year }),
-    supabase.from('budget_categories').select('id,name,category').limit(2000),
-  ])
+  // Transición fail-safe: usa v2 (histórico certificado por mes) cuando ya
+  // está desplegado. Solo una función inexistente cae al v1; cualquier otro
+  // error del v2 se muestra y no se oculta con un fallback.
+  let report = await supabase.rpc('dashboard_global_budget_report_v2', { p_company_id: companyId, p_year: year })
+  if (report.error && ['PGRST202', '42883'].includes(String(report.error.code || ''))) {
+    report = await supabase.rpc('dashboard_global_budget_report', { p_company_id: companyId, p_year: year })
+  }
+  const catRes = await supabase.from('budget_categories').select('id,name,category').limit(2000)
   if (report.error) throw report.error
   if (catRes.error) throw catRes.error
   const rows = (report.data ?? []) as BudgetAvailabilityRow[]
