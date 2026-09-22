@@ -330,9 +330,18 @@ async function mountPage({ fetchBudget, fetchRequests, fetchActivity, pathname =
 test('actual page renders canonical budget split and neutral fiscal labels', async () => {
   const p = await mountPage()
   try {
-    assert.match(p.section('sec-budget'), /Pendiente de pago\$200/)
-    assert.match(p.section('sec-budget'), /Disponible\$300/)
+    // El desglose canónico global conserva el monto comprometido/pendiente ($200) y el saldo ($300),
+    // ahora con las etiquetas de la tabla compacta: "Comprometido por pagar" y "Saldo restante".
+    assert.match(p.section('sec-budget'), /Comprometido por pagar\$200/)
+    assert.match(p.section('sec-budget'), /Saldo restante\$300/)
     assert.doesNotMatch(p.section('sec-budget'), /Sobregirado ·/)
+    // Por partida, el pendiente de pago ($200) y el disponible ($300) se muestran SOLO al expandir la
+    // fila (rediseño compacto). Se expande y se sigue verificando el dato, no se elimina la aserción.
+    await act(async () => {
+      p.renderer.root.findAll(node => typeof node.props?.className === 'string' && node.props.className.split(' ')[0] === 'budgetTr')[0].props.onClick()
+    })
+    assert.match(p.section('sec-budget'), /pendiente de pago\$200/)
+    assert.match(p.section('sec-budget'), /Disponible\$300/)
     assert.match(p.section('sec-taxes'), /IVA registrado/)
     assert.match(p.section('sec-taxes'), /Retenciones registradas/)
     assert.doesNotMatch(p.section('sec-taxes'), /acreditable|por enterar|tax_amount|withholding_amount/)
@@ -362,22 +371,51 @@ test('unallocated categories remain in global consumption but never appear as ca
   assert.equal(result.partidas[0].categoryId, 'qa')
   const p = await mountPage({ fetchBudget: async () => ({ rows, categories }) })
   try {
+    const dataRow = (name) => p.renderer.root.findAll(node => typeof node.props?.className === 'string' && node.props.className.split(' ')[0] === 'budgetTr' && text(node).includes(name))[0]
+    const over = dataRow('Servicios QA')
+    const unallocated = dataRow('Sin partida')
+    // Sobregiro real: la tabla compacta lo marca con la flecha ↑ + el % USADO total (112.9%, no el
+    // excedente 12.9%) y el estado sobregirado (clase de tono "alert"), no con el texto "por encima".
+    assert.match(text(over), /↑ 112\.9%/)
+    assert.ok(over.props.className.includes('alert'))
+    // "Sin partida" (sin asignar) nunca cuenta como sobregiro de partida: se muestra como "s/p" en la
+    // columna de % y no lleva ningún indicador de exceso (flecha, "Sobregirado", disponible negativo).
+    assert.match(text(unallocated), /s\/p/)
+    assert.doesNotMatch(text(unallocated), /Sobregirado|Disponible|%|↑|-\$300/)
+    assert.equal(unallocated.findAll(node => node.props?.role === 'img').length, 0)
+    // Al expandir, el detalle confirma el excedente real ($129) y que el gasto sin presupuesto consume
+    // el saldo global pero "no genera sobregiro de partida".
+    for (const name of ['Servicios QA', 'Sin partida']) {
+      await act(async () => { dataRow(name).props.onClick() })
+    }
     const section = p.section('sec-budget')
-    assert.match(section, /12\.9% por encima/)
-    assert.doesNotMatch(section, /112\.9%/)
     assert.match(section, /Excedente\$129/)
-    const unallocated = p.renderer.root.findAll(node => node.props.className === 'budgetRow unbudgeted')[0]
-    assert.match(text(unallocated), /Sin presupuesto asignado/)
-    assert.doesNotMatch(text(unallocated), /Sobregirado|Disponible|%|-\$300/)
-    assert.equal(unallocated.findAll(node => node.props.role === 'img').length, 0)
+    assert.match(section, /no genera sobregiro de partida/)
     assert.match(text(p.renderer.toJSON()), /1partida sobregirada/)
   } finally { p.unmount() }
 })
 
 test('budget delta handles small overruns and exact budget without a false zero-percent overrun', async () => {
-  for (const [used, label] of [[1039, '3.9% por encima'], [1000.01, '<0.1% por encima'], [1000, '100.0% utilizado']]) {
+  // La tabla compacta expresa el % como % USADO total. Un sobregiro (aun mínimo, 100.001%) debe
+  // marcarse como sobregirado (flecha ↑ + estado "alert"); el gasto EXACTO al 100% no debe marcarse
+  // como sobregiro falso (sin flecha, sin estado alert), mostrando "100.0%" pero no un exceso.
+  for (const { used, pctLabel, over } of [
+    { used: 1039, pctLabel: '103.9%', over: true },
+    { used: 1000.01, pctLabel: '100.0%', over: true },
+    { used: 1000, pctLabel: '100.0%', over: false },
+  ]) {
     const p = await mountPage({ fetchBudget: async () => ({ rows: [budgetRow({ budgeted: 1000, committed: used, executed: used, available: 1000-used })], categories }) })
-    try { assert.ok(p.section('sec-budget').includes(label)) } finally { p.unmount() }
+    try {
+      const row = p.renderer.root.findAll(node => typeof node.props?.className === 'string' && node.props.className.split(' ')[0] === 'budgetTr')[0]
+      assert.ok(text(row).includes(pctLabel))
+      if (over) {
+        assert.match(text(row), new RegExp(`↑ ${pctLabel.replace('.', '\\.')}`))
+        assert.ok(row.props.className.includes('alert'))
+      } else {
+        assert.doesNotMatch(text(row), /↑/)
+        assert.ok(!row.props.className.includes('alert'))
+      }
+    } finally { p.unmount() }
   }
 })
 

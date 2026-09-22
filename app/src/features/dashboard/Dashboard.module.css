@@ -193,10 +193,12 @@
 .summaryRow { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.012); font-size: 12.5px; }
 .summaryRow span { color: var(--text-3); }
 .summaryRow strong { font-variant-numeric: tabular-nums; color: var(--text-1); }
-.miniGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
-.miniCard { border: 1px solid var(--border); border-radius: 10px; background: rgba(255,255,255,.012); padding: 11px 12px; }
-.miniCard span { display: block; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .55px; font-weight: 800; }
-.miniCard strong { display: block; margin-top: 4px; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--text-1); }
+/* Tile compacto compartido: Presupuesto global, Solicitudes (embudo) y Efectivo/comprobaciones
+   comparten esta densidad para eliminar el espacio en blanco de números chicos. */
+.miniGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 8px 14px; }
+.miniCard { border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.012); padding: 6px 9px; }
+.miniCard span { display: block; color: var(--text-3); font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; font-weight: 800; }
+.miniCard strong { display: block; margin-top: 1px; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--text-1); }
 
 .closureCard { display: flex; flex-direction: column; }
 .closureChecks { border-top: 1px solid var(--border); padding: 10px 14px 4px; }
@@ -296,6 +298,55 @@
 .budgetLegend { display: flex; flex-wrap: wrap; gap: 14px; }
 .budgetLegend .chartLegendItem { font-size: 11px; color: var(--text-3); }
 
+/* ── Tabla compacta de partidas ─────────────────────────────────────────────── */
+.budgetTableWrap { padding: 6px 8px 12px; overflow-x: auto; }
+.budgetTable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.budgetTable thead th {
+  position: sticky; top: 0; text-align: right; padding: 8px 10px; white-space: nowrap;
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--text-3); border-bottom: 1px solid var(--border); background: var(--bg-card);
+}
+.budgetTable thead th:first-child { text-align: left; }
+.budgetNum { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.budgetTr { cursor: pointer; border-bottom: 1px solid var(--border); }
+.budgetTr:hover { background: var(--bg-hover); }
+.budgetTr td, .budgetTr > th { padding: 9px 10px; color: var(--text-2); vertical-align: middle; }
+.budgetTr.alert { box-shadow: inset 3px 0 0 var(--ruby); }
+.budgetTr.warn { box-shadow: inset 3px 0 0 var(--amber); }
+.budgetTr.unbudgeted { box-shadow: inset 3px 0 0 var(--budget-info); }
+.budgetNameCell { text-align: left; font-weight: 400; }
+.budgetNameCell { display: flex; align-items: baseline; gap: 7px; }
+.budgetNameInner { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; min-width: 0; flex: 1; }
+.budgetNameInner .budgetPartida { font-size: 12.5px; }
+.budgetNameInner .budgetGroup { margin-left: 0; }
+.budgetMiniBar { flex: 1 0 100%; height: 4px; margin-top: 5px; border-radius: 3px; background: var(--border); overflow: hidden; max-width: 240px; }
+.budgetMiniFill { display: block; height: 100%; border-radius: 3px; }
+.budgetMiniFill.barOk { background: var(--emerald); }
+.budgetMiniFill.barWarn { background: var(--amber); }
+.budgetMiniFill.barAlert { background: var(--ruby); }
+.budgetMiniFill.barInfo { background: var(--budget-info); }
+.budgetPctCell { font-weight: 700; color: var(--text-1); }
+.budgetPctCell.alert { color: var(--budget-over); }
+.budgetPctCell.warn { color: var(--amber); }
+.budgetPctCell.unbudgeted { color: var(--budget-info); }
+.alertText { color: var(--budget-over); }
+.budgetMuted { color: var(--text-3); }
+.budgetCaret, .budgetCaretOpen { display: inline-block; color: var(--text-3); font-size: 10px; transition: transform .12s ease; }
+.budgetCaretOpen { transform: rotate(90deg); }
+.budgetToggleRow td { padding: 0; }
+.budgetToggleBtn {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 10px 10px;
+  background: transparent; border: none; border-bottom: 1px solid var(--border);
+  color: var(--text-2); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; text-align: left;
+}
+.budgetToggleBtn:hover { background: var(--bg-hover); color: var(--text-1); }
+.budgetDetailRow td { padding: 0; background: var(--bg-hover); border-bottom: 1px solid var(--border); }
+.budgetDetail { display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 10px 14px 12px 30px; font-size: 11.5px; }
+.budgetDetail span { color: var(--text-2); }
+.budgetDetail strong { color: var(--text-1); font-weight: 700; font-variant-numeric: tabular-nums; margin-left: 5px; }
+.budgetDetailNote { flex: 1 0 100%; color: var(--text-3); margin-left: 0; }
+.budgetTableMsg { text-align: center; color: var(--text-3); padding: 14px; font-size: 12px; }
+
 /* ── Fila de alertas / estado del mes ──────────────────────────────────────── */
 .alertsRow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .alertCard {
@@ -318,14 +369,15 @@
 .chartEmpty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 13px; }
 
 /* ── Solicitudes: embudo + alertas ─────────────────────────────────────────── */
-.funnelRow { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+/* Mismo criterio de densidad compacta que .miniCard (tile compartido). */
+.funnelRow { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; }
 .funnelStage {
-  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 11px;
-  background: rgba(255,255,255,.012); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px;
+  position: relative; flex: 1 1 120px; min-width: 120px; border: 1px solid var(--border); border-radius: 9px;
+  background: rgba(255,255,255,.012); padding: 6px 11px; display: flex; flex-direction: column; gap: 2px;
 }
 .funnelStage.paid { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); background: color-mix(in srgb, var(--emerald) 7%, transparent); }
-.funnelLabel { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
-.funnelCount { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.funnelLabel { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-3); }
+.funnelCount { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-1); }
 .funnelStage.paid .funnelCount { color: var(--emerald); }
 .funnelAmount { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .funnelArrow { position: absolute; right: -10px; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--text-3); font-size: 13px; }
@@ -377,4 +429,8 @@
   .miniCard, .summaryRow { min-width: 0; }
   .miniCard strong { overflow-wrap: anywhere; }
   .checkLink { flex-shrink: 1; }
+  /* En móvil se oculta Presupuestado; queda al expandir la fila. */
+  .budgetTable thead th:nth-child(2), .budgetTr td:nth-child(2) { display: none; }
+  .budgetTable { font-size: 12px; }
+  .budgetTr td, .budgetTr > th { padding: 9px 6px; }
 }
