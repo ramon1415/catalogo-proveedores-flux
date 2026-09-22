@@ -262,13 +262,13 @@ jobs:
 
           grant select on qa_expected_history to authenticated;
 
-          do $
+          do $uat$
           begin
             if coalesce((select sum(historical_executed) from qa_expected_history),0) <= 0 then
               raise exception 'UAT_FAIL_NO_HISTORICAL_SPEND';
             end if;
           end;
-          $$;
+          $uat$;
 
           set local role authenticated;
 
