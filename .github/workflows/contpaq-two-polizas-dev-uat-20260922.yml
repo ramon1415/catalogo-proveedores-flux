@@ -1,0 +1,225 @@
+name: CONTPAQ two-polizas DEV isolated UAT
+
+on:
+  push:
+    branches:
+      - ops/contpaq-two-polizas-dev-uat-20260922
+    paths:
+      - .github/workflows/contpaq-two-polizas-dev-uat-20260922.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contpaq-two-polizas-dev-uat-20260922
+  cancel-in-progress: false
+
+env:
+  EXPECTED_DEV_SHA: eb82588a7ec3feaa861238589075c8b304e2684a
+  COMPANY_ID: 9680353c-9b86-4730-82e1-fce664f048a2
+  BUDGET_CATEGORY_ID: 4d2e8df2-bf12-432b-99f8-ed6dca91dfe6
+  EXPENSE_ACCOUNT: "60201007000"
+  PROVIDER_ACCOUNT: "20101200000"
+  BANK_ACCOUNT: "10201100000"
+
+jobs:
+  uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard exact DEV code
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_SHA"
+          git merge-base --is-ancestor "$EXPECTED_DEV_SHA" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_DEV_SHA" HEAD)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/contpaq-two-polizas-dev-uat-20260922.yml"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+
+      - name: Install locked app dependencies
+        run: npm --prefix app ci
+
+      - name: Read and validate real Operadora accounting mappings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<SQL > /tmp/contpaq-uat.json
+          select jsonb_build_object(
+            'company_id','$COMPANY_ID',
+            'budget_category_id','$BUDGET_CATEGORY_ID',
+            'expense_account',(select code from public.contpaq_accounts where company_id='$COMPANY_ID'::uuid and code='$EXPENSE_ACCOUNT' and activo and is_detail),
+            'provider_account',(select code from public.contpaq_accounts where company_id='$COMPANY_ID'::uuid and code='$PROVIDER_ACCOUNT' and activo and is_detail),
+            'bank_account',(select code from public.contpaq_accounts where company_id='$COMPANY_ID'::uuid and code='$BANK_ACCOUNT' and activo and is_detail),
+            'iva_pendiente',(select contpaq_account_code from public.tax_account_mappings where company_id='$COMPANY_ID'::uuid and tax_key='ivaPendiente' and not needs_review),
+            'iva_pagado',(select contpaq_account_code from public.tax_account_mappings where company_id='$COMPANY_ID'::uuid and tax_key='ivaAcreditablePagado' and not needs_review),
+            'budget_mapping_ok',exists(select 1 from public.budget_account_mappings where company_id='$COMPANY_ID'::uuid and budget_category_id='$BUDGET_CATEGORY_ID'::uuid and contpaq_account_code='$EXPENSE_ACCOUNT' and not needs_review),
+            'ledger_before',(select count(*) from public.accounting_exports where company_id='$COMPANY_ID'::uuid)
+          );
+          SQL
+          cat /tmp/contpaq-uat.json
+          jq -e '
+            .expense_account == "60201007000"
+            and .provider_account == "20101200000"
+            and .bank_account == "10201100000"
+            and .iva_pendiente == "11901100000"
+            and .iva_pagado == "11801100000"
+            and .budget_mapping_ok == true
+          ' /tmp/contpaq-uat.json >/dev/null
+
+      - name: Run isolated engine UAT with real DEV account codes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > scripts/qa/tmp-contpaq-two-polizas-dev-uat.test.mjs <<'JS'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          import test from 'node:test'
+
+          import {
+            procesarPagosDosPolizas,
+            generarExportDosPolizas,
+          } from '../../app/src/features/configuracion/exportarPolizas.ts'
+          import { operadoraConfig } from '../../app/src/lib/contpaq/serializer/configs/operadora.js'
+
+          const real = JSON.parse(readFileSync('/tmp/contpaq-uat.json', 'utf8'))
+          const BASE = 80161
+          const IVA = 12825.76
+          const BRUTO = BASE + IVA
+          const requestId = 'uat-two-polizas-no-db-write'
+
+          const row = {
+            id: requestId,
+            company_id: real.company_id,
+            provider_id: 'uat-provider',
+            proveedor_id: 'uat-provider',
+            budget_category_id: real.budget_category_id,
+            cost_center_id: null,
+            company_bank_account_id: 'uat-bank',
+            amount_requested: BRUTO,
+            currency: 'MXN',
+            exchange_rate: 1,
+            concept: 'UAT aislado dos pólizas',
+            description: null,
+            request_number: 'UAT-2POL',
+            paid_at: '2026-06-20',
+            payment_method: 'transfer',
+            proveedores: {
+              rfc: 'AAA010101AAA',
+              nombre_completo: 'Proveedor UAT SA de CV',
+              persona_tipo: 'moral',
+            },
+            cfdi_data: {
+              uuid: 'UAT-SIN-RET-0001',
+              comprobante: {
+                subTotal: BASE,
+                total: BRUTO,
+                fecha: '2026-06-15',
+                serie: 'UAT',
+                folio: '1',
+              },
+              emisor: { rfc: 'AAA010101AAA', nombre: 'Proveedor UAT SA de CV' },
+              impuestos: {
+                traslados: [{ impuesto: '002', base: BASE, importe: IVA, tasaOCuota: 0.16 }],
+                retenciones: [],
+              },
+            },
+          }
+
+          const mapeo = {
+            partida: { [real.budget_category_id]: real.expense_account },
+            banco: { 'uat-bank': real.bank_account },
+            proveedor: {
+              'uat-provider': { cuenta: real.provider_account, idProveedor: 500 },
+            },
+            impuesto: {
+              ivaAcreditablePagado: real.iva_pagado,
+              ivaAcreditablePendiente: real.iva_pendiente,
+            },
+          }
+
+          const cent = n => Math.round(Number(n) * 100)
+          const cuadre = asientos => {
+            let cargos = 0
+            let abonos = 0
+            for (const a of asientos) {
+              if (a.tipoMovto === 'cargo') cargos += cent(a.importe)
+              else abonos += cent(a.importe)
+            }
+            return { cargos, abonos }
+          }
+
+          test('real DEV account codes produce faithful provision + payment', () => {
+            const res = procesarPagosDosPolizas([row], mapeo, operadoraConfig, new Set())
+            assert.equal(res.problemas.length, 0)
+            assert.equal(res.listos.length, 1)
+            assert.equal(res.listos[0].ruta, 'dos-polizas')
+            assert.equal(res.listos[0].polizas.length, 2)
+
+            const [provision, pago] = res.listos[0].polizas
+            assert.equal(provision.tipo, 'diario')
+            assert.equal(provision.kind, 'provision')
+            assert.equal(provision.fecha, '2026-06-15')
+            assert.ok(provision.asientos.some(a => a.cuenta === real.expense_account && a.tipoMovto === 'cargo'))
+            assert.ok(provision.asientos.some(a => a.cuenta === real.iva_pendiente && a.tipoMovto === 'cargo'))
+            assert.ok(provision.asientos.some(a => a.cuenta === real.provider_account && a.tipoMovto === 'abono'))
+            assert.deepEqual(cuadre(provision.asientos), { cargos: cent(BRUTO), abonos: cent(BRUTO) })
+
+            assert.equal(pago.tipo, 'egreso')
+            assert.equal(pago.kind, 'pago')
+            assert.equal(pago.fecha, '2026-06-20')
+            assert.ok(pago.asientos.some(a => a.cuenta === real.provider_account && a.tipoMovto === 'cargo'))
+            assert.ok(pago.asientos.some(a => a.cuenta === real.iva_pagado && a.tipoMovto === 'cargo'))
+            assert.ok(pago.asientos.some(a => a.cuenta === real.bank_account && a.tipoMovto === 'abono'))
+            assert.ok(pago.asientos.some(a => a.cuenta === real.iva_pendiente && a.tipoMovto === 'abono'))
+            const paymentBalance = cuadre(pago.asientos)
+            assert.equal(paymentBalance.cargos, paymentBalance.abonos)
+
+            const gen = generarExportDosPolizas(res.listos, operadoraConfig, '2026-06', {})
+            assert.equal(gen.ledgerRows.length, 2)
+            assert.deepEqual(gen.ledgerRows.map(x => x.source_kind), ['provision','pago'])
+            assert.deepEqual(gen.ledgerRows.map(x => x.tipo_pol), [3,2])
+            assert.deepEqual(gen.ledgerRows.map(x => x.folio), [1,1])
+            assert.ok(gen.filas.length > 0)
+          })
+          JS
+
+          node --test scripts/qa/tmp-contpaq-two-polizas-dev-uat.test.mjs
+          rm scripts/qa/tmp-contpaq-two-polizas-dev-uat.test.mjs
+
+      - name: Prove no ledger or request was written
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          before="$(jq -r '.ledger_before' /tmp/contpaq-uat.json)"
+          after="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 -c "select count(*) from public.accounting_exports where company_id='$COMPANY_ID'::uuid;")"
+          test "$before" = "$after"
+          requests="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 -c "select count(*) from public.payment_requests where id::text='uat-two-polizas-no-db-write';")"
+          test "$requests" = "0"
+          echo "CONTPAQ_TWO_POLIZAS_DEV_ISOLATED_UAT_PASS ledger_before=$before ledger_after=$after"
