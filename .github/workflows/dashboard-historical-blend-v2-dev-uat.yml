@@ -260,7 +260,9 @@ jobs:
           where company_id=:'TEST_COMPANY'::uuid
             and period_month=:'CERTIFIED_MONTH'::date;
 
-          do $$
+          grant select on qa_expected_history to authenticated;
+
+          do $
           begin
             if coalesce((select sum(historical_executed) from qa_expected_history),0) <= 0 then
               raise exception 'UAT_FAIL_NO_HISTORICAL_SPEND';
