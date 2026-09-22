@@ -81,7 +81,8 @@ jobs:
           conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
           grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
 
-          python3 - <<'PY' >> "$GITHUB_ENV"
+          DEV_DATABASE_ROUTE="$(
+            python3 - <<'PY'
           import os
           from urllib.parse import parse_qs, urlsplit
 
@@ -108,8 +109,11 @@ jobs:
               raise SystemExit("BLOCKED_UNEXPECTED_DATABASE_ROUTE")
           if route == "session_pooler" and project_ref not in username and project_ref not in os.environ["SUPABASE_DEV_DB_URL"]:
               raise SystemExit("BLOCKED_POOLER_PROJECT_REF_MISMATCH")
-          print(f"DEV_DATABASE_ROUTE={route}")
+          print(route)
           PY
+          )"
+          export DEV_DATABASE_ROUTE
+          echo "DEV_DATABASE_ROUTE=$DEV_DATABASE_ROUTE"
 
           binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 \
             -c "select current_database()||'|'||current_user||'|'||coalesce((select ssl::text from pg_stat_ssl where pid=pg_backend_pid()),'false');")"
