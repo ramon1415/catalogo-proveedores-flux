@@ -121,6 +121,7 @@ export function ExportarSection({
   useEffect(() => { setPreview(null); setError(null) }, [desde, hasta])
 
   function rangoMes(m: string): { inicio: string; fin: string } {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return { inicio: '', fin: '' }
     const [y, mm] = m.split('-').map(Number)
     const fin = mm === 12 ? `${y + 1}-01-01` : `${y}-${String(mm + 1).padStart(2, '0')}-01`
     return { inicio: `${m}-01`, fin }
@@ -128,6 +129,7 @@ export function ExportarSection({
 
   function ultimoDiaMes(m: string): string {
     const { fin } = rangoMes(m)
+    if (!fin) return ''
     return new Date(new Date(`${fin}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10)
   }
 
@@ -135,6 +137,10 @@ export function ExportarSection({
 
   async function previsualizar() {
     if (!companyId || !config) return
+    if (!mes) {
+      setError('Selecciona el mes contable antes de previsualizar.')
+      return
+    }
     setBusy('preview')
     setError(null)
     setEdits(new Map())
@@ -324,8 +330,8 @@ export function ExportarSection({
           <input
             type="date"
             value={desde}
-            min={`${mes}-01`}
-            max={hasta && hasta <= mesUltimoDia ? hasta : mesUltimoDia}
+            min={mes ? `${mes}-01` : undefined}
+            max={mesUltimoDia ? (hasta && hasta <= mesUltimoDia ? hasta : mesUltimoDia) : undefined}
             onChange={(e) => setDesde(e.target.value)}
             className={s.mapInput}
             style={{ width: 'auto' }}
@@ -336,8 +342,8 @@ export function ExportarSection({
           <input
             type="date"
             value={hasta}
-            min={desde || `${mes}-01`}
-            max={mesUltimoDia}
+            min={desde || (mes ? `${mes}-01` : undefined)}
+            max={mesUltimoDia || undefined}
             onChange={(e) => setHasta(e.target.value)}
             className={s.mapInput}
             style={{ width: 'auto' }}
@@ -345,7 +351,7 @@ export function ExportarSection({
             aria-label="Hasta (opcional)"
             title="Hasta (opcional) — vacío = fin del mes"
           />
-          <button type="button" className={s.secondaryBtn} onClick={previsualizar} disabled={busy !== null || !config}>
+          <button type="button" className={s.secondaryBtn} onClick={previsualizar} disabled={busy !== null || !config || !mes}>
             {busy === 'preview' ? 'Calculando...' : 'Previsualizar'}
           </button>
           <button type="button" className={s.primaryBtn} onClick={exportar} disabled={!puedeExportar}>
