@@ -191,6 +191,13 @@ test('SIN retención → export emite provisión (tipoPol 3) + pago (tipoPol 2) 
     'periodo contable del mes',
   )
   assert.ok(Array.isArray(gen.filas) && gen.filas.length > 0, 'renderLayout produce filas')
+  // B: archivos separados por tipo — diario (provisión) y pago (egreso).
+  assert.ok(Array.isArray(gen.filasDiario) && gen.filasDiario.length > 0, 'filasDiario no vacío')
+  assert.ok(Array.isArray(gen.filasPago) && gen.filasPago.length > 0, 'filasPago no vacío')
+  // Cada archivo separado es más corto que el combinado (la provisión y el pago
+  // no están juntos), pero mayor que solo la leyenda.
+  assert.ok(gen.filasDiario.length < gen.filas.length, 'diario es subconjunto del combinado')
+  assert.ok(gen.filasPago.length < gen.filas.length, 'pago es subconjunto del combinado')
 })
 
 // ── 3. CON retención → UNA póliza de egreso (egreso-directo intacto) ──────

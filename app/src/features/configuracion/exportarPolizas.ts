@@ -220,6 +220,11 @@ export function procesarPagos(
 export type ExportGenerado = {
   filas: unknown[][]
   ledgerRows: AccountingExportInsert[]
+  // Modo dos-pólizas: filas separadas por tipo de póliza, para descargar el
+  // layout de diario (provisiones) y el de pago (egresos) en archivos aparte.
+  // null cuando ese tipo no tiene pólizas en el lote. En egreso-directo van undefined.
+  filasDiario?: unknown[][] | null
+  filasPago?: unknown[][] | null
 }
 
 /**
@@ -604,7 +609,9 @@ export function generarExportDosPolizas(
   }
   const tipoPolDiario = diarioCfg.tipoPol
 
-  const polizas: PolizaConstruida[] = []
+  const polizas: PolizaConstruida[] = [] // todas, en orden original (provisión→pago por pago)
+  const polizasDiario: PolizaConstruida[] = [] // solo provisiones (para el archivo de diario)
+  const polizasPago: PolizaConstruida[] = [] // solo egresos (para el archivo de pago)
   const ledgerRows: AccountingExportInsert[] = []
   for (const p of listos) {
     for (const plan of p.polizas) {
@@ -618,6 +625,8 @@ export function generarExportDosPolizas(
       )
       const poliza = plan.fiscales ? armarPolizaFiscal(base, plan.fiscales) : base
       polizas.push(poliza)
+      if (plan.tipo === 'diario') polizasDiario.push(poliza)
+      else polizasPago.push(poliza)
 
       const registro = planRegistro(p.contrato, poliza, { hashFn: motor.sha256Sync, kind: plan.kind })
       ledgerRows.push({
@@ -635,7 +644,14 @@ export function generarExportDosPolizas(
     }
   }
 
-  return { filas: renderLayout(polizas, config), ledgerRows }
+  // renderLayout incluye la leyenda; cada archivo se renderiza sobre su propio
+  // subconjunto para que diario y pago sean layouts CONTPAQ independientes.
+  return {
+    filas: renderLayout(polizas, config),
+    filasDiario: polizasDiario.length ? renderLayout(polizasDiario, config) : null,
+    filasPago: polizasPago.length ? renderLayout(polizasPago, config) : null,
+    ledgerRows,
+  }
 }
 
 /** Escribe la matriz de renderLayout a un .xls (hoja 'Datos') y lo descarga. */
@@ -657,14 +673,14 @@ export function descargarXls(filas: unknown[][], nombreArchivo: string): void {
 }
 
 /** Nombre de archivo seguro: polizas_<empresa>_<YYYY-MM>.xls */
-export function nombreArchivoExport(empresaNombre: string, mes: string): string {
+export function nombreArchivoExport(empresaNombre: string, mes: string, sufijo = ''): string {
   const slug = empresaNombre
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return `polizas_${slug || 'empresa'}_${mes}.xls`
+  return `polizas_${slug || 'empresa'}_${mes}${sufijo}.xls`
 }
 
 // ── Agrupación de faltantes para la UI ──
