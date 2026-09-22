@@ -22,8 +22,13 @@ import {
   descargarXls,
   empresaConfigDe,
   generarExport,
+  generarExportDosPolizas,
   nombreArchivoExport,
   procesarPagos,
+  procesarPagosDosPolizas,
+  type ModoPoliza,
+  type PagoListo,
+  type PagoListoDos,
 } from './exportarPolizas'
 import {
   construirReview,
@@ -42,6 +47,7 @@ const TAX_LABELS: Record<string, string> = {
   ivaRetenidoAcreditable: 'IVA retenido acreditable',
   retIvaPasivo: 'Retención IVA (pasivo)',
   retIsrPasivo: 'Retención ISR (pasivo)',
+  ivaAcreditablePendiente: 'IVA acreditable pendiente (provisión)',
   ajusteRedondeo: 'Ajuste por redondeo',
   noDeducibles: 'No deducibles',
 }
@@ -91,6 +97,9 @@ export function ExportarSection({
 }: Props) {
   const { showToast } = useToast()
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
+  // Modo de póliza: egreso-directo (default, retrocompatible) o dos-pólizas
+  // (provisión + pago) para facturas sin retención. Ver exportarPolizas.ts.
+  const [modo, setModo] = useState<ModoPoliza>('egreso-directo')
   // Rango de días OPCIONAL dentro del mes (Denise, 21-sep: exportar por periodos
   // o semanas). Vacío = mes completo. El periodo contable (folio/ledger) sigue
   // siendo el mes; desde/hasta solo acotan qué pagos entran.
@@ -200,8 +209,19 @@ export function ExportarSection({
   // detalle por pago y el export reflejan la cola sin volver a previsualizar.
   const resultado = useMemo(() => {
     if (!preview || !config) return null
-    return procesarPagos(preview.rows, mapeo, config, preview.exportadosIds, override)
-  }, [preview, config, mapeo, override])
+    return modo === 'dos-polizas'
+      ? procesarPagosDosPolizas(preview.rows, mapeo, config, preview.exportadosIds, override)
+      : procesarPagos(preview.rows, mapeo, config, preview.exportadosIds, override)
+  }, [preview, config, mapeo, override, modo])
+
+  // Nº de pólizas que se generarían (en dos-pólizas un pago produce 1 o 2).
+  const numPolizas = useMemo(() => {
+    if (!resultado) return 0
+    if (modo === 'dos-polizas') {
+      return (resultado.listos as PagoListoDos[]).reduce((acc, p) => acc + p.polizas.length, 0)
+    }
+    return resultado.listos.length
+  }, [resultado, modo])
 
   async function exportar() {
     if (!resultado || !preview || !companyId || !config) return
@@ -223,7 +243,9 @@ export function ExportarSection({
     setBusy('export')
     let descargado = false
     try {
-      const gen = generarExport(listos, config, preview.mes, preview.foliosPorTipo)
+      const gen = modo === 'dos-polizas'
+        ? generarExportDosPolizas(listos as PagoListoDos[], config, preview.mes, preview.foliosPorTipo)
+        : generarExport(listos as PagoListo[], config, preview.mes, preview.foliosPorTipo)
       // Primero el archivo, luego el ledger: si el insert falla, el usuario
       // ya tiene el .xls y se le avisa que el registro quedó pendiente.
       descargarXls(gen.filas, nombreArchivoExport(companyName, preview.mes))
@@ -313,11 +335,25 @@ export function ExportarSection({
         <div>
           <h2>Exportar pólizas a CONTPAQ</h2>
           <div className={s.mapperCounter}>
-            Pagos pagados del periodo → pólizas de egreso (modo egreso-directo) → archivo .xls listo para importar.
+            {modo === 'dos-polizas'
+              ? 'Facturas sin retención → provisión (diario, fecha de factura) + pago (egreso, fecha de pago). Las facturas con retención y los pagos sin CFDI se emiten como egreso-directo (una póliza).'
+              : 'Pagos pagados del periodo → pólizas de egreso (modo egreso-directo) → archivo .xls listo para importar.'}{' '}
             El mes es el periodo contable; el rango de días es opcional (para exportar por semanas).
           </div>
         </div>
         <div className={s.mapperControls}>
+          <select
+            value={modo}
+            onChange={(e) => setModo(e.target.value as ModoPoliza)}
+            className={s.mapInput}
+            style={{ width: 'auto' }}
+            disabled={busy !== null}
+            aria-label="Modo de póliza"
+            title="Modo de póliza: egreso directo (default) o provisión + pago (dos pólizas)"
+          >
+            <option value="egreso-directo">Egreso directo (default)</option>
+            <option value="dos-polizas">Provisión + Pago (dos pólizas)</option>
+          </select>
           <input
             type="month"
             value={mes}
@@ -355,7 +391,7 @@ export function ExportarSection({
             {busy === 'preview' ? 'Calculando...' : 'Previsualizar'}
           </button>
           <button type="button" className={s.primaryBtn} onClick={exportar} disabled={!puedeExportar}>
-            {busy === 'export' ? 'Exportando...' : `Exportar ${listos.length || ''} póliza${listos.length === 1 ? '' : 's'}`}
+            {busy === 'export' ? 'Exportando...' : `Exportar ${numPolizas || ''} póliza${numPolizas === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>
@@ -383,7 +419,7 @@ export function ExportarSection({
           <div className={s.panelToolbar} style={{ borderTop: 0 }}>
             <div className={s.mapperCounter}>
               {elegibles} pago{elegibles === 1 ? '' : 's'} elegible{elegibles === 1 ? '' : 's'} en {preview!.mes} ·{' '}
-              {listos.length} póliza{listos.length === 1 ? '' : 's'} lista{listos.length === 1 ? '' : 's'} ·{' '}
+              {numPolizas} póliza{numPolizas === 1 ? '' : 's'} lista{numPolizas === 1 ? '' : 's'} ·{' '}
               suma {money.format(sumaListos)}
               {resultado.yaExportados.length > 0 && ` · ${resultado.yaExportados.length} ya exportado(s) (se excluyen)`}
             </div>

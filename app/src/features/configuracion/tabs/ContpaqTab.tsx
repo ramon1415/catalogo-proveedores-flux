@@ -377,6 +377,9 @@ export function ContpaqTab() {
       ivaRetenidoAcreditable: taxMap.get('ivaRetenidoAcreditable')?.code,
       retIvaPasivo: taxMap.get('retIvaPasivo')?.code,
       retIsrPasivo: taxMap.get('retIsrPasivo')?.code,
+      // Provisión (modo dos-pólizas): IVA acreditable pendiente de pago
+      // (cuenta 11901…). La llave de captura es 'ivaPendiente'.
+      ivaAcreditablePendiente: taxMap.get('ivaPendiente')?.code,
     }
     const cuentasEspeciales = {
       ajusteRedondeo: taxMap.get('ajusteRedondeo')?.code,
