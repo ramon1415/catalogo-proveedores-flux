@@ -301,9 +301,9 @@ export function generarExport(
 // Una solicitud SIN CFDI tampoco se provisiona (no hay factura que
 // provisionar) → egreso-directo.
 //
-// FOLLOW-UP fuera de scope: el traspaso mensual de IVA pendiente→acreditable
-// (11901 → 11801) es un diario AGREGADO mensual en la contabilidad real; NO se
-// genera por transacción aquí. Debe cubrirse como un asiento mensual aparte.
+// IVA por flujo: al provisionar queda en 11901 (pendiente) y al pagar se
+// traspasa a 11801 (acreditable) dentro de la póliza de pago. Esta regla fue
+// confirmada contra pólizas reales de Operadora de junio/julio.
 // ════════════════════════════════════════════════════════════════════════
 
 export type ModoPoliza = 'egreso-directo' | 'dos-polizas'
