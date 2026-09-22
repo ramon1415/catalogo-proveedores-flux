@@ -1,0 +1,34 @@
+name: Generate historical blend migration names
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/generate-historical-blend-migration-names.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: 2.113.0
+      - name: Generate names with Supabase CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version
+          supabase migration new historical_actuals_period_certification
+          sleep 1
+          supabase migration new dashboard_historical_blend_v2
+          find supabase/migrations -maxdepth 1 -type f \
+            \( -name '*_historical_actuals_period_certification.sql' -o -name '*_dashboard_historical_blend_v2.sql' \) \
+            -printf '%f\n' | sort | tee /tmp/historical-blend-migration-names.txt
+          [[ "$(wc -l < /tmp/historical-blend-migration-names.txt)" -eq 2 ]]
