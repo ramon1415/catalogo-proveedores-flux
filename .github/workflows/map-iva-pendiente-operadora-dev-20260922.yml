@@ -1,0 +1,134 @@
+name: Map Operadora IVA pendiente DEV one-shot
+
+on:
+  push:
+    branches:
+      - ops/map-iva-pendiente-operadora-dev-20260922
+    paths:
+      - .github/workflows/map-iva-pendiente-operadora-dev-20260922.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: map-iva-pendiente-operadora-dev-20260922
+  cancel-in-progress: false
+
+env:
+  EXPECTED_DEV_SHA: 297900b5d3191f4bd2bd24735e14da6188208b97
+  COMPANY_ID: 9680353c-9b86-4730-82e1-fce664f048a2
+  TAX_KEY: ivaPendiente
+  ACCOUNT_CODE: "11901100000"
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard exact DEV state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_SHA"
+          git merge-base --is-ancestor "$EXPECTED_DEV_SHA" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_DEV_SHA" HEAD)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/map-iva-pendiente-operadora-dev-20260922.yml"
+
+      - name: Require secure DEV route
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+          conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
+          grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
+          binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 -c "select current_database()||'|'||current_user;")"
+          IFS='|' read -r db role <<<"$binding"
+          test "$db" = "postgres"
+          case "$role" in postgres|supabase_admin) ;; *) echo "::error::unexpected DEV DB role"; exit 1;; esac
+
+      - name: Preflight exact accounting account
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<SQL > /tmp/pre.json
+          select jsonb_build_object(
+            'mapping_absent', not exists(
+              select 1 from public.tax_account_mappings
+              where company_id='$COMPANY_ID'::uuid and tax_key='$TAX_KEY'
+            ),
+            'account_exact', exists(
+              select 1 from public.contpaq_accounts
+              where company_id='$COMPANY_ID'::uuid
+                and code='$ACCOUNT_CODE'
+                and activo
+                and is_detail
+                and name='IVA acreditable Pendiente de pago'
+            ),
+            'paid_mapping_ok', exists(
+              select 1 from public.tax_account_mappings
+              where company_id='$COMPANY_ID'::uuid
+                and tax_key='ivaAcreditablePagado'
+                and contpaq_account_code='11801100000'
+                and not needs_review
+            )
+          );
+          SQL
+          cat /tmp/pre.json
+          jq -e '.mapping_absent and .account_exact and .paid_mapping_ok' /tmp/pre.json >/dev/null
+
+      - name: Insert exact reviewed mapping
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 <<SQL
+          begin;
+          insert into public.tax_account_mappings(
+            company_id,tax_key,contpaq_account_code,needs_review,updated_at
+          ) values (
+            '$COMPANY_ID'::uuid,'$TAX_KEY','$ACCOUNT_CODE',false,now()
+          );
+          commit;
+          SQL
+
+      - name: Postcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<SQL > /tmp/post.json
+          select to_jsonb(x) from (
+            select tax_key,contpaq_account_code,needs_review
+            from public.tax_account_mappings
+            where company_id='$COMPANY_ID'::uuid and tax_key='$TAX_KEY'
+          ) x;
+          SQL
+          cat /tmp/post.json
+          jq -e '
+            .tax_key == "ivaPendiente"
+            and .contpaq_account_code == "11901100000"
+            and .needs_review == false
+          ' /tmp/post.json >/dev/null
