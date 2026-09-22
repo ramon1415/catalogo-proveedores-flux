@@ -126,6 +126,13 @@ export function ExportarSection({
     return { inicio: `${m}-01`, fin }
   }
 
+  function ultimoDiaMes(m: string): string {
+    const { fin } = rangoMes(m)
+    return new Date(new Date(`${fin}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10)
+  }
+
+  const mesUltimoDia = ultimoDiaMes(mes)
+
   async function previsualizar() {
     if (!companyId || !config) return
     setBusy('preview')
@@ -134,6 +141,13 @@ export function ExportarSection({
     setConfirmados(new Set())
     try {
       const { inicio: mesInicio, fin: mesFin } = rangoMes(mes)
+      if ((desde && (desde < mesInicio || desde > mesUltimoDia))
+        || (hasta && (hasta < mesInicio || hasta > mesUltimoDia))) {
+        throw new Error('El rango de fechas debe quedar dentro del mes contable seleccionado.')
+      }
+      if (desde && hasta && desde > hasta) {
+        throw new Error('La fecha "Desde" no puede ser posterior a "Hasta".')
+      }
       // Rango de días opcional: acota qué pagos entran, sin cambiar el periodo.
       // `fin` es exclusivo, así que `hasta` se corre un día.
       const filtroInicio = desde || mesInicio
@@ -311,7 +325,7 @@ export function ExportarSection({
             type="date"
             value={desde}
             min={`${mes}-01`}
-            max={hasta || undefined}
+            max={hasta && hasta <= mesUltimoDia ? hasta : mesUltimoDia}
             onChange={(e) => setDesde(e.target.value)}
             className={s.mapInput}
             style={{ width: 'auto' }}
@@ -323,6 +337,7 @@ export function ExportarSection({
             type="date"
             value={hasta}
             min={desde || `${mes}-01`}
+            max={mesUltimoDia}
             onChange={(e) => setHasta(e.target.value)}
             className={s.mapInput}
             style={{ width: 'auto' }}
