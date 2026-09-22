@@ -1,0 +1,224 @@
+name: Certify historical actual periods DEV one-shot
+
+on:
+  push:
+    branches:
+      - ops/certify-historical-periods-dev-20260922
+    paths:
+      - .github/workflows/certify-historical-periods-dev-20260922.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: certify-historical-periods-dev-20260922
+  cancel-in-progress: false
+
+env:
+  EXPECTED_DEV_SHA: 297900b5d3191f4bd2bd24735e14da6188208b97
+  OPERADORA_ID: 9680353c-9b86-4730-82e1-fce664f048a2
+  FERSANA_ID: 68b61801-74c0-44ea-a33b-f20e4bf53aa7
+  START_MONTH: "2024-01-01"
+  END_MONTH: "2026-07-01"
+  SOURCE_REF: "CONTPAQ auxiliares exports 2024 + 2025 + 2026 through Jul-2026; imported to historical_actuals in DEV; certified by Carlos 2026-09-22"
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard exact DEV state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_SHA"
+          git merge-base --is-ancestor "$EXPECTED_DEV_SHA" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_DEV_SHA" HEAD)
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = ".github/workflows/certify-historical-periods-dev-20260922.yml"
+
+      - name: Require secure DEV database route
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          export PGCONNECT_TIMEOUT=15
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+          conninfo="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 --command '\conninfo' 2>&1)"
+          grep -Eiq 'SSL connection|TLSv1\.[23]|protocol:[[:space:]]*TLS' <<<"$conninfo"
+          binding="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 -c "select current_database()||'|'||current_user;")"
+          IFS='|' read -r db role <<<"$binding"
+          test "$db" = "postgres"
+          case "$role" in postgres|supabase_admin) ;; *) echo "::error::unexpected DEV DB role"; exit 1;; esac
+
+      - name: Preflight source coverage and empty certification table
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<SQL > /tmp/preflight.json
+          with months as (
+            select generate_series(date '$START_MONTH', date '$END_MONTH', interval '1 month')::date m
+          ), companies(id,name) as (
+            values
+              ('$OPERADORA_ID'::uuid,'Operadora Tlacatecpan'),
+              ('$FERSANA_ID'::uuid,'Soporte Fersana')
+          ), coverage as (
+            select c.id,c.name,m.m,count(ha.*) rows
+            from companies c cross join months m
+            left join public.historical_actuals ha
+              on ha.company_id=c.id
+             and date_trunc('month',ha.period_month)::date=m.m
+            group by c.id,c.name,m.m
+          )
+          select jsonb_build_object(
+            'months',(select count(*) from months),
+            'companies',(select count(*) from companies),
+            'expected_periods',(select count(*) from months)*(select count(*) from companies),
+            'periods_existing',(select count(*) from public.historical_actuals_periods),
+            'months_without_rows',(select count(*) from coverage where rows=0),
+            'operadora_months',(select count(*) from coverage where id='$OPERADORA_ID'::uuid and rows>0),
+            'fersana_months',(select count(*) from coverage where id='$FERSANA_ID'::uuid and rows>0)
+          );
+          SQL
+          cat /tmp/preflight.json
+          jq -e '
+            .months == 31
+            and .companies == 2
+            and .expected_periods == 62
+            and .periods_existing == 0
+            and .months_without_rows == 0
+            and .operadora_months == 31
+            and .fersana_months == 31
+          ' /tmp/preflight.json >/dev/null
+
+      - name: Insert exact 62 certified periods atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          export PGOPTIONS="-c statement_timeout=90000 -c lock_timeout=5000"
+
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 <<SQL
+          begin;
+
+          with actor as (
+            select auth_user_id
+            from public.profiles
+            where lower(email)='ramon@quantta.mx'
+              and active
+              and auth_user_id is not null
+            order by id
+            limit 1
+          ), months as (
+            select generate_series(date '$START_MONTH', date '$END_MONTH', interval '1 month')::date m
+          ), companies(id) as (
+            values ('$OPERADORA_ID'::uuid),('$FERSANA_ID'::uuid)
+          )
+          insert into public.historical_actuals_periods(
+            company_id,period_month,status,certified_at,certified_by,source_ref,note
+          )
+          select
+            c.id,m.m,'certified',now(),(select auth_user_id from actor),
+            '$SOURCE_REF',
+            'Closed accounting balance period. Historical actuals replace Flux spend for this company+month.'
+          from companies c cross join months m;
+
+          do $check$
+          begin
+            if (select count(*) from public.historical_actuals_periods) <> 62 then
+              raise exception 'CERTIFICATION_COUNT_MISMATCH';
+            end if;
+            if exists (
+              select 1 from public.historical_actuals_periods
+              where status <> 'certified'
+                 or source_ref <> '$SOURCE_REF'
+                 or certified_at is null
+            ) then
+              raise exception 'CERTIFICATION_CONTENT_MISMATCH';
+            end if;
+          end;
+          $check$;
+
+          commit;
+          SQL
+
+      - name: Postcheck certified range and dashboard source switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<SQL > /tmp/post.json
+          select jsonb_build_object(
+            'total',(select count(*) from public.historical_actuals_periods),
+            'operadora',(select jsonb_build_object(
+              'count',count(*),'min',min(period_month),'max',max(period_month)
+            ) from public.historical_actuals_periods where company_id='$OPERADORA_ID'::uuid),
+            'fersana',(select jsonb_build_object(
+              'count',count(*),'min',min(period_month),'max',max(period_month)
+            ) from public.historical_actuals_periods where company_id='$FERSANA_ID'::uuid),
+            'source_refs',(select count(distinct source_ref) from public.historical_actuals_periods),
+            'status_non_certified',(select count(*) from public.historical_actuals_periods where status<>'certified')
+          );
+          SQL
+          cat /tmp/post.json
+          jq -e '
+            .total == 62
+            and .operadora.count == 31
+            and .operadora.min == "2024-01-01"
+            and .operadora.max == "2026-07-01"
+            and .fersana.count == 31
+            and .fersana.min == "2024-01-01"
+            and .fersana.max == "2026-07-01"
+            and .source_refs == 1
+            and .status_non_certified == 0
+          ' /tmp/post.json >/dev/null
+
+          cat > /tmp/check-source.sql <<'SQL'
+          \set ON_ERROR_STOP on
+          select p.auth_user_id::text as auth_user_id
+          from public.profiles p
+          join public.profile_company_memberships pcm
+            on pcm.profile_id=p.id and pcm.active
+          join public.user_roles ur on ur.profile_id=p.id
+          join public.roles r on r.id=ur.role_id
+          where p.active and p.auth_user_id is not null
+            and pcm.company_id='9680353c-9b86-4730-82e1-fce664f048a2'::uuid
+            and r.name in ('admin','superadmin','sysadmin','system_admin','finance','finanzas','treasury','tesoreria','administracion','approver_2','aprobador_2','direccion','director')
+          order by p.auth_user_id limit 1
+          \gset
+          select set_config('request.jwt.claims',jsonb_build_object('sub',:'auth_user_id','role','authenticated')::text,false);
+          set role authenticated;
+          with rows as (
+            select *
+            from jsonb_to_recordset(public.dashboard_global_budget_report_v2('9680353c-9b86-4730-82e1-fce664f048a2'::uuid,2026))
+            as x(budget_category_id uuid,budget_month date,classification text,data_source text,budgeted numeric,committed numeric,executed numeric,available numeric,paid_amount numeric,non_budget_used numeric,payroll_used numeric,unconverted_count integer)
+          )
+          select jsonb_build_object(
+            'jan_jul_non_historical',count(*) filter(where budget_month between date '2026-01-01' and date '2026-07-01' and data_source<>'historical'),
+            'jan_jul_historical_rows',count(*) filter(where budget_month between date '2026-01-01' and date '2026-07-01' and data_source='historical')
+          ) from rows;
+          SQL
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 --file /tmp/check-source.sql | tee /tmp/source.json
+          jq -e '.jan_jul_non_historical == 0 and .jan_jul_historical_rows > 0' /tmp/source.json >/dev/null
