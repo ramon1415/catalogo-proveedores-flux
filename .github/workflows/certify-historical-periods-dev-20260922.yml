@@ -118,7 +118,14 @@ jobs:
           export PGSSLMODE=require
           export PGOPTIONS="-c statement_timeout=90000 -c lock_timeout=5000"
 
-          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc --set ON_ERROR_STOP=1 <<SQL
+          psql "$SUPABASE_DEV_DB_URL" \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --set OPERADORA_ID="$OPERADORA_ID" \
+            --set FERSANA_ID="$FERSANA_ID" \
+            --set START_MONTH="$START_MONTH" \
+            --set END_MONTH="$END_MONTH" \
+            --set SOURCE_REF="$SOURCE_REF" <<'SQL'
           begin;
 
           with actor as (
@@ -130,18 +137,20 @@ jobs:
             order by id
             limit 1
           ), months as (
-            select generate_series(date '$START_MONTH', date '$END_MONTH', interval '1 month')::date m
+            select generate_series(:'START_MONTH'::date, :'END_MONTH'::date, interval '1 month')::date m
           ), companies(id) as (
-            values ('$OPERADORA_ID'::uuid),('$FERSANA_ID'::uuid)
+            values (:'OPERADORA_ID'::uuid),(:'FERSANA_ID'::uuid)
           )
           insert into public.historical_actuals_periods(
             company_id,period_month,status,certified_at,certified_by,source_ref,note
           )
           select
             c.id,m.m,'certified',now(),(select auth_user_id from actor),
-            '$SOURCE_REF',
+            :'SOURCE_REF',
             'Closed accounting balance period. Historical actuals replace Flux spend for this company+month.'
           from companies c cross join months m;
+
+          select set_config('qa.source_ref', :'SOURCE_REF', true);
 
           do $check$
           begin
@@ -151,7 +160,7 @@ jobs:
             if exists (
               select 1 from public.historical_actuals_periods
               where status <> 'certified'
-                 or source_ref <> '$SOURCE_REF'
+                 or source_ref <> current_setting('qa.source_ref')
                  or certified_at is null
             ) then
               raise exception 'CERTIFICATION_CONTENT_MISMATCH';
