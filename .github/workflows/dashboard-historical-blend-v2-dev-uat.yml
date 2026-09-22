@@ -270,6 +270,9 @@ jobs:
 
           set local role authenticated;
 
+          select set_config('qa.certified_month', :'CERTIFIED_MONTH', true);
+          select set_config('qa.control_month', :'CONTROL_MONTH', true);
+
           create temp table qa_v2_after as
           select *
           from jsonb_to_recordset(
@@ -301,11 +304,11 @@ jobs:
                    round(coalesce(sum(executed),0),2)
               into actual_committed, actual_executed
             from qa_v2_after
-            where budget_month=:'CERTIFIED_MONTH'::date;
+            where budget_month=current_setting('qa.certified_month')::date;
 
             if exists (
               select 1 from qa_v2_after
-              where budget_month=:'CERTIFIED_MONTH'::date
+              where budget_month=current_setting('qa.certified_month')::date
                 and data_source <> 'historical'
             ) then raise exception 'UAT_FAIL_CERTIFIED_MONTH_HAS_FLUX'; end if;
 
@@ -316,7 +319,7 @@ jobs:
 
             if exists (
               select 1 from qa_v2_after
-              where budget_month=:'CERTIFIED_MONTH'::date
+              where budget_month=current_setting('qa.certified_month')::date
                 and (
                   coalesce(paid_amount,0) <> 0
                   or coalesce(non_budget_used,0) <> 0
@@ -328,20 +331,20 @@ jobs:
             if exists (
               (select budget_category_id,budget_month,budgeted,committed,executed,available,
                       paid_amount,non_budget_used,payroll_used,unconverted_count
-               from qa_v2_after where budget_month=:'CONTROL_MONTH'::date
+               from qa_v2_after where budget_month=current_setting('qa.control_month')::date
                except all
-               select * from qa_v1 where budget_month=:'CONTROL_MONTH'::date)
+               select * from qa_v1 where budget_month=current_setting('qa.control_month')::date)
               union all
-              (select * from qa_v1 where budget_month=:'CONTROL_MONTH'::date
+              (select * from qa_v1 where budget_month=current_setting('qa.control_month')::date
                except all
                select budget_category_id,budget_month,budgeted,committed,executed,available,
                       paid_amount,non_budget_used,payroll_used,unconverted_count
-               from qa_v2_after where budget_month=:'CONTROL_MONTH'::date)
+               from qa_v2_after where budget_month=current_setting('qa.control_month')::date)
             ) then raise exception 'UAT_FAIL_CONTROL_MONTH_CHANGED'; end if;
 
             if exists (
               select 1 from qa_v2_after
-              where budget_month=:'CONTROL_MONTH'::date
+              where budget_month=current_setting('qa.control_month')::date
                 and data_source <> 'flux'
             ) then raise exception 'UAT_FAIL_CONTROL_MONTH_NOT_FLUX'; end if;
 
@@ -351,11 +354,11 @@ jobs:
                except all
                select classification,budget_category_id,round(executed,2)
                from qa_v2_after
-               where budget_month=:'CERTIFIED_MONTH'::date and budgeted=0)
+               where budget_month=current_setting('qa.certified_month')::date and coalesce(executed,0) <> 0)
               union all
               (select classification,budget_category_id,round(executed,2)
                from qa_v2_after
-               where budget_month=:'CERTIFIED_MONTH'::date and budgeted=0
+               where budget_month=current_setting('qa.certified_month')::date and coalesce(executed,0) <> 0
                except all
                select classification,budget_category_id,round(historical_executed,2)
                from qa_expected_history)
@@ -375,21 +378,24 @@ jobs:
             'historical_buckets', (
               select jsonb_agg(
                 jsonb_build_object(
-                  'classification',classification,
-                  'amount',round(sum(historical_executed),2)
+                  'classification', bucket.classification,
+                  'amount', bucket.amount
                 )
-                order by classification
+                order by bucket.classification
               )
-              from qa_expected_history
-              group by true
+              from (
+                select classification, round(sum(historical_executed),2) as amount
+                from qa_expected_history
+                group by classification
+              ) bucket
             ),
             'v1_certified_month_committed', (
               select round(sum(committed),2) from qa_v1
-              where budget_month=:'CERTIFIED_MONTH'::date
+              where budget_month=current_setting('qa.certified_month')::date
             ),
             'v2_certified_month_committed', (
               select round(sum(committed),2) from qa_v2_after
-              where budget_month=:'CERTIFIED_MONTH'::date
+              where budget_month=current_setting('qa.certified_month')::date
             )
           ) as evidence;
 
