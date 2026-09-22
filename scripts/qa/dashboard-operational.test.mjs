@@ -192,7 +192,7 @@ test('both operational API queries isolate company/year across pages and retriev
     data[table].push({ ...data[table][0], company_id: 'fersana' }, { ...data[table][0], budget_month: '2025-09-01' }, { ...data[table][0], budget_month: '2027-01-01' })
   }
   const supabase = { async rpc(name, args) {
-    assert.equal(name, 'dashboard_global_budget_report')
+    assert.equal(name, 'dashboard_global_budget_report_v2')
     assert.deepEqual(args, { p_company_id: 'operadora', p_year: 2026 })
     return { data: data.budget_availability.filter(row => row.company_id === args.p_company_id && row.budget_month.startsWith(String(args.p_year))), error: null }
   }, from(table) {
