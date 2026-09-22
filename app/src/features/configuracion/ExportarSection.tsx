@@ -5,7 +5,7 @@
 // Incluye la COLA DE REVISIÓN DE CUENTAS CONTABLES: antes de generar la póliza,
 // Finanzas revisa/confirma la cuenta de gasto por proveedor (perfilamiento
 // proveedor→cuenta), sembrando la capa autoritativa provider_account_mappings.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../../components/ui/Toast'
 import { Badge } from '../../components/ui/Badge'
 import type { MapeoEmpresa } from '../../lib/contpaq/export'
@@ -209,21 +209,41 @@ export function ExportarSection({
   // detalle por pago y el export reflejan la cola sin volver a previsualizar.
   const resultado = useMemo(() => {
     if (!preview || !config) return null
+    // En dos-pólizas NO se aplica el override de la cola de revisión: ese
+    // override reemplaza la cuenta de GASTO por provider_account_mappings, que
+    // en dos-pólizas es la cuenta de PROVEEDOR POR PAGAR — aplicarlo colapsaría
+    // gasto y proveedor en la misma cuenta. Aquí el gasto viene de la partida y
+    // el proveedor por pagar sale del mapeo de proveedor. (egreso-directo sí lo usa.)
     return modo === 'dos-polizas'
-      ? procesarPagosDosPolizas(preview.rows, mapeo, config, preview.exportadosIds, override)
+      ? procesarPagosDosPolizas(preview.rows, mapeo, config, preview.exportadosIds)
       : procesarPagos(preview.rows, mapeo, config, preview.exportadosIds, override)
   }, [preview, config, mapeo, override, modo])
 
-  // Nº de pólizas que se generarían (en dos-pólizas un pago produce 1 o 2).
-  const numPolizas = useMemo(() => {
-    if (!resultado) return 0
+  // Conteo de pólizas por tipo (en dos-pólizas diario y pago se descargan aparte).
+  const { numDiario, numPago, numPolizas } = useMemo(() => {
+    if (!resultado) return { numDiario: 0, numPago: 0, numPolizas: 0 }
     if (modo === 'dos-polizas') {
-      return (resultado.listos as PagoListoDos[]).reduce((acc, p) => acc + p.polizas.length, 0)
+      let d = 0
+      let g = 0
+      for (const p of resultado.listos as PagoListoDos[]) {
+        for (const plan of p.polizas) {
+          if (plan.tipo === 'diario') d += 1
+          else g += 1
+        }
+      }
+      return { numDiario: d, numPago: g, numPolizas: d + g }
     }
-    return resultado.listos.length
+    return { numDiario: 0, numPago: 0, numPolizas: resultado.listos.length }
   }, [resultado, modo])
 
-  async function exportar() {
+  // El ledger (accounting_exports) se registra UNA vez por preview, aunque en
+  // dos-pólizas se descarguen el archivo de diario y el de pago por separado.
+  const ledgerDoneRef = useRef(false)
+  useEffect(() => {
+    ledgerDoneRef.current = false
+  }, [preview])
+
+  async function exportar(parte?: 'diario' | 'pago') {
     if (!resultado || !preview || !companyId || !config) return
     const { listos } = resultado
     if (!listos.length) return
@@ -246,13 +266,32 @@ export function ExportarSection({
       const gen = modo === 'dos-polizas'
         ? generarExportDosPolizas(listos as PagoListoDos[], config, preview.mes, preview.foliosPorTipo)
         : generarExport(listos as PagoListo[], config, preview.mes, preview.foliosPorTipo)
+
+      // Qué filas descargar según el botón (en dos-pólizas: diario o pago).
+      let filas = gen.filas
+      let sufijo = ''
+      if (modo === 'dos-polizas' && parte === 'diario') {
+        filas = gen.filasDiario ?? []
+        sufijo = '_diario'
+      } else if (modo === 'dos-polizas' && parte === 'pago') {
+        filas = gen.filasPago ?? []
+        sufijo = '_pago'
+      }
       // Primero el archivo, luego el ledger: si el insert falla, el usuario
       // ya tiene el .xls y se le avisa que el registro quedó pendiente.
-      descargarXls(gen.filas, nombreArchivoExport(companyName, preview.mes))
+      descargarXls(filas, nombreArchivoExport(companyName, preview.mes, sufijo))
       descargado = true
-      await insertAccountingExports(gen.ledgerRows)
-      showToast('Export generado', `${gen.ledgerRows.length} póliza(s) descargadas y registradas en el ledger.`, 'success')
-      setPreview(null)
+      // El ledger cubre AMBAS pólizas y se inserta una sola vez por preview.
+      if (!ledgerDoneRef.current) {
+        await insertAccountingExports(gen.ledgerRows)
+        ledgerDoneRef.current = true
+        showToast('Export generado', `${gen.ledgerRows.length} póliza(s) registradas en el ledger.`, 'success')
+      } else {
+        showToast('Archivo descargado', `Se descargó el layout de ${parte === 'pago' ? 'pago' : 'diario'}.`, 'success')
+      }
+      // Egreso-directo: un solo archivo, se limpia el preview. Dos-pólizas: se
+      // conserva para poder descargar también el otro archivo.
+      if (modo !== 'dos-polizas') setPreview(null)
     } catch (err: unknown) {
       if (descargado) {
         showToast(
@@ -390,9 +429,32 @@ export function ExportarSection({
           <button type="button" className={s.secondaryBtn} onClick={previsualizar} disabled={busy !== null || !config || !mes}>
             {busy === 'preview' ? 'Calculando...' : 'Previsualizar'}
           </button>
-          <button type="button" className={s.primaryBtn} onClick={exportar} disabled={!puedeExportar}>
-            {busy === 'export' ? 'Exportando...' : `Exportar ${numPolizas || ''} póliza${numPolizas === 1 ? '' : 's'}`}
-          </button>
+          {modo === 'dos-polizas' ? (
+            <>
+              <button
+                type="button"
+                className={s.primaryBtn}
+                onClick={() => exportar('diario')}
+                disabled={!puedeExportar || numDiario === 0}
+                title="Descarga el layout con solo las pólizas de provisión (diario)"
+              >
+                {busy === 'export' ? 'Exportando...' : `Exportar pólizas de diario${numDiario ? ` (${numDiario})` : ''}`}
+              </button>
+              <button
+                type="button"
+                className={s.primaryBtn}
+                onClick={() => exportar('pago')}
+                disabled={!puedeExportar || numPago === 0}
+                title="Descarga el layout con solo las pólizas de pago (egreso)"
+              >
+                {busy === 'export' ? 'Exportando...' : `Exportar pólizas de pago${numPago ? ` (${numPago})` : ''}`}
+              </button>
+            </>
+          ) : (
+            <button type="button" className={s.primaryBtn} onClick={() => exportar()} disabled={!puedeExportar}>
+              {busy === 'export' ? 'Exportando...' : `Exportar ${numPolizas || ''} póliza${numPolizas === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
       </div>
 
