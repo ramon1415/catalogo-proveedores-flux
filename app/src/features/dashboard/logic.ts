@@ -5,7 +5,7 @@ import { ROLE_GROUPS } from '../../lib/roles'
 import type {
   DashboardPayload, DashboardState, Kpis, BudgetRow, YtdRow, IncomeMemberRow,
   ClosureChecklist, HistoricalActual, HistMapeo,
-  BudgetAvailabilityRow, BudgetCategoryMeta, BudgetAggregate, BudgetPartida, BudgetTotals,
+  BudgetAvailabilityRow, BudgetCategoryMeta, BudgetAggregate, BudgetPartida, BudgetTotals, BudgetCoverage,
   PaymentRequestRow, RequestAmountSummary, RequestsAggregate, RequestStage, RequestStatusLine, TaxesAggregate, DashboardActivity,
 } from './types'
 
@@ -337,13 +337,24 @@ export function aggregateBudget(
   const months = [...new Set(rows.map((r) => r.budget_month).filter((m): m is string => !!m))].sort()
   const scoped = period === BUDGET_ALL_PERIOD ? rows : rows.filter((r) => r.budget_month === period)
 
-  type Acc = { budgeted: number; used: number; executed: number; available: number }
+  type Acc = {
+    budgeted: number
+    used: number
+    executed: number
+    available: number
+    classification: 'partida' | 'por_clasificar' | 'sin_partida'
+  }
   const byCat = new Map<string, Acc>()
   const totals: BudgetTotals = { budgeted: 0, committed: 0, executed: 0, used: 0, available: 0, pctUsed: 0 }
 
   for (const r of scoped) {
-    const id = r.budget_category_id || '__sin_partida__'
-    const acc = byCat.get(id) || { budgeted: 0, used: 0, executed: 0, available: 0 }
+    const classification = r.classification
+      || (r.budget_category_id ? 'partida' : 'sin_partida')
+    const id = r.budget_category_id
+      || (classification === 'por_clasificar' ? '__por_clasificar__' : '__sin_partida__')
+    const acc = byCat.get(id) || {
+      budgeted: 0, used: 0, executed: 0, available: 0, classification,
+    }
     // committed de la vista YA incluye executed. Separa lo pendiente para la
     // barra y conserva el disponible canónico, sin volver a descontar lo pagado.
     const used = num(r.committed)
@@ -376,10 +387,13 @@ export function aggregateBudget(
     const available = r2(acc.available)
     const pctUsed = budgetPctUsed(budgeted, used)
     const cat = categories.get(id)
+    const fallbackName = acc.classification === 'por_clasificar' ? 'Por clasificar' : 'Sin partida'
+    const fallbackGroup = acc.classification === 'por_clasificar' ? 'Clasificación pendiente' : 'Sin grupo'
     partidas.push({
       categoryId: id,
-      name: cat?.name || 'Sin partida',
-      group: cat?.category || 'Sin grupo',
+      name: cat?.name || fallbackName,
+      group: cat?.category || fallbackGroup,
+      classification: acc.classification,
       budgeted, committed, executed, used, available, pctUsed,
       over: budgeted > 0 && available < 0,
       warn: available >= 0 && Number.isFinite(pctUsed) && pctUsed >= BUDGET_WARN_PCT,
@@ -393,12 +407,24 @@ export function aggregateBudget(
 }
 
 // These are breakdowns of the global report, not additional amounts to add to it.
-export function aggregateBudgetCoverage(rows: BudgetAvailabilityRow[], period: string) {
+export function aggregateBudgetCoverage(rows: BudgetAvailabilityRow[], period: string): BudgetCoverage {
   const scoped = period === BUDGET_ALL_PERIOD ? rows : rows.filter(row => row.budget_month === period)
+  const historicalMonths = new Set(
+    scoped.filter(row => row.data_source === 'historical').map(row => row.budget_month).filter(Boolean),
+  ).size
+  const fluxMonths = new Set(
+    scoped.filter(row => row.data_source !== 'historical').map(row => row.budget_month).filter(Boolean),
+  ).size
+  const sourceMode: BudgetCoverage['sourceMode'] = historicalMonths > 0
+    ? (fluxMonths > 0 ? 'mixed' : 'historical')
+    : 'flux'
   return {
     paid: r2(scoped.reduce((sum, row) => sum + num(row.paid_amount), 0)),
     nonBudget: r2(scoped.reduce((sum, row) => sum + num(row.non_budget_used), 0)),
     payroll: r2(scoped.reduce((sum, row) => sum + num(row.payroll_used), 0)),
+    historicalMonths,
+    fluxMonths,
+    sourceMode,
   }
 }
 

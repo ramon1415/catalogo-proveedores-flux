@@ -52,13 +52,67 @@ test('budget uses committed including paid once and separates pending payment', 
 
 test('coverage totals are subsets, and failed or incomplete global reports never fall back to the old understated budget', async () => {
   const rows = [budgetRow({ paid_amount: 116, non_budget_used: 100, payroll_used: 75 }), budgetRow({ budget_month: '2026-10-01', paid_amount: 99 })]
-  assert.deepEqual(logic.aggregateBudgetCoverage(rows, month), { paid: 116, nonBudget: 100, payroll: 75 })
+  assert.deepEqual(logic.aggregateBudgetCoverage(rows, month), {
+    paid: 116, nonBudget: 100, payroll: 75,
+    historicalMonths: 0, fluxMonths: 1, sourceMode: 'flux',
+  })
   assert.equal(logic.aggregateBudget(rows, categories, month).totals.used, 700)
   for (const result of [{ data: null, error: new Error('unavailable') }, { data: [budgetRow({ unconverted_count: 1 })], error: null }]) {
     const supabase = { rpc: async () => result, from: () => ({ select: () => ({ limit: async () => ({ data: [], error: null }) }) }) }
     const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, '../../lib/tenantConfig': tenantConfig, './logic': logic })
     await assert.rejects(() => api.fetchBudgetAvailability('operadora', 2026))
   }
+})
+
+test('historical rows keep Por clasificar separate from Sin partida and expose source mode', () => {
+  const rows = [
+    budgetRow({
+      budget_category_id: null, classification: 'por_clasificar', data_source: 'historical',
+      budgeted: 0, committed: 40, executed: 40, available: -40,
+    }),
+    budgetRow({
+      budget_category_id: null, classification: 'sin_partida', data_source: 'historical',
+      budgeted: 0, committed: 60, executed: 60, available: -60,
+    }),
+  ]
+  const result = logic.aggregateBudget(rows, categories, month)
+  assert.equal(result.totals.used, 100)
+  assert.equal(result.totals.executed, 100)
+  assert.equal(result.totals.committed, 0)
+  assert.equal(result.partidas.length, 2)
+  assert.deepEqual(
+    result.partidas.map(row => [row.name, row.classification]).sort(),
+    [['Por clasificar', 'por_clasificar'], ['Sin partida', 'sin_partida']].sort(),
+  )
+  assert.ok(result.partidas.every(row => row.over === false))
+  assert.deepEqual(logic.aggregateBudgetCoverage(rows, month), {
+    paid: 0, nonBudget: 0, payroll: 0,
+    historicalMonths: 1, fluxMonths: 0, sourceMode: 'historical',
+  })
+})
+
+test('budget API falls back to v1 only when v2 is not deployed', async () => {
+  const calls = []
+  const supabase = {
+    rpc: async name => {
+      calls.push(name)
+      if (name === 'dashboard_global_budget_report_v2') return { data: null, error: { code: 'PGRST202', message: 'missing' } }
+      return { data: [budgetRow()], error: null }
+    },
+    from: () => ({ select: () => ({ limit: async () => ({ data: [], error: null }) }) }),
+  }
+  const api = load(`${dashboardPath}api.ts`, { '../../lib/supabase': { supabase }, '../../lib/tenantConfig': tenantConfig, './logic': logic })
+  const result = await api.fetchBudgetAvailability('operadora', 2026)
+  assert.deepEqual(calls, ['dashboard_global_budget_report_v2', 'dashboard_global_budget_report'])
+  assert.equal(result.rows.length, 1)
+
+  calls.length = 0
+  supabase.rpc = async name => {
+    calls.push(name)
+    return { data: null, error: { code: '42501', message: 'denied' } }
+  }
+  await assert.rejects(() => api.fetchBudgetAvailability('operadora', 2026))
+  assert.deepEqual(calls, ['dashboard_global_budget_report_v2'])
 })
 
 test('budget aggregates centers with cent precision and filters months; unbudgeted use stays visible', () => {
@@ -138,7 +192,7 @@ test('both operational API queries isolate company/year across pages and retriev
     data[table].push({ ...data[table][0], company_id: 'fersana' }, { ...data[table][0], budget_month: '2025-09-01' }, { ...data[table][0], budget_month: '2027-01-01' })
   }
   const supabase = { async rpc(name, args) {
-    assert.equal(name, 'dashboard_global_budget_report')
+    assert.equal(name, 'dashboard_global_budget_report_v2')
     assert.deepEqual(args, { p_company_id: 'operadora', p_year: 2026 })
     return { data: data.budget_availability.filter(row => row.company_id === args.p_company_id && row.budget_month.startsWith(String(args.p_year))), error: null }
   }, from(table) {
@@ -355,7 +409,7 @@ test('global overrun is visible in headline, alerts and details while gross paid
     assert.match(page, /Consumo global del presupuesto\$1,200/)
     assert.match(page, /Saldo restante: -\$200/)
     assert.match(page, /\$200de excedente sobre el presupuesto global/)
-    assert.match(p.section('sec-budget'), /Total registrado como pagado\$1,160/)
+    assert.match(p.section('sec-budget'), /Pagado registrado en Flux\$1,160/)
     assert.match(p.section('sec-budget'), /Comprometido por pagar\$200/)
     assert.doesNotMatch(page, /Sin alertas destacadas/)
   } finally { p.unmount() }
