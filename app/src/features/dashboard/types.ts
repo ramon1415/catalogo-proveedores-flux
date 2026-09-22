@@ -149,6 +149,8 @@ export type DashboardActivity = {
 export type BudgetAvailabilityRow = {
   budget_category_id: string | null
   budget_month: string | null // date 'YYYY-MM-DD'
+  classification?: 'partida' | 'por_clasificar' | 'sin_partida' | null
+  data_source?: 'flux' | 'historical' | null
   budgeted: number | null
   committed: number | null
   executed: number | null
@@ -166,6 +168,7 @@ export type BudgetPartida = {
   categoryId: string
   name: string
   group: string
+  classification: 'partida' | 'por_clasificar' | 'sin_partida'
   budgeted: number
   committed: number // pendiente de pago: committed de la vista − executed
   executed: number
@@ -183,6 +186,15 @@ export type BudgetTotals = {
   used: number
   available: number
   pctUsed: number
+}
+
+export type BudgetCoverage = {
+  paid: number
+  nonBudget: number
+  payroll: number
+  historicalMonths: number
+  fluxMonths: number
+  sourceMode: 'flux' | 'historical' | 'mixed'
 }
 
 export type BudgetAggregate = {
