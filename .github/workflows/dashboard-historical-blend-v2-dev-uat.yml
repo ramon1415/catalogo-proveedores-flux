@@ -446,5 +446,4 @@ jobs:
             | tee /tmp/historical-blend-uat/uat-output.txt
 
           grep -F 'DASHBOARD_HISTORICAL_BLEND_V2_ROLLBACK_UAT_PASS' /tmp/historical-blend-uat/uat-output.txt
-          grep -F '"rollback" : "PASS"' /tmp/historical-blend-uat/uat-output.txt || \
-            grep -F '"rollback":"PASS"' /tmp/historical-blend-uat/uat-output.txt
+          grep -E '"rollback"[[:space:]]*:[[:space:]]*"PASS"' /tmp/historical-blend-uat/uat-output.txt
