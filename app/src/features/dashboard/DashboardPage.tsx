@@ -336,6 +336,11 @@ export default function DashboardPage() {
     () => budgetData ? aggregateBudgetCoverage(budgetData.rows, budgetPeriod) : null,
     [budgetData, budgetPeriod],
   )
+  const budgetSourceLabel = budgetCoverage?.sourceMode === 'historical'
+    ? 'Fuente: histórico contable certificado'
+    : budgetCoverage?.sourceMode === 'mixed'
+      ? 'Fuente mixta: histórico certificado + Flux'
+      : 'Fuente: Flux operativo'
   const periodLabel = budgetPeriod === BUDGET_ALL_PERIOD ? `Año ${reportYear}` : budgetMonthLabel(budgetPeriod)
   const monthLabel = budgetMonthLabel(`${periodKey}-01`)
   const filteredPartidas = useMemo(() => filterBudgetPartidas(budgetAgg?.partidas ?? [], budgetSearch), [budgetAgg, budgetSearch])
@@ -556,7 +561,7 @@ export default function DashboardPage() {
             <div className={s.kpiSub} style={budgetAgg && budgetAgg.totals.available < 0 ? { color: 'var(--ruby)' } : undefined}>
               {budgetAgg ? `Saldo restante: ${money(budgetAgg.totals.available)}` : '—'}
             </div>
-            <div className={s.kpiSub}>{periodLabel} · Incluye nómina, Sin partida y excepciones</div>
+            <div className={s.kpiSub}>{periodLabel} · {budgetSourceLabel}</div>
           </div>
           <div className={`${s.kpiCard} ${s.success}`}>
             <div className={s.kpiLabel}>Ingreso cobrado en el mes</div>
@@ -717,6 +722,7 @@ export default function DashboardPage() {
                 <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--amber)' }} />Cerca del límite (≥90%)</div>
                 <div className={s.chartLegendItem}><div className={s.chartLegendDot} style={{ background: 'var(--ruby)' }} />Sobregirado</div>
                 <div className={s.chartLegendItem}><span className={s.budgetInfo} aria-hidden="true">ⓘ</span> Sin presupuesto asignado</div>
+                {!!budgetCoverage?.historicalMonths && <div className={s.chartLegendItem}><span className={s.budgetInfo} aria-hidden="true">?</span> Por clasificar = cuenta histórica ambigua</div>}
               </div>
               <label className={s.periodField}>
                 <span>Ver resumen</span>
@@ -743,10 +749,10 @@ export default function DashboardPage() {
             {budgetAgg && budgetCoverage && !budgetLoading && !budgetError && <>
               <div className={s.miniGrid} aria-label="Desglose del consumo global">
                 {([
-                  ['Total registrado como pagado', money(budgetCoverage.paid)],
-                  ['Pagado · base presupuestal', money(budgetAgg.totals.executed)],
+                  ['Pagado registrado en Flux', money(budgetCoverage.paid)],
+                  ['Ejecutado · base presupuestal', money(budgetAgg.totals.executed)],
                   ['Comprometido por pagar', money(budgetAgg.totals.committed)],
-                  ['Del consumo: no presupuestal', money(budgetCoverage.nonBudget)],
+                  ['No presupuestal identificado en Flux', money(budgetCoverage.nonBudget)],
                 ] as [string, string][]).map(([label, value]) => (
                   <div key={label} className={s.miniCard}><span>{label}</span><strong>{value}</strong></div>
                 ))}
