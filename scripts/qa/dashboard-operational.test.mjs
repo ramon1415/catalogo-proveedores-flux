@@ -409,7 +409,7 @@ test('global overrun is visible in headline, alerts and details while gross paid
     assert.match(page, /Consumo global del presupuesto\$1,200/)
     assert.match(page, /Saldo restante: -\$200/)
     assert.match(page, /\$200de excedente sobre el presupuesto global/)
-    assert.match(p.section('sec-budget'), /Total registrado como pagado\$1,160/)
+    assert.match(p.section('sec-budget'), /Pagado registrado en Flux\$1,160/)
     assert.match(p.section('sec-budget'), /Comprometido por pagar\$200/)
     assert.doesNotMatch(page, /Sin alertas destacadas/)
   } finally { p.unmount() }
