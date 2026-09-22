@@ -12,6 +12,11 @@ export type MapeoEmpresa = {
     ivaRetenidoAcreditable?: string
     retIvaPasivo?: string
     retIsrPasivo?: string
+    // Cuenta de IVA acreditable PENDIENTE de pago (11901…), usada por la
+    // provisión del modo dos-pólizas. Cada empresa la mapea en su tab de
+    // Impuestos (tax_key 'ivaPendiente'); si falta, el pipeline la reporta
+    // como faltante 'impuesto:ivaAcreditablePendiente'.
+    ivaAcreditablePendiente?: string
   }
   cuentasEspeciales?: { ajusteRedondeo?: string; noDeducibles?: string }
 }
