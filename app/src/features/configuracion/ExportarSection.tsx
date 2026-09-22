@@ -91,6 +91,11 @@ export function ExportarSection({
 }: Props) {
   const { showToast } = useToast()
   const [mes, setMes] = useState(() => new Date().toISOString().slice(0, 7))
+  // Rango de días OPCIONAL dentro del mes (Denise, 21-sep: exportar por periodos
+  // o semanas). Vacío = mes completo. El periodo contable (folio/ledger) sigue
+  // siendo el mes; desde/hasta solo acotan qué pagos entran.
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
   const [busy, setBusy] = useState<'preview' | 'export' | null>(null)
   const [preview, setPreview] = useState<PreviewState | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -102,13 +107,18 @@ export function ExportarSection({
 
   const config = companyId ? empresaConfigDe(companyId) : null
 
-  // La previsualización caduca si cambia empresa, mes o algún mapeo.
+  // La previsualización caduca si cambia empresa, mes o algún mapeo; al cambiar
+  // de mes se limpia el rango de días para no arrastrar uno fuera del periodo.
   useEffect(() => {
     setPreview(null)
     setError(null)
     setEdits(new Map())
     setConfirmados(new Set())
+    setDesde('')
+    setHasta('')
   }, [companyId, mes, mapeo])
+  // El rango de días también invalida la previsualización vigente.
+  useEffect(() => { setPreview(null); setError(null) }, [desde, hasta])
 
   function rangoMes(m: string): { inicio: string; fin: string } {
     const [y, mm] = m.split('-').map(Number)
@@ -123,10 +133,17 @@ export function ExportarSection({
     setEdits(new Map())
     setConfirmados(new Set())
     try {
-      const { inicio, fin } = rangoMes(mes)
-      const rows = await loadPaidRequestsForExport(companyId, inicio, fin)
+      const { inicio: mesInicio, fin: mesFin } = rangoMes(mes)
+      // Rango de días opcional: acota qué pagos entran, sin cambiar el periodo.
+      // `fin` es exclusivo, así que `hasta` se corre un día.
+      const filtroInicio = desde || mesInicio
+      const filtroFin = hasta
+        ? new Date(new Date(`${hasta}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10)
+        : mesFin
+      const rows = await loadPaidRequestsForExport(companyId, filtroInicio, filtroFin)
       const [{ exportadosIds, foliosPorTipo }, reviewData] = await Promise.all([
-        loadExportLedger(companyId, inicio, rows.map((r) => r.id)),
+        // El ledger/folio se mantiene por MES (periodo contable), no por el rango.
+        loadExportLedger(companyId, mesInicio, rows.map((r) => r.id)),
         loadCuentaReviewData(companyId),
       ])
       setPreview({
@@ -276,7 +293,8 @@ export function ExportarSection({
         <div>
           <h2>Exportar pólizas a CONTPAQ</h2>
           <div className={s.mapperCounter}>
-            Pagos pagados del mes → pólizas de egreso (modo egreso-directo) → archivo .xls listo para importar.
+            Pagos pagados del periodo → pólizas de egreso (modo egreso-directo) → archivo .xls listo para importar.
+            El mes es el periodo contable; el rango de días es opcional (para exportar por semanas).
           </div>
         </div>
         <div className={s.mapperControls}>
@@ -287,6 +305,30 @@ export function ExportarSection({
             className={s.mapInput}
             style={{ width: 'auto' }}
             disabled={busy !== null}
+            aria-label="Mes (periodo contable)"
+          />
+          <input
+            type="date"
+            value={desde}
+            min={`${mes}-01`}
+            max={hasta || undefined}
+            onChange={(e) => setDesde(e.target.value)}
+            className={s.mapInput}
+            style={{ width: 'auto' }}
+            disabled={busy !== null}
+            aria-label="Desde (opcional)"
+            title="Desde (opcional) — vacío = inicio del mes"
+          />
+          <input
+            type="date"
+            value={hasta}
+            min={desde || `${mes}-01`}
+            onChange={(e) => setHasta(e.target.value)}
+            className={s.mapInput}
+            style={{ width: 'auto' }}
+            disabled={busy !== null}
+            aria-label="Hasta (opcional)"
+            title="Hasta (opcional) — vacío = fin del mes"
           />
           <button type="button" className={s.secondaryBtn} onClick={previsualizar} disabled={busy !== null || !config}>
             {busy === 'preview' ? 'Calculando...' : 'Previsualizar'}
