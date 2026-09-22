@@ -758,10 +758,22 @@ export default function DashboardPage() {
                 ))}
               </div>
               <p className={s.budgetOmitNote}>
-                Consumo global = pagado + comprometido por pagar, usando el subtotal cuando está registrado.
-                El total pagado incluye impuestos y corresponde al periodo presupuestal seleccionado.
-                Nómina incluida en el consumo: {money(budgetCoverage.payroll)}. Nómina y no presupuestal son desgloses del mismo consumo.
-                Las excepciones autorizadas aumentan el gasto, no el presupuesto.
+                {budgetCoverage.historicalMonths > 0 ? (
+                  <>
+                    Los meses certificados usan histórico contable como única fuente de gasto; Flux y payroll_obligations no se vuelven a sumar.
+                    Pagado, nómina y no presupuestal se desglosan solo para meses Flux.
+                    Nómina identificada en Flux: {money(budgetCoverage.payroll)}.
+                    Histórico certificado: {budgetCoverage.historicalMonths} mes{budgetCoverage.historicalMonths === 1 ? '' : 'es'}.
+                    {budgetCoverage.fluxMonths > 0 && <> Flux: {budgetCoverage.fluxMonths} mes{budgetCoverage.fluxMonths === 1 ? '' : 'es'}.</>}
+                  </>
+                ) : (
+                  <>
+                    Consumo global = pagado + comprometido por pagar, usando el subtotal cuando está registrado.
+                    El total pagado incluye impuestos y corresponde al periodo presupuestal seleccionado.
+                    Nómina incluida en el consumo: {money(budgetCoverage.payroll)}. Nómina y no presupuestal son desgloses del mismo consumo.
+                    Las excepciones autorizadas aumentan el gasto, no el presupuesto.
+                  </>
+                )}
               </p>
             </>}
 
@@ -790,7 +802,7 @@ export default function DashboardPage() {
                   {budgetSearch && <button type="button" className={s.secondaryBtn} onClick={() => setBudgetSearch('')}>Limpiar búsqueda</button>}
                   <span role="status">{filteredPartidas.length} de {budgetAgg.partidas.length} partidas</span>
                 </div>
-                <p className={s.budgetOmitNote}>Se muestran primero las partidas con movimiento; las sobregiradas y cerca del límite van arriba. Las partidas sin uso quedan colapsadas al final. Los gastos sin presupuesto asignado también consumen el saldo global. La búsqueda no modifica los totales.</p>
+                <p className={s.budgetOmitNote}>Se muestran primero las partidas con movimiento; las sobregiradas y cerca del límite van arriba. Las partidas sin uso quedan colapsadas al final. Los gastos sin presupuesto asignado también consumen el saldo global. {!!budgetCoverage?.historicalMonths && <>En histórico, “Por clasificar” = cuenta con mapeo ambiguo; “Sin partida” = cuenta sin mapeo. </>}La búsqueda no modifica los totales.</p>
                 <BudgetTable curated={curatedPartidas} noUse={noUsePartidas} search={budgetSearch} />
                 {budgetAgg.omittedCount > 0 && (
                   <div className={s.budgetOmitNote}>
