@@ -59,15 +59,23 @@ create policy payment_request_attachments_insert
 -- El bucket ya es privado. Se amplía únicamente la lista de MIME admitidos
 -- para los tipos que el formulario valida explícitamente.
 update storage.buckets
-set allowed_mime_types = array[
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-  'text/xml',
-  'application/xml',
-  'text/plain'
-]::text[]
+set allowed_mime_types = case
+  when allowed_mime_types is null then null
+  else (
+    select array_agg(distinct mime order by mime)
+    from unnest(
+      allowed_mime_types || array[
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'application/pdf',
+        'text/xml',
+        'application/xml',
+        'text/plain'
+      ]::text[]
+    ) as mime
+  )
+end
 where id = 'payment-receipts';
 
 commit;
