@@ -623,8 +623,12 @@ export async function uploadReceipt(file: File, folder: string): Promise<string>
     ext === 'xml' ? 'application/xml'
     : ext === 'txt' || ext === 'ddf' ? 'text/plain'
     : 'application/octet-stream'
+  const contentType =
+    ext === 'ddf' || ((ext === 'txt' || ext === 'xml') && (!file.type || file.type === 'application/octet-stream'))
+      ? fallbackContentType
+      : (file.type || fallbackContentType)
   const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(path, file, {
-    contentType: file.type || fallbackContentType,
+    contentType,
     upsert: false,
   })
   if (error) throw new Error(`Error al subir archivo: ${error.message}`)
