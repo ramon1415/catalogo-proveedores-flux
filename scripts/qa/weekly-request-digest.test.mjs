@@ -6,14 +6,14 @@ import {extractText} from 'unpdf'
 import {handleRequest} from '../../supabase/functions/weekly-request-digest/index.ts'
 import {renderEmail,renderPdf,totals} from '../../supabase/functions/weekly-request-digest/render.ts'
 const uuid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`
-const row=(n,status='pending_approval')=>({id:uuid(n),folio:`SOL-QA-${n}`,company:n%2?'Operadora Tlacatecpan':'Soporte Fersana',beneficiary:'Beneficiario <QA>',description:'Solicitud de prueba con acentos: aprobación',cost_center:'Centro',category:'Sin partida (QA)',amount_minor:10000,currency:'MXN',status,request_type:'provider_payment',requester:'QA',created_at:'2026-09-17T12:00:00Z'})
+const row=(n,status='approved')=>({id:uuid(n),folio:`SOL-QA-${n}`,company:n%2?'Operadora Tlacatecpan':'Soporte Fersana',beneficiary:'Beneficiario <QA>',description:'Solicitud de prueba con acentos: aprobación',cost_center:'Centro',category:'Sin partida (QA)',amount_minor:10000,currency:'MXN',status,request_type:'provider_payment',requester:'QA',created_at:'2026-09-17T12:00:00Z'})
 const doc={id:uuid(50),environment:'dev',recipient:'ramon@quantta.mx',period_start:'2026-09-16T23:00:00Z',period_end:'2026-09-23T23:00:00Z',rows:[row(1),row(2,'approved')]}
 const env={NOTIFICATION_DISPATCHER_SECRET:'secret',SUPABASE_URL:'https://scsirgbuqjcwoaxfacth.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'service',RESEND_API_KEY:'resend',NOTIFICATION_FROM_EMAIL:'Flux <test@example.com>'}
 const request=(body={},auth=true)=>new Request('https://worker',{method:'POST',headers:auth?{'x-notification-dispatcher-secret':'secret'}:{},body:JSON.stringify(body)})
 
 test('PDF contains all rows, correct states and amounts across company pages; HTML escapes data',async()=>{
  const bytes=renderPdf(doc);const result=await extractText(bytes.slice(),{mergePages:true})
- assert.equal(result.totalPages,2);assert.match(result.text,/SOL-QA-1/);assert.match(result.text,/SOL-QA-2/);assert.match(result.text,/Pendiente de aprobación/);assert.match(result.text,/Aprobada/)
+ assert.equal(result.totalPages,2);assert.match(result.text,/SOL-QA-1/);assert.match(result.text,/SOL-QA-2/);assert.doesNotMatch(result.text,/Pendiente de aprobación/);assert.match(result.text,/Aprobada/)
  const email=renderEmail(doc);assert.match(email.html,/Beneficiario &lt;QA&gt;/);assert.match(email.html,/\$200.00 MXN/);assert.doesNotMatch(email.html,/<a /)
  assert.equal(totals([...doc.rows,{...row(3),currency:'USD',amount_minor:5050}]),'$200.00 MXN / $50.50 USD')
  mkdirSync('/tmp/weekly-request-digest-qa',{recursive:true});writeFileSync('/tmp/weekly-request-digest-qa/example.pdf',bytes)
@@ -66,7 +66,7 @@ test('rejected or cross-environment snapshots are refused before send',async()=>
  }
 })
 
-test('database: weekly boundaries, all non-rejected states, empty weeks, leases and exact-payload retries',async()=>{
+test('database: weekly boundaries, approved-only states, empty weeks, leases and exact-payload retries',async()=>{
  const db=new PGlite()
  await db.exec(`create role anon;create role authenticated;create role service_role;create schema private;
  create table public.companies(id uuid,name text);create table public.profiles(id uuid,full_name text);
@@ -75,6 +75,7 @@ test('database: weekly boundaries, all non-rejected states, empty weeks, leases 
  create table public.payment_requests(id uuid,request_number text,company_id uuid,proveedor_id uuid,beneficiary_profile_id uuid,requested_by uuid,cost_center_id uuid,budget_category_id uuid,description text,concept text,sin_partida_description text,amount_requested numeric,currency text,status text,exception_status text,request_type text,created_at timestamptz);`)
  const migration=readFileSync('supabase/migrations/20260917221717_weekly_request_digest.sql','utf8')
  await db.exec(migration.split('-- Scheduler registration:')[0])
+ await db.exec(readFileSync('supabase/migrations/20260923225159_weekly_request_digest_approved_only.sql','utf8'))
  for(const [at,expected] of [['2026-09-23T22:59:59Z','2026-09-16T23:00:00.000Z'],['2026-09-23T23:00:00Z','2026-09-23T23:00:00.000Z'],['2026-09-24T02:00:00Z','2026-09-23T23:00:00.000Z']]){
   const r=await db.query('select private.weekly_request_digest_cutoff($1) cutoff',[at]);assert.equal(r.rows[0].cutoff.toISOString(),expected)
  }
@@ -85,7 +86,7 @@ test('database: weekly boundaries, all non-rejected states, empty weeks, leases 
  await db.exec(`insert into public.payment_requests(id,company_id,amount_requested,currency,status,created_at)values('${uuid(20)}','${uuid(99)}',1,'MXN','approved','2026-09-16T23:00:00Z'),('${uuid(21)}','${uuid(99)}',1,'MXN','approved','2026-09-09T23:00:00Z');
  insert into public.approval_batch_items values('${uuid(4)}',null,'rejected','blocked'),('${uuid(6)}',null,'rejected','released');`)
  const claim=async worker=>(await db.query('select public.claim_weekly_request_digest($1) result',[worker])).rows[0].result
- const first=await claim(uuid(80));assert.equal(first.document.rows.length,9);assert.ok(first.document.rows.some(r=>r.status==='draft'));assert.ok(!first.document.rows.some(r=>r.status==='rejected'||r.id===uuid(4)||r.id===uuid(20)));assert.equal(await claim(uuid(81)),null)
+ const first=await claim(uuid(80));assert.equal(first.document.rows.length,1);assert.ok(first.document.rows.every(r=>r.status==='approved'));assert.ok(!first.document.rows.some(r=>r.status==='rejected'||r.id===uuid(4)||r.id===uuid(20)));assert.equal(await claim(uuid(81)),null)
  const payload={from:'Flux <test@example.com>',to:[doc.recipient],subject:'Subject',html:'HTML',text:'text',attachments:[{filename:'Corte.pdf',content:'base64'}]}
  const prep=async(worker,payload)=>(await db.query('select public.prepare_weekly_request_digest($1,$2,$3::jsonb) result',[first.id,worker,JSON.stringify(payload)])).rows[0].result
  await assert.rejects(prep(uuid(81),payload),/DIGEST_LEASE_INVALID/)
@@ -101,7 +102,7 @@ test('database: weekly boundaries, all non-rejected states, empty weeks, leases 
  assert.equal(await claim(uuid(84)),null);assert.equal((await db.query('select status from private.weekly_request_digest_runs where id=$1',[first.id])).rows[0].status,'needs_review')
  // The user requested a first window starting Sep 18 at midnight CDMX, not Sep 16/17.
  await db.exec(`update private.weekly_request_digest_settings set period_start='2026-09-18T06:00:00Z',next_cutoff='2026-09-23T23:00:00Z';delete from public.payment_requests;`)
- for(const [n,date] of [[31,'2026-09-18T05:59:59Z'],[32,'2026-09-18T06:00:00Z'],[33,'2026-09-23T22:59:59Z'],[34,'2026-09-23T23:00:00Z']])await db.query('insert into public.payment_requests(id,company_id,amount_requested,currency,status,created_at)values($1,$2,1,\'MXN\',\'pending_approval\',$3)',[uuid(n),uuid(99),date])
+ for(const [n,date] of [[31,'2026-09-18T05:59:59Z'],[32,'2026-09-18T06:00:00Z'],[33,'2026-09-23T22:59:59Z'],[34,'2026-09-23T23:00:00Z']])await db.query('insert into public.payment_requests(id,company_id,amount_requested,currency,status,created_at)values($1,$2,1,\'MXN\',\'approved\',$3)',[uuid(n),uuid(99),date])
  const initial=(await db.query("select private.weekly_request_digest_document($1,'2026-09-18T06:00:00Z','2026-09-23T23:00:00Z') result",[uuid(50)])).rows[0].result
  assert.deepEqual(initial.rows.map(r=>r.id),[uuid(32),uuid(33)])
  for(const role of ['anon','authenticated']){await db.exec(`set role ${role}`);await assert.rejects(db.query('select public.preview_weekly_request_digest()'),/permission denied/);await db.exec('reset role')}
