@@ -46,7 +46,7 @@ test('Fersana original headers retain retroactive vouchers and Operadora origina
   const old = await formats.parseCoverXlsx(workbook({ modern:false, retro:true }));
   assert.equal(old.valid,true); assert.equal(old.totals.vouchersAmountMinor,11000);
   assert.equal((await formats.parseCoverXlsx(workbook({ modern:false, operadora:true }))).valid,true);
-  assert.equal((await formats.parseCoverXlsx(workbook({ operadora:true }))).valid,false);
+  assert.equal((await formats.parseCoverXlsx(workbook({ operadora:true }))).valid,true);
 });
 test('ambiguous and missing net headers fail; labels from row 15 cannot supply row 5 headers', async () => {
   for (const options of [{duplicate:true}, {missingNet:true}, {missingNet:true,laterHeader:true}]) assert.equal((await formats.parseCoverXlsx(workbook(options))).valid,false);
@@ -57,26 +57,31 @@ test('net mismatches and present but empty retroactive cells remain blocking', a
     const r = await formats.parseCoverXlsx(workbook(options)); assert.equal(r.valid,false); assert.equal(r.totals,null); assert.equal(r.people.length,0);
   }
 });
-test('Fersana periodo 18 resolves A PAGAR as cash only with CON VALES, in both runtimes', async () => {
+test('both companies resolve all three net header pairs in Node and browser runtimes', async () => {
   const browser = vm.createContext({ Uint8Array, ArrayBuffer, TextDecoder, Blob, Response, DecompressionStream });
   vm.runInContext(readFileSync(new URL('../../payroll_real_formats.js', import.meta.url), 'utf8'), browser);
   for (const api of [formats, browser.FluxPayrollRealFormats]) {
-    for (const options of [{period18:true}, {period18:true,reverse:true,mixedCase:true}, {modern:false,mixedCase:true}]) {
-      const result = await api.parseCoverXlsx(workbook(options));
-      assert.equal(result.valid, true); assert.equal(result.people.length, 1);
-      assert.equal(result.totals.netAmountMinor, 110000);
-      assert.equal(result.totals.cashAmountMinor, 100000);
-      assert.equal(result.totals.vouchersAmountMinor, 10000);
+    for (const operadora of [false, true]) {
+      for (const options of [{period18:true}, {period18:true,reverse:true,mixedCase:true}, {modern:true}, {modern:false,mixedCase:true}]) {
+        const result = await api.parseCoverXlsx(workbook({...options,operadora}));
+        assert.equal(result.valid, true); assert.equal(result.people.length, 1);
+        assert.equal(result.contractVersion, operadora ? 'operadora-tlacatecpan-cover-v1' : 'soporte-fersana-cover-v1');
+        assert.equal(result.totals.netAmountMinor, 110000);
+        assert.equal(result.totals.cashAmountMinor, 100000);
+        assert.equal(result.totals.vouchersAmountMinor, 10000);
+      }
     }
   }
 });
 test('periodo 18 rejects missing pairs, duplicate cash or total columns, and inconsistent totals', async () => {
-  for (const options of [
-    {missingNet:true}, {missingNet:true,laterHeader:true}, {duplicate:true},
-    {extraHeader:'Neto sin vales'}, {extraHeader:'Neto en efectivo'},
-    {extraHeader:'Neto con vales'}, {mismatch:true}, {operadora:true}
-  ]) {
-    const result = await formats.parseCoverXlsx(workbook({period18:true,...options}));
-    assert.equal(result.valid,false,JSON.stringify(options)); assert.equal(result.people.length,0);
+  for (const operadora of [false, true]) {
+    for (const options of [
+      {missingNet:true}, {missingNet:true,laterHeader:true}, {duplicate:true},
+      {extraHeader:'Neto sin vales'}, {extraHeader:'Neto en efectivo'},
+      {extraHeader:'Neto con vales'}, {extraHeader:'NETO EN EFECTIVO (SIN VALES)'}, {mismatch:true}
+    ]) {
+      const result = await formats.parseCoverXlsx(workbook({period18:true,...options,operadora}));
+      assert.equal(result.valid,false,JSON.stringify(options)); assert.equal(result.people.length,0);
+    }
   }
 });
