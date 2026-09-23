@@ -524,7 +524,12 @@ const availablePredictionCandidates = useMemo(
   }
 
   function onFilesSelected(selected: File[]) {
-    if (!selected.length) return
+    if (!selected.length) {
+      setFiles([])
+      onFile(null)
+      updateFilesHint([])
+      return
+    }
     const valid: File[] = []
     const rejected: string[] = []
     for (const candidate of selected) {
