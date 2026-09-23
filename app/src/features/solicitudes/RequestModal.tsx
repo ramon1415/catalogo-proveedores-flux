@@ -1022,14 +1022,14 @@ const availablePredictionCandidates = useMemo(
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Facturas / comprobantes (opcional)
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional · puedes adjuntar varios)
                       <input
                         type="file"
                         multiple
                         accept=".jpg,.jpeg,.png,.webp,.pdf,.xml,.txt,.ddf,image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml,text/plain"
                         onChange={(e) => {
                           onFilesSelected(Array.from(e.target.files ?? []))
-                          e.currentTarget.value = ''
+                          e.target.value = ''
                         }}
                       />
                       <span className={s.fileHint}>{fileHint}</span>
