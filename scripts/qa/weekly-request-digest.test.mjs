@@ -86,7 +86,9 @@ test('database: weekly boundaries, all non-rejected states, empty weeks, leases 
  await db.exec(`insert into public.payment_requests(id,company_id,amount_requested,currency,status,created_at)values('${uuid(20)}','${uuid(99)}',1,'MXN','approved','2026-09-16T23:00:00Z'),('${uuid(21)}','${uuid(99)}',1,'MXN','approved','2026-09-09T23:00:00Z');
  insert into public.approval_batch_items values('${uuid(4)}',null,'rejected','blocked'),('${uuid(6)}',null,'rejected','released');`)
  const claim=async worker=>(await db.query('select public.claim_weekly_request_digest($1) result',[worker])).rows[0].result
- const first=await claim(uuid(80));assert.equal(first.document.rows.length,9);assert.ok(first.document.rows.some(r=>r.status==='draft'));assert.ok(!first.document.rows.some(r=>r.status==='rejected'||r.id===uuid(4)||r.id===uuid(20)));assert.equal(await claim(uuid(81)),null)
+ const first=await claim(uuid(80));assert.equal(first.document.rows.length,9);assert.ok(first.document.rows.some(r=>r.status==='draft'));assert.ok(!first.document.rows.some(r=>r.status==='rejected'||r.id===uuid(4)||r.id===uuid(20)));// Isolate lease contention from subsequent weeks becoming due as the real clock advances.
+ await db.exec(`update private.weekly_request_digest_settings set next_cutoff=now()+interval '7 days'`)
+ assert.equal(await claim(uuid(81)),null)
  const payload={from:'Flux <test@example.com>',to:[doc.recipient],subject:'Subject',html:'HTML',text:'text',attachments:[{filename:'Corte.pdf',content:'base64'}]}
  const prep=async(worker,payload)=>(await db.query('select public.prepare_weekly_request_digest($1,$2,$3::jsonb) result',[first.id,worker,JSON.stringify(payload)])).rows[0].result
  await assert.rejects(prep(uuid(81),payload),/DIGEST_LEASE_INVALID/)
