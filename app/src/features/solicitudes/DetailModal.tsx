@@ -9,7 +9,7 @@ import {
   getApproverDetails, loadApprovalHistory, loadPaymentReceipts, getReceiptUrl,
   decidePaymentRequest, getExecutionContext, loadRequestSummary, loadCashFund,
   loadIncidencias, updateRequestNotes, getReceiptSummary, getEvidenceAccess, createSignedUrl,
-  loadReimbursementItems, loadBeneficiaryProfileId, loadEmployeeBankAccount,
+  loadReimbursementItems, loadBeneficiaryProfileId, loadEmployeeBankAccount, loadRequestAttachments,
 } from './api'
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorAlias, formatCurrencyC,
@@ -26,7 +26,7 @@ import { CashFundModal } from './CashFundModal'
 import type {
   PaymentRequest, Company, CostCenter, BudgetCategory, Proveedor, Profile,
   ApprovalHistoryRow, PaymentReceiptRow, ExecutionContext, RequestSummary,
-  CashFund, IncidentCharge, DecisionAction, ReimbursementItem, EmployeeBankAccount,
+  CashFund, IncidentCharge, DecisionAction, ReimbursementItem, EmployeeBankAccount, RequestAttachment,
 } from './types'
 import s from './Solicitudes.module.css'
 
@@ -73,6 +73,7 @@ export function DetailModal({
   const [approverRouting, setApproverRouting] = useState('Cargando...')
   const [history, setHistory] = useState<ApprovalHistoryRow[] | 'loading' | 'error'>('loading')
   const [receipts, setReceipts] = useState<PaymentReceiptRow[] | null>(null)
+  const [attachments, setAttachments] = useState<RequestAttachment[] | null>(null)
   const [context, setContext] = useState<ExecutionContext>(null)
   const [summary, setSummary] = useState<RequestSummary | null>(null)
   const [cashFund, setCashFund] = useState<CashFund | null>(null)
@@ -111,6 +112,7 @@ export function DetailModal({
     setApproverRouting('Cargando...')
     setHistory('loading')
     setReceipts(null)
+    setAttachments(null)
     setContext(null)
     setCashFund(null)
     setReceiptSummary(null)
@@ -138,6 +140,14 @@ export function DetailModal({
         if (!cancelled) setHistory(rows)
       } catch {
         if (!cancelled) setHistory('error')
+      }
+
+      // Archivos originales de la solicitud (facturas, XML, TXT, imágenes).
+      try {
+        const rows = await loadRequestAttachments(request.id)
+        if (!cancelled) setAttachments(rows)
+      } catch {
+        if (!cancelled) setAttachments([])
       }
 
       // Payment info (paid)
@@ -381,9 +391,22 @@ export function DetailModal({
             <DataRow label="Validación presupuestal" value={(() => { const b = budgetDecisionBadge(request.budget_decision, request.budget_block_reason || ''); return <Badge variant={b.variant} title={b.title}>{b.label}</Badge> })()} />
             <DataRow label="Descripción" value={request.description || 'Sin descripción'} muted />
             {request.notes && <DataRow label="Notas" value={request.notes} muted />}
-            {request.invoice_storage_path && (
+            {attachments && attachments.length > 0 ? (
+              <DataRow
+                label={`Adjuntos (${attachments.length})`}
+                value={
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                    {attachments.map((attachment) => (
+                      <button key={attachment.id} type="button" className={s.invoiceLink} onClick={() => openInvoice(attachment.storage_path)}>
+                        {attachment.original_filename}
+                      </button>
+                    ))}
+                  </div>
+                }
+              />
+            ) : request.invoice_storage_path ? (
               <DataRow label="Comprobante" value={<button type="button" className={s.invoiceLink} onClick={() => openInvoice(request.invoice_storage_path!)}>Ver comprobante</button>} />
-            )}
+            ) : null}
           </div>
 
           <div className={s.dataSection}>
