@@ -51,12 +51,13 @@ const deferred = () => { let resolve; const promise = new Promise((r) => { resol
 const text = (node) => typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join('') : node?.props ? text(node.props.children) : ''
 
 async function mount(t, { activeCompany = 'a', allowed = ['a', 'b'], manage = true, duplicate, allowCreation = false, creation } = {}) {
-  const calls = { creates: [], snapshots: [], toasts: [], lookups: [], uploads: [] }
+  const calls = { creates: [], snapshots: [], toasts: [], lookups: [], uploads: [], attachments: [] }
   const api = {
     loadActiveProjects: async () => [], fetchPartidaPrediction: async () => null,
     findRequestByInvoiceUuid: async (company, uuid) => { calls.lookups.push([company, uuid]); return duplicate ? duplicate(company, uuid) : null },
     createPaymentRequest: async (payload) => { calls.creates.push(payload); return creation || { id: 'created', request_number: 'QA-1' } },
-    updateFase2Metadata: async () => '', uploadReceipt: async (file) => { calls.uploads.push(file); return 'qa/receipt.xml' }, linkInvoicePath: async () => {},
+    updateFase2Metadata: async () => '', uploadReceipt: async (file) => { calls.uploads.push(file); return `qa/${file.name || 'receipt.xml'}` }, linkInvoicePath: async () => {},
+    insertRequestAttachments: async (rows) => { calls.attachments.push(...rows) },
     saveCfdiData: async (id, snapshot) => { calls.snapshots.push(snapshot); return '' },
   }
   const ProviderCombo = () => null
