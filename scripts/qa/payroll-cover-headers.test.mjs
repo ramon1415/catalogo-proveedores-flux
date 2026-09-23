@@ -17,12 +17,15 @@ function zip(entries) {
   const directory = Buffer.concat(central), end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50); end.writeUInt16LE(Object.keys(entries).length, 8); end.writeUInt16LE(Object.keys(entries).length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, directory, end]);
 }
-function workbook({ modern = true, retro = false, blankRetro = false, mismatch = false, duplicate = false, missingNet = false, laterHeader = false, operadora = false } = {}) {
+function workbook({ modern = true, period18 = false, retro = false, blankRetro = false, mismatch = false, duplicate = false, missingNet = false, laterHeader = false, operadora = false, extraHeader = null, reverse = false, mixedCase = false } = {}) {
   const fields = [['RFC','XAXX010101000'],['CURP',''],['Nombre completo','PERSONA DE PRUEBA'],['Banco','BBVA'],['Cuenta banco','1234567890'],['CLABE','012345678901234567'],['Vales De Despensa','100.00'],['Pension Alimenticia','0']];
-  if (!missingNet) fields.push([modern ? 'Neto con vales ' : 'Neto a pagar', mismatch ? '1199.99' : retro ? '1110.00' : '1100.00']);
-  fields.push([modern ? 'Neto sin vales' : operadora ? 'Neto en efectivo (sin vales)' : 'Neto en efectivo', '1000.00']);
+  if (!missingNet) fields.push([period18 ? 'NETO CON VALES' : modern ? 'Neto con vales ' : 'Neto a pagar', mismatch ? '1199.99' : retro ? '1110.00' : '1100.00']);
+  fields.push([period18 ? 'NETO A PAGAR' : modern ? 'Neto sin vales' : operadora ? 'Neto en efectivo (sin vales)' : 'Neto en efectivo', '1000.00']);
   if (retro) fields.push(['Retroactivo Vales Despensa', blankRetro ? '' : '10.00']);
   if (duplicate) fields.push(['Neto a pagar','1100.00']);
+  if (extraHeader) fields.push([extraHeader, '1000.00']);
+  if (mixedCase) fields.forEach(field => { if (/^neto/i.test(field[0])) field[0] = '  ' + field[0].toLowerCase().replaceAll(' ', '  ') + '  '; });
+  if (reverse) fields.reverse();
   const escape = s => String(s).replaceAll('&','&amp;').replaceAll('<','&lt;');
   const cell = (col, row, value) => `<c r="${col}${row}" t="inlineStr"><is><t>${escape(value)}</t></is></c>`;
   let cells = fields.map(([label,value], i) => cell(String.fromCharCode(65+i),5,label)+cell(String.fromCharCode(65+i),6,value)).join('');
@@ -52,5 +55,28 @@ test('ambiguous and missing net headers fail; labels from row 15 cannot supply r
 test('net mismatches and present but empty retroactive cells remain blocking', async () => {
   for (const options of [{mismatch:true}, {retro:true,blankRetro:true}]) {
     const r = await formats.parseCoverXlsx(workbook(options)); assert.equal(r.valid,false); assert.equal(r.totals,null); assert.equal(r.people.length,0);
+  }
+});
+test('Fersana periodo 18 resolves A PAGAR as cash only with CON VALES, in both runtimes', async () => {
+  const browser = vm.createContext({ Uint8Array, ArrayBuffer, TextDecoder, Blob, Response, DecompressionStream });
+  vm.runInContext(readFileSync(new URL('../../payroll_real_formats.js', import.meta.url), 'utf8'), browser);
+  for (const api of [formats, browser.FluxPayrollRealFormats]) {
+    for (const options of [{period18:true}, {period18:true,reverse:true,mixedCase:true}, {modern:false,mixedCase:true}]) {
+      const result = await api.parseCoverXlsx(workbook(options));
+      assert.equal(result.valid, true); assert.equal(result.people.length, 1);
+      assert.equal(result.totals.netAmountMinor, 110000);
+      assert.equal(result.totals.cashAmountMinor, 100000);
+      assert.equal(result.totals.vouchersAmountMinor, 10000);
+    }
+  }
+});
+test('periodo 18 rejects missing pairs, duplicate cash or total columns, and inconsistent totals', async () => {
+  for (const options of [
+    {missingNet:true}, {missingNet:true,laterHeader:true}, {duplicate:true},
+    {extraHeader:'Neto sin vales'}, {extraHeader:'Neto en efectivo'},
+    {extraHeader:'Neto con vales'}, {mismatch:true}, {operadora:true}
+  ]) {
+    const result = await formats.parseCoverXlsx(workbook({period18:true,...options}));
+    assert.equal(result.valid,false,JSON.stringify(options)); assert.equal(result.people.length,0);
   }
 });

@@ -223,15 +223,28 @@
       const cells = parseCells(sheet, shared);
       const requiredHeaders = ['RFC','CURP','Nombre completo','Banco','Cuenta banco','CLABE','Vales De Despensa','Neto a pagar',selected.cashHeader];
       const headerMap = {};
-      // Fersana periodo 17 renames the two net columns without changing
-      // their meaning. Keep aliases scoped to that sheet and reject ambiguity.
-      const aliases = selected.contractVersion === FERSANA_COVER_CONTRACT_VERSION
-        ? { 'Neto con vales': 'Neto a pagar', 'Neto sin vales': selected.cashHeader } : {};
+      // Fersana uses three header pairs: legacy total/cash, periodo 17
+      // con/sin vales, and periodo 18 CON VALES/A PAGAR. In the last pair
+      // "a pagar" means cash, so resolve its meaning from the row-5 pair,
+      // never from column positions or amounts. Duplicate mappings still fail.
+      const fersana = selected.contractVersion === FERSANA_COVER_CONTRACT_VERSION;
+      const headerKey = function (label) { return String(label || '').trim().replace(/\s+/g, ' ').toLowerCase(); };
+      let hasNetWithVouchers = false;
+      if (fersana) cells.forEach(function (value, ref) {
+        if (/^[A-Z]+5$/.test(ref) && headerKey(value) === 'neto con vales') hasNetWithVouchers = true;
+      });
+      const aliases = fersana ? {
+        'neto con vales': 'Neto a pagar',
+        'neto sin vales': selected.cashHeader,
+        'neto en efectivo': selected.cashHeader,
+        'neto a pagar': hasNetWithVouchers ? selected.cashHeader : 'Neto a pagar'
+      } : {};
       let ambiguousHeaders = false;
       cells.forEach(function (value, ref) {
         if (!/^[A-Z]+5$/.test(ref)) return;
         const rawLabel = String(value || '').trim();
-        const label = Object.prototype.hasOwnProperty.call(aliases, rawLabel) ? aliases[rawLabel] : rawLabel;
+        const key = headerKey(rawLabel);
+        const label = Object.prototype.hasOwnProperty.call(aliases, key) ? aliases[key] : rawLabel;
         if (requiredHeaders.includes(label) || label === selected.retroHeader || label === selected.pensionHeader) {
           if (headerMap[label]) ambiguousHeaders = true;
           headerMap[label] = columnNumber(ref);
