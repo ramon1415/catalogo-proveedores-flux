@@ -28,7 +28,7 @@ export async function handleRequest(req:Request,runtime:Runtime):Promise<Respons
    const probe=doc.rows.length?doc:{...doc,period_end:preview.next_cutoff,rows:[{
     id:crypto.randomUUID(),folio:'VERIFICACION-TECNICA',company:'Verificación técnica',beneficiary:'Sin datos reales',
     description:'Prueba interna del PDF; no se envía por correo.',cost_center:'Prueba',category:'Prueba',amount_minor:0,
-    currency:'MXN',status:'pending_approval',request_type:'provider_payment',requester:'Prueba',created_at:doc.period_start
+    currency:'MXN',status:'approved',request_type:'provider_payment',requester:'Prueba',created_at:doc.period_start
    }]}
    validateDocument(probe);const pdfBytes=renderPdf(probe).length;renderEmail(probe)
    return json({dry_run:true,sent:0,configured:true,enabled:preview.enabled,...destination,next_cutoff:preview.next_cutoff,request_count:doc.rows.length,pdf_bytes:pdfBytes,synthetic_pdf_probe:doc.rows.length===0})
