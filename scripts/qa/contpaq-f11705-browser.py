@@ -79,7 +79,7 @@ with sync_playwright() as pw:
     page.get_by_role("button", name="Previsualizar", exact=True).click()
 
     expect(page.get_by_text("2 pólizas listas", exact=False)).to_be_visible()
-    expect(page.get_by_text("$92,986.76", exact=False)).to_be_visible()
+    expect(page.get_by_role("cell", name="$92,986.76", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="Exportar pólizas de diario (1)", exact=True)).to_be_enabled()
     expect(page.get_by_role("button", name="Exportar pólizas de pago (1)", exact=True)).to_be_enabled()
     page.screenshot(path=str(OUT / "01-preview-f11705.png"), full_page=True)
