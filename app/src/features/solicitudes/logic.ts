@@ -798,7 +798,9 @@ export const MAX_REQUEST_ATTACHMENTS = 10
 export function validateReceiptFile(file: File): { ok: boolean; message: string } {
   const extension = (file.name.split('.').pop() || '').toLowerCase()
   const mimeAllowed = UPLOAD_ACCEPTED_MIME.includes(file.type)
-  const extensionFallback = (!file.type || file.type === 'application/octet-stream') && UPLOAD_ACCEPTED_EXTENSIONS.includes(extension)
+  const extensionFallback =
+    extension === 'ddf'
+    || ((!file.type || file.type === 'application/octet-stream') && UPLOAD_ACCEPTED_EXTENSIONS.includes(extension))
   if (!mimeAllowed && !extensionFallback) return { ok: false, message: 'Tipo no permitido. Usa JPG, PNG, WEBP, PDF, XML, TXT o DDF.' }
   if (!UPLOAD_ACCEPTED_EXTENSIONS.includes(extension)) return { ok: false, message: 'Extensión no permitida. Usa JPG, PNG, WEBP, PDF, XML, TXT o DDF.' }
   if (file.size > UPLOAD_MAX_BYTES) return { ok: false, message: `${file.name}: supera 10 MB.` }
