@@ -842,13 +842,43 @@ const availablePredictionCandidates = useMemo(
         if (itemsWarning) showToast('Desglose no guardado', itemsWarning, 'warning')
       }
 
-      // Adjunto de comprobante.
-      if (file) {
-        try {
-          const path = await uploadReceipt(file, `solicitudes/${requestId}`)
-          await linkInvoicePath(requestId, path)
-        } catch {
-          showToast('Comprobante no vinculado', 'La solicitud se creo, pero el comprobante no pudo subirse o vincularse.', 'warning')
+      // Adjuntos de la solicitud. El primero se conserva también en
+      // invoice_storage_path para compatibilidad con flujos históricos.
+      if (files.length) {
+        const uploaded: Array<{ file: File; path: string }> = []
+        let attachmentFailures = 0
+        for (const selectedFile of files) {
+          try {
+            const path = await uploadReceipt(selectedFile, `solicitudes/${requestId}`)
+            uploaded.push({ file: selectedFile, path })
+          } catch {
+            attachmentFailures += 1
+          }
+        }
+
+        if (uploaded.length) {
+          try {
+            await linkInvoicePath(requestId, uploaded[0].path)
+          } catch {
+            showToast('Comprobante principal no vinculado', 'Los archivos se subieron, pero no se pudo conservar el vínculo de compatibilidad.', 'warning')
+          }
+
+          try {
+            await insertRequestAttachments(uploaded.map(({ file: uploadedFile, path }) => ({
+              payment_request_id: requestId,
+              company_id: payload.company_id!,
+              storage_path: path,
+              original_filename: uploadedFile.name,
+              mime_type: uploadedFile.type || null,
+              file_size: uploadedFile.size,
+            })))
+          } catch {
+            showToast('Adjuntos no vinculados', 'La solicitud se creó, pero no se pudo registrar la lista completa de archivos.', 'warning')
+          }
+        }
+
+        if (attachmentFailures) {
+          showToast('Archivos no subidos', `${attachmentFailures} archivo(s) no pudieron subirse. Los demás quedaron guardados.`, 'warning')
         }
       }
 
@@ -881,11 +911,11 @@ const availablePredictionCandidates = useMemo(
     setCompanyId(initialCompanyId); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
-    setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
+    setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null); setFiles([])
     setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
     setDupWarning(null); setProviderPrefill(null)
     setIncidentId('')
-    setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
+    setFileHint('Hasta 10 archivos · JPG, PNG, WEBP, PDF, XML, TXT o DDF · máx. 10 MB c/u')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
     setBeneficiaryId(profile?.id ?? ''); setBankAccount(null); setItems([emptyReimbursementItem()])
     setBudgetRows([]); setCategoryDisabled(true); setCategorySearch('')
@@ -992,10 +1022,31 @@ const availablePredictionCandidates = useMemo(
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Facturas / comprobantes (opcional)
+                      <input
+                        type="file"
+                        multiple
+                        accept=".jpg,.jpeg,.png,.webp,.pdf,.xml,.txt,.ddf,image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml,text/plain"
+                        onChange={(e) => {
+                          onFilesSelected(Array.from(e.target.files ?? []))
+                          e.currentTarget.value = ''
+                        }}
+                      />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
+                    {!isReembolso && files.length > 0 && (
+                      <div className={`${s.fullRow} ${s.attachmentList}`} aria-label="Archivos seleccionados">
+                        {files.map((selectedFile) => (
+                          <div key={fileKey(selectedFile)} className={s.attachmentItem}>
+                            <span>
+                              <strong>{selectedFile.name}</strong>
+                              <small>{(selectedFile.size / 1024).toFixed(0)} KB</small>
+                            </span>
+                            <button type="button" onClick={() => removeSelectedFile(fileKey(selectedFile))} aria-label={`Quitar ${selectedFile.name}`}>Quitar</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {!isReembolso && cfdiLoading && <p className={`${s.fullRow} ${s.fieldHint}`} role="status">Leyendo factura…</p>}
                     {cfdiError && (
                       <div className={`${s.fullRow} ${s.fieldHint}`} role="alert" style={{ color: 'var(--ruby)' }}>
