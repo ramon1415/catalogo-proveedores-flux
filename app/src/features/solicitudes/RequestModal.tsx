@@ -547,10 +547,14 @@ const availablePredictionCandidates = useMemo(
     }
 
     setFiles(limited)
-    const preferred = limited.find(isXmlFile) || limited[0] || null
+    // Los adjuntos se acumulan, pero si esta selección trae un XML nuevo,
+    // ese documento pasa a ser la fuente fiscal activa. Así reemplazar el CFDI
+    // conserva el comportamiento histórico sin perder los demás respaldos.
+    const selectedXml = [...selected].reverse().find(isXmlFile) || null
     const currentStillSelected = file ? limited.some((item) => fileKey(item) === fileKey(file)) : false
-    if (!currentStillSelected || (preferred && isXmlFile(preferred) && file && !isXmlFile(file))) onFile(preferred)
-    else if (!file && preferred) onFile(preferred)
+    if (selectedXml) onFile(selectedXml)
+    else if (!currentStillSelected) onFile(limited.find(isXmlFile) || limited[0] || null)
+    else if (!file && limited.length) onFile(limited.find(isXmlFile) || limited[0] || null)
     updateFilesHint(limited)
 
     if (rejected.length) showToast('Algunos archivos no se agregaron', rejected.slice(0, 3).join(' · '), 'warning')
