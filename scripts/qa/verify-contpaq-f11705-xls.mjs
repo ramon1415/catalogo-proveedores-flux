@@ -11,7 +11,8 @@ assert.ok(diarioFile, 'missing diario xls')
 assert.ok(pagoFile, 'missing pago xls')
 
 function values(file) {
-  const wb = XLSX.readFile(path.join(dir, file))
+  const bytes = fs.readFileSync(path.join(dir, file))
+  const wb = XLSX.read(bytes, { type: 'buffer' })
   const ws = wb.Sheets[wb.SheetNames[0]]
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' })
   return rows.flat().map(v => String(v).replace(/-/g, '').trim())
