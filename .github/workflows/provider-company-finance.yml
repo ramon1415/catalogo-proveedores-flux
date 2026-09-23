@@ -6,6 +6,8 @@ on:
     paths:
       - 'supabase/migrations/*provider_catalog_company_finance.sql'
       - 'ops/provider-company-finance-hotfix.sql'
+      - 'ops/provider-current-roles.sql'
+      - 'supabase/migrations/*provider_catalog_current_roles.sql'
       - 'scripts/qa/provider-company-finance-db.test.mjs'
       - 'scripts/qa/fixtures/provider-catalog-before-finance.sql'
       - '.github/workflows/provider-company-finance.yml'
@@ -30,3 +32,6 @@ jobs:
       - run: node --test scripts/qa/provider-company-finance-db.test.mjs scripts/qa/provider-catalog-rpc-persistence-contract.test.mjs
       - name: Verify applied migration and tested patch match
         run: cmp ops/provider-company-finance-hotfix.sql supabase/migrations/*provider_catalog_company_finance.sql
+
+      - name: Verify current role migration matches the tested patch
+        run: cmp ops/provider-current-roles.sql supabase/migrations/*provider_catalog_current_roles.sql
