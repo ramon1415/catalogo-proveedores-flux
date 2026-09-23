@@ -1,0 +1,223 @@
+name: CONTPAQ F-11705 UI browser UAT
+
+on:
+  push:
+    branches:
+      - qa/contpaq-f11705-ui-20260922
+    paths:
+      - app/qa-contpaq-export.html
+      - app/src/qa/contpaq-export-harness.tsx
+      - scripts/qa/contpaq-f11705-browser.py
+      - scripts/qa/verify-contpaq-f11705-xls.mjs
+      - .github/workflows/contpaq-f11705-ui-browser-uat.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contpaq-f11705-ui-browser-uat
+  cancel-in-progress: false
+
+env:
+  EXPECTED_DEV_SHA: "09453321ade6375887d6adba0a3fd4f7d2ff3219"
+  COMPANY_ID: "9680353c-9b86-4730-82e1-fce664f048a2"
+  REQUEST_ID: "62ba54a6-a1a1-4982-9030-f09da81c851c"
+
+jobs:
+  ui-uat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: DEV
+    env:
+      SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard exact DEV ancestry and QA-only scope
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live_dev="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/dev" --jq .object.sha)"
+          test "$live_dev" = "$EXPECTED_DEV_SHA"
+          git merge-base --is-ancestor "$EXPECTED_DEV_SHA" HEAD
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_DEV_SHA" HEAD | sort)
+          printf '%s\n' "${changed[@]}"
+          expected=(
+            ".github/workflows/contpaq-f11705-ui-browser-uat.yml"
+            "app/qa-contpaq-export.html"
+            "app/src/qa/contpaq-export-harness.tsx"
+            "scripts/qa/contpaq-f11705-browser.py"
+            "scripts/qa/verify-contpaq-f11705-xls.mjs"
+          )
+          mapfile -t exp_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "${#changed[@]}" -eq "${#exp_sorted[@]}"
+          for i in "${!changed[@]}"; do test "${changed[$i]}" = "${exp_sorted[$i]}"; done
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+
+      - name: Install locked app dependencies
+        run: npm --prefix app ci
+
+      - name: Install Playwright browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check playwright==1.55.0
+          python3 -m playwright install --with-deps chromium
+
+      - name: Extract F-11705 and mappings from DEV read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_DEV_DB_URL"
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get -qq update >/dev/null
+            sudo apt-get -qq install -y postgresql-client >/dev/null
+          fi
+          mkdir -p app/public qa-artifact/contpaq-f11705-ui
+
+          psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 <<'SQL' > app/public/qa-contpaq-fixture.json
+          with pr as (
+            select *
+            from public.payment_requests
+            where id='62ba54a6-a1a1-4982-9030-f09da81c851c'::uuid
+              and company_id='9680353c-9b86-4730-82e1-fce664f048a2'::uuid
+              and status::text='paid'
+          ),
+          prov as (
+            select p.id,p.rfc,p.nombre_completo,p.persona_tipo,p.alias
+            from public.proveedores p
+            join pr on pr.proveedor_id=p.id
+          ),
+          budget_map as (
+            select contpaq_account_code
+            from public.budget_account_mappings m
+            join pr on pr.budget_category_id=m.budget_category_id and pr.company_id=m.company_id
+            where not m.needs_review
+            order by m.updated_at desc
+            limit 1
+          ),
+          bank_map as (
+            select contpaq_account_code
+            from public.bank_account_mappings m
+            join pr on pr.company_bank_account_id=m.company_bank_account_id and pr.company_id=m.company_id
+            limit 1
+          ),
+          provider_map as (
+            select contpaq_account_code,contpaq_provider_id
+            from public.provider_account_mappings m
+            join pr on pr.proveedor_id=m.proveedor_id and pr.company_id=m.company_id
+            limit 1
+          )
+          select jsonb_build_object(
+            'companyId',(select company_id from pr),
+            'companyName',(select name from public.companies where id=(select company_id from pr)),
+            'ledgerBefore',(select count(*) from public.accounting_exports where company_id=(select company_id from pr) and source_id=(select id::text from pr)),
+            'row',(
+              select jsonb_build_object(
+                'id',pr.id,
+                'company_id',pr.company_id,
+                'provider_id',pr.provider_id,
+                'proveedor_id',pr.proveedor_id,
+                'budget_category_id',pr.budget_category_id,
+                'cost_center_id',pr.cost_center_id,
+                'company_bank_account_id',pr.company_bank_account_id,
+                'amount_requested',pr.amount_requested,
+                'currency',pr.currency,
+                'exchange_rate',pr.exchange_rate,
+                'concept',pr.concept,
+                'description',pr.description,
+                'request_number',pr.request_number,
+                'paid_at',pr.paid_at,
+                'payment_method',pr.payment_method,
+                'cfdi_data',pr.cfdi_data,
+                'proveedores',jsonb_build_object(
+                  'rfc',prov.rfc,
+                  'nombre_completo',prov.nombre_completo,
+                  'persona_tipo',prov.persona_tipo
+                )
+              )
+              from pr cross join prov
+            ),
+            'mappings',jsonb_build_object(
+              'expense',(select contpaq_account_code from budget_map),
+              'bank',(select contpaq_account_code from bank_map),
+              'provider',(select contpaq_account_code from provider_map),
+              'providerTerceroId',(select contpaq_provider_id from provider_map),
+              'ivaPendiente',(select contpaq_account_code from public.tax_account_mappings where company_id=(select company_id from pr) and tax_key='ivaPendiente' and not needs_review),
+              'ivaPagado',(select contpaq_account_code from public.tax_account_mappings where company_id=(select company_id from pr) and tax_key='ivaAcreditablePagado' and not needs_review)
+            ),
+            'names',jsonb_build_object(
+              'budget',(select bc.name from public.budget_categories bc where bc.id=(select budget_category_id from pr)),
+              'bank',(select cba.name from public.company_bank_accounts cba where cba.id=(select company_bank_account_id from pr)),
+              'provider',(select coalesce(alias,nombre_completo) from prov)
+            )
+          );
+          SQL
+
+          cat app/public/qa-contpaq-fixture.json | jq .
+          jq -e '
+            .row.request_number == "DEMO-DOSPOL-F-11705"
+            and (.row.amount_requested|tonumber) == 92986.76
+            and .row.cfdi_data.comprobante.subTotal == 80161
+            and .row.cfdi_data.comprobante.total == 92986.76
+            and (.row.cfdi_data.impuestos.retenciones|length) == 0
+            and .mappings.expense == "60202002000"
+            and .mappings.provider == "20101202000"
+            and .mappings.bank == "10201100000"
+            and .mappings.ivaPendiente == "11901100000"
+            and .mappings.ivaPagado == "11801100000"
+            and .ledgerBefore == 0
+          ' app/public/qa-contpaq-fixture.json >/dev/null
+
+      - name: Start real Vite component harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          export VITE_SUPABASE_URL="https://flux-contpaq-ui-qa.invalid"
+          export VITE_SUPABASE_ANON_KEY="synthetic-qa-key"
+          nohup npm --prefix app run dev -- --host 127.0.0.1 --port 4173 > /tmp/contpaq-vite.log 2>&1 &
+          echo $! > /tmp/contpaq-vite.pid
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4173/qa-contpaq-export.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/contpaq-vite.log
+          exit 1
+
+      - name: Click preview, diario and pago in Chromium
+        run: python3 scripts/qa/contpaq-f11705-browser.py
+
+      - name: Validate both downloaded XLS files
+        run: node scripts/qa/verify-contpaq-f11705-xls.mjs
+
+      - name: Prove DEV ledger stayed untouched
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SUPABASE_DEV_DB_URL"
+          export PGSSLMODE=require
+          before="$(jq -r '.ledgerBefore' app/public/qa-contpaq-fixture.json)"
+          after="$(psql "$SUPABASE_DEV_DB_URL" --no-psqlrc -At --set ON_ERROR_STOP=1 -c "select count(*) from public.accounting_exports where company_id='$COMPANY_ID'::uuid and source_id='$REQUEST_ID';")"
+          test "$before" = "$after"
+          test "$after" = "0"
+          echo "CONTPAQ_F11705_UI_END_TO_END_PASS ledger_before=$before ledger_after=$after"
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: contpaq-f11705-ui-evidence
+          path: qa-artifact/contpaq-f11705-ui
+          if-no-files-found: warn
+          retention-days: 14
