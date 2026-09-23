@@ -790,12 +790,20 @@ export function rlsHint(table: string, operation: string, error: any): string {
   return message
 }
 
-// Validación de adjunto de comprobante (upload_helper.js): tipo + tamaño.
-const UPLOAD_ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'text/xml', 'application/xml']
+// Validación de adjuntos de comprobante: tipo + tamaño por archivo.
+const UPLOAD_ACCEPTED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'text/xml', 'application/xml', 'text/plain']
+const UPLOAD_ACCEPTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'xml', 'txt', 'ddf']
 const UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+export const MAX_REQUEST_ATTACHMENTS = 10
 export function validateReceiptFile(file: File): { ok: boolean; message: string } {
-  if (!UPLOAD_ACCEPTED.includes(file.type)) return { ok: false, message: 'Tipo no permitido. Usa JPG, PNG, WEBP, PDF o XML.' }
-  if (file.size > UPLOAD_MAX_BYTES) return { ok: false, message: 'El archivo supera 10 MB. Elige uno más pequeño.' }
+  const extension = (file.name.split('.').pop() || '').toLowerCase()
+  const mimeAllowed = UPLOAD_ACCEPTED_MIME.includes(file.type)
+  const extensionFallback =
+    extension === 'ddf'
+    || ((!file.type || file.type === 'application/octet-stream') && UPLOAD_ACCEPTED_EXTENSIONS.includes(extension))
+  if (!mimeAllowed && !extensionFallback) return { ok: false, message: 'Tipo no permitido. Usa JPG, PNG, WEBP, PDF, XML, TXT o DDF.' }
+  if (!UPLOAD_ACCEPTED_EXTENSIONS.includes(extension)) return { ok: false, message: 'Extensión no permitida. Usa JPG, PNG, WEBP, PDF, XML, TXT o DDF.' }
+  if (file.size > UPLOAD_MAX_BYTES) return { ok: false, message: `${file.name}: supera 10 MB.` }
   return { ok: true, message: `${(file.size / 1024).toFixed(0)} KB · listo para subir` }
 }
 

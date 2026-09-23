@@ -4,7 +4,7 @@ import { ProviderCombo } from './ProviderCombo'
 import { QuickProviderModal } from './QuickProviderModal'
 import {
   loadBudgetAvailability, listApproverOptions, createPaymentRequest,
-  updateFase2Metadata, uploadReceipt, linkInvoicePath, loadIncidencias,
+  updateFase2Metadata, uploadReceipt, linkInvoicePath, insertRequestAttachments, loadIncidencias,
   loadActiveProfiles, loadEmployeeBankAccount, setBeneficiaryProfile,
   insertReimbursementItems, loadActiveProjects, setRequestProject,
   fetchPartidaPrediction, getSinPartidaApprover,
@@ -12,7 +12,7 @@ import {
 import {
   companyName, costCenterName, budgetCategoryLabel, proveedorLabel,
   budgetCategoryAvailabilityLabel, sortAvailabilityRows,
-  monthInputToDate, formatCurrencyC, formatMonth, validateReceiptFile,
+  monthInputToDate, formatCurrencyC, formatMonth, validateReceiptFile, MAX_REQUEST_ATTACHMENTS,
   candidateMatchesSelection, validateRequestPayload, normalizeRequestType,
   normalizePaymentMethod, requestTypeLabel, paymentMethodLabel, isApproverStaleError,
   friendlyError, normalizeRpcResult, REQUEST_TYPE_OPTIONS, PAYMENT_METHOD_OPTIONS,
@@ -136,8 +136,11 @@ export function RequestModal({
   const [isExtraordinary, setIsExtraordinary] = useState(false)
   const [description, setDescription] = useState('')
   const [notes, setNotes] = useState('')
+  // `file` conserva el documento usado para autollenado CFDI; `files` es la
+  // colección completa que se sube y vincula a la solicitud.
   const [file, setFile] = useState<File | null>(null)
-  const [fileHint, setFileHint] = useState('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
+  const [files, setFiles] = useState<File[]>([])
+  const [fileHint, setFileHint] = useState('Hasta 10 archivos · JPG, PNG, WEBP, PDF, XML, TXT o DDF · máx. 10 MB c/u')
   const [incidents, setIncidents] = useState<IncidentCharge[]>([])
   const [membersById, setMembersById] = useState<Map<string, string>>(new Map())
   const [incidentId, setIncidentId] = useState('')
@@ -503,6 +506,68 @@ const availablePredictionCandidates = useMemo(
     else if (!exchangeRate || Number(exchangeRate) <= 0) setExchangeRate('1')
   }
 
+  function fileKey(f: File): string {
+    return `${f.name}::${f.size}::${f.lastModified}`
+  }
+
+  function isXmlFile(f: File): boolean {
+    return /\.xml$/i.test(f.name) || f.type.includes('xml')
+  }
+
+  function updateFilesHint(next: File[]) {
+    if (!next.length) {
+      setFileHint('Hasta 10 archivos · JPG, PNG, WEBP, PDF, XML, TXT o DDF · máx. 10 MB c/u')
+      return
+    }
+    const totalMb = next.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)
+    setFileHint(`${next.length} archivo${next.length === 1 ? '' : 's'} seleccionado${next.length === 1 ? '' : 's'} · ${totalMb.toFixed(1)} MB en total`)
+  }
+
+  function onFilesSelected(selected: File[]) {
+    if (!selected.length) {
+      setFiles([])
+      onFile(null)
+      updateFilesHint([])
+      return
+    }
+    const valid: File[] = []
+    const rejected: string[] = []
+    for (const candidate of selected) {
+      const result = validateReceiptFile(candidate)
+      if (result.ok) valid.push(candidate)
+      else rejected.push(`${candidate.name}: ${result.message}`)
+    }
+
+    const mergedByKey = new Map(files.map((item) => [fileKey(item), item]))
+    valid.forEach((item) => mergedByKey.set(fileKey(item), item))
+    const merged = Array.from(mergedByKey.values())
+    const limited = merged.slice(0, MAX_REQUEST_ATTACHMENTS)
+    if (merged.length > MAX_REQUEST_ATTACHMENTS) {
+      rejected.push(`Solo se permiten ${MAX_REQUEST_ATTACHMENTS} archivos por solicitud.`)
+    }
+
+    setFiles(limited)
+    // Los adjuntos se acumulan, pero si esta selección trae un XML nuevo,
+    // ese documento pasa a ser la fuente fiscal activa. Así reemplazar el CFDI
+    // conserva el comportamiento histórico sin perder los demás respaldos.
+    const selectedXml = [...selected].reverse().find(isXmlFile) || null
+    const currentStillSelected = file ? limited.some((item) => fileKey(item) === fileKey(file)) : false
+    if (selectedXml) onFile(selectedXml)
+    else if (!currentStillSelected) onFile(limited.find(isXmlFile) || limited[0] || null)
+    else if (!file && limited.length) onFile(limited.find(isXmlFile) || limited[0] || null)
+    updateFilesHint(limited)
+
+    if (rejected.length) showToast('Algunos archivos no se agregaron', rejected.slice(0, 3).join(' · '), 'warning')
+  }
+
+  function removeSelectedFile(key: string) {
+    const next = files.filter((item) => fileKey(item) !== key)
+    const removedCurrent = file ? fileKey(file) === key : false
+    setFiles(next)
+    if (removedCurrent) onFile(next.find(isXmlFile) || next[0] || null)
+    updateFilesHint(next)
+  }
+
   function onFile(f: File | null) {
     const parseVersion = ++cfdiParseVersion.current
     setFile(f)
@@ -523,10 +588,9 @@ const availablePredictionCandidates = useMemo(
     if (!currencyTouched.current) setCurrency('MXN')
     if (!exchangeRateTouched.current) setExchangeRate('1')
     if (!providerTouched.current) { setProveedorId(''); setProviderSearch('') }
-    if (!f) { setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB'); return }
+    if (!f) { return }
     const res = validateReceiptFile(f)
     if (!res.ok) { setFile(null); setFileHint(res.message); return }
-    setFileHint(res.message)
     // E1 · Solicitud desde factura: al subir el XML se precarga lo que trae el
     // CFDI. Solo rellena vacíos; nunca pisa lo que el usuario ya capturó.
     if (/\.xml$/i.test(f.name) || f.type.includes('xml')) {
@@ -787,13 +851,43 @@ const availablePredictionCandidates = useMemo(
         if (itemsWarning) showToast('Desglose no guardado', itemsWarning, 'warning')
       }
 
-      // Adjunto de comprobante.
-      if (file) {
-        try {
-          const path = await uploadReceipt(file, `solicitudes/${requestId}`)
-          await linkInvoicePath(requestId, path)
-        } catch {
-          showToast('Comprobante no vinculado', 'La solicitud se creo, pero el comprobante no pudo subirse o vincularse.', 'warning')
+      // Adjuntos de la solicitud. El primero se conserva también en
+      // invoice_storage_path para compatibilidad con flujos históricos.
+      if (files.length) {
+        const uploaded: Array<{ file: File; path: string }> = []
+        let attachmentFailures = 0
+        for (const selectedFile of files) {
+          try {
+            const path = await uploadReceipt(selectedFile, `solicitudes/${requestId}`)
+            uploaded.push({ file: selectedFile, path })
+          } catch {
+            attachmentFailures += 1
+          }
+        }
+
+        if (uploaded.length) {
+          try {
+            await linkInvoicePath(requestId, uploaded[0].path)
+          } catch {
+            showToast('Comprobante principal no vinculado', 'Los archivos se subieron, pero no se pudo conservar el vínculo de compatibilidad.', 'warning')
+          }
+
+          try {
+            await insertRequestAttachments(uploaded.map(({ file: uploadedFile, path }) => ({
+              payment_request_id: requestId,
+              company_id: payload.company_id!,
+              storage_path: path,
+              original_filename: uploadedFile.name,
+              mime_type: uploadedFile.type || null,
+              file_size: uploadedFile.size,
+            })))
+          } catch {
+            showToast('Adjuntos no vinculados', 'La solicitud se creó, pero no se pudo registrar la lista completa de archivos.', 'warning')
+          }
+        }
+
+        if (attachmentFailures) {
+          showToast('Archivos no subidos', `${attachmentFailures} archivo(s) no pudieron subirse. Los demás quedaron guardados.`, 'warning')
         }
       }
 
@@ -826,11 +920,11 @@ const availablePredictionCandidates = useMemo(
     setCompanyId(initialCompanyId); setCostCenterId(''); setBudgetMonth(defaultMonth()); setBudgetCategoryId('')
     setPrediction(null); setPartidaUnsure(false); categoryTouched.current = false
     setProveedorId(''); setProviderSearch(''); setAmount(''); setCurrency('MXN'); setExchangeRate('1')
-    setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null)
+    setIsExtraordinary(false); setDescription(''); setNotes(''); setFile(null); setFiles([])
     setSubtotal(''); setTaxAmount(''); setWithholding(''); setInvoiceUuid(''); setCfdiHint('')
     setDupWarning(null); setProviderPrefill(null)
     setIncidentId('')
-    setFileHint('JPG, PNG, WEBP, PDF o XML · máx. 10 MB')
+    setFileHint('Hasta 10 archivos · JPG, PNG, WEBP, PDF, XML, TXT o DDF · máx. 10 MB c/u')
     setResponsibleId(profile?.id ?? ''); setDueDate(''); setDeliveryMethod('cash')
     setBeneficiaryId(profile?.id ?? ''); setBankAccount(null); setItems([emptyReimbursementItem()])
     setBudgetRows([]); setCategoryDisabled(true); setCategorySearch('')
@@ -937,10 +1031,31 @@ const availablePredictionCandidates = useMemo(
                     </label>
                     {/* En reembolso los comprobantes van por renglón: cada uno es
                         de un comercio distinto, no hay una factura única. */}
-                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional)
-                      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                    <label className={`${s.fullRow} ${isReembolso ? s.hidden : ''}`}>Factura / comprobante (opcional · puedes adjuntar varios)
+                      <input
+                        type="file"
+                        multiple
+                        accept=".jpg,.jpeg,.png,.webp,.pdf,.xml,.txt,.ddf,image/jpeg,image/png,image/webp,application/pdf,text/xml,application/xml,text/plain"
+                        onChange={(e) => {
+                          onFilesSelected(Array.from(e.target.files ?? []))
+                          e.target.value = ''
+                        }}
+                      />
                       <span className={s.fileHint}>{fileHint}</span>
                     </label>
+                    {!isReembolso && files.length > 0 && (
+                      <div className={`${s.fullRow} ${s.attachmentList}`} aria-label="Archivos seleccionados">
+                        {files.map((selectedFile) => (
+                          <div key={fileKey(selectedFile)} className={s.attachmentItem}>
+                            <span>
+                              <strong>{selectedFile.name}</strong>
+                              <small>{(selectedFile.size / 1024).toFixed(0)} KB</small>
+                            </span>
+                            <button type="button" onClick={() => removeSelectedFile(fileKey(selectedFile))} aria-label={`Quitar ${selectedFile.name}`}>Quitar</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {!isReembolso && cfdiLoading && <p className={`${s.fullRow} ${s.fieldHint}`} role="status">Leyendo factura…</p>}
                     {cfdiError && (
                       <div className={`${s.fullRow} ${s.fieldHint}`} role="alert" style={{ color: 'var(--ruby)' }}>
