@@ -7,6 +7,7 @@ import type {
   IncidentCharge, Profile, ExecutionContext, RequestSummary, RequestPayload,
   EditPayload, DecisionAction, CashFund, EmployeeBankAccount, ReimbursementItem,
   ReimbursementItemInsert, ProjectOption, PartidaPrediction, PartidaCandidate,
+  RequestAttachment, RequestAttachmentInsert,
 } from './types'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
@@ -618,8 +619,12 @@ export async function createCashFund(params: {
 export async function uploadReceipt(file: File, folder: string): Promise<string> {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase()
   const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+  const fallbackContentType =
+    ext === 'xml' ? 'application/xml'
+    : ext === 'txt' || ext === 'ddf' ? 'text/plain'
+    : 'application/octet-stream'
   const { error } = await supabase.storage.from(UPLOAD_BUCKET).upload(path, file, {
-    contentType: file.type,
+    contentType: file.type || fallbackContentType,
     upsert: false,
   })
   if (error) throw new Error(`Error al subir archivo: ${error.message}`)
@@ -633,6 +638,22 @@ export async function getReceiptUrl(storagePath: string): Promise<string | null>
 export async function linkInvoicePath(requestId: string, storagePath: string): Promise<void> {
   const { error } = await supabase.from('payment_requests').update({ invoice_storage_path: storagePath }).eq('id', requestId)
   if (error) throw error
+}
+
+export async function insertRequestAttachments(rows: RequestAttachmentInsert[]): Promise<void> {
+  if (!rows.length) return
+  const { error } = await supabase.from('payment_request_attachments').insert(rows)
+  if (error) throw error
+}
+
+export async function loadRequestAttachments(requestId: string): Promise<RequestAttachment[]> {
+  const { data, error } = await supabase
+    .from('payment_request_attachments')
+    .select('id,payment_request_id,company_id,storage_path,original_filename,mime_type,file_size,created_at')
+    .eq('payment_request_id', requestId)
+    .order('created_at', { ascending: true })
+  if (error) return []
+  return (data ?? []) as RequestAttachment[]
 }
 
 // ── Proyectos ──────────────────────────────────────────────────────────────
