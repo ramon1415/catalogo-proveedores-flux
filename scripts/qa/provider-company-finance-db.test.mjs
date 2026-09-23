@@ -45,5 +45,62 @@ test('provider company finance authorization and banking guards', async () => {
   await assert.rejects(save(),/not_authenticated/)
   await db.exec(`update profiles set active=true; select set_config('test.uid','',false)`)
   await assert.rejects(save(),/not_authenticated/)
+
+  // Full catalog role cutover: validate RLS as authenticated, not only RPC guards.
+  await db.exec(`
+    update profiles set active=true;
+    update companies set active=true;
+    update profile_company_memberships set active=true,role_key='finance';
+    select set_config('test.uid','00000000-0000-4000-8000-000000000002',false);
+    create role authenticated;
+    create schema storage;
+    create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);
+    alter table storage.objects enable row level security;
+    alter table proveedores enable row level security;
+    grant usage on schema public,storage to authenticated;
+    grant select on all tables in schema public to authenticated;
+    grant insert,update on proveedores to authenticated;
+    grant select,insert on storage.objects to authenticated;
+    create policy proveedores_select_members on proveedores for select to authenticated using (current_user_has_role(flux_member_roles()));
+    create policy proveedores_insert_members on proveedores for insert to authenticated with check (current_user_has_role(flux_member_roles()));
+    create policy proveedores_update_managers on proveedores for update to authenticated using (current_user_has_role(flux_approver_roles())) with check (current_user_has_role(flux_approver_roles()));
+    create policy "Authenticated can upload provider CSF" on storage.objects for insert to authenticated with check (bucket_id='payment-receipts' and name like 'csf/%' and current_user_has_role(flux_approver_roles()));
+    create policy "Authenticated can read provider CSF" on storage.objects for select to authenticated using (bucket_id='payment-receipts' and name like 'csf/%' and current_user_has_role(flux_approver_roles()));
+  `)
+  await db.exec(read('../../ops/provider-current-roles.sql'))
+  for (const role of ['finance','director','sysadmin','operator']) {
+    await db.query('update profile_company_memberships set role_key=$1',[role])
+    await db.exec('set role authenticated')
+    assert.ok((await db.query('select id from proveedores')).rows.length, role+' reads catalog')
+    const basicId=(await save(null,{alias:'QA '+role,nombre_completo:'QA '+role,metodo_pago:'Efectivo'})).rows[0].result.id
+    const updated=await db.query('update proveedores set activo=false,csf_file_path=$1 where id=$2 returning id',['csf/'+basicId+'/test.pdf',basicId])
+    assert.equal(updated.rows.length,role==='operator'?0:1,role+' updates active and CSF metadata')
+    if(role==='operator') {
+      await assert.rejects(save(basicId,{nombre_completo:'Changed'}),/provider_update_role_required/)
+      await assert.rejects(db.query('insert into storage.objects(bucket_id,name)values($1,$2)',['payment-receipts','csf/'+basicId+'/test.pdf']),/row-level security/)
+    } else {
+      await save(basicId,{nombre_completo:'Changed'})
+      await db.query('insert into storage.objects(bucket_id,name)values($1,$2)',['payment-receipts','csf/'+basicId+'/test.pdf'])
+      assert.ok((await db.query('select * from storage.objects')).rows.length)
+    }
+    if(['finance','sysadmin'].includes(role)) await save()
+    else await assert.rejects(save(),/finance_role_required/)
+    await assert.rejects(db.query('insert into storage.objects(bucket_id,name)values($1,$2)',['other-bucket','csf/test.pdf']),/row-level security/)
+    await db.exec('reset role')
+  }
+  for (const scenario of ['membership','company','profile','unknown']) {
+    await db.exec(`update profile_company_memberships set active=true,role_key='finance';update companies set active=true;update profiles set active=true`)
+    if(scenario==='membership') await db.exec('update profile_company_memberships set active=false')
+    if(scenario==='company') await db.exec('update companies set active=false')
+    if(scenario==='profile') await db.exec('update profiles set active=false')
+    if(scenario==='unknown') await db.exec("update profile_company_memberships set role_key='unknown'")
+    await db.exec('set role authenticated')
+    assert.equal((await db.query('select * from proveedores')).rows.length,0,scenario+' cannot read catalog')
+    assert.equal((await db.query('update proveedores set activo=false returning id')).rows.length,0)
+    assert.equal((await db.query('select * from storage.objects')).rows.length,0)
+    await assert.rejects(save(),/provider_create_role_required|not_authenticated/)
+    await assert.rejects(db.exec("insert into storage.objects(bucket_id,name)values('payment-receipts','csf/test.pdf')"),/row-level security/)
+    await db.exec('reset role')
+  }
   await db.close()
 })
