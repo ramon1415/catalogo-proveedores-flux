@@ -146,6 +146,19 @@ export type PaymentReceiptRow = {
   created_at: string | null
 }
 
+export type RequestAttachment = {
+  id: string
+  payment_request_id: string
+  company_id: string
+  storage_path: string
+  original_filename: string
+  mime_type: string | null
+  file_size: number | null
+  created_at: string | null
+}
+
+export type RequestAttachmentInsert = Omit<RequestAttachment, 'id' | 'created_at'>
+
 export type Profile = { id: string; full_name: string | null; email: string | null }
 
 // ── Reembolsos ─────────────────────────────────────────────────────────────
