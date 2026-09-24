@@ -228,7 +228,7 @@ export default function SolicitudesPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'excepciones' }) } }}>
           <span className={s.kpiLabel}>Excepciones presupuestales</span><span className={s.kpiValue}>{stats.blocked}</span>
         </div>
-        <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.paid ? s.active : ''}`} role="button" tabIndex={0}
+        <div className={`${s.kpi} ${s.paymentPaid} ${s.clickable} ${cardActive.paid ? s.active : ''}`} role="button" tabIndex={0}
           onClick={() => setFilters({ status: 'paid', decision: 'todos' })}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'paid', decision: 'todos' }) } }}>
           <span className={s.kpiLabel}>Pagadas</span><span className={s.kpiValue}>{stats.paid}</span>
@@ -250,7 +250,7 @@ export default function SolicitudesPage() {
             <option value="submitted">Enviada</option>
             <option value="approved">Aprobada</option>
             <option value="changes_requested">Con correccion</option>
-            <option value="finance_validation">En revision</option>
+            <option value="finance_validation">En proceso de pago</option>
             <option value="scheduled">Programada</option>
             <option value="paid">Pagada</option>
             <option value="rejected">Rechazada</option>

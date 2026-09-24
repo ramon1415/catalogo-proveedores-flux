@@ -17,3 +17,16 @@
 .info    { background: color-mix(in srgb, #6ea8fe 15%, transparent); color: #9ec3ff; border-color: color-mix(in srgb, #6ea8fe 30%, transparent); }
 .warning { background: color-mix(in srgb, var(--amber, #e0a53a) 16%, transparent); color: var(--amber, #e0a53a); border-color: color-mix(in srgb, var(--amber, #e0a53a) 32%, transparent); }
 .danger  { background: color-mix(in srgb, var(--ruby, #e05a6a) 15%, transparent); color: var(--ruby, #e05a6a); border-color: color-mix(in srgb, var(--ruby, #e05a6a) 30%, transparent); }
+
+/* Payment outcome stays distinct from brand-colored budget/approval badges. */
+.paymentPaid, .paymentPending {
+  background: color-mix(in srgb, var(--payment-status-color) 12%, transparent);
+  color: var(--payment-status-color);
+  border-color: color-mix(in srgb, var(--payment-status-color) 32%, transparent);
+  font-weight: 700;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.4;
+}
+.paymentPaid { --payment-status-color: var(--payment-paid); }
+.paymentPending { --payment-status-color: var(--payment-pending); }

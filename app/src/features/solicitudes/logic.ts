@@ -70,13 +70,13 @@ type BadgeDesc = { label: string; variant: BadgeVariant; title?: string }
 export function statusBadge(status: string | null): BadgeDesc {
   const map: Record<string, BadgeDesc> = {
     submitted: { label: 'Enviada', variant: 'info' },
-    approved: { label: 'Aprobada', variant: 'success' },
-    paid: { label: 'Pagado', variant: 'success' },
+    approved: { label: 'Aprobada', variant: 'paymentPending' },
+    paid: { label: 'Pagada', variant: 'paymentPaid' },
     rejected: { label: 'Rechazada', variant: 'danger' },
     cancelled: { label: 'Cancelada', variant: 'warning' },
     changes_requested: { label: 'Con corrección', variant: 'warning' },
-    finance_validation: { label: 'En revisión', variant: 'info' },
-    scheduled: { label: 'Programado', variant: 'info' },
+    finance_validation: { label: 'Aprobada · Pendiente de pago', variant: 'paymentPending' },
+    scheduled: { label: 'Aprobada · Pago programado', variant: 'paymentPending' },
   }
   return map[status ?? ''] ?? { label: status || 'Sin estatus', variant: 'neutral' }
 }
