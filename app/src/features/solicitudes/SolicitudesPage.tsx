@@ -14,8 +14,8 @@ import {
   loadProfiles, loadPaymentRequests, loadFase2Metadata, loadExtraordinaryBadges,
 } from './api'
 import {
-  isActiveRequest, isExceptionRequest, statusMatches, budgetDecisionMatches,
-  requestSearchHaystack, statusBadge, budgetDecisionBadge, companyName, costCenterName,
+  isActiveRequest, isApprovedAwaitingPayment, isPendingExceptionRequest, statusMatches, budgetDecisionMatches,
+  requestSearchHaystack, statusBadge, requestBudgetDecisionBadge, companyName, costCenterName,
   proveedorAlias, formatCurrencyC, formatMonth, hasFinanceRole,
   requestTypeLabel, paymentMethodLabel, paymentMethodVariant,
   isReimbursement,
@@ -149,8 +149,8 @@ export default function SolicitudesPage() {
     const paid = scopedRequests.filter((r) => r.status === 'paid')
     return {
       total: active.length,
-      aprobables: active.filter((r) => r.budget_decision === 'aprobable').length,
-      blocked: active.filter(isExceptionRequest).length,
+      approved: active.filter(isApprovedAwaitingPayment).length,
+      blocked: active.filter(isPendingExceptionRequest).length,
       paid: paid.length,
       amount: active.reduce((sum, r) => sum + numberValue(r.amount_requested), 0),
     }
@@ -181,8 +181,9 @@ export default function SolicitudesPage() {
     if (query.trim()) parts.push('Busqueda')
     if (categoryFilter) parts.push(lookups.category(categoryFilter)?.name || 'Partida')
     if (statusFilter !== 'todos') parts.push(STATUS_FILTER_LABELS[statusFilter] || `Estatus: ${statusFilter}`)
-    if (decisionFilter === 'aprobable') parts.push('Aprobables')
-    if (decisionFilter === 'excepciones') parts.push('Excepciones presupuestales')
+    if (decisionFilter === 'aprobable') parts.push('Con presupuesto')
+    if (decisionFilter === 'excepciones') parts.push('Excepciones por autorizar')
+    if (decisionFilter === 'excepciones_autorizadas') parts.push('Excepciones autorizadas')
     if (activeCompanyId) { const c = lookups.company(activeCompanyId); parts.push(c ? companyName(c) : 'Empresa activa') }
     return parts
   }, [query, statusFilter, decisionFilter, categoryFilter, activeCompanyId, lookups])
@@ -194,7 +195,7 @@ export default function SolicitudesPage() {
   // ── Card active state (mirror renderFilterState) ─────────────────────────
   const cardActive = {
     total: statusFilter === 'activas' && decisionFilter === 'todos',
-    approvable: statusFilter === 'activas' && decisionFilter === 'aprobable',
+    approved: statusFilter === 'approved' && decisionFilter === 'todos',
     exceptions: statusFilter === 'activas' && decisionFilter === 'excepciones',
     paid: statusFilter === 'paid',
   }
@@ -236,15 +237,15 @@ export default function SolicitudesPage() {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'todos' }) } }}>
           <span className={s.kpiLabel}>Solicitudes activas</span><span className={s.kpiValue}>{stats.total}</span>
         </div>
-        <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.approvable ? s.active : ''}`} role="button" tabIndex={0}
-          onClick={() => setFilters({ status: 'activas', decision: 'aprobable' })}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'aprobable' }) } }}>
-          <span className={s.kpiLabel}>Aprobables</span><span className={s.kpiValue}>{stats.aprobables}</span>
+        <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.approved ? s.active : ''}`} role="button" tabIndex={0}
+          onClick={() => setFilters({ status: 'approved', decision: 'todos' })}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'approved', decision: 'todos' }) } }}>
+          <span className={s.kpiLabel}>Aprobadas por pagar</span><span className={s.kpiValue}>{stats.approved}</span>
         </div>
         <div className={`${s.kpi} ${s.warning} ${s.clickable} ${cardActive.exceptions ? s.active : ''}`} role="button" tabIndex={0}
           onClick={() => setFilters({ status: 'activas', decision: 'excepciones' })}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFilters({ status: 'activas', decision: 'excepciones' }) } }}>
-          <span className={s.kpiLabel}>Excepciones presupuestales</span><span className={s.kpiValue}>{stats.blocked}</span>
+          <span className={s.kpiLabel}>Excepciones por autorizar</span><span className={s.kpiValue}>{stats.blocked}</span>
         </div>
         <div className={`${s.kpi} ${s.success} ${s.clickable} ${cardActive.paid ? s.active : ''}`} role="button" tabIndex={0}
           onClick={() => setFilters({ status: 'paid', decision: 'todos' })}
@@ -266,9 +267,9 @@ export default function SolicitudesPage() {
             <option value="todos">Estatus: Todos</option>
             <option value="activas">Activas</option>
             <option value="submitted">Enviada</option>
-            <option value="approved">Aprobada</option>
+            <option value="approved">Aprobadas por pagar</option>
             <option value="changes_requested">Con correccion</option>
-            <option value="finance_validation">En revision</option>
+            <option value="finance_validation">En proceso de pago</option>
             <option value="scheduled">Programada</option>
             <option value="paid">Pagada</option>
             <option value="rejected">Rechazada</option>
@@ -276,8 +277,9 @@ export default function SolicitudesPage() {
           </select>
           <select aria-label="Filtrar por presupuesto" value={decisionFilter} onChange={(e) => setDecisionFilter(e.target.value as BudgetDecisionFilter)}>
             <option value="todos">Presupuesto: Todos</option>
-            <option value="aprobable">Aprobable</option>
-            <option value="excepciones">Excepciones</option>
+            <option value="aprobable">Con presupuesto</option>
+            <option value="excepciones">Excepciones por autorizar</option>
+            <option value="excepciones_autorizadas">Excepciones autorizadas</option>
           </select>
           <select aria-label="Filtrar por partida" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las partidas</option>
@@ -326,7 +328,7 @@ export default function SolicitudesPage() {
                 const center = lookups.center(r.cost_center_id)
                 const category = lookups.category(r.budget_category_id)
                 const sb = statusBadge(r.status)
-                const db = budgetDecisionBadge(r.budget_decision, r.budget_block_reason || '')
+                const db = requestBudgetDecisionBadge(r)
                 const meta = r.request_number ? fase2.get(r.request_number) : undefined
                 const extra = extraBadges.get(r.id)
                 return (
@@ -351,7 +353,7 @@ export default function SolicitudesPage() {
                       <span className={s.cellSub}>{isSinPartida(category) ? '' : `${category?.name || ''} · `}{formatMonth(r.budget_month)}</span>
                     </td>
                     <td data-label="Monto"><span className={s.cellMain}>{formatCurrencyC(r.amount_requested, r.currency || 'MXN')}</span></td>
-                    <td data-label="Estatus"><Badge variant={sb.variant}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
+                    <td data-label="Estatus"><Badge variant={sb.variant} title={sb.title}>{sb.label}</Badge> <Badge variant={db.variant} title={db.title}>{db.label}</Badge></td>
                     <td data-label="Acciones"><div className={s.rowActions}><button type="button" className={s.smallBtn} style={{ whiteSpace: 'nowrap' }} onClick={() => { setDetailId(r.id); setDetailKey((k) => k + 1) }}>Ver detalle</button></div></td>
                   </tr>
                 )
