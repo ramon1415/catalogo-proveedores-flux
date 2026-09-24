@@ -573,6 +573,35 @@ test('activity distinguishes monthly income/incidents from current cash, without
   assert.equal(result.incomeExcluded, 2)
 })
 
+test('cash renders as a Solicitudes-style summary + table (concepto · cantidad · monto), not a hero', async () => {
+  // Fechas explícitas (pasado / futuro lejano) para que "vencidos" sea determinista sin importar la fecha de ejecución.
+  const p = await mountPage({ fetchActivity: async () => ({ legacyIncome: true, income: [], incidents: [], cash: [
+    cashRow({ due_date: '2000-01-01' }),                                     // activo · por comprobar · vencido
+    cashRow({ id: 'review', status: 'receipt_review', due_date: '2999-12-31' }), // activo · en revisión · NO vencido
+    cashRow({ id: 'closed', status: 'closed', assigned_amount: 1000 }),      // cerrado: excluido de fondos activos
+  ] }) })
+  try {
+    const section = p.section('sec-cash')
+    // Resumen accionable estilo Solicitudes (fondos activos · por comprobar · vencidos).
+    assert.match(section, /2fondos activos/)
+    assert.match(section, /\$160 por comprobar/)
+    assert.match(section, /1 vencido/)
+    // Tabla concepto · cantidad · monto (ya no el héroe cash).
+    assert.match(section, /ConceptoCantidadMonto/)
+    assert.match(section, /Fondos activos2\$200/)          // count active · entregado
+    assert.match(section, /Con saldo por comprobar2\$160/) // count pending · pendingAmount
+    assert.match(section, /En revisión1/)                  // inReview count
+    assert.match(section, /Vencidos1/)                     // overdue count, tono de atención
+    // Datos entregado/comprobado preservados en la nota; el héroe anterior desaparece.
+    assert.match(section, /Entregado \$200 · comprobado \$40/)
+    assert.doesNotMatch(section, /Monto comprobado/)       // etiqueta del héroe anterior
+    // Invariantes: importe por comprobar no se duplica y los vencidos no se doble-cuentan.
+    assert.equal(section.match(/\$160/g).length, 2)        // solo en resumen y en la fila "por comprobar"
+    assert.match(section, /no se suman de nuevo/)
+    assert.match(section, /Ver módulo completo/)
+  } finally { p.unmount() }
+})
+
 test('activity API selects the income model per company and scopes all tenant data before pagination', async () => {
   const op = tenantConfig.LEGACY_INCOME_COMPANY_IDS[0]
   const fer = '68b61801-74c0-44ea-a33b-f20e4bf53aa7'
