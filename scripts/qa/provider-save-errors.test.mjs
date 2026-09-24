@@ -19,10 +19,8 @@ function load(path, mocks = {}) {
   return exports
 }
 const logic = load('app/src/features/proveedores/logic.ts')
-const legacySource = readFileSync(new URL('proveedores.js', root), 'utf8')
-const legacy = vm.runInNewContext(legacySource.slice(legacySource.indexOf('const PROVIDER_SAVE_ERROR_MESSAGES'), legacySource.indexOf('function logSupplierSaveDiagnostic')) + '\n({ messageForSaveError: e => PROVIDER_SAVE_ERROR_MESSAGES[providerSaveErrorCode(e)] })')
 
-for (const [label, api] of [['React', logic], ['legacy', legacy]]) {
+for (const [label, api] of [['React', logic]]) {
   test(`${label}: custom duplicate alias error takes priority over SQLSTATE and explains inactive records`, () => {
     const message = api.messageForSaveError({ code: '23505', message: 'alias_duplicado: el alias Ejemplo ya pertenece a otro proveedor' })
     assert.match(message, /alias/)

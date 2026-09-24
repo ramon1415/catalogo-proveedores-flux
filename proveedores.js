@@ -500,22 +500,6 @@ function isPreviewEnvironment() {
 }
 
 const PROVIDER_SAVE_ERROR_MESSAGES = Object.freeze({
-  "alias_duplicado": "Ya existe un proveedor con ese alias, incluso si está inactivo. Búscalo en el catálogo con el filtro Todos o Inactivos y edita o reactiva su registro.",
-  "proveedores_alias_normalized_uidx": "Ya existe un proveedor con ese alias, incluso si está inactivo. Búscalo en el catálogo con el filtro Todos o Inactivos y edita o reactiva su registro.",
-  "proveedores_rfc_normalized_uidx": "Ese RFC ya pertenece a otro proveedor. Busca el registro existente en el catálogo, incluidos los inactivos.",
-  "proveedores_clabe_normalized_uidx": "Esa CLABE ya pertenece a otro proveedor. Revisa el registro existente antes de guardar.",
-  "proveedores_bank_account_normalized_uidx": "Esa cuenta bancaria ya está registrada para ese banco en otro proveedor. Revisa el registro existente antes de guardar.",
-  "rfc_invalido": "RFC inválido: captura 12 o 13 caracteres, sin espacios ni guiones.",
-  "proveedores_rfc_format_check": "RFC inválido: captura 12 o 13 caracteres, sin espacios ni guiones.",
-  "clabe_invalida": "CLABE inválida: debe contener exactamente 18 dígitos; puede llevar espacios o guiones como separadores.",
-  "proveedores_clabe_format_check": "CLABE inválida: debe contener exactamente 18 dígitos.",
-  "persona_tipo_invalido": "Selecciona un tipo de persona fiscal válido: física o moral.",
-  "provider_core_fields_required": "Completa el alias, el nombre completo y el método de pago.",
-  "proveedor_not_found_or_inactive": "El proveedor no existe o está inactivo. Actívalo antes de modificar sus datos bancarios.",
-  "proveedor_not_found": "El proveedor ya no está disponible. Actualiza el catálogo antes de continuar.",
-  "profile_inactive": "Tu perfil está inactivo. Solicita su activación al administrador.",
-  "42501": "Tu usuario no tiene permiso para guardar este proveedor. Solicita que revisen tu acceso.",
-  "23505": "Un dato del proveedor ya está registrado. Revisa alias, RFC, CLABE y cuenta bancaria, incluidos los proveedores inactivos.",
   finance_role_required: "Los datos bancarios del proveedor solo pueden ser guardados por Finanzas.",
   provider_payment_execution_data_invalid: "Revisa los datos bancarios del proveedor.",
   provider_create_role_required: "No tienes permiso para crear proveedores.",
@@ -529,7 +513,6 @@ function providerSaveErrorCode(error) {
     .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean)
   const knownCode = Object.keys(PROVIDER_SAVE_ERROR_MESSAGES)
-    .filter((code) => !/^\d{5}$/.test(code))
     .find((code) => candidates.some((candidate) => candidate.includes(code)))
   if (knownCode) return knownCode
 
