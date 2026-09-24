@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { BudgetPartida } from './types'
 import { money, pct, REQUEST_STATUS_LABELS } from './logic'
@@ -35,6 +35,25 @@ export function BudgetMovementDetail({ p, companyId, year, period, periodLabel, 
     return () => { cancelled = true }
   }, [companyId, year, p.categoryId, period, attempt])
   const rows = result?.rows
+  const viewportRef = useRef<HTMLDivElement>(null)
+  // Measure the actual first four rows: mobile text wraps and font scaling must
+  // never clip a field or silently expose a fifth entry. Recalculate on resize.
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    const table = viewport?.querySelector('table')
+    if (!viewport || !table || !rows?.length) return
+    const visibleRows = Array.from(table.tBodies[0].rows).slice(0, 4)
+    const measure = () => {
+      const last = visibleRows[visibleRows.length - 1]
+      const height = last.getBoundingClientRect().bottom - table.getBoundingClientRect().top
+      viewport.style.setProperty('--movement-visible-height', `${Math.ceil(height)}px`)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(table)
+    visibleRows.forEach(row => observer.observe(row))
+    return () => observer.disconnect()
+  }, [rows])
   const totals = rows ? movementTotals(rows) : null
   const matches = !!totals && Math.abs(totals.used - p.used) < 0.01 && Math.abs(totals.executed - p.executed) < 0.01
   const requestsOnly = rows?.every(row => row.source === 'request')
@@ -45,17 +64,17 @@ export function BudgetMovementDetail({ p, companyId, year, period, periodLabel, 
     {rows && <>
       {!matches && <p className={d.notice} role="status">El detalle y el resumen no coinciden; puede haber movimientos recientes. <button type="button" className={s.secondaryBtn} onClick={onRefresh}>Actualizar resumen</button></p>}
       {!rows.length ? <p>Sin movimientos que consuman presupuesto en este periodo.</p> : <>
-        {rows.length > 4 && <p className={d.scrollHint}>Desplázate dentro de la tabla para ver los {rows.length} movimientos.</p>}
-        <div className={d.viewport} tabIndex={0} role="region" aria-label={`Movimientos de ${p.name}; tabla con desplazamiento interno`}>
-          <table className={d.table}>
-            <thead><tr><th scope="col">Folio</th><th scope="col">Fecha</th><th scope="col">Proveedor / Concepto</th><th scope="col">Estado</th><th scope="col" className={d.amount}>Consumo MXN</th><th scope="col"><span className={d.srOnly}>Acciones</span></th></tr></thead>
-            <tbody>{rows.map(row => <tr key={`${row.source}-${row.id}`}>
-              <td><span className={d.truncate} title={row.reference || 'Sin folio'}>{row.reference || 'Sin folio'}</span></td>
-              <td>{row.date ? row.date.split('-').reverse().join('/') : '—'}</td>
-              <td><strong className={d.truncate} title={row.title}>{row.title}</strong><span className={d.truncate} title={row.description}>{row.description || 'Sin concepto'}</span></td>
-              <td><span className={row.status === 'paid' ? d.paid : d.pending}>{row.source === 'historical' ? 'Contabilizado' : REQUEST_STATUS_LABELS[row.status] || row.status}</span></td>
-              <td className={d.amount}>{row.amount.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}</td>
-              <td>{row.source === 'request' ? <Link className={d.link} to={`/solicitudes?request_id=${encodeURIComponent(row.id)}`}>Ver solicitud ↗</Link> : row.source === 'obligation' ? <Link className={d.link} to="/nomina">Ver nómina ↗</Link> : <span className={d.source}>Consolidado mensual</span>}</td>
+        {rows.length > 4 && <p className={d.scrollHint}>Desplázate hacia abajo dentro del detalle para ver los {rows.length} movimientos.</p>}
+        <div ref={viewportRef} className={d.viewport} tabIndex={0} role="region" aria-label={`Movimientos de ${p.name}; desplazamiento interno`}>
+          <table className={d.table} role="table">
+            <thead role="rowgroup"><tr role="row"><th scope="col">Folio</th><th scope="col">Fecha</th><th scope="col">Proveedor / Concepto</th><th scope="col">Estado</th><th scope="col" className={d.amount}>Consumo MXN</th><th scope="col"><span className={d.srOnly}>Acciones</span></th></tr></thead>
+            <tbody role="rowgroup">{rows.map(row => <tr role="row" key={`${row.source}-${row.id}`}>
+              <td role="cell" className={d.reference}><span className={d.mobileLabel} aria-hidden="true">Folio</span><span className={d.truncate} title={row.reference || 'Sin folio'}>{row.reference || 'Sin folio'}</span></td>
+              <td role="cell" className={d.date}><span className={d.mobileLabel} aria-hidden="true">Fecha</span>{row.date ? row.date.split('-').reverse().join('/') : '—'}</td>
+              <td role="cell" className={d.provider}><span className={d.mobileLabel} aria-hidden="true">Proveedor / Concepto</span><strong className={d.truncate} title={row.title}>{row.title}</strong><span className={d.truncate} title={row.description}>{row.description || 'Sin concepto'}</span></td>
+              <td role="cell" className={d.status}><span className={d.mobileLabel} aria-hidden="true">Estado</span><span className={row.status === 'paid' ? d.paid : d.pending}>{row.source === 'historical' ? 'Contabilizado' : REQUEST_STATUS_LABELS[row.status] || row.status}</span></td>
+              <td role="cell" className={d.amount}><span className={d.mobileLabel} aria-hidden="true">Consumo MXN</span>{row.amount.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}</td>
+              <td role="cell" className={d.action}>{row.source === 'request' ? <Link className={d.link} to={`/solicitudes?request_id=${encodeURIComponent(row.id)}`}>Ver solicitud ↗</Link> : row.source === 'obligation' ? <Link className={d.link} to="/nomina">Ver nómina ↗</Link> : <span className={d.source}>Consolidado mensual</span>}</td>
             </tr>)}</tbody>
           </table>
         </div>
