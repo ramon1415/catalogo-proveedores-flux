@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - 'feature/carlos-*'
+      - 'dev'
+      - 'main'
     paths:
       - 'app/**'
       - '.github/workflows/react-app-ci.yml'
@@ -37,6 +39,12 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Lint (errors and warning budget)
+        run: npm run lint
+
+      - name: Check tooling format
+        run: npm run format:check:tooling
 
       - name: Typecheck
         run: npm run typecheck

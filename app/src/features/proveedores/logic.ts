@@ -50,6 +50,7 @@ export function validateDestination(payload: ProviderPayload): string {
   const digits = (value: string | null) => (value ?? '').replace(/[\s-]/g, '')
   if (payload.destination_type === 'clabe' && !/^[0-9]{18}$/.test(digits(payload.clabe))) return PROVIDER_SAVE_ERROR_MESSAGES.clabe_invalida
   if (payload.destination_type === 'cuenta' && !/^[0-9]{1,18}$/.test(digits(payload.cuenta_bancaria))) return 'Cuenta bancaria inválida: captura entre 1 y 18 dígitos; puede llevar espacios o guiones como separadores.'
+  // eslint-disable-next-line no-control-regex -- Deliberately reject control characters in bank fields.
   const invalidText = (value: string, max: number) => [...value.trim()].length > max || /[\x00-\x1f\x7f]/.test(value)
   if (invalidText(payload.banco ?? '', 100)) return 'Banco inválido: usa hasta 100 caracteres, sin saltos de línea ni caracteres de control.'
   if (invalidText(payload.beneficiary_name || payload.nombre_completo || payload.alias || '', 180)) return 'Beneficiario inválido: usa hasta 180 caracteres, sin saltos de línea ni caracteres de control.'
