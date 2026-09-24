@@ -372,3 +372,13 @@ textarea.formControl { min-height: 74px; padding: 10px 11px; resize: vertical; l
 
 .scrollHint { display: none; }
 @media (max-width: 760px) { .scrollHint { display: block; margin: 0; padding: 8px 12px; color: var(--text-2); font-size: 11px; border-bottom: 1px solid var(--border); } }
+
+.kpi.paymentPaid .kpiValue { color: var(--payment-paid); }
+.kpi.paymentPending .kpiValue { color: var(--payment-pending); }
+.notice.paymentPaid { --payment-status-color: var(--payment-paid); }
+.notice.paymentPending { --payment-status-color: var(--payment-pending); }
+.notice.paymentPaid, .notice.paymentPending {
+  color: var(--payment-status-color);
+  background: color-mix(in srgb, var(--payment-status-color) 12%, transparent);
+  border-color: color-mix(in srgb, var(--payment-status-color) 32%, transparent);
+}

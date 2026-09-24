@@ -227,8 +227,10 @@ export function DetailModal({
   }, [isReembolso, request.id, request.company_id])
 
   const detailNotice = isPaid
-    ? { title: 'Pagada', desc: 'Esta solicitud ya fue pagada.', variant: 'success' as const }
-    : exception
+    ? { title: 'Pagada', desc: 'Esta solicitud ya fue pagada.', variant: 'paymentPaid' as const }
+    : ['approved', 'finance_validation', 'scheduled'].includes(request.status || '')
+      ? { title: statusBadge(request.status).label, desc: 'La aprobación ya está registrada. La solicitud está pendiente de pago.', variant: 'paymentPending' as const }
+      : exception
       ? { title: 'Excepción presupuestal', desc: 'Requiere revisión por excepción presupuestal.', variant: 'warning' as const }
       : { title: 'Presupuesto disponible', desc: 'Validada automáticamente con presupuesto disponible.', variant: 'info' as const }
 
