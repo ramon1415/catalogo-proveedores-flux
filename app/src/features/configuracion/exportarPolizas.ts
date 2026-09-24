@@ -90,6 +90,29 @@ export function empresaConfigDe(companyId: string): EmpresaConfigReal | null {
   return null
 }
 
+/**
+ * FASE 1 multi-partida (backbone). Si la solicitud trae líneas de distribución
+ * (payment_request_distributions, N≥1), REEMPLAZA contrato.distribucion por esas
+ * líneas — cada una con la forma que consume el motor
+ * ({partidaId, centroCostosId?, importeBase}, ver adapters/paymentRequest.js y
+ * mapeo/resolver.js). La suma de `amount` de las líneas es la BASE (subtotal)
+ * del gasto; el IVA / las retenciones se siguen calculando del CFDI, así la
+ * póliza cuadra igual (cargos de gasto por N líneas + IVA = abonos).
+ *
+ * Sin líneas (ausentes o []) → NO toca el contrato: se usa la única partida
+ * derivada de budget_category_id (comportamiento actual). Backward-compatible.
+ * Muta el contrato in situ (recién construido y propio de esta iteración).
+ */
+function aplicarDistribucionMultipartida(contrato: ContratoCanonico, row: PaidRequestRow): void {
+  const lineas = row.payment_request_distributions
+  if (!Array.isArray(lineas) || lineas.length === 0) return
+  contrato.distribucion = lineas.map((l) => ({
+    partidaId: l.budget_category_id,
+    centroCostosId: l.cost_center_id ?? undefined,
+    importeBase: Number(l.amount),
+  }))
+}
+
 // ── Resultado del pipeline (previsualizar y exportar comparten esto) ──
 export type PagoListo = {
   row: PaidRequestRow
@@ -178,6 +201,11 @@ export function procesarPagos(
       })
       continue
     }
+
+    // FASE 1: si la solicitud es multi-partida, la distribución del contrato se
+    // arma con sus líneas (el override proveedor→cuenta de arriba solo aplica a
+    // la línea cuya partidaId = budget_category_id, cuando exista).
+    aplicarDistribucionMultipartida(contrato, row)
 
     // Se corren ambos resolvers aunque el primero truene, para juntar TODOS
     // los faltantes del pago (mapeo contable + mapeo fiscal) en una pasada.
@@ -519,6 +547,11 @@ export function procesarPagosDosPolizas(
       problemas.push({ row, kind: 'datos', faltantes: [], mensaje: detalles.length ? detalles.join(' · ') : String((err as Error).message ?? err) })
       continue
     }
+
+    // FASE 1: distribución multi-partida (aplica a ambas rutas — la provisión
+    // (planProvisionYPago) y el egreso-directo (resolverAsientos) recorren
+    // contrato.distribucion).
+    aplicarDistribucionMultipartida(contrato, row)
 
     const imp = impuestosDeCfdi(contrato.cfdi)
     if (imp.noSoportado) {

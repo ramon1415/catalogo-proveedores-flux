@@ -336,6 +336,18 @@ export type PaidRequestRow = {
   payment_method: string | null
   cfdi_data: Record<string, unknown> | null
   proveedores: { rfc: string | null; nombre_completo: string | null; persona_tipo: string | null } | null
+  // FASE 1 multi-partida: líneas de distribución de la solicitud (tabla
+  // payment_request_distributions, embebidas por PostgREST). Si viene con N≥1
+  // líneas, el export arma la distribución del contrato con ESAS líneas; si
+  // viene vacío/ausente, se usa la única partida (budget_category_id) — retrocompat.
+  payment_request_distributions?: PaymentRequestDistributionRow[] | null
+}
+
+// FASE 1 · Línea de distribución multi-partida de una solicitud de pago.
+export type PaymentRequestDistributionRow = {
+  budget_category_id: string
+  cost_center_id: string | null
+  amount: number | string
 }
 
 // Predicción histórica proveedor(RFC)→cuenta de gasto (seed del histórico),
