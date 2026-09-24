@@ -9,6 +9,7 @@ import type {
   ReimbursementItemInsert, ProjectOption, PartidaPrediction, PartidaCandidate,
   RequestAttachment, RequestAttachmentInsert,
 } from './types'
+import type { DistributionInsert } from './multipartida'
 
 // Bucket de comprobantes/adjuntos (igual a upload_helper.js), TTL firmado 3600.
 const UPLOAD_BUCKET = 'payment-receipts'
@@ -341,6 +342,22 @@ export async function loadBeneficiaryProfileId(requestId: string): Promise<strin
     .maybeSingle()
   if (error || !data) return null
   return (data as { beneficiary_profile_id: string | null }).beneficiary_profile_id ?? null
+}
+
+// ── Distribución multi-partida (FASE 2) ────────────────────────────────────
+// Se insertan DESPUÉS de create_payment_request: el RPC no conoce estas líneas,
+// y la solicitud no debe perderse si el insert falla. La presencia de líneas es
+// lo que activa el reparto multi-partida en el export (FASE 1). No bloqueante:
+// devuelve un warning en lugar de lanzar (misma política que reembolsos/proyecto).
+export async function insertPaymentRequestDistributions(rows: DistributionInsert[]): Promise<string> {
+  if (!rows.length) return ''
+  try {
+    const { error } = await supabase.from('payment_request_distributions').insert(rows)
+    if (!error) return ''
+    return 'La solicitud se creó, pero la distribución por partidas no pudo guardarse. El export usará la partida principal.'
+  } catch {
+    return 'La solicitud se creó, pero la distribución por partidas no pudo guardarse. El export usará la partida principal.'
+  }
 }
 
 // ── Alta rápida de proveedor (fase2 quick provider) ───────────────────────
